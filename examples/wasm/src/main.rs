@@ -363,6 +363,29 @@ async fn main(task_manager: &'static xila::task::Manager) {
     .await;
     assert_eq!(install_status, 0, "Failed to install bundled Pixel Painter");
 
+    // Use the same guest runtime and installation path for Synth.
+    File::write_to_path(
+        virtual_file_system,
+        task,
+        "/binaries/synth",
+        include_bytes!("../../../target/wasm32-wasip1/release/synth.wasm"),
+    )
+    .await
+    .unwrap();
+
+    let install_status = executable::execute(
+        executable_context,
+        "/binaries/wasm",
+        vec!["--install".to_string(), "/binaries/synth".to_string()],
+        standard.duplicate().await.unwrap(),
+        None,
+    )
+    .await
+    .unwrap()
+    .join()
+    .await;
+    assert_eq!(install_status, 0, "Failed to install bundled Synth");
+
     // - - Load saved accounts, or create defaults only on a fresh disk.
     let authentication_context = authentication::Context {
         virtual_file_system,

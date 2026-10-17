@@ -140,6 +140,8 @@ args = [
   "clock",
   "--package",
   "pixel_painter",
+  "--package",
+  "synth",
 ]
 
 [tasks.check-localization]
@@ -229,6 +231,8 @@ args = [
   "clock",
   "--package",
   "pixel_painter",
+  "--package",
+  "synth",
   "--target",
   "wasm32-wasip1",
   "--profile",
