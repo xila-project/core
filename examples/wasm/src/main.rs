@@ -55,7 +55,7 @@ async fn main(task_manager: &'static xila::task::Manager) {
     use alloc::vec;
     use core::sync::atomic::{AtomicBool, Ordering};
     use drivers_wasm::devices::graphics::GraphicsDevices;
-    use wasm_bindgen::{closure::Closure, JsCast};
+    use wasm_bindgen::{JsCast, closure::Closure};
     use web_sys::{HtmlElement, MouseEvent};
     use xila::bootsplash::Bootsplash;
     use xila::executable::{self, Standard, mount_executables};
