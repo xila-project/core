@@ -10,7 +10,8 @@ use std::{
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     const RATE: u32 = 48_000;
     const FRAMES: usize = 128;
-    let system: Pin<&'static AudioSystem> = Box::leak(Box::pin(AudioSystem::new()?)).as_ref();
+    let system: Pin<&'static AudioSystem> =
+        Box::leak(Box::new(Box::pin(AudioSystem::new()?))).as_ref();
     let stream = system.open_stream()?;
     stream.set_volume(25)?;
     stream.start()?;
