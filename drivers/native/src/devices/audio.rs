@@ -124,12 +124,12 @@ fn build_native_sink<const Q: usize, T, E>(
 impl Runner {
     /// Returns output underruns accumulated by each native sink.
     pub fn underruns(&self) -> impl Iterator<Item = u32> + '_ {
-        self.outputs.iter().map(Output::underruns)
+        self.outputs.iter().map(|sink| sink.output().underruns())
     }
 
     /// Returns output callback errors accumulated by each native sink.
     pub fn output_errors(&self) -> impl Iterator<Item = u32> + '_ {
-        self.outputs.iter().map(Output::errors)
+        self.outputs.iter().map(|sink| sink.output().errors())
     }
 
     /// Polls host output and mixer health without blocking.
@@ -140,7 +140,7 @@ impl Runner {
         if self.mixer.as_ref().is_some_and(JoinHandle::is_finished) {
             return Err(Error::MixerStopped);
         }
-        if self.outputs.iter().any(|output| output.errors() != 0) {
+        if self.outputs.iter().any(|sink| sink.output().errors() != 0) {
             return Err(Error::OutputFailed);
         }
         Ok(())
