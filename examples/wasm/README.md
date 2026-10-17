@@ -73,11 +73,13 @@ The OS canvas still uses the existing localized LVGL Montserrat Regular subsets 
   limits below. Startup reinstalls the bundled Calculator, Clock, Pixel Painter,
   and Synth. Other guest files must be present before launching; there is no
   upload mechanism.
-- Synth writes ordinary PCM to `/devices/audio/playback`. Browser playback still
-  requires the host to start `WebAudioDevice` from a user gesture and mount it at
-  that path before Synth starts; this integration is handled by the dependent
-  browser gesture PR.
-- Embedding applications increases the browser WASM download and retains the
+- Click **Enable audio** in the browser page before launching Synth. The click
+  starts one `WebAudioDevice` and mounts it at `/devices/audio/playback`; Synth
+  then writes ordinary PCM through its file descriptor. If Synth is already
+  open, close and relaunch it after enabling audio. Browsers may require this
+  gesture because audio contexts cannot start during page initialization.
+- Embedding the applications increases the browser WASM download and retains
+  the
   embedded bytes alongside the VFS copy. Running it also needs Wasmi's module
   and guest memory. This simple approach favors convenience over RAM usage.
 - Guests run cooperatively in Wasmi on the browser's executor, not as separate

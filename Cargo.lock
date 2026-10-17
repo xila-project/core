@@ -4814,6 +4814,7 @@ dependencies = [
  "terminal",
  "wasm",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "wasm-bindgen-test",
  "web-sys",
  "xila",
