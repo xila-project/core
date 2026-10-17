@@ -134,7 +134,7 @@ these host core tests.
 ## Local VFS playback file
 
 `AudioStreamDevice` exposes the native/local service as a `CharacterDevice` for
-the VFS node `/dev/audio/playback`. Construct it with a pinned static
+the VFS node `/devices/audio/playback`. Construct it with a pinned static
 `AudioSystem`, then register it at that path during system setup. Each VFS open
 reserves one independent stream in that open's `Context`; writes and the
 existing generic `b'A'` controls apply only to that stream. A close releases the

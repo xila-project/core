@@ -81,6 +81,7 @@ audio = { path = "modules/audio" }
 nanoaudio = { git = "https://github.com/AlixANNERAUD/nanoaudio.git", rev = "596076c64827fd8bf9e8319addc2f215e0cde8be", default-features = false }
 nanoaudio-cpal = { git = "https://github.com/AlixANNERAUD/nanoaudio.git", rev = "596076c64827fd8bf9e8319addc2f215e0cde8be", default-features = false }
 nanoaudio-web = { git = "https://github.com/AlixANNERAUD/nanoaudio.git", rev = "596076c64827fd8bf9e8319addc2f215e0cde8be", default-features = false }
+nanoaudio-synth = { git = "https://github.com/AlixANNERAUD/nanoaudio.git", rev = "596076c64827fd8bf9e8319addc2f215e0cde8be", default-features = false }
 abi_declarations = { path = "modules/abi/declarations" }
 abi_definitions = { path = "modules/abi/definitions" }
 little_fs = { path = "modules/little_fs" }
@@ -125,6 +126,7 @@ pixel_painter = { path = "executables/pixel_painter" }
 calculator = { path = "executables/calculator" }
 weather = { path = "executables/weather" }
 clock = { path = "executables/clock" }
+synth = { path = "executables/synth" }
 
 # - External crates
 embedded-hal = { version = "1", default-features = false }
@@ -200,6 +202,7 @@ members = [
   "modules/device",
   "executables/weather",
   "executables/clock",
+  "executables/synth",
   "modules/graphics/bindings_generator",
   "tools/fs_image",
 ]
