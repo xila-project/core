@@ -1,6 +1,7 @@
 //! Native output for the fixed-capacity Xila audio service.
 
 use ::audio::AudioSystem;
+use ::audio::OutputReservation;
 use nanoaudio_cpal::{Output, cpal::traits::HostTrait};
 use std::{
     pin::Pin,
@@ -80,10 +81,44 @@ impl std::error::Error for Error {}
 /// 128-frame quanta; cpal callbacks consume independent queues and insert
 /// silence on underrun. Drop stops and joins the mixer before closing outputs.
 pub struct Runner {
-    outputs: Vec<Output>,
+    outputs: Vec<NativeSink<Output, OutputReservation>>,
     stop: Arc<AtomicBool>,
     mixer_failed: Arc<AtomicBool>,
     mixer: Option<JoinHandle<()>>,
+}
+
+struct NativeSink<T, L> {
+    output: Option<T>,
+    reservation: Option<L>,
+}
+
+impl<T, L> NativeSink<T, L> {
+    fn new(output: T, reservation: L) -> Self {
+        Self {
+            output: Some(output),
+            reservation: Some(reservation),
+        }
+    }
+
+    fn output(&self) -> &T {
+        self.output.as_ref().expect("output exists until sink drop")
+    }
+}
+
+impl<T, L> Drop for NativeSink<T, L> {
+    fn drop(&mut self) {
+        drop(self.output.take());
+        drop(self.reservation.take());
+    }
+}
+
+fn build_native_sink<const Q: usize, T, E>(
+    consumer: nanoaudio::Consumer<'static, Q>,
+    reservation: OutputReservation,
+    build: impl FnOnce(nanoaudio::Consumer<'static, Q>) -> Result<T, E>,
+) -> Result<NativeSink<T, OutputReservation>, E> {
+    let output = build(consumer)?;
+    Ok(NativeSink::new(output, reservation))
 }
 
 impl Runner {
@@ -131,7 +166,7 @@ pub fn new<const S: usize, const B: usize, const F: usize, const O: usize, const
     system: Pin<&'static AudioSystem<S, B, F, O, Q>>,
     output_count: usize,
 ) -> Result<Runner, Error> {
-    if !(1..=MAX_OUTPUTS).contains(&output_count) {
+    if !(1..=MAX_OUTPUTS).contains(&output_count) || output_count > O {
         return Err(Error::InvalidOutputCount);
     }
     let host = nanoaudio_cpal::cpal::default_host();
@@ -145,16 +180,18 @@ pub fn new<const S: usize, const B: usize, const F: usize, const O: usize, const
             .ok_or_else(|| Error::Open(nanoaudio_cpal::Error::NoDevice))?;
         let sink = system.as_ref().open_output().map_err(Error::System)?;
         let configuration = output_configuration(sink.configuration())?;
-        let consumer = sink.into_consumer();
-        let output = Output::open_device(
-            &device,
-            consumer,
-            configuration,
-            nanoaudio_cpal::Quality::default(),
-        )
-        .map_err(Error::Open)?;
-        output.play().map_err(Error::Play)?;
-        outputs.push(output);
+        let (consumer, reservation) = unsafe { sink.into_consumer_with_reservation() };
+        let sink = build_native_sink(consumer, reservation, |consumer| {
+            Output::open_device(
+                &device,
+                consumer,
+                configuration,
+                nanoaudio_cpal::Quality::default(),
+            )
+            .map_err(Error::Open)
+        })?;
+        sink.output().play().map_err(Error::Play)?;
+        outputs.push(sink);
     }
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -229,5 +266,76 @@ mod tests {
             Box::leak(Box::pin(AudioSystem::new().unwrap())).as_ref();
         assert!(matches!(new(system, 0), Err(Error::InvalidOutputCount)));
         assert!(matches!(new(system, 3), Err(Error::InvalidOutputCount)));
+    }
+
+    #[test]
+    fn output_capacity_is_checked_before_host_device_access() {
+        type OneOutputSystem = AudioSystem<4, 2048, 128, 1, 3072>;
+        let system: Pin<&'static OneOutputSystem> =
+            Box::leak(Box::pin(OneOutputSystem::new().unwrap())).as_ref();
+        assert!(matches!(new(system, 2), Err(Error::InvalidOutputCount)));
+        assert!(system.as_ref().open_output().is_ok());
+    }
+
+    #[test]
+    fn native_sink_drops_backend_before_releasing_its_reservation() {
+        use std::{cell::RefCell, rc::Rc};
+
+        struct DropProbe(&'static str, Rc<RefCell<Vec<&'static str>>>);
+        impl Drop for DropProbe {
+            fn drop(&mut self) {
+                self.1.borrow_mut().push(self.0);
+            }
+        }
+
+        let dropped = Rc::new(RefCell::new(Vec::new()));
+        drop(NativeSink::new(
+            DropProbe("backend", Rc::clone(&dropped)),
+            DropProbe("reservation", Rc::clone(&dropped)),
+        ));
+        assert_eq!(*dropped.borrow(), ["backend", "reservation"]);
+    }
+
+    #[test]
+    fn dropping_native_sink_reclaims_its_system_slot() {
+        let system: Pin<&'static AudioSystem> =
+            Box::leak(Box::pin(AudioSystem::new().unwrap())).as_ref();
+        let (consumer, reservation) = unsafe {
+            system
+                .as_ref()
+                .open_output()
+                .unwrap()
+                .into_consumer_with_reservation()
+        };
+        let sink = NativeSink::new(consumer, reservation);
+        let second = system.as_ref().open_output().unwrap();
+        assert!(matches!(
+            system.as_ref().open_output(),
+            Err(file_system::Error::RessourceBusy)
+        ));
+        drop(sink);
+        let third = system.as_ref().open_output().unwrap();
+        drop((second, third));
+    }
+
+    #[test]
+    fn failed_backend_open_releases_its_reservation_after_consumer_drop() {
+        let system: Pin<&'static AudioSystem> =
+            Box::leak(Box::pin(AudioSystem::new().unwrap())).as_ref();
+        let (consumer, reservation) = unsafe {
+            system
+                .as_ref()
+                .open_output()
+                .unwrap()
+                .into_consumer_with_reservation()
+        };
+        let second = system.as_ref().open_output().unwrap();
+        let error = build_native_sink(consumer, reservation, |consumer| {
+            drop(consumer);
+            Err::<(), _>("adapter setup failed")
+        });
+        assert!(matches!(error, Err("adapter setup failed")));
+        let third = system.as_ref().open_output().unwrap();
+        drop((second, third));
     }
 }

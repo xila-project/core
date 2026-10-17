@@ -113,7 +113,11 @@ The scheduler should retry a skipped mix at its next opportunity. Output consume
 never take this lock. `with_consumer` keeps the consumer inside its reservation;
 `OutputHandle<'static>::into_consumer` supports adapters that take ownership of a
 static consumer, permanently reserving that output slot because those adapters do
-not return their consumer for safe reuse.
+not return their consumer for safe reuse. Adapters with an explicit owner can use
+`into_consumer_with_reservation`, which returns the consumer and an
+`OutputReservation` that reclaims the slot when dropped. This transfer is unsafe:
+the adapter and consumer must be destroyed before the reservation. Keep both in
+an owner that enforces this order, as the native `Runner` does.
 
 On the x86_64 debug test build, the system is **14,544 bytes**, each stream handle
 is **16 bytes**, and each output handle is **24 bytes**. PCM queues contain exactly
@@ -150,6 +154,8 @@ cpal callback consumes its own bounded output queue, does not allocate or block,
 and plays silence on underrun. Poll `Runner::check()` to detect mixer-thread
 termination or host callback errors; `underruns()` reports underruns per sink.
 Dropping the runner stops and joins the mixer before closing host streams.
+It closes each cpal stream before releasing that sink's output reservation, so
+the static audio system can register a replacement sink after runner teardown.
 The same native driver targets (Linux, macOS and Windows) are supported; SDL
 is no longer needed.
 

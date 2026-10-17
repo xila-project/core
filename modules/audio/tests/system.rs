@@ -275,6 +275,25 @@ fn static_output_can_transfer_its_consumer_to_an_owning_platform_adapter() {
 }
 
 #[test]
+fn static_output_reservation_releases_only_after_consumer_drop_and_lease_drop() {
+    let system = Box::leak(Box::new(Box::pin(System::new().unwrap())));
+    let system = core::pin::Pin::as_ref(system);
+    let (consumer, reservation) = unsafe {
+        system
+            .open_output()
+            .unwrap()
+            .into_consumer_with_reservation()
+    };
+    let second = system.open_output().unwrap();
+    assert!(matches!(system.open_output(), Err(Error::RessourceBusy)));
+    drop(consumer);
+    assert!(matches!(system.open_output(), Err(Error::RessourceBusy)));
+    drop(reservation);
+    let third = system.open_output().unwrap();
+    drop((second, third));
+}
+
+#[test]
 fn unaligned_writes_preserve_frame_order_across_queue_wrap() {
     let system = core::pin::pin!(System::new().unwrap());
     let stream = system.open_stream().unwrap();
