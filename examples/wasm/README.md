@@ -73,6 +73,11 @@ The OS canvas still uses the existing localized LVGL Montserrat Regular subsets 
 - The example persists its filesystem in OPFS; see the storage and durability
   limits below. Other guest files must be present before launching; there is no
   upload mechanism.
+- Click **Enable audio** in the browser page before launching Synth. The click
+  starts one `WebAudioDevice` and mounts it at `/devices/audio/playback`; Synth
+  then writes ordinary PCM through its file descriptor. If Synth is already
+  open, close and relaunch it after enabling audio. Browsers may require this
+  gesture because audio contexts cannot start during page initialization.
 - Applications are distributed in a separate seed image. The disk cache still
   occupies 16 MiB; running a guest also needs Wasmi's module and guest memory.
 - Guests run cooperatively in Wasmi on the browser's executor, not as separate
