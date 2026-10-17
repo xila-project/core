@@ -14,7 +14,6 @@ use std::{
 };
 
 const SAMPLE_RATE: u32 = 48_000;
-const CHANNELS: u8 = 2;
 const MAX_OUTPUTS: usize = 2;
 
 fn mix_period(frames: usize) -> Duration {
@@ -177,8 +176,8 @@ pub fn new<const S: usize, const B: usize, const F: usize, const O: usize, const
     for _ in 0..output_count {
         let device = devices
             .next()
-            .ok_or_else(|| Error::Open(nanoaudio_cpal::Error::NoDevice))?;
-        let sink = system.as_ref().open_output().map_err(Error::System)?;
+            .ok_or(Error::Open(nanoaudio_cpal::Error::NoDevice))?;
+        let sink = system.open_output().map_err(Error::System)?;
         let configuration = output_configuration(sink.configuration())?;
         let (consumer, reservation) = unsafe { sink.into_consumer_with_reservation() };
         let sink = build_native_sink(consumer, reservation, |consumer| {
@@ -204,11 +203,12 @@ pub fn new<const S: usize, const B: usize, const F: usize, const O: usize, const
             let period = mix_period(F);
             let mut deadline = Instant::now();
             while !thread_stop.load(Ordering::Acquire) {
-                if let Err(error) = system.as_ref().mix_next_block() {
-                    if error != file_system::Error::RessourceBusy {
+                match system.mix_next_block() {
+                    Err(error) if error != file_system::Error::RessourceBusy => {
                         thread_failed.store(true, Ordering::Release);
                         return;
                     }
+                    _ => {}
                 }
                 deadline += period;
                 let now = Instant::now();
@@ -237,7 +237,7 @@ mod tests {
     fn requests_fixed_system_mix_configuration() {
         let configuration = output_configuration(::audio::Configuration::new(
             SAMPLE_RATE,
-            CHANNELS,
+            2,
             ::audio::SampleFormat::F32,
         ))
         .unwrap();
@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn invalid_output_count_fails_before_accessing_host_devices() {
         let system: Pin<&'static AudioSystem> =
-            Box::leak(Box::pin(AudioSystem::new().unwrap())).as_ref();
+            Box::leak(Box::new(Box::pin(AudioSystem::new().unwrap()))).as_ref();
         assert!(matches!(new(system, 0), Err(Error::InvalidOutputCount)));
         assert!(matches!(new(system, 3), Err(Error::InvalidOutputCount)));
     }
@@ -272,9 +272,9 @@ mod tests {
     fn output_capacity_is_checked_before_host_device_access() {
         type OneOutputSystem = AudioSystem<4, 2048, 128, 1, 3072>;
         let system: Pin<&'static OneOutputSystem> =
-            Box::leak(Box::pin(OneOutputSystem::new().unwrap())).as_ref();
+            Box::leak(Box::new(Box::pin(OneOutputSystem::new().unwrap()))).as_ref();
         assert!(matches!(new(system, 2), Err(Error::InvalidOutputCount)));
-        assert!(system.as_ref().open_output().is_ok());
+        assert!(system.open_output().is_ok());
     }
 
     #[test]
@@ -299,43 +299,40 @@ mod tests {
     #[test]
     fn dropping_native_sink_reclaims_its_system_slot() {
         let system: Pin<&'static AudioSystem> =
-            Box::leak(Box::pin(AudioSystem::new().unwrap())).as_ref();
+            Box::leak(Box::new(Box::pin(AudioSystem::new().unwrap()))).as_ref();
         let (consumer, reservation) = unsafe {
             system
-                .as_ref()
                 .open_output()
                 .unwrap()
                 .into_consumer_with_reservation()
         };
         let sink = NativeSink::new(consumer, reservation);
-        let second = system.as_ref().open_output().unwrap();
+        let second = system.open_output().unwrap();
         assert!(matches!(
-            system.as_ref().open_output(),
+            system.open_output(),
             Err(file_system::Error::RessourceBusy)
         ));
         drop(sink);
-        let third = system.as_ref().open_output().unwrap();
+        let third = system.open_output().unwrap();
         drop((second, third));
     }
 
     #[test]
     fn failed_backend_open_releases_its_reservation_after_consumer_drop() {
         let system: Pin<&'static AudioSystem> =
-            Box::leak(Box::pin(AudioSystem::new().unwrap())).as_ref();
+            Box::leak(Box::new(Box::pin(AudioSystem::new().unwrap()))).as_ref();
         let (consumer, reservation) = unsafe {
             system
-                .as_ref()
                 .open_output()
                 .unwrap()
                 .into_consumer_with_reservation()
         };
-        let second = system.as_ref().open_output().unwrap();
-        let error = build_native_sink(consumer, reservation, |consumer| {
-            drop(consumer);
+        let second = system.open_output().unwrap();
+        let error = build_native_sink(consumer, reservation, |_consumer| {
             Err::<(), _>("adapter setup failed")
         });
         assert!(matches!(error, Err("adapter setup failed")));
-        let third = system.as_ref().open_output().unwrap();
+        let third = system.open_output().unwrap();
         drop((second, third));
     }
 }
