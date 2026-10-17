@@ -126,6 +126,19 @@ and volume controls with zero allocations. Platform buffers and adapter setup ar
 outside these measurements. No audible hardware/browser playback is claimed by
 these host core tests.
 
+## Local VFS playback file
+
+`AudioStreamDevice` exposes the native/local service as a `CharacterDevice` for
+the VFS node `/dev/audio/playback`. Construct it with a pinned static
+`AudioSystem`, then register it at that path during system setup. Each VFS open
+reserves one independent stream in that open's `Context`; writes and the
+existing generic `b'A'` controls apply only to that stream. A close releases the
+reservation, and reopening gets an empty paused stream at default volume.
+Cloning an open context returns `UnsupportedOperation`, so stream handles are
+never aliased. Reads are unsupported, and `flush()` polls until the mixer has
+consumed queued PCM. Applications use ordinary file writes and descriptor
+controls; the device does not add app-specific APIs or WASI imports.
+
 ## Native backend and example
 
 The opt-in native backend uses the MIT Rust SDL2 bindings and the zlib-licensed
