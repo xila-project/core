@@ -5,6 +5,12 @@
 /// `input` and `output` must point to guest memory, use 16-byte-aligned
 /// storage, and not overlap. The host validates both spans and limits payloads
 /// to 256 bytes. The command is opaque to WASI and forwarded to the file.
+///
+/// # Safety
+///
+/// `input` must be valid to read for `input_length` bytes and `output` must be
+/// valid to write for `output_length` bytes. Both pointers must refer to guest
+/// memory, be 16-byte aligned, and their spans must not overlap.
 #[allow(clippy::too_many_arguments)]
 pub unsafe fn fd_control(
     fd: i32,
