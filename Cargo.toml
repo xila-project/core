@@ -79,6 +79,7 @@ graphics_rendering_xrgb8888 = ["graphics", "graphics/rendering_xrgb8888"]
 audio = { path = "modules/audio" }
 nanoaudio = { git = "https://github.com/AlixANNERAUD/nanoaudio.git", rev = "596076c64827fd8bf9e8319addc2f215e0cde8be", default-features = false }
 nanoaudio-cpal = { git = "https://github.com/AlixANNERAUD/nanoaudio.git", rev = "596076c64827fd8bf9e8319addc2f215e0cde8be", default-features = false }
+nanoaudio-web = { git = "https://github.com/AlixANNERAUD/nanoaudio.git", rev = "596076c64827fd8bf9e8319addc2f215e0cde8be", default-features = false }
 abi_declarations = { path = "modules/abi/declarations" }
 abi_definitions = { path = "modules/abi/definitions" }
 little_fs = { path = "modules/little_fs" }
