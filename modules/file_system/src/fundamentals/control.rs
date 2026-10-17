@@ -139,6 +139,19 @@ impl ControlCommandIdentifier {
         )
     }
 
+    /// Reconstructs an identifier received through a raw control interface.
+    ///
+    /// The identifier's current encoding occupies at most 32 bits. This
+    /// conversion preserves those bits without interpreting the command.
+    pub const fn from_raw(raw: u32) -> Self {
+        Self(raw as usize)
+    }
+
+    /// Returns the stable raw encoding used by generic control interfaces.
+    pub const fn raw(self) -> u32 {
+        self.0 as u32
+    }
+
     pub const fn get_direction(&self) -> ControlDirectionFlags {
         let direction = (self.0 >> Self::DIRECTION_SHIFT) & ((1 << Self::DIRECTION_SIZE) - 1);
         ControlDirectionFlags(direction as u8)
