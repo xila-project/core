@@ -19,7 +19,7 @@ use file_system::{
 use js_sys::{Array, ArrayBuffer, Object, Reflect, Uint8Array};
 use nanoaudio_web::{Format, Options, Output, Port, Source, Worklet};
 use shared::AnyByLayout;
-use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
+use wasm_bindgen::{JsCast, JsValue, prelude::wasm_bindgen};
 
 const STREAMS: usize = 4;
 const STREAM_BYTES: usize = 2048;
@@ -35,12 +35,42 @@ const OUTPUT_CONFIGURATION: audio::Configuration = Configuration::new(48_000, 2,
 
 static STARTED: AtomicBool = AtomicBool::new(false);
 
+struct StartGuard<'a> {
+    started: &'a AtomicBool,
+    committed: bool,
+}
+
+impl<'a> StartGuard<'a> {
+    fn acquire(started: &'a AtomicBool) -> Result<Self> {
+        started
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| Error::RessourceBusy)?;
+        Ok(Self {
+            started,
+            committed: false,
+        })
+    }
+
+    fn commit(mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for StartGuard<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            self.started.store(false, Ordering::Release);
+        }
+    }
+}
+
 struct BridgeSlot {
     occupied: AtomicBool,
     id: AtomicU32,
     sent: AtomicU64,
     consumed: AtomicU64,
     ready: AtomicBool,
+    closing: AtomicBool,
 }
 
 impl BridgeSlot {
@@ -51,6 +81,7 @@ impl BridgeSlot {
             sent: AtomicU64::new(0),
             consumed: AtomicU64::new(0),
             ready: AtomicBool::new(false),
+            closing: AtomicBool::new(false),
         }
     }
 
@@ -142,6 +173,7 @@ impl Bridge {
         slot.sent.store(0, Ordering::Relaxed);
         slot.consumed.store(0, Ordering::Relaxed);
         slot.ready.store(false, Ordering::Relaxed);
+        slot.closing.store(false, Ordering::Relaxed);
         slot.id.store(id, Ordering::Release);
         Ok((index, id))
     }
@@ -150,7 +182,16 @@ impl Bridge {
         let slot = &self.slots[slot_index];
         if slot.id.load(Ordering::Acquire) == id {
             slot.ready.store(false, Ordering::Release);
+            slot.closing.store(false, Ordering::Release);
             slot.occupied.store(false, Ordering::Release);
+        }
+    }
+
+    fn release_id(&self, id: u32) {
+        if let Some((index, _)) = self.slots.iter().enumerate().find(|(_, slot)| {
+            slot.occupied.load(Ordering::Acquire) && slot.id.load(Ordering::Acquire) == id
+        }) {
+            self.release(index, id);
         }
     }
 
@@ -212,7 +253,12 @@ impl Bridge {
             return;
         };
         match op.as_string().as_deref() {
-            Some("open_ack") => slot.ready.store(true, Ordering::Release),
+            Some("open_ack") => {
+                if !slot.closing.load(Ordering::Acquire) {
+                    slot.ready.store(true, Ordering::Release);
+                }
+            }
+            Some("close_ack") => self.release_id(id),
             Some("consumed") => {
                 if let Ok(consumed) = number_field64(&value, "bytes") {
                     slot.report_consumed(consumed);
@@ -229,12 +275,7 @@ pub struct WebAudioDevice {
 
 impl WebAudioDevice {
     pub async fn start_from_user_gesture() -> Result<Self> {
-        if STARTED
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            return Err(Error::RessourceBusy);
-        }
+        let startup = StartGuard::acquire(&STARTED)?;
 
         let worklet: fn() -> Worklet = xila_audio_worklet;
         let _ = worklet;
@@ -247,14 +288,9 @@ impl WebAudioDevice {
         .await
         {
             Ok(output) => output,
-            Err(_) => {
-                STARTED.store(false, Ordering::Release);
-                return Err(Error::InputOutput);
-            }
+            Err(_) => return Err(Error::InputOutput),
         };
         if output.play().await.is_err() {
-            drop(output);
-            STARTED.store(false, Ordering::Release);
             return Err(Error::InputOutput);
         }
 
@@ -270,6 +306,7 @@ impl WebAudioDevice {
             bridge.on_message(value);
         });
 
+        startup.commit();
         Ok(Self { bridge })
     }
 
@@ -284,9 +321,16 @@ impl WebAudioDevice {
         self.bridge.send(&packet, &[])
     }
 
-    fn post_close(&self, id: u32) {
+    fn post_close(&self, slot: usize, id: u32) -> Result<()> {
+        self.bridge.slots[slot]
+            .closing
+            .store(true, Ordering::Release);
         let packet = packet("close", id);
-        let _ = self.bridge.send(&packet, &[]);
+        if let Err(error) = self.bridge.send(&packet, &[]) {
+            self.bridge.release(slot, id);
+            return Err(error);
+        }
+        Ok(())
     }
 }
 
@@ -326,9 +370,7 @@ impl BaseOperations for WebAudioDevice {
         let proxy = context
             .take_private_data_of_type::<StreamProxy>()
             .ok_or(Error::InvalidContext)?;
-        self.post_close(proxy.id);
-        self.bridge.release(proxy.slot, proxy.id);
-        Ok(())
+        self.post_close(proxy.slot, proxy.id)
     }
 
     fn read(&self, _context: &mut Context, _buffer: &mut [u8], _position: Size) -> Result<usize> {
@@ -521,9 +563,11 @@ impl WorkletSource {
                 let Ok(bytes_value) = field(&value, "bytes") else {
                     return;
                 };
-                let bytes = Uint8Array::new(&bytes_value);
+                let Ok(bytes) = bounded_bytes(bytes_value, MAX_TRANSFER_BYTES) else {
+                    return;
+                };
                 let length = bytes.length() as usize;
-                if length > MAX_TRANSFER_BYTES || !length.is_multiple_of(FRAME_BYTES) {
+                if !length.is_multiple_of(FRAME_BYTES) {
                     return;
                 }
                 bytes.copy_to(&mut self.scratch[..length]);
@@ -540,6 +584,8 @@ impl WorkletSource {
                     self.ids[index] = 0;
                     self.accepted[index] = 0;
                     self.reported[index] = 0;
+                    let packet = packet("close_ack", id);
+                    let _ = port.post(&packet.into());
                 }
             }
             Some("control") => self.control(&value, id, port),
@@ -560,10 +606,12 @@ impl WorkletSource {
         let Ok(bytes_value) = field(value, "bytes") else {
             return;
         };
-        let bytes = Uint8Array::new(&bytes_value);
+        let Ok(bytes) = bounded_bytes(bytes_value, MAX_CONTROL_BYTES) else {
+            return;
+        };
         let input_size = bytes.length() as usize;
         let output_size = output_size as usize;
-        if input_size > MAX_CONTROL_BYTES || output_size > MAX_CONTROL_BYTES {
+        if output_size > MAX_CONTROL_BYTES {
             return;
         }
         bytes.copy_to(&mut self.control_input.0[..input_size]);
@@ -743,6 +791,14 @@ fn make_bytes(bytes: &[u8]) -> (Uint8Array, ArrayBuffer) {
     (array, buffer)
 }
 
+fn bounded_bytes(value: JsValue, maximum: usize) -> core::result::Result<Uint8Array, JsValue> {
+    let bytes = value.dyn_into::<Uint8Array>()?;
+    if bytes.length() as usize > maximum {
+        return Err(JsValue::from_str("audio message exceeds its size limit"));
+    }
+    Ok(bytes)
+}
+
 fn any_bytes(value: &AnyByLayout) -> &[u8] {
     unsafe {
         core::slice::from_raw_parts((value as *const AnyByLayout).cast::<u8>(), value.get_size())
@@ -751,7 +807,24 @@ fn any_bytes(value: &AnyByLayout) -> &[u8] {
 
 #[cfg(test)]
 mod tests {
-    use super::BridgeSlot;
+    use super::{BridgeSlot, StartGuard};
+    use core::sync::atomic::{AtomicBool, Ordering};
+
+    #[test]
+    fn uncommitted_start_guard_resets_reservation() {
+        let started = AtomicBool::new(false);
+        let guard = StartGuard::acquire(&started).unwrap();
+        assert!(started.load(Ordering::Acquire));
+        drop(guard);
+        assert!(!started.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn committed_start_guard_keeps_reservation() {
+        let started = AtomicBool::new(false);
+        StartGuard::acquire(&started).unwrap().commit();
+        assert!(started.load(Ordering::Acquire));
+    }
 
     #[test]
     fn bounds_outstanding_pcm_and_restores_only_consumed_credit() {
