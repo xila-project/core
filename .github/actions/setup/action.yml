@@ -124,5 +124,5 @@ runs:
       if: inputs.profile != 'minimal'
       shell: bash
       run: |
-        cargo binstall --no-confirm cargo-make@0.37.24 trunk@0.21.14 taplo-cli@0.10.0 cargo-llvm-cov@0.9.1
+        cargo binstall --no-confirm --locked cargo-make@0.37.24 trunk@0.21.14 taplo-cli@0.10.0 cargo-llvm-cov@0.9.1
         npm ci

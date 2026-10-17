@@ -14,7 +14,6 @@ use std::{
 };
 
 const SAMPLE_RATE: u32 = 48_000;
-const CHANNELS: u8 = 2;
 const MAX_OUTPUTS: usize = 2;
 
 fn mix_period(frames: usize) -> Duration {
@@ -177,7 +176,7 @@ pub fn new<const S: usize, const B: usize, const F: usize, const O: usize, const
     for _ in 0..output_count {
         let device = devices
             .next()
-            .ok_or_else(|| Error::Open(nanoaudio_cpal::Error::NoDevice))?;
+            .ok_or(Error::Open(nanoaudio_cpal::Error::NoDevice))?;
         let sink = system.open_output().map_err(Error::System)?;
         let configuration = output_configuration(sink.configuration())?;
         let (consumer, reservation) = unsafe { sink.into_consumer_with_reservation() };
@@ -204,11 +203,12 @@ pub fn new<const S: usize, const B: usize, const F: usize, const O: usize, const
             let period = mix_period(F);
             let mut deadline = Instant::now();
             while !thread_stop.load(Ordering::Acquire) {
-                if let Err(error) = system.mix_next_block() {
-                    if error != file_system::Error::RessourceBusy {
+                match system.mix_next_block() {
+                    Err(error) if error != file_system::Error::RessourceBusy => {
                         thread_failed.store(true, Ordering::Release);
                         return;
                     }
+                    _ => {}
                 }
                 deadline += period;
                 let now = Instant::now();
@@ -237,7 +237,7 @@ mod tests {
     fn requests_fixed_system_mix_configuration() {
         let configuration = output_configuration(::audio::Configuration::new(
             SAMPLE_RATE,
-            CHANNELS,
+            2,
             ::audio::SampleFormat::F32,
         ))
         .unwrap();
@@ -328,8 +328,7 @@ mod tests {
                 .into_consumer_with_reservation()
         };
         let second = system.open_output().unwrap();
-        let error = build_native_sink(consumer, reservation, |consumer| {
-            drop(consumer);
+        let error = build_native_sink(consumer, reservation, |_consumer| {
             Err::<(), _>("adapter setup failed")
         });
         assert!(matches!(error, Err("adapter setup failed")));
