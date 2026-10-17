@@ -3,7 +3,7 @@ use core::fmt::Debug;
 use crate::{Error, ItemStatic, Result, VirtualFileSystem};
 use alloc::{vec, vec::Vec};
 use exported_file_system::StateFlags;
-use exported_file_system::{ControlCommand, Permissions};
+use exported_file_system::{ControlCommand, ControlCommandIdentifier, Permissions};
 use file_system::{
     AccessFlags, AttributeFlags, Attributes, Context, Flags, Path, Position, Size, Statistics,
 };
@@ -255,6 +255,21 @@ impl<'a> SynchronousFile<'a> {
             )?;
 
         Ok(output)
+    }
+
+    /// Forwards an opaque control command and caller-owned payload layouts.
+    pub fn control_raw(
+        &mut self,
+        command: ControlCommandIdentifier,
+        input: &AnyByLayout,
+        output: &mut AnyByLayout,
+    ) -> Result<()> {
+        self.item
+            .as_base_operations()
+            .ok_or(Error::UnsupportedOperation)?
+            .control(&mut self.context, command, input, output)?;
+
+        Ok(())
     }
 
     pub fn get_access(&self) -> Result<AccessFlags> {

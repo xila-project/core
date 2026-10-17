@@ -84,6 +84,7 @@ impl ControlCommandIdentifier {
     const NUMBER_SIZE: usize = 8;
     const KIND_SIZE: usize = 8;
     const SIZE_SIZE: usize = 14;
+    const MAX_SIZE: usize = (1 << Self::SIZE_SIZE) - 1;
     const DIRECTION_SIZE: usize = 2;
 
     const NUMBER_SHIFT: usize = 0;
@@ -121,6 +122,11 @@ impl ControlCommandIdentifier {
         kind: u8,
         number: u8,
     ) -> Self {
+        assert!(
+            size <= Self::MAX_SIZE,
+            "control command size exceeds its 14-bit field"
+        );
+
         let direction = direction.bits() as usize;
         let kind = kind as usize;
         let number = number as usize;
@@ -131,6 +137,19 @@ impl ControlCommandIdentifier {
                 | (kind << Self::KIND_SHIFT)
                 | (number << Self::NUMBER_SHIFT),
         )
+    }
+
+    /// Reconstructs an identifier received through a raw control interface.
+    ///
+    /// The identifier's current encoding occupies at most 32 bits. This
+    /// conversion preserves those bits without interpreting the command.
+    pub const fn from_raw(raw: u32) -> Self {
+        Self(raw as usize)
+    }
+
+    /// Returns the stable raw encoding used by generic control interfaces.
+    pub const fn raw(self) -> u32 {
+        self.0 as u32
     }
 
     pub const fn get_direction(&self) -> ControlDirectionFlags {
@@ -148,5 +167,37 @@ impl ControlCommandIdentifier {
 
     pub const fn get_number(&self) -> u8 {
         ((self.0 >> Self::NUMBER_SHIFT) & ((1 << Self::NUMBER_SIZE) - 1)) as u8
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MAX_ENCODED_SIZE: usize = (1 << 14) - 1;
+
+    #[test]
+    fn new_with_size_preserves_maximum_14_bit_value_in_raw_encoding() {
+        let identifier = ControlCommandIdentifier::new_with_size(
+            ControlDirectionFlags::Write,
+            MAX_ENCODED_SIZE,
+            0xAB,
+            0xCD,
+        );
+        let expected = (2u32 << 30) | ((MAX_ENCODED_SIZE as u32) << 16) | (0xABu32 << 8) | 0xCD;
+
+        assert_eq!(identifier.get_size(), MAX_ENCODED_SIZE);
+        assert_eq!(identifier.raw(), expected);
+    }
+
+    #[test]
+    #[should_panic(expected = "control command size exceeds its 14-bit field")]
+    fn new_with_size_rejects_values_above_14_bit_boundary() {
+        ControlCommandIdentifier::new_with_size(
+            ControlDirectionFlags::Write,
+            MAX_ENCODED_SIZE + 1,
+            0,
+            0,
+        );
     }
 }
