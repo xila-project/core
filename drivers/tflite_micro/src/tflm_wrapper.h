@@ -23,6 +23,10 @@ enum {
 size_t xila_tflm_context_size(void);
 size_t xila_tflm_context_alignment(void);
 int32_t xila_tflm_validate_model(const uint8_t *model, size_t model_len);
+int32_t xila_tflm_model_requirements(const uint8_t *model, size_t model_len,
+                                    size_t *workspace_bytes,
+                                    size_t *input_count, size_t *output_count);
+void xila_tflm_invalidate_outputs(void *context);
 int32_t xila_tflm_create(const uint8_t *model, size_t model_len,
                        uint8_t *workspace, size_t workspace_len,
                        void **context, size_t *arena_used);

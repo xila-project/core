@@ -44,6 +44,7 @@ shared = { workspace = true, optional = true }
 synchronization = { workspace = true, optional = true }
 bootsplash = { workspace = true, optional = true }
 network = { workspace = true, optional = true }
+drivers_tflite_micro = { workspace = true, optional = true }
 
 [features]
 default = [
@@ -73,6 +74,7 @@ bootsplash = ["dep:bootsplash"]
 graphics = ["dep:graphics", "executable/graphics"]
 graphics_rendering_rgb565 = ["graphics", "graphics/rendering_rgb565"]
 graphics_rendering_xrgb8888 = ["graphics", "graphics/rendering_xrgb8888"]
+tflite_micro = ["dep:drivers_tflite_micro"]
 
 
 [workspace.dependencies]

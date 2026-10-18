@@ -279,10 +279,20 @@ impl<'a> Workspace<'a> {
 ///     drop(context);
 /// }
 /// ```
+/// Persistent workspace is retained privately so safe callers cannot mutate
+/// bytes that a backend may use for native state after initialization:
+/// ```compile_fail
+/// use device::neural_network::Context;
+///
+/// fn mutate_backend_workspace<Model, Backend>(context: &mut Context<'_, '_, Model, Backend>) {
+///     let _ = context.workspace();
+/// }
+/// ```
 #[must_use = "call NeuralNetworkDevice::destroy_context before dropping the context"]
 pub struct Context<'model, 'workspace, Model, BackendContext> {
     model: &'model Model,
     backend: BackendContext,
+    #[allow(dead_code)]
     workspace: Option<Workspace<'workspace>>,
 }
 
@@ -297,10 +307,6 @@ impl<Model, BackendContext> Context<'_, '_, Model, BackendContext> {
 
     pub fn backend_mut(&mut self) -> &mut BackendContext {
         &mut self.backend
-    }
-
-    pub fn workspace(&mut self) -> Option<&mut [u8]> {
-        self.workspace.as_mut().map(Workspace::as_mut_slice)
     }
 }
 
@@ -505,9 +511,6 @@ mod tests {
                 TensorData::I8(values) => {
                     context.backend_mut().input_address = Some(values.as_ptr() as usize);
                     context.backend_mut().output.copy_from_slice(values);
-                    if let Some(workspace) = context.workspace() {
-                        workspace[0] = 0xA5;
-                    }
                     Ok(())
                 }
                 _ => Err(Error::InvalidTensor),
@@ -614,7 +617,7 @@ mod tests {
                 TensorData::I8(&[5, 6, 7])
             );
             device.destroy_context(context).unwrap();
-            assert_eq!(arena[0], 0xA5);
+            assert_eq!(arena[0], 0);
             assert_eq!(arena[1], 0x5A);
             device.unload_model(model).unwrap();
         }

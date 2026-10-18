@@ -239,6 +239,32 @@ int32_t xila_tflm_validate_model(const uint8_t* model, size_t len) {
   return Validate(model, len, &ignored);
 }
 
+int32_t xila_tflm_model_requirements(const uint8_t* model, size_t len,
+                                    size_t* workspace_bytes,
+                                    size_t* input_count, size_t* output_count) {
+  if (workspace_bytes) *workspace_bytes = 0;
+  if (input_count) *input_count = 0;
+  if (output_count) *output_count = 0;
+  if (!workspace_bytes || !input_count || !output_count) {
+    return XILA_TFLM_INVALID_ARGUMENT;
+  }
+  size_t arena_bound;
+  const int32_t status = Validate(model, len, &arena_bound);
+  if (status != XILA_TFLM_OK) return status;
+  if (arena_bound > SIZE_MAX - ContextBytes() - (kAlignment - 1)) {
+    return XILA_TFLM_UNSUPPORTED;
+  }
+  const auto* graph = tflite::GetModel(model)->subgraphs()->Get(0);
+  *workspace_bytes = ContextBytes() + arena_bound + kAlignment - 1;
+  *input_count = graph->inputs()->size();
+  *output_count = graph->outputs()->size();
+  return XILA_TFLM_OK;
+}
+
+void xila_tflm_invalidate_outputs(void* context) {
+  if (context) static_cast<Context*>(context)->output_available = false;
+}
+
 int32_t xila_tflm_create(const uint8_t* model, size_t model_len,
                        uint8_t* workspace, size_t len, void** context,
                        size_t* arena_used) {

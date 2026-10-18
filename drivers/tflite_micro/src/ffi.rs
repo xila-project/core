@@ -19,6 +19,14 @@ unsafe extern "C" {
     pub(crate) fn xila_tflm_context_size() -> usize;
     pub(crate) fn xila_tflm_context_alignment() -> usize;
     pub(crate) fn xila_tflm_validate_model(model: *const u8, model_len: usize) -> i32;
+    pub(crate) fn xila_tflm_model_requirements(
+        model: *const u8,
+        model_len: usize,
+        workspace_bytes: *mut usize,
+        input_count: *mut usize,
+        output_count: *mut usize,
+    ) -> i32;
+    pub(crate) fn xila_tflm_invalidate_outputs(context: *mut c_void);
     pub(crate) fn xila_tflm_create(
         model: *const u8,
         model_len: usize,
