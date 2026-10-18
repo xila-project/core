@@ -1642,6 +1642,7 @@ dependencies = [
  "critical-section",
  "drivers_std",
  "file_system",
+ "libc",
  "little_fs",
  "users",
 ]

@@ -14,6 +14,11 @@ cargo run -p fs_image -- native.img 16777216 --bundle native --applications-dir 
 cargo run -p fs_image -- browser.img 16777216 --bundle wasm --applications-dir target/wasm32-wasip1/release
 ```
 
+Host-side population currently requires Linux or macOS. It opens source entries
+relative to directory descriptors, rejecting symlink substitutions and FIFOs
+even if the source tree changes during generation. Other native platforms can
+consume the images published by CI.
+
 Sizes must be multiples of 512 bytes and accommodate the MBR and LittleFS (at
 least 1049600 bytes; populated bundles need more). Import accepts regular files
 and directories with UTF-8 names, rejecting symlinks and special files. It uses

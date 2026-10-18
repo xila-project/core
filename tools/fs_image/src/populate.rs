@@ -1,32 +1,19 @@
+use super::source::{Directory, Entry};
 use file_system::{
     AccessFlags, AttributeFlags, Attributes, BaseOperations, Context, FileSystemOperations, Kind,
     Permissions,
 };
-use std::{error::Error, fs, io::Read, path::Path};
+use std::{error::Error, fs, io::Read};
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 const BUFFER_SIZE: usize = 4096;
 
-fn entries(root: &Path) -> Result<Vec<fs::DirEntry>> {
-    let mut entries = fs::read_dir(root)?.collect::<std::io::Result<Vec<_>>>()?;
-    entries.sort_by_key(|entry| entry.file_name());
-    Ok(entries)
-}
-
-pub fn validate(root: &Path) -> Result<()> {
-    if !fs::symlink_metadata(root)?.is_dir() {
-        return Err("root must be a real directory".into());
-    }
-    for entry in entries(root)? {
-        let name = entry.file_name();
-        let name = name.to_str().ok_or("file names must be UTF-8")?;
+pub fn validate(root: &Directory) -> Result<()> {
+    for name in root.names()? {
         if name.contains(['\0', '\\']) || name.len() > 255 {
             return Err("invalid file name".into());
         }
-        let kind = entry.file_type()?;
-        if kind.is_dir() {
-            validate(&entry.path())?;
-        } else if !kind.is_file() {
-            return Err("only regular files and directories can be imported".into());
+        if let Entry::Directory(directory) = root.open_child(&name)? {
+            validate(&directory)?;
         }
     }
     Ok(())
@@ -56,7 +43,7 @@ fn attributes(path: &str, kind: Kind) -> Attributes {
     result
 }
 
-pub fn populate(fs: &little_fs::FileSystem, root: Option<&Path>) -> Result<()> {
+pub fn populate(fs: &little_fs::FileSystem, root: Option<&Directory>) -> Result<()> {
     fs.set_attributes("/".as_ref(), &attributes("/", Kind::Directory))?;
     if let Some(root) = root {
         visit(fs, root, "", false)?;
@@ -64,7 +51,7 @@ pub fn populate(fs: &little_fs::FileSystem, root: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
-pub fn verify(fs: &little_fs::FileSystem, root: Option<&Path>) -> Result<()> {
+pub fn verify(fs: &little_fs::FileSystem, root: Option<&Directory>) -> Result<()> {
     verify_attributes(fs, "/", Kind::Directory)?;
     if let Some(root) = root {
         visit(fs, root, "", true)?;
@@ -92,33 +79,26 @@ fn verify_attributes(fs: &little_fs::FileSystem, path: &str, kind: Kind) -> Resu
     Ok(())
 }
 
-fn visit(fs: &little_fs::FileSystem, root: &Path, parent: &str, verify: bool) -> Result<()> {
-    for entry in entries(root)? {
-        let name = entry.file_name();
-        let path = format!(
-            "{parent}/{}",
-            name.to_str().ok_or("file names must be UTF-8")?
-        );
-        let directory = entry.file_type()?.is_dir();
-        let kind = if directory {
-            Kind::Directory
-        } else {
-            Kind::File
+fn visit(fs: &little_fs::FileSystem, root: &Directory, parent: &str, verify: bool) -> Result<()> {
+    for name in root.names()? {
+        let path = format!("{parent}/{name}");
+        let entry = root.open_child(&name)?;
+        let kind = match &entry {
+            Entry::Directory(_) => Kind::Directory,
+            Entry::File(_) => Kind::File,
         };
         if verify {
             verify_attributes(fs, &path, kind)?;
         } else {
-            if directory {
-                fs.create_directory(path.as_str().as_ref())?;
-            } else {
-                fs.create_file(path.as_str().as_ref())?;
+            match &entry {
+                Entry::Directory(_) => fs.create_directory(path.as_str().as_ref())?,
+                Entry::File(_) => fs.create_file(path.as_str().as_ref())?,
             }
             fs.set_attributes(path.as_str().as_ref(), &attributes(&path, kind))?;
         }
-        if directory {
-            visit(fs, &entry.path(), &path, verify)?;
-        } else {
-            copy_or_verify(fs, &entry.path(), &path, verify)?;
+        match entry {
+            Entry::Directory(directory) => visit(fs, &directory, &path, verify)?,
+            Entry::File(file) => copy_or_verify(fs, file, &path, verify)?,
         }
     }
     Ok(())
@@ -126,11 +106,10 @@ fn visit(fs: &little_fs::FileSystem, root: &Path, parent: &str, verify: bool) ->
 
 fn copy_or_verify(
     fs: &little_fs::FileSystem,
-    source: &Path,
+    mut file: fs::File,
     path: &str,
     verify: bool,
 ) -> Result<()> {
-    let mut file = fs::File::open(source)?;
     let mut context = Context::new_empty();
     fs.lookup_file(
         &mut context,
@@ -182,4 +161,108 @@ fn copy_or_verify(
     result?;
     close?;
     Ok(())
+}
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod tests {
+    use super::*;
+    #[test]
+    fn rejects_a_file_replaced_by_a_symlink_after_validation() {
+        let root = std::env::temp_dir().join(format!("xila-source-race-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("entry"), b"approved").unwrap();
+        let source = Directory::open(&root).unwrap();
+        validate(&source).unwrap();
+        fs::remove_file(root.join("entry")).unwrap();
+        std::os::unix::fs::symlink("/etc/passwd", root.join("entry")).unwrap();
+        let filesystem = little_fs::FileSystem::new_format(
+            file_system::MemoryDevice::<512>::new_static(512 * 1024),
+            256,
+        )
+        .unwrap();
+        let result = populate(&filesystem, Some(&source));
+        fs::remove_dir_all(root).unwrap();
+        assert!(
+            result.is_err(),
+            "population must not follow a link introduced after validation"
+        );
+    }
+}
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod mutation_tests {
+    use super::*;
+    fn temporary(name: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("xila-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir(&root).unwrap();
+        root
+    }
+    #[test]
+    fn directory_substitution_cannot_escape_the_opened_root() {
+        let root = temporary("directory-substitution");
+        fs::create_dir(root.join("child")).unwrap();
+        let source = Directory::open(&root).unwrap();
+        validate(&source).unwrap();
+        fs::remove_dir(root.join("child")).unwrap();
+        std::os::unix::fs::symlink("/etc", root.join("child")).unwrap();
+        let filesystem = little_fs::FileSystem::new_format(
+            file_system::MemoryDevice::<512>::new_static(512 * 1024),
+            256,
+        )
+        .unwrap();
+        assert!(populate(&filesystem, Some(&source)).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn root_rename_keeps_import_anchored_to_its_original_descriptor() {
+        let parent = temporary("root-substitution");
+        let root = parent.join("root");
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("approved"), b"original").unwrap();
+        let source = Directory::open(&root).unwrap();
+        validate(&source).unwrap();
+        fs::rename(&root, parent.join("original")).unwrap();
+        std::os::unix::fs::symlink("/etc", &root).unwrap();
+        let filesystem = little_fs::FileSystem::new_format(
+            file_system::MemoryDevice::<512>::new_static(512 * 1024),
+            256,
+        )
+        .unwrap();
+        populate(&filesystem, Some(&source)).unwrap();
+        let mut attributes = Attributes::new().set_mask(AttributeFlags::All);
+        filesystem
+            .get_attributes("/approved".as_ref(), &mut attributes)
+            .unwrap();
+        assert_eq!(attributes.get_size(), Some(&8));
+        assert!(
+            filesystem
+                .get_attributes("/passwd".as_ref(), &mut attributes)
+                .is_err()
+        );
+        verify(&filesystem, Some(&source)).unwrap();
+        fs::remove_dir_all(parent).unwrap();
+    }
+    #[test]
+    fn substituted_fifo_is_rejected_without_blocking() {
+        let root = temporary("fifo-substitution");
+        fs::write(root.join("entry"), b"approved").unwrap();
+        let source = Directory::open(&root).unwrap();
+        validate(&source).unwrap();
+        fs::remove_file(root.join("entry")).unwrap();
+        let name =
+            std::ffi::CString::new(root.join("entry").as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        let (send, receive) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = send.send(source.open_child("entry").is_err());
+        });
+        assert!(
+            receive
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 }

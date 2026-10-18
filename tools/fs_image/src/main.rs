@@ -1,6 +1,7 @@
 mod bundle;
 mod image;
 mod populate;
+mod source;
 use std::{env, error::Error, path::PathBuf, process};
 
 const DEFAULT_SIZE: u64 = 16 * 1024 * 1024;

@@ -1,3 +1,4 @@
+#![cfg(any(target_os = "linux", target_os = "macos"))]
 use std::{
     fs,
     path::PathBuf,
@@ -104,4 +105,59 @@ fn missing_bundle_binary_is_an_error_without_output() {
         .unwrap();
     assert!(!output.status.success());
     assert!(!f.0.join("missing.img").exists());
+}
+
+#[test]
+fn optional_capacity_defaults_when_population_flags_follow_output() {
+    let f = Fixture::new();
+    let output = Command::new(env!("CARGO_BIN_EXE_fs_image"))
+        .arg(f.0.join("default.img"))
+        .arg("--root")
+        .arg(f.0.join("root"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::metadata(f.0.join("default.img")).unwrap().len(),
+        16 * 1024 * 1024
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn unsupported_entries_and_non_utf8_names_are_rejected() {
+    use std::os::unix::{ffi::OsStringExt, fs::PermissionsExt, net::UnixListener};
+    let f = Fixture::new();
+    let socket = f.0.join("root/socket");
+    let listener = UnixListener::bind(&socket).unwrap();
+    assert!(!f.build("socket.img").status.success());
+    assert!(!f.0.join("socket.img").exists());
+    drop(listener);
+    fs::remove_file(socket).unwrap();
+    let invalid =
+        f.0.join("root")
+            .join(std::ffi::OsString::from_vec(vec![0xff]));
+    fs::write(&invalid, b"invalid path").unwrap();
+    assert!(!f.build("utf8.img").status.success());
+    assert!(!f.0.join("utf8.img").exists());
+    fs::remove_file(invalid).unwrap();
+    assert!(f.build("before.img").status.success());
+    fs::set_permissions(
+        f.0.join("root/binaries/example"),
+        fs::Permissions::from_mode(0o444),
+    )
+    .unwrap();
+    fs::File::open(f.0.join("root/binaries/example"))
+        .unwrap()
+        .set_modified(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap();
+    assert!(f.build("after.img").status.success());
+    assert_eq!(
+        fs::read(f.0.join("before.img")).unwrap(),
+        fs::read(f.0.join("after.img")).unwrap()
+    );
 }
