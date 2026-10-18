@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+application_metadata = { workspace = true }
 embedded-i18n = { workspace = true }
 nanoexpr = { version = "0.2.1", default-features = false, features = ["exact"] }
 

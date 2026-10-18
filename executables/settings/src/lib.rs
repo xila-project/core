@@ -28,18 +28,7 @@ use xila::task::TaskIdentifier;
 use xila::virtual_file_system::{File, VirtualFileSystem};
 
 pub fn get_shortcut() -> alloc::string::String {
-    use xila::internationalization::translate;
-    alloc::format!(
-        r#"{{
-    "name": "{}",
-    "command": "/binaries/settings",
-    "arguments": [],
-    "terminal": false,
-    "icon_string": "Se",
-    "icon_color": [158, 158, 158]
-}}"#,
-        translate!("Settings")
-    )
+    application_metadata::shortcut("settings").unwrap()
 }
 
 pub struct SettingsExecutable;

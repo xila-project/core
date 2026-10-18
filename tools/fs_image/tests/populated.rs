@@ -66,3 +66,42 @@ fn out_of_space_removes_incomplete_output() {
     assert!(!f.build("full.img").status.success());
     assert!(!f.0.join("full.img").exists());
 }
+
+#[test]
+fn browser_and_native_bundles_contain_their_declared_apps() {
+    let f = Fixture::new();
+    for app in ["calculator", "weather", "clock", "pixel_painter"] {
+        fs::write(f.0.join(format!("{app}.wasm")), b"\0asm\x01\0\0\0").unwrap();
+    }
+    for profile in ["native", "wasm"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_fs_image"))
+            .arg(f.0.join(format!("{profile}.img")))
+            .arg("4194304")
+            .args(["--bundle", profile, "--applications-dir"])
+            .arg(&f.0)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(text.contains("calculator,clock,pixel_painter"));
+        assert_eq!(text.contains(",weather"), profile == "native");
+    }
+}
+
+#[test]
+fn missing_bundle_binary_is_an_error_without_output() {
+    let f = Fixture::new();
+    let output = Command::new(env!("CARGO_BIN_EXE_fs_image"))
+        .arg(f.0.join("missing.img"))
+        .arg("4194304")
+        .args(["--bundle", "wasm", "--applications-dir"])
+        .arg(&f.0)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(!f.0.join("missing.img").exists());
+}

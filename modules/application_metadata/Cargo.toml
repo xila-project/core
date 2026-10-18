@@ -1,0 +1,7 @@
+[package]
+name = "application_metadata"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+embedded-i18n = { workspace = true }

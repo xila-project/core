@@ -1,3 +1,4 @@
+mod bundle;
 mod image;
 mod populate;
 use std::{env, error::Error, path::PathBuf, process};
@@ -18,27 +19,55 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
-    let mut arguments = env::args_os().skip(1);
+    let mut arguments = env::args_os().skip(1).peekable();
     let output = arguments
         .next()
         .map(PathBuf::from)
         .ok_or("usage: fs_image <output-image> [size-bytes] (size defaults to 16777216)")?;
-    let size = match arguments.next() {
-        Some(value) => value.to_string_lossy().parse::<u64>()?,
-        None => DEFAULT_SIZE,
+    let size = if arguments
+        .peek()
+        .is_some_and(|value| !value.to_string_lossy().starts_with("--"))
+    {
+        arguments.next().unwrap().to_string_lossy().parse::<u64>()?
+    } else {
+        DEFAULT_SIZE
     };
-    let root = match arguments.next() {
-        Some(flag) if flag == "--root" => Some(PathBuf::from(
-            arguments.next().ok_or("--root requires a directory")?,
-        )),
-        Some(_) => return Err("expected --root <directory>".into()),
-        None => None,
-    };
-    if arguments.next().is_some() {
-        return Err("too many arguments".into());
+    let mut root = None;
+    let mut bundle = None;
+    let mut applications = None;
+    while let Some(flag) = arguments.next() {
+        match flag.to_str() {
+            Some("--root") => {
+                root = Some(PathBuf::from(
+                    arguments.next().ok_or("--root requires a directory")?,
+                ))
+            }
+            Some("--bundle") => {
+                bundle = Some(arguments.next().ok_or("--bundle requires native or wasm")?)
+            }
+            Some("--applications-dir") => {
+                applications = Some(PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or("--applications-dir requires a directory")?,
+                ))
+            }
+            _ => return Err("unknown argument".into()),
+        }
     }
+    let staging = match (bundle, applications) {
+        (Some(profile), Some(directory)) if root.is_none() => Some(bundle::prepare(
+            profile.to_str().ok_or("invalid bundle")?,
+            &directory,
+        )?),
+        (None, None) => None,
+        _ => {
+            return Err("use --root or --bundle native|wasm --applications-dir <directory>".into());
+        }
+    };
+    let root = staging.as_ref().map(|s| s.0.as_path()).or(root.as_deref());
     let output = output.canonicalize_parent()?;
-    image::build(&output, size, root.as_deref())?;
+    image::build(&output, size, root)?;
 
     println!(
         "Verified Xila MBR, LittleFS contents and metadata: {} ({} bytes)",

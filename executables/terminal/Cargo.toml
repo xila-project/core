@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+application_metadata = { workspace = true }
 xila = { path = "../../", features = ["graphics"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dev-dependencies]

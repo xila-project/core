@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+application_metadata = { workspace = true }
+users = { workspace = true }
 abi_definitions = { workspace = true }
 drivers_std = { workspace = true }
 file_system = { workspace = true }

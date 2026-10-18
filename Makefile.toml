@@ -243,3 +243,21 @@ args = ["llvm-cov", "--workspace", "--coverage-host-only", "${@}"]
 
 [tasks.before-commit]
 dependencies = ["format", "check", "doc", "clippy"]
+
+[tasks.prepare-native-image]
+dependencies = ["prepare-profiling"]
+script = '''
+set -eu
+mkdir -p target/seed/native
+rm -f target/seed/native/seed.img
+cargo run --package fs_image -- target/seed/native/seed.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release-wasm
+'''
+
+[tasks.prepare-wasm-image]
+script = '''
+set -eu
+cargo build -p calculator -p clock -p pixel_painter --target wasm32-wasip1 --release
+mkdir -p target/seed/wasm
+rm -f target/seed/wasm/seed.img
+cargo run --package fs_image -- target/seed/wasm/seed.img 16777216 --bundle wasm --applications-dir target/wasm32-wasip1/release
+'''

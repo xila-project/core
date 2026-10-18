@@ -38,10 +38,22 @@ fn attributes(path: &str, kind: Kind) -> Attributes {
     } else {
         0o644
     };
-    Attributes::new()
+    let mut result = Attributes::new()
         .set_mask(AttributeFlags::All)
         .set_kind(kind)
-        .set_permissions(Permissions::from_octal(permissions).unwrap())
+        .set_permissions(Permissions::from_octal(permissions).unwrap());
+    if matches!(
+        path,
+        "/configuration/shared/clock" | "/configuration/shared/pixel_painter"
+    ) {
+        result = result
+            .set_user(users::UserIdentifier::new(1000))
+            .set_group(users::GroupIdentifier::new(1000));
+    }
+    if matches!(path, "/system/users" | "/system/groups") {
+        result = result.set_permissions(Permissions::from_octal(0o700).unwrap());
+    }
+    result
 }
 
 pub fn populate(fs: &little_fs::FileSystem, root: Option<&Path>) -> Result<()> {

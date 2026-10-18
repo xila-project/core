@@ -1,26 +1,14 @@
-use std::fs;
-
-pub static SHORTCUT: &str = r#"
-{
-    "name": "Calculator",
-    "command": "/binaries/wasm",
-    "arguments": ["/binaries/calculator"],
-    "terminal": false,
-    "icon_string": "Ca",
-    "icon_color": [158, 158, 158]
-}"#;
-
-pub const SHORTCUT_PATH: &str = "/configuration/shared/shortcuts/calculator.json";
-
 #[unsafe(no_mangle)]
 pub extern "C" fn __install() {
-    println!("Installing Calculator shortcut...");
-
-    // fs::create_dir_all("/configuration/shared/shortcuts").unwrap();
-
-    println!("Creating shortcut at {}", SHORTCUT_PATH);
-
-    fs::write(SHORTCUT_PATH, SHORTCUT).unwrap();
-
-    println!("Calculator shortcut installed.");
+    let result = (|| -> std::io::Result<()> {
+        std::fs::create_dir_all("/configuration/shared/shortcuts")?;
+        std::fs::write(
+            "/configuration/shared/shortcuts/calculator.json",
+            application_metadata::shortcut("calculator").unwrap(),
+        )
+    })();
+    if let Err(error) = result {
+        eprintln!("Installation failed: {error}");
+        std::process::exit(1);
+    }
 }
