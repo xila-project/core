@@ -108,7 +108,8 @@ unsafe extern "C" fn window_event_callback(
 
         let (code, key) = match code {
             lvgl::lv_event_code_t_LV_EVENT_CHILD_CREATED => {
-                lvgl::lv_obj_add_flag(target, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_EVENT_BUBBLE);
+                let child = lvgl::lv_event_get_param(event) as *mut lvgl::lv_obj_t;
+                lvgl::lv_obj_add_flag(child, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_EVENT_BUBBLE);
                 (code, None)
             }
             lvgl::lv_event_code_t_LV_EVENT_KEY => {
