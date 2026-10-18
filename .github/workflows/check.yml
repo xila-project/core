@@ -293,12 +293,16 @@ jobs:
           LOCALIZATION_RESULT: ${{ needs.localization.result }}
           CLIPPY_RESULT: ${{ needs.host-clippy-work.result }}
         run: |
-          for result in "$FORMAT_RESULT" "$LOCALIZATION_RESULT" "$CLIPPY_RESULT"; do
+          for result in "$FORMAT_RESULT" "$LOCALIZATION_RESULT"; do
             if [[ "$result" != success && "$result" != skipped ]]; then
               echo "::error::A required CI dependency finished with result: $result"
               exit 1
             fi
           done
+          if [[ "$CLIPPY_RESULT" != success ]]; then
+            echo "::error::Host Clippy was required but finished with result: $CLIPPY_RESULT"
+            exit 1
+          fi
 
   host-test:
     name: Host checks (Tests)
@@ -585,24 +589,49 @@ jobs:
       - name: Setup | Generate fonts
         run: cargo make generate-fonts
 
-      - name: Benchmark | cargo test
-        if: matrix.runner == 'cargo-test'
-        run: cargo test --workspace --timings
+      - name: Setup | Install GNU time
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends time
+          rm -rf /var/lib/apt/lists/*
 
       - name: Setup | Install pinned nextest for benchmark
         if: matrix.runner == 'nextest'
         run: cargo binstall --no-confirm cargo-nextest@0.9.148
 
-      - name: Benchmark | nextest and doctests
+      - name: Benchmark | Compile test binaries
+        run: |
+          mkdir -p benchmark-results
+          /usr/bin/time -v -o "benchmark-results/compile-${{ matrix.runner }}.txt" \
+            cargo test --workspace --no-run --timings
+          cat "benchmark-results/compile-${{ matrix.runner }}.txt"
+
+      - name: Benchmark | cargo test execution
+        if: matrix.runner == 'cargo-test'
+        run: |
+          /usr/bin/time -v -o benchmark-results/test-execution-cargo-test.txt \
+            cargo test --workspace
+          cat benchmark-results/test-execution-cargo-test.txt
+
+      - name: Benchmark | nextest execution
         if: matrix.runner == 'nextest'
         run: |
-          cargo nextest run --workspace --timings
-          cargo test --workspace --doc --timings
+          /usr/bin/time -v -o benchmark-results/test-execution-nextest.txt \
+            cargo nextest run --workspace --timings
+          cat benchmark-results/test-execution-nextest.txt
+
+      - name: Benchmark | Doctest execution
+        run: |
+          /usr/bin/time -v -o "benchmark-results/doctests-${{ matrix.runner }}.txt" \
+            cargo test --workspace --doc --timings
+          cat "benchmark-results/doctests-${{ matrix.runner }}.txt"
 
       - name: Upload | Test runner timings
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: cargo-test-runner-timings-${{ matrix.runner }}
-          path: target/cargo-timings/
+          path: |
+            target/cargo-timings/
+            benchmark-results/
           if-no-files-found: warn
