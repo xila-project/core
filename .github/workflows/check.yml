@@ -138,6 +138,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
+          profile: minimal
           cache-workspaces: "executables/wasm/tests/translation -> target"
 
       # Keep main's plain dependency artifacts compatible with PR test builds.
