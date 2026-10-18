@@ -1,35 +1,37 @@
 # Browser example
 
-From the repository root, build the bundled guests first, generate the LVGL
-fonts, and then build the browser example:
+From the repository root, prepare the separate application disk and build the
+browser runtime:
 
 ```sh
-cargo +stable build -p calculator -p clock --target wasm32-wasip1 --release
+cargo make prepare-wasm-image
 cargo make generate-fonts
-cargo +stable build -p wasm_example --target wasm32-unknown-unknown
-```
-
-To serve it in a browser, install [Trunk](https://trunkrs.dev/) and run:
-
-```sh
+cargo check -p wasm_example --target wasm32-unknown-unknown
 cd examples/wasm
 RUSTUP_TOOLCHAIN=stable trunk serve
 ```
+
+Trunk copies `target/seed/wasm/seed.img` beside the runtime. Building the Rust
+runtime alone requires no prebuilt guest binaries; serving a fresh installation
+requires this image. Build guests and images with the same
+`EMBEDDED_I18N_LOCALE` as the runtime (`en` or `fr`).
 
 Use localhost or HTTPS in a browser supporting OPFS,
 `FileSystemFileHandle.createWritable`, and Web Locks.
 
 ## Running guest WebAssembly applications
 
-Calculator and Clock are embedded from `target/wasm32-wasip1/release/` at
-browser build time. Startup copies them to `/binaries/calculator` and
-`/binaries/clock`, then runs their installers to create application-drawer
-shortcuts. Rebuild the guests before rebuilding the browser example whenever
-either application changes. Guest builds must place these artifacts in the
-repository's default `target` directory.
+Calculator, Clock and Pixel Painter are provisioned in `seed.img` at build time,
+along with their shortcuts. The first startup streams this image into the disk
+cache only when the selected OPFS file is absent or zero bytes. It validates and
+mounts LittleFS before account initialization and the first persistent commit.
+Failures leave a new disk retryable. Existing nonempty disks are mounted without
+downloading a seed, copying applications or running their installers. Mount errors
+never authorize erasing a disk. Publishing a newer image does not upgrade existing
+installations; choose a new disk to try a fresh bundle while retaining the old one.
 
 Clock's settings directory is provisioned at `/configuration/shared/clock` and
-assigned to the administrator account when it exists. Its saved preferences and
+owned by the seed's administrator account (UID 1000) on a new installation. Its saved preferences and
 alarm follow the OPFS persistence limits below. Other accounts need write access
 to this directory to save settings. Clock alerts require the application to stay
 open; browser background-tab throttling can delay them.
@@ -37,7 +39,7 @@ open; browser background-tab throttling can delay them.
 On a fresh disk, log in as **administrator** with an empty password; otherwise
 use your saved credentials. Open the application drawer using the Xila button
 in the dock. Select
-**Calculator** or **Clock**. They can also be launched from Xila's terminal:
+**Calculator**, **Clock** or **Pixel Painter**. They can also be launched from Xila's terminal:
 
 ```text
 /binaries/wasm /binaries/calculator
@@ -67,11 +69,10 @@ The OS canvas still uses the existing localized LVGL Montserrat Regular subsets 
 ## Browser limitations
 
 - The example persists its filesystem in OPFS; see the storage and durability
-  limits below. Startup reinstalls the bundled Calculator and Clock. Other guest files
-  must be present before launching; there is no upload mechanism.
-- Embedding applications increases the browser WASM download and retains the
-  embedded bytes alongside the VFS copy. Running it also needs Wasmi's module
-  and guest memory. This simple approach favors convenience over RAM usage.
+  limits below. Other guest files must be present before launching; there is no
+  upload mechanism.
+- Applications are distributed in a separate seed image. The disk cache still
+  occupies 16 MiB; running a guest also needs Wasmi's module and guest memory.
 - Guests run cooperatively in Wasmi on the browser's executor, not as separate
   native browser WebAssembly instances. Fuel exhaustion and supported WASI
   suspension calls yield to the executor.
@@ -97,11 +98,12 @@ launched them through the mounted `/binaries/wasm` executable:
   through LVGL button events, used WASI clock polling, and exited successfully
   with its window removed after a close request.
 
-Calculator bundling was additionally checked with a temporary probe that read
-the startup-created guest and shortcut without creating either, then ran the
-bundled guest through the same evaluation and teardown checks.
+The storage regression suite also exercises OPFS persistence, first-use seed
+import through Fetch, zero-byte placeholders, failed imports, corrupt existing
+disks, lease handling and reopening an existing disk without downloading a seed.
+The image-builder tests remount populated disks and check reproducibility.
 
-The probes are not included in normal example startup; bundled applications are. Generated
+The probes are not included in normal example startup. Generated
 guest binaries are not committed. This is focused browser validation, not a
 claim of full WASI/graphics compatibility or support across all browsers.
 
@@ -121,7 +123,8 @@ deletes its files. The default administrator with an empty password is created
 only on a fresh disk. Existing users/groups are loaded even if the administrator
 account was removed. Invalid MBRs or filesystem mount errors stop boot without
 reformatting an existing image. A Web Lock allows only one Xila tab to open a
-given disk at a time.
+given disk at a time. A new disk imports the reference image; existing nonempty
+disks do not depend on it being available.
 
 Synchronous OPFS handles are available only in workers, while this example's
 UI and filesystem run on the browser main thread. The drive therefore keeps a

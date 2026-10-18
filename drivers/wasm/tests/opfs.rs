@@ -467,3 +467,38 @@ async fn littlefs_file_and_mbr_survive_reopening_the_opfs_disk() {
     drive.unmount().unwrap();
     remove(&name).await;
 }
+
+#[wasm_bindgen_test]
+async fn existing_disk_never_requires_a_seed_fetch() {
+    let name = name();
+    let drive = DriveDevice::new(Path::from_str(&name), 4096).await.unwrap();
+    drive.write(b"saved", 512).unwrap();
+    drive.sync().await.unwrap();
+    drop(drive);
+    let drive = DriveDevice::new_seeded(
+        Path::from_str(&name),
+        4096,
+        "invalid-protocol://must-not-fetch",
+    )
+    .await
+    .unwrap();
+    let mut bytes = [0; 5];
+    drive.read(&mut bytes, 512).unwrap();
+    assert_eq!(&bytes, b"saved");
+    drop(drive);
+    remove(&name).await;
+}
+
+#[wasm_bindgen_test]
+async fn failed_seed_download_keeps_an_empty_disk_retryable() {
+    let name = name();
+    assert!(
+        DriveDevice::new_seeded(Path::from_str(&name), 4096, "invalid-protocol://offline")
+            .await
+            .is_err()
+    );
+    let drive = DriveDevice::new(Path::from_str(&name), 4096).await.unwrap();
+    assert!(drive.is_new());
+    drop(drive);
+    remove(&name).await;
+}
