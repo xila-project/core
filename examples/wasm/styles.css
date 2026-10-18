@@ -115,6 +115,20 @@ a:hover {
   opacity: 0.48;
   cursor: default;
 }
+#audio-enable {
+  width: 100%;
+  margin: 8px 0;
+  padding: 10px;
+  border: 0;
+  border-radius: 4px;
+  background: #245b87;
+  color: #fff;
+  cursor: pointer;
+}
+#audio-enable:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
 #disk-status {
   min-height: 2.8em;
   overflow-wrap: anywhere;
