@@ -26,7 +26,7 @@ accounts and passwords load on subsequent starts. Explicit pending installation
 state permits completion after interruption without resetting saved credentials.
 Applications and shortcuts are already in the image; startup performs no guest
 compilation or bundled application installation. The native bundle includes
-Calculator, Clock, Pixel Painter and Weather. Updating the reference image does
+Calculator, Clock, Pixel Painter, Synth and Weather. Updating the reference image does
 not replace applications on existing disks.
 
 The `prebuilt-applications` feature remains accepted for older profiling commands,
@@ -34,3 +34,7 @@ but every build now uses the disk image. `XILA_PROFILE_APP_DIR` remains useful t
 the profiling recorder for hashing source guest binaries; it no longer changes
 runtime loading. See the repository's profiling instructions for preparing and
 selecting a seed before measurement.
+
+The example mounts `/devices/audio/playback` using the default host audio output.
+Audio initialization failures are logged and leave the rest of the OS usable.
+See [Synth](../../executables/synth/README.md) for controls, silent mode and checks.

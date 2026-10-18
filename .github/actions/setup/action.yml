@@ -34,7 +34,7 @@ runs:
       shell: bash
       run: |
         sudo apt-get update
-        sudo apt-get install -y clang mold pkg-config cmake ninja-build libclang-dev libwayland-dev libxkbcommon-dev libsdl2-dev libgl-dev
+        sudo apt-get install -y clang mold pkg-config cmake ninja-build libclang-dev libwayland-dev libxkbcommon-dev libsdl2-dev libgl-dev libasound2-dev
 
     - name: Setup | Export native build env
       shell: bash

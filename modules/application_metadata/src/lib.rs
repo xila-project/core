@@ -4,7 +4,7 @@ extern crate alloc;
 use alloc::{format, string::String};
 embedded_i18n::track_locales!();
 
-pub const GUESTS: &[&str] = &["calculator", "clock", "pixel_painter", "weather"];
+pub const GUESTS: &[&str] = &["calculator", "clock", "pixel_painter", "synth", "weather"];
 pub const NATIVE: &[&str] = &["file_manager", "terminal", "settings"];
 pub const PENDING_PATH: &str = "/system/.seed-pending";
 pub const PENDING_CONTENT: &[u8] = b"xila-seed-v1\n";
@@ -19,6 +19,7 @@ pub fn shortcut(name: &str) -> Option<String> {
             [142, 36, 170],
             true,
         ),
+        "synth" => ("Synth", "Sy", [103, 58, 183], true),
         "weather" => ("Weather", "We", [33, 150, 243], true),
         "file_manager" => ("File manager", "Fm", [0, 188, 212], false),
         "terminal" => ("Terminal", ">_", [0, 0, 0], false),

@@ -55,7 +55,7 @@ jobs:
           EMBEDDED_I18N_LOCALE: en
         run: |
           cargo make generate-fonts
-          cargo build -p calculator -p weather -p clock -p pixel_painter --target wasm32-wasip1 --release
+          cargo build -p calculator -p weather -p clock -p pixel_painter -p synth --target wasm32-wasip1 --release
           cargo make prepare-wasm-image
           cargo run -p fs_image -- target/seed/wasm/repeated.img 16777216 --bundle wasm --applications-dir target/wasm32-wasip1/release
           cmp target/seed/wasm/seed.img target/seed/wasm/repeated.img
@@ -75,7 +75,7 @@ jobs:
           EMBEDDED_I18N_LOCALE: fr
         run: |
           cargo make generate-fonts
-          cargo build -p calculator -p weather -p clock -p pixel_painter --target wasm32-wasip1 --release
+          cargo build -p calculator -p weather -p clock -p pixel_painter -p synth --target wasm32-wasip1 --release
           cargo make prepare-wasm-image
           cargo run -p fs_image -- target/seed/wasm/repeated.img 16777216 --bundle wasm --applications-dir target/wasm32-wasip1/release
           cmp target/seed/wasm/seed.img target/seed/wasm/repeated.img

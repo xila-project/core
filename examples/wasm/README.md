@@ -21,7 +21,7 @@ Use localhost or HTTPS in a browser supporting OPFS,
 
 ## Running guest WebAssembly applications
 
-Calculator, Clock and Pixel Painter are provisioned in `seed.img` at build time,
+Calculator, Clock, Pixel Painter and Synth are provisioned in `seed.img` at build time,
 along with their shortcuts. The first startup streams this image into the disk
 cache only when the selected OPFS file is absent or zero bytes. It validates and
 mounts LittleFS before account initialization and the first persistent commit.
@@ -39,11 +39,13 @@ open; browser background-tab throttling can delay them.
 On a fresh disk, log in as **administrator** with an empty password; otherwise
 use your saved credentials. Open the application drawer using the Xila button
 in the dock. Select
-**Calculator**, **Clock** or **Pixel Painter**. They can also be launched from Xila's terminal:
+**Calculator**, **Clock**, **Pixel Painter** or **Synth**. They can also be launched from Xila's terminal:
 
 ```text
 /binaries/wasm /binaries/calculator
 /binaries/wasm /binaries/clock
+/binaries/wasm /binaries/pixel_painter
+/binaries/wasm /binaries/synth
 ```
 
 The example mounts the Wasmi-backed runtime at `/binaries/wasm`, with the same
@@ -71,6 +73,11 @@ The OS canvas still uses the existing localized LVGL Montserrat Regular subsets 
 - The example persists its filesystem in OPFS; see the storage and durability
   limits below. Other guest files must be present before launching; there is no
   upload mechanism.
+- Click **Enable audio** in the browser page before launching Synth. The click
+  starts one `WebAudioDevice` and mounts it at `/devices/audio/playback`; Synth
+  then writes ordinary PCM through its file descriptor. If Synth is already
+  open, choose **Retry audio** inside its window. Browsers may require this
+  gesture because audio contexts cannot start during page initialization.
 - Applications are distributed in a separate seed image. The disk cache still
   occupies 16 MiB; running a guest also needs Wasmi's module and guest memory.
 - Guests run cooperatively in Wasmi on the browser's executor, not as separate
@@ -166,3 +173,6 @@ file containing `{"goog:chromeOptions":{"binary":"/path/to/chromium"}}`.
 These tests use real OPFS files, including MBR/LittleFS save/reopen coverage.
 The disk-name and collision rules can also be tested with
 `node --test examples/wasm/tests/disk_manager.test.mjs`.
+
+See [Synth](../../executables/synth/README.md) for controls, silent mode,
+existing-disk behavior and the audio smoke-test procedure.

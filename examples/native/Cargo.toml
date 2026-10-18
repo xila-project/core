@@ -19,7 +19,8 @@ settings = { workspace = true }
 drivers_core = { workspace = true }
 drivers_std = { workspace = true }
 drivers_shared = { workspace = true }
-drivers_native = { workspace = true }
+drivers_native = { workspace = true, features = ["audio"] }
+audio = { workspace = true }
 getargs = { version = "0.5" }
 getargs-derive = { workspace = true }
 

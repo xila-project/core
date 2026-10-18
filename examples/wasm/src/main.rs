@@ -56,6 +56,7 @@ async fn main(task_manager: &'static xila::task::Manager) {
     use core::sync::atomic::{AtomicBool, Ordering};
     use drivers_wasm::devices::graphics::GraphicsDevices;
     use wasm_bindgen::{JsCast, closure::Closure};
+    use web_sys::{HtmlElement, MouseEvent};
     use xila::bootsplash::Bootsplash;
     use xila::executable::{self, Standard, mount_executables};
     use xila::file_system::mbr::Mbr;
@@ -179,6 +180,66 @@ async fn main(task_manager: &'static xila::task::Manager) {
     virtual_file_system::clean_devices(virtual_file_system, task)
         .await
         .unwrap();
+    virtual_file_system
+        .create_directory(task, &"/devices/audio")
+        .await
+        .unwrap();
+
+    let audio_button = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.body().map(|body| (document, body)))
+        .map(|(document, body)| {
+            let button = document
+                .create_element("button")
+                .unwrap()
+                .dyn_into::<HtmlElement>()
+                .unwrap();
+            button.set_text_content(Some("Enable audio before launching Synth"));
+            button
+                .set_attribute(
+                    "style",
+                    "position:fixed;top:8px;right:8px;z-index:10000;padding:10px;",
+                )
+                .unwrap();
+            body.append_child(&button).unwrap();
+            button
+        })
+        .expect("Failed to create the browser audio button");
+
+    let audio_button_for_callback = audio_button.clone();
+    let audio_button_callback = Closure::wrap(Box::new(move |_event: MouseEvent| {
+        let button = audio_button_for_callback.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            button.set_text_content(Some("Starting browser audio…"));
+            let device =
+                match drivers_wasm::devices::WebAudioDevice::start_from_user_gesture().await {
+                    Ok(device) => device,
+                    Err(error) => {
+                        log::error!("Failed to start browser audio: {error:?}");
+                        button.set_text_content(Some("Audio start failed; click to retry"));
+                        return;
+                    }
+                };
+
+            match virtual_file_system
+                .mount_character_device(task, "/devices/audio/playback", device)
+                .await
+            {
+                Ok(()) => {
+                    button.set_text_content(Some("Audio enabled — launch Synth"));
+                    button.set_attribute("disabled", "true").unwrap();
+                }
+                Err(error) => {
+                    log::error!("Failed to mount browser audio: {error}");
+                    button.set_text_content(Some("Audio mount failed"));
+                }
+            }
+        });
+    }) as Box<dyn FnMut(MouseEvent)>);
+    audio_button
+        .add_event_listener_with_callback("click", audio_button_callback.as_ref().unchecked_ref())
+        .unwrap();
+    audio_button_callback.forget();
 
     mount_static!(
         virtual_file_system,

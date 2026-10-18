@@ -404,6 +404,21 @@ impl<'a, const S: usize, const B: usize, const F: usize, const O: usize, const Q
         )
     }
 }
+
+/// Keeps a transferred native output slot reserved until the adapter is dropped.
+///
+/// This token is returned by [`OutputHandle::into_consumer_with_reservation`].
+/// Drop the transferred consumer or its adapter before this reservation.
+pub struct OutputReservation {
+    occupied: &'static AtomicBool,
+}
+
+impl Drop for OutputReservation {
+    fn drop(&mut self) {
+        self.occupied.store(false, Ordering::Release);
+    }
+}
+
 impl<const S: usize, const B: usize, const F: usize, const O: usize, const Q: usize> Drop
     for OutputHandle<'_, S, B, F, O, Q>
 {
@@ -426,5 +441,30 @@ impl<const S: usize, const B: usize, const F: usize, const O: usize, const Q: us
         self.consumer
             .take()
             .expect("consumer exists until handle drop")
+    }
+
+    /// Transfers the consumer with a token that releases its output slot on drop.
+    ///
+    /// Unlike [`into_consumer`](Self::into_consumer), this permits the system to
+    /// reuse the output after the consumer's owner has been dropped. The adapter
+    /// must be destroyed before the returned reservation; a wrapper should own
+    /// both and explicitly drop the adapter first.
+    ///
+    /// # Safety
+    ///
+    /// The returned consumer must be dropped before the reservation. Releasing
+    /// the slot while the consumer is still live would allow the system to split
+    /// the same ring buffer again while that consumer still references it.
+    pub unsafe fn into_consumer_with_reservation(
+        mut self,
+    ) -> (Consumer<'static, Q>, OutputReservation) {
+        let consumer = self
+            .consumer
+            .take()
+            .expect("consumer exists until handle drop");
+        let reservation = OutputReservation {
+            occupied: &self.system.outputs[self.index].occupied,
+        };
+        (consumer, reservation)
     }
 }

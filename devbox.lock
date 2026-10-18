@@ -54,6 +54,9 @@
     },
     "github:NixOS/nixpkgs/7fd4004d0511991fff3a0524856a9be09e28c5f0#cargo-llvm-cov": {
       "resolved": "github:NixOS/nixpkgs/7fd4004d0511991fff3a0524856a9be09e28c5f0#cargo-llvm-cov"
+    },
+    "github:NixOS/nixpkgs/7fd4004d0511991fff3a0524856a9be09e28c5f0#alsa-lib": {
+      "resolved": "github:NixOS/nixpkgs/7fd4004d0511991fff3a0524856a9be09e28c5f0#alsa-lib"
     }
   }
 }

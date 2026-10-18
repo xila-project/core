@@ -57,6 +57,7 @@ abi_definitions = { workspace = true }
 command_line_shell = { workspace = true }
 executable = { workspace = true, features = ["building"] }
 testing = { workspace = true }
+audio = { workspace = true }
 wat = "1"
 
 [[test]]

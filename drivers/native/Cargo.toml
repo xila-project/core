@@ -5,7 +5,7 @@ edition = "2024"
 
 [features]
 default = []
-audio = ["dep:audio", "dep:sdl2"]
+audio = ["dep:audio", "dep:nanoaudio", "dep:nanoaudio-cpal"]
 
 [[example]]
 name = "audio"
@@ -14,7 +14,8 @@ required-features = ["audio"]
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
 file_system = { workspace = true }
 audio = { workspace = true, optional = true }
-sdl2 = { version = "0.38", default-features = false, optional = true }
+nanoaudio = { workspace = true, optional = true }
+nanoaudio-cpal = { workspace = true, optional = true }
 
 graphics = { workspace = true, features = ["rendering_xrgb8888"] }
 task = { workspace = true }

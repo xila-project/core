@@ -150,6 +150,33 @@ async fn main(task_manager: &'static xila::task::Manager) {
         .create_directory(task, &"/devices/cpu")
         .await;
 
+    // Keep the mixer pinned for the lifetime of every mounted VFS stream.
+    let audio_system: &'static audio::AudioSystem =
+        Box::leak(Box::new(audio::AudioSystem::new().unwrap()));
+    // SAFETY: the leaked service can never move or be freed.
+    let audio_system = unsafe { core::pin::Pin::new_unchecked(audio_system) };
+    let mut audio_runner = match drivers_native::audio::new(audio_system, 1) {
+        Ok(runner) => {
+            let _ = virtual_file_system
+                .create_directory(task, &"/devices/audio")
+                .await;
+            virtual_file_system
+                .mount_character_device(
+                    task,
+                    "/devices/audio/playback",
+                    audio::AudioStreamDevice::new(audio_system),
+                )
+                .await
+                .expect("Failed to mount audio playback");
+            log::information!("Native audio ready");
+            Some(runner)
+        }
+        Err(error) => {
+            log::warning!("Audio unavailable; applications can run silently: {error}");
+            None
+        }
+    };
+
     log::information!("Default hierarchy created.");
 
     if let Some(graphics) = graphics_manager {
@@ -333,13 +360,32 @@ async fn main(task_manager: &'static xila::task::Manager) {
         cli::InterfaceMode::Graphical => "/binaries/graphical_shell",
         cli::InterfaceMode::Terminal => "/binaries/command_line_shell",
     };
-    let _ = executable::execute(executable_context, shell_path, vec![], standard, None)
+    let shell = executable::execute(executable_context, shell_path, vec![], standard, None)
         .await
-        .unwrap()
-        .join()
-        .await;
+        .unwrap();
+    let mut join = core::pin::pin!(shell.join());
+    loop {
+        use core::{
+            future::{Future, poll_fn},
+            task::Poll,
+        };
+        if poll_fn(|context| Poll::Ready(join.as_mut().poll(context)))
+            .await
+            .is_ready()
+        {
+            break;
+        }
+        if let Some(runner) = &audio_runner
+            && let Err(error) = runner.check()
+        {
+            log::warning!("Native audio stopped: {error}; restart to reopen the host output");
+            audio_runner = None;
+        }
+        task::Manager::sleep(Duration::from_millis(100)).await;
+    }
 
     virtual_file_system.uninitialize().await;
+    drop(audio_runner);
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]

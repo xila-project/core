@@ -72,8 +72,9 @@ On the x86_64 debug test build, `PlaybackBuffer<4096>` occupies 4,120 bytes,
 and the device and renderer each occupy 40 bytes. The test suite checks zero
 allocations over 1,000 playback cycles after setup and concurrently transfers
 5,000 samples across a wrapping ring. These figures exclude test buffers,
-application stack and SDL's own buffers/threads; they are not a measurement of
-total host-driver memory or an assertion about allocations inside SDL.
+application stack and platform backend buffers/threads; they are not a
+measurement of total host-driver memory or an assertion about backend
+allocations.
 
 ## Fixed-capacity audio system
 
@@ -112,7 +113,11 @@ The scheduler should retry a skipped mix at its next opportunity. Output consume
 never take this lock. `with_consumer` keeps the consumer inside its reservation;
 `OutputHandle<'static>::into_consumer` supports adapters that take ownership of a
 static consumer, permanently reserving that output slot because those adapters do
-not return their consumer for safe reuse.
+not return their consumer for safe reuse. Adapters with an explicit owner can use
+`into_consumer_with_reservation`, which returns the consumer and an
+`OutputReservation` that reclaims the slot when dropped. This transfer is unsafe:
+the adapter and consumer must be destroyed before the reservation. Keep both in
+an owner that enforces this order, as the native `Runner` does.
 
 On the x86_64 debug test build, the system is **14,544 bytes**, each stream handle
 is **16 bytes**, and each output handle is **24 bytes**. PCM queues contain exactly
@@ -126,20 +131,33 @@ and volume controls with zero allocations. Platform buffers and adapter setup ar
 outside these measurements. No audible hardware/browser playback is claimed by
 these host core tests.
 
-## Native backend and example
+## Local VFS playback file
 
-The opt-in native backend uses the MIT Rust SDL2 bindings and the zlib-licensed
-SDL2 system library. The pinned Devbox shell provides SDL2; other environments
-need their platform's SDL2 development library (e.g. `libsdl2-dev` on Debian).
+`AudioStreamDevice` exposes the native/local service as a `CharacterDevice` for
+the VFS node `/devices/audio/playback`. Construct it with a pinned static
+`AudioSystem`, then register it at that path during system setup. Each VFS open
+reserves one independent stream in that open's `Context`; writes and the
+existing generic `b'A'` controls apply only to that stream. A close releases the
+reservation, and reopening gets an empty paused stream at default volume.
+Cloning an open context returns `UnsupportedOperation`, so stream handles are
+never aliased. Reads are unsupported, and `flush()` polls until the mixer has
+consumed queued PCM. Applications use ordinary file writes and descriptor
+controls; the device does not add app-specific APIs or WASI imports.
 
-`drivers_native::audio::new()` returns an output device and a runner. Keep the
-runner on its creating thread for the duration of playback. SDL receives F32
-callbacks; nanoaudio converts all accepted PCM formats to F32 in place in the
-callback's destination. The backend requests the exact sample rate and channel
-count and rejects an unexpected returned configuration. SDL may adapt that
-stream to the physical host hardware internally. Poll `Runner::check()` to
-detect a stopped host stream and mark the output failed. Dropping the runner
-closes the host device and invalidates the surviving output handle.
+## Native cpal output and example
+
+The opt-in native backend uses `nanoaudio-cpal`, which selects host output
+devices and adapts the fixed 48 kHz stereo F32 mix to their supported formats
+and sample rates. `drivers_native::audio::new(system, output_count)` opens one
+or two output sinks and starts one scheduler for the shared audio service. Each
+cpal callback consumes its own bounded output queue, does not allocate or block,
+and plays silence on underrun. Poll `Runner::check()` to detect mixer-thread
+termination or host callback errors; `underruns()` reports underruns per sink.
+Dropping the runner stops and joins the mixer before closing host streams.
+It closes each cpal stream before releasing that sink's output reservation, so
+the static audio system can register a replacement sink after runner teardown.
+The same native driver targets (Linux, macOS and Windows) are supported; SDL
+is no longer needed.
 
 From the repository development shell:
 
@@ -148,19 +166,19 @@ cargo run -p drivers_native --features audio --example audio
 ```
 
 This plays a quiet two-second 440 Hz square-wave tone through the default host
-output, using the character-device commands. It does not require a GUI window.
-The example allocates its 4 KiB queue once during setup. For a headless smoke
-test, choose SDL's dummy driver (this does not test audible output):
+output by writing to an ordinary audio stream. It does not require a GUI window.
+The example allocates its pinned audio system during setup. An audible check
+requires an available host output device; headless compilation does not test
+playback.
 
 ```sh
-SDL_AUDIODRIVER=dummy cargo run -p drivers_native --features audio --example audio
-SDL_AUDIODRIVER=dummy cargo test -p drivers_native --features audio --lib \
-  devices::audio::tests::dummy_playback_and_teardown -- --ignored
 cargo test -p audio
 ```
 
 ## Later milestones
 
-ESP32 I2S, Web Audio, per-client virtual device files, system sounds and the
-guest control ABI remain separate follow-up work. Applications can choose
+Web Audio, per-open VFS streams and the bounded generic guest `fd_control`
+bridge are available. See [Synth](../../executables/synth/README.md) for the
+native/browser example setup and smoke test. ESP32 I2S and system sounds remain
+follow-up work. Applications can choose
 nanoaudio codecs independently when they need decoding.

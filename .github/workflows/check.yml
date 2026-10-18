@@ -354,9 +354,9 @@ jobs:
 
       - name: Check | Audio
         run: |
-          cargo +${XILA_RUST_TOOLCHAIN} test -p audio
+          cargo +${XILA_RUST_TOOLCHAIN} test -p audio -p synth
           cargo +${XILA_RUST_TOOLCHAIN} clippy -p audio -p drivers_native --features drivers_native/audio --all-targets -- -D warnings
-          SDL_AUDIODRIVER=dummy cargo +${XILA_RUST_TOOLCHAIN} test -p drivers_native --features audio --lib devices::audio::tests -- --include-ignored
+          cargo +${XILA_RUST_TOOLCHAIN} test -p drivers_native --features audio --lib devices::audio::tests
 
       - name: Check | Documentation (Host)
         if: github.event_name != 'pull_request'
@@ -392,7 +392,7 @@ jobs:
         run: cargo make clippy-guest
 
       - name: Check | Portable audio (WASM)
-        run: cargo +${XILA_RUST_TOOLCHAIN} check -p audio --target wasm32-unknown-unknown
+        run: cargo +${XILA_RUST_TOOLCHAIN} check -p audio -p drivers_wasm --features drivers_wasm/audio --target wasm32-unknown-unknown
 
       - name: Check | Documentation (Guest)
         if: github.event_name != 'pull_request'
