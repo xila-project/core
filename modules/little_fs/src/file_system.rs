@@ -450,11 +450,40 @@ impl Drop for FileSystem {
     }
 }
 
+/// Mount an existing Xila disk without ever formatting it. Validate partition
+/// extents before overlap arithmetic, including malicious overflowing entries.
+pub fn mount_disk<D: DirectBlockDevice>(
+    device: &'static D,
+    cache_size: usize,
+) -> Result<FileSystem> {
+    use file_system::{
+        XILA_DISK_SIGNATURE,
+        mbr::{Mbr, PartitionKind, create_partition_device},
+    };
+    let mbr = Mbr::read_from_device(device).map_err(|_| Error::InvalidFile)?;
+    let count = device.get_block_count()?;
+    for entry in mbr.partitions.iter().filter(|entry| entry.is_valid()) {
+        if entry.start_block == 0 || entry.start_block as u64 + entry.block_count as u64 > count {
+            return Err(Error::InvalidFile);
+        }
+    }
+    mbr.validate().map_err(|_| Error::InvalidFile)?;
+    if mbr.get_disk_signature() != XILA_DISK_SIGNATURE {
+        return Err(Error::InvalidFile);
+    }
+    let entry = mbr
+        .partitions
+        .iter()
+        .find(|entry| entry.is_valid() && entry.kind == PartitionKind::Xila)
+        .ok_or(Error::InvalidFile)?;
+    let partition = create_partition_device(device, entry).map_err(|_| Error::InvalidFile)?;
+    FileSystem::new(Box::leak(Box::new(partition)), cache_size)
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;
 
-    use drivers_std;
     use file_system::{MemoryDevice, file_system::tests::implement_file_system_tests};
 
     use super::*;

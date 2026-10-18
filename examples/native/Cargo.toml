@@ -8,7 +8,6 @@ xila = { path = "../../", features = [
   "graphics",
   "graphics_rendering_xrgb8888",
   "bootsplash",
-  "executable_building",
 ] }
 abi_definitions = { workspace = true }
 file_manager = { workspace = true }
@@ -26,6 +25,7 @@ getargs-derive = { workspace = true }
 
 [features]
 default = []
+# Compatibility flag: bundled applications now always come from the seed.
 prebuilt-applications = []
 profiling = ["drivers_std/profiling", "prebuilt-applications"]
 heaptrack = ["drivers_std/heaptrack", "prebuilt-applications"]

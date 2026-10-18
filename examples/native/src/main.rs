@@ -1,18 +1,8 @@
-#[cfg(feature = "prebuilt-applications")]
-mod profiling;
-
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod cli;
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-#[inline(always)]
-fn application_binary(name: &str) -> Result<std::path::PathBuf, String> {
-    #[cfg(feature = "prebuilt-applications")]
-    if let Some(directory) = std::env::var_os("XILA_PROFILE_APP_DIR") {
-        return profiling::application_path(std::path::Path::new(&directory), name);
-    }
-    xila::executable::build_crate(name)
-}
+mod storage;
 
 static TASK_MANAGER: xila::task::Manager = xila::task::Manager::new();
 
@@ -31,16 +21,12 @@ async fn main(task_manager: &'static xila::task::Manager) {
 
     use alloc::vec;
     use core::time::Duration;
-    use drivers_std::loader::load_to_virtual_file_system;
     use xila::authentication;
     use xila::bootsplash::Bootsplash;
     use xila::executable;
     use xila::executable::Standard;
     use xila::executable::mount_executables;
     use xila::file_system::AccessFlags;
-    use xila::file_system::XILA_DISK_SIGNATURE;
-    use xila::file_system::mbr::Mbr;
-    use xila::file_system::mbr::PartitionKind;
     use xila::graphics;
     use xila::little_fs;
     use xila::log;
@@ -129,31 +115,20 @@ async fn main(task_manager: &'static xila::task::Manager) {
             (None, None)
         };
 
-    // - Initialize the file system
-    // Create a memory device
-    let drive = drivers_std::drive_file::FileDriveDevice::new_static(
-        &config.disk_path.as_str(),
+    storage::prepare_disk(
+        std::path::Path::new(&config.disk_path),
+        std::path::Path::new(&config.seed_image),
         config.disk_size,
-    );
-    //let drive = file_system::MemoryDevice::<512>::new_static(16 * 1024 * 1024);
-
-    // Create a partition type
-    let partition = Mbr::find_or_create_partition_with_signature(
-        drive,
-        XILA_DISK_SIGNATURE,
-        PartitionKind::Xila,
     )
-    .unwrap();
-
-    // Print MBR information
-    let mbr = Mbr::read_from_device(drive).unwrap();
-
-    log::information!("MBR information: {mbr}");
-    let partition = Box::leak(Box::new(partition));
-
-    log::information!("Partition device: {:?}", partition);
-
-    let file_system = little_fs::FileSystem::get_or_format(partition, 256).unwrap();
+    .expect("Failed to import reference disk; existing disks are never replaced");
+    let drive = Box::leak(Box::new(
+        drivers_std::drive_file::FileDriveDevice::open_existing(std::path::Path::new(
+            &config.disk_path,
+        ))
+        .expect("Failed to open disk"),
+    ));
+    let file_system = little_fs::mount_disk(drive, 256)
+        .expect("Failed to mount existing disk; it was not reformatted");
 
     // Initialize the virtual file system
     let virtual_file_system: &'static virtual_file_system::VirtualFileSystem = Box::leak(Box::new(
@@ -301,143 +276,19 @@ async fn main(task_manager: &'static xila::task::Manager) {
             ),
             (
                 &"/binaries/file_manager",
-                file_manager::FileManagerExecutable::new(virtual_file_system, task)
-                    .await
-                    .unwrap()
+                file_manager::FileManagerExecutable
             ),
             (
                 &"/binaries/command_line_shell",
                 command_line_shell::ShellExecutable
             ),
-            (
-                &"/binaries/terminal",
-                terminal::TerminalExecutable::new(virtual_file_system, task)
-                    .await
-                    .unwrap()
-            ),
-            (
-                &"/binaries/settings",
-                settings::SettingsExecutable::new(virtual_file_system, task)
-                    .await
-                    .unwrap()
-            ),
+            (&"/binaries/terminal", terminal::TerminalExecutable),
+            (&"/binaries/settings", settings::SettingsExecutable),
             (&"/binaries/wasm", wasm::WasmExecutable),
         ]
     )
     .await
     .unwrap();
-
-    // - Execute the shell
-    // - - Open the standard input, output and error
-    let standard = Standard::open(
-        &"/devices/standard_in",
-        &"/devices/standard_out",
-        &"/devices/standard_error",
-        task,
-        virtual_file_system,
-        executable_context,
-    )
-    .await
-    .unwrap();
-
-    let calculator_binary_path = application_binary("calculator").unwrap();
-
-    load_to_virtual_file_system(
-        task_manager,
-        virtual_file_system,
-        &calculator_binary_path,
-        "/binaries/calculator",
-    )
-    .await
-    .unwrap();
-
-    let weather_binary_path = application_binary("weather").unwrap();
-
-    load_to_virtual_file_system(
-        task_manager,
-        virtual_file_system,
-        &weather_binary_path,
-        "/binaries/weather",
-    )
-    .await
-    .unwrap();
-
-    let clock_binary_path = application_binary("clock").unwrap();
-    load_to_virtual_file_system(
-        task_manager,
-        virtual_file_system,
-        &clock_binary_path,
-        "/binaries/clock",
-    )
-    .await
-    .unwrap();
-
-    let pixel_painter_binary_path = application_binary("pixel_painter").unwrap();
-    load_to_virtual_file_system(
-        task_manager,
-        virtual_file_system,
-        &pixel_painter_binary_path,
-        "/binaries/pixel_painter",
-    )
-    .await
-    .unwrap();
-
-    let _ = executable::execute(
-        executable_context,
-        "/binaries/wasm",
-        vec!["--install".to_string(), "/binaries/calculator".to_string()],
-        standard
-            .duplicate()
-            .await
-            .expect("Failed to duplicate standard for calculator."),
-        None,
-    )
-    .await
-    .unwrap()
-    .join()
-    .await;
-
-    let _ = executable::execute(
-        executable_context,
-        "/binaries/wasm",
-        vec!["--install".to_string(), "/binaries/weather".to_string()],
-        standard.duplicate().await.unwrap(),
-        None,
-    )
-    .await
-    .unwrap()
-    .join()
-    .await;
-
-    let _ = executable::execute(
-        executable_context,
-        "/binaries/wasm",
-        vec!["--install".to_string(), "/binaries/clock".to_string()],
-        standard.duplicate().await.unwrap(),
-        None,
-    )
-    .await
-    .unwrap()
-    .join()
-    .await;
-
-    let _ = executable::execute(
-        executable_context,
-        "/binaries/wasm",
-        vec![
-            "--install".to_string(),
-            "/binaries/pixel_painter".to_string(),
-        ],
-        standard,
-        None,
-    )
-    .await
-    .unwrap()
-    .join()
-    .await;
-
-    // - - Create the default user
-    let group_identifier = users::GroupIdentifier::new(1000);
 
     let authentication_context = authentication::Context {
         virtual_file_system,
@@ -445,57 +296,9 @@ async fn main(task_manager: &'static xila::task::Manager) {
         users_manager,
         task,
     };
-    let _ = authentication::create_group(
-        &authentication_context,
-        "administrator",
-        Some(group_identifier),
-    )
-    .await
-    .unwrap();
-
-    let administrator = authentication::create_user(
-        &authentication_context,
-        "administrator",
-        "",
-        group_identifier,
-        None,
-    )
-    .await
-    .unwrap();
-
-    // The shared configuration parent belongs to root. Provision only Clock's
-    // settings directory for the default login user, without widening its parent.
-    virtual_file_system::ignore_already_exists_error(
-        virtual_file_system
-            .create_directory(task, &"/configuration/shared/clock")
-            .await,
-    )
-    .unwrap();
-    virtual_file_system
-        .set_ownership(
-            task,
-            "/configuration/shared/clock",
-            Some(administrator),
-            Some(group_identifier),
-        )
+    authentication::initialize_seeded(&authentication_context)
         .await
-        .unwrap();
-
-    virtual_file_system::ignore_already_exists_error(
-        virtual_file_system
-            .create_directory(task, &"/configuration/shared/pixel_painter")
-            .await,
-    )
-    .unwrap();
-    virtual_file_system
-        .set_ownership(
-            task,
-            "/configuration/shared/pixel_painter",
-            Some(administrator),
-            Some(group_identifier),
-        )
-        .await
-        .unwrap();
+        .expect("Failed to initialize saved accounts");
 
     // - - Set the environment variables
     task_manager

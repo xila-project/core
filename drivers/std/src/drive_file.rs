@@ -17,6 +17,12 @@ use crate::io::map_error;
 pub struct FileDriveDevice(MutexMountWrapper<CriticalSectionRawMutex, File>);
 
 impl FileDriveDevice {
+    /// Open a committed disk without creating or resizing it.
+    pub fn open_existing(path: &std::path::Path) -> std::io::Result<Self> {
+        let file = OpenOptions::new().read(true).write(true).open(path)?;
+        Ok(Self(MutexMountWrapper::new_mounted(file)))
+    }
+
     pub fn new(path: &impl AsRef<Path>, size: Size) -> Self {
         let path = path.as_ref().as_str();
 

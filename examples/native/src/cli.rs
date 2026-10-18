@@ -18,6 +18,7 @@ pub struct Config {
     pub networking: bool,
     pub resolution: (i16, i16),
     pub disk_path: String,
+    pub seed_image: String,
     pub disk_size: u64,
     pub interface_name: String,
 }
@@ -53,6 +54,14 @@ struct Arguments<'a> {
         allow_hyphen_values = true
     )]
     disk_path: &'a str,
+    /// Reference image imported only when the backing disk is absent.
+    #[arg(
+        long = "seed-image",
+        default_value = "./seed.img",
+        value_name = "PATH",
+        allow_hyphen_values = true
+    )]
+    seed_image: &'a str,
     /// Capacity in bytes (minimum: 1049600 for the MBR and filesystem).
     #[arg(short = 's', long = "disk-size", default_value_t = 16 * 1024 * 1024, value_name = "BYTES", value_parser = 1049600..)]
     disk_size: u64,
@@ -90,6 +99,7 @@ where
         networking: arguments.network || !arguments.no_network,
         resolution: arguments.resolution,
         disk_path: arguments.disk_path.to_string(),
+        seed_image: arguments.seed_image.to_string(),
         disk_size: arguments.disk_size,
         interface_name: arguments.interface_name.to_string(),
     })
