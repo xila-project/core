@@ -6,6 +6,10 @@ inputs:
     description: "Setup profile: 'full' (default) or 'minimal' for lightweight Rust checks and formatting."
     required: false
     default: full
+  trunk:
+    description: "Install trunk for browser WASM builds."
+    required: false
+    default: "false"
   cache-workspaces:
     description: "Cargo workspace -> target directory mappings for the job's Rust cache."
     required: false
@@ -124,5 +128,10 @@ runs:
       if: inputs.profile != 'minimal'
       shell: bash
       run: |
-        cargo binstall --no-confirm cargo-make@0.37.24 trunk@0.21.14 taplo-cli@0.10.0 cargo-llvm-cov@0.9.1
+        cargo binstall --no-confirm cargo-make@0.37.24 taplo-cli@0.10.0 cargo-llvm-cov@0.9.1
         npm ci
+
+    - name: Setup | Trunk
+      if: inputs.profile != 'minimal' && inputs.trunk == 'true'
+      shell: bash
+      run: cargo binstall --no-confirm trunk@0.21.14
