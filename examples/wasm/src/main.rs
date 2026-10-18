@@ -48,6 +48,12 @@ static TASK_MANAGER: xila::task::Manager = xila::task::Manager::new();
     manager = &TASK_MANAGER
 )]
 async fn main(task_manager: &'static xila::task::Manager) {
+    // AudioWorklet runs this module in a worker-like context without `window`.
+    // The worklet only needs the exported audio factory, not the Xila runtime.
+    if web_sys::window().is_none() {
+        return;
+    }
+
     drivers_wasm::memory::instantiate_global_allocator!();
 
     use alloc::boxed::Box;
@@ -180,31 +186,18 @@ async fn main(task_manager: &'static xila::task::Manager) {
     virtual_file_system::clean_devices(virtual_file_system, task)
         .await
         .unwrap();
-    virtual_file_system
-        .create_directory(task, &"/devices/audio")
-        .await
-        .unwrap();
+    virtual_file_system::ignore_already_exists_error(
+        virtual_file_system
+            .create_directory(task, &"/devices/audio")
+            .await,
+    )
+    .unwrap();
 
     let audio_button = web_sys::window()
         .and_then(|window| window.document())
-        .and_then(|document| document.body().map(|body| (document, body)))
-        .map(|(document, body)| {
-            let button = document
-                .create_element("button")
-                .unwrap()
-                .dyn_into::<HtmlElement>()
-                .unwrap();
-            button.set_text_content(Some("Enable audio before launching Synth"));
-            button
-                .set_attribute(
-                    "style",
-                    "position:fixed;top:8px;right:8px;z-index:10000;padding:10px;",
-                )
-                .unwrap();
-            body.append_child(&button).unwrap();
-            button
-        })
-        .expect("Failed to create the browser audio button");
+        .and_then(|document| document.get_element_by_id("audio-enable"))
+        .and_then(|button| button.dyn_into::<HtmlElement>().ok())
+        .expect("Failed to find the browser audio button in the help panel");
 
     let audio_button_for_callback = audio_button.clone();
     let audio_button_callback = Closure::wrap(Box::new(move |_event: MouseEvent| {
