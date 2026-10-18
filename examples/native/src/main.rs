@@ -177,6 +177,10 @@ async fn main(task_manager: &'static xila::task::Manager) {
 
     log::information!("Default hierarchy created.");
 
+    if let Some(graphics) = graphics_manager {
+        graphics::appearance::restore_appearance(graphics, virtual_file_system, task).await;
+    }
+
     let network_manager: &'static network::Manager = Box::leak(Box::new(network::initialize(
         task_manager,
         virtual_file_system,

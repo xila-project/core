@@ -8,12 +8,12 @@ use xila::graphics::{
 use xila::task;
 
 use crate::error::Result;
-use crate::tabs::{AboutTab, GeneralTab, NetworkTab, PasswordTab, Tab};
+use crate::tabs::{AboutTab, AppearanceTab, GeneralTab, NetworkTab, PasswordTab, Tab};
 
 pub struct Settings {
     graphics_manager: &'static graphics::Manager,
     window: OwnedWindow,
-    tabs: [Tab; 4],
+    tabs: [Tab; 5],
 }
 
 #[derive(Clone)]
@@ -57,6 +57,7 @@ impl Settings {
         // Create tabs
         let mut tabs = [
             Tab::General(GeneralTab::new()),
+            Tab::Appearance(AppearanceTab::new(context).await),
             Tab::Password(PasswordTab::new(context)),
             Tab::Network(NetworkTab::new(context)),
             Tab::About(AboutTab::new(context)),

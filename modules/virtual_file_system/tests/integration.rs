@@ -49,7 +49,7 @@ async fn test_file() {
     let file_path = "/file";
 
     let mut file = File::open(
-        &virtual_file_system,
+        virtual_file_system,
         task,
         file_path,
         Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None),
@@ -71,7 +71,7 @@ async fn test_file() {
 
     core::mem::drop(file);
 
-    let _ = virtual_file_system.remove(task, file_path).await.unwrap();
+    virtual_file_system.remove(task, file_path).await.unwrap();
 }
 
 #[cfg(target_os = "linux")]
@@ -80,7 +80,7 @@ async fn test_unnamed_pipe() {
     let (_, virtual_file_system) = initialize().await;
 
     let (mut pipe_read, mut pipe_write) =
-        File::create_unnamed_pipe(&virtual_file_system, 512, StateFlags::None)
+        File::create_unnamed_pipe(virtual_file_system, 512, StateFlags::None)
             .await
             .unwrap();
 
@@ -108,7 +108,7 @@ async fn test_named_pipe() {
         .unwrap();
 
     let mut pipe_read = File::open(
-        &virtual_file_system,
+        virtual_file_system,
         task,
         pipe_path,
         AccessFlags::Read.into(),
@@ -117,7 +117,7 @@ async fn test_named_pipe() {
     .unwrap();
 
     let mut pipe_write = File::open(
-        &virtual_file_system,
+        virtual_file_system,
         task,
         pipe_path,
         AccessFlags::Write.into(),
@@ -155,7 +155,7 @@ async fn test_device() {
         .unwrap();
 
     let mut device_file = File::open(
-        &virtual_file_system,
+        virtual_file_system,
         task,
         DEVICE_PATH,
         AccessFlags::READ_WRITE.into(),
@@ -177,5 +177,5 @@ async fn test_device() {
 
     core::mem::drop(device_file);
 
-    let _ = virtual_file_system.remove(task, DEVICE_PATH).await.unwrap();
+    virtual_file_system.remove(task, DEVICE_PATH).await.unwrap();
 }

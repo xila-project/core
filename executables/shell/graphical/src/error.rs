@@ -55,7 +55,6 @@ impl From<graphics::Error> for Error {
 
 impl Display for Error {
     fn fmt(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
-        translate!("Failed to create object");
         match self {
             Self::Graphics(error) => {
                 write!(formatter, translate!("Graphics error: {}"), error)

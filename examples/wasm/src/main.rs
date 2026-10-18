@@ -165,6 +165,7 @@ async fn main(task_manager: &'static xila::task::Manager) {
 
     // - - Create the default system hierarchy
     let _ = virtual_file_system::create_default_hierarchy(virtual_file_system, task).await;
+    graphics::appearance::restore_appearance(graphics_manager, virtual_file_system, task).await;
     let _ = virtual_file_system
         .create_directory(task, &"/devices/cpu")
         .await;
