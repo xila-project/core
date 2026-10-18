@@ -124,6 +124,7 @@ weather = { path = "executables/weather" }
 clock = { path = "executables/clock" }
 
 # - External crates
+embedded-hal = { version = "1", default-features = false }
 miniserde = { version = "0.1" }
 bindgen = { version = "0.73" }
 cbindgen = { version = "0.29" }

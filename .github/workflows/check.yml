@@ -379,6 +379,8 @@ jobs:
 
       - name: Setup
         uses: ./.github/actions/setup
+        with:
+          trunk: ${{ github.event_name != 'pull_request' }}
 
       - name: Check | Clippy (Guest)
         run: cargo make clippy-guest
