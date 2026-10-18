@@ -362,6 +362,12 @@ jobs:
         if: github.event_name != 'pull_request'
         run: RUSTDOCFLAGS="--deny warnings" cargo make doc-host
 
+      - name: Check | Seed image generation and native import
+        run: cargo test -p fs_image -p authentication -p native_example
+
+      - name: Check | Browser seed streaming and disk manager
+        run: node --test drivers/wasm/tests/seed.test.mjs examples/wasm/tests/disk_manager.test.mjs
+
       - name: Build | Example (Native)
         run: cargo make build -p native_example
 
@@ -393,7 +399,7 @@ jobs:
         run: RUSTDOCFLAGS="--deny warnings" cargo make doc-guest
 
       - name: Build | Bundled applications (WASI)
-        run: cargo +${XILA_RUST_TOOLCHAIN} build -p calculator -p clock -p pixel_painter --target wasm32-wasip1 --release
+        run: cargo make prepare-wasm-image
 
       - name: Check | Clock (WASI)
         run: cargo +${XILA_RUST_TOOLCHAIN} clippy -p clock --all-targets --target wasm32-wasip1 -- -D warnings
