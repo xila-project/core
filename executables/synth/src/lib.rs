@@ -43,6 +43,49 @@ impl AudioConfiguration {
     }
 }
 
+/// Held keys retain their MIDI pitch until release. Transposing clears held
+/// keys; the caller must stop the instrument before changing octaves.
+pub struct Keyboard {
+    octave: u8,
+    held: [Option<u8>; 13],
+}
+
+impl Default for Keyboard {
+    fn default() -> Self {
+        Self {
+            octave: 4,
+            held: [None; 13],
+        }
+    }
+}
+
+impl Keyboard {
+    pub fn octave(&self) -> u8 {
+        self.octave
+    }
+    pub fn press(&mut self, key: usize) -> Option<u8> {
+        let held = self.held.get_mut(key)?;
+        if held.is_some() {
+            return None;
+        }
+        let note = (self.octave + 1) * 12 + key as u8;
+        *held = Some(note);
+        Some(note)
+    }
+    pub fn release(&mut self, key: usize) -> Option<u8> {
+        self.held.get_mut(key)?.take()
+    }
+    pub fn shift_octave(&mut self, delta: i8) -> bool {
+        let octave = self.octave.saturating_add_signed(delta).clamp(2, 6);
+        if octave == self.octave {
+            return false;
+        }
+        self.octave = octave;
+        self.held.fill(None);
+        true
+    }
+}
+
 /// Fixed-memory synthesizer and one retained PCM block for partial writes.
 pub struct Instrument {
     synth: Synth<nanoaudio::DefaultRepresentation, VOICE_LIMIT>,
@@ -77,6 +120,10 @@ impl Instrument {
             pending: 0,
             offset: 0,
         })
+    }
+
+    pub fn set_waveform(&mut self, waveform: Waveform) {
+        self.patch.waveform = waveform;
     }
 
     pub fn note_on(&mut self, note: u8) {
@@ -191,6 +238,45 @@ mod tests {
 
     fn instrument() -> Instrument {
         Instrument::new(AudioConfiguration::new(SAMPLE_RATE, CHANNELS, 4)).unwrap()
+    }
+
+    #[test]
+    fn keyboard_releases_pressed_pitch_and_ignores_duplicate_events() {
+        let mut keys = Keyboard::default();
+        assert_eq!(keys.press(0), Some(60));
+        assert_eq!(keys.press(0), None);
+        assert_eq!(keys.release(0), Some(60));
+        assert_eq!(keys.release(0), None);
+        assert_eq!(keys.press(12), Some(72));
+        assert!(keys.shift_octave(1));
+        assert_eq!(keys.release(12), None);
+        assert_eq!(keys.press(0), Some(72));
+        for _ in 0..10 {
+            keys.shift_octave(1);
+        }
+        assert_eq!(keys.octave(), 6);
+        for _ in 0..10 {
+            keys.shift_octave(-1);
+        }
+        assert_eq!(keys.octave(), 2);
+        assert_eq!(keys.press(99), None);
+    }
+
+    #[test]
+    fn waveform_changes_the_rendered_audio() {
+        let render = |waveform| {
+            let mut instrument = instrument();
+            instrument.set_waveform(waveform);
+            instrument.note_on(60);
+            let mut sink = Sink {
+                maximum: BLOCK_BYTES,
+                bytes: Vec::new(),
+            };
+            instrument.write_once(BLOCK_BYTES, &mut sink).unwrap();
+            sink.bytes
+        };
+        assert_ne!(render(Waveform::Sine), render(Waveform::Square));
+        assert_ne!(render(Waveform::Triangle), render(Waveform::Square));
     }
 
     #[test]

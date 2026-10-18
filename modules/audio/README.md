@@ -177,6 +177,8 @@ cargo test -p audio
 
 ## Later milestones
 
-ESP32 I2S, Web Audio, per-client virtual device files, system sounds and the
-guest control ABI remain separate follow-up work. Applications can choose
+Web Audio, per-open VFS streams and the bounded generic guest `fd_control`
+bridge are available. See [Synth](../../executables/synth/README.md) for the
+native/browser example setup and smoke test. ESP32 I2S and system sounds remain
+follow-up work. Applications can choose
 nanoaudio codecs independently when they need decoding.

@@ -116,6 +116,19 @@ impl AudioOutput {
         self.instrument.note_off(note);
     }
 
+    pub fn set_waveform(&mut self, waveform: nanoaudio_synth::Waveform) {
+        self.instrument.set_waveform(waveform);
+    }
+
+    pub fn set_volume(&mut self, volume: u8) -> io::Result<()> {
+        write_control(&self.file.0, SET_VOLUME, volume)
+    }
+
+    pub fn stop_all(&mut self) {
+        self.instrument.stop_all();
+        // Already submitted PCM drains through the bounded device queue.
+    }
+
     pub fn pump(&mut self) -> io::Result<WriteProgress> {
         let mut writable = Aligned(0u32);
         if let Err(error) = read_control(&self.file.0, GET_WRITABLE, &mut writable) {

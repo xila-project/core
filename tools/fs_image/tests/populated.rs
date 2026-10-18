@@ -71,8 +71,12 @@ fn out_of_space_removes_incomplete_output() {
 #[test]
 fn browser_and_native_bundles_contain_their_declared_apps() {
     let f = Fixture::new();
-    for app in ["calculator", "weather", "clock", "pixel_painter"] {
-        fs::write(f.0.join(format!("{app}.wasm")), b"\0asm\x01\0\0\0").unwrap();
+    for app in ["calculator", "weather", "clock", "pixel_painter", "synth"] {
+        fs::write(
+            f.0.join(format!("{app}.wasm")),
+            format!("guest fixture for {app}"),
+        )
+        .unwrap();
     }
     for profile in ["native", "wasm"] {
         let output = Command::new(env!("CARGO_BIN_EXE_fs_image"))
@@ -88,7 +92,14 @@ fn browser_and_native_bundles_contain_their_declared_apps() {
             String::from_utf8_lossy(&output.stderr)
         );
         let text = String::from_utf8_lossy(&output.stdout);
-        assert!(text.contains("calculator,clock,pixel_painter"));
+        assert!(text.contains("calculator,clock,pixel_painter,synth"));
+        let image = fs::read(f.0.join(format!("{profile}.img"))).unwrap();
+        for content in [
+            b"guest fixture for synth".as_slice(),
+            b"\"name\": \"Synth\"",
+        ] {
+            assert!(image.windows(content.len()).any(|bytes| bytes == content));
+        }
         assert_eq!(text.contains(",weather"), profile == "native");
     }
 }

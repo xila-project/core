@@ -206,18 +206,20 @@ async fn main(task_manager: &'static xila::task::Manager) {
         })
         .expect("Failed to create the browser audio button");
 
+    let audio_button_for_callback = audio_button.clone();
     let audio_button_callback = Closure::wrap(Box::new(move |_event: MouseEvent| {
-        let button = audio_button.clone();
+        let button = audio_button_for_callback.clone();
         wasm_bindgen_futures::spawn_local(async move {
             button.set_text_content(Some("Starting browser audio…"));
-            let device = match drivers_wasm::WebAudioDevice::start_from_user_gesture().await {
-                Ok(device) => device,
-                Err(error) => {
-                    log::error!("Failed to start browser audio: {error:?}");
-                    button.set_text_content(Some("Audio start failed; click to retry"));
-                    return;
-                }
-            };
+            let device =
+                match drivers_wasm::devices::WebAudioDevice::start_from_user_gesture().await {
+                    Ok(device) => device,
+                    Err(error) => {
+                        log::error!("Failed to start browser audio: {error:?}");
+                        button.set_text_content(Some("Audio start failed; click to retry"));
+                        return;
+                    }
+                };
 
             match virtual_file_system
                 .mount_character_device(task, "/devices/audio/playback", device)

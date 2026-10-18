@@ -15,6 +15,7 @@
     "github:NixOS/nixpkgs/7fd4004d0511991fff3a0524856a9be09e28c5f0#wayland",
     "github:NixOS/nixpkgs/7fd4004d0511991fff3a0524856a9be09e28c5f0#libxkbcommon",
     "github:NixOS/nixpkgs/7fd4004d0511991fff3a0524856a9be09e28c5f0#SDL2",
+    "github:NixOS/nixpkgs/7fd4004d0511991fff3a0524856a9be09e28c5f0#alsa-lib",
     "github:NixOS/nixpkgs/7fd4004d0511991fff3a0524856a9be09e28c5f0#libGL",
     "github:NixOS/nixpkgs/7fd4004d0511991fff3a0524856a9be09e28c5f0#vulkan-loader",
     "github:NixOS/nixpkgs/ac62194c3917d5f474c1a844b6fd6da2db95077d#taplo",

@@ -76,7 +76,7 @@ The OS canvas still uses the existing localized LVGL Montserrat Regular subsets 
 - Click **Enable audio** in the browser page before launching Synth. The click
   starts one `WebAudioDevice` and mounts it at `/devices/audio/playback`; Synth
   then writes ordinary PCM through its file descriptor. If Synth is already
-  open, close and relaunch it after enabling audio. Browsers may require this
+  open, choose **Retry audio** inside its window. Browsers may require this
   gesture because audio contexts cannot start during page initialization.
 - Applications are distributed in a separate seed image. The disk cache still
   occupies 16 MiB; running a guest also needs Wasmi's module and guest memory.
@@ -173,3 +173,6 @@ file containing `{"goog:chromeOptions":{"binary":"/path/to/chromium"}}`.
 These tests use real OPFS files, including MBR/LittleFS save/reopen coverage.
 The disk-name and collision rules can also be tested with
 `node --test examples/wasm/tests/disk_manager.test.mjs`.
+
+See [Synth](../../executables/synth/README.md) for controls, silent mode,
+existing-disk behavior and the audio smoke-test procedure.

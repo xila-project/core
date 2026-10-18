@@ -2683,6 +2683,7 @@ name = "native_example"
 version = "0.1.0"
 dependencies = [
  "abi_definitions",
+ "audio",
  "command_line_shell",
  "drivers_core",
  "drivers_native",
@@ -4188,6 +4189,7 @@ dependencies = [
 name = "synth"
 version = "0.1.0"
 dependencies = [
+ "application_metadata",
  "audio",
  "file_system",
  "nanoaudio",
@@ -4685,6 +4687,7 @@ name = "wasm"
 version = "0.1.0"
 dependencies = [
  "abi_definitions",
+ "audio",
  "cbindgen",
  "command_line_shell",
  "drivers_core",
