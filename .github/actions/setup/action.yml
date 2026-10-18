@@ -10,6 +10,10 @@ inputs:
     description: "Cargo workspace -> target directory mappings for the job's Rust cache."
     required: false
     default: ". -> target"
+  cache-key:
+    description: "Stable Rust cache identity for this workload; separate locale/feature variants."
+    required: false
+    default: default
 
 runs:
   using: "composite"
@@ -34,20 +38,36 @@ runs:
         echo "SCCACHE_GHA_RW_MODE=${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}" >> "$GITHUB_ENV"
 
     - name: Setup | npm cache
+      id: npm-cache
       uses: actions/cache@v4
       with:
         path: ~/.npm
-        key: npm-${{ runner.os }}-${{ hashFiles('package-lock.json', 'development/toolchains.env') }}
+        key: npm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
         restore-keys: |
           npm-${{ runner.os }}-
 
+    - name: Setup | Report npm cache
+      shell: bash
+      run: 'echo "npm cache exact hit: ${{ steps.npm-cache.outputs.cache-hit }}"'
+
     - name: Setup | Rust cache
+      if: inputs.profile != 'minimal'
+      id: rust-cache
       uses: Swatinem/rust-cache@v2
       with:
         workspaces: ${{ inputs.cache-workspaces }}
-        key: ${{ hashFiles('**/Cargo.lock', 'development/toolchains.env') }}
+        # The action itself hashes Cargo manifests/lockfiles, rustc, .cargo
+        # config, and RUST_* environment. Keep comments/toolchain manifest
+        # formatting out of this identity; cache-bin is in the image already.
+        shared-key: ${{ inputs.cache-key }}
+        cache-bin: "false"
         # PRs restore main's caches without filling the quota with PR copies.
         save-if: ${{ github.ref == 'refs/heads/main' }}
+
+    - name: Setup | Report Rust cache
+      if: inputs.profile != 'minimal'
+      shell: bash
+      run: 'echo "Rust cache exact hit: ${{ steps.rust-cache.outputs.cache-hit }}"'
 
     - name: Setup | Validate lockfiles
       if: inputs.profile != 'minimal'

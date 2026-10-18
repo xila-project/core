@@ -119,6 +119,8 @@ jobs:
 
       - name: Setup
         uses: ./.github/actions/setup
+        with:
+          cache-key: localization-${{ matrix.locale }}
 
       - name: Check | Strict host and guest translations
         run: cargo make check-localization
@@ -148,6 +150,7 @@ jobs:
         uses: ./.github/actions/setup
         with:
           cache-workspaces: "executables/wasm/tests/translation -> target"
+          cache-key: wasm-translation-${{ matrix.memory }}
 
       # Keep main's plain dependency artifacts compatible with PR test builds.
       - name: Check | Translation tests
@@ -186,6 +189,7 @@ jobs:
         uses: ./.github/actions/setup
         with:
           cache-workspaces: "executables/wasm/tests/translation -> target/llvm-cov-target"
+          cache-key: wasm-extended-${{ matrix.memory }}
 
       - name: Check | Translation coverage
         run: >-
@@ -236,6 +240,7 @@ jobs:
         uses: ./.github/actions/setup
         with:
           profile: minimal
+          cache-key: format
 
       - name: Check | Formatting (TOML)
         run: cargo make --skip-init-end-tasks format-toml --check
@@ -246,9 +251,9 @@ jobs:
       - name: Check | Formatting (JSON)
         run: npm exec prettier -- --check "**/*.json"
 
-  host-clippy:
-    name: Host checks (Clippy)
-    needs: [changes, format, localization]
+  host-clippy-work:
+    name: Host checks (Clippy work)
+    needs: [changes, format]
     if: >-
       ${{ !cancelled() && (needs.format.result == 'success' || needs.format.result == 'skipped') &&
           (needs.changes.result != 'success' || needs.changes.outputs.host == 'true') }}
@@ -260,17 +265,13 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 20
     steps:
-      - name: Check | Translation coverage gate
-        if: needs.localization.result != 'success' && needs.localization.result != 'skipped'
-        run: |
-          echo "::error::Strict translation coverage did not pass."
-          exit 1
-
       - name: Setup | Checkout repository
         uses: actions/checkout@v7
 
       - name: Setup
         uses: ./.github/actions/setup
+        with:
+          cache-key: host-clippy
 
       - name: Check | Clippy (Host)
         run: cargo make clippy-host
@@ -278,9 +279,34 @@ jobs:
       - name: Check | Clippy (Host - Wasmi)
         run: cargo +${XILA_RUST_TOOLCHAIN} clippy -p wasm --features graphics,xila/graphics_rendering_xrgb8888 --target x86_64-unknown-linux-gnu
 
+  host-clippy:
+    name: Host checks (Clippy)
+    needs: [changes, format, localization, host-clippy-work]
+    if: >-
+      ${{ always() && (needs.changes.result != 'success' || needs.changes.outputs.host == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check | Required host and localization results
+        env:
+          FORMAT_RESULT: ${{ needs.format.result }}
+          LOCALIZATION_RESULT: ${{ needs.localization.result }}
+          CLIPPY_RESULT: ${{ needs.host-clippy-work.result }}
+        run: |
+          for result in "$FORMAT_RESULT" "$LOCALIZATION_RESULT"; do
+            if [[ "$result" != success && "$result" != skipped ]]; then
+              echo "::error::A required CI dependency finished with result: $result"
+              exit 1
+            fi
+          done
+          if [[ "$CLIPPY_RESULT" != success ]]; then
+            echo "::error::Host Clippy was required but finished with result: $CLIPPY_RESULT"
+            exit 1
+          fi
+
   host-test:
     name: Host checks (Tests)
-    needs: [changes, format, localization]
+    needs: [changes, format]
     if: >-
       ${{ !cancelled() && (needs.format.result == 'success' || needs.format.result == 'skipped') &&
           (needs.changes.result != 'success' || needs.changes.outputs.host == 'true') }}
@@ -292,12 +318,6 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 30
     steps:
-      - name: Check | Translation coverage gate
-        if: needs.localization.result != 'success' && needs.localization.result != 'skipped'
-        run: |
-          echo "::error::Strict translation coverage did not pass."
-          exit 1
-
       - name: Setup | Checkout repository
         uses: actions/checkout@v7
 
@@ -307,6 +327,7 @@ jobs:
           cache-workspaces: |
             . -> target
             tools/profiling -> target
+          cache-key: host-test
 
       - name: Check | Profiling runner
         run: |
@@ -315,8 +336,21 @@ jobs:
           cargo test --manifest-path tools/profiling/Cargo.toml
 
       # Run the same plain tests on main and PRs so main saves a reusable cache.
+      # cargo-make's default init task generates the font sources; keep that
+      # setup explicit when invoking Cargo directly for its timing report.
+      - name: Setup | Generate fonts for tests
+        run: cargo make generate-fonts
+
       - name: Run | Test
-        run: cargo make test
+        run: cargo test --workspace --timings
+
+      - name: Upload | Cargo timings (Host)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-timings-host
+          path: target/cargo-timings/
+          if-no-files-found: warn
 
   host-coverage:
     name: Host coverage and profiling checks
@@ -341,6 +375,7 @@ jobs:
           # Profiling builds into target/, coverage into its llvm-cov-target child.
           # Cache the parent once; the job-specific key isolates it from plain tests.
           cache-workspaces: ". -> target"
+          cache-key: host-coverage
 
       - name: Setup | Generate fonts
         run: cargo make generate-fonts
@@ -364,7 +399,7 @@ jobs:
 
   host-audio-docs:
     name: Host checks (Audio, docs, build)
-    needs: [changes, format, localization]
+    needs: [changes, format]
     if: >-
       ${{ !cancelled() && (needs.format.result == 'success' || needs.format.result == 'skipped') &&
           (needs.changes.result != 'success' || needs.changes.outputs.host == 'true') }}
@@ -376,17 +411,13 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 30
     steps:
-      - name: Check | Translation coverage gate
-        if: needs.localization.result != 'success' && needs.localization.result != 'skipped'
-        run: |
-          echo "::error::Strict translation coverage did not pass."
-          exit 1
-
       - name: Setup | Checkout repository
         uses: actions/checkout@v7
 
       - name: Setup
         uses: ./.github/actions/setup
+        with:
+          cache-key: host-audio-docs
 
       - name: Setup | Generate fonts
         run: cargo make generate-fonts
@@ -429,9 +460,17 @@ jobs:
 
       - name: Setup
         uses: ./.github/actions/setup
+        with:
+          cache-key: guest
+
+      - name: Setup | Generate fonts
+        run: cargo make generate-fonts
 
       - name: Check | Clippy (Guest)
-        run: cargo make clippy-guest
+        run: >-
+          cargo clippy --package wasm --no-default-features
+          --features default_guest --target wasm32-unknown-unknown
+          --all-targets --timings -- -D warnings
 
       - name: Check | Portable audio (WASM)
         run: cargo +${XILA_RUST_TOOLCHAIN} check -p audio -p drivers_wasm --features drivers_wasm/audio --target wasm32-unknown-unknown
@@ -459,10 +498,140 @@ jobs:
           # rebuilt by `trunk build`, so it is intentionally not cached.
           path: |
             ~/.cache/trunk
-          key: trunk-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'development/toolchains.env') }}
+          key: trunk-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             trunk-tools-
 
       - name: Build | Example (WASM)
         if: github.event_name != 'pull_request'
         run: cd examples/wasm && RUSTUP_TOOLCHAIN="$XILA_NIGHTLY_TOOLCHAIN" trunk build
+
+      - name: Upload | Cargo timings (Guest)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-timings-guest
+          path: target/cargo-timings/
+          if-no-files-found: warn
+
+  profile-benchmark:
+    name: Cargo profile benchmark (${{ matrix.profile }})
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/xila-project/development-environment:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    timeout-minutes: 40
+    strategy:
+      matrix:
+        profile: [default, line-tables-only]
+    steps:
+      - name: Setup | Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup
+        uses: ./.github/actions/setup
+        with:
+          cache-key: profile-benchmark-${{ matrix.profile }}
+
+      - name: Setup | Generate fonts
+        run: cargo make generate-fonts
+
+      - name: Benchmark | Default debug profiles
+        if: matrix.profile == 'default'
+        run: |
+          cargo test --workspace --timings
+          cargo clippy --package wasm --no-default-features --features default_guest \
+            --target wasm32-unknown-unknown --all-targets --timings -- -D warnings
+
+      - name: Benchmark | Reduced debug profiles
+        if: matrix.profile == 'line-tables-only'
+        env:
+          CARGO_PROFILE_DEV_DEBUG: line-tables-only
+          CARGO_PROFILE_TEST_DEBUG: line-tables-only
+        run: |
+          cargo test --workspace --timings
+          cargo clippy --package wasm --no-default-features --features default_guest \
+            --target wasm32-unknown-unknown --all-targets --timings -- -D warnings
+
+      - name: Upload | Cargo profile timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-profile-timings-${{ matrix.profile }}
+          path: target/cargo-timings/
+          if-no-files-found: warn
+
+  nextest-benchmark:
+    name: Test runner benchmark (${{ matrix.runner }})
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/xila-project/development-environment:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    timeout-minutes: 40
+    strategy:
+      matrix:
+        runner: [cargo-test, nextest]
+    steps:
+      - name: Setup | Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup
+        uses: ./.github/actions/setup
+        with:
+          cache-key: test-runner-${{ matrix.runner }}
+
+      - name: Setup | Generate fonts
+        run: cargo make generate-fonts
+
+      - name: Setup | Install GNU time
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends time
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Setup | Install pinned nextest for benchmark
+        if: matrix.runner == 'nextest'
+        run: cargo binstall --no-confirm cargo-nextest@0.9.148
+
+      - name: Benchmark | Compile test binaries
+        run: |
+          mkdir -p benchmark-results
+          /usr/bin/time -v -o "benchmark-results/compile-${{ matrix.runner }}.txt" \
+            cargo test --workspace --no-run --timings
+          cat "benchmark-results/compile-${{ matrix.runner }}.txt"
+
+      - name: Benchmark | cargo test execution
+        if: matrix.runner == 'cargo-test'
+        run: |
+          /usr/bin/time -v -o benchmark-results/test-execution-cargo-test.txt \
+            cargo test --workspace
+          cat benchmark-results/test-execution-cargo-test.txt
+
+      - name: Benchmark | nextest execution
+        if: matrix.runner == 'nextest'
+        run: |
+          /usr/bin/time -v -o benchmark-results/test-execution-nextest.txt \
+            cargo nextest run --workspace --timings
+          cat benchmark-results/test-execution-nextest.txt
+
+      - name: Benchmark | Doctest execution
+        run: |
+          /usr/bin/time -v -o "benchmark-results/doctests-${{ matrix.runner }}.txt" \
+            cargo test --workspace --doc --timings
+          cat "benchmark-results/doctests-${{ matrix.runner }}.txt"
+
+      - name: Upload | Test runner timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-test-runner-timings-${{ matrix.runner }}
+          path: |
+            target/cargo-timings/
+            benchmark-results/
+          if-no-files-found: warn
