@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
   pages: write
   id-token: write
 
@@ -22,14 +23,17 @@ defaults:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/xila-project/development-environment:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Setup | Checkout repository
         uses: actions/checkout@v7
 
       - name: Setup
         uses: ./.github/actions/setup
-        with:
-          trunk: "true"
 
       - name: Build | Documentation (Host)
         run: |
@@ -108,6 +112,10 @@ jobs:
 
     runs-on: ubuntu-latest
     needs: build
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
