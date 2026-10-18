@@ -86,3 +86,20 @@ pub async fn clean_devices(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ignore_already_exists_error_only_suppresses_existing_paths() {
+        assert_eq!(
+            ignore_already_exists_error::<()>(Err(Error::AlreadyExists)),
+            Ok(())
+        );
+        assert_eq!(
+            ignore_already_exists_error::<()>(Err(Error::PermissionDenied)),
+            Err(Error::PermissionDenied)
+        );
+    }
+}
