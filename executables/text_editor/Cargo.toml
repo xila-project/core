@@ -1,0 +1,12 @@
+[package]
+name = "text_editor"
+version = "0.1.0"
+edition = "2024"
+description = "A page-based text editor for Xila WebAssembly."
+
+[dependencies]
+application_metadata = { workspace = true }
+embedded-i18n = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm = { workspace = true, default-features = false, features = ["guest", "graphics", "memory_32"] }

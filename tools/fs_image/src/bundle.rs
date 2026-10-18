@@ -15,7 +15,7 @@ impl Drop for Staging {
 pub fn prepare(profile: &str, applications: &Path) -> Result<Staging, Box<dyn Error>> {
     let guests = match profile {
         "native" => application_metadata::GUESTS,
-        "wasm" => &application_metadata::GUESTS[..4],
+        "wasm" => &application_metadata::GUESTS[..5],
         _ => return Err("bundle must be native or wasm".into()),
     };
     let staging = loop {
@@ -36,6 +36,7 @@ pub fn prepare(profile: &str, applications: &Path) -> Result<Staging, Box<dyn Er
         "configuration/shared/shortcuts",
         "configuration/shared/clock",
         "configuration/shared/pixel_painter",
+        "configuration/shared/text_editor",
         "devices/network",
         "users",
         "data/shared",

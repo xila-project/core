@@ -71,7 +71,7 @@ fn out_of_space_removes_incomplete_output() {
 #[test]
 fn browser_and_native_bundles_contain_their_declared_apps() {
     let f = Fixture::new();
-    for app in ["calculator", "weather", "clock", "pixel_painter", "synth"] {
+    for app in ["calculator", "weather", "clock", "pixel_painter", "synth", "text_editor"] {
         fs::write(
             f.0.join(format!("{app}.wasm")),
             format!("guest fixture for {app}"),
@@ -92,11 +92,13 @@ fn browser_and_native_bundles_contain_their_declared_apps() {
             String::from_utf8_lossy(&output.stderr)
         );
         let text = String::from_utf8_lossy(&output.stdout);
-        assert!(text.contains("calculator,clock,pixel_painter,synth"));
+        assert!(text.contains("calculator,clock,pixel_painter,synth,text_editor"));
         let image = fs::read(f.0.join(format!("{profile}.img"))).unwrap();
         for content in [
             b"guest fixture for synth".as_slice(),
             b"\"name\": \"Synth\"",
+            b"guest fixture for text_editor".as_slice(),
+            b"\"name\": \"Text Editor\"",
         ] {
             assert!(image.windows(content.len()).any(|bytes| bytes == content));
         }

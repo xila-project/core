@@ -145,6 +145,7 @@ async fn install_selects_install_export_and_never_falls_back_to_main() {
             ("weather", "Weather"),
             ("clock", "Clock"),
             ("synth", "Synth"),
+            ("text_editor", "Text Editor"),
         ] {
             let binary = executable::build_crate(app).unwrap();
             let path = format!("/binaries/{app}");

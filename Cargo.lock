@@ -4298,6 +4298,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "text_editor"
+version = "0.1.0"
+dependencies = [
+ "application_metadata",
+ "embedded-i18n",
+ "wasm",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
