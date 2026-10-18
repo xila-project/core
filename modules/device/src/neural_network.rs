@@ -110,8 +110,20 @@ impl<'a> TensorSpec<'a> {
     pub fn validate(self) -> Result<(), Error> {
         self.element_count()?;
         let valid_parameters = |scale: f32| scale.is_finite() && scale > 0.0;
+        let zero_point_range = match self.data_type {
+            TensorType::I8 => Some((i8::MIN as i64, i8::MAX as i64)),
+            TensorType::U8 => Some((u8::MIN as i64, u8::MAX as i64)),
+            TensorType::I16 => Some((i16::MIN as i64, i16::MAX as i64)),
+            TensorType::I32 => Some((i32::MIN as i64, i32::MAX as i64)),
+            TensorType::F16 | TensorType::F32 => None,
+        };
+        let valid_zero_point = |zero_point: i32| {
+            zero_point_range.is_some_and(|(min, max)| (min..=max).contains(&(zero_point as i64)))
+        };
         match self.quantization {
-            Some(Quantization::PerTensor { scale, .. }) if !valid_parameters(scale) => {
+            Some(Quantization::PerTensor { scale, zero_point })
+                if !valid_parameters(scale) || !valid_zero_point(zero_point) =>
+            {
                 Err(Error::InvalidTensor)
             }
             Some(Quantization::PerAxis {
@@ -122,6 +134,11 @@ impl<'a> TensorSpec<'a> {
                 || self.shape[axis] != scales.len()
                 || scales.len() != zero_points.len()
                 || !scales.iter().copied().all(valid_parameters) =>
+            {
+                Err(Error::InvalidTensor)
+            }
+            Some(Quantization::PerAxis { zero_points, .. })
+                if !zero_points.iter().copied().all(valid_zero_point) =>
             {
                 Err(Error::InvalidTensor)
             }
@@ -215,8 +232,21 @@ pub struct Workspace<'a> {
 }
 
 impl<'a> Workspace<'a> {
-    pub fn new(memory: &'a mut [u8]) -> Self {
-        Self { memory }
+    /// Validates caller memory against the backend's reported workspace size
+    /// and base-address alignment before making it available to the context.
+    pub fn try_new(memory: &'a mut [u8], requirements: MemoryRequirements) -> Result<Self, Error> {
+        if !requirements.alignment.is_power_of_two() {
+            return Err(Error::InvalidWorkspace);
+        }
+        if memory.len() < requirements.workspace_bytes {
+            return Err(Error::InsufficientMemory);
+        }
+        if requirements.workspace_bytes > 0
+            && (memory.as_ptr() as usize) % requirements.alignment != 0
+        {
+            return Err(Error::InvalidWorkspace);
+        }
+        Ok(Self { memory })
     }
 
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
@@ -225,6 +255,11 @@ impl<'a> Workspace<'a> {
 }
 
 /// Context guard that keeps its model and caller arena borrowed for its lifetime.
+///
+/// Dropping this value releases those Rust borrows and drops the backend context,
+/// but does not call the device's backend-specific teardown. Call
+/// [`NeuralNetworkDevice::destroy_context`] exactly once for every successfully
+/// created context.
 ///
 /// A context must be dropped before its model can be unloaded:
 /// ```compile_fail
@@ -240,6 +275,7 @@ impl<'a> Workspace<'a> {
 ///     drop(context);
 /// }
 /// ```
+#[must_use = "call NeuralNetworkDevice::destroy_context before dropping the context"]
 pub struct Context<'model, 'workspace, Model, BackendContext> {
     model: &'model Model,
     backend: BackendContext,
@@ -287,12 +323,28 @@ pub enum Accelerator {
     Other,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct MemoryRequirements {
+    /// Backend-managed model memory estimate.
     pub model_bytes: usize,
+    /// Backend-managed context memory estimate.
     pub context_bytes: usize,
+    /// Minimum caller-provided workspace size in bytes.
     pub workspace_bytes: usize,
+    /// Required power-of-two alignment of the caller-provided workspace base
+    /// address. This does not constrain backend-managed allocations.
     pub alignment: usize,
+}
+
+impl Default for MemoryRequirements {
+    fn default() -> Self {
+        Self {
+            model_bytes: 0,
+            context_bytes: 0,
+            workspace_bytes: 0,
+            alignment: 1,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -301,6 +353,7 @@ pub enum Error {
     InvalidModel,
     InvalidTensor,
     InsufficientMemory,
+    InvalidWorkspace,
     Backend,
 }
 
@@ -350,6 +403,8 @@ pub trait NeuralNetworkDevice<Aot: ?Sized = ()> {
         tensors: &[TensorSpec<'_>],
         workspace: Option<&mut [u8]>,
     ) -> Result<Self::Context, Error>;
+    /// Performs backend-specific teardown and consumes the context. Call this
+    /// exactly once for every successful `create_context` call.
     fn destroy_context(
         &mut self,
         context: Context<'_, '_, Self::Model<'_>, Self::Context>,
@@ -521,8 +576,16 @@ mod tests {
             )
             .unwrap();
             let mut arena = [0_u8; 8];
+            let requirements = MemoryRequirements {
+                workspace_bytes: arena.len(),
+                ..MemoryRequirements::default()
+            };
             let mut context = device
-                .create_context(&model, &[spec], Some(Workspace::new(&mut arena)))
+                .create_context(
+                    &model,
+                    &[spec],
+                    Some(Workspace::try_new(&mut arena, requirements).unwrap()),
+                )
                 .unwrap();
             assert!(core::ptr::eq(context.model(), &model));
             let input = [5_i8, 6, 7];
@@ -610,6 +673,82 @@ mod tests {
                 }),
             ),
             Err(Error::InvalidTensor)
+        ));
+    }
+
+    #[test]
+    fn affine_quantization_rejects_float_types_and_out_of_range_zero_points() {
+        let shape = [1];
+        let quantization = Quantization::PerTensor {
+            scale: 1.0,
+            zero_point: 0,
+        };
+        assert!(matches!(
+            TensorSpec::try_new(&shape, TensorType::F32, Some(quantization)),
+            Err(Error::InvalidTensor)
+        ));
+        assert!(matches!(
+            TensorSpec::try_new(
+                &shape,
+                TensorType::I8,
+                Some(Quantization::PerTensor {
+                    scale: 1.0,
+                    zero_point: 128,
+                }),
+            ),
+            Err(Error::InvalidTensor)
+        ));
+        assert!(matches!(
+            TensorSpec::try_new(
+                &shape,
+                TensorType::U8,
+                Some(Quantization::PerTensor {
+                    scale: 1.0,
+                    zero_point: -1,
+                }),
+            ),
+            Err(Error::InvalidTensor)
+        ));
+        assert!(
+            TensorSpec::try_new(
+                &shape,
+                TensorType::I8,
+                Some(Quantization::PerTensor {
+                    scale: 1.0,
+                    zero_point: -128,
+                }),
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn workspace_checks_alignment_and_required_capacity() {
+        let requirements = MemoryRequirements {
+            workspace_bytes: 8,
+            alignment: 8,
+            ..MemoryRequirements::default()
+        };
+        let mut storage = [0_u8; 64];
+        let base = storage.as_ptr() as usize;
+        let aligned_offset = (8 - base % 8) % 8;
+        let aligned = &mut storage[aligned_offset..aligned_offset + 16];
+        assert!(Workspace::try_new(aligned, requirements).is_ok());
+
+        let misaligned_offset = aligned_offset + 1;
+        assert!(matches!(
+            Workspace::try_new(
+                &mut storage[misaligned_offset..misaligned_offset + 16],
+                requirements
+            ),
+            Err(Error::InvalidWorkspace)
+        ));
+        assert!(matches!(
+            Workspace::try_new(
+                &mut storage[aligned_offset..aligned_offset + 7],
+                requirements
+            ),
+            Err(Error::InsufficientMemory)
         ));
     }
 
