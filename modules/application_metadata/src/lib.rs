@@ -37,7 +37,7 @@ pub fn shortcut(name: &str) -> Option<String> {
         String::new()
     };
     Some(format!(
-        r#"{{"name":"{label}","command":"/binaries/{command}","arguments":[{arguments}],"terminal":false,"icon_string":"{icon}","icon_color":[{},{},{}]}}"#,
+        r#"{{"name": "{label}","command": "/binaries/{command}","arguments": [{arguments}],"terminal":false,"icon_string":"{icon}","icon_color":[{},{},{}]}}"#,
         color[0], color[1], color[2]
     ))
 }
