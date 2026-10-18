@@ -31,6 +31,17 @@ impl Shell {
                 .await
                 .map_err(Error::AuthenticationFailed)?;
 
+        let home = self
+            .context
+            .virtual_file_system
+            .ensure_user_home(task, user_identifier)
+            .await
+            .map_err(Error::FailedToCreateDirectory)?;
+        task_manager
+            .set_environment_variable(task, "HOME", home.as_str())
+            .await
+            .map_err(Error::FailedToSetEnvironmentVariable)?;
+
         // - Set the user
         task_manager
             .set_user(task, user_identifier)

@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 cstr_core = "0.2.6"
 file_system = { workspace = true }
+virtual_file_system = { workspace = true }
 lvgl_rust_sys = { workspace = true, features = ["shadcn-theme"] }
 syn = { workspace = true, features = ["full"] }
 quote = "1.0"

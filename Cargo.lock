@@ -1925,6 +1925,7 @@ dependencies = [
  "task",
  "time",
  "users",
+ "virtual_file_system",
 ]
 
 [[package]]

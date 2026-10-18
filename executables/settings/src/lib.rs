@@ -2,11 +2,19 @@
 
 extern crate alloc;
 
+#[cfg(test)]
+extern crate std;
+
 xila::internationalization::track_locales!();
 
+#[cfg(test)]
+mod appearance;
 mod error;
 mod settings;
 mod tabs;
+
+#[cfg(all(test, target_os = "linux"))]
+drivers_std::memory::instantiate_global_allocator!();
 
 use alloc::boxed::Box;
 pub use error::*;

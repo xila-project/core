@@ -316,6 +316,17 @@ impl Manager {
         is_dark: bool,
     ) -> Result<()> {
         let _lock = self.global_lock.lock().await;
+        self.update_theme_locked(primary_color, secondary_color, is_dark)
+            .await
+    }
+
+    /// Apply a palette when the caller already holds the global LVGL lock.
+    pub(crate) async fn update_theme_locked(
+        &self,
+        primary_color: Color,
+        secondary_color: Color,
+        is_dark: bool,
+    ) -> Result<()> {
         let displays = &self.inner.read().await.displays;
 
         for display in displays {
