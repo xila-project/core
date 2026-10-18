@@ -3,7 +3,7 @@ description: "Native Rust/Node setup for Xila checks and builds (no Devbox)"
 
 inputs:
   profile:
-    description: "Setup profile: 'full' (default) or 'minimal' for lightweight Rust checks and formatting."
+    description: "Setup profile: 'full' (default) or 'minimal' for lightweight jobs (format only)."
     required: false
     default: full
   trunk:
