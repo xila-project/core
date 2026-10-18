@@ -216,6 +216,17 @@ pub(crate) mod tests {
             let container = tab.create_ui(tabview).await.unwrap();
             assert!(!container.is_null());
             assert_eq!(lvgl::lv_tabview_get_tab_count(tabview), 1);
+
+            while window.pop_event().is_some() {}
+            lvgl::lv_obj_send_event(
+                tab.dark_mode,
+                lvgl::lv_event_code_t_LV_EVENT_VALUE_CHANGED,
+                core::ptr::null_mut(),
+            );
+            let bubbled = window.pop_event().unwrap();
+            assert_eq!(bubbled.code, EventKind::ValueChanged);
+            assert_eq!(bubbled.target, tab.dark_mode);
+
             assert_eq!(lvgl::lv_dropdown_get_selected(tab.primary), 2);
             assert_eq!(lvgl::lv_dropdown_get_selected(tab.secondary), 5);
             assert!(!lvgl::lv_obj_has_state(
