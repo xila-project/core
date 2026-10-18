@@ -332,6 +332,11 @@ jobs:
           cargo test --manifest-path tools/profiling/Cargo.toml
 
       # Run the same plain tests on main and PRs so main saves a reusable cache.
+      # cargo-make's default init task generates the font sources; keep that
+      # setup explicit when invoking Cargo directly for its timing report.
+      - name: Setup | Generate fonts for tests
+        run: cargo make generate-fonts
+
       - name: Run | Test
         run: cargo test --workspace --timings
 
@@ -454,6 +459,9 @@ jobs:
         with:
           cache-key: guest
 
+      - name: Setup | Generate fonts
+        run: cargo make generate-fonts
+
       - name: Check | Clippy (Guest)
         run: >-
           cargo clippy --package wasm --no-default-features
@@ -524,6 +532,9 @@ jobs:
         with:
           cache-key: profile-benchmark-${{ matrix.profile }}
 
+      - name: Setup | Generate fonts
+        run: cargo make generate-fonts
+
       - name: Benchmark | Default debug profiles
         if: matrix.profile == 'default'
         run: |
@@ -570,6 +581,9 @@ jobs:
         uses: ./.github/actions/setup
         with:
           cache-key: test-runner-${{ matrix.runner }}
+
+      - name: Setup | Generate fonts
+        run: cargo make generate-fonts
 
       - name: Benchmark | cargo test
         if: matrix.runner == 'cargo-test'
