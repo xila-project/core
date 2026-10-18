@@ -1,3 +1,4 @@
-mod pin;
+#![no_std]
 
-pub use pin::*;
+#[cfg(feature = "gpio")]
+pub mod gpio;
