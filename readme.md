@@ -48,21 +48,20 @@ documentation and learning guides.
 
 ## Build and check Core
 
-**Devbox is the standard setup for local development and CI on x86_64 Linux.**
-Install [Devbox](https://www.jetify.com/docs/devbox/installing_devbox/) at the
-version recorded in `.devbox-version`, then:
+Use the canonical [Xila development environment](https://github.com/Xila-Project/development-environment)
+for local builds and checks. It provides the same pinned tools and packages as
+CI. From a checkout of that repository, run:
 
 ```bash
-git clone https://github.com/xila-project/core.git
-cd core
-devbox shell
-devbox run setup
-devbox run check                # Linux host + WASM guest checks
+cd /path/to/Core
+/path/to/development-environment/scripts/xila-dev pull
+/path/to/development-environment/scripts/xila-dev shell
+npm ci
+cargo make check                # Linux host + WASM guest checks
 ```
 
-Devbox installs Nix if needed; setup installs Rust/WASM targets and runs `npm ci`.
-Initial setup requires internet access. Leave with `exit`; `.dev-environment/`
-and `.devbox/` hold removable local caches.
+The image and wrapper require Docker or Podman and internet access on first use.
+The wrapper keeps removable local caches in `.dev-environment/`.
 
 Other checks, inside the shell:
 
@@ -77,11 +76,11 @@ For opt-in native PCM playback using nanoaudio, see
 [the audio module](modules/audio/README.md). Run its tone example with
 `cargo run -p drivers_native --features audio --example audio` inside the shell.
 
-Run `devbox run gui` from a **Wayland desktop** and check rendering, input and
-window closing. Keep the host GPU drivers and enter without `--pure` to retain
-the display, runtime directory and session bus. Windows requires x86_64 WSL2/WSLg
-and a GUI smoke test. Native Windows, macOS, ARM Linux and NixOS are unvalidated;
-the current host checks and native event loop depend on Linux/Wayland.
+For GUI builds from a **Wayland desktop**, use the wrapper's `--gui` option and
+check rendering, input and window closing. Keep the host GPU drivers. Windows
+requires x86_64 WSL2/WSLg and a GUI smoke test. Native Windows, macOS, ARM Linux
+and NixOS are unvalidated; the current host checks and native event loop depend
+on Linux/Wayland.
 
 For the browser example, inside the shell:
 
@@ -93,23 +92,17 @@ cargo make generate-fonts
 
 Use `trunk build` for a build check; open the served URL to test rendering/input.
 
-Devbox provides a native shell and JSON configuration. Containers require GUI
-and device forwarding; mise leaves native dependencies to the OS; direct
-Nix/devenv adds Nix configuration to maintain. Versions live in `.devbox-version`
-(CLI), `devbox.json`/`devbox.lock` (native tools), `development/toolchains.env`
-(Rust versions/targets) and `package-lock.json` (npm). CI uses these same sources and setup for
-formatting, host/WASM, coverage, Miri and deployment. For local coverage/Miri,
-add `llvm-tools-preview` to the pinned stable toolchain and `miri` to the pinned
-nightly. Update the version sources together and repeat checks and GUI tests;
-tool pins do not freeze untracked Cargo lockfiles or moving Git dependencies.
-
-Manual workflows still work with the tools/targets from `devbox.json` installed separately, followed by `npm ci`; cargo-make
-defaults to stable outside Devbox.
+Tool versions are maintained by the development-environment image and
+`development/toolchains.env`; npm dependencies are pinned by `package-lock.json`.
+CI uses the same image for formatting, host/WASM checks, coverage, Miri and
+deployment. For local coverage/Miri, the image already includes the required
+Rust components. Tool pins do not freeze untracked Cargo lockfiles or moving Git
+dependencies.
 
 ESP-IDF, flashing and serial permissions need separate setup: follow the esp-rs
 [Xtensa](https://docs.esp-rs.org/book/installation/riscv-and-xtensa.html) or
 [RISC-V](https://docs.esp-rs.org/book/installation/riscv.html) guides after leaving
-Devbox. Host/WASM checks do not prove ESP32, nRF, STM32 or other hardware correctness.
+development container. Host/WASM checks do not prove ESP32, nRF, STM32 or other hardware correctness.
 
 ## Graphics theme
 

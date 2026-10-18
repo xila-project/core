@@ -25,7 +25,6 @@ command = "cargo"
 args = ["fmt", "--all", "${@}"]
 
 [tasks.format-toml]
-install_crate = "taplo-cli"
 command = "taplo"
 args = ["format", "${@}"]
 

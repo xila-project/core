@@ -51,8 +51,6 @@ jobs:
               - '**/rust-toolchain{,.toml}'
               - '.github/workflows/**'
               - '.github/actions/**'
-              - 'devbox.{json,lock}'
-              - '.devbox-version'
               - 'development/**'
               - 'package{,-lock}.json'
               - '**/.{gitignore,editorconfig,npmrc}'
