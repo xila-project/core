@@ -186,6 +186,10 @@ impl TensorData<'_> {
             Self::I32(values) => values.len(),
         }
     }
+
+    pub fn is_empty(self) -> bool {
+        self.len() == 0
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -242,7 +246,7 @@ impl<'a> Workspace<'a> {
             return Err(Error::InsufficientMemory);
         }
         if requirements.workspace_bytes > 0
-            && (memory.as_ptr() as usize) % requirements.alignment != 0
+            && !(memory.as_ptr() as usize).is_multiple_of(requirements.alignment)
         {
             return Err(Error::InvalidWorkspace);
         }
@@ -477,10 +481,8 @@ mod tests {
             _: &[TensorSpec<'_>],
             workspace: Option<&mut [u8]>,
         ) -> Result<Self::Context, Error> {
-            if let Some(workspace) = workspace {
-                if let Some(byte) = workspace.get_mut(1) {
-                    *byte = 0x5A;
-                }
+            if let Some(byte) = workspace.and_then(|workspace| workspace.get_mut(1)) {
+                *byte = 0x5A;
             }
             Ok(MockContext {
                 output: [0; 3],
