@@ -15,6 +15,8 @@ pub struct InternalAttributes {
     pub group: GroupIdentifier,
     pub permissions: Permissions,
     pub kind: Kind,
+    // Occupies the existing trailing byte: never persist implicit padding.
+    reserved: u8,
 }
 
 impl Debug for InternalAttributes {
@@ -37,7 +39,18 @@ impl InternalAttributes {
     pub const IDENTIFIER: u8 = 1;
 
     pub fn new_uninitialized() -> MaybeUninit<Self> {
-        MaybeUninit::<Self>::uninit()
+        MaybeUninit::new(Self {
+            inode: 0,
+            creation: Time::new(0),
+            modification: Time::new(0),
+            access: Time::new(0),
+            status: Time::new(0),
+            user: UserIdentifier::ROOT,
+            group: GroupIdentifier::ROOT,
+            permissions: Permissions::NONE,
+            kind: Kind::File,
+            reserved: 0,
+        })
     }
 
     pub fn update_attributes(&self, statistics: &mut Attributes) -> Result<()> {
@@ -81,6 +94,7 @@ impl InternalAttributes {
     }
 
     pub fn update_with_attributes(&mut self, statistics: &Attributes) -> Result<()> {
+        self.reserved = 0;
         if let Some(inode) = statistics.get_inode() {
             self.inode = *inode;
         }

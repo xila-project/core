@@ -63,7 +63,7 @@ async fn main(task_manager: &'static xila::task::Manager) {
     use xila::log;
     use xila::task;
     use xila::time::{self, Duration};
-    use xila::virtual_file_system::{File, mount_static};
+    use xila::virtual_file_system::mount_static;
     use xila::{authentication, graphics, users, virtual_file_system};
 
     console_error_panic_hook::set_once();
@@ -125,7 +125,13 @@ async fn main(task_manager: &'static xila::task::Manager) {
     let selected_disk = selected_xila_disk();
     let selected_disk_path = Path::from_str(&selected_disk);
     let drive: &'static drivers_wasm::devices::DriveDevice =
-        match drivers_wasm::devices::DriveDevice::new(selected_disk_path, 16 * 1024 * 1024).await {
+        match drivers_wasm::devices::DriveDevice::new_seeded(
+            selected_disk_path,
+            16 * 1024 * 1024,
+            "./seed.img",
+        )
+        .await
+        {
             Ok(drive) => Box::leak(Box::new(drive)),
             Err(error) => {
                 let message = alloc::format!("Could not open {selected_disk}: {error}");
@@ -134,13 +140,12 @@ async fn main(task_manager: &'static xila::task::Manager) {
             }
         };
 
-    // Format only an empty disk; mount errors on saved images are fatal.
+    // Imported seeds and saved images must already contain a valid filesystem.
     let file_system = match storage::mount(drive) {
         Ok(file_system) => file_system,
         Err(error) => {
-            if drive.sync().await.is_ok() {
-                let _ = drive.unmount();
-            }
+            // Never commit a failed seed import or changes from a failed mount.
+            let _ = drive.discard_unsaved();
             let message = alloc::format!("Could not mount {selected_disk}: {error}");
             disk_manager_error(&message);
             panic!("{message}; saved data was not reformatted");
@@ -256,24 +261,12 @@ async fn main(task_manager: &'static xila::task::Manager) {
                 &"/binaries/command_line_shell",
                 command_line_shell::ShellExecutable
             ),
-            (
-                &"/binaries/settings",
-                settings::SettingsExecutable::new(virtual_file_system, task)
-                    .await
-                    .unwrap()
-            ),
+            (&"/binaries/settings", settings::SettingsExecutable),
             (
                 &"/binaries/file_manager",
-                file_manager::FileManagerExecutable::new(virtual_file_system, task)
-                    .await
-                    .unwrap()
+                file_manager::FileManagerExecutable
             ),
-            (
-                &"/binaries/terminal",
-                terminal::TerminalExecutable::new(virtual_file_system, task)
-                    .await
-                    .unwrap()
-            ),
+            (&"/binaries/terminal", terminal::TerminalExecutable),
         ]
     )
     .await
@@ -292,78 +285,6 @@ async fn main(task_manager: &'static xila::task::Manager) {
     .await
     .unwrap();
 
-    // Bundle Calculator and install its application-drawer shortcut.
-    File::write_to_path(
-        virtual_file_system,
-        task,
-        "/binaries/calculator",
-        include_bytes!("../../../target/wasm32-wasip1/release/calculator.wasm"),
-    )
-    .await
-    .unwrap();
-
-    let install_status = executable::execute(
-        executable_context,
-        "/binaries/wasm",
-        vec!["--install".to_string(), "/binaries/calculator".to_string()],
-        standard.duplicate().await.unwrap(),
-        None,
-    )
-    .await
-    .unwrap()
-    .join()
-    .await;
-    assert_eq!(install_status, 0, "Failed to install bundled Calculator");
-
-    // Use the same guest runtime and installation path for Clock.
-    File::write_to_path(
-        virtual_file_system,
-        task,
-        "/binaries/clock",
-        include_bytes!("../../../target/wasm32-wasip1/release/clock.wasm"),
-    )
-    .await
-    .unwrap();
-
-    let install_status = executable::execute(
-        executable_context,
-        "/binaries/wasm",
-        vec!["--install".to_string(), "/binaries/clock".to_string()],
-        standard.duplicate().await.unwrap(),
-        None,
-    )
-    .await
-    .unwrap()
-    .join()
-    .await;
-    assert_eq!(install_status, 0, "Failed to install bundled Clock");
-
-    // Use the same guest runtime and installation path for Pixel Painter.
-    File::write_to_path(
-        virtual_file_system,
-        task,
-        "/binaries/pixel_painter",
-        include_bytes!("../../../target/wasm32-wasip1/release/pixel_painter.wasm"),
-    )
-    .await
-    .unwrap();
-
-    let install_status = executable::execute(
-        executable_context,
-        "/binaries/wasm",
-        vec![
-            "--install".to_string(),
-            "/binaries/pixel_painter".to_string(),
-        ],
-        standard.duplicate().await.unwrap(),
-        None,
-    )
-    .await
-    .unwrap()
-    .join()
-    .await;
-    assert_eq!(install_status, 0, "Failed to install bundled Pixel Painter");
-
     // - - Load saved accounts, or create defaults only on a fresh disk.
     let authentication_context = authentication::Context {
         virtual_file_system,
@@ -374,46 +295,6 @@ async fn main(task_manager: &'static xila::task::Manager) {
     storage::initialize_users(&authentication_context, drive.is_new())
         .await
         .expect("Failed to initialize users and groups");
-
-    // Provision Clock's settings without widening access to the shared parent.
-    // An existing disk may have removed the default administrator account.
-    virtual_file_system::ignore_already_exists_error(
-        virtual_file_system
-            .create_directory(task, &"/configuration/shared/clock")
-            .await,
-    )
-    .unwrap();
-    if let Ok(administrator) = users_manager.get_user_identifier("administrator").await {
-        virtual_file_system
-            .set_ownership(
-                task,
-                "/configuration/shared/clock",
-                Some(administrator),
-                None,
-            )
-            .await
-            .unwrap();
-    }
-
-    // Provision Pixel Painter's settings without widening access to the shared parent.
-    // An existing disk may have removed the default administrator account.
-    virtual_file_system::ignore_already_exists_error(
-        virtual_file_system
-            .create_directory(task, &"/configuration/shared/pixel_painter")
-            .await,
-    )
-    .unwrap();
-    if let Ok(administrator) = users_manager.get_user_identifier("administrator").await {
-        virtual_file_system
-            .set_ownership(
-                task,
-                "/configuration/shared/pixel_painter",
-                Some(administrator),
-                None,
-            )
-            .await
-            .unwrap();
-    }
 
     drive
         .sync()

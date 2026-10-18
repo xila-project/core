@@ -1,14 +1,10 @@
+mod bundle;
+mod image;
+mod populate;
+mod source;
 use std::{env, error::Error, path::PathBuf, process};
 
-use drivers_std::drive_file::FileDriveDevice;
-use file_system::{
-    DirectBaseOperations, XILA_DISK_SIGNATURE,
-    mbr::{Mbr, PartitionKind, create_partition_device},
-};
-
 const DEFAULT_SIZE: u64 = 16 * 1024 * 1024;
-const CACHE_SIZE: usize = 256;
-const BLOCK_SIZE: u64 = 512;
 
 fn main() {
     drivers_std::memory::instantiate_global_allocator!();
@@ -24,62 +20,58 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
-    let mut arguments = env::args_os().skip(1);
+    let mut arguments = env::args_os().skip(1).peekable();
     let output = arguments
         .next()
         .map(PathBuf::from)
         .ok_or("usage: fs_image <output-image> [size-bytes] (size defaults to 16777216)")?;
-    let size = match arguments.next() {
-        Some(value) => value.to_string_lossy().parse::<u64>()?,
-        None => DEFAULT_SIZE,
+    let size = if arguments
+        .peek()
+        .is_some_and(|value| !value.to_string_lossy().starts_with("--"))
+    {
+        arguments.next().unwrap().to_string_lossy().parse::<u64>()?
+    } else {
+        DEFAULT_SIZE
     };
-    if arguments.next().is_some() {
-        return Err("too many arguments".into());
-    }
-    if size % BLOCK_SIZE != 0 || size / BLOCK_SIZE < 2048 {
-        return Err("disk size must be a multiple of 512 bytes and at least 1048576 bytes".into());
-    }
-    let output = output.canonicalize_parent()?;
-    let output_string = output
-        .to_str()
-        .ok_or("output image path must be valid UTF-8")?;
-
-    create_output_file(&output, size)?;
-
-    {
-        let drive = Box::leak(Box::new(FileDriveDevice::new(&output_string, size)));
-        let partition = Mbr::format_disk_with_signature_and_partition(
-            drive,
-            XILA_DISK_SIGNATURE,
-            PartitionKind::Xila,
-        )?;
-        let partition = Box::leak(Box::new(partition));
-        let file_system = little_fs::FileSystem::new_format(partition, CACHE_SIZE)?;
-        drop(file_system);
-        drive.flush()?;
-    }
-
-    {
-        let drive = Box::leak(Box::new(FileDriveDevice::new(&output_string, size)));
-        let mbr = Mbr::read_from_device(drive)?;
-        mbr.validate()?;
-        if mbr.get_disk_signature() != XILA_DISK_SIGNATURE {
-            return Err("MBR disk signature does not match Xila".into());
+    let mut root = None;
+    let mut bundle = None;
+    let mut applications = None;
+    while let Some(flag) = arguments.next() {
+        match flag.to_str() {
+            Some("--root") => {
+                root = Some(PathBuf::from(
+                    arguments.next().ok_or("--root requires a directory")?,
+                ))
+            }
+            Some("--bundle") => {
+                bundle = Some(arguments.next().ok_or("--bundle requires native or wasm")?)
+            }
+            Some("--applications-dir") => {
+                applications = Some(PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or("--applications-dir requires a directory")?,
+                ))
+            }
+            _ => return Err("unknown argument".into()),
         }
-        let entry = mbr
-            .partitions
-            .iter()
-            .find(|entry| entry.is_valid() && entry.kind == PartitionKind::Xila)
-            .ok_or("MBR has no valid Xila partition")?;
-        let partition = create_partition_device(drive, entry)?;
-        let partition = Box::leak(Box::new(partition));
-        let file_system = little_fs::FileSystem::new(partition, CACHE_SIZE)?;
-        drop(file_system);
-        drive.flush()?;
     }
+    let staging = match (bundle, applications) {
+        (Some(profile), Some(directory)) if root.is_none() => Some(bundle::prepare(
+            profile.to_str().ok_or("invalid bundle")?,
+            &directory,
+        )?),
+        (None, None) => None,
+        _ => {
+            return Err("use --root or --bundle native|wasm --applications-dir <directory>".into());
+        }
+    };
+    let root = staging.as_ref().map(|s| s.0.as_path()).or(root.as_deref());
+    let output = output.canonicalize_parent()?;
+    image::build(&output, size, root)?;
 
     println!(
-        "Validated Xila MBR and mounted LittleFS: {} ({} bytes)",
+        "Verified Xila MBR, LittleFS contents and metadata: {} ({} bytes)",
         output.display(),
         size
     );

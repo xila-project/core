@@ -34,6 +34,8 @@ extern crate alloc;
 embedded_i18n::track_locales!();
 
 mod error;
+mod seed;
+pub use seed::initialize_seeded;
 mod group;
 mod hash;
 mod user;

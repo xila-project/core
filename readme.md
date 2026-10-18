@@ -135,20 +135,23 @@ requires access to perf events; a permission error is reported in the run log.
 Build before recording, inside the development shell:
 
 ```bash
-cargo make prepare-profiling
+cargo make prepare-native-image
 cargo make build-profiling --features prebuilt-applications
 cargo run --manifest-path tools/profiling/Cargo.toml -- measure \
   --scenario terminal-idle --output target/profiles/before --runs 3 --duration 30 \
   --applications-dir target/wasm32-wasip1/release-wasm \
-  -- target/profiling/native_example --terminal --no-network
+  -- target/profiling/native_example --terminal --no-network --seed-image target/seed/native/seed.img
 ```
 
 The `profiling` Cargo profile keeps release optimizations and full debug symbols.
 If using an explicit Cargo target or custom target directory, adjust the binary
-path. The `prebuilt-applications` feature and `--applications-dir` load prepared
-Calculator/Weather/Clock files instead of invoking Cargo during startup. A missing
-file fails explicitly. The recorder also recognizes and hashes application files
-selected by `XILA_PROFILE_APP_DIR`. Default native builds keep their existing startup builds.
+path. Every native build loads bundled applications from the disk. Prepare the
+reference image before measurement and pass `--seed-image` for a new disk;
+existing disks are mounted without reinstallation. The `prebuilt-applications`
+feature is retained for compatibility. `--applications-dir` and
+`XILA_PROFILE_APP_DIR` let the recorder identify and hash guest build artifacts;
+they no longer cause runtime compilation or copying. See the
+[native example](examples/native/README.md) and [image builder](tools/fs_image/README.md).
 Measurements still include OS startup; they are not steady-state-only data.
 Use the same disk fixture and settings on each run. A mutable disk can change
 between runs; restore its baseline if the workload writes to it.
@@ -160,11 +163,11 @@ cargo make build-profiling --features profiling,heaptrack
 cargo run --manifest-path tools/profiling/Cargo.toml -- cpu \
   --scenario gui-navigation --output target/profiles/cpu --runs 1 --duration 60 \
   --applications-dir target/wasm32-wasip1/release-wasm \
-  -- target/profiling/native_example --gui --no-network --resolution 800x600
+  -- target/profiling/native_example --gui --no-network --resolution 800x600 --seed-image target/seed/native/seed.img
 cargo run --manifest-path tools/profiling/Cargo.toml -- heap \
   --scenario gui-navigation --output target/profiles/heap --runs 1 --duration 60 \
   --applications-dir target/wasm32-wasip1/release-wasm \
-  -- target/profiling/native_example --gui --no-network --resolution 800x600
+  -- target/profiling/native_example --gui --no-network --resolution 800x600 --seed-image target/seed/native/seed.img
 ```
 
 Replay the same manual GUI interactions for exploratory recordings. For repeatable

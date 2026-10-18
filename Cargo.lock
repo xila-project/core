@@ -201,6 +201,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "application_metadata"
+version = "0.1.0"
+dependencies = [
+ "embedded-i18n",
+]
+
+[[package]]
 name = "arboard"
 version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -280,11 +287,18 @@ dependencies = [
 name = "authentication"
 version = "0.1.0"
 dependencies = [
+ "abi_definitions",
+ "application_metadata",
  "device",
+ "drivers_native",
+ "drivers_shared",
+ "drivers_std",
  "embedded-i18n",
  "file_system",
+ "little_fs",
  "miniserde",
  "task",
+ "time",
  "users",
  "virtual_file_system",
 ]
@@ -486,6 +500,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 name = "calculator"
 version = "0.1.0"
 dependencies = [
+ "application_metadata",
  "drivers_core",
  "drivers_native",
  "drivers_shared",
@@ -654,6 +669,7 @@ dependencies = [
 name = "clock"
 version = "0.1.0"
 dependencies = [
+ "application_metadata",
  "embedded-i18n",
  "wasm",
 ]
@@ -1514,6 +1530,7 @@ name = "file_manager"
 version = "0.1.0"
 dependencies = [
  "abi_definitions",
+ "application_metadata",
  "drivers_core",
  "drivers_native",
  "drivers_shared",
@@ -1621,10 +1638,13 @@ name = "fs_image"
 version = "0.1.0"
 dependencies = [
  "abi_definitions",
+ "application_metadata",
  "critical-section",
  "drivers_std",
  "file_system",
+ "libc",
  "little_fs",
+ "users",
 ]
 
 [[package]]
@@ -3236,6 +3256,7 @@ checksum = "13bee6c73da26345c729282832b60b0363cf3dd9f4bfd81d8551b7a1c889a113"
 name = "pixel_painter"
 version = "0.1.0"
 dependencies = [
+ "application_metadata",
  "embedded-i18n",
  "wasm",
 ]
@@ -3756,6 +3777,7 @@ name = "settings"
 version = "0.1.0"
 dependencies = [
  "abi_definitions",
+ "application_metadata",
  "const_format",
  "drivers_core",
  "drivers_native",
@@ -4071,6 +4093,7 @@ name = "terminal"
 version = "0.1.0"
 dependencies = [
  "abi_definitions",
+ "application_metadata",
  "command_line_shell",
  "drivers_core",
  "drivers_native",
@@ -4859,6 +4882,7 @@ dependencies = [
 name = "weather"
 version = "0.1.0"
 dependencies = [
+ "application_metadata",
  "drivers_core",
  "drivers_native",
  "drivers_shared",

@@ -20,7 +20,9 @@ impl TerminalExecutable {
             virtual_file_system,
             task,
             "/configuration/shared/shortcuts/terminal.json",
-            crate::SHORTCUT.as_bytes(),
+            application_metadata::shortcut("terminal")
+                .unwrap()
+                .as_bytes(),
         )
         .await
         .map_err(|error| error.to_string())?;

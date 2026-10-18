@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+application_metadata = { workspace = true }
 xila = { path = "../../", features = ["graphics"] }
 const_format = { version = "0.2", features = ["fmt"] }
 embedded-io = { workspace = true }

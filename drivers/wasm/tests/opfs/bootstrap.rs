@@ -80,6 +80,16 @@ async fn saved_accounts_fixture() -> Result<(), String> {
             .await
             .map_err(|e| e.to_string())?,
     ));
+    let partition = Mbr::format_disk_with_signature_and_partition(
+        drive,
+        XILA_DISK_SIGNATURE,
+        PartitionKind::Xila,
+    )
+    .map_err(|e| e.to_string())?;
+    drop(
+        little_fs::FileSystem::new_format(Box::leak(Box::new(partition)), 256)
+            .map_err(|e| e.to_string())?,
+    );
     let task_manager = Box::leak(Box::new(task::Manager::new()));
     let task = task_manager.get_current_task_identifier().await;
     let users_manager = Box::leak(Box::new(users::Manager::new()));
@@ -153,4 +163,101 @@ async fn saved_accounts_are_loaded_even_without_an_administrator_file() {
     let executor = Box::leak(Box::new(drivers_wasm::executor::Executor::new()));
     executor.start(|spawner| spawner.spawn(check_saved_accounts(completion).unwrap()));
     assert_eq!(completion.wait().await, Ok(()));
+}
+
+#[wasm_bindgen_test]
+async fn new_placeholder_imports_a_seed_and_reopens_without_a_download() {
+    use file_system::{AccessFlags, BaseOperations, Context, FileSystemOperations};
+    let source_name = name();
+    let source = Box::leak(Box::new(
+        DriveDevice::new(Path::from_str(&source_name), 4 * 1024 * 1024)
+            .await
+            .unwrap(),
+    ));
+    let partition = Mbr::format_disk_with_signature_and_partition(
+        source,
+        XILA_DISK_SIGNATURE,
+        PartitionKind::Xila,
+    )
+    .unwrap();
+    let fs = little_fs::FileSystem::new_format(Box::leak(Box::new(partition)), 256).unwrap();
+    fs.create_file(Path::from_str("/seed-proof")).unwrap();
+    let mut context = Context::new_empty();
+    fs.lookup_file(
+        &mut context,
+        Path::from_str("/seed-proof"),
+        AccessFlags::Write.into(),
+    )
+    .unwrap();
+    fs.write(&mut context, b"from-build", 0).unwrap();
+    fs.close(&mut context).unwrap();
+    drop(fs);
+    let mut bytes = vec![0; 4 * 1024 * 1024];
+    DirectBaseOperations::read(source, &mut bytes, 0).unwrap();
+    source.discard_unsaved().unwrap();
+    remove(&source_name).await;
+    let array = js_sys::Uint8Array::from(bytes.as_slice());
+    let blob = web_sys::Blob::new_with_u8_array_sequence(&js_sys::Array::of1(&array)).unwrap();
+    let url = web_sys::Url::create_object_url_with_blob(&blob).unwrap();
+    let name = name();
+    // The disk manager creates the same zero-byte placeholder before switching.
+    drop(
+        DriveDevice::new(Path::from_str(&name), bytes.len())
+            .await
+            .unwrap(),
+    );
+    let drive = Box::leak(Box::new(
+        DriveDevice::new_seeded(Path::from_str(&name), bytes.len(), &url)
+            .await
+            .unwrap(),
+    ));
+    assert!(drive.is_new());
+    let fs = storage::mount(drive).unwrap();
+    let mut context = Context::new_empty();
+    fs.lookup_file(
+        &mut context,
+        Path::from_str("/seed-proof"),
+        AccessFlags::Read.into(),
+    )
+    .unwrap();
+    let mut proof = [0; 10];
+    fs.read(&mut context, &mut proof, 0).unwrap();
+    assert_eq!(&proof, b"from-build");
+    fs.close(&mut context).unwrap();
+    drop(fs);
+    drive.sync().await.unwrap();
+    drive.unmount().unwrap();
+    web_sys::Url::revoke_object_url(&url).unwrap();
+    let reopened = DriveDevice::new_seeded(
+        Path::from_str(&name),
+        bytes.len(),
+        "invalid-protocol://no-fetch",
+    )
+    .await
+    .unwrap();
+    assert!(!reopened.is_new());
+    drop(reopened);
+    remove(&name).await;
+}
+
+#[wasm_bindgen_test]
+async fn malformed_seed_is_not_committed_and_can_be_retried() {
+    let array = js_sys::Uint8Array::new_with_length(4 * 1024 * 1024);
+    let blob = web_sys::Blob::new_with_u8_array_sequence(&js_sys::Array::of1(&array)).unwrap();
+    let url = web_sys::Url::create_object_url_with_blob(&blob).unwrap();
+    let name = name();
+    let drive = Box::leak(Box::new(
+        DriveDevice::new_seeded(Path::from_str(&name), array.length() as usize, &url)
+            .await
+            .unwrap(),
+    ));
+    assert!(storage::mount(drive).is_err());
+    drive.discard_unsaved().unwrap();
+    web_sys::Url::revoke_object_url(&url).unwrap();
+    let reopened = DriveDevice::new(Path::from_str(&name), array.length() as usize)
+        .await
+        .unwrap();
+    assert!(reopened.is_new());
+    drop(reopened);
+    remove(&name).await;
 }

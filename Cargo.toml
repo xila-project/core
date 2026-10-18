@@ -76,6 +76,7 @@ graphics_rendering_xrgb8888 = ["graphics", "graphics/rendering_xrgb8888"]
 
 
 [workspace.dependencies]
+application_metadata = { path = "modules/application_metadata" }
 audio = { path = "modules/audio" }
 nanoaudio = { git = "https://github.com/AlixANNERAUD/nanoaudio.git", rev = "596076c64827fd8bf9e8319addc2f215e0cde8be", default-features = false }
 abi_declarations = { path = "modules/abi/declarations" }
@@ -153,6 +154,7 @@ getargs-derive = { git = "https://github.com/AlixANNERAUD/getargs-derive.git", r
 
 [workspace]
 members = [
+  "modules/application_metadata",
   "modules/audio",
   "modules/file_system",
   "modules/graphics",

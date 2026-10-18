@@ -42,7 +42,9 @@ impl FileManagerExecutable {
             virtual_file_system,
             task,
             "/configuration/shared/shortcuts/file_manager.json",
-            SHORTCUT.as_bytes(),
+            application_metadata::shortcut("file_manager")
+                .unwrap()
+                .as_bytes(),
         )
         .await
         .map_err(|error| error.to_string())?;

@@ -88,6 +88,12 @@ extern "C" {
     fn release(this: &Reservation);
 }
 
+#[wasm_bindgen(module = "/src/devices/seed.mjs")]
+extern "C" {
+    #[wasm_bindgen(catch, js_name = importSeed)]
+    async fn import_seed(url: &str, data: &Uint8Array) -> Result<JsValue, JsValue>;
+}
+
 struct Lease(Reservation);
 
 impl Drop for Lease {
@@ -244,6 +250,27 @@ impl DriveDevice {
             }),
             is_new,
         ))
+    }
+
+    /// Import a reference image into an uncommitted cache only for an absent
+    /// or zero-byte disk. The caller must validate/mount it before `sync`.
+    /// Existing disks never fetch a reference image.
+    pub async fn new_seeded(name: &Path, size: usize, seed_url: &str) -> file_system::Result<Self> {
+        let drive = Self::new(name, size).await?;
+        if drive.is_new() {
+            let data = drive.0.inner.try_get()?.data.clone();
+            import_seed(seed_url, &data).await.map_err(map_error)?;
+        }
+        Ok(drive)
+    }
+
+    /// Abandon the cache without committing it and release the disk lease.
+    /// Intended for startup failures before the filesystem becomes usable.
+    /// Unlike `unmount`, this explicitly discards unsaved changes. A running
+    /// save must finish first; this never races an OPFS commit.
+    pub fn discard_unsaved(&self) -> file_system::Result<()> {
+        let _save = self.0.saving.try_lock().map_err(|_| Error::RessourceBusy)?;
+        self.0.inner.unmount()
     }
 
     /// Whether the disk had no committed image when it was opened. This stays

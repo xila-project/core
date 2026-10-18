@@ -12,10 +12,7 @@ pub extern "C" fn __install() {
         std::fs::create_dir_all("/configuration/shared/shortcuts")?;
         std::fs::write(
             "/configuration/shared/shortcuts/pixel_painter.json",
-            format!(
-                r#"{{"name":"{}","command":"/binaries/wasm","arguments":["/binaries/pixel_painter"],"terminal":false,"icon_string":"Pa","icon_color":[142,36,170]}}"#,
-                embedded_i18n::translate!("Pixel Painter")
-            ),
+            application_metadata::shortcut("pixel_painter").unwrap(),
         )
     })();
     if let Err(error) = result {

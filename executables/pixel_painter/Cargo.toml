@@ -5,6 +5,7 @@ edition = "2024"
 description = "A bounded pixel drawing app for Xila WebAssembly."
 
 [dependencies]
+application_metadata = { workspace = true }
 embedded-i18n = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
