@@ -1,14 +1,8 @@
+mod image;
+mod populate;
 use std::{env, error::Error, path::PathBuf, process};
 
-use drivers_std::drive_file::FileDriveDevice;
-use file_system::{
-    DirectBaseOperations, XILA_DISK_SIGNATURE,
-    mbr::{Mbr, PartitionKind, create_partition_device},
-};
-
 const DEFAULT_SIZE: u64 = 16 * 1024 * 1024;
-const CACHE_SIZE: usize = 256;
-const BLOCK_SIZE: u64 = 512;
 
 fn main() {
     drivers_std::memory::instantiate_global_allocator!();
@@ -33,53 +27,21 @@ fn run() -> Result<(), Box<dyn Error>> {
         Some(value) => value.to_string_lossy().parse::<u64>()?,
         None => DEFAULT_SIZE,
     };
+    let root = match arguments.next() {
+        Some(flag) if flag == "--root" => Some(PathBuf::from(
+            arguments.next().ok_or("--root requires a directory")?,
+        )),
+        Some(_) => return Err("expected --root <directory>".into()),
+        None => None,
+    };
     if arguments.next().is_some() {
         return Err("too many arguments".into());
     }
-    if size % BLOCK_SIZE != 0 || size / BLOCK_SIZE < 2048 {
-        return Err("disk size must be a multiple of 512 bytes and at least 1048576 bytes".into());
-    }
     let output = output.canonicalize_parent()?;
-    let output_string = output
-        .to_str()
-        .ok_or("output image path must be valid UTF-8")?;
-
-    create_output_file(&output, size)?;
-
-    {
-        let drive = Box::leak(Box::new(FileDriveDevice::new(&output_string, size)));
-        let partition = Mbr::format_disk_with_signature_and_partition(
-            drive,
-            XILA_DISK_SIGNATURE,
-            PartitionKind::Xila,
-        )?;
-        let partition = Box::leak(Box::new(partition));
-        let file_system = little_fs::FileSystem::new_format(partition, CACHE_SIZE)?;
-        drop(file_system);
-        drive.flush()?;
-    }
-
-    {
-        let drive = Box::leak(Box::new(FileDriveDevice::new(&output_string, size)));
-        let mbr = Mbr::read_from_device(drive)?;
-        mbr.validate()?;
-        if mbr.get_disk_signature() != XILA_DISK_SIGNATURE {
-            return Err("MBR disk signature does not match Xila".into());
-        }
-        let entry = mbr
-            .partitions
-            .iter()
-            .find(|entry| entry.is_valid() && entry.kind == PartitionKind::Xila)
-            .ok_or("MBR has no valid Xila partition")?;
-        let partition = create_partition_device(drive, entry)?;
-        let partition = Box::leak(Box::new(partition));
-        let file_system = little_fs::FileSystem::new(partition, CACHE_SIZE)?;
-        drop(file_system);
-        drive.flush()?;
-    }
+    image::build(&output, size, root.as_deref())?;
 
     println!(
-        "Validated Xila MBR and mounted LittleFS: {} ({} bytes)",
+        "Verified Xila MBR, LittleFS contents and metadata: {} ({} bytes)",
         output.display(),
         size
     );
