@@ -5,7 +5,9 @@
   "main": "index.js",
   "directories": {},
   "scripts": {
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "check:translations": "node tools/localization/check-catalogs.mjs && node --test tools/localization/check-catalogs.test.mjs",
+    "pseudo:translations": "node tools/localization/check-catalogs.mjs --pseudo target/pseudo-locales"
   },
   "author": "",
   "license": "ISC",
