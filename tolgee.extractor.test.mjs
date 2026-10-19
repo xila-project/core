@@ -4,6 +4,14 @@ import extract from "./tolgee.extractor.mjs";
 
 const fileName = "executables/clock/src/interface.rs";
 
+// The extractor discovers the union of plural categories across all installed
+// locales. Polish adds `few` and `many` beyond English's `one` and `other`.
+const pluralCategories = ["few", "many", "one", "other"];
+
+function expectedPluralKeys(keyName) {
+  return pluralCategories.map((category) => `${keyName}.${category}`);
+}
+
 test("extracts ordinary strings without changing existing namespaces", () => {
   const result = extract('translate!("Clock");\ntranslate!(c"Start");', fileName);
   assert.deepEqual(result.keys.map(({ keyName, namespace }) => [keyName, namespace]), [
@@ -17,18 +25,18 @@ test("discovers plural forms from the existing flat Tolgee catalogs", () => {
     'embedded_i18n::translate_plural_write!(&mut laps, "Recorded laps", count);',
     fileName,
   );
-  assert.deepEqual(result.keys.map(({ keyName }) => keyName), [
-    "Recorded laps.one",
-    "Recorded laps.other",
-  ]);
+  assert.deepEqual(
+    result.keys.map(({ keyName }) => keyName),
+    expectedPluralKeys("Recorded laps"),
+  );
 });
 
 test("supports lookup-style plural macros too", () => {
   const result = extract('translate_plural!("Recorded laps", count);', fileName);
-  assert.deepEqual(result.keys.map(({ keyName }) => keyName), [
-    "Recorded laps.one",
-    "Recorded laps.other",
-  ]);
+  assert.deepEqual(
+    result.keys.map(({ keyName }) => keyName),
+    expectedPluralKeys("Recorded laps"),
+  );
 });
 
 test("extracts all plural forms across app and shell translation namespaces", () => {
@@ -56,10 +64,7 @@ test("extracts all plural forms across app and shell translation namespaces", ()
     );
     assert.deepEqual(
       result.keys.map(({ keyName, namespace }) => [keyName, namespace]),
-      [
-        [`${key}.one`, expectedNamespace],
-        [`${key}.other`, expectedNamespace],
-      ],
+      expectedPluralKeys(key).map((keyName) => [keyName, expectedNamespace]),
     );
   }
 });
