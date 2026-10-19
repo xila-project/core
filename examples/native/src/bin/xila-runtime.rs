@@ -467,7 +467,8 @@ async fn ensure_vfs_directory(
     path: &str,
 ) -> Result<(), String> {
     let mut current = String::new();
-    for part in path.split('/').filter(|part| !part.is_empty()) {
+    let parent = path.rsplit_once('/').map_or("", |(parent, _)| parent);
+    for part in parent.split('/').filter(|part| !part.is_empty()) {
         current.push('/');
         current.push_str(part);
         let current_path = PathOwned::new(current.clone())
