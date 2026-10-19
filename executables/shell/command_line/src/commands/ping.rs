@@ -192,6 +192,31 @@ mod tests {
     }
 
     #[test]
+    fn ping_byte_counts_select_singular_and_plural() {
+        let (data_one, data_many, reply_one, reply_many) =
+            match xila::internationalization::get_locale() {
+                "fr" => ("octet de données", "octets de données", "octet de", "octets de"),
+                _ => ("data byte", "data bytes", "byte from", "bytes from"),
+            };
+        assert_eq!(
+            xila::internationalization::translate_plural!("PING data bytes", 1usize),
+            data_one
+        );
+        assert_eq!(
+            xila::internationalization::translate_plural!("PING data bytes", 2usize),
+            data_many
+        );
+        assert_eq!(
+            xila::internationalization::translate_plural!("ICMP bytes from", 1usize),
+            reply_one
+        );
+        assert_eq!(
+            xila::internationalization::translate_plural!("ICMP bytes from", 2usize),
+            reply_many
+        );
+    }
+
+    #[test]
     fn suggests_misspelled_timeout_option() {
         let error = PingArguments::from_args(["localhost", "--timout", "3"].into_iter())
             .err()
