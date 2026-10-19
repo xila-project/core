@@ -78,7 +78,8 @@ pub fn run() -> wasm::Result<()> {
                     4 => ui.save_document()?,
                     _ => (),
                 }
-            } else if code == EventCode::Focused as u32 && (target == ui.path || target == ui.text) {
+            } else if code == EventCode::Focused as u32 && (target == ui.path || target == ui.text)
+            {
                 unsafe {
                     keyboard_set_textarea(ui.keyboard, target)?;
                     object_remove_flag(ui.keyboard, ObjectFlag::Hidden)?;
