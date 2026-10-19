@@ -137,7 +137,8 @@ impl VirtualFileSystem {
                 let mountpoint_index = file_systems
                     .iter()
                     .position(|file_system| {
-                        file_system.is_mounted && file_system.mount_point.as_ref() == path
+                        let mount_point: &Path = file_system.mount_point.as_ref();
+                        file_system.is_mounted && mount_point == path
                     })
                     .ok_or(Error::InvalidPath)?;
                 let file_system = &file_systems[mountpoint_index];
