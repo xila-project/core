@@ -61,14 +61,17 @@ async fn resolve_record<C: CommandContext>(
 ) -> Result<()> {
     match network_manager.resolve(domain, kind, true, None).await {
         Ok(ip) => {
+            let count = ip.len();
+            let record_label =
+                xila::internationalization::translate_plural!("DNS records for domain", count);
+            // DNS record types (A, AAAA, etc.) remain invariant CLI identifiers.
             context
                 .write_out_fmt(format_args!(
-                    "{}\n",
-                    format_args!(
-                        translate!("{} record(s) for domain '{}':"),
-                        format_kind(kind),
-                        domain
-                    )
+                    "{}: {} {} '{}':\n",
+                    format_kind(kind),
+                    count,
+                    record_label,
+                    domain
                 ))
                 .await?;
             for address in &ip {
@@ -155,6 +158,25 @@ where
 mod tests {
     use super::format_kind;
     use xila::network::DnsQueryKind;
+
+    #[test]
+    fn dns_record_count_selects_singular_and_plural() {
+        let (one, other) = match xila::internationalization::get_locale() {
+            "fr" => (
+                "enregistrement pour le domaine",
+                "enregistrements pour le domaine",
+            ),
+            _ => ("record for domain", "records for domain"),
+        };
+        assert_eq!(
+            xila::internationalization::translate_plural!("DNS records for domain", 1usize),
+            one
+        );
+        assert_eq!(
+            xila::internationalization::translate_plural!("DNS records for domain", 2usize),
+            other
+        );
+    }
 
     #[test]
     fn format_kind_maps_a() {

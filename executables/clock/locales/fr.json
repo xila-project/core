@@ -23,6 +23,8 @@
   "No saved alarm": "Aucune alarme enregistrée",
   "Pause / resume": "Pause / reprendre",
   "Repeat on selected days; none means once. All times are UTC.": "Répéter les jours sélectionnés ; aucun pour une seule fois. Les heures sont en UTC.",
+  "Recorded laps.one": "{count} tour enregistré",
+  "Recorded laps.other": "{count} tours enregistrés",
   "Reset": "Réinitialiser",
   "Restart": "Redémarrer",
   "Sat": "Sam",

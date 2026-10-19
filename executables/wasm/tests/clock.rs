@@ -12,12 +12,14 @@ mod support;
 use core::{ffi::CStr, future::poll_fn, task::Poll, time::Duration};
 use xila::graphics::{Manager, lvgl};
 
-unsafe fn find_label(root: *mut lvgl::lv_obj_t, text: &str, prefix: bool) -> *mut lvgl::lv_obj_t {
+unsafe fn find_label(root: *mut lvgl::lv_obj_t, text: &str, contains: bool) -> *mut lvgl::lv_obj_t {
     unsafe {
         if lvgl::lv_obj_has_class(root, &lvgl::lv_label_class) {
             let label = CStr::from_ptr(lvgl::lv_label_get_text(root)).to_bytes();
-            if if prefix {
-                label.starts_with(text.as_bytes())
+            if if contains {
+                label
+                    .windows(text.len())
+                    .any(|window| window == text.as_bytes())
             } else {
                 label == text.as_bytes()
             } {
@@ -25,7 +27,7 @@ unsafe fn find_label(root: *mut lvgl::lv_obj_t, text: &str, prefix: bool) -> *mu
             }
         }
         for index in 0..lvgl::lv_obj_get_child_count(root) {
-            let found = find_label(lvgl::lv_obj_get_child(root, index as i32), text, prefix);
+            let found = find_label(lvgl::lv_obj_get_child(root, index as i32), text, contains);
             if !found.is_null() {
                 return found;
             }
@@ -34,13 +36,13 @@ unsafe fn find_label(root: *mut lvgl::lv_obj_t, text: &str, prefix: bool) -> *mu
     }
 }
 
-async fn wait_label(manager: &Manager, text: &str) {
+async fn wait_label(manager: &Manager, text: &str, contains: bool) {
     for _ in 0..1000 {
         if manager.get_window_count().await.unwrap() != 0 {
             let root = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
             let found = {
                 let _lock = manager.synchronous_lock();
-                unsafe { !find_label(root, text, true).is_null() }
+                unsafe { !find_label(root, text, contains).is_null() }
             };
             if found {
                 return;
@@ -134,11 +136,11 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
     )
     .await
     .unwrap();
-    wait_label(manager, "Cancel").await;
+    wait_label(manager, "Cancel", true).await;
     click(manager, Some(2), "Start / pause").await;
     xila::task::sleep(Duration::from_millis(300)).await;
     click(manager, Some(2), "Lap").await;
-    wait_label(manager, "1: ").await;
+    wait_label(manager, "1: ", true).await;
     click(manager, Some(2), "Start / pause").await;
 
     // Select a one-second countdown using the actual touch controls.
@@ -146,7 +148,7 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
         click(manager, Some(3), "Minute -").await;
     }
     click(manager, Some(3), "Start").await;
-    wait_label(manager, "Timer finished!").await;
+    wait_label(manager, "Timer finished!", true).await;
     click(manager, None, "Dismiss").await;
 
     // Keep the saved occurrence well ahead of now, including around midnight.
@@ -161,7 +163,7 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
         click(manager, Some(1), "Hour +").await;
     }
     click(manager, Some(1), "Save and enable").await;
-    wait_label(manager, &format!("{alarm_hour:02}:00 UTC\nEnabled:")).await;
+    wait_label(manager, &format!("{alarm_hour:02}:00 UTC\nEnabled:"), true).await;
     let mut saved = Vec::new();
     xila::virtual_file_system::File::read_from_path(
         context.virtual_file_system,
@@ -183,7 +185,7 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
     )
     .await
     .unwrap();
-    wait_label(manager, "Cancel").await;
+    wait_label(manager, "Cancel", true).await;
     // No save action: the new guest must load the existing enabled alarm.
     click(manager, Some(1), "Hour +").await;
     wait_label(
@@ -192,6 +194,7 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
             "{:02}:00 UTC\nEnabled: {alarm_hour:02}:00 UTC",
             (alarm_hour + 1) % 24
         ),
+        true,
     )
     .await;
     close_and_join(manager, reopened).await;

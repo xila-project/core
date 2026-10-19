@@ -122,6 +122,10 @@ jobs:
         with:
           cache-key: localization-${{ matrix.locale }}
 
+      - name: Check | Tolgee Rust extractor regression tests
+        if: matrix.locale == 'en'
+        run: node --test tolgee.extractor.test.mjs
+
       - name: Check | Strict host and guest translations
         run: cargo make check-localization
 
