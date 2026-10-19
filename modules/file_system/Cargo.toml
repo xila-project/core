@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bitflags = { version = "2", default-features = false }
 task = { workspace = true }
 users = { workspace = true }
 shared = { workspace = true }
