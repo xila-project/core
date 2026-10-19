@@ -101,7 +101,7 @@ target = { path = "modules/target" }
 network = { path = "modules/network" }
 peripherals = { path = "modules/peripherals" }
 bootsplash = { path = "modules/bootsplash" }
-embedded-i18n = { version = "=0.1.2", default-features = false, features = [
+embedded-i18n = { version = "=0.1.3", default-features = false, features = [
   "backend-json",
 ] }
 testing = { path = "modules/testing" }

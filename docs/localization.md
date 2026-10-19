@@ -15,7 +15,7 @@ application namespace, not a global catalog.
 | `fr` — French | Existing supported locale |
 | `es` — Spanish | Shipped locale; review of terminology and LVGL layouts remains welcome |
 | `de` — German | New translated catalogs; CI and native-language review required before merging |
-| `pt-BR` — Brazilian Portuguese | Planned in #441; font-range support is fixed upstream, verify pinned embedded-i18n release |
+| `pt-BR` — Brazilian Portuguese | New catalogs; requires native-speaker and UI review before release |
 
 ## Build / verify a locale
 
@@ -57,8 +57,8 @@ change locale catalogs, it validates the **modified languages**; changes
 to Rust code, extractors, build scripts, or non-catalog workflow changes
 validate every shipped locale. Pushes to `main` also validate all locales.
 Each compiled language uses its **own Cargo target directory** to avoid
-stale compile-time translations. CI verifies font generation for Spanish
-and German when these locales are checked.
+stale compile-time translations. CI verifies font generation for Spanish, German
+and Brazilian Portuguese when these locales are checked.
 
 ## Contributing translations
 
@@ -76,7 +76,7 @@ extraction or translation-management tool.
   environment variables or other machine-readable interfaces.
 - Review text expansion on small LVGL displays and glyph availability, not
   only Tolgee completion percentages.
-- A translated `es.json` does **not** imply human review. Native speakers
+- Translated locale catalogs do **not** imply human review. Native speakers
   should check terminology, UI context and punctuation before release.
 
 Adding more locales should happen **one language per pull request**. Before
