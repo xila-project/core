@@ -45,6 +45,7 @@ async fn action(manager: &Manager, button: u32) {
     unsafe {
         let matrix = lvgl::lv_obj_get_child(root, 0);
         lvgl::lv_buttonmatrix_set_selected_button(matrix, button);
+        assert_eq!(lvgl::lv_buttonmatrix_get_selected_button(matrix), button);
         lvgl::lv_obj_send_event(
             matrix,
             lvgl::lv_event_code_t_LV_EVENT_CLICKED,
