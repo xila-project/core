@@ -43,13 +43,13 @@ fn c_strings_are_bounded_and_never_accept_null_or_out_of_range_offsets() {
 
 #[test]
 fn textarea_strings_allow_a_full_page_and_remain_bounded() {
-    let mut bytes = vec![b'a'; 4098];
-    bytes[4096] = 0;
+    let mut bytes = vec![b'a'; 4099];
+    bytes[4097] = 0;
     let mut memory = GuestMemory::new(&mut bytes);
-    assert_eq!(read_textarea_string(&memory, 0).unwrap().to_bytes().len(), 4096);
-    memory.write(GuestPointer::new(4096), b'a').unwrap();
+    assert_eq!(read_textarea_string(&memory, 1).unwrap().to_bytes().len(), 4096);
+    memory.write(GuestPointer::new(4097), b'a').unwrap();
     assert_eq!(
-        read_textarea_string(&memory, 0),
+        read_textarea_string(&memory, 1),
         Err(GraphicsError::ResourceLimit)
     );
 }
