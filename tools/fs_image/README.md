@@ -30,7 +30,7 @@ modification times do not enter the image.
 
 The native bundle contains Calculator, Clock, Pixel Painter, Synth and Weather. The
 browser bundle contains Calculator, Clock, Pixel Painter and Synth. Both include native application
-shortcuts and configuration directories. Set `EMBEDDED_I18N_LOCALE=en` or `fr`
+shortcuts and configuration directories. Set `EMBEDDED_I18N_LOCALE=en`, `fr` or `es`
 while building both guests and images. No passwords or random salts are included.
 An explicit pending marker allows runtime account initialization to finish after
 an interruption; existing saved credentials are preserved.
