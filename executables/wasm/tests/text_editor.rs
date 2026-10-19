@@ -81,6 +81,11 @@ async fn guest_opens_pages_edits_and_saves_large_file() {
         remaining = &remaining[written..];
     }
     source.close(vfs).await.unwrap();
+    let mut source_contents = Vec::new();
+    File::read_from_path(vfs, task, path, &mut source_contents)
+        .await
+        .unwrap();
+    assert_eq!(source_contents, original.as_bytes());
     let binary = xila::executable::build_crate("text_editor").unwrap();
     drivers_std::loader::load_to_virtual_file_system(
         context.task_manager,
