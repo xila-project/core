@@ -31,7 +31,9 @@ fn attributes(path: &str, kind: Kind) -> Attributes {
         .set_permissions(Permissions::from_octal(permissions).unwrap());
     if matches!(
         path,
-        "/configuration/shared/clock" | "/configuration/shared/pixel_painter"
+        "/configuration/shared/clock"
+            | "/configuration/shared/pixel_painter"
+            | "/configuration/shared/text_editor"
     ) {
         result = result
             .set_user(users::UserIdentifier::new(1000))

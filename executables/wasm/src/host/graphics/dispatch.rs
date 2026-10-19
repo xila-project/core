@@ -1,7 +1,7 @@
 use super::{
     Function, GraphicsState, ResultKind,
     error::{GraphicsError, Result},
-    marshal::{ButtonMap, read_c_string},
+    marshal::{ButtonMap, read_c_string, read_textarea_string},
     objects::Kind,
 };
 use crate::host::translation::{GuestMemory, GuestPointer, GuestSlice, WasmUsize};
@@ -278,7 +278,11 @@ pub fn dispatch(
                 Kind::Textarea
             };
             let pointer = state.object(a, Some(kind))?;
-            let text = read_c_string(memory, b)?;
+            let text = if function == Function::TextareaSetText {
+                read_textarea_string(memory, b)?
+            } else {
+                read_c_string(memory, b)?
+            };
             // Both setters copy synchronously; neither retains guest bytes.
             unsafe {
                 if function == Function::LabelSetText {

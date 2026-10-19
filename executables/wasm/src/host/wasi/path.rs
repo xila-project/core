@@ -100,6 +100,23 @@ define_wasi_module! {
         })
     }
 
+    fn path_unlink_file(caller: Caller<GlobalStore>, fd: i32, path_ptr: WasmUsize, path_len: WasmUsize) -> Result<WasiResult, wasmi::Error> {
+        wrap_function!({
+            let mut caller = caller;
+            let path_bytes = copy_guest_path(&mut caller, path_ptr, path_len)?;
+            let (task_id, directory) = base_path(&caller, fd)?;
+            let relative = core::str::from_utf8(&path_bytes).map_err(|_| Error::Ilseq)?;
+            let absolute_path = resolve_guest_path(&directory, relative)?;
+            let vfs = caller.data().context.virtual_file_system;
+            let statistics = task::block_on(vfs.get_statistics(&absolute_path)).map_err(vfs_error)?;
+            if statistics.kind == xila::file_system::Kind::Directory {
+                return Err(Error::Isdir.into());
+            }
+            task::block_on(vfs.remove(task_id, &absolute_path)).map_err(vfs_error)?;
+            Ok(())
+        })
+    }
+
     fn path_open(caller: Caller<GlobalStore>, fd: i32, _dirflags: i32, path_ptr: WasmUsize, path_len: WasmUsize, oflags: i32, rights_base: i64, _rights_inheriting: i64, fdflags: i32, opened_fd_ptr: WasmUsize) -> Result<WasiResult, wasmi::Error> {
         wrap_function!({
             let mut caller = caller;

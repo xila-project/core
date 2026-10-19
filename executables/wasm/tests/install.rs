@@ -145,6 +145,7 @@ async fn install_selects_install_export_and_never_falls_back_to_main() {
             ("weather", "Weather"),
             ("clock", "Clock"),
             ("synth", "Synth"),
+            ("text_editor", "Text Editor"),
         ] {
             let binary = executable::build_crate(app).unwrap();
             let path = format!("/binaries/{app}");
@@ -156,11 +157,13 @@ async fn install_selects_install_export_and_never_falls_back_to_main() {
             )
             .await
             .unwrap();
-            assert_eq!(
-                execute(&standard, vec!["--install".into(), path.clone()]).await,
-                0,
-                "{app}"
-            );
+            let exit = execute(&standard, vec!["--install".into(), path.clone()]).await;
+            context
+                .virtual_file_system
+                .remove(task, path.as_str())
+                .await
+                .unwrap();
+            assert_eq!(exit, 0, "{app}");
             let mut contents = Vec::new();
             let shortcut_path = format!("/configuration/shared/shortcuts/{app}.json");
             File::read_from_path(

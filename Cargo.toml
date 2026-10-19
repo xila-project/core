@@ -123,6 +123,7 @@ wasm = { path = "executables/wasm" }
 terminal = { path = "executables/terminal" }
 settings = { path = "executables/settings" }
 pixel_painter = { path = "executables/pixel_painter" }
+text_editor = { path = "executables/text_editor" }
 calculator = { path = "executables/calculator" }
 weather = { path = "executables/weather" }
 clock = { path = "executables/clock" }
@@ -181,6 +182,7 @@ members = [
   "executables/terminal",
   "executables/settings",
   "executables/pixel_painter",
+  "executables/text_editor",
   "modules/authentication",
   "modules/network",
   "modules/synchronization",

@@ -1,6 +1,6 @@
 use super::{
     error::GraphicsError,
-    marshal::{ButtonMap, read_c_string},
+    marshal::{ButtonMap, read_c_string, read_textarea_string},
 };
 use crate::host::translation::{GuestMemory, GuestPointer, GuestValue, WasmUsize};
 use alloc::{vec, vec::Vec};
@@ -38,6 +38,19 @@ fn c_strings_are_bounded_and_never_accept_null_or_out_of_range_offsets() {
     assert_eq!(
         read_c_string(&GuestMemory::new(&mut no_nul), 1),
         Err(GraphicsError::InvalidMemory)
+    );
+}
+
+#[test]
+fn textarea_strings_allow_a_full_page_and_remain_bounded() {
+    let mut bytes = vec![b'a'; 4099];
+    bytes[4097] = 0;
+    let mut memory = GuestMemory::new(&mut bytes);
+    assert_eq!(read_textarea_string(&memory, 1).unwrap().to_bytes().len(), 4096);
+    memory.write(GuestPointer::new(4097), b'a').unwrap();
+    assert_eq!(
+        read_textarea_string(&memory, 1),
+        Err(GraphicsError::ResourceLimit)
     );
 }
 
