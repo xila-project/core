@@ -112,13 +112,6 @@ impl VirtualFileSystem {
 
         let mut file_systems = self.file_systems.write().await;
 
-        let (mountpoint_file_system, _, mountpoint_index) =
-            Self::get_file_system_from_path(&file_systems, &path)?;
-        let mounted_path: &Path = mountpoint_file_system.mount_point.as_ref();
-        if mounted_path != path {
-            return Err(Error::InvalidPath);
-        }
-
         let parent_path = path.go_parent().ok_or(Error::InvalidPath)?;
 
         let (underlying_file_system, _, _) =
@@ -129,13 +122,24 @@ impl VirtualFileSystem {
 
         let mut attributes =
             Attributes::new().set_mask(AttributeFlags::Kind | AttributeFlags::Inode);
-        Self::get_attributes(underlying_file_system.file_system, path, &mut attributes).await?;
+        Self::get_attributes(
+            underlying_file_system.file_system,
+            relative_path,
+            &mut attributes,
+        )
+        .await?;
 
         let kind = attributes.get_kind().ok_or(Error::MissingAttribute)?;
         let inode = *attributes.get_inode().ok_or(Error::MissingAttribute)?;
 
         match kind {
             Kind::Directory => {
+                let mountpoint_index = file_systems
+                    .iter()
+                    .position(|file_system| {
+                        file_system.is_mounted && file_system.mount_point.as_ref() == path
+                    })
+                    .ok_or(Error::InvalidPath)?;
                 let file_system = &file_systems[mountpoint_index];
 
                 if file_system.reference_count > 1 && !force {
