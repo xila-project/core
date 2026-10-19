@@ -111,7 +111,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use alloc::{vec, vec::Vec};
+    use alloc::vec::Vec;
     use getargs::Options;
 
     use super::HeadArguments;
