@@ -5,7 +5,6 @@ extern crate alloc;
 mod any;
 mod bijective_map;
 mod error;
-pub mod flags;
 mod http;
 pub mod shadow_type;
 mod size;
