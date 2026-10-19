@@ -5,6 +5,7 @@
   "Failed to get resolution": "No se pudo obtener la resolución",
   "Failed to register": "No se pudo registrar",
   "Invalid reference": "Referencia no válida",
+  "Invalid parameter": "Parámetro no válido",
   "Invalid window identifier": "Identificador de ventana no válido",
   "Not available": "No disponible",
   "Not initialized": "No inicializado",
