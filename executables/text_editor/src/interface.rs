@@ -378,8 +378,12 @@ impl Interface {
         let text = CString::new(page_text).map_err(|_| -1)?;
         unsafe {
             textarea_set_text(self.text, text.as_ptr())?;
-            let label = CString::new(format!("{} | {} bytes", self.page_start, page.length))
-                .map_err(|_| -1)?;
+            let total_length = self.working.as_ref().map_or(0, WorkingCopy::length);
+            let label = CString::new(format!(
+                "{} | {} of {} bytes",
+                self.page_start, page.length, total_length
+            ))
+            .map_err(|_| -1)?;
             label_set_text(self.page_label, label.as_ptr().cast_mut())?;
         }
         self.page_length = page.length;

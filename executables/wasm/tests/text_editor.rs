@@ -124,9 +124,10 @@ async fn guest_opens_pages_edits_and_saves_large_file() {
     }
     action(manager, 3).await;
     wait_label(manager, 4, "Opened").await;
+    wait_label(manager, 2, "0 | 4096 of 9000 bytes").await;
     xila::task::sleep(Duration::from_millis(30)).await;
     action(manager, 1).await;
-    wait_label(manager, 2, "4096 | 4096 bytes").await;
+    wait_label(manager, 2, "4096 | 4096 of 9000 bytes").await;
     xila::task::sleep(Duration::from_millis(30)).await;
     let root = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
     {
