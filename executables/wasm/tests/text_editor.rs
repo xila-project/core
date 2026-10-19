@@ -88,7 +88,7 @@ async fn guest_opens_pages_edits_and_saves_large_file() {
     let handle = xila::executable::execute(
         context,
         "/binaries/wasm",
-        vec!["/binaries/text_editor".into(), path.into()],
+        vec![path.into()],
         standard,
         None,
     )
