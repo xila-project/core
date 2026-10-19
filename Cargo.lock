@@ -1284,6 +1284,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "drivers_tflite_micro"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "device",
+]
+
+[[package]]
 name = "drivers_wasm"
 version = "0.1.0"
 dependencies = [
@@ -5656,6 +5664,7 @@ dependencies = [
  "audio",
  "authentication",
  "bootsplash",
+ "drivers_tflite_micro",
  "embedded-i18n",
  "executable",
  "file_system",
