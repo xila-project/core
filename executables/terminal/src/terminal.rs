@@ -2,12 +2,12 @@ use crate::error::{Error, Result};
 use alloc::{collections::vec_deque::VecDeque, string::String};
 use core::ffi::CStr;
 use xila::graphics::OwnedWindow;
-use xila::internationalization::translate;
 use xila::graphics::fonts::get_font_monospace_medium;
 use xila::graphics::{
     self, Color, EventKind, Key,
     lvgl::{self, lv_obj_t},
 };
+use xila::internationalization::translate;
 use xila::synchronization::{blocking_mutex::raw::CriticalSectionRawMutex, rwlock::RwLock};
 
 pub(crate) struct Inner {
