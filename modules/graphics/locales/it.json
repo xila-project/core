@@ -1,0 +1,13 @@
+{
+  "Already in use": "Già in uso",
+  "Already initialized": "Già inizializzato",
+  "Failed to create object": "Impossibile creare l'oggetto",
+  "Failed to get resolution": "Impossibile ottenere la risoluzione",
+  "Failed to register": "Registrazione non riuscita",
+  "Invalid reference": "Riferimento non valido",
+  "Invalid window identifier": "Identificatore della finestra non valido",
+  "Not available": "Non disponibile",
+  "Not initialized": "Non inizializzato",
+  "Not registered": "Non registrato",
+  "Out of memory": "Memoria esaurita"
+}

@@ -1,0 +1,22 @@
+{
+  "Text Editor": "Editor di testo",
+  "Previous": "Precedente",
+  "Next": "Successivo",
+  "New": "Nuovo",
+  "Open": "Apri",
+  "Save": "Salva",
+  "Choose a path, then create or open a text file": "Scegli un percorso, quindi crea o apri un file di testo",
+  "Unsaved changes - close again to discard": "Modifiche non salvate - chiudi di nuovo per scartarle",
+  "Unsaved changes - choose New or Open again to discard": "Modifiche non salvate - premi di nuovo Nuovo o Apri per scartarle",
+  "Enter an absolute file path": "Inserisci un percorso assoluto",
+  "Open or create a file first": "Apri o crea prima un file",
+  "Could not create a working copy in this directory": "Impossibile creare una copia di lavoro in questa directory",
+  "New text file": "Nuovo file di testo",
+  "Opened": "Aperto",
+  "Open failed - use a UTF-8 text file and check storage": "Apertura non riuscita - usa un file di testo UTF-8 e controlla la memoria",
+  "Saved": "Salvato",
+  "Save failed - working copy kept; check path and storage": "Salvataggio non riuscito - copia di lavoro conservata; controlla percorso e memoria",
+  "Page text must fit within 4096 UTF-8 bytes": "Il testo della pagina non deve superare 4096 byte UTF-8",
+  "Edit failed - close again to discard changes": "Modifica non riuscita - chiudi di nuovo per scartare le modifiche",
+  "Edit failed - reopen the source file": "Modifica non riuscita - riapri il file originale"
+}

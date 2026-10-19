@@ -1,0 +1,16 @@
+{
+  "Pixel Painter": "Editor di pixel",
+  "Undo": "Annulla",
+  "Clear": "Cancella",
+  "Save": "Salva",
+  "Open": "Apri",
+  "Ready - white erases": "Pronto - il bianco cancella",
+  "Unsaved drawing - close again to discard": "Disegno non salvato - chiudi di nuovo per scartarlo",
+  "Unsaved drawing - Open again to discard": "Disegno non salvato - premi di nuovo Apri per scartarlo",
+  "Enter an absolute file path": "Inserisci un percorso assoluto",
+  "Opened": "Aperto",
+  "Saved": "Salvato",
+  "Invalid Pixel Painter file - drawing kept": "File dell'editor di pixel non valido - disegno conservato",
+  "Open failed - check path and storage": "Apertura non riuscita - controlla percorso e memoria",
+  "Save failed - drawing kept; check path and storage": "Salvataggio non riuscito - disegno conservato; controlla percorso e memoria"
+}
