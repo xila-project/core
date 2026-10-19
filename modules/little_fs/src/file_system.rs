@@ -252,7 +252,7 @@ impl FileSystemOperations for FileSystem {
             let mut internal_attributes =
                 unsafe { InternalAttributes::new_uninitialized().assume_init() };
 
-            if attributes.get_mask() != AttributeFlags::All {
+            if attributes.get_mask() != AttributeFlags::all() {
                 convert_result(unsafe {
                     littlefs::lfs_getattr(
                         file_system,
