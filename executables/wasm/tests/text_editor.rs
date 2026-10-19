@@ -70,7 +70,7 @@ async fn guest_opens_pages_edits_and_saves_large_file() {
         vfs,
         task,
         path,
-        Flags::new(AccessFlags::Write, Some(CreateFlags::CreateTruncate), None),
+        Flags::new(AccessFlags::Write, Some(CreateFlags::CREATE_TRUNCATE), None),
     )
     .await
     .unwrap();
