@@ -16,6 +16,7 @@ pub mod macros;
 mod manager;
 mod point;
 mod screen;
+mod screenshot;
 pub mod symbol;
 mod window;
 
@@ -31,6 +32,7 @@ pub use input::*;
 pub use manager::*;
 pub use point::*;
 pub use screen::*;
+pub use screenshot::*;
 pub use window::*;
 pub mod stubs;
 pub use logo::*;

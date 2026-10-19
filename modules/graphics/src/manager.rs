@@ -141,6 +141,28 @@ impl Manager {
         })
     }
 
+    /// Capture the active LVGL screen into an owned, bounded RGBA8888 buffer.
+    pub async fn capture_screen(&self) -> Result<crate::ScreenSnapshot> {
+        let _lock = self.global_lock.lock().await;
+        let inner = self.inner.read().await;
+        inner
+            .displays
+            .first()
+            .ok_or(Error::NotAvailable)?
+            .capture_screen()
+    }
+
+    /// Return the current active LVGL display resolution.
+    pub async fn get_resolution(&self) -> Result<crate::Point> {
+        let _lock = self.global_lock.lock().await;
+        let inner = self.inner.read().await;
+        inner
+            .displays
+            .first()
+            .map(Display::get_resolution)
+            .ok_or(Error::NotAvailable)
+    }
+
     pub fn lock_function_sync<T>(&self, function: impl FnOnce() -> Result<T>) -> Result<T> {
         task::block_on(self.lock_function(function))
     }
