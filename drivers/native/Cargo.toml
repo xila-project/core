@@ -28,6 +28,9 @@ pixels = "0.17.1"
 winit = { version = "0.30", features = ["rwh_05"] }
 rand = "0.10.0"
 libc = { version = "0.2" }
+png = "0.18.1"
+serde_json = "1.0"
+debug_protocol = { workspace = true }
 cap-std = "4.0.3"
 users = { workspace = true }
 

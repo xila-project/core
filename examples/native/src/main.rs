@@ -51,6 +51,18 @@ async fn main(task_manager: &'static xila::task::Manager) {
             std::process::exit(2);
         }
     };
+    if config.interface == cli::InterfaceMode::Graphical
+        && config.display_driver == cli::DisplayDriver::Headless
+        && (config.resolution.0 as usize)
+            .checked_mul(config.resolution.1 as usize)
+            .is_none_or(|area| area > xila::graphics::SCREEN_SNAPSHOT_MAX_PIXELS)
+    {
+        eprintln!(
+            "Invalid headless display resolution: area exceeds the {} pixel limit.",
+            xila::graphics::SCREEN_SNAPSHOT_MAX_PIXELS
+        );
+        std::process::exit(2);
+    }
 
     // - Initialize the system
     log::initialize(&drivers_std::log::Logger).unwrap();
@@ -67,33 +79,58 @@ async fn main(task_manager: &'static xila::task::Manager) {
     let (graphics_manager, bootsplash): (Option<&'static graphics::Manager>, Option<Bootsplash>) =
         if config.interface == cli::InterfaceMode::Graphical {
             let resolution = graphics::Point::new(config.resolution.0, config.resolution.1);
-            let (screen_device, pointer_device, keyboard_device, mut runner) =
-                drivers_native::window_screen::new(resolution)
-                    .await
-                    .unwrap();
-            let (screen_device, pointer_device, keyboard_device) = (
-                Box::leak(Box::new(screen_device)),
-                Box::leak(Box::new(pointer_device)),
-                Box::leak(Box::new(keyboard_device)),
-            );
-
-            let graphics_manager = graphics::initialize(
-                time_manager,
-                screen_device,
-                pointer_device,
-                graphics::InputKind::Pointer,
-                graphics::get_minimal_buffer_size(&resolution),
-                true,
-            )
-            .await;
+            let (graphics_manager, event_runner) = match config.display_driver {
+                cli::DisplayDriver::Native => {
+                    let (screen_device, pointer_device, keyboard_device, runner) =
+                        drivers_native::window_screen::new(resolution)
+                            .await
+                            .unwrap();
+                    let (screen_device, pointer_device, keyboard_device) = (
+                        Box::leak(Box::new(screen_device)),
+                        Box::leak(Box::new(pointer_device)),
+                        Box::leak(Box::new(keyboard_device)),
+                    );
+                    let pointer_device: &'static dyn xila::file_system::DirectCharacterDevice =
+                        pointer_device;
+                    let keyboard_device: &'static dyn xila::file_system::DirectCharacterDevice =
+                        keyboard_device;
+                    let input_devices = [
+                        (pointer_device, graphics::InputKind::Pointer),
+                        (keyboard_device, graphics::InputKind::Keypad),
+                    ];
+                    let manager = graphics::initialize_with_input_devices(
+                        time_manager,
+                        screen_device,
+                        &input_devices,
+                        graphics::get_minimal_buffer_size(&resolution),
+                        true,
+                    )
+                    .await;
+                    (manager, Some(runner))
+                }
+                cli::DisplayDriver::Headless => {
+                    let screen_device = Box::leak(Box::new(
+                        drivers_headless::HeadlessScreenDevice::new(resolution).unwrap_or_else(
+                            |error| {
+                                eprintln!("Failed to create headless display: {error}");
+                                std::process::exit(2);
+                            },
+                        ),
+                    ));
+                    let manager = graphics::initialize_with_input_devices(
+                        time_manager,
+                        screen_device,
+                        &[],
+                        graphics::get_minimal_buffer_size(&resolution),
+                        true,
+                    )
+                    .await;
+                    (manager, None)
+                }
+            };
             let graphics_manager: &'static graphics::Manager =
                 Box::leak(Box::new(graphics_manager));
             graphics::set_ffi_manager(graphics_manager);
-
-            graphics_manager
-                .add_input_device(keyboard_device, graphics::InputKind::Keypad)
-                .await
-                .unwrap();
 
             task_manager
                 .spawn(task, "Graphics", None, |_| {
@@ -102,12 +139,14 @@ async fn main(task_manager: &'static xila::task::Manager) {
                 .await
                 .unwrap();
 
-            task_manager
-                .spawn(task, "Event Loop", None, async move |_| {
-                    runner.run().await;
-                })
-                .await
-                .unwrap();
+            if let Some(mut runner) = event_runner {
+                task_manager
+                    .spawn(task, "Event Loop", None, async move |_| {
+                        runner.run().await;
+                    })
+                    .await
+                    .unwrap();
+            }
 
             let bootsplash = Bootsplash::new(graphics_manager).await.unwrap();
             (Some(graphics_manager), Some(bootsplash))
@@ -150,30 +189,49 @@ async fn main(task_manager: &'static xila::task::Manager) {
         .create_directory(task, &"/devices/cpu")
         .await;
 
-    // Keep the mixer pinned for the lifetime of every mounted VFS stream.
-    let audio_system: &'static audio::AudioSystem =
-        Box::leak(Box::new(audio::AudioSystem::new().unwrap()));
-    // SAFETY: the leaked service can never move or be freed.
-    let audio_system = unsafe { core::pin::Pin::new_unchecked(audio_system) };
-    let mut audio_runner = match drivers_native::audio::new(audio_system, 1) {
-        Ok(runner) => {
-            let _ = virtual_file_system
-                .create_directory(task, &"/devices/audio")
-                .await;
-            virtual_file_system
-                .mount_character_device(
-                    task,
-                    "/devices/audio/playback",
-                    audio::AudioStreamDevice::new(audio_system),
-                )
-                .await
-                .expect("Failed to mount audio playback");
-            log::information!("Native audio ready");
-            Some(runner)
-        }
-        Err(error) => {
-            log::warning!("Audio unavailable; applications can run silently: {error}");
-            None
+    #[cfg(unix)]
+    if graphics_manager.is_some() {
+        virtual_file_system
+            .create_directory(task, &"/devices/debug")
+            .await
+            .expect("Failed to create debug device directory");
+        virtual_file_system
+            .mount_character_device(
+                task,
+                "/devices/debug/transport",
+                drivers_native::window_screen::DebugTransportDevice,
+            )
+            .await
+            .expect("Failed to mount debug transport");
+    }
+
+    #[cfg(feature = "audio")]
+    let mut audio_runner = {
+        // Keep the mixer pinned for the lifetime of every mounted VFS stream.
+        let audio_system: &'static audio::AudioSystem =
+            Box::leak(Box::new(audio::AudioSystem::new().unwrap()));
+        // SAFETY: the leaked service can never move or be freed.
+        let audio_system = unsafe { core::pin::Pin::new_unchecked(audio_system) };
+        match drivers_native::audio::new(audio_system, 1) {
+            Ok(runner) => {
+                let _ = virtual_file_system
+                    .create_directory(task, &"/devices/audio")
+                    .await;
+                virtual_file_system
+                    .mount_character_device(
+                        task,
+                        "/devices/audio/playback",
+                        audio::AudioStreamDevice::new(audio_system),
+                    )
+                    .await
+                    .expect("Failed to mount audio playback");
+                log::information!("Native audio ready");
+                Some(runner)
+            }
+            Err(error) => {
+                log::warning!("Audio unavailable; applications can run silently: {error}");
+                None
+            }
         }
     };
 
@@ -311,6 +369,8 @@ async fn main(task_manager: &'static xila::task::Manager) {
             ),
             (&"/binaries/terminal", terminal::TerminalExecutable),
             (&"/binaries/settings", settings::SettingsExecutable),
+            #[cfg(unix)]
+            (&"/binaries/debug", debug_application::DebugExecutable),
             (&"/binaries/wasm", wasm::WasmExecutable),
         ]
     )
@@ -344,6 +404,33 @@ async fn main(task_manager: &'static xila::task::Manager) {
         bootsplash.stop(graphics_manager).await.unwrap();
     }
 
+    // Headless sessions have no physical input with which to open the Debug
+    // application. Start its subsystem-backed transport before the shell so
+    // a host agent can inspect and control the UI immediately after boot.
+    if config.interface == cli::InterfaceMode::Graphical
+        && config.display_driver == cli::DisplayDriver::Headless
+    {
+        let debug_standard = Standard::open(
+            &"/devices/null",
+            &"/devices/null",
+            &"/devices/null",
+            task,
+            virtual_file_system,
+            executable_context,
+        )
+        .await
+        .expect("Failed to open standard files for the headless Debug app");
+        executable::execute(
+            executable_context,
+            &"/binaries/debug",
+            vec!["--background".into()],
+            debug_standard,
+            None,
+        )
+        .await
+        .expect("Failed to start the headless Debug app");
+    }
+
     let standard = Standard::open(
         &"/devices/standard_in",
         &"/devices/standard_out",
@@ -375,6 +462,7 @@ async fn main(task_manager: &'static xila::task::Manager) {
         {
             break;
         }
+        #[cfg(feature = "audio")]
         if let Some(runner) = &audio_runner
             && let Err(error) = runner.check()
         {
@@ -385,6 +473,7 @@ async fn main(task_manager: &'static xila::task::Manager) {
     }
 
     virtual_file_system.uninitialize().await;
+    #[cfg(feature = "audio")]
     drop(audio_runner);
 }
 

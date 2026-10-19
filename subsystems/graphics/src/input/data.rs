@@ -109,9 +109,7 @@ impl From<InputData> for lvgl::lv_indev_data_t {
 
         let state = value.get_touch();
 
-        if *state == State::Pressed {
-            input_device_data.point = (*value.get_point()).into();
-        }
+        input_device_data.point = (*value.get_point()).into();
 
         input_device_data.state = (*state).into();
         input_device_data.key = value.key.into();

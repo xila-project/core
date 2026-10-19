@@ -177,6 +177,28 @@ impl Display {
     pub fn get_object(&self) -> *mut lvgl::lv_obj_t {
         unsafe { lvgl::lv_display_get_screen_active(self.display) }
     }
+
+    pub fn get_resolution(&self) -> Point {
+        unsafe {
+            Point::new(
+                lvgl::lv_display_get_horizontal_resolution(self.display) as i16,
+                lvgl::lv_display_get_vertical_resolution(self.display) as i16,
+            )
+        }
+    }
+
+    pub(crate) fn capture_screen(&self) -> Result<crate::ScreenSnapshot> {
+        let resolution = self.get_resolution();
+        if resolution.get_x() <= 0
+            || resolution.get_y() <= 0
+            || (resolution.get_x() as usize)
+                .checked_mul(resolution.get_y() as usize)
+                .is_none_or(|pixels| pixels > crate::SCREEN_SNAPSHOT_MAX_PIXELS)
+        {
+            return Err(crate::Error::InvalidParameter);
+        }
+        crate::screenshot::capture_screen(self.get_object())
+    }
 }
 
 #[cfg(test)]
