@@ -52,11 +52,13 @@ locale in `seed-images/{locale}/`; the localized browser demonstration is at
 
 ## Localization CI
 
-The localization workflow runs in **one job** for `en`, `fr`, `es`
-and `de`, sharing its setup while using a **separate Cargo target
-directory for each locale**. This deliberately avoids stale
-compile-time translations across successive builds. Font generation is
-also checked for Spanish and German.
+The localization workflow runs in **one job**. On pull requests that only
+change locale catalogs, it validates the **modified languages**; changes
+to Rust code, extractors, build scripts, or non-catalog workflow changes
+validate every shipped locale. Pushes to `main` also validate all locales.
+Each compiled language uses its **own Cargo target directory** to avoid
+stale compile-time translations. CI verifies font generation for Spanish
+and German when these locales are checked.
 
 ## Contributing translations
 
