@@ -76,7 +76,7 @@ export default function extractRustTranslations(code, fileName) {
 
   // Plain lookups and plural lookup macros have the key as first argument.
   const translationCall =
-    /\\b(translate|translation|translate_plural)!\\s*\\(\\s*(?:c)?"((?:\\\\.|[^"\\\\])+)"/g;
+    /\b(translate|translation|translate_plural)!\s*\(\s*(?:c)?"((?:\\.|[^"\\])+)"/g;
   let match;
   while ((match = translationCall.exec(code)) !== null) {
     const keys = match[1] === "translate_plural"
@@ -87,7 +87,7 @@ export default function extractRustTranslations(code, fileName) {
 
   // The write macro takes the writer before the translation key.
   const pluralWriteCall =
-    /\\btranslate_plural_write!\\s*\\(\\s*[^,]+,\\s*"((?:\\\\.|[^"\\\\])+)"/g;
+    /\btranslate_plural_write!\s*\(\s*[^,]+,\s*"((?:\\.|[^"\\])+)"/g;
   while ((match = pluralWriteCall.exec(code)) !== null) {
     for (const key of pluralKeys(namespace, match[1])) addKey(key, match.index);
   }
