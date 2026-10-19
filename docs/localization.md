@@ -14,8 +14,8 @@ application namespace, not a global catalog.
 | `en` — English | Existing supported locale (fallback) |
 | `fr` — French | Existing supported locale |
 | `es` — Spanish | Shipped locale; review of terminology and LVGL layouts remains welcome |
-| `de` — German | New translated catalogs; CI and native-language review required before merging |
-| `pt-BR` — Brazilian Portuguese | New catalogs; requires native-speaker and UI review before release |
+| `de` — German | Shipped locale; native-language and small-screen reviews remain welcome |
+| `pt-BR` — Brazilian Portuguese | Shipped locale; native-language and UI review remain welcome |
 | `it` — Italian | New catalogs; requires native-speaker and UI review before release |
 
 ## Build / verify a locale
