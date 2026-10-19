@@ -1,0 +1,16 @@
+{
+  "AlreadyInitialized": "Ya inicializado",
+  "AlreadySet": "Ya establecido",
+  "FailedToCreateThread": "No se pudo crear el hilo",
+  "FailedToSpawnThread": "No se pudo iniciar el hilo",
+  "InvalidEnvironmentVariable": "Variable de entorno no válida",
+  "InvalidSpawnerIdentifier": "Identificador de lanzador no válido",
+  "InvalidTaskIdentifier": "Identificador de tarea no válido",
+  "NoSpawnerAvailable": "No hay ningún lanzador disponible",
+  "NoThreadForTask": "No hay hilo para la tarea",
+  "NotInitialized": "No inicializado",
+  "ThreadAlreadyRegistered": "Hilo ya registrado",
+  "ThreadNotRegistered": "Hilo no registrado",
+  "TooManySpawners": "Demasiados lanzadores",
+  "TooManyTasks": "Demasiadas tareas"
+}
