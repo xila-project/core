@@ -165,9 +165,7 @@ impl WorkingCopy {
                 ));
             }
         };
-        Ok(Page {
-            length: valid,
-        })
+        Ok(Page { length: valid })
     }
 
     pub fn previous_page_start(&mut self, offset: u64) -> io::Result<u64> {
@@ -323,22 +321,25 @@ mod tests {
     fn working_copy_pages_and_saves_without_loading_the_document() {
         let dir = directory();
         let source = dir.join("source.txt");
-        let contents = format!("{}é{}", "a".repeat(PAGE_BYTES - 1), "b".repeat(PAGE_BYTES * 3));
+        let contents = format!(
+            "{}é{}",
+            "a".repeat(PAGE_BYTES - 1),
+            "b".repeat(PAGE_BYTES * 3)
+        );
         fs::write(&source, &contents).unwrap();
         let mut copy = WorkingCopy::open(&source).unwrap();
         let mut page = [0; PAGE_BYTES];
         let first = copy.read_page(0, &mut page).unwrap();
         assert_eq!(first.length, PAGE_BYTES - 1);
         assert!(copy.length() > first.length as u64);
-        assert_eq!(
-            copy.previous_page_start(first.length as u64).unwrap(),
-            0
-        );
+        assert_eq!(copy.previous_page_start(first.length as u64).unwrap(), 0);
         copy.replace_page(0, first.length, "short").unwrap();
         let second = copy.read_page(0, &mut page).unwrap();
-        assert!(std::str::from_utf8(&page[..second.length])
-            .unwrap()
-            .starts_with("shorté"));
+        assert!(
+            std::str::from_utf8(&page[..second.length])
+                .unwrap()
+                .starts_with("shorté")
+        );
         let saved = dir.join("saved.txt");
         copy.save_to(&saved).unwrap();
         assert_eq!(

@@ -120,11 +120,13 @@ async fn guest_opens_pages_edits_and_saves_large_file() {
     manager.send_window_close_request(window).await.unwrap();
     let exit = handle.join().await;
     assert_eq!(exit, 0);
-    let directory = SynchronousDirectory::open(vfs, task, "/configuration/shared/text_editor")
-        .unwrap();
+    let directory =
+        SynchronousDirectory::open(vfs, task, "/configuration/shared/text_editor").unwrap();
     let names: Vec<_> = directory.map(|entry| entry.name).collect();
     assert!(names.iter().any(|name| name == "document.txt"));
-    assert!(!names
-        .iter()
-        .any(|name| name.starts_with(".xila-text-editor-")));
+    assert!(
+        !names
+            .iter()
+            .any(|name| name.starts_with(".xila-text-editor-"))
+    );
 }

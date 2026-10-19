@@ -71,7 +71,14 @@ fn out_of_space_removes_incomplete_output() {
 #[test]
 fn browser_and_native_bundles_contain_their_declared_apps() {
     let f = Fixture::new();
-    for app in ["calculator", "weather", "clock", "pixel_painter", "synth", "text_editor"] {
+    for app in [
+        "calculator",
+        "weather",
+        "clock",
+        "pixel_painter",
+        "synth",
+        "text_editor",
+    ] {
         fs::write(
             f.0.join(format!("{app}.wasm")),
             format!("guest fixture for {app}"),

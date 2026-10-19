@@ -78,9 +78,7 @@ pub fn run() -> wasm::Result<()> {
                     4 => ui.save_document()?,
                     _ => (),
                 }
-            } else if code == EventCode::Focused as u32
-                && (target == ui.path || target == ui.text)
-            {
+            } else if code == EventCode::Focused as u32 && (target == ui.path || target == ui.text) {
                 unsafe {
                     keyboard_set_textarea(ui.keyboard, target)?;
                     object_remove_flag(ui.keyboard, ObjectFlag::Hidden)?;
@@ -221,10 +219,11 @@ impl Interface {
             return Ok(false);
         };
         if text != self.original_page {
-            let result = self.working
-                .as_mut()
-                .ok_or(-1)?
-                .replace_page(self.page_start, self.page_length, &text);
+            let result = self.working.as_mut().ok_or(-1)?.replace_page(
+                self.page_start,
+                self.page_length,
+                &text,
+            );
             if result.is_err() {
                 self.dirty = true;
                 self.revision = self.revision.wrapping_add(1);
@@ -285,9 +284,9 @@ impl Interface {
                 self.show_page()?;
                 self.status(translate!("New text file"))?;
             }
-            Err(_) => {
-                self.status(translate!("Could not create a working copy in this directory"))?
-            }
+            Err(_) => self.status(translate!(
+                "Could not create a working copy in this directory"
+            ))?,
         }
         Ok(())
     }
@@ -315,11 +314,9 @@ impl Interface {
                 self.show_page()?;
                 self.status(translate!("Opened"))?;
             }
-            Err(_) => {
-                self.status(translate!(
-                    "Open failed - use a UTF-8 text file and check storage"
-                ))?
-            }
+            Err(_) => self.status(translate!(
+                "Open failed - use a UTF-8 text file and check storage"
+            ))?,
         }
         Ok(())
     }
