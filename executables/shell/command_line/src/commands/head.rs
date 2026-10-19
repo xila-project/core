@@ -111,7 +111,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use alloc::{vec, vec::Vec};
+    use alloc::vec::Vec;
     use getargs::Options;
 
     use super::HeadArguments;
@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn keeps_nothing_when_zero_lines_requested() {
         let input = b"line1\nline2\n";
-        assert_eq!(select_head_bytes(input, 0), vec![]);
+        assert_eq!(select_head_bytes(input, 0), Vec::<u8>::new());
     }
 
     #[test]

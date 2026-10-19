@@ -1115,6 +1115,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c87e182de0887fd5361989c677c4e8f5000cd9491d6d563161a8f3a5519fc7f"
 
 [[package]]
+name = "debug_application"
+version = "0.1.0"
+dependencies = [
+ "debug_protocol",
+ "log 0.1.0",
+ "serde_json",
+ "xila",
+]
+
+[[package]]
+name = "debug_protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "defmt"
 version = "0.3.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1252,6 +1269,15 @@ name = "drivers_espressif"
 version = "0.1.0"
 
 [[package]]
+name = "drivers_headless"
+version = "0.1.0"
+dependencies = [
+ "file_system",
+ "graphics",
+ "shared",
+]
+
+[[package]]
 name = "drivers_native"
 version = "0.1.0"
 dependencies = [
@@ -1259,6 +1285,7 @@ dependencies = [
  "audio",
  "cap-std",
  "critical-section",
+ "debug_protocol",
  "embassy-executor",
  "file_system",
  "graphics",
@@ -1267,8 +1294,10 @@ dependencies = [
  "nanoaudio",
  "nanoaudio-cpal",
  "pixels",
+ "png",
  "rand",
  "rustix 1.1.5",
+ "serde_json",
  "shared",
  "synchronization",
  "task",
@@ -2771,7 +2800,9 @@ dependencies = [
  "abi_definitions",
  "audio",
  "command_line_shell",
+ "debug_application",
  "drivers_core",
+ "drivers_headless",
  "drivers_native",
  "drivers_shared",
  "drivers_std",

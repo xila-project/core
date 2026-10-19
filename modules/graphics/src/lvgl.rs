@@ -20,6 +20,23 @@ pub const LV_OPA_0: u8 = 0;
 pub const LV_OPA_50: u8 = 127;
 pub const LV_OPA_COVER: u8 = 255;
 
+// `lvgl_rust_sys` omits this optional LVGL declaration. Keep the raw
+// function private to this module and expose it only to the graphics wrapper.
+unsafe extern "C" {
+    #[link_name = "lv_snapshot_take"]
+    fn lv_snapshot_take_raw(
+        object: *mut lv_obj_t,
+        color_format: lv_color_format_t,
+    ) -> *mut lv_draw_buf_t;
+}
+
+pub(crate) unsafe fn snapshot_take(
+    object: *mut lv_obj_t,
+    color_format: lv_color_format_t,
+) -> *mut lv_draw_buf_t {
+    unsafe { lv_snapshot_take_raw(object, color_format) }
+}
+
 /// Set the padding of an object on all sides
 ///
 /// # Arguments

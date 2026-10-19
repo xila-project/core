@@ -17,6 +17,7 @@ pub enum Error {
     NotAvailable,
     FailedToCreateObject,
     InvalidWindowIdentifier,
+    InvalidParameter,
 }
 
 impl Display for Error {
@@ -33,6 +34,7 @@ impl Display for Error {
             Error::NotAvailable => translate!("Not available"),
             Error::FailedToCreateObject => translate!("Failed to create object"),
             Error::InvalidWindowIdentifier => translate!("Invalid window identifier"),
+            Error::InvalidParameter => translate!("Invalid parameter"),
         };
 
         write!(formatter, "{string}")

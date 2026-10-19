@@ -1,11 +1,12 @@
 use alloc::boxed::Box;
 use file_system::DirectCharacterDevice;
+use synchronization::Arc;
 
 use core::ffi::c_void;
 
 use crate::{Result, lvgl};
 
-use super::{InputKind, UserData, binding_callback_function};
+use super::{InputKind, InputQueue, UserData, binding_callback_function};
 
 pub struct Input {
     #[allow(dead_code)]
@@ -30,8 +31,24 @@ unsafe impl Sync for Input {}
 
 impl Input {
     pub fn new(device: &'static dyn DirectCharacterDevice, kind: InputKind) -> Result<Self> {
-        // User_data is a pinned box, so it's ownership can be transferred to LVGL and will not move or dropper until the Input_device is dropped.
-        let user_data = Box::new(UserData { device });
+        Self::create(Some(device), None, kind)
+    }
+
+    pub(crate) fn new_virtual(queue: Arc<InputQueue>, kind: InputKind) -> Result<Self> {
+        Self::create(None, Some(queue), kind)
+    }
+
+    fn create(
+        device: Option<&'static dyn DirectCharacterDevice>,
+        injected: Option<Arc<InputQueue>>,
+        kind: InputKind,
+    ) -> Result<Self> {
+        // User_data stays allocated until LVGL drops this input device.
+        let user_data = Box::new(UserData {
+            device,
+            injected,
+            kind,
+        });
 
         let input_device = unsafe {
             let input_device = lvgl::lv_indev_create();
