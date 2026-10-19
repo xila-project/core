@@ -162,7 +162,10 @@ mod tests {
     #[test]
     fn dns_record_count_selects_singular_and_plural() {
         let (one, other) = match xila::internationalization::get_locale() {
-            "fr" => ("enregistrement pour le domaine", "enregistrements pour le domaine"),
+            "fr" => (
+                "enregistrement pour le domaine",
+                "enregistrements pour le domaine",
+            ),
             _ => ("record for domain", "records for domain"),
         };
         assert_eq!(

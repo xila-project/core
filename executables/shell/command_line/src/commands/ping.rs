@@ -85,10 +85,8 @@ async fn ping_loop<C: CommandContext>(
             .await
         {
             Ok(duration) => {
-                let unit = xila::internationalization::translate_plural!(
-                    "ICMP bytes from",
-                    payload_size
-                );
+                let unit =
+                    xila::internationalization::translate_plural!("ICMP bytes from", payload_size);
                 context
                     .write_out_fmt(format_args!(
                         "{} {} {}: icmp_seq={} {}={:.2} ms\n",
@@ -195,7 +193,12 @@ mod tests {
     fn ping_byte_counts_select_singular_and_plural() {
         let (data_one, data_many, reply_one, reply_many) =
             match xila::internationalization::get_locale() {
-                "fr" => ("octet de données", "octets de données", "octet de", "octets de"),
+                "fr" => (
+                    "octet de données",
+                    "octets de données",
+                    "octet de",
+                    "octets de",
+                ),
                 _ => ("data byte", "data bytes", "byte from", "bytes from"),
             };
         assert_eq!(
