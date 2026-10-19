@@ -2,8 +2,8 @@
  * @typedef {import('@tolgee/cli/extractor').ExtractionResult} ExtractionResult
  */
 
-import path from "node:path";
 import { readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
 
 function normalizePath(fileName) {
   return fileName.replace(/\\/g, "/");
@@ -21,7 +21,14 @@ function resolveNamespace(fileName) {
   return relativePath.slice(0, markerIndex);
 }
 
-const pluralCategories = new Set(["zero", "one", "two", "few", "many", "other"]);
+const pluralCategories = new Set([
+  "zero",
+  "one",
+  "two",
+  "few",
+  "many",
+  "other",
+]);
 
 function pluralKeys(namespace, keyName) {
   if (!namespace) return [`${keyName}.one`, `${keyName}.other`];
@@ -39,7 +46,10 @@ function pluralKeys(namespace, keyName) {
             if (pluralCategories.has(category)) keys.add(`${keyName}.${category}`);
           }
         }
-        if (key.startsWith(keyName + ".") && pluralCategories.has(key.slice(keyName.length + 1))) {
+        if (
+          key.startsWith(keyName + ".") &&
+          pluralCategories.has(key.slice(keyName.length + 1))
+        ) {
           keys.add(key);
         }
       }
@@ -79,9 +89,10 @@ export default function extractRustTranslations(code, fileName) {
     /\b(translate|translation|translate_plural)!\s*\(\s*(?:c)?"((?:\\.|[^"\\])+)"/g;
   let match;
   while ((match = translationCall.exec(code)) !== null) {
-    const keys = match[1] === "translate_plural"
-      ? pluralKeys(namespace, match[2])
-      : [match[2]];
+    const keys =
+      match[1] === "translate_plural"
+        ? pluralKeys(namespace, match[2])
+        : [match[2]];
     for (const key of keys) addKey(key, match.index);
   }
 
