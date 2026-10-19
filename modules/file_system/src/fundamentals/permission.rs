@@ -366,12 +366,12 @@ mod tests {
 
     #[test]
     fn test_new_permission() {
-        assert_eq!(Permission::Read.0, 0b100);
-        assert_eq!(Permission::Write.0, 0b010);
-        assert_eq!(Permission::Execute.0, 0b001);
-        assert_eq!(Permission::READ_WRITE.0, 0b110);
-        assert_eq!(Permission::WRITE_EXECUTE.0, 0b011);
-        assert_eq!(Permission::READ_EXECUTE.0, 0b101);
+        assert_eq!(Permission::Read.bits(), 0b100);
+        assert_eq!(Permission::Write.bits(), 0b010);
+        assert_eq!(Permission::Execute.bits(), 0b001);
+        assert_eq!(Permission::READ_WRITE.bits(), 0b110);
+        assert_eq!(Permission::WRITE_EXECUTE.bits(), 0b011);
+        assert_eq!(Permission::READ_EXECUTE.bits(), 0b101);
         assert_eq!(Permission::empty().0, 0b000);
         assert_eq!(Permission::all().0, 0b111);
     }
