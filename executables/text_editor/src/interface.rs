@@ -339,15 +339,18 @@ impl Interface {
                 return Ok(());
             }
         };
-        match self.working.as_mut() {
-            Some(working) if working.save_to(&path).is_ok() => {
-                self.dirty = false;
-                self.revision = self.revision.wrapping_add(1);
-                self.status(translate!("Saved"))?;
-            }
-            _ => self.status(translate!(
+        let save_result = match self.working.as_mut() {
+            Some(working) => working.save_to(&path),
+            None => return self.status(translate!("Open or create a file first")),
+        };
+        if save_result.is_ok() {
+            self.dirty = false;
+            self.revision = self.revision.wrapping_add(1);
+            self.status(translate!("Saved"))?;
+        } else {
+            self.status(translate!(
                 "Save failed - working copy kept; check path and storage"
-            ))?,
+            ))?;
         }
         Ok(())
     }

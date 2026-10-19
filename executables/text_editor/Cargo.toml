@@ -9,4 +9,8 @@ application_metadata = { workspace = true }
 embedded-i18n = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm = { workspace = true, default-features = false, features = ["guest", "graphics", "memory_32"] }
+wasm = { workspace = true, default-features = false, features = [
+  "guest",
+  "graphics",
+  "memory_32",
+] }
