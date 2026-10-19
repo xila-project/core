@@ -38,7 +38,7 @@ impl<const N: usize> DirectBaseOperations for KeyboardDevice<CriticalSectionRawM
                 .try_into()
                 .map_err(|_| file_system::Error::InvalidParameter)?;
 
-            let size = if let Ok((key, state)) = self.0.try_receive() {
+            let size = if let Ok((key, state)) = self.receiver.try_receive() {
                 data.set_key(key);
                 data.set_state(state);
                 size_of::<InputData>()
@@ -46,7 +46,7 @@ impl<const N: usize> DirectBaseOperations for KeyboardDevice<CriticalSectionRawM
                 0
             };
 
-            data.set_continue(!self.0.is_empty());
+            data.set_continue(!self.receiver.is_empty());
 
             Ok(size)
         })
@@ -69,8 +69,11 @@ impl<const N: usize> DirectBaseOperations for KeyboardDevice<CriticalSectionRawM
             {
                 return Err(file_system::Error::InvalidParameter);
             }
-            let state = State::try_from(buffer[4]).map_err(|_| file_system::Error::InvalidParameter)?;
-            self.sender.try_send((key, state)).map_err(|_| file_system::Error::RessourceBusy)?;
+            let state =
+                State::try_from(buffer[4]).map_err(|_| file_system::Error::InvalidParameter)?;
+            self.sender
+                .try_send((key, state))
+                .map_err(|_| file_system::Error::RessourceBusy)?;
             Ok(buffer.len())
         })
     }

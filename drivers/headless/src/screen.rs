@@ -40,52 +40,67 @@ impl HeadlessScreenDevice {
 }
 
 impl DirectBaseOperations for HeadlessScreenDevice {
-    fn read(&self, _: &mut [u8], _: Size) -> file_system::Result<usize> {
-        Err(file_system::Error::UnsupportedOperation)
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        _: &mut [u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
     }
 
-    fn write(&self, buffer: &[u8], _: Size) -> file_system::Result<usize> {
-        let pixels: &[RenderingColor] =
-            align_slice_to(buffer).ok_or(file_system::Error::InvalidParameter)?;
-        let expected = self
-            .drawing_area
-            .lock()
-            .map_err(|_| file_system::Error::InputOutput)
-            .and_then(|area| {
-                validate_flush(self.resolution, *area, size_of::<RenderingColor>())
-                    .map_err(|_| file_system::Error::InvalidParameter)
-            })?;
-        if pixels.len().checked_mul(size_of::<RenderingColor>()) != Some(expected)
-            || buffer.len() != expected
-        {
-            return Err(file_system::Error::InvalidParameter);
-        }
-        Ok(buffer.len())
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            let pixels: &[RenderingColor] =
+                align_slice_to(buffer).ok_or(file_system::Error::InvalidParameter)?;
+            let expected = self
+                .drawing_area
+                .lock()
+                .map_err(|_| file_system::Error::InputOutput)
+                .and_then(|area| {
+                    validate_flush(self.resolution, *area, size_of::<RenderingColor>())
+                        .map_err(|_| file_system::Error::InvalidParameter)
+                })?;
+            if pixels.len().checked_mul(size_of::<RenderingColor>()) != Some(expected)
+                || buffer.len() != expected
+            {
+                return Err(file_system::Error::InvalidParameter);
+            }
+            Ok(buffer.len())
+        })
     }
 
     fn control(
         &self,
+        _cx: &mut core::task::Context<'_>,
         command: ControlCommandIdentifier,
         input: &AnyByLayout,
         output: &mut AnyByLayout,
-    ) -> file_system::Result<()> {
-        match command {
-            SET_DRAWING_AREA::IDENTIFIER => {
-                let area = *SET_DRAWING_AREA::cast_input(input)?;
-                *self
-                    .drawing_area
-                    .lock()
-                    .map_err(|_| file_system::Error::InputOutput)? = area;
+    ) -> core::task::Poll<file_system::Result<()>> {
+        file_system::ready(|| {
+            match command {
+                SET_DRAWING_AREA::IDENTIFIER => {
+                    let area = *SET_DRAWING_AREA::cast_input(input)?;
+                    *self
+                        .drawing_area
+                        .lock()
+                        .map_err(|_| file_system::Error::InputOutput)? = area;
+                }
+                GET_RESOLUTION::IDENTIFIER => {
+                    *GET_RESOLUTION::cast_output(output)? = self.resolution;
+                }
+                WAS_RESIZED::IDENTIFIER => {
+                    *WAS_RESIZED::cast_output(output)? = false;
+                }
+                _ => return Err(file_system::Error::UnsupportedOperation),
             }
-            GET_RESOLUTION::IDENTIFIER => {
-                *GET_RESOLUTION::cast_output(output)? = self.resolution;
-            }
-            WAS_RESIZED::IDENTIFIER => {
-                *WAS_RESIZED::cast_output(output)? = false;
-            }
-            _ => return Err(file_system::Error::UnsupportedOperation),
-        }
-        Ok(())
+            Ok(())
+        })
     }
 }
 

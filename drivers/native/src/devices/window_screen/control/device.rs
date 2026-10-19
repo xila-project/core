@@ -138,61 +138,78 @@ impl DirectBaseOperations for DebugTransportDevice {
         Ok(())
     }
 
-    fn read(&self, buffer: &mut [u8], _: Size) -> file_system::Result<usize> {
-        if buffer.is_empty() {
-            return Ok(0);
-        }
-        let state = Self::state()?;
-        let mut active = state
-            .active
-            .try_lock()
-            .map_err(|_| file_system::Error::RessourceBusy)?;
-
-        if active.is_none() {
-            let requests = state
-                .requests
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            if buffer.is_empty() {
+                return Ok(0);
+            }
+            let state = Self::state()?;
+            let mut active = state
+                .active
                 .try_lock()
                 .map_err(|_| file_system::Error::RessourceBusy)?;
-            match requests.try_recv() {
-                Ok(request) => {
-                    *active = Some(ActiveRequest {
-                        bytes: request.bytes,
-                        offset: 0,
-                        response: request.response,
-                        response_frame: ResponseAccumulator::default(),
-                    });
-                }
-                Err(TryRecvError::Empty) => return Err(file_system::Error::RessourceBusy),
-                Err(TryRecvError::Disconnected) => return Err(file_system::Error::InputOutput),
-            }
-        }
 
-        let request = active.as_mut().unwrap();
-        if request.offset == request.bytes.len() {
-            return Err(file_system::Error::RessourceBusy);
-        }
-        let length = buffer.len().min(request.bytes.len() - request.offset);
-        buffer[..length].copy_from_slice(&request.bytes[request.offset..request.offset + length]);
-        request.offset += length;
-        Ok(length)
+            if active.is_none() {
+                let requests = state
+                    .requests
+                    .try_lock()
+                    .map_err(|_| file_system::Error::RessourceBusy)?;
+                match requests.try_recv() {
+                    Ok(request) => {
+                        *active = Some(ActiveRequest {
+                            bytes: request.bytes,
+                            offset: 0,
+                            response: request.response,
+                            response_frame: ResponseAccumulator::default(),
+                        });
+                    }
+                    Err(TryRecvError::Empty) => return Err(file_system::Error::RessourceBusy),
+                    Err(TryRecvError::Disconnected) => {
+                        return Err(file_system::Error::InputOutput);
+                    }
+                }
+            }
+
+            let request = active.as_mut().unwrap();
+            if request.offset == request.bytes.len() {
+                return Err(file_system::Error::RessourceBusy);
+            }
+            let length = buffer.len().min(request.bytes.len() - request.offset);
+            buffer[..length]
+                .copy_from_slice(&request.bytes[request.offset..request.offset + length]);
+            request.offset += length;
+            Ok(length)
+        })
     }
 
-    fn write(&self, buffer: &[u8], _: Size) -> file_system::Result<usize> {
-        let state = Self::state()?;
-        let mut active = state
-            .active
-            .try_lock()
-            .map_err(|_| file_system::Error::RessourceBusy)?;
-        let request = active.as_mut().ok_or(file_system::Error::RessourceBusy)?;
-        let length = buffer.len();
-        if request.response_frame.push(buffer)? {
-            let active = active.take().unwrap();
-            active
-                .response
-                .send(active.response_frame.bytes)
-                .map_err(|_| file_system::Error::InputOutput)?;
-        }
-        Ok(length)
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            let state = Self::state()?;
+            let mut active = state
+                .active
+                .try_lock()
+                .map_err(|_| file_system::Error::RessourceBusy)?;
+            let request = active.as_mut().ok_or(file_system::Error::RessourceBusy)?;
+            let length = buffer.len();
+            if request.response_frame.push(buffer)? {
+                let active = active.take().unwrap();
+                active
+                    .response
+                    .send(active.response_frame.bytes)
+                    .map_err(|_| file_system::Error::InputOutput)?;
+            }
+            Ok(length)
+        })
     }
 }
 

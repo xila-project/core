@@ -74,10 +74,9 @@ impl<'a> DirectBaseOperations for ScreenDevice<'a> {
                 WRITE_SCREENSHOT_TO_PATH::IDENTIFIER => {
                     let request = WRITE_SCREENSHOT_TO_PATH::cast_input(input)?;
                     let path = request.path().ok_or(file_system::Error::InvalidParameter)?;
-                    let dimensions = task::block_on(super::screenshot::write_png(
-                        std::path::Path::new(path),
-                    ))
-                    .map_err(|_| file_system::Error::InputOutput)?;
+                    let dimensions =
+                        task::block_on(super::screenshot::write_png(std::path::Path::new(path)))
+                            .map_err(|_| file_system::Error::InputOutput)?;
                     *WRITE_SCREENSHOT_TO_PATH::cast_output(output)? = dimensions;
                 }
                 _ => return Err(file_system::Error::UnsupportedOperation),
