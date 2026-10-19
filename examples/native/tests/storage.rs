@@ -67,7 +67,7 @@ fn imports_once_and_preserves_existing_disk_without_seed() {
     assert!(!storage::prepare_disk(&disk, &disk, SIZE).unwrap());
     let filesystem = xila::little_fs::mount_disk(drive, 256).unwrap();
     let mut attributes =
-        xila::file_system::Attributes::new().set_mask(xila::file_system::AttributeFlags::All);
+        xila::file_system::Attributes::new().set_mask(xila::file_system::AttributeFlags::all());
     filesystem
         .get_attributes(
             xila::file_system::Path::from_str("/user-kept-file"),
