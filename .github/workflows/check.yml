@@ -36,6 +36,11 @@ jobs:
       host: ${{ steps.filter.outputs.host }}
       guest: ${{ steps.filter.outputs.guest }}
       localization: ${{ steps.filter.outputs.localization }}
+      i18n_code: ${{ steps.filter.outputs.i18n_code }}
+      i18n_en: ${{ steps.filter.outputs.i18n_en }}
+      i18n_fr: ${{ steps.filter.outputs.i18n_fr }}
+      i18n_es: ${{ steps.filter.outputs.i18n_es }}
+      i18n_de: ${{ steps.filter.outputs.i18n_de }}
     steps:
       - uses: dorny/paths-filter@v4
         id: filter
@@ -93,6 +98,24 @@ jobs:
               - '**/localization/**'
               - 'executables/wasm/src/host/translation/**'
               - 'executables/wasm/tests/translation/**'
+            i18n_code:
+              - '**/*.rs'
+              - '**/Cargo.toml'
+              - 'Cargo.toml'
+              - '**/build.rs'
+              - '**/build/**'
+              - 'Makefile.toml'
+              - 'tolgee.extractor.mjs'
+              - 'tolgee.config.ts'
+              - 'modules/graphics/fonts_generator/**'
+            i18n_en:
+              - '**/locales/en.json'
+            i18n_fr:
+              - '**/locales/fr.json'
+            i18n_es:
+              - '**/locales/es.json'
+            i18n_de:
+              - '**/locales/de.json'
 
   localization:
     name: Localization checks (all shipped locales)
@@ -110,6 +133,11 @@ jobs:
     timeout-minutes: 60
     env:
       EMBEDDED_I18N_STRICT: "1"
+      I18N_CODE_CHANGED: ${{ needs.changes.outputs.i18n_code }}
+      I18N_EN_CHANGED: ${{ needs.changes.outputs.i18n_en }}
+      I18N_FR_CHANGED: ${{ needs.changes.outputs.i18n_fr }}
+      I18N_ES_CHANGED: ${{ needs.changes.outputs.i18n_es }}
+      I18N_DE_CHANGED: ${{ needs.changes.outputs.i18n_de }}
     steps:
       - name: Setup | Checkout repository
         uses: actions/checkout@v7
@@ -125,7 +153,22 @@ jobs:
       - name: Check | Strict translations and font subsets
         run: |
           set -euo pipefail
-          for locale in en fr es de; do
+          # Changes restricted to catalogs only need the affected languages.
+          # Changes to Rust/extraction/build logic and main/manual runs
+          # still validate every supported compile-time locale.
+          locales=(en fr es de)
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$I18N_CODE_CHANGED" == "false" ]]; then
+            locales=()
+            [[ "$I18N_EN_CHANGED" == "true" ]] && locales+=(en)
+            [[ "$I18N_FR_CHANGED" == "true" ]] && locales+=(fr)
+            [[ "$I18N_ES_CHANGED" == "true" ]] && locales+=(es)
+            [[ "$I18N_DE_CHANGED" == "true" ]] && locales+=(de)
+            if [[ ${#locales[@]} -eq 0 ]]; then
+              locales=(en fr es de)
+            fi
+          fi
+          printf 'Checking locale(s): %s\n' "${locales[*]}"
+          for locale in "${locales[@]}"; do
             echo "::group::Localization ($locale)"
             # Keep compile-time locale variants independent while using one
             # runner and sccache's cross-build compiler artifact cache.
