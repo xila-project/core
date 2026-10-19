@@ -34,14 +34,32 @@ test("supports lookup-style plural macros too", () => {
 test("extracts all plural forms across app and shell translation namespaces", () => {
   for (const [key, file, expectedNamespace] of [
     ["Recorded laps", "executables/clock/src/interface.rs", "executables/clock"],
-    ["DNS records for domain", "executables/shell/command_line/src/commands/dns.rs", "executables/shell/command_line"],
-    ["PING data bytes", "executables/shell/command_line/src/commands/ping.rs", "executables/shell/command_line"],
-    ["ICMP bytes from", "executables/shell/command_line/src/commands/ping.rs", "executables/shell/command_line"],
+    [
+      "DNS records for domain",
+      "executables/shell/command_line/src/commands/dns.rs",
+      "executables/shell/command_line",
+    ],
+    [
+      "PING data bytes",
+      "executables/shell/command_line/src/commands/ping.rs",
+      "executables/shell/command_line",
+    ],
+    [
+      "ICMP bytes from",
+      "executables/shell/command_line/src/commands/ping.rs",
+      "executables/shell/command_line",
+    ],
   ]) {
-    const result = extract(`xila::internationalization::translate_plural!("${key}", count);`, file);
+    const result = extract(
+      `xila::internationalization::translate_plural!("${key}", count);`,
+      file,
+    );
     assert.deepEqual(
       result.keys.map(({ keyName, namespace }) => [keyName, namespace]),
-      [[`${key}.one`, expectedNamespace], [`${key}.other`, expectedNamespace]],
+      [
+        [`${key}.one`, expectedNamespace],
+        [`${key}.other`, expectedNamespace],
+      ],
     );
   }
 });
