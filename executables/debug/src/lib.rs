@@ -5,17 +5,19 @@ extern crate alloc;
 use alloc::{
     boxed::Box,
     string::{String, ToString},
+    sync::Arc,
     vec::Vec,
 };
 use core::num::NonZeroUsize;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use debug_protocol::{InputState, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, Request};
 use xila::{
     executable::{self, ExecutableTrait, Standard},
     file_system::AccessFlags,
     graphics::{
-        self, EventKind, GET_RESOLUTION, Key, Point, ScreenshotDimensions, ScreenshotRequest,
-        State, WRITE_SCREENSHOT_TO_PATH,
+        self, EventKind, GET_RESOLUTION, Key, Point, ScreenshotRequest, State,
+        WRITE_SCREENSHOT_TO_PATH,
     },
     task::{self, TaskIdentifier},
     virtual_file_system::{File, VirtualFileSystem},
@@ -53,13 +55,15 @@ async fn run(standard: Standard<'static>, _: Vec<String>) -> Result<(), NonZeroU
     let vfs = context.virtual_file_system;
     let task_manager = context.task_manager;
     let task = task_manager.get_current_task_identifier().await;
-    task_manager
+    let stopping = Arc::new(AtomicBool::new(false));
+    let task_stopping = stopping.clone();
+    let (service_handle, _) = task_manager
         .spawn(
             task,
             "Debug agent transport",
             None,
             async move |service_task| {
-                if let Err(error) = serve_agent(vfs, context, service_task).await {
+                if let Err(error) = serve_agent(vfs, context, service_task, task_stopping).await {
                     log::error!("Debug agent transport stopped: {error}");
                 }
             },
@@ -67,16 +71,23 @@ async fn run(standard: Standard<'static>, _: Vec<String>) -> Result<(), NonZeroU
         .await
         .map_err(|_| code(1))?;
 
+    let mut should_close = false;
     loop {
         graphics::lock!(graphics, {
             while let Some(event) = window.pop_event() {
                 if matches!(event.code, EventKind::Delete | EventKind::CloseRequested)
                     && event.target == window.as_object_mutable()
                 {
-                    return Ok(());
+                    should_close = true;
+                    break;
                 }
             }
         });
+        if should_close {
+            stopping.store(true, Ordering::Release);
+            service_handle.join().await;
+            return Ok(());
+        }
         task::sleep(core::time::Duration::from_millis(50)).await;
     }
 }
@@ -85,6 +96,7 @@ async fn serve_agent(
     vfs: &'static VirtualFileSystem,
     context: &'static xila::executable::ExecutableContext,
     task: TaskIdentifier,
+    stopping: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let mut transport = File::open(
         vfs,
@@ -121,10 +133,23 @@ async fn serve_agent(
 
     let mut request_buffer = alloc::vec![0; MAX_REQUEST_BYTES + 1];
     loop {
-        let length = transport
+        if stopping.load(Ordering::Acquire) {
+            break;
+        }
+        let length = match transport
+            .as_synchronous_file_mut()
             .read(&mut request_buffer)
-            .await
-            .map_err(|error| error.to_string())?;
+        {
+            Ok(length) => length,
+            Err(xila::virtual_file_system::Error::RessourceBusy)
+            | Err(xila::virtual_file_system::Error::FileSystem(
+                xila::file_system::Error::RessourceBusy,
+            )) => {
+                task::sleep(core::time::Duration::from_millis(10)).await;
+                continue;
+            }
+            Err(error) => return Err(error.to_string()),
+        };
         let response = match parse_request(&request_buffer[..length]) {
             Ok(request) => {
                 dispatch(request, context, &mut screen, &mut pointer, &mut keyboard).await
@@ -145,6 +170,21 @@ async fn serve_agent(
             .await
             .map_err(|error| error.to_string())?;
     }
+
+    keyboard
+        .close(vfs)
+        .await
+        .map_err(|error| error.to_string())?;
+    pointer
+        .close(vfs)
+        .await
+        .map_err(|error| error.to_string())?;
+    screen.close(vfs).await.map_err(|error| error.to_string())?;
+    transport
+        .close(vfs)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 fn parse_request(bytes: &[u8]) -> Result<Request, (&'static str, String)> {
@@ -196,9 +236,9 @@ async fn dispatch(
             .inspect_ui_tree(max_elements, max_depth)
             .await
         {
-            Ok(elements) => {
-                let truncated = elements.len() == max_elements;
-                let elements: Vec<serde_json::Value> = elements
+            Ok(snapshot) => {
+                let elements: Vec<serde_json::Value> = snapshot
+                    .elements
                     .into_iter()
                     .map(|element| {
                         serde_json::json!({
@@ -210,7 +250,10 @@ async fn dispatch(
                         })
                     })
                     .collect();
-                Ok(serde_json::json!({"elements": elements, "truncated": truncated}))
+                Ok(serde_json::json!({
+                    "elements": elements,
+                    "truncated": snapshot.truncated
+                }))
             }
             Err(error) => Err(("ui_tree_failed", error.to_string())),
         },
@@ -345,6 +388,7 @@ fn state_to_graphics(state: InputState) -> State {
 async fn diagnostics(
     context: &'static xila::executable::ExecutableContext,
 ) -> Result<serde_json::Value, (&'static str, String)> {
+    let memory = xila::memory::global_manager();
     let mut stack = context
         .task_manager
         .get_children(task::Manager::ROOT_TASK_IDENTIFIER)
@@ -366,9 +410,28 @@ async fn diagnostics(
             .await
             .unwrap_or_default();
         stack.extend(children);
-        tasks.push(serde_json::json!({"id": usize::from(task), "name": name}));
+        let parent = context
+            .task_manager
+            .get_parent(task)
+            .await
+            .map(|parent| usize::from(parent))
+            .ok();
+        tasks.push(serde_json::json!({
+            "id": usize::from(task),
+            "parent_id": parent,
+            "name": name
+        }));
     }
-    Ok(serde_json::json!({"tasks": tasks, "truncated": !stack.is_empty()}))
+    Ok(serde_json::json!({
+        "tasks": tasks,
+        "truncated": !stack.is_empty(),
+        "memory": {
+            "total_bytes": memory.get_total_size(),
+            "used_bytes": memory.get_used(),
+            "free_bytes": memory.get_free(),
+            "page_size": memory.get_page_size(),
+        }
+    }))
 }
 
 fn error_response(code: &str, message: &str) -> serde_json::Value {

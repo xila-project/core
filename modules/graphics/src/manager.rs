@@ -92,6 +92,13 @@ pub struct UiElement {
     pub bounds: (i32, i32, i32, i32),
 }
 
+/// One bounded UI-tree snapshot and whether additional objects were omitted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UiTreeSnapshot {
+    pub elements: Vec<UiElement>,
+    pub truncated: bool,
+}
+
 /// Bounds for UI tree snapshots. These limits keep diagnostics safe on small targets.
 pub const UI_TREE_MAX_ELEMENTS: usize = 256;
 pub const UI_TREE_MAX_DEPTH: usize = 24;
@@ -106,7 +113,7 @@ impl Manager {
         &self,
         max_elements: usize,
         max_depth: usize,
-    ) -> Result<Vec<UiElement>> {
+    ) -> Result<UiTreeSnapshot> {
         validate_ui_tree_limits(max_elements, max_depth)?;
 
         let _lock = self.global_lock.lock().await;
@@ -116,6 +123,7 @@ impl Manager {
         }
 
         let mut elements = Vec::with_capacity(max_elements);
+        let mut truncated = false;
         unsafe {
             inspect_children(
                 inner.window_parent,
@@ -124,9 +132,13 @@ impl Manager {
                 max_depth,
                 max_elements,
                 &mut elements,
+                &mut truncated,
             );
         }
-        Ok(elements)
+        Ok(UiTreeSnapshot {
+            elements,
+            truncated,
+        })
     }
 
     pub fn lock_function_sync<T>(&self, function: impl FnOnce() -> Result<T>) -> Result<T> {
@@ -172,8 +184,13 @@ unsafe fn inspect_children(
     max_depth: usize,
     max_elements: usize,
     elements: &mut Vec<UiElement>,
+    truncated: &mut bool,
 ) {
-    if object.is_null() || depth >= max_depth || elements.len() >= max_elements {
+    if object.is_null() {
+        return;
+    }
+    if depth >= max_depth || elements.len() >= max_elements {
+        *truncated = true;
         return;
     }
 
@@ -206,13 +223,17 @@ unsafe fn inspect_children(
         bounds: (area.x1, area.y1, area.x2, area.y2),
     });
 
-    if depth + 1 >= max_depth || elements.len() >= max_elements {
+    let child_count = unsafe { lvgl::lv_obj_get_child_count(object) };
+    if child_count == 0 {
         return;
     }
-
-    let child_count = unsafe { lvgl::lv_obj_get_child_count(object) };
+    if depth + 1 >= max_depth || elements.len() >= max_elements {
+        *truncated = true;
+        return;
+    }
     for index in 0..child_count {
         if elements.len() >= max_elements {
+            *truncated = true;
             break;
         }
         let child = unsafe { lvgl::lv_obj_get_child(object, index as i32) };
@@ -224,6 +245,7 @@ unsafe fn inspect_children(
                 max_depth,
                 max_elements,
                 elements,
+                truncated,
             );
         }
     }

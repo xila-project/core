@@ -1,6 +1,6 @@
 use std::{
     fs,
-    io::{BufRead, BufReader, Read, Write},
+    io::{Read, Write},
     os::unix::{
         fs::{FileTypeExt, MetadataExt, PermissionsExt},
         net::{UnixListener, UnixStream},
@@ -12,7 +12,7 @@ use std::{
         mpsc::{Receiver, Sender, SyncSender},
     },
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use debug_protocol::{MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES};
@@ -118,7 +118,7 @@ fn bind_private_endpoint(endpoint: &std::path::Path) -> Result<UnixListener, Str
 fn serve(listener: UnixListener, sender: SyncSender<PendingRequest>, stop: Arc<AtomicBool>) {
     while !stop.load(Ordering::Acquire) {
         match listener.accept() {
-            Ok((stream, _)) => serve_request(stream, &sender),
+            Ok((stream, _)) => serve_request(stream, &sender, &stop),
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(20));
             }
@@ -130,12 +130,40 @@ fn serve(listener: UnixListener, sender: SyncSender<PendingRequest>, stop: Arc<A
     }
 }
 
-fn serve_request(mut stream: UnixStream, sender: &SyncSender<PendingRequest>) {
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+fn serve_request(mut stream: UnixStream, sender: &SyncSender<PendingRequest>, stop: &AtomicBool) {
+    if stream.set_nonblocking(true).is_err() {
+        return;
+    }
     let mut bytes = Vec::with_capacity(1024);
-    let read = BufReader::new(&mut stream)
-        .take((MAX_REQUEST_BYTES + 1) as u64)
-        .read_until(b'\n', &mut bytes);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let read = loop {
+        if stop.load(Ordering::Acquire) {
+            return;
+        }
+        if Instant::now() >= deadline {
+            break Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Timed out waiting for a request.",
+            ));
+        }
+        let mut chunk = [0; 1024];
+        match stream.read(&mut chunk) {
+            Ok(0) => break Ok(bytes.len()),
+            Ok(length) => {
+                bytes.extend_from_slice(&chunk[..length]);
+                if bytes.len() > MAX_REQUEST_BYTES {
+                    break Ok(bytes.len());
+                }
+                if bytes.contains(&b'\n') {
+                    break Ok(bytes.len());
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => break Err(error),
+        }
+    };
 
     match read {
         Ok(length) if length <= MAX_REQUEST_BYTES => {
@@ -148,31 +176,47 @@ fn serve_request(mut stream: UnixStream, sender: &SyncSender<PendingRequest>) {
                 })
                 .is_err()
             {
-                let _ = stream.write_all(
+                write_response(
+                    &mut stream,
                     b"{\"ok\":false,\"error\":{\"code\":\"debug_app_unavailable\",\"message\":\"Debug app is not running.\"}}\n",
+                    stop,
                 );
                 return;
             }
-            let response = response_receiver.recv_timeout(Duration::from_secs(30));
+            let response = loop {
+                if stop.load(Ordering::Acquire) {
+                    return;
+                }
+                match response_receiver.recv_timeout(Duration::from_millis(50)) {
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                    result => break result,
+                }
+            };
             match response {
                 Ok(response) if response.len() <= MAX_RESPONSE_BYTES => {
-                    let _ = stream.write_all(&response);
+                    write_response(&mut stream, &response, stop);
                 }
                 Ok(_) => {
-                    let _ = stream.write_all(
+                    write_response(
+                        &mut stream,
                         b"{\"ok\":false,\"error\":{\"code\":\"response_too_large\",\"message\":\"Response exceeds the 64 KiB limit.\"}}\n",
+                        stop,
                     );
                 }
                 Err(_) => {
-                    let _ = stream.write_all(
+                    write_response(
+                        &mut stream,
                         b"{\"ok\":false,\"error\":{\"code\":\"debug_app_timeout\",\"message\":\"Debug app did not respond within 30 seconds.\"}}\n",
+                        stop,
                     );
                 }
             }
         }
         Ok(_) => {
-            let _ = stream.write_all(
+            write_response(
+                &mut stream,
                 b"{\"ok\":false,\"error\":{\"code\":\"request_too_large\",\"message\":\"Request exceeds the 16 KiB limit.\"}}\n",
+                stop,
             );
         }
         Err(error) => {
@@ -180,7 +224,25 @@ fn serve_request(mut stream: UnixStream, sender: &SyncSender<PendingRequest>) {
                 "{{\"ok\":false,\"error\":{{\"code\":\"ipc_read_failed\",\"message\":{:?}}}}}\n",
                 error.to_string()
             );
-            let _ = stream.write_all(message.as_bytes());
+            write_response(&mut stream, message.as_bytes(), stop);
+        }
+    }
+}
+
+fn write_response(stream: &mut UnixStream, response: &[u8], stop: &AtomicBool) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut offset = 0;
+    while offset < response.len() {
+        if stop.load(Ordering::Acquire) || Instant::now() >= deadline {
+            return;
+        }
+        match stream.write(&response[offset..]) {
+            Ok(0) => return,
+            Ok(length) => offset += length,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(_) => return,
         }
     }
 }
