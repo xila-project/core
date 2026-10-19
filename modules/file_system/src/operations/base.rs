@@ -3,6 +3,8 @@
 //! This module provides the core device trait and types for abstracting various
 //! storage devices, peripherals, and I/O endpoints in the file system.
 
+use super::polling::Operation;
+use core::task::{Context as TaskContext, Poll};
 use shared::AnyByLayout;
 
 use crate::{Context, ControlCommandIdentifier, Error, Position, Result, Size};
@@ -52,6 +54,58 @@ use crate::{Context, ControlCommandIdentifier, Error, Position, Result, Size};
 /// assert_eq!(&buffer, data);
 /// ```
 pub trait BaseOperations: Send + Sync {
+    /// Opt in to event-driven VFS operations instead of legacy busy retries.
+    fn supports_polling(&self) -> bool {
+        false
+    }
+
+    /// Attempt one read. `Pending` requires an arranged wakeup, without consuming
+    /// bytes. Never retain the buffer or task context after returning.
+    /// The opening context may hold device-owned state allocated during open.
+    fn poll_read(
+        &self,
+        context: &mut Context,
+        _cx: &mut TaskContext<'_>,
+        buffer: &mut [u8],
+        absolute_position: Size,
+    ) -> Poll<Result<usize>> {
+        Poll::Ready(self.read(context, buffer, absolute_position))
+    }
+
+    /// Attempt one write; partial progress must be returned as `Ready(Ok(n))`.
+    fn poll_write(
+        &self,
+        context: &mut Context,
+        _cx: &mut TaskContext<'_>,
+        buffer: &[u8],
+        absolute_position: Size,
+    ) -> Poll<Result<usize>> {
+        Poll::Ready(self.write(context, buffer, absolute_position))
+    }
+
+    /// Poll a flush, arranging a wakeup before returning `Pending`.
+    fn poll_flush(&self, context: &mut Context, _cx: &mut TaskContext<'_>) -> Poll<Result<()>> {
+        Poll::Ready(self.flush(context))
+    }
+
+    /// Poll control without retaining borrowed payloads. Re-polling a pending
+    /// command must not enqueue duplicate work; keep its state in `context`.
+    fn poll_control(
+        &self,
+        context: &mut Context,
+        _cx: &mut TaskContext<'_>,
+        command: ControlCommandIdentifier,
+        input: &AnyByLayout,
+        output: &mut AnyByLayout,
+    ) -> Poll<Result<()>> {
+        Poll::Ready(self.control(context, command, input, output))
+    }
+
+    /// Idempotently release a polling registration on completion or cancellation.
+    /// Close must also release registrations. Wake/drop wakers outside locks.
+    /// Cancellation need not undo hardware work, but must detach this waiter.
+    fn cancel_operation(&self, _context: &mut Context, _operation: Operation) {}
+
     fn open(&self, _context: &mut Context) -> Result<()> {
         Ok(())
     }
@@ -273,6 +327,54 @@ where
 }
 
 pub trait DirectBaseOperations: Send + Sync {
+    /// Opt in to event-driven VFS operations instead of legacy busy retries.
+    fn supports_polling(&self) -> bool {
+        false
+    }
+
+    /// Attempt one read. `Pending` requires an arranged wakeup, without consuming
+    /// bytes. Never retain the buffer or task context after returning.
+    fn poll_read(
+        &self,
+        _cx: &mut TaskContext<'_>,
+        buffer: &mut [u8],
+        absolute_position: Size,
+    ) -> Poll<Result<usize>> {
+        Poll::Ready(self.read(buffer, absolute_position))
+    }
+
+    /// Attempt one write; partial progress must be returned as `Ready(Ok(n))`.
+    fn poll_write(
+        &self,
+        _cx: &mut TaskContext<'_>,
+        buffer: &[u8],
+        absolute_position: Size,
+    ) -> Poll<Result<usize>> {
+        Poll::Ready(self.write(buffer, absolute_position))
+    }
+
+    /// Poll a flush, arranging a wakeup before returning `Pending`.
+    fn poll_flush(&self, _cx: &mut TaskContext<'_>) -> Poll<Result<()>> {
+        Poll::Ready(self.flush())
+    }
+
+    /// Poll control without retaining borrowed payloads. Re-polling a pending
+    /// command must not enqueue duplicate work; keep its state in the device.
+    fn poll_control(
+        &self,
+        _cx: &mut TaskContext<'_>,
+        command: ControlCommandIdentifier,
+        input: &AnyByLayout,
+        output: &mut AnyByLayout,
+    ) -> Poll<Result<()>> {
+        Poll::Ready(self.control(command, input, output))
+    }
+
+    /// Idempotently release a polling registration on completion or cancellation.
+    /// Close must also release registrations. Wake/drop wakers outside locks.
+    /// Cancellation need not undo hardware work, but must detach this waiter.
+    fn cancel_operation(&self, __operation: Operation) {}
+
     fn open(&self) -> Result<()> {
         Ok(())
     }
@@ -390,6 +492,44 @@ impl<T> BaseOperations for T
 where
     T: DirectBaseOperations + Send + Sync,
 {
+    fn supports_polling(&self) -> bool {
+        DirectBaseOperations::supports_polling(self)
+    }
+    fn poll_read(
+        &self,
+        _: &mut Context,
+        cx: &mut TaskContext<'_>,
+        buffer: &mut [u8],
+        position: Size,
+    ) -> Poll<Result<usize>> {
+        DirectBaseOperations::poll_read(self, cx, buffer, position)
+    }
+    fn poll_write(
+        &self,
+        _: &mut Context,
+        cx: &mut TaskContext<'_>,
+        buffer: &[u8],
+        position: Size,
+    ) -> Poll<Result<usize>> {
+        DirectBaseOperations::poll_write(self, cx, buffer, position)
+    }
+    fn poll_flush(&self, _: &mut Context, cx: &mut TaskContext<'_>) -> Poll<Result<()>> {
+        DirectBaseOperations::poll_flush(self, cx)
+    }
+    fn poll_control(
+        &self,
+        _: &mut Context,
+        cx: &mut TaskContext<'_>,
+        command: ControlCommandIdentifier,
+        input: &AnyByLayout,
+        output: &mut AnyByLayout,
+    ) -> Poll<Result<()>> {
+        DirectBaseOperations::poll_control(self, cx, command, input, output)
+    }
+    fn cancel_operation(&self, _: &mut Context, operation: Operation) {
+        DirectBaseOperations::cancel_operation(self, operation);
+    }
+
     fn open(&self, _: &mut Context) -> Result<()> {
         self.open()
     }
