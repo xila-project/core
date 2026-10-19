@@ -24,6 +24,7 @@ function resolveNamespace(fileName) {
 const pluralCategories = new Set(["zero", "one", "two", "few", "many", "other"]);
 
 function pluralKeys(namespace, keyName) {
+  if (!namespace) return [`${keyName}.one`, `${keyName}.other`];
   // JSON_C uses flat dotted keys, which embedded-i18n resolves exactly
   // like nested { "key": { "one": ..., "other": ... } } catalogs.
   const directory = path.join(process.cwd(), namespace, "locales");
