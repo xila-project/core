@@ -61,7 +61,8 @@ RUN cargo run --locked --package fonts_generator \
         | sort -u > /tmp/xila-runtime-library-paths \
     && : > /tmp/xila-runtime-packages \
     && while IFS= read -r library; do \
-        package="$(dpkg-query --search "$library" | sed -n '1{s/: .*//;p;}')"; \
+        resolved_library="$(readlink -f "$library")"; \
+        package="$(dpkg-query --search "$resolved_library" | sed -n '1{s/: .*//;p;}')"; \
         if [ -z "$package" ]; then echo "No Debian package owns runtime library $library" >&2; exit 1; fi; \
         printf '%s\n' "${package%%:*}" >> /tmp/xila-runtime-packages; \
     done < /tmp/xila-runtime-library-paths \
