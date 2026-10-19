@@ -92,7 +92,7 @@ impl<T: ExecutableTrait> DirectCharacterDevice for ExecutableWrapper<T> {}
 #[macro_export]
 macro_rules! mount_executables {
 
-    ( $context:expr, $virtual_file_system:expr, $task:expr, &[ $( ($path:expr, $executable:expr) ),* $(,)? ] ) => {
+    ( $context:expr, $virtual_file_system:expr, $task:expr, &[ $( $(#[$attribute:meta])* ($path:expr, $executable:expr) ),* $(,)? ] ) => {
 
     async || -> $crate::exported_virtual_file_system::Result<()>
     {
@@ -100,11 +100,14 @@ macro_rules! mount_executables {
         use $crate::exported_virtual_file_system::ItemStatic;
 
         $(
-            let __executable = $crate::ExecutableWrapper::new($executable, $context);
+            $(#[$attribute])*
+            {
+                let __executable = $crate::ExecutableWrapper::new($executable, $context);
 
-            let _ = $virtual_file_system.remove($task, $path).await;
-            $virtual_file_system.mount_character_device($task, $path, __executable).await?;
-            $virtual_file_system.set_permissions($task, $path, Permissions::EXECUTABLE).await?;
+                let _ = $virtual_file_system.remove($task, $path).await;
+                $virtual_file_system.mount_character_device($task, $path, __executable).await?;
+                $virtual_file_system.set_permissions($task, $path, Permissions::EXECUTABLE).await?;
+            }
         )*
 
         Ok(())
