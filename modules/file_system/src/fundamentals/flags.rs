@@ -1,65 +1,16 @@
 use core::fmt::Debug;
 
-use shared::flags;
+use bitflags::bitflags;
 
 use super::Permission;
 
-flags! {
-    /// The flags for opening a file.
-    pub enum AccessFlags: u8 {
-        /// Read permission.
-        Read,
-        /// Write permission.
-        Write,
-    }
-}
-
-impl AccessFlags {
-    pub const READ_WRITE: Self = Self::None.insert(Self::Read).insert(Self::Write);
-
-    pub const fn into_permission(&self) -> Permission {
-        let mut permission = Permission::None;
-
-        if self.contains(AccessFlags::Read) {
-            permission = permission.insert(Permission::Read);
-        }
-
-        if self.contains(AccessFlags::Write) {
-            permission = permission.insert(Permission::Write);
-        }
-
-        permission
-    }
-}
-
-flags! {
-    /// The flags for opening a file.
-    pub enum CreateFlags: u8 {
-        /// Create the file if it does not exist.
-        Create,
-        /// Fail if the file already exists.
-        Exclusive,
-        /// Truncate the file to zero length if it exists.
-        Truncate,
-    }
-}
-
-impl CreateFlags {
-    pub const CREATE_TRUNCATE: Self = Self::Create.insert(Self::Truncate);
-    pub const CREATE_EXCLUSIVE: Self = Self::Create.insert(Self::Exclusive);
-}
-
-flags! {
-    /// The status flags of a file.
-    pub enum StateFlags: u8 {
-        /// Append mode.
-        Append,
-        /// Non-blocking mode.
-        NonBlocking,
-        /// Synchronous mode.
-        Synchronous,
-        /// Synchronous data only mode.
-        SynchronousDataOnly,
+bitbitbitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct StateFlags: u8 {
+        const Append = 1 << 0;
+        const NonBlocking = 1 << 1;
+        const Synchronous = 1 << 2;
+        const SynchronousDataOnly = 1 << 3;
     }
 }
 
@@ -99,12 +50,12 @@ impl Debug for Flags {
 
 impl Flags {
     const MODE_POSITION: u8 = 0;
-    const OPEN_POSITION: u8 = AccessFlags::bits_used();
-    const STATUS_POSITION: u8 = CreateFlags::bits_used() + Self::OPEN_POSITION;
+    const OPEN_POSITION: u8 = 2;
+    const STATUS_POSITION: u8 = 3 + Self::OPEN_POSITION;
 
-    const OPEN_MASK: u16 = (1 << CreateFlags::bits_used()) - 1;
-    const STATUS_MASK: u16 = (1 << StateFlags::bits_used()) - 1;
-    const MODE_MASK: u16 = (1 << AccessFlags::bits_used()) - 1;
+    const OPEN_MASK: u16 = (1 << 3) - 1;
+    const STATUS_MASK: u16 = (1 << 4) - 1;
+    const MODE_MASK: u16 = (1 << 2) - 1;
 
     pub const fn new(
         mode: AccessFlags,
@@ -114,48 +65,48 @@ impl Flags {
         let open = if let Some(open_val) = open {
             open_val
         } else {
-            CreateFlags::None
+            CreateFlags::empty()
         };
         let status = if let Some(status_val) = status {
             status_val
         } else {
-            StateFlags::None
+            StateFlags::empty()
         };
 
         let mut flags: u16 = 0;
-        flags |= (mode.0 as u16) << Self::MODE_POSITION;
-        flags |= (open.0 as u16) << Self::OPEN_POSITION;
-        flags |= (status.0 as u16) << Self::STATUS_POSITION;
+        flags |= (mode.bits() as u16) << Self::MODE_POSITION;
+        flags |= (open.bits() as u16) << Self::OPEN_POSITION;
+        flags |= (status.bits() as u16) << Self::STATUS_POSITION;
         Self(flags)
     }
 
     pub const fn get_access(&self) -> AccessFlags {
-        AccessFlags(((self.0 >> Self::MODE_POSITION) & Self::MODE_MASK) as u8)
+        AccessFlags::from_bits_retain(((self.0 >> Self::MODE_POSITION) & Self::MODE_MASK) as u8)
     }
 
     pub const fn get_create(&self) -> CreateFlags {
-        CreateFlags(((self.0 >> Self::OPEN_POSITION) & Self::OPEN_MASK) as u8)
+        CreateFlags::from_bits_retain(((self.0 >> Self::OPEN_POSITION) & Self::OPEN_MASK) as u8)
     }
 
     pub const fn get_state(&self) -> StateFlags {
-        StateFlags(((self.0 >> Self::STATUS_POSITION) & Self::STATUS_MASK) as u8)
+        StateFlags::from_bits_retain(((self.0 >> Self::STATUS_POSITION) & Self::STATUS_MASK) as u8)
     }
 
     pub const fn set_mode(mut self, mode: AccessFlags) -> Self {
         self.0 &= !(Self::MODE_MASK << Self::MODE_POSITION);
-        self.0 |= (mode.0 as u16) << Self::MODE_POSITION;
+        self.0 |= (mode.bits() as u16) << Self::MODE_POSITION;
         self
     }
 
     pub const fn set_open(mut self, open: CreateFlags) -> Self {
         self.0 &= !(Self::OPEN_MASK << Self::OPEN_POSITION);
-        self.0 |= (open.0 as u16) << Self::OPEN_POSITION;
+        self.0 |= (open.bits() as u16) << Self::OPEN_POSITION;
         self
     }
 
     pub const fn set_status(mut self, status: StateFlags) -> Self {
         self.0 &= !(Self::STATUS_MASK << Self::STATUS_POSITION);
-        self.0 |= (status.0 as u16) << Self::STATUS_POSITION;
+        self.0 |= (status.bits() as u16) << Self::STATUS_POSITION;
         self
     }
 
@@ -210,7 +161,7 @@ mod tests {
     #[test]
     fn test_flags_type_is_permission_granted() {
         let mode = AccessFlags::READ_WRITE;
-        let status = StateFlags::None;
+        let status = StateFlags::empty();
         let flags = Flags::new(mode, None, Some(status));
 
         assert!(flags.is_permission_granted(&Permission::Read));
