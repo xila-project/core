@@ -114,84 +114,101 @@ pub struct OutputDevice<'a, const N: usize> {
 }
 
 impl<const N: usize> DirectBaseOperations for OutputDevice<'_, N> {
-    fn read(&self, _: &mut [u8], _: Size) -> Result<usize> {
-        Err(Error::UnsupportedOperation)
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        _: &mut [u8],
+        _: Size,
+    ) -> core::task::Poll<Result<usize>> {
+        file_system::ready(|| Err(Error::UnsupportedOperation))
     }
 
     /// Enqueues whole frames, returning zero immediately when full. No alignment
     /// requirement on the byte slice; incomplete frames are rejected.
-    fn write(&self, buffer: &[u8], _: Size) -> Result<usize> {
-        self.state.check()?;
-        if !buffer.len().is_multiple_of(self.frame_size) {
-            return Err(Error::InvalidParameter);
-        }
-        Ok(self.producer.lock(|producer| {
-            let mut producer = producer.borrow_mut();
-            let free = producer.free() / self.frame_size * self.frame_size;
-            producer.write(&buffer[..buffer.len().min(free)])
-        }))
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        _: Size,
+    ) -> core::task::Poll<Result<usize>> {
+        file_system::ready(|| {
+            self.state.check()?;
+            if !buffer.len().is_multiple_of(self.frame_size) {
+                return Err(Error::InvalidParameter);
+            }
+            Ok(self.producer.lock(|producer| {
+                let mut producer = producer.borrow_mut();
+                let free = producer.free() / self.frame_size * self.frame_size;
+                producer.write(&buffer[..buffer.len().min(free)])
+            }))
+        })
     }
 
     /// Polls for queued PCM to be consumed. Success means submitted to the
     /// callback, not physically played by the hardware. Never waits or spins.
-    fn flush(&self) -> Result<()> {
-        self.state.check()?;
-        if self.producer.lock(|producer| producer.borrow().free()) == N {
-            Ok(())
-        } else {
-            Err(Error::RessourceBusy)
-        }
+    fn flush(&self, _cx: &mut core::task::Context<'_>) -> core::task::Poll<Result<()>> {
+        file_system::ready(|| {
+            self.state.check()?;
+            if self.producer.lock(|producer| producer.borrow().free()) == N {
+                Ok(())
+            } else {
+                Err(Error::RessourceBusy)
+            }
+        })
     }
 
     fn control(
         &self,
+        _cx: &mut core::task::Context<'_>,
         command: ControlCommandIdentifier,
         input: &AnyByLayout,
         output: &mut AnyByLayout,
-    ) -> Result<()> {
-        self.state.check()?;
-        match command {
-            SET_CONFIGURATION::IDENTIFIER => {
-                validate_command::<SET_CONFIGURATION>(input, output)?;
-                let configuration = SET_CONFIGURATION::cast_input(input)?;
-                configuration.validate()?;
-                if *configuration != self.configuration {
-                    return Err(Error::UnsupportedOperation);
+    ) -> core::task::Poll<Result<()>> {
+        file_system::ready(|| {
+            self.state.check()?;
+            match command {
+                SET_CONFIGURATION::IDENTIFIER => {
+                    validate_command::<SET_CONFIGURATION>(input, output)?;
+                    let configuration = SET_CONFIGURATION::cast_input(input)?;
+                    configuration.validate()?;
+                    if *configuration != self.configuration {
+                        return Err(Error::UnsupportedOperation);
+                    }
                 }
-            }
-            GET_CONFIGURATION::IDENTIFIER => {
-                validate_command::<GET_CONFIGURATION>(input, output)?;
-                *GET_CONFIGURATION::cast_output(output)? = self.configuration;
-            }
-            GET_WRITABLE::IDENTIFIER => {
-                validate_command::<GET_WRITABLE>(input, output)?;
-                let free = self.producer.lock(|producer| producer.borrow().free());
-                *GET_WRITABLE::cast_output(output)? =
-                    (free / self.frame_size * self.frame_size) as u32;
-            }
-            SET_VOLUME::IDENTIFIER => {
-                validate_command::<SET_VOLUME>(input, output)?;
-                let volume = *SET_VOLUME::cast_input(input)?;
-                if volume > 100 {
-                    return Err(Error::InvalidParameter);
+                GET_CONFIGURATION::IDENTIFIER => {
+                    validate_command::<GET_CONFIGURATION>(input, output)?;
+                    *GET_CONFIGURATION::cast_output(output)? = self.configuration;
                 }
-                self.state.volume.store(volume, Ordering::Release);
+                GET_WRITABLE::IDENTIFIER => {
+                    validate_command::<GET_WRITABLE>(input, output)?;
+                    let free = self.producer.lock(|producer| producer.borrow().free());
+                    *GET_WRITABLE::cast_output(output)? =
+                        (free / self.frame_size * self.frame_size) as u32;
+                }
+                SET_VOLUME::IDENTIFIER => {
+                    validate_command::<SET_VOLUME>(input, output)?;
+                    let volume = *SET_VOLUME::cast_input(input)?;
+                    if volume > 100 {
+                        return Err(Error::InvalidParameter);
+                    }
+                    self.state.volume.store(volume, Ordering::Release);
+                }
+                GET_VOLUME::IDENTIFIER => {
+                    validate_command::<GET_VOLUME>(input, output)?;
+                    *GET_VOLUME::cast_output(output)? = self.state.volume.load(Ordering::Acquire);
+                }
+                START::IDENTIFIER => {
+                    validate_command::<START>(input, output)?;
+                    self.state.started.store(true, Ordering::Release);
+                }
+                STOP::IDENTIFIER => {
+                    validate_command::<STOP>(input, output)?;
+                    self.state.started.store(false, Ordering::Release);
+                }
+                _ => return Err(Error::UnsupportedOperation),
             }
-            GET_VOLUME::IDENTIFIER => {
-                validate_command::<GET_VOLUME>(input, output)?;
-                *GET_VOLUME::cast_output(output)? = self.state.volume.load(Ordering::Acquire);
-            }
-            START::IDENTIFIER => {
-                validate_command::<START>(input, output)?;
-                self.state.started.store(true, Ordering::Release);
-            }
-            STOP::IDENTIFIER => {
-                validate_command::<STOP>(input, output)?;
-                self.state.started.store(false, Ordering::Release);
-            }
-            _ => return Err(Error::UnsupportedOperation),
-        }
-        Ok(())
+            Ok(())
+        })
     }
 }
 

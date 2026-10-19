@@ -89,7 +89,7 @@ impl Manager {
     fn generate_seed(&self) -> Result<u64> {
         let mut buffer = [0u8; 8];
         self.random_device
-            .read(&mut buffer, 0)
+            .read_sync(&mut buffer, 0)
             .map_err(Error::FailedToGenerateSeed)?;
         Ok(u64::from_le_bytes(buffer))
     }

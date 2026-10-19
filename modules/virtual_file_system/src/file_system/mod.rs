@@ -397,7 +397,7 @@ impl VirtualFileSystem {
                 let mut pipes = self.pipes.write().await;
                 let pipe = pipes.get_mut(&inode).ok_or(Error::InvalidInode)?;
 
-                context = pipe.pipe.open_context(flags.get_access());
+                context = pipe.pipe.open_context(flags.get_access())?;
                 File::new(self, ItemStatic::Pipe(pipe.pipe.clone()), flags, context)
             }
             Kind::File => {
@@ -630,14 +630,14 @@ impl VirtualFileSystem {
             self,
             ItemStatic::Pipe(pipe.clone()),
             Flags::new(AccessFlags::Write, None, Some(status)),
-            pipe.open_context(AccessFlags::Write),
+            pipe.open_context(AccessFlags::Write)?,
         );
 
         let reader = File::new(
             self,
             ItemStatic::Pipe(pipe.clone()),
             Flags::new(AccessFlags::Read, None, Some(status)),
-            pipe.open_context(AccessFlags::Read),
+            pipe.open_context(AccessFlags::Read)?,
         );
 
         Ok((reader, writer))

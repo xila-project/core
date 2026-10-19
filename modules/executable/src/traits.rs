@@ -43,42 +43,47 @@ impl<T: ExecutableTrait> MountOperations for ExecutableWrapper<T> {}
 impl<T: ExecutableTrait> DirectBaseOperations for ExecutableWrapper<T> {
     fn read(
         &self,
+        _cx: &mut core::task::Context<'_>,
         _buffer: &mut [u8],
         _absolute_position: file_system::Size,
-    ) -> file_system::Result<usize> {
-        Err(file_system::Error::UnsupportedOperation)
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
     }
 
     fn write(
         &self,
+        _cx: &mut core::task::Context<'_>,
         _buffer: &[u8],
         _absolute_position: file_system::Size,
-    ) -> file_system::Result<usize> {
-        Err(file_system::Error::UnsupportedOperation)
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
     }
 
     fn control(
         &self,
+        _cx: &mut core::task::Context<'_>,
         command: ControlCommandIdentifier,
         _: &AnyByLayout,
         output: &mut AnyByLayout,
-    ) -> file_system::Result<()> {
-        log::debug!("ExecutableWrapper control command: {:?}", command);
+    ) -> core::task::Poll<file_system::Result<()>> {
+        file_system::ready(|| {
+            log::debug!("ExecutableWrapper control command: {:?}", command);
 
-        match command {
-            GET_MAIN_FUNCTION::IDENTIFIER => {
-                let output = GET_MAIN_FUNCTION::cast_output(output)?;
-                let executable_context = self.1;
-                *output = Some(Box::new(move |context, standard, arguments| {
-                    let mut standard = standard;
-                    standard.context = context;
-                    debug_assert!(core::ptr::eq(context, executable_context));
-                    T::main(standard, arguments)
-                }));
-                Ok(())
+            match command {
+                GET_MAIN_FUNCTION::IDENTIFIER => {
+                    let output = GET_MAIN_FUNCTION::cast_output(output)?;
+                    let executable_context = self.1;
+                    *output = Some(Box::new(move |context, standard, arguments| {
+                        let mut standard = standard;
+                        standard.context = context;
+                        debug_assert!(core::ptr::eq(context, executable_context));
+                        T::main(standard, arguments)
+                    }));
+                    Ok(())
+                }
+                _ => Err(file_system::Error::UnsupportedOperation),
             }
-            _ => Err(file_system::Error::UnsupportedOperation),
-        }
+        })
     }
 }
 

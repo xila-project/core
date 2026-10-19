@@ -13,7 +13,8 @@ use file_system::{
 use task::test;
 use virtual_file_system::{File, VirtualFileSystem};
 
-drivers_std::instantiate_global_allocator!();
+#[path = "support/allocation.rs"]
+mod allocation;
 
 async fn initialize() -> (TaskIdentifier, &'static VirtualFileSystem) {
     let task_instance = Box::leak(Box::new(task::Manager::new()));
@@ -255,3 +256,11 @@ async fn test_device() {
 
     virtual_file_system.remove(task, DEVICE_PATH).await.unwrap();
 }
+
+#[cfg(target_os = "linux")]
+#[path = "support/polling.rs"]
+mod polling;
+
+#[cfg(target_os = "linux")]
+#[path = "support/device_polling.rs"]
+mod device_polling;

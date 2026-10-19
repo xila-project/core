@@ -420,14 +420,27 @@ async fn duplicated_regular_streams_share_their_position() {
 
 struct FailingFlush;
 impl xila::file_system::DirectBaseOperations for FailingFlush {
-    fn read(&self, _: &mut [u8], _: xila::file_system::Size) -> xila::file_system::Result<usize> {
-        Ok(0)
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        _: &mut [u8],
+        _: xila::file_system::Size,
+    ) -> core::task::Poll<xila::file_system::Result<usize>> {
+        xila::file_system::ready(|| Ok(0))
     }
-    fn write(&self, bytes: &[u8], _: xila::file_system::Size) -> xila::file_system::Result<usize> {
-        Ok(bytes.len())
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        bytes: &[u8],
+        _: xila::file_system::Size,
+    ) -> core::task::Poll<xila::file_system::Result<usize>> {
+        xila::file_system::ready(|| Ok(bytes.len()))
     }
-    fn flush(&self) -> xila::file_system::Result<()> {
-        Err(xila::file_system::Error::InputOutput)
+    fn flush(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<xila::file_system::Result<()>> {
+        xila::file_system::ready(|| Err(xila::file_system::Error::InputOutput))
     }
 }
 impl xila::file_system::MountOperations for FailingFlush {}

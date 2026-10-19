@@ -29,9 +29,40 @@ impl Cursor {
             Self(Mutex::new(RefCell::new(position.clone())))
         })
     }
+    /// Commit position only after completed I/O, releasing the lock on Pending.
+    pub fn poll_update<T>(
+        &self,
+        operation: impl FnOnce(Size) -> core::task::Poll<Result<(T, Size)>>,
+    ) -> core::task::Poll<Result<T>> {
+        use core::task::Poll;
+        let position = self.0.lock(|position| position.borrow().clone());
+        match position {
+            Position::Exclusive(value) => match operation(value) {
+                Poll::Ready(Ok((result, next))) => {
+                    self.0
+                        .lock(|position| *position.borrow_mut() = Position::Exclusive(next));
+                    Poll::Ready(Ok(result))
+                }
+                Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+                Poll::Pending => Poll::Pending,
+            },
+            Position::Shared(shared) => {
+                let mut value = shared.try_lock().map_err(|_| Error::RessourceBusy)?;
+                match operation(*value) {
+                    Poll::Ready(Ok((result, next))) => {
+                        *value = next;
+                        Poll::Ready(Ok(result))
+                    }
+                    Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+                    Poll::Pending => Poll::Pending,
+                }
+            }
+        }
+    }
+
     pub fn update<T>(&self, operation: impl FnOnce(Size) -> Result<(T, Size)>) -> Result<T> {
         // Never hold the global critical section across device I/O. Contended
-        // duplicated streams return ResourceBusy for the caller's polling path.
+        // duplicated streams return ResourceBusy without changing the cursor.
         let position = self.0.lock(|position| position.borrow().clone());
         match position {
             Position::Exclusive(value) => {
@@ -54,6 +85,39 @@ impl Cursor {
 mod tests {
     extern crate std;
     use super::*;
+
+    #[test]
+    fn pending_does_not_commit_or_retain_shared_cursor_lock() {
+        use core::task::Poll;
+        let cursor = Cursor::new(7);
+        let duplicate = cursor.duplicate();
+        assert_eq!(cursor.poll_update::<()>(|_| Poll::Pending), Poll::Pending);
+        assert_eq!(
+            duplicate
+                .update(|position| Ok((position, position)))
+                .unwrap(),
+            7
+        );
+        assert_eq!(
+            cursor.poll_update(|position| Poll::Ready(Ok((2, position + 2)))),
+            Poll::Ready(Ok(2))
+        );
+        assert_eq!(
+            duplicate
+                .update(|position| Ok((position, position)))
+                .unwrap(),
+            9
+        );
+        duplicate
+            .update(|position| {
+                assert_eq!(
+                    cursor.poll_update::<()>(|_| panic!("contended callback must not run")),
+                    Poll::Ready(Err(Error::RessourceBusy))
+                );
+                Ok(((), position))
+            })
+            .unwrap();
+    }
 
     #[test]
     fn io_callbacks_do_not_hold_the_global_critical_section() {

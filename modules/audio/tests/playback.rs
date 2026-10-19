@@ -51,7 +51,7 @@ fn control<C: ControlCommand>(
     input: &C::Input,
     output: &mut C::Output,
 ) -> file_system::Result<()> {
-    device.control(
+    device.control_sync(
         C::IDENTIFIER,
         AnyByLayout::from(input),
         AnyByLayout::from_mutable(output),
@@ -80,9 +80,12 @@ fn configuration_and_frame_boundaries() {
 
     let mut buffer = PlaybackBuffer::<8>::new();
     let (device, _renderer) = buffer.split(configuration).unwrap();
-    assert_eq!(device.write(&[1, 2, 3], 0), Err(Error::InvalidParameter));
-    assert_eq!(device.write(&[0; 12], 0), Ok(8));
-    assert_eq!(device.write(&[0; 4], 0), Ok(0));
+    assert_eq!(
+        device.write_sync(&[1, 2, 3], 0),
+        Err(Error::InvalidParameter)
+    );
+    assert_eq!(device.write_sync(&[0; 12], 0), Ok(8));
+    assert_eq!(device.write_sync(&[0; 4], 0), Ok(0));
     let mut writable = 99;
     control::<GET_WRITABLE>(&device, &(), &mut writable).unwrap();
     assert_eq!(writable, 0);
@@ -93,18 +96,18 @@ fn starts_paused_and_retains_audio_across_stop() {
     let configuration = Configuration::new(48_000, 1, SampleFormat::I16);
     let mut buffer = PlaybackBuffer::<8>::new();
     let (device, mut renderer) = buffer.split(configuration).unwrap();
-    device.write(&1000i16.to_le_bytes(), 0).unwrap();
+    device.write_sync(&1000i16.to_le_bytes(), 0).unwrap();
     let mut output = [42i16; 2];
     assert_eq!(renderer.render_i16(&mut output), 0);
     assert_eq!(output, [0, 0]);
-    assert_eq!(device.flush(), Err(Error::RessourceBusy));
+    assert_eq!(device.flush_sync(), Err(Error::RessourceBusy));
     start(&device);
     control::<STOP>(&device, &(), &mut ()).unwrap();
     assert_eq!(renderer.render_i16(&mut output), 0);
     start(&device);
     assert_eq!(renderer.render_i16(&mut output), 1);
     assert_eq!(output, [1000, 0]);
-    assert_eq!(device.flush(), Ok(()));
+    assert_eq!(device.flush_sync(), Ok(()));
 }
 
 #[test]
@@ -118,15 +121,15 @@ fn wrapping_stereo_frames_are_not_split_or_reordered() {
         .into_iter()
         .flat_map(i16::to_le_bytes)
         .collect();
-    assert_eq!(device.write(&input[..8], 0), Ok(8));
+    assert_eq!(device.write_sync(&input[..8], 0), Ok(8));
     let mut output = [0i16; 2];
     assert_eq!(renderer.render_i16(&mut output), 1);
     assert_eq!(output, [100, -100]);
-    assert_eq!(device.write(&input[4..], 0), Ok(8));
+    assert_eq!(device.write_sync(&input[4..], 0), Ok(8));
     let mut output = [0i16; 7];
     assert_eq!(renderer.render_i16(&mut output), 3);
     assert_eq!(output, [200, -200, 200, -200, 300, -300, 0]);
-    assert_eq!(device.flush(), Ok(()));
+    assert_eq!(device.flush_sync(), Ok(()));
 }
 
 #[test]
@@ -150,7 +153,7 @@ fn volume_is_applied_when_rendering_and_configuration_is_fixed() {
         control::<SET_VOLUME>(&device, &101, &mut ()),
         Err(Error::InvalidParameter)
     );
-    device.write(&1000i16.to_le_bytes(), 0).unwrap();
+    device.write_sync(&1000i16.to_le_bytes(), 0).unwrap();
     control::<SET_VOLUME>(&device, &50, &mut ()).unwrap();
     let mut volume = 0;
     control::<GET_VOLUME>(&device, &(), &mut volume).unwrap();
@@ -168,14 +171,14 @@ fn converts_pcm_and_fills_unsigned_silence() {
         .split(Configuration::new(48_000, 1, SampleFormat::I16))
         .unwrap();
     start(&device);
-    device.write(&(-16384i16).to_le_bytes(), 0).unwrap();
+    device.write_sync(&(-16384i16).to_le_bytes(), 0).unwrap();
     let mut float = [99.0; 2];
     assert_eq!(renderer.render_f32(&mut float), 1);
     assert_eq!(float, [-0.5, 0.0]);
     let mut unsigned = [0u8; 2];
     assert_eq!(renderer.render_u8(&mut unsigned), 0);
     assert_eq!(unsigned, [128, 128]);
-    device.write(&16384i16.to_le_bytes(), 0).unwrap();
+    device.write_sync(&16384i16.to_le_bytes(), 0).unwrap();
     let mut wide = [0i32; 1];
     assert_eq!(renderer.render_i32(&mut wide), 1);
     assert_eq!(wide, [1 << 30]);
@@ -188,10 +191,10 @@ fn backend_failure_is_reported_instead_of_stalling() {
         .split(Configuration::new(48_000, 1, SampleFormat::I16))
         .unwrap();
     start(&device);
-    device.write(&[0; 2], 0).unwrap();
+    device.write_sync(&[0; 2], 0).unwrap();
     renderer.failure_reporter().fail();
-    assert_eq!(device.flush(), Err(Error::InputOutput));
-    assert_eq!(device.write(&[0; 2], 0), Err(Error::InputOutput));
+    assert_eq!(device.flush_sync(), Err(Error::InputOutput));
+    assert_eq!(device.write_sync(&[0; 2], 0), Err(Error::InputOutput));
     assert_eq!(
         control::<START>(&device, &(), &mut ()),
         Err(Error::InputOutput)
@@ -214,10 +217,10 @@ fn playback_hot_path_has_zero_allocations() {
     TRACKING.with(|tracking| tracking.set(true));
     ALLOCATIONS.with(|count| count.set(0));
     for _ in 0..1000 {
-        assert_eq!(device.write(&input, 0), Ok(1024));
+        assert_eq!(device.write_sync(&input, 0), Ok(1024));
         control::<SET_VOLUME>(&device, &50, &mut ()).unwrap();
         assert_eq!(renderer.render_f32(&mut output), 256);
-        assert_eq!(device.flush(), Ok(()));
+        assert_eq!(device.flush_sync(), Ok(()));
     }
     TRACKING.with(|tracking| tracking.set(false));
     assert_eq!(ALLOCATIONS.with(Cell::get), 0);
@@ -239,7 +242,7 @@ fn concurrent_writer_and_callback_preserve_samples() {
     std::thread::scope(|scope| {
         scope.spawn(|| {
             for sample in 1..=5000i16 {
-                while device.write(&sample.to_le_bytes(), 0).unwrap() == 0 {
+                while device.write_sync(&sample.to_le_bytes(), 0).unwrap() == 0 {
                     std::thread::yield_now();
                 }
             }
@@ -255,7 +258,7 @@ fn concurrent_writer_and_callback_preserve_samples() {
             std::thread::yield_now();
         }
     });
-    assert_eq!(device.flush(), Ok(()));
+    assert_eq!(device.flush_sync(), Ok(()));
 }
 
 #[test]
@@ -273,7 +276,10 @@ fn all_input_formats_and_unaligned_bytes_are_supported() {
         // Offset input by one byte, so typed input alignment cannot be assumed.
         let mut input = [0u8; 5];
         input[1..1 + bytes.len()].copy_from_slice(bytes);
-        assert_eq!(device.write(&input[1..1 + bytes.len()], 0), Ok(bytes.len()));
+        assert_eq!(
+            device.write_sync(&input[1..1 + bytes.len()], 0),
+            Ok(bytes.len())
+        );
         let mut output = [0.0; 1];
         assert_eq!(renderer.render_f32(&mut output), 1);
         assert_eq!(output, [0.5]);
@@ -302,7 +308,7 @@ fn commands_have_unique_audio_identifiers_and_renderer_drop_fails_device() {
         .split(Configuration::new(48_000, 1, SampleFormat::I16))
         .unwrap();
     drop(renderer);
-    assert_eq!(device.write(&[0; 2], 0), Err(Error::InputOutput));
+    assert_eq!(device.write_sync(&[0; 2], 0), Err(Error::InputOutput));
 }
 
 #[test]
@@ -313,7 +319,7 @@ fn rejects_oversized_misaligned_and_unexpected_command_payloads() {
     let configuration = Configuration::new(48_000, 1, SampleFormat::I16);
     let (device, _renderer) = buffer.split(configuration).unwrap();
     assert_eq!(
-        device.control(
+        device.control_sync(
             SET_CONFIGURATION::IDENTIFIER,
             AnyByLayout::from(&[configuration; 2]),
             AnyByLayout::NONE,
@@ -322,7 +328,7 @@ fn rejects_oversized_misaligned_and_unexpected_command_payloads() {
     );
     let mut oversized = [0u8; 2];
     assert_eq!(
-        device.control(
+        device.control_sync(
             GET_VOLUME::IDENTIFIER,
             AnyByLayout::from(&()),
             AnyByLayout::from_mutable(&mut oversized),
@@ -334,7 +340,7 @@ fn rejects_oversized_misaligned_and_unexpected_command_payloads() {
     let mut bytes = Aligned([0; 16]);
     let misaligned: &mut [u8; 12] = (&mut bytes.0[1..13]).try_into().unwrap();
     assert_eq!(
-        device.control(
+        device.control_sync(
             GET_CONFIGURATION::IDENTIFIER,
             AnyByLayout::from(&()),
             AnyByLayout::from_mutable(misaligned),
@@ -342,7 +348,7 @@ fn rejects_oversized_misaligned_and_unexpected_command_payloads() {
         Err(Error::InvalidParameter)
     );
     assert_eq!(
-        device.control(
+        device.control_sync(
             START::IDENTIFIER,
             AnyByLayout::from(&0u8),
             AnyByLayout::NONE
@@ -350,7 +356,7 @@ fn rejects_oversized_misaligned_and_unexpected_command_payloads() {
         Err(Error::InvalidParameter)
     );
     assert_eq!(
-        device.control(
+        device.control_sync(
             ControlCommandIdentifier::new_read::<(), ()>(b'A', 99),
             AnyByLayout::from(&()),
             AnyByLayout::NONE,

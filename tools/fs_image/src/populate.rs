@@ -138,7 +138,7 @@ fn copy_or_verify(
             let mut done = 0;
             while done < count {
                 let transferred = if verify {
-                    let read = fs.read(
+                    let read = fs.read_sync(
                         &mut context,
                         &mut comparison[done..count],
                         position + done as u64,
@@ -148,7 +148,7 @@ fn copy_or_verify(
                     }
                     read
                 } else {
-                    fs.write(&mut context, &buffer[done..count], position + done as u64)?
+                    fs.write_sync(&mut context, &buffer[done..count], position + done as u64)?
                 };
                 if transferred == 0 {
                     return Err("short filesystem I/O".into());
@@ -157,7 +157,7 @@ fn copy_or_verify(
             }
             position += count as u64;
         }
-        if verify && fs.read(&mut context, &mut comparison[..1], position)? != 0 {
+        if verify && fs.read_sync(&mut context, &mut comparison[..1], position)? != 0 {
             return Err("file has unexpected trailing content".into());
         }
         Ok(())

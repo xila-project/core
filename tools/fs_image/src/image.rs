@@ -28,7 +28,7 @@ pub fn build(output: &Path, size: u64, root: Option<&Path>) -> Result<(), Box<dy
             let fs = little_fs::FileSystem::new_format(Box::leak(Box::new(partition)), 256)?;
             super::populate::populate(&fs, source.as_ref())?;
             drop(fs);
-            drive.flush()?;
+            drive.flush_sync()?;
         }
         {
             let drive = Box::leak(Box::new(FileDriveDevice::new(&name, size)));
@@ -46,7 +46,7 @@ pub fn build(output: &Path, size: u64, root: Option<&Path>) -> Result<(), Box<dy
             let fs = little_fs::FileSystem::new(Box::leak(Box::new(partition)), 256)?;
             super::populate::verify(&fs, source.as_ref())?;
             drop(fs);
-            drive.flush()?;
+            drive.flush_sync()?;
         }
         Ok(())
     })();

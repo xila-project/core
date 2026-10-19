@@ -156,7 +156,7 @@ impl Mbr {
 
         let mut buffer = [0u8; Self::SIZE];
         device.set_position(0, &crate::Position::Start(0))?;
-        let bytes_read = device.read(&mut buffer, 0)?;
+        let bytes_read = device.read_sync(&mut buffer, 0)?;
 
         if bytes_read < Self::SIZE {
             return Err(Error::ReadFailed);
@@ -177,7 +177,7 @@ impl Mbr {
 
         // Convert to bytes and write
         let buffer = self.to_bytes();
-        let bytes_written = device.write(&buffer, 0)?;
+        let bytes_written = device.write_sync(&buffer, 0)?;
 
         if bytes_written < Self::SIZE {
             return Err(Error::WriteFailed);

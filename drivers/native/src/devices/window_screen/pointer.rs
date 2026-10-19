@@ -11,23 +11,35 @@ impl PointerDevice {
 }
 
 impl DirectBaseOperations for PointerDevice {
-    fn read(&self, buffer: &mut [u8], _: Size) -> file_system::Result<usize> {
-        // - Cast the pointer data to the buffer.
-        let data: &mut InputData = buffer
-            .try_into()
-            .map_err(|_| file_system::Error::InvalidParameter)?;
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            // - Cast the pointer data to the buffer.
+            let data: &mut InputData = buffer
+                .try_into()
+                .map_err(|_| file_system::Error::InvalidParameter)?;
 
-        // Copy the pointer data.
+            // Copy the pointer data.
 
-        if let Ok(guard) = self.0.try_read() {
-            *data = *guard;
-        }
+            if let Ok(guard) = self.0.try_read() {
+                *data = *guard;
+            }
 
-        Ok(size_of::<InputData>())
+            Ok(size_of::<InputData>())
+        })
     }
 
-    fn write(&self, _: &[u8], _: Size) -> file_system::Result<usize> {
-        Err(file_system::Error::UnsupportedOperation)
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        _: &[u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
     }
 }
 

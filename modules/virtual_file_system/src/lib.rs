@@ -13,13 +13,14 @@ mod hierarchy;
 mod home;
 mod item;
 mod r#macro;
+mod operation;
 mod pipe;
 mod synchronous_directory;
 mod synchronous_file;
 
 pub use directory::*;
 pub use error::*;
-use exported_file_system::{Flags, StateFlags};
+use exported_file_system::Flags;
 pub use file::*;
 pub use file_system::*;
 pub use hierarchy::*;
@@ -30,30 +31,11 @@ pub use synchronous_file::*;
 
 pub extern crate file_system as exported_file_system;
 
-pub async fn poll<O>(mut operation: impl FnMut() -> Result<O>) -> Result<O> {
-    loop {
-        match operation() {
-            Err(Error::FileSystem(::file_system::Error::RessourceBusy))
-            | Err(Error::RessourceBusy) => {
-                task::yield_now().await;
-            }
-            other => return other,
-        }
-    }
+/// Run synchronous metadata once. Busy is an error, not an implicit wait.
+pub async fn poll<O>(operation: impl FnOnce() -> Result<O>) -> Result<O> {
+    operation()
 }
 
-pub fn blocking_operation<O>(flags: Flags, mut operation: impl FnMut() -> Result<O>) -> Result<O> {
-    let non_blocking = flags.get_state().contains(StateFlags::NonBlocking);
-
-    loop {
-        match operation() {
-            Err(Error::FileSystem(::file_system::Error::RessourceBusy))
-            | Err(Error::RessourceBusy) => {
-                if non_blocking {
-                    return Err(Error::FileSystem(::file_system::Error::RessourceBusy));
-                }
-            }
-            other => return other,
-        }
-    }
+pub fn blocking_operation<O>(_flags: Flags, operation: impl FnOnce() -> Result<O>) -> Result<O> {
+    operation()
 }

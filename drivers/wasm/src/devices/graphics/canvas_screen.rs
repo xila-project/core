@@ -149,58 +149,73 @@ impl CanvasScreenDevice {
 }
 
 impl DirectBaseOperations for CanvasScreenDevice {
-    fn read(&self, _: &mut [u8], _: Size) -> file_system::Result<usize> {
-        Err(file_system::Error::UnsupportedOperation)
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        _: &mut [u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
     }
 
-    fn write(&self, buffer: &[u8], _: Size) -> file_system::Result<usize> {
-        let buffer: &[RenderingColor] =
-            align_slice_to(buffer).ok_or(file_system::Error::InvalidParameter)?;
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            let buffer: &[RenderingColor] =
+                align_slice_to(buffer).ok_or(file_system::Error::InvalidParameter)?;
 
-        let mut inner = block_on(self.0.write());
+            let mut inner = block_on(self.0.write());
 
-        inner
-            .draw_buffer(buffer)
-            .map_err(|_| file_system::Error::InputOutput)?;
+            inner
+                .draw_buffer(buffer)
+                .map_err(|_| file_system::Error::InputOutput)?;
 
-        Ok(buffer.len())
+            Ok(buffer.len())
+        })
     }
 
     fn control(
         &self,
+        _cx: &mut core::task::Context<'_>,
         command: ControlCommandIdentifier,
         input: &AnyByLayout,
         output: &mut AnyByLayout,
-    ) -> file_system::Result<()> {
-        match command {
-            SET_DRAWING_AREA::IDENTIFIER => {
-                let area = SET_DRAWING_AREA::cast_input(input)?;
+    ) -> core::task::Poll<file_system::Result<()>> {
+        file_system::ready(|| {
+            match command {
+                SET_DRAWING_AREA::IDENTIFIER => {
+                    let area = SET_DRAWING_AREA::cast_input(input)?;
 
-                let mut inner = block_on(self.0.write());
-                inner.area = *area;
+                    let mut inner = block_on(self.0.write());
+                    inner.area = *area;
+                }
+                GET_RESOLUTION::IDENTIFIER => {
+                    let point = GET_RESOLUTION::cast_output(output)?;
+
+                    let inner = block_on(self.0.read());
+
+                    let resolution = inner
+                        .get_resolution()
+                        .map_err(|_| file_system::Error::InputOutput)?;
+
+                    *point = resolution;
+                }
+                WAS_RESIZED::IDENTIFIER => {
+                    let was_resized = WAS_RESIZED::cast_output(output)?;
+
+                    let mut inner = block_on(self.0.write());
+                    *was_resized = inner.was_resized;
+                    inner.was_resized = false;
+                }
+                _ => return Err(file_system::Error::InvalidParameter),
             }
-            GET_RESOLUTION::IDENTIFIER => {
-                let point = GET_RESOLUTION::cast_output(output)?;
 
-                let inner = block_on(self.0.read());
-
-                let resolution = inner
-                    .get_resolution()
-                    .map_err(|_| file_system::Error::InputOutput)?;
-
-                *point = resolution;
-            }
-            WAS_RESIZED::IDENTIFIER => {
-                let was_resized = WAS_RESIZED::cast_output(output)?;
-
-                let mut inner = block_on(self.0.write());
-                *was_resized = inner.was_resized;
-                inner.was_resized = false;
-            }
-            _ => return Err(file_system::Error::InvalidParameter),
-        }
-
-        Ok(())
+            Ok(())
+        })
     }
 }
 

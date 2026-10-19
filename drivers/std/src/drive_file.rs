@@ -45,37 +45,54 @@ impl FileDriveDevice {
 }
 
 impl DirectBaseOperations for FileDriveDevice {
-    fn read(&self, buffer: &mut [u8], position: Size) -> file_system::Result<usize> {
-        let mut inner = self.0.try_get()?;
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        position: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            let mut inner = self.0.try_get()?;
 
-        inner.seek(SeekFrom::Start(position)).map_err(map_error)?;
-        inner.read(buffer).map_err(map_error)
+            inner.seek(SeekFrom::Start(position)).map_err(map_error)?;
+            inner.read(buffer).map_err(map_error)
+        })
     }
 
-    fn write(&self, buffer: &[u8], position: Size) -> file_system::Result<usize> {
-        let mut inner = self.0.try_get()?;
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        position: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            let mut inner = self.0.try_get()?;
 
-        inner.seek(SeekFrom::Start(position)).map_err(map_error)?;
-        inner.write(buffer).map_err(map_error)
+            inner.seek(SeekFrom::Start(position)).map_err(map_error)?;
+            inner.write(buffer).map_err(map_error)
+        })
     }
 
     fn write_pattern(
         &self,
+        _cx: &mut core::task::Context<'_>,
         pattern: &[u8],
         count: usize,
         absolute_position: Size,
-    ) -> file_system::Result<usize> {
-        let mut inner = self.0.try_get()?;
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            let mut inner = self.0.try_get()?;
 
-        inner
-            .seek(SeekFrom::Start(absolute_position))
-            .map_err(map_error)?;
+            inner
+                .seek(SeekFrom::Start(absolute_position))
+                .map_err(map_error)?;
 
-        for _ in 0..count {
-            inner.write_all(pattern).map_err(map_error)?;
-        }
+            for _ in 0..count {
+                inner.write_all(pattern).map_err(map_error)?;
+            }
 
-        Ok(pattern.len() * count)
+            Ok(pattern.len() * count)
+        })
     }
 
     fn set_position(&self, _: Size, position: &Position) -> file_system::Result<Size> {
@@ -92,44 +109,52 @@ impl DirectBaseOperations for FileDriveDevice {
             .map_err(map_error)
     }
 
-    fn flush(&self) -> file_system::Result<()> {
-        self.0
-            .try_get()
-            .map_err(|_| Error::RessourceBusy)?
-            .flush()
-            .map_err(map_error)
+    fn flush(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<file_system::Result<()>> {
+        file_system::ready(|| {
+            self.0
+                .try_get()
+                .map_err(|_| Error::RessourceBusy)?
+                .flush()
+                .map_err(map_error)
+        })
     }
 
     fn control(
         &self,
+        _cx: &mut core::task::Context<'_>,
         command: ControlCommandIdentifier,
         _: &AnyByLayout,
         output: &mut AnyByLayout,
-    ) -> file_system::Result<()> {
-        match command {
-            GET_BLOCK_SIZE::IDENTIFIER => {
-                let block_size = GET_BLOCK_SIZE::cast_output(output)?;
-                *block_size = 512; // Fixed block size for file drive device
+    ) -> core::task::Poll<file_system::Result<()>> {
+        file_system::ready(|| {
+            match command {
+                GET_BLOCK_SIZE::IDENTIFIER => {
+                    let block_size = GET_BLOCK_SIZE::cast_output(output)?;
+                    *block_size = 512; // Fixed block size for file drive device
 
-                Ok(())
+                    Ok(())
+                }
+                GET_BLOCK_COUNT::IDENTIFIER => {
+                    let block_count = GET_BLOCK_COUNT::cast_output(output)?;
+
+                    let file_size = self
+                        .0
+                        .try_get()
+                        .map_err(|_| Error::RessourceBusy)?
+                        .metadata()
+                        .map_err(map_error)?
+                        .len();
+
+                    *block_count = (file_size / 512) as _; // Fixed block size for file drive device
+
+                    Ok(())
+                }
+                _ => Err(Error::UnsupportedOperation),
             }
-            GET_BLOCK_COUNT::IDENTIFIER => {
-                let block_count = GET_BLOCK_COUNT::cast_output(output)?;
-
-                let file_size = self
-                    .0
-                    .try_get()
-                    .map_err(|_| Error::RessourceBusy)?
-                    .metadata()
-                    .map_err(map_error)?
-                    .len();
-
-                *block_count = (file_size / 512) as _; // Fixed block size for file drive device
-
-                Ok(())
-            }
-            _ => Err(Error::UnsupportedOperation),
-        }
+        })
     }
 }
 

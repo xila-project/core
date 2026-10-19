@@ -61,8 +61,8 @@
 //!
 //! // Write some data
 //! let data = b"Hello, File System!";
-//! let result = device.write(data, 0);
-//! assert!(result.is_ok());
+//! let mut cx = core::task::Context::from_waker(core::task::Waker::noop());
+//! assert_eq!(device.write(&mut cx, data, 0), core::task::Poll::Ready(Ok(data.len())));
 //! ```
 //!
 //! ### MBR Operations
@@ -93,7 +93,7 @@
 //!
 //! ## Error Handling
 //!
-//! All operations return [`Result<T>`] which is an alias for `Result<T, Error>`.
+//! Device I/O returns `Poll<Result<T>>`; synchronous operations return [`Result<T>`].
 //! The [`Error`] enum provides comprehensive error reporting for all file system operations.
 
 #![no_std]

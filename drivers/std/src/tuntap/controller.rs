@@ -8,28 +8,39 @@ use shared::AnyByLayout;
 pub struct TunTapControllerDevice;
 
 impl DirectBaseOperations for TunTapControllerDevice {
-    fn read(&self, _: &mut [u8], _: file_system::Size) -> file_system::Result<usize> {
-        Err(Error::UnsupportedOperation)
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        _: &mut [u8],
+        _: file_system::Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| Err(Error::UnsupportedOperation))
     }
 
-    fn write(&self, _: &[u8], _: file_system::Size) -> file_system::Result<usize> {
-        Err(Error::UnsupportedOperation)
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        _: &[u8],
+        _: file_system::Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| Err(Error::UnsupportedOperation))
     }
 
     fn control(
         &self,
+        _cx: &mut core::task::Context<'_>,
         command: ControlCommandIdentifier,
         _: &AnyByLayout,
         output: &mut AnyByLayout,
-    ) -> file_system::Result<()> {
-        match command {
+    ) -> core::task::Poll<file_system::Result<()>> {
+        file_system::ready(|| match command {
             GET_KIND::IDENTIFIER => {
                 let kind = GET_KIND::cast_output(output)?;
                 *kind = InterfaceKind::Ethernet;
                 Ok(())
             }
             _ => Err(Error::UnsupportedOperation),
-        }
+        })
     }
 }
 

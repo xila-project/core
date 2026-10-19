@@ -1060,14 +1060,14 @@ mod tests {
         write_buffer[0..test_data.len()].copy_from_slice(test_data);
 
         // Write at absolute position 0 within the partition
-        let write_result = partition_device.write(&write_buffer, 0);
+        let write_result = partition_device.write_sync(&write_buffer, 0);
         assert!(write_result.is_ok());
         let bytes_written = write_result.unwrap();
         assert_eq!(bytes_written, 512);
 
         // Read it back from absolute position 0
         let mut read_buffer = vec![0u8; 512];
-        let read_result = partition_device.read(&mut read_buffer, 0);
+        let read_result = partition_device.read_sync(&mut read_buffer, 0);
         assert!(read_result.is_ok());
         let bytes_read = read_result.unwrap();
         assert_eq!(bytes_read, 512);
@@ -1080,12 +1080,12 @@ mod tests {
         second_write_buffer[0..second_test_data.len()].copy_from_slice(second_test_data);
 
         // Write at absolute position 1024 within the partition
-        let write_result = partition_device.write(&second_write_buffer, second_position);
+        let write_result = partition_device.write_sync(&second_write_buffer, second_position);
         assert!(write_result.is_ok());
 
         // Read back from absolute position 1024
         let mut second_read_buffer = vec![0u8; 512];
-        let read_result = partition_device.read(&mut second_read_buffer, second_position);
+        let read_result = partition_device.read_sync(&mut second_read_buffer, second_position);
         assert!(read_result.is_ok());
         assert_eq!(
             &second_read_buffer[0..second_test_data.len()],
@@ -1094,7 +1094,7 @@ mod tests {
 
         // Test 3: Verify first write is still intact at position 0
         let mut final_read_buffer = vec![0u8; 512];
-        let read_result = partition_device.read(&mut final_read_buffer, 0);
+        let read_result = partition_device.read_sync(&mut final_read_buffer, 0);
         assert!(read_result.is_ok());
         assert_eq!(&final_read_buffer[0..test_data.len()], test_data);
     }
@@ -1137,12 +1137,12 @@ mod tests {
 
         let mut first_buffer = vec![0u8; 512];
         first_buffer[0..first_data.len()].copy_from_slice(first_data);
-        let write_result = first_partition_device.write(&first_buffer, 0);
+        let write_result = first_partition_device.write_sync(&first_buffer, 0);
         assert!(write_result.is_ok());
 
         let mut second_buffer = vec![0u8; 512];
         second_buffer[0..second_data.len()].copy_from_slice(second_data);
-        let write_result = second_partition_device.write(&second_buffer, 0);
+        let write_result = second_partition_device.write_sync(&second_buffer, 0);
         assert!(write_result.is_ok());
 
         // Reset positions and read back
@@ -1152,9 +1152,9 @@ mod tests {
         let mut first_read_buffer = vec![0u8; 512];
         let mut second_read_buffer = vec![0u8; 512];
 
-        let read_result = first_partition_device.read(&mut first_read_buffer, 0);
+        let read_result = first_partition_device.read_sync(&mut first_read_buffer, 0);
         assert!(read_result.is_ok());
-        let read_result = second_partition_device.read(&mut second_read_buffer, 0);
+        let read_result = second_partition_device.read_sync(&mut second_read_buffer, 0);
         assert!(read_result.is_ok());
 
         // Verify each partition has its own data
@@ -1194,7 +1194,7 @@ mod tests {
         let mut write_buffer = vec![0u8; 512];
         write_buffer[0..test_data.len()].copy_from_slice(test_data);
 
-        let write_result = partition_device.write(&write_buffer, 0);
+        let write_result = partition_device.write_sync(&write_buffer, 0);
         assert!(write_result.is_ok());
 
         // Read it back to verify
@@ -1202,7 +1202,7 @@ mod tests {
             partition_device.set_position(512, &Position::Start(end_position));
         assert!(set_position_result.is_ok());
         let mut read_buffer = vec![0u8; 512];
-        let read_result = partition_device.read(&mut read_buffer, 0);
+        let read_result = partition_device.read_sync(&mut read_buffer, 0);
         assert!(read_result.is_ok());
         assert_eq!(&read_buffer[0..test_data.len()], test_data);
     }

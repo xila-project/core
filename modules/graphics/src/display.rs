@@ -46,14 +46,16 @@ unsafe extern "C" fn binding_callback_function(
     let device = &user_data.device;
 
     device
-        .control(
+        .control_sync(
             SET_DRAWING_AREA::IDENTIFIER,
             AnyByLayout::from_mutable(&mut area),
             AnyByLayout::NONE,
         )
         .expect("Error setting drawing area");
 
-    device.write(buffer, 0).expect("Error writing to display");
+    device
+        .write_sync(buffer, 0)
+        .expect("Error writing to display");
 
     unsafe { lvgl::lv_display_flush_ready(display) };
 }
@@ -79,7 +81,7 @@ impl Display {
         // Get the resolution from the device.
         let mut resolution = Point::new(0, 0);
         device
-            .control(
+            .control_sync(
                 GET_RESOLUTION::IDENTIFIER,
                 AnyByLayout::NONE,
                 AnyByLayout::from_mutable(&mut resolution),
@@ -137,7 +139,7 @@ impl Display {
 
         user_data
             .device
-            .control(
+            .control_sync(
                 WAS_RESIZED::IDENTIFIER,
                 AnyByLayout::NONE,
                 AnyByLayout::from_mutable(&mut was_resize),
@@ -152,7 +154,7 @@ impl Display {
 
         user_data
             .device
-            .control(
+            .control_sync(
                 GET_RESOLUTION::IDENTIFIER,
                 AnyByLayout::NONE,
                 AnyByLayout::from_mutable(&mut resolution),

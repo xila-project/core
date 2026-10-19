@@ -20,45 +20,60 @@ impl<'a> ScreenDevice<'a> {
 }
 
 impl<'a> DirectBaseOperations for ScreenDevice<'a> {
-    fn read(&self, _: &mut [u8], _: Size) -> file_system::Result<usize> {
-        Err(file_system::Error::UnsupportedOperation)
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        _: &mut [u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
     }
 
-    fn write(&self, buffer: &[u8], _: Size) -> file_system::Result<usize> {
-        let data: &[RenderingColor] =
-            align_slice_to(buffer).ok_or(file_system::Error::InvalidParameter)?;
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            let data: &[RenderingColor] =
+                align_slice_to(buffer).ok_or(file_system::Error::InvalidParameter)?;
 
-        task::block_on(self.0.draw(data)).unwrap();
+            task::block_on(self.0.draw(data)).unwrap();
 
-        Ok(size_of::<Self>() as _)
+            Ok(size_of::<Self>() as _)
+        })
     }
 
     fn control(
         &self,
+        _cx: &mut core::task::Context<'_>,
         command: ControlCommandIdentifier,
         input: &AnyByLayout,
         output: &mut AnyByLayout,
-    ) -> file_system::Result<()> {
-        match command {
-            SET_DRAWING_AREA::IDENTIFIER => {
-                let area: &Area = SET_DRAWING_AREA::cast_input(input)?;
+    ) -> core::task::Poll<file_system::Result<()>> {
+        file_system::ready(|| {
+            match command {
+                SET_DRAWING_AREA::IDENTIFIER => {
+                    let area: &Area = SET_DRAWING_AREA::cast_input(input)?;
 
-                task::block_on(self.0.set_drawing_area(*area)).unwrap();
+                    task::block_on(self.0.set_drawing_area(*area)).unwrap();
+                }
+                GET_RESOLUTION::IDENTIFIER => {
+                    let resolution: &mut graphics::Point = GET_RESOLUTION::cast_output(output)?;
+
+                    *resolution = task::block_on(self.0.get_resolution()).unwrap();
+                }
+                WAS_RESIZED::IDENTIFIER => {
+                    let was_resized: &mut bool = WAS_RESIZED::cast_output(output)?;
+
+                    *was_resized = task::block_on(self.0.was_resized()).unwrap();
+                }
+                _ => return Err(file_system::Error::UnsupportedOperation),
             }
-            GET_RESOLUTION::IDENTIFIER => {
-                let resolution: &mut graphics::Point = GET_RESOLUTION::cast_output(output)?;
 
-                *resolution = task::block_on(self.0.get_resolution()).unwrap();
-            }
-            WAS_RESIZED::IDENTIFIER => {
-                let was_resized: &mut bool = WAS_RESIZED::cast_output(output)?;
-
-                *was_resized = task::block_on(self.0.was_resized()).unwrap();
-            }
-            _ => return Err(file_system::Error::UnsupportedOperation),
-        }
-
-        Ok(())
+            Ok(())
+        })
     }
 }
 

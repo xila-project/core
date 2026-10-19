@@ -134,23 +134,35 @@ impl KeyboardDevice {
 }
 
 impl DirectBaseOperations for KeyboardDevice {
-    fn read(&self, buffer: &mut [u8], _: Size) -> file_system::Result<usize> {
-        let data: &mut InputData = buffer
-            .try_into()
-            .map_err(|_| file_system::Error::InvalidParameter)?;
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            let data: &mut InputData = buffer
+                .try_into()
+                .map_err(|_| file_system::Error::InvalidParameter)?;
 
-        if let Ok((key, state)) = self.0.receiver().try_receive() {
-            data.set_key(key);
-            data.set_state(state);
-        }
+            if let Ok((key, state)) = self.0.receiver().try_receive() {
+                data.set_key(key);
+                data.set_state(state);
+            }
 
-        data.set_continue(!self.0.is_empty());
+            data.set_continue(!self.0.is_empty());
 
-        Ok(buffer.len())
+            Ok(buffer.len())
+        })
     }
 
-    fn write(&self, _: &[u8], _: Size) -> file_system::Result<usize> {
-        Err(file_system::Error::UnsupportedOperation)
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        _: &[u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
     }
 }
 

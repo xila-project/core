@@ -9,25 +9,39 @@ use std::io::{Read, Write, stderr, stdin, stdout};
 pub struct StandardInDevice;
 
 impl DirectBaseOperations for StandardInDevice {
-    fn read(&self, buffer: &mut [u8], _: Size) -> file_system::Result<usize> {
-        stdin().read(buffer).map_err(map_error)
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| stdin().read(buffer).map_err(map_error))
     }
 
-    fn write(&self, _: &[u8], _: Size) -> file_system::Result<usize> {
-        Err(file_system::Error::UnsupportedOperation)
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        _: &[u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
     }
 
-    fn flush(&self) -> file_system::Result<()> {
-        Ok(())
+    fn flush(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<file_system::Result<()>> {
+        file_system::ready(|| Ok(()))
     }
 
     fn control(
         &self,
+        _cx: &mut core::task::Context<'_>,
         command: ControlCommandIdentifier,
         input: &AnyByLayout,
         output: &mut AnyByLayout,
-    ) -> file_system::Result<()> {
-        control(command, input, output)
+    ) -> core::task::Poll<file_system::Result<()>> {
+        file_system::ready(|| control(command, input, output))
     }
 }
 
@@ -38,25 +52,39 @@ impl DirectCharacterDevice for StandardInDevice {}
 pub struct StandardOutDevice;
 
 impl DirectBaseOperations for StandardOutDevice {
-    fn read(&self, _: &mut [u8], _: Size) -> file_system::Result<usize> {
-        Err(file_system::Error::UnsupportedOperation)
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        _: &mut [u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
     }
 
-    fn write(&self, buffer: &[u8], _: Size) -> file_system::Result<usize> {
-        Ok(stdout().write(buffer).map_err(map_error)? as _)
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| Ok(stdout().write(buffer).map_err(map_error)? as _))
     }
 
-    fn flush(&self) -> file_system::Result<()> {
-        stdout().flush().map_err(map_error)
+    fn flush(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<file_system::Result<()>> {
+        file_system::ready(|| stdout().flush().map_err(map_error))
     }
 
     fn control(
         &self,
+        _cx: &mut core::task::Context<'_>,
         command: ControlCommandIdentifier,
         input: &AnyByLayout,
         output: &mut AnyByLayout,
-    ) -> file_system::Result<()> {
-        control(command, input, output)
+    ) -> core::task::Poll<file_system::Result<()>> {
+        file_system::ready(|| control(command, input, output))
     }
 }
 
@@ -67,25 +95,39 @@ impl DirectCharacterDevice for StandardOutDevice {}
 pub struct StandardErrorDevice;
 
 impl DirectBaseOperations for StandardErrorDevice {
-    fn read(&self, _: &mut [u8], _: Size) -> file_system::Result<usize> {
-        Err(file_system::Error::UnsupportedOperation)
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        _: &mut [u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
     }
 
-    fn write(&self, buffer: &[u8], _: Size) -> file_system::Result<usize> {
-        Ok(stderr().write(buffer).map_err(map_error)? as _)
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| Ok(stderr().write(buffer).map_err(map_error)? as _))
     }
 
-    fn flush(&self) -> file_system::Result<()> {
-        stderr().flush().map_err(map_error)
+    fn flush(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<file_system::Result<()>> {
+        file_system::ready(|| stderr().flush().map_err(map_error))
     }
 
     fn control(
         &self,
+        _cx: &mut core::task::Context<'_>,
         command: ControlCommandIdentifier,
         input: &AnyByLayout,
         output: &mut AnyByLayout,
-    ) -> file_system::Result<()> {
-        control(command, input, output)
+    ) -> core::task::Poll<file_system::Result<()>> {
+        file_system::ready(|| control(command, input, output))
     }
 }
 

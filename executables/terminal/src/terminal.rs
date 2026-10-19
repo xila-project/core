@@ -19,6 +19,8 @@ pub(crate) struct Inner {
 }
 
 pub struct Terminal {
+    pub(crate) input_waiters: xila::file_system::WaitQueue<16>,
+    pub(crate) input_closed: core::sync::atomic::AtomicBool,
     inner: RwLock<CriticalSectionRawMutex, Inner>,
     graphics_manager: &'static graphics::Manager,
 }
@@ -118,6 +120,8 @@ impl Terminal {
         });
 
         Ok(Self {
+            input_waiters: xila::file_system::WaitQueue::new(),
+            input_closed: core::sync::atomic::AtomicBool::new(false),
             inner: RwLock::new(inner),
             graphics_manager,
         })
@@ -216,6 +220,7 @@ impl Terminal {
 
     pub async fn handle_events(&self) -> Result<bool> {
         let mut running = true;
+        let mut notify_input = false;
 
         graphics::lock!(self.graphics_manager, {
             let mut inner = self.inner.write().await;
@@ -237,6 +242,7 @@ impl Terminal {
 
                             inner.validated_input.extend(text.as_bytes());
                             inner.validated_input.push_back(b'\n');
+                            notify_input = true;
 
                             unsafe {
                                 lvgl::lv_textarea_set_text(inner.input, c"".as_ptr());
@@ -248,6 +254,13 @@ impl Terminal {
             }
         });
 
+        if !running {
+            self.input_closed
+                .store(true, core::sync::atomic::Ordering::Release);
+        }
+        if notify_input || !running {
+            self.input_waiters.wake_all();
+        }
         Ok(running)
     }
 }

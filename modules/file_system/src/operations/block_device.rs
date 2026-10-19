@@ -13,7 +13,7 @@ pub trait DirectBlockDevice: DirectBaseOperations + MountOperations {
     fn get_block_size(&self) -> Result<u32> {
         let mut block_size: u32 = 0;
 
-        self.control(
+        self.control_sync(
             GET_BLOCK_SIZE::IDENTIFIER,
             AnyByLayout::NONE,
             AnyByLayout::from_mutable(&mut block_size),
@@ -24,7 +24,7 @@ pub trait DirectBlockDevice: DirectBaseOperations + MountOperations {
     fn get_block_count(&self) -> Result<Size> {
         let mut total_size: Size = 0;
 
-        self.control(
+        self.control_sync(
             GET_BLOCK_COUNT::IDENTIFIER,
             AnyByLayout::NONE,
             AnyByLayout::from_mutable(&mut total_size),
@@ -70,11 +70,11 @@ pub mod tests {
         let mut context = Context::new_empty();
 
         let write_data = b"Hello, Context!";
-        let bytes_written = device.write(&mut context, write_data, 0).unwrap();
+        let bytes_written = device.write_sync(&mut context, write_data, 0).unwrap();
         assert_eq!(bytes_written, write_data.len());
 
         let mut read_buffer = vec![0u8; write_data.len()];
-        let bytes_read = device.read(&mut context, &mut read_buffer, 0).unwrap();
+        let bytes_read = device.read_sync(&mut context, &mut read_buffer, 0).unwrap();
         assert_eq!(bytes_read, write_data.len());
         assert_eq!(&read_buffer[..], write_data);
     }
@@ -85,11 +85,13 @@ pub mod tests {
 
         let data = b"Xila";
         let offset = 100;
-        let bytes_written = device.write(&mut context, data, offset).unwrap();
+        let bytes_written = device.write_sync(&mut context, data, offset).unwrap();
         assert_eq!(bytes_written, data.len());
 
         let mut read_buffer = vec![0u8; data.len()];
-        let bytes_read = device.read(&mut context, &mut read_buffer, offset).unwrap();
+        let bytes_read = device
+            .read_sync(&mut context, &mut read_buffer, offset)
+            .unwrap();
         assert_eq!(bytes_read, data.len());
         assert_eq!(&read_buffer[..], data);
     }
@@ -119,13 +121,13 @@ pub mod tests {
         let pattern_count = 4;
         let position = 200;
         let bytes_written = device
-            .write_pattern(&mut context, pattern, pattern_count, position)
+            .write_pattern_sync(&mut context, pattern, pattern_count, position)
             .unwrap();
         assert_eq!(bytes_written, pattern.len() * pattern_count);
 
         let mut read_buffer = vec![0u8; pattern.len() * pattern_count];
         let bytes_read = device
-            .read(&mut context, &mut read_buffer, position)
+            .read_sync(&mut context, &mut read_buffer, position)
             .unwrap();
         assert_eq!(bytes_read, pattern.len() * pattern_count);
         assert_eq!(&read_buffer[..], b"XYXYXYXY");
@@ -138,13 +140,13 @@ pub mod tests {
         let buffers = [b"Alpha".as_slice(), b"Beta".as_slice()];
         let position = 300;
         let total_written = device
-            .write_vectored(&mut context, &buffers, position)
+            .write_vectored_sync(&mut context, &buffers, position)
             .unwrap();
         assert_eq!(total_written, 9); // 5 + 4
 
         let mut read_buffer = vec![0u8; 9];
         let bytes_read = device
-            .read(&mut context, &mut read_buffer, position)
+            .read_sync(&mut context, &mut read_buffer, position)
             .unwrap();
         assert_eq!(bytes_read, 9);
         assert_eq!(&read_buffer[..], b"AlphaBeta");
@@ -155,11 +157,11 @@ pub mod tests {
         let mut context = Context::new_empty();
 
         let test_data = b"Start|Middle|End";
-        device.write(&mut context, test_data, 400).unwrap();
+        device.write_sync(&mut context, test_data, 400).unwrap();
 
         let mut read_buffer = vec![0u8; 20];
         let bytes_read = device
-            .read_until(&mut context, &mut read_buffer, 400, b"|")
+            .read_until_sync(&mut context, &mut read_buffer, 400, b"|")
             .unwrap();
         assert_eq!(&read_buffer[..bytes_read], b"Start|");
     }
@@ -167,7 +169,7 @@ pub mod tests {
     /// Generic test for flush operation.
     pub fn test_flush<T: BlockDevice>(device: &T) {
         let mut context = Context::new_empty();
-        device.flush(&mut context).unwrap();
+        device.flush_sync(&mut context).unwrap();
     }
 
     /// Generic test for context cloning.
@@ -182,7 +184,7 @@ pub mod tests {
         let mut context = Context::new_empty();
         let mut block_count: Size = 0;
         device
-            .control(
+            .control_sync(
                 &mut context,
                 GET_BLOCK_COUNT::IDENTIFIER,
                 AnyByLayout::NONE,
@@ -194,7 +196,7 @@ pub mod tests {
 
         let mut block_size: usize = 0;
         device
-            .control(
+            .control_sync(
                 &mut context,
                 GET_BLOCK_SIZE::IDENTIFIER,
                 AnyByLayout::NONE,
@@ -211,32 +213,32 @@ pub mod tests {
 
         // Test: delimiter not found
         let test_data = b"NoDelimiterHere";
-        device.write(&mut context, test_data, 0).unwrap();
+        device.write_sync(&mut context, test_data, 0).unwrap();
 
         let mut read_buffer = vec![0u8; test_data.len()];
         let bytes_read = device
-            .read_until(&mut context, &mut read_buffer, 0, b"|")
+            .read_until_sync(&mut context, &mut read_buffer, 0, b"|")
             .unwrap();
         assert_eq!(bytes_read, test_data.len());
         assert_eq!(&read_buffer[..], test_data);
 
         // Test: delimiter at start
         let test_data = b"|Start";
-        device.write(&mut context, test_data, 100).unwrap();
+        device.write_sync(&mut context, test_data, 100).unwrap();
 
         let mut read_buffer = vec![0u8; 10];
         let bytes_read = device
-            .read_until(&mut context, &mut read_buffer, 100, b"|")
+            .read_until_sync(&mut context, &mut read_buffer, 100, b"|")
             .unwrap();
         assert_eq!(&read_buffer[..bytes_read], b"|");
 
         // Test: partial delimiter match followed by different character
         let test_data = b"ABACD";
-        device.write(&mut context, test_data, 200).unwrap();
+        device.write_sync(&mut context, test_data, 200).unwrap();
 
         let mut read_buffer = vec![0u8; test_data.len()];
         let bytes_read = device
-            .read_until(&mut context, &mut read_buffer, 200, b"ABC")
+            .read_until_sync(&mut context, &mut read_buffer, 200, b"ABC")
             .unwrap();
         assert_eq!(bytes_read, test_data.len());
         assert_eq!(&read_buffer[..], test_data);
@@ -248,16 +250,20 @@ pub mod tests {
 
         // Test: zero count
         let pattern = b"XYZ";
-        let bytes_written = device.write_pattern(&mut context, pattern, 0, 0).unwrap();
+        let bytes_written = device
+            .write_pattern_sync(&mut context, pattern, 0, 0)
+            .unwrap();
         assert_eq!(bytes_written, 0);
 
         // Test: single byte pattern
         let pattern = b"A";
-        let bytes_written = device.write_pattern(&mut context, pattern, 10, 0).unwrap();
+        let bytes_written = device
+            .write_pattern_sync(&mut context, pattern, 10, 0)
+            .unwrap();
         assert_eq!(bytes_written, 10);
 
         let mut read_buffer = vec![0u8; 10];
-        device.read(&mut context, &mut read_buffer, 0).unwrap();
+        device.read_sync(&mut context, &mut read_buffer, 0).unwrap();
         assert_eq!(&read_buffer[..], b"AAAAAAAAAA");
     }
 
@@ -267,16 +273,20 @@ pub mod tests {
 
         // Test: empty buffers array
         let buffers: [&[u8]; 0] = [];
-        let bytes_written = device.write_vectored(&mut context, &buffers, 0).unwrap();
+        let bytes_written = device
+            .write_vectored_sync(&mut context, &buffers, 0)
+            .unwrap();
         assert_eq!(bytes_written, 0);
 
         // Test: buffers with empty slices
         let buffers = [b"First".as_slice(), b"".as_slice(), b"Third".as_slice()];
-        let bytes_written = device.write_vectored(&mut context, &buffers, 0).unwrap();
+        let bytes_written = device
+            .write_vectored_sync(&mut context, &buffers, 0)
+            .unwrap();
         assert_eq!(bytes_written, buffers.into_iter().map(|b| b.len()).sum());
 
         let mut read_buffer = vec![0u8; 10];
-        device.read(&mut context, &mut read_buffer, 0).unwrap();
+        device.read_sync(&mut context, &mut read_buffer, 0).unwrap();
         assert_eq!(&read_buffer[..], b"FirstThird");
     }
 
@@ -324,12 +334,12 @@ pub mod tests {
 
         // Write from one context
         let write_data = b"Concurrent Write Test";
-        device.write(&mut context, write_data, 0).unwrap();
+        device.write_sync(&mut context, write_data, 0).unwrap();
 
         // Read from another context
         let mut read_buffer = vec![0u8; write_data.len()];
         device
-            .read(&mut context_clone, &mut read_buffer, 0)
+            .read_sync(&mut context_clone, &mut read_buffer, 0)
             .unwrap();
         assert_eq!(&read_buffer[..], write_data);
     }
@@ -340,11 +350,11 @@ pub mod tests {
 
         // Test with a large buffer
         let large_data = vec![0x42u8; 4096];
-        let bytes_written = device.write(&mut context, &large_data, 0).unwrap();
+        let bytes_written = device.write_sync(&mut context, &large_data, 0).unwrap();
         assert_eq!(bytes_written, large_data.len());
 
         let mut read_buffer = vec![0u8; 4096];
-        let bytes_read = device.read(&mut context, &mut read_buffer, 0).unwrap();
+        let bytes_read = device.read_sync(&mut context, &mut read_buffer, 0).unwrap();
         assert_eq!(bytes_read, large_data.len());
         assert_eq!(read_buffer, large_data);
     }
