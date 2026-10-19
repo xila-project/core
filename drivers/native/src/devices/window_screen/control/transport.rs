@@ -17,6 +17,9 @@ use std::{
 
 use debug_protocol::{MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES};
 
+const MAX_TRANSPORT_RESPONSE_BYTES: usize =
+    MAX_RESPONSE_BYTES + debug_protocol::MAX_SCREENSHOT_BYTES;
+
 pub(crate) struct PendingRequest {
     pub bytes: Vec<u8>,
     pub response: Sender<Vec<u8>>,
@@ -193,7 +196,7 @@ fn serve_request(mut stream: UnixStream, sender: &SyncSender<PendingRequest>, st
                 }
             };
             match response {
-                Ok(response) if response.len() <= MAX_RESPONSE_BYTES => {
+                Ok(response) if response.len() <= MAX_TRANSPORT_RESPONSE_BYTES => {
                     write_response(&mut stream, &response, stop);
                 }
                 Ok(_) => {

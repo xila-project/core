@@ -1,4 +1,4 @@
-use std::io::{BufRead, Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 
 use drivers_native::window_screen::control::protocol::{InputState, Request};
 
@@ -25,6 +25,10 @@ fn run() -> Result<bool, String> {
 
     let operation = arguments.next().ok_or_else(usage)?;
     let request = parse_operation(&operation, &mut arguments)?;
+    let screenshot_path = match &request {
+        Request::Screenshot { path } => Some(path.clone()),
+        _ => None,
+    };
     if arguments.next().is_some() {
         return Err(usage());
     }
@@ -47,17 +51,68 @@ fn run() -> Result<bool, String> {
             .write_all(&bytes)
             .map_err(|error| format!("Failed to send request: {error}"))?;
 
-        let mut response = Vec::new();
-        std::io::BufReader::new(stream)
-            .take(64 * 1024)
-            .read_until(b'\n', &mut response)
-            .map_err(|error| format!("Failed to read response: {error}"))?;
-        if response.len() >= 64 * 1024 {
-            return Err("Response exceeds the 64 KiB limit".into());
+        let mut reader = BufReader::new(stream);
+        let mut header = Vec::new();
+        loop {
+            let mut byte = [0];
+            reader
+                .read_exact(&mut byte)
+                .map_err(|error| format!("Failed to read response header: {error}"))?;
+            if byte[0] == b'\n' {
+                break;
+            }
+            if header.len() + 1 >= debug_protocol::MAX_RESPONSE_BYTES {
+                return Err("Response header exceeds the 64 KiB limit".into());
+            }
+            header.push(byte[0]);
         }
-        let value: serde_json::Value = serde_json::from_slice(&response)
+        let value: serde_json::Value = serde_json::from_slice(&header)
             .map_err(|error| format!("Invalid response: {error}"))?;
-        println!("{}", String::from_utf8_lossy(&response).trim_end());
+        let payload_bytes = value
+            .pointer("/result/payload_bytes")
+            .and_then(serde_json::Value::as_u64)
+            .map(usize::try_from)
+            .transpose()
+            .map_err(|_| "Invalid screenshot payload length")?
+            .unwrap_or(0);
+        if payload_bytes > debug_protocol::MAX_SCREENSHOT_BYTES {
+            return Err("Screenshot payload exceeds the 8 MiB limit".into());
+        }
+        if value["ok"] != true {
+            if payload_bytes != 0 {
+                return Err("Unexpected payload in an error response".into());
+            }
+            println!("{}", String::from_utf8_lossy(&header));
+            return Ok(false);
+        }
+        if let Some(path) = screenshot_path {
+            let metadata: debug_protocol::ScreenshotMetadata = serde_json::from_value(
+                value
+                    .get("result")
+                    .cloned()
+                    .ok_or("Screenshot response has no metadata")?,
+            )
+            .map_err(|error| format!("Invalid screenshot metadata: {error}"))?;
+            debug_protocol::validate_screenshot_metadata(metadata)
+                .map_err(|_| "Invalid screenshot dimensions or payload length")?;
+            if metadata.payload_bytes != payload_bytes
+                || metadata.format != debug_protocol::ScreenshotPixelFormat::Rgba8888
+            {
+                return Err("Unsupported screenshot pixel format or payload length".into());
+            }
+            let mut pixels = vec![0; payload_bytes];
+            reader
+                .read_exact(&mut pixels)
+                .map_err(|error| format!("Truncated screenshot payload: {error}"))?;
+            write_png(&path, metadata.width, metadata.height, &pixels)?;
+            println!("{}", String::from_utf8_lossy(&header));
+            println!("Screenshot written to {path}");
+        } else {
+            if payload_bytes != 0 {
+                return Err("Unexpected binary payload in non-screenshot response".into());
+            }
+            println!("{}", String::from_utf8_lossy(&header));
+        }
         Ok(value["ok"] == true)
     }
     #[cfg(not(unix))]
@@ -65,6 +120,20 @@ fn run() -> Result<bool, String> {
         let _ = endpoint;
         Err("The native control client is not available on this platform yet.".into())
     }
+}
+
+fn write_png(path: &str, width: u16, height: u16, pixels: &[u8]) -> Result<(), String> {
+    let file = std::fs::File::create(path)
+        .map_err(|error| format!("Failed to create screenshot {path}: {error}"))?;
+    let mut encoder = png::Encoder::new(file, u32::from(width), u32::from(height));
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder
+        .write_header()
+        .map_err(|error| format!("Failed to encode screenshot PNG: {error}"))?;
+    writer
+        .write_image_data(pixels)
+        .map_err(|error| format!("Failed to write screenshot PNG: {error}"))
 }
 
 fn parse_operation(
