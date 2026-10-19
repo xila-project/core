@@ -17,12 +17,12 @@ use core::time::Duration;
 
 use super::lvgl;
 
-use crate::Input;
-use crate::InputKind;
+use crate::input::InputQueue;
 use crate::window::Window;
 use crate::{Color, theme};
 use crate::{Display, OwnedWindow};
 use crate::{Error, Result};
+use crate::{Input, InputKind, Key, State};
 
 static TICK_TIME_MANAGER: AtomicPtr<time::Manager<'static>> = AtomicPtr::new(core::ptr::null_mut());
 static FFI_GRAPHICS_MANAGER: AtomicPtr<Manager> = AtomicPtr::new(core::ptr::null_mut());
@@ -57,12 +57,31 @@ pub async fn initialize(
     buffer_size: usize,
     double_buffered: bool,
 ) -> Manager {
+    let input_devices = [(input_device, input_device_type)];
+    initialize_with_input_devices(
+        time_manager,
+        screen_device,
+        &input_devices,
+        buffer_size,
+        double_buffered,
+    )
+    .await
+}
+
+/// Initialize graphics with zero or more physical input devices. Graphics-owned
+/// virtual pointer and keypad devices are always installed for subsystem input.
+pub async fn initialize_with_input_devices(
+    time_manager: &'static time::Manager<'static>,
+    screen_device: &'static dyn DirectCharacterDevice,
+    input_devices: &[(&'static dyn DirectCharacterDevice, InputKind)],
+    buffer_size: usize,
+    double_buffered: bool,
+) -> Manager {
     TICK_TIME_MANAGER.store(time_manager as *const _ as *mut _, Ordering::Release);
     Manager::new(
         time_manager,
         screen_device,
-        input_device,
-        input_device_type,
+        input_devices,
         buffer_size,
         double_buffered,
     )
@@ -78,6 +97,7 @@ struct Inner {
 pub struct Manager {
     inner: RwLock<CriticalSectionRawMutex, Inner>,
     global_lock: Mutex<CriticalSectionRawMutex, ()>,
+    injected_inputs: synchronization::Arc<InputQueue>,
 }
 
 /// A bounded, pointer-free description of one LVGL object.
@@ -163,8 +183,51 @@ impl Manager {
             .ok_or(Error::NotAvailable)
     }
 
+    /// Queue a pointer move for the graphics-owned LVGL pointer input.
+    pub async fn inject_pointer_move(&self, point: crate::Point) -> Result<()> {
+        let _lock = self.global_lock.lock().await;
+        let inner = self.inner.read().await;
+        let resolution = inner
+            .displays
+            .first()
+            .map(Display::get_resolution)
+            .ok_or(Error::NotAvailable)?;
+        validate_pointer_point(point, resolution)?;
+        self.injected_inputs.pointer_move(point)
+    }
+
+    /// Queue a pointer button state at the most recently injected pointer point.
+    pub async fn inject_pointer_button(&self, state: State) -> Result<()> {
+        let _lock = self.global_lock.lock().await;
+        self.injected_inputs.pointer_button(state)
+    }
+
+    /// Queue one keyboard key transition for the graphics-owned LVGL keypad.
+    pub async fn inject_key(&self, key: Key, state: State) -> Result<()> {
+        let _lock = self.global_lock.lock().await;
+        self.injected_inputs.key(key, state)
+    }
+
+    /// Queue printable ASCII text as ordered key press and release events.
+    pub async fn inject_text(&self, text: &str) -> Result<usize> {
+        let _lock = self.global_lock.lock().await;
+        self.injected_inputs.text(text)
+    }
+
     pub fn lock_function_sync<T>(&self, function: impl FnOnce() -> Result<T>) -> Result<T> {
         task::block_on(self.lock_function(function))
+    }
+}
+
+fn validate_pointer_point(point: crate::Point, resolution: crate::Point) -> Result<()> {
+    if point.get_x() < 0
+        || point.get_y() < 0
+        || point.get_x() >= resolution.get_x()
+        || point.get_y() >= resolution.get_y()
+    {
+        Err(Error::InvalidParameter)
+    } else {
+        Ok(())
     }
 }
 
@@ -196,6 +259,28 @@ mod ui_tree_tests {
             Err(Error::InvalidParameter)
         );
         assert_eq!(validate_ui_tree_limits(0, 1), Err(Error::InvalidParameter));
+    }
+}
+
+#[cfg(test)]
+mod injected_input_tests {
+    use super::*;
+
+    #[test]
+    fn injected_pointer_rejects_right_and_bottom_edges() {
+        let resolution = crate::Point::new(640, 480);
+        assert_eq!(
+            validate_pointer_point(crate::Point::new(639, 479), resolution),
+            Ok(())
+        );
+        assert_eq!(
+            validate_pointer_point(crate::Point::new(640, 10), resolution),
+            Err(Error::InvalidParameter)
+        );
+        assert_eq!(
+            validate_pointer_point(crate::Point::new(10, 480), resolution),
+            Err(Error::InvalidParameter)
+        );
     }
 }
 
@@ -317,11 +402,11 @@ impl Manager {
     fn new(
         _: &time::Manager,
         screen_device: &'static dyn DirectCharacterDevice,
-        input_device: &'static dyn DirectCharacterDevice,
-        input_device_type: InputKind,
+        input_devices: &[(&'static dyn DirectCharacterDevice, InputKind)],
         buffer_size: usize,
         double_buffered: bool,
     ) -> Result<Self> {
+        let injected_inputs = InputQueue::new()?;
         unsafe {
             lvgl::lv_init();
 
@@ -332,12 +417,12 @@ impl Manager {
             lvgl::lv_tick_set_cb(Some(binding_tick_callback_function));
         }
 
-        let (display, input) = Self::create_display(
+        let (display, inputs) = Self::create_display(
             screen_device,
+            input_devices,
             buffer_size,
-            input_device,
-            input_device_type,
             double_buffered,
+            injected_inputs.clone(),
         )?;
 
         let screen = display.get_object();
@@ -350,11 +435,12 @@ impl Manager {
 
         Ok(Self {
             inner: RwLock::new(Inner {
-                _inputs: vec![input],
+                _inputs: inputs,
                 displays: vec![display],
                 window_parent: screen,
             }),
             global_lock: Mutex::new(()),
+            injected_inputs,
         })
     }
 
@@ -415,16 +501,20 @@ impl Manager {
 
     fn create_display(
         screen_device: &'static dyn DirectCharacterDevice,
+        input_devices: &[(&'static dyn DirectCharacterDevice, InputKind)],
         buffer_size: usize,
-        input_device: &'static dyn DirectCharacterDevice,
-        input_device_type: InputKind,
         double_buffered: bool,
-    ) -> Result<(Display, Input)> {
+        injected_inputs: synchronization::Arc<InputQueue>,
+    ) -> Result<(Display, Vec<Input>)> {
         let display = Display::new(screen_device, buffer_size, double_buffered)?;
-
-        let input = Input::new(input_device, input_device_type)?;
-
-        Ok((display, input))
+        let mut inputs = vec![
+            Input::new_virtual(injected_inputs.clone(), InputKind::Pointer)?,
+            Input::new_virtual(injected_inputs, InputKind::Keypad)?,
+        ];
+        for (device, kind) in input_devices {
+            inputs.push(Input::new(device, *kind)?);
+        }
+        Ok((display, inputs))
     }
 
     pub async fn get_window_count(&self) -> Result<usize> {
