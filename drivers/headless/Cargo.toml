@@ -1,0 +1,10 @@
+[package]
+name = "drivers_headless"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+file_system = { workspace = true }
+graphics = { workspace = true }
+shared = { workspace = true }
+synchronization = { workspace = true }

@@ -112,6 +112,7 @@ device = { path = "modules/device" }
 drivers_core = { path = "drivers/core" }
 drivers_espressif = { path = "drivers/espressif" }
 drivers_native = { path = "drivers/native" }
+drivers_headless = { path = "drivers/headless" }
 drivers_shared = { path = "drivers/shared" }
 drivers_std = { path = "drivers/std" }
 drivers_wasm = { path = "drivers/wasm" }
@@ -199,6 +200,7 @@ members = [
   "drivers/core",
   "drivers/espressif",
   "drivers/native",
+  "drivers/headless",
   "drivers/shared",
   "drivers/std",
   "drivers/wasm",
