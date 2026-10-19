@@ -278,20 +278,20 @@ async fn dispatch(
                     "invalid_coordinates",
                     "Coordinates are outside the display.".into(),
                 )),
-                Err(error) => Err(("input_failed", error.to_string())),
+                Err(error) => Err(input_error(error)),
             }
         }
         Request::PointerButton { state } => graphics_manager
             .inject_pointer_button(state_to_graphics(state))
             .await
             .map(|()| serde_json::json!({"state": state}))
-            .map_err(|error| ("input_failed", error.to_string())),
+            .map_err(input_error),
         Request::Key { key: name, state } => match parse_key(&name) {
             Some(key) => graphics_manager
                 .inject_key(key, state_to_graphics(state))
                 .await
                 .map(|()| serde_json::json!({"key": name, "state": state}))
-                .map_err(|error| ("input_failed", error.to_string())),
+                .map_err(input_error),
             None => Err(("unsupported_key", "Key is not supported.".into())),
         },
         Request::Text { text } => match graphics_manager.inject_text(&text).await {
@@ -300,7 +300,7 @@ async fn dispatch(
                 "unsupported_character",
                 "Only printable ASCII is supported.".into(),
             )),
-            Err(error) => Err(("input_failed", error.to_string())),
+            Err(error) => Err(input_error(error)),
         },
     };
 
@@ -309,6 +309,16 @@ async fn dispatch(
         Err((code, message)) => error_response(code, &message),
     };
     DispatchResponse { value, payload }
+}
+
+fn input_error(error: graphics::Error) -> (&'static str, String) {
+    match error {
+        graphics::Error::AlreadyInUse => (
+            "busy",
+            "The input queue is full; retry after the UI processes pending input.".into(),
+        ),
+        error => ("input_failed", error.to_string()),
+    }
 }
 
 fn parse_key(value: &str) -> Option<Key> {

@@ -186,11 +186,17 @@ fn serve_request(mut stream: UnixStream, sender: &SyncSender<PendingRequest>, st
                 );
                 return;
             }
+            let response_deadline = std::time::Instant::now() + Duration::from_secs(30);
             let response = loop {
                 if stop.load(Ordering::Acquire) {
                     return;
                 }
-                match response_receiver.recv_timeout(Duration::from_millis(50)) {
+                let remaining =
+                    response_deadline.saturating_duration_since(std::time::Instant::now());
+                if remaining.is_zero() {
+                    break Err(std::sync::mpsc::RecvTimeoutError::Timeout);
+                }
+                match response_receiver.recv_timeout(remaining.min(Duration::from_millis(50))) {
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
                     result => break result,
                 }

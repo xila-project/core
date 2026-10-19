@@ -415,6 +415,10 @@ impl Manager {
             }
 
             lvgl::lv_tick_set_cb(Some(binding_tick_callback_function));
+            // LVGL assigns newly created keypads to the default group. Create
+            // it before display creation also creates the virtual keypad.
+            let group = lvgl::lv_group_create();
+            lvgl::lv_group_set_default(group);
         }
 
         let (display, inputs) = Self::create_display(
@@ -428,8 +432,6 @@ impl Manager {
         let screen = display.get_object();
 
         unsafe {
-            let group = lvgl::lv_group_create();
-            lvgl::lv_group_set_default(group);
             theme::initialize(&display)?;
         }
 

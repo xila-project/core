@@ -19,7 +19,7 @@ enum InjectedEvent {
 
 pub(crate) struct InputQueue {
     events: Mutex<CriticalSectionRawMutex, VecDeque<InjectedEvent>>,
-    pointer: Mutex<CriticalSectionRawMutex, Point>,
+    pointer: Mutex<CriticalSectionRawMutex, (Point, State)>,
 }
 
 impl InputQueue {
@@ -30,7 +30,7 @@ impl InputQueue {
             .map_err(|_| Error::OutOfMemory)?;
         Ok(Arc::new(Self {
             events: Mutex::new(events),
-            pointer: Mutex::new(Point::default()),
+            pointer: Mutex::new((Point::default(), State::Released)),
         }))
     }
 
@@ -49,11 +49,11 @@ impl InputQueue {
             if events.len() >= INPUT_EVENT_QUEUE_CAPACITY {
                 return Err(Error::AlreadyInUse);
             }
-            self.pointer.lock(|last| *last = point);
-            events.push_back(InjectedEvent::Pointer {
-                point,
-                state: State::Released,
+            let state = self.pointer.lock(|last| {
+                last.0 = point;
+                last.1
             });
+            events.push_back(InjectedEvent::Pointer { point, state });
             Ok(())
         })
     }
@@ -63,7 +63,10 @@ impl InputQueue {
             if events.len() >= INPUT_EVENT_QUEUE_CAPACITY {
                 return Err(Error::AlreadyInUse);
             }
-            let point = self.pointer.lock(|last| *last);
+            let (point, _) = self.pointer.lock(|last| {
+                last.1 = state;
+                *last
+            });
             events.push_back(InjectedEvent::Pointer { point, state });
             Ok(())
         })
@@ -120,6 +123,11 @@ impl InputQueue {
             }
         })
     }
+
+    pub(crate) fn current_pointer(&self) -> InputData {
+        self.pointer
+            .lock(|(point, state)| InputData::new(*point, *state, Key::Character(0), false))
+    }
 }
 
 #[cfg(test)]
@@ -168,5 +176,29 @@ mod tests {
             queue.key(Key::Enter, State::Released),
             Err(Error::AlreadyInUse)
         );
+    }
+
+    #[test]
+    fn pointer_state_persists_after_events_are_consumed() {
+        let queue = InputQueue::new().unwrap();
+        let point = Point::new(12, 34);
+        queue.pointer_move(point).unwrap();
+        queue.pointer_button(State::Pressed).unwrap();
+        assert_eq!(
+            queue.pop_for(InputKind::Pointer).unwrap().get_point(),
+            point
+        );
+        assert_eq!(
+            *queue.pop_for(InputKind::Pointer).unwrap().get_touch(),
+            State::Pressed
+        );
+        let current = queue.current_pointer();
+        assert_eq!(current.get_point(), point);
+        assert_eq!(*current.get_touch(), State::Pressed);
+        let moved_point = Point::new(23, 45);
+        queue.pointer_move(moved_point).unwrap();
+        let moved = queue.pop_for(InputKind::Pointer).unwrap();
+        assert_eq!(moved.get_point(), moved_point);
+        assert_eq!(*moved.get_touch(), State::Pressed);
     }
 }

@@ -60,6 +60,33 @@ pub(crate) fn capture_screen(object: *mut lvgl::lv_obj_t) -> Result<ScreenSnapsh
         return Err(Error::NotAvailable);
     }
 
+    // LVGL allocates the complete snapshot inside lv_snapshot_take. Check its
+    // layout-derived dimensions first so an oversized object cannot trigger
+    // an unbounded allocation before our post-capture validation.
+    let (expected_width, expected_height) = unsafe {
+        lvgl::lv_obj_update_layout(object);
+        let width = lvgl::lv_obj_get_width(object);
+        let height = lvgl::lv_obj_get_height(object);
+        let ext = lvgl::lv_obj_get_ext_draw_size(object);
+        let twice_ext = ext.checked_mul(2).ok_or(Error::InvalidParameter)?;
+        (
+            width
+                .checked_add(twice_ext)
+                .ok_or(Error::InvalidParameter)?,
+            height
+                .checked_add(twice_ext)
+                .ok_or(Error::InvalidParameter)?,
+        )
+    };
+    if expected_width <= 0
+        || expected_height <= 0
+        || (expected_width as usize)
+            .checked_mul(expected_height as usize)
+            .is_none_or(|area| area > SCREEN_SNAPSHOT_MAX_PIXELS)
+    {
+        return Err(Error::InvalidParameter);
+    }
+
     let draw_buf =
         unsafe { lvgl::lv_snapshot_take(object, lvgl::lv_color_format_t_LV_COLOR_FORMAT_ARGB8888) };
     if draw_buf.is_null() {

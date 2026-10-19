@@ -51,6 +51,18 @@ async fn main(task_manager: &'static xila::task::Manager) {
             std::process::exit(2);
         }
     };
+    if config.interface == cli::InterfaceMode::Graphical
+        && config.display_driver == cli::DisplayDriver::Headless
+        && (config.resolution.0 as usize)
+            .checked_mul(config.resolution.1 as usize)
+            .is_none_or(|area| area > xila::graphics::SCREEN_SNAPSHOT_MAX_PIXELS)
+    {
+        eprintln!(
+            "Invalid headless display resolution: area exceeds the {} pixel limit.",
+            xila::graphics::SCREEN_SNAPSHOT_MAX_PIXELS
+        );
+        std::process::exit(2);
+    }
 
     // - Initialize the system
     log::initialize(&drivers_std::log::Logger).unwrap();
@@ -98,8 +110,12 @@ async fn main(task_manager: &'static xila::task::Manager) {
                 }
                 cli::DisplayDriver::Headless => {
                     let screen_device = Box::leak(Box::new(
-                        drivers_headless::HeadlessScreenDevice::new(resolution)
-                            .expect("Invalid headless display resolution"),
+                        drivers_headless::HeadlessScreenDevice::new(resolution).unwrap_or_else(
+                            |error| {
+                                eprintln!("Failed to create headless display: {error}");
+                                std::process::exit(2);
+                            },
+                        ),
                     ));
                     let manager = graphics::initialize_with_input_devices(
                         time_manager,

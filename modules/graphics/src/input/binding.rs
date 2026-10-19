@@ -22,6 +22,16 @@ pub unsafe extern "C" fn binding_callback_function(
         .as_ref()
         .and_then(|queue| queue.pop_for(user_data.kind))
         .or_else(|| {
+            (user_data.kind == InputKind::Pointer)
+                .then(|| {
+                    user_data
+                        .injected
+                        .as_ref()
+                        .map(|queue| queue.current_pointer())
+                })
+                .flatten()
+        })
+        .or_else(|| {
             let mut data = InputData::default();
             if let Some(device) = user_data.device {
                 device
