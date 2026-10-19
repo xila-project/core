@@ -16,6 +16,7 @@ application namespace, not a global catalog.
 | `es` — Spanish | Shipped locale; review of terminology and LVGL layouts remains welcome |
 | `de` — German | New translated catalogs; CI and native-language review required before merging |
 | `pt-BR` — Brazilian Portuguese | New catalogs; requires native-speaker and UI review before release |
+| `it` — Italian | New catalogs; requires native-speaker and UI review before release |
 
 ## Build / verify a locale
 
@@ -57,8 +58,8 @@ change locale catalogs, it validates the **modified languages**; changes
 to Rust code, extractors, build scripts, or non-catalog workflow changes
 validate every shipped locale. Pushes to `main` also validate all locales.
 Each compiled language uses its **own Cargo target directory** to avoid
-stale compile-time translations. CI verifies font generation for Spanish, German
-and Brazilian Portuguese when these locales are checked.
+stale compile-time translations. CI verifies font generation for Spanish, German,
+Brazilian Portuguese and Italian when these locales are checked.
 
 ## Contributing translations
 

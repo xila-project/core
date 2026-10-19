@@ -154,6 +154,26 @@ jobs:
           mkdir -p pages/demonstrations/wasm/pt-BR/
           cp -r examples/wasm/dist/* pages/demonstrations/wasm/pt-BR/
 
+      - name: Build | WASM demonstration (it)
+        env:
+          EMBEDDED_I18N_LOCALE: it
+        run: |
+          cargo make generate-fonts
+          cargo build -p calculator -p weather -p clock -p pixel_painter -p synth --target wasm32-wasip1 --release
+          cargo make prepare-wasm-image
+          cargo run -p fs_image -- target/seed/wasm/repeated.img 16777216 --bundle wasm --applications-dir target/wasm32-wasip1/release
+          cmp target/seed/wasm/seed.img target/seed/wasm/repeated.img
+          rm target/seed/wasm/repeated.img
+          mkdir -p seed-images/$EMBEDDED_I18N_LOCALE
+          cp target/seed/wasm/seed.img seed-images/$EMBEDDED_I18N_LOCALE/wasm.img
+          cargo run -p fs_image -- seed-images/$EMBEDDED_I18N_LOCALE/native.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release
+          cargo run -p fs_image -- target/seed/wasm/native-repeated.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release
+          cmp seed-images/$EMBEDDED_I18N_LOCALE/native.img target/seed/wasm/native-repeated.img
+          rm target/seed/wasm/native-repeated.img
+          (cd examples/wasm && RUSTUP_TOOLCHAIN="$XILA_NIGHTLY_TOOLCHAIN" trunk build --release --public-url ./)
+          mkdir -p pages/demonstrations/wasm/it/
+          cp -r examples/wasm/dist/* pages/demonstrations/wasm/it/
+
       - name: Upload reference disk images
         uses: actions/upload-artifact@v4
         with:
