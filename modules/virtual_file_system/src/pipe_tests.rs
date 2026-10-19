@@ -205,3 +205,72 @@ fn wake_and_replaced_cancelled_waker_drop_run_outside_lock() {
     pipe.close(&mut reader).unwrap();
     pipe.close(&mut writer).unwrap();
 }
+
+#[test]
+fn duplicate_writers_with_same_waker_re_register_after_losing_space_race() {
+    let pipe = Pipe::new(1);
+    let mut reader = pipe.open_context(AccessFlags::Read).unwrap();
+    let mut first = pipe.open_context(AccessFlags::Write).unwrap();
+    let mut second = pipe.clone_context(&first).unwrap();
+    let (count, waker) = counter();
+    let mut cx = TaskContext::from_waker(&waker);
+    BaseOperations::write(&pipe, &mut first, b"a", 0).unwrap();
+    assert!(BaseOperations::poll_write(&pipe, &mut first, &mut cx, b"b", 0).is_pending());
+    assert!(BaseOperations::poll_write(&pipe, &mut second, &mut cx, b"c", 0).is_pending());
+    assert_eq!(count.0.load(Ordering::SeqCst), 0);
+    let mut byte = [0];
+    BaseOperations::read(&pipe, &mut reader, &mut byte, 0).unwrap();
+    assert_eq!(count.0.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        BaseOperations::poll_write(&pipe, &mut first, &mut cx, b"b", 0),
+        Poll::Ready(Ok(1))
+    );
+    assert!(BaseOperations::poll_write(&pipe, &mut second, &mut cx, b"c", 0).is_pending());
+    BaseOperations::read(&pipe, &mut reader, &mut byte, 0).unwrap();
+    assert_eq!(&byte, b"b");
+    assert_eq!(count.0.load(Ordering::SeqCst), 3);
+    assert_eq!(
+        BaseOperations::poll_write(&pipe, &mut second, &mut cx, b"c", 0),
+        Poll::Ready(Ok(1))
+    );
+    BaseOperations::read(&pipe, &mut reader, &mut byte, 0).unwrap();
+    assert_eq!(&byte, b"c");
+}
+
+#[test]
+fn close_detaches_live_waiter_before_slot_is_reused() {
+    let pipe = Pipe::new(1);
+    let mut old_reader = pipe.open_context(AccessFlags::Read).unwrap();
+    let mut writer = pipe.open_context(AccessFlags::Write).unwrap();
+    let (old, old_waker) = counter();
+    let (new, new_waker) = counter();
+    assert!(
+        BaseOperations::poll_read(
+            &pipe,
+            &mut old_reader,
+            &mut TaskContext::from_waker(&old_waker),
+            &mut [0],
+            0
+        )
+        .is_pending()
+    );
+    pipe.close(&mut old_reader).unwrap(); // No prior cancellation.
+    let mut replacement = pipe.open_context(AccessFlags::Read).unwrap();
+    // A write before replacement registration must not wake the old slot.
+    BaseOperations::write(&pipe, &mut writer, b"a", 0).unwrap();
+    assert_eq!(old.0.load(Ordering::SeqCst), 0);
+    BaseOperations::read(&pipe, &mut replacement, &mut [0], 0).unwrap();
+    assert!(
+        BaseOperations::poll_read(
+            &pipe,
+            &mut replacement,
+            &mut TaskContext::from_waker(&new_waker),
+            &mut [0],
+            0
+        )
+        .is_pending()
+    );
+    BaseOperations::write(&pipe, &mut writer, b"b", 0).unwrap();
+    assert_eq!(old.0.load(Ordering::SeqCst), 0);
+    assert_eq!(new.0.load(Ordering::SeqCst), 1);
+}

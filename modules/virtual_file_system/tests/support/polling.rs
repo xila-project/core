@@ -31,7 +31,7 @@ fn counter() -> (Arc<Counter>, Waker) {
 #[task::test]
 async fn vfs_pending_read_is_woken_once_and_cancel_unregisters() {
     let (_, vfs) = initialize().await;
-    let (mut reader, mut writer) = File::create_unnamed_pipe(vfs, 1, StateFlags::None)
+    let (mut reader, mut writer) = File::create_unnamed_pipe(vfs, 1, StateFlags::empty())
         .await
         .unwrap();
     let (count, waker) = counter();
@@ -61,7 +61,7 @@ async fn vfs_pending_read_is_woken_once_and_cancel_unregisters() {
 #[task::test]
 async fn vfs_full_write_waits_then_reports_last_reader_close() {
     let (_, vfs) = initialize().await;
-    let (mut reader, mut writer) = File::create_unnamed_pipe(vfs, 1, StateFlags::None)
+    let (mut reader, mut writer) = File::create_unnamed_pipe(vfs, 1, StateFlags::empty())
         .await
         .unwrap();
     writer.write(b"x").await.unwrap();
@@ -116,7 +116,7 @@ async fn vfs_nonblocking_read_and_write_return_busy_without_waking() {
 #[task::test]
 async fn vfs_duplicate_readers_wake_independently_and_last_writer_produces_eof() {
     let (_, vfs) = initialize().await;
-    let (mut reader, mut writer) = File::create_unnamed_pipe(vfs, 2, StateFlags::None)
+    let (mut reader, mut writer) = File::create_unnamed_pipe(vfs, 2, StateFlags::empty())
         .await
         .unwrap();
     let mut second = reader.duplicate().await.unwrap();
@@ -157,7 +157,7 @@ async fn vfs_duplicate_readers_wake_independently_and_last_writer_produces_eof()
 #[task::test]
 async fn vfs_write_line_keeps_partial_progress_across_waits() {
     let (_, vfs) = initialize().await;
-    let (mut reader, mut writer) = File::create_unnamed_pipe(vfs, 1, StateFlags::None)
+    let (mut reader, mut writer) = File::create_unnamed_pipe(vfs, 1, StateFlags::empty())
         .await
         .unwrap();
     let (_, waker) = counter();
@@ -180,7 +180,7 @@ async fn vfs_write_line_keeps_partial_progress_across_waits() {
 #[task::test]
 async fn vfs_read_to_end_keeps_bytes_and_cursor_across_waits() {
     let (_, vfs) = initialize().await;
-    let (mut reader, mut writer) = File::create_unnamed_pipe(vfs, 2, StateFlags::None)
+    let (mut reader, mut writer) = File::create_unnamed_pipe(vfs, 2, StateFlags::empty())
         .await
         .unwrap();
     writer.write(b"ab").await.unwrap();
@@ -203,7 +203,7 @@ async fn vfs_read_to_end_keeps_bytes_and_cursor_across_waits() {
 #[task::test]
 async fn vfs_read_until_waits_for_first_byte_and_returns_available_progress() {
     let (_, vfs) = initialize().await;
-    let (mut reader, mut writer) = File::create_unnamed_pipe(vfs, 8, StateFlags::None)
+    let (mut reader, mut writer) = File::create_unnamed_pipe(vfs, 8, StateFlags::empty())
         .await
         .unwrap();
     let (count, waker) = counter();
@@ -226,7 +226,7 @@ async fn vfs_read_until_waits_for_first_byte_and_returns_available_progress() {
 #[task::test]
 async fn vfs_steady_state_poll_wake_and_cancel_allocate_nothing() {
     let (_, vfs) = initialize().await;
-    let (reader, mut writer) = File::create_unnamed_pipe(vfs, 1, StateFlags::None)
+    let (reader, mut writer) = File::create_unnamed_pipe(vfs, 1, StateFlags::empty())
         .await
         .unwrap();
     let mut reader = reader.duplicate().await.unwrap(); // Exercise shared cursor storage.
@@ -275,7 +275,7 @@ async fn vfs_steady_state_poll_wake_and_cancel_allocate_nothing() {
 async fn external_deadline_cancels_pending_registration() {
     use core::sync::atomic::AtomicBool;
     let (_, vfs) = initialize().await;
-    let (mut reader, mut writer) = File::create_unnamed_pipe(vfs, 1, StateFlags::None)
+    let (mut reader, mut writer) = File::create_unnamed_pipe(vfs, 1, StateFlags::empty())
         .await
         .unwrap();
     let expired = AtomicBool::new(false);
@@ -306,7 +306,7 @@ async fn external_deadline_cancels_pending_registration() {
 #[task::test]
 async fn cancelling_compound_read_preserves_consumed_bytes_and_cursor() {
     let (_, vfs) = initialize().await;
-    let (mut reader, mut writer) = File::create_unnamed_pipe(vfs, 2, StateFlags::None)
+    let (mut reader, mut writer) = File::create_unnamed_pipe(vfs, 2, StateFlags::empty())
         .await
         .unwrap();
     writer.write(b"ab").await.unwrap();
@@ -343,7 +343,7 @@ async fn nonblocking_compound_helpers_return_partial_progress() {
 #[task::test]
 async fn duplicate_capacity_failure_leaves_existing_descriptors_usable() {
     let (_, vfs) = initialize().await;
-    let (reader, mut writer) = File::create_unnamed_pipe(vfs, 1, StateFlags::None)
+    let (reader, mut writer) = File::create_unnamed_pipe(vfs, 1, StateFlags::empty())
         .await
         .unwrap();
     let mut readers = std::vec::Vec::from([reader]);

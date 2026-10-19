@@ -155,7 +155,7 @@ async fn device(polling: bool, flags: StateFlags) -> (Arc<State>, File<'static>)
 
 #[task::test]
 async fn flush_and_control_preserve_private_state_and_cleanup_on_all_exits() {
-    let (state, mut file) = device(true, StateFlags::None).await;
+    let (state, mut file) = device(true, StateFlags::empty()).await;
     let mut cx = TaskContext::from_waker(Waker::noop());
     {
         let mut flush = pin!(file.flush());
@@ -218,7 +218,7 @@ async fn nonblocking_flush_and_control_never_register_or_retry() {
 
 #[task::test]
 async fn legacy_device_keeps_cooperative_retry_and_explicit_busy_is_not_pending() {
-    let (state, mut legacy) = device(false, StateFlags::None).await;
+    let (state, mut legacy) = device(false, StateFlags::empty()).await;
     let mut cx = TaskContext::from_waker(Waker::noop());
     let mut byte = [0];
     {
@@ -234,7 +234,7 @@ async fn legacy_device_keeps_cooperative_retry_and_explicit_busy_is_not_pending(
             .iter()
             .all(|count| count.load(Ordering::SeqCst) == 0)
     );
-    let (state, mut migrated) = device(true, StateFlags::None).await;
+    let (state, mut migrated) = device(true, StateFlags::empty()).await;
     let mut read = pin!(migrated.read(&mut byte)); // Default hook reports explicit busy.
     assert_eq!(
         read.as_mut().poll(&mut cx),
