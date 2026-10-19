@@ -2,6 +2,7 @@ use crate::error::{Error, Result};
 use alloc::{collections::vec_deque::VecDeque, string::String};
 use core::ffi::CStr;
 use xila::graphics::OwnedWindow;
+use xila::internationalization::translate;
 use xila::graphics::fonts::get_font_monospace_medium;
 use xila::graphics::{
     self, Color, EventKind, Key,
@@ -97,7 +98,10 @@ impl Terminal {
                     return Err(crate::error::Error::FailedToCreateObject);
                 }
 
-                lvgl::lv_textarea_set_placeholder_text(input, c"Enter your command ...".as_ptr());
+                lvgl::lv_textarea_set_placeholder_text(
+                    input,
+                    translate!(c"Enter your command ...").as_ptr(),
+                );
                 lvgl::lv_obj_set_width(input, lvgl::lv_pct(100));
                 lvgl::lv_textarea_set_one_line(input, true);
 
