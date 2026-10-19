@@ -45,8 +45,10 @@ RUN cargo run --locked --package fonts_generator \
         --package clock \
         --package pixel_painter \
         --package synth \
+        --package text_editor \
         --target wasm32-wasip1 \
         --profile release-wasm \
+    && test -s target/wasm32-wasip1/release-wasm/text_editor.wasm \
     && mkdir -p target/seed/native \
     && cargo run --locked --package fs_image -- \
         target/seed/native/seed.img 16777216 \
