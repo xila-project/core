@@ -1269,6 +1269,15 @@ name = "drivers_espressif"
 version = "0.1.0"
 
 [[package]]
+name = "drivers_headless"
+version = "0.1.0"
+dependencies = [
+ "file_system",
+ "graphics",
+ "shared",
+]
+
+[[package]]
 name = "drivers_native"
 version = "0.1.0"
 dependencies = [
@@ -2793,6 +2802,7 @@ dependencies = [
  "command_line_shell",
  "debug_application",
  "drivers_core",
+ "drivers_headless",
  "drivers_native",
  "drivers_shared",
  "drivers_std",
