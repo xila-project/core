@@ -19,10 +19,15 @@ RUN apt-get update \
         libsdl2-dev \
         mold \
         ninja-build \
-        nodejs \
-        npm \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
+
+# lv_font_conv 1.5.3 requires Node.js 24; Debian Bookworm's nodejs package is
+# too old and npm only reports the incompatibility before failing at runtime.
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x -o /tmp/nodesource_setup.sh \
+    && bash /tmp/nodesource_setup.sh \
+    && apt-get install --no-install-recommends -y nodejs \
+    && rm -rf /var/lib/apt/lists/* /tmp/nodesource_setup.sh
 
 RUN rustup target add wasm32-wasip1
 

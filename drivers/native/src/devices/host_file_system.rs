@@ -249,23 +249,23 @@ impl HostFileSystem {
             None
         };
 
-        if requested.contains(AttributeFlags::Kind) {
-            if let Some(kind) = kind {
-                result = result.set_kind(kind);
-            }
+        if requested.contains(AttributeFlags::Kind)
+            && let Some(kind) = kind
+        {
+            result = result.set_kind(kind);
         }
         if requested.contains(AttributeFlags::Size) && metadata.is_file() {
             result = result.set_size(metadata.len());
         }
-        if requested.contains(AttributeFlags::Inode) {
-            if let Some(inode) = stable_inode(metadata) {
-                result = result.set_inode(inode);
-            }
+        if requested.contains(AttributeFlags::Inode)
+            && let Some(inode) = stable_inode(metadata)
+        {
+            result = result.set_inode(inode);
         }
-        if requested.contains(AttributeFlags::Links) {
-            if let Some(links) = link_count(metadata) {
-                result = result.set_links(links);
-            }
+        if requested.contains(AttributeFlags::Links)
+            && let Some(links) = link_count(metadata)
+        {
+            result = result.set_links(links);
         }
         if requested.contains(AttributeFlags::Permissions) {
             result = result.set_permissions(if metadata.is_dir() {
@@ -280,20 +280,20 @@ impl HostFileSystem {
         if requested.contains(AttributeFlags::Group) {
             result = result.set_group(self.options.group);
         }
-        if requested.contains(AttributeFlags::ModificationTime) {
-            if let Some(time) = metadata.modified().ok().and_then(system_time) {
-                result = result.set_modification(time);
-            }
+        if requested.contains(AttributeFlags::ModificationTime)
+            && let Some(time) = metadata.modified().ok().and_then(system_time)
+        {
+            result = result.set_modification(time);
         }
-        if requested.contains(AttributeFlags::CreationTime) {
-            if let Some(time) = metadata.created().ok().and_then(system_time) {
-                result = result.set_creation(time);
-            }
+        if requested.contains(AttributeFlags::CreationTime)
+            && let Some(time) = metadata.created().ok().and_then(system_time)
+        {
+            result = result.set_creation(time);
         }
-        if requested.contains(AttributeFlags::AccessTime) {
-            if let Some(time) = metadata.accessed().ok().and_then(system_time) {
-                result = result.set_access(time);
-            }
+        if requested.contains(AttributeFlags::AccessTime)
+            && let Some(time) = metadata.accessed().ok().and_then(system_time)
+        {
+            result = result.set_access(time);
         }
         #[cfg(unix)]
         if requested.contains(AttributeFlags::StatusTime) {

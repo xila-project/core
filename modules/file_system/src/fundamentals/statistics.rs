@@ -64,10 +64,16 @@ impl Statistics {
     }
 
     pub fn from_attributes(attributes: &Attributes) -> Option<Self> {
+        // Backends without hard links report no link-count attribute. A
+        // directory's size is also commonly undefined. Keep the aggregate
+        // Statistics API usable by assigning conventional values to those
+        // two nonessential fields.
+        let links = attributes.get_links().copied().unwrap_or(1);
+        let size = attributes.get_size().copied().unwrap_or(0);
         Some(Statistics::new(
             *attributes.get_inode()?,
-            *attributes.get_links()?,
-            *attributes.get_size()?,
+            links,
+            size,
             *attributes.get_creation()?,
             *attributes.get_access()?,
             *attributes.get_modification()?,
