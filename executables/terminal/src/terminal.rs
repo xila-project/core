@@ -7,6 +7,7 @@ use xila::graphics::{
     self, Color, EventKind, Key,
     lvgl::{self, lv_obj_t},
 };
+use xila::internationalization::translate;
 use xila::synchronization::{blocking_mutex::raw::CriticalSectionRawMutex, rwlock::RwLock};
 
 pub(crate) struct Inner {
@@ -97,7 +98,10 @@ impl Terminal {
                     return Err(crate::error::Error::FailedToCreateObject);
                 }
 
-                lvgl::lv_textarea_set_placeholder_text(input, c"Enter your command ...".as_ptr());
+                lvgl::lv_textarea_set_placeholder_text(
+                    input,
+                    translate!(c"Enter your command ...").as_ptr(),
+                );
                 lvgl::lv_obj_set_width(input, lvgl::lv_pct(100));
                 lvgl::lv_textarea_set_one_line(input, true);
 
