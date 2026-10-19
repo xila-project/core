@@ -1,10 +1,48 @@
 use core::fmt::Debug;
-
 use bitflags::bitflags;
-
 use super::Permission;
 
-bitbitbitflags! {
+bitflags! {
+    /// File access permissions.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct AccessFlags: u8 {
+        const Read = 1 << 0;
+        const Write = 1 << 1;
+    }
+}
+
+impl AccessFlags {
+    pub const READ_WRITE: Self = Self::Read.union(Self::Write);
+
+    pub const fn into_permission(&self) -> Permission {
+        let mut permission = Permission::empty();
+        if self.contains(Self::Read) {
+            permission = permission.union(Permission::Read);
+        }
+        if self.contains(Self::Write) {
+            permission = permission.union(Permission::Write);
+        }
+        permission
+    }
+}
+
+bitflags! {
+    /// File creation flags.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct CreateFlags: u8 {
+        const Create = 1 << 0;
+        const Exclusive = 1 << 1;
+        const Truncate = 1 << 2;
+    }
+}
+
+impl CreateFlags {
+    pub const CREATE_TRUNCATE: Self = Self::Create.union(Self::Truncate);
+    pub const CREATE_EXCLUSIVE: Self = Self::Create.union(Self::Exclusive);
+}
+
+bitflags! {
+    /// File status flags.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct StateFlags: u8 {
         const Append = 1 << 0;
