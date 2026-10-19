@@ -82,7 +82,7 @@ cargo test -p wasm --features graphics,xila/graphics_rendering_xrgb8888 \
   --test graphics_canvas --test pixel_painter
 ```
 
-- `modules/graphics/bindings_generator` discovers and orders one shared LVGL ABI
+- `subsystems/graphics/bindings_generator` discovers and orders one shared LVGL ABI
   catalog; unsupported calls keep their IDs. Wasmi's supported-call table checks
   full C signatures, not just argument counts. The catalog is compatible with
   guest bindings built from the same LVGL revision/configuration, not a stable

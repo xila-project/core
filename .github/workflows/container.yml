@@ -22,7 +22,8 @@ on:
       - 'examples/**'
       - 'assets/**'
       - 'drivers/**'
-      - 'modules/**'
+      - 'subsystems/**'
+      - 'libraries/**'
       - 'executables/**'
       - 'tools/**'
   pull_request:
@@ -44,7 +45,8 @@ on:
       - 'examples/**'
       - 'assets/**'
       - 'drivers/**'
-      - 'modules/**'
+      - 'subsystems/**'
+      - 'libraries/**'
       - 'executables/**'
       - 'tools/**'
   workflow_dispatch:
