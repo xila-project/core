@@ -14,6 +14,11 @@ When packaging the executable, distribute a matching seed alongside it, or pass
 its explicit path. The default disk size is 16 MiB; custom seeds and
 `--disk-size BYTES` must agree.
 
+Host audio support is disabled by default, so builds do not require ALSA
+development files. Enable it with `--features audio`, for example
+`cargo run -p native_example --features audio -- --terminal`. Linux builds with
+audio enabled require ALSA development files.
+
 Only an absent live disk is imported. Import validates a temporary copy before
 publishing it without replacement. Existing disks do not require a seed and are
 never resized or automatically reformatted, including empty or corrupt files.
@@ -35,6 +40,7 @@ the profiling recorder for hashing source guest binaries; it no longer changes
 runtime loading. See the repository's profiling instructions for preparing and
 selecting a seed before measurement.
 
-The example mounts `/devices/audio/playback` using the default host audio output.
-Audio initialization failures are logged and leave the rest of the OS usable.
+With the `audio` feature enabled, the example mounts `/devices/audio/playback`
+using the default host audio output. Audio initialization failures are logged
+and leave the rest of the OS usable.
 See [Synth](../../executables/synth/README.md) for controls, silent mode and checks.
