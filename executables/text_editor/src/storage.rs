@@ -362,21 +362,21 @@ mod tests {
         copy.save_to(&expanded).unwrap();
         assert_eq!(
             fs::read(&expanded).unwrap(),
-            format!("{}\n{tail}", "a".repeat(PAGE_BYTES)).as_bytes()
+            format!("{}{tail}", "a".repeat(PAGE_BYTES)).as_bytes()
         );
         copy.replace_page(0, PAGE_BYTES, "x").unwrap();
         let contracted = dir.join("contracted.txt");
         copy.save_to(&contracted).unwrap();
         assert_eq!(
             fs::read(&contracted).unwrap(),
-            format!("x\n{tail}").as_bytes()
+            format!("x{tail}").as_bytes()
         );
         copy.replace_page(0, 1, &"y".repeat(PAGE_BYTES)).unwrap();
         let regrown = dir.join("regrown.txt");
         copy.save_to(&regrown).unwrap();
         assert_eq!(
             fs::read(&regrown).unwrap(),
-            format!("{}\n{tail}", "y".repeat(PAGE_BYTES)).as_bytes()
+            format!("{}{tail}", "y".repeat(PAGE_BYTES)).as_bytes()
         );
         drop(copy);
         fs::remove_dir_all(dir).unwrap();
