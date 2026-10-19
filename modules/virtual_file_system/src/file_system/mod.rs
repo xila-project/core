@@ -467,7 +467,10 @@ impl VirtualFileSystem {
         .await?;
 
         if let ItemStatic::FileSystem(_) = item {
-            match parent_file_system.file_system.create_directory(relative_path) {
+            match parent_file_system
+                .file_system
+                .create_directory(relative_path)
+            {
                 Ok(()) => {}
                 Err(file_system::Error::AlreadyExists) => {
                     let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
