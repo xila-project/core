@@ -1,0 +1,7 @@
+{
+  "Buffer too small": "Búfer demasiado pequeño",
+  "Failed to convert length": "No se pudo convertir la longitud",
+  "Invalid UTF-8 string": "Cadena UTF-8 no válida",
+  "Invalid length": "Longitud no válida",
+  "Invalid pointer": "Puntero no válido"
+}

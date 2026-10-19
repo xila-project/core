@@ -1,0 +1,23 @@
+{
+  "Authentication failed: {}": "Error de autenticación: {}",
+  "Failed to add shortcut: {}": "No se pudo añadir el acceso directo: {}",
+  "Failed to create object": "No se pudo crear el objeto",
+  "Failed to deserialize shortcut: {}": "No se pudo deserializar el acceso directo: {}",
+  "Failed to execute shortcut: {}": "No se pudo ejecutar el acceso directo: {}",
+  "Failed to get child": "No se pudo obtener el elemento hijo",
+  "Failed to get current task identifier: {}": "No se pudo obtener el identificador de la tarea actual: {}",
+  "Failed to get shortcut file path": "No se pudo obtener la ruta del acceso directo",
+  "Failed to open directory: {}": "No se pudo abrir el directorio: {}",
+  "Failed to open standard file: {}": "No se pudo abrir el archivo estándar: {}",
+  "Failed to read shortcut directory: {}": "No se pudo leer el directorio de accesos directos: {}",
+  "Failed to read shortcut file: {}": "No se pudo leer el acceso directo: {}",
+  "Failed to set environment variable: {}": "No se pudo establecer la variable de entorno: {}",
+  "Failed to set task user: {}": "No se pudo establecer el usuario de la tarea: {}",
+  "Graphics error: {}": "Error gráfico: {}",
+  "Invalid UTF-8: {}": "UTF-8 no válido: {}",
+  "Login": "Iniciar sesión",
+  "Missing arguments": "Faltan argumentos",
+  "Null character in string: {}": "Carácter nulo en la cadena: {}",
+  "Password": "Contraseña",
+  "User name": "Nombre de usuario"
+}
