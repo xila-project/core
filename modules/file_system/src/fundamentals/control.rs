@@ -1,14 +1,14 @@
-use shared::{AnyByLayout, flags};
+use shared::AnyByLayout;
+use bitflags::bitflags;
 
 use crate::{Error, Result};
 
-flags! {
-    /// The kinds of control commands.
-    pub enum ControlDirectionFlags: u8 {
-        /// Read data from the device.
-        Read,
-        /// Write data to the device.
-        Write,
+bitflags! {
+    /// Direction of control commands.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct ControlDirectionFlags: u8 {
+        const Read = 1 << 0;
+        const Write = 1 << 1;
     }
 }
 
@@ -154,7 +154,7 @@ impl ControlCommandIdentifier {
 
     pub const fn get_direction(&self) -> ControlDirectionFlags {
         let direction = (self.0 >> Self::DIRECTION_SHIFT) & ((1 << Self::DIRECTION_SIZE) - 1);
-        ControlDirectionFlags(direction as u8)
+        ControlDirectionFlags::from_bits_retain(direction as u8)
     }
 
     pub const fn get_size(&self) -> usize {
