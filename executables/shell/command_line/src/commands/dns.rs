@@ -62,7 +62,7 @@ async fn resolve_record<C: CommandContext>(
     match network_manager.resolve(domain, kind, true, None).await {
         Ok(ip) => {
             let count = ip.len();
-            let record_label = embedded_i18n::translate_plural!("DNS records for domain", count);
+            let record_label = xila::internationalization::translate_plural!("DNS records for domain", count);
             // DNS record types (A, AAAA, etc.) remain invariant CLI identifiers.
             context
                 .write_out_fmt(format_args!(
