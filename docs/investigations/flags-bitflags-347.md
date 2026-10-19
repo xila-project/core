@@ -1,6 +1,6 @@
 # #347 — Custom `flags!` versus `bitflags` 2
 
-Status: **investigation only — no migration approved**.
+Status: **breaking API changes are permitted; prefer idiomatic Rust and removal of compatibility shims.**
 
 ## Current inventory (default branch)
 
@@ -40,3 +40,11 @@ This is an initial search inventory, not a verified exhaustive call graph.
 ## Preliminary assessment
 
 The custom macro is more than a flags declaration helper: it defines an API and storage contract. Source LOC reduction alone cannot justify migration. There is currently **no verified binary-size or compile-time result**, so the decision is **pending measurements**.
+
+## Updated project direction (2026-10-19)
+
+The maintainer explicitly permits breaking changes and prioritizes code cleanliness. Accordingly, the eventual migration should use the idiomatic `bitflags` 2 API rather than preserving Xila-specific naming and method signatures. Remove the custom macro and its redundant helper methods once migration is validated. Update all call sites to `empty()`, `all()`, `bits()`, `from_bits_retain()`, and normal mutable flag operations. Avoid compatibility aliases or wrappers solely to retain old source-level behavior.
+
+Breaking **source API** compatibility is acceptable; changes to persistent filesystem encodings, hardware protocol fields, and ABI used across separately built components must still be explicit and tested. The existing regression tests describe legacy behavior, not necessarily required future behavior; revise tests for intentionally changed semantics (notably `Not` and `Debug`) rather than constraining the new implementation to old quirks.
+
+The initial issue's investigation/measurement gate remains in place until a measured go/no-go decision, unless explicitly amended by the maintainer.
