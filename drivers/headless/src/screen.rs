@@ -9,7 +9,7 @@ use graphics::{
     WAS_RESIZED,
 };
 use shared::{AnyByLayout, align_slice_to};
-use synchronization::blocking_mutex::{Mutex, raw::CriticalSectionRawMutex};
+use std::sync::Mutex;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HeadlessError {
@@ -26,7 +26,7 @@ impl fmt::Display for HeadlessError {
 
 pub struct HeadlessScreenDevice {
     resolution: Point,
-    drawing_area: Mutex<CriticalSectionRawMutex, Area>,
+    drawing_area: Mutex<Area>,
 }
 
 impl HeadlessScreenDevice {
@@ -49,8 +49,12 @@ impl DirectBaseOperations for HeadlessScreenDevice {
             align_slice_to(buffer).ok_or(file_system::Error::InvalidParameter)?;
         let expected = self
             .drawing_area
-            .lock(|area| validate_flush(self.resolution, *area, size_of::<RenderingColor>()))
-            .map_err(|_| file_system::Error::InvalidParameter)?;
+            .lock()
+            .map_err(|_| file_system::Error::InputOutput)
+            .and_then(|area| {
+                validate_flush(self.resolution, *area, size_of::<RenderingColor>())
+                    .map_err(|_| file_system::Error::InvalidParameter)
+            })?;
         if pixels.len().checked_mul(size_of::<RenderingColor>()) != Some(expected)
             || buffer.len() != expected
         {
@@ -68,7 +72,10 @@ impl DirectBaseOperations for HeadlessScreenDevice {
         match command {
             SET_DRAWING_AREA::IDENTIFIER => {
                 let area = *SET_DRAWING_AREA::cast_input(input)?;
-                self.drawing_area.lock(|current| *current = area);
+                *self
+                    .drawing_area
+                    .lock()
+                    .map_err(|_| file_system::Error::InputOutput)? = area;
             }
             GET_RESOLUTION::IDENTIFIER => {
                 *GET_RESOLUTION::cast_output(output)? = self.resolution;
