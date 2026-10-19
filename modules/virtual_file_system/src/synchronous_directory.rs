@@ -53,7 +53,7 @@ impl<'a> SynchronousDirectory<'a> {
         let mut directory =
             block_on(virtual_file_system.open_directory(task, &path))?.into_synchronous_directory();
 
-        directory.flags = directory.flags.set_status(StateFlags::None);
+        directory.flags = directory.flags.set_status(StateFlags::empty());
 
         Ok(directory)
     }
@@ -71,7 +71,7 @@ impl<'a> SynchronousDirectory<'a> {
 
     pub fn get_statistics(&mut self) -> Result<Statistics> {
         self.blocking_operation(|directory| {
-            let mut attributes = Attributes::new().set_mask(AttributeFlags::All);
+            let mut attributes = Attributes::new().set_mask(AttributeFlags::all());
 
             AttributeOperations::get_attributes(
                 directory.directory,
