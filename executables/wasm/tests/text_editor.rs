@@ -85,15 +85,10 @@ async fn guest_opens_pages_edits_and_saves_large_file() {
     )
     .await
     .unwrap();
-    let handle = xila::executable::execute(
-        context,
-        "/binaries/wasm",
-        vec![path.into()],
-        standard,
-        None,
-    )
-    .await
-    .unwrap();
+    let handle =
+        xila::executable::execute(context, "/binaries/wasm", vec![path.into()], standard, None)
+            .await
+            .unwrap();
     action(manager, 3).await;
     wait_label(manager, 4, "Opened").await;
     action(manager, 1).await;
