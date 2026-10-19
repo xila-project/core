@@ -122,6 +122,10 @@ jobs:
         with:
           cache-key: localization-${{ matrix.locale }}
 
+      - name: Check | Catalog placeholders and pseudo-localization tests
+        if: matrix.locale == 'en'
+        run: npm run check:translations
+
       - name: Check | Strict host and guest translations
         run: cargo make check-localization
 
