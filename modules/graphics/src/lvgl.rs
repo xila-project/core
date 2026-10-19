@@ -30,7 +30,7 @@ unsafe extern "C" {
     ) -> *mut lv_draw_buf_t;
 }
 
-pub(crate) unsafe fn lv_snapshot_take(
+pub(crate) unsafe fn snapshot_take(
     object: *mut lv_obj_t,
     color_format: lv_color_format_t,
 ) -> *mut lv_draw_buf_t {

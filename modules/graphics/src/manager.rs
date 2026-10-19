@@ -431,9 +431,7 @@ impl Manager {
 
         let screen = display.get_object();
 
-        unsafe {
-            theme::initialize(&display)?;
-        }
+        theme::initialize(&display)?;
 
         Ok(Self {
             inner: RwLock::new(Inner {
@@ -514,7 +512,7 @@ impl Manager {
             Input::new_virtual(injected_inputs, InputKind::Keypad)?,
         ];
         for (device, kind) in input_devices {
-            inputs.push(Input::new(device, *kind)?);
+            inputs.push(Input::new(*device, *kind)?);
         }
         Ok((display, inputs))
     }

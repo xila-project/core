@@ -88,7 +88,7 @@ pub(crate) fn capture_screen(object: *mut lvgl::lv_obj_t) -> Result<ScreenSnapsh
     }
 
     let draw_buf =
-        unsafe { lvgl::lv_snapshot_take(object, lvgl::lv_color_format_t_LV_COLOR_FORMAT_ARGB8888) };
+        unsafe { lvgl::snapshot_take(object, lvgl::lv_color_format_t_LV_COLOR_FORMAT_ARGB8888) };
     if draw_buf.is_null() {
         return Err(Error::OutOfMemory);
     }

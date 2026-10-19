@@ -1,4 +1,5 @@
 use alloc::collections::VecDeque;
+use core::cell::{Cell, RefCell};
 
 use synchronization::{
     Arc,
@@ -18,8 +19,8 @@ enum InjectedEvent {
 }
 
 pub(crate) struct InputQueue {
-    events: Mutex<CriticalSectionRawMutex, VecDeque<InjectedEvent>>,
-    pointer: Mutex<CriticalSectionRawMutex, (Point, State)>,
+    events: Mutex<CriticalSectionRawMutex, RefCell<VecDeque<InjectedEvent>>>,
+    pointer: Mutex<CriticalSectionRawMutex, Cell<(Point, State)>>,
 }
 
 impl InputQueue {
@@ -29,13 +30,14 @@ impl InputQueue {
             .try_reserve_exact(INPUT_EVENT_QUEUE_CAPACITY)
             .map_err(|_| Error::OutOfMemory)?;
         Ok(Arc::new(Self {
-            events: Mutex::new(events),
-            pointer: Mutex::new((Point::default(), State::Released)),
+            events: Mutex::new(RefCell::new(events)),
+            pointer: Mutex::new(Cell::new((Point::default(), State::Released))),
         }))
     }
 
     fn enqueue(&self, event: InjectedEvent) -> Result<()> {
         self.events.lock(|events| {
+            let mut events = events.borrow_mut();
             if events.len() >= INPUT_EVENT_QUEUE_CAPACITY {
                 return Err(Error::AlreadyInUse);
             }
@@ -46,12 +48,14 @@ impl InputQueue {
 
     pub(crate) fn pointer_move(&self, point: Point) -> Result<()> {
         self.events.lock(|events| {
+            let mut events = events.borrow_mut();
             if events.len() >= INPUT_EVENT_QUEUE_CAPACITY {
                 return Err(Error::AlreadyInUse);
             }
             let state = self.pointer.lock(|last| {
-                last.0 = point;
-                last.1
+                let (_, state) = last.get();
+                last.set((point, state));
+                state
             });
             events.push_back(InjectedEvent::Pointer { point, state });
             Ok(())
@@ -60,12 +64,14 @@ impl InputQueue {
 
     pub(crate) fn pointer_button(&self, state: State) -> Result<()> {
         self.events.lock(|events| {
+            let mut events = events.borrow_mut();
             if events.len() >= INPUT_EVENT_QUEUE_CAPACITY {
                 return Err(Error::AlreadyInUse);
             }
             let (point, _) = self.pointer.lock(|last| {
-                last.1 = state;
-                *last
+                let (point, _) = last.get();
+                last.set((point, state));
+                (point, state)
             });
             events.push_back(InjectedEvent::Pointer { point, state });
             Ok(())
@@ -82,6 +88,7 @@ impl InputQueue {
         }
         let event_count = text.len().checked_mul(2).ok_or(Error::InvalidParameter)?;
         self.events.lock(|events| {
+            let mut events = events.borrow_mut();
             if events.len().saturating_add(event_count) > INPUT_EVENT_QUEUE_CAPACITY {
                 return Err(Error::AlreadyInUse);
             }
@@ -105,6 +112,7 @@ impl InputQueue {
 
     pub(crate) fn pop_for(&self, kind: InputKind) -> Option<InputData> {
         self.events.lock(|events| {
+            let mut events = events.borrow_mut();
             let matches = matches!(
                 (kind, events.front()),
                 (InputKind::Pointer, Some(InjectedEvent::Pointer { .. }))
@@ -125,8 +133,10 @@ impl InputQueue {
     }
 
     pub(crate) fn current_pointer(&self) -> InputData {
-        self.pointer
-            .lock(|(point, state)| InputData::new(*point, *state, Key::Character(0), false))
+        self.pointer.lock(|pointer| {
+            let (point, state) = pointer.get();
+            InputData::new(point, state, Key::Character(0), false)
+        })
     }
 }
 

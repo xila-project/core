@@ -11,7 +11,7 @@ mod r#type;
 
 use binding::*;
 pub use data::*;
-pub use injection::*;
+pub(crate) use injection::InputQueue;
 pub use input::*;
 pub use key::*;
 pub use state::*;
