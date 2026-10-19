@@ -1,0 +1,13 @@
+{
+  "Already initialized": "Já inicializado",
+  "Duplicate group identifier": "Identificador de grupo duplicado",
+  "Duplicate group name": "Nome de grupo duplicado",
+  "Duplicate user identifier": "Identificador de usuário duplicado",
+  "Duplicate user name": "Nome de usuário duplicado",
+  "Invalid group identifier": "Identificador de grupo inválido",
+  "Invalid user identifier": "Identificador de usuário inválido",
+  "Not initialized": "Não inicializado",
+  "Poisoned lock": "Bloqueio corrompido",
+  "Too many groups": "Grupos demais",
+  "Too many users": "Usuários demais"
+}

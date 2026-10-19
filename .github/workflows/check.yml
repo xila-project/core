@@ -41,6 +41,7 @@ jobs:
       i18n_fr: ${{ steps.filter.outputs.i18n_fr }}
       i18n_es: ${{ steps.filter.outputs.i18n_es }}
       i18n_de: ${{ steps.filter.outputs.i18n_de }}
+      i18n_pt_br: ${{ steps.filter.outputs.i18n_pt_br }}
     steps:
       - uses: dorny/paths-filter@v4
         id: filter
@@ -116,6 +117,8 @@ jobs:
               - '**/locales/es.json'
             i18n_de:
               - '**/locales/de.json'
+            i18n_pt_br:
+              - '**/locales/pt-BR.json'
 
   localization:
     name: Localization checks (all shipped locales)
@@ -138,6 +141,7 @@ jobs:
       I18N_FR_CHANGED: ${{ needs.changes.outputs.i18n_fr }}
       I18N_ES_CHANGED: ${{ needs.changes.outputs.i18n_es }}
       I18N_DE_CHANGED: ${{ needs.changes.outputs.i18n_de }}
+      I18N_PT_BR_CHANGED: ${{ needs.changes.outputs.i18n_pt_br }}
     steps:
       - name: Setup | Checkout repository
         uses: actions/checkout@v7
@@ -156,15 +160,16 @@ jobs:
           # Changes restricted to catalogs only need the affected languages.
           # Changes to Rust/extraction/build logic and main/manual runs
           # still validate every supported compile-time locale.
-          locales=(en fr es de)
+          locales=(en fr es de pt-BR)
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$I18N_CODE_CHANGED" == "false" ]]; then
             locales=()
             [[ "$I18N_EN_CHANGED" == "true" ]] && locales+=(en)
             [[ "$I18N_FR_CHANGED" == "true" ]] && locales+=(fr)
             [[ "$I18N_ES_CHANGED" == "true" ]] && locales+=(es)
             [[ "$I18N_DE_CHANGED" == "true" ]] && locales+=(de)
+            [[ "$I18N_PT_BR_CHANGED" == "true" ]] && locales+=(pt-BR)
             if [[ ${#locales[@]} -eq 0 ]]; then
-              locales=(en fr es de)
+              locales=(en fr es de pt-BR)
             fi
           fi
           printf 'Checking locale(s): %s\n' "${locales[*]}"
@@ -177,7 +182,7 @@ jobs:
             cargo make check-localization
 
             # New language glyphs must also work with lv_font_conv.
-            if [[ "$locale" == "es" || "$locale" == "de" ]]; then
+            if [[ "$locale" == "es" || "$locale" == "de" || "$locale" == "pt-BR" ]]; then
               cargo make generate-fonts
             fi
             echo "::endgroup::"

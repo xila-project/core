@@ -1508,18 +1508,18 @@ dependencies = [
 
 [[package]]
 name = "embedded-i18n"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c9771870987c29d3a6de8a07770c82a74d534ffb145e5dc5d3708d3286d245a"
+checksum = "5ce1668d5987e7a5675337485a41b37e5196a4951cb390028f99a3fca96733b7"
 dependencies = [
  "embedded-i18n-macros",
 ]
 
 [[package]]
 name = "embedded-i18n-macros"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6a0c8f5d9069c7417b966e9729924e0391fbc237f26953820ea1cc1d42a9b0e"
+checksum = "1e8b268917f1d9b4a473d8a2ec546088648b0fa849b1a8c6ebff39ab00ec0d6f"
 dependencies = [
  "proc-macro2",
  "quote",
