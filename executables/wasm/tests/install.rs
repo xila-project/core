@@ -160,7 +160,7 @@ async fn install_selects_install_export_and_never_falls_back_to_main() {
             let exit = execute(&standard, vec!["--install".into(), path.clone()]).await;
             context
                 .virtual_file_system
-                .remove(task, &path)
+                .remove(task, path.as_str())
                 .await
                 .unwrap();
             assert_eq!(exit, 0, "{app}");
