@@ -31,25 +31,30 @@ impl ExecutableTrait for DebugExecutable {
     }
 }
 
-async fn run(standard: Standard<'static>, _: Vec<String>) -> Result<(), NonZeroUsize> {
+async fn run(standard: Standard<'static>, arguments: Vec<String>) -> Result<(), NonZeroUsize> {
     let context = standard.context;
     let graphics = graphics::ffi_manager();
-    let mut window = {
-        let _lock = graphics.lock().await;
-        let mut window = graphics.create_window().await.map_err(|_| code(1))?;
-        window.set_icon("Db", graphics::Color::BLACK);
-        let label = unsafe { graphics::lvgl::lv_label_create(window.as_object_mutable()) };
-        if label.is_null() {
-            return Err(code(1));
-        }
-        unsafe {
-            graphics::lvgl::lv_label_set_text(
-                label,
-                c"Debug agent is ready. Use xila-debug from the host.".as_ptr(),
-            );
-            graphics::lvgl::lv_obj_center(label);
-        }
-        window
+    let background = arguments.iter().any(|argument| argument == "--background");
+    let mut window = if background {
+        None
+    } else {
+        Some({
+            let _lock = graphics.lock().await;
+            let mut window = graphics.create_window().await.map_err(|_| code(1))?;
+            window.set_icon("Db", graphics::Color::BLACK);
+            let label = unsafe { graphics::lvgl::lv_label_create(window.as_object_mutable()) };
+            if label.is_null() {
+                return Err(code(1));
+            }
+            unsafe {
+                graphics::lvgl::lv_label_set_text(
+                    label,
+                    c"Debug agent is ready. Use xila-debug from the host.".as_ptr(),
+                );
+                graphics::lvgl::lv_obj_center(label);
+            }
+            window
+        })
     };
 
     let vfs = context.virtual_file_system;
@@ -73,16 +78,18 @@ async fn run(standard: Standard<'static>, _: Vec<String>) -> Result<(), NonZeroU
 
     let mut should_close = false;
     loop {
-        graphics::lock!(graphics, {
-            while let Some(event) = window.pop_event() {
-                if matches!(event.code, EventKind::Delete | EventKind::CloseRequested)
-                    && event.target == window.as_object_mutable()
-                {
-                    should_close = true;
-                    break;
+        if let Some(window) = window.as_mut() {
+            graphics::lock!(graphics, {
+                while let Some(event) = window.pop_event() {
+                    if matches!(event.code, EventKind::Delete | EventKind::CloseRequested)
+                        && event.target == window.as_object_mutable()
+                    {
+                        should_close = true;
+                        break;
+                    }
                 }
-            }
-        });
+            });
+        }
         if should_close {
             stopping.store(true, Ordering::Release);
             service_handle.join().await;

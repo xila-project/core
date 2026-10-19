@@ -423,7 +423,7 @@ async fn main(task_manager: &'static xila::task::Manager) {
         executable::execute(
             executable_context,
             &"/binaries/debug",
-            vec![],
+            vec!["--background".into()],
             debug_standard,
             None,
         )

@@ -57,8 +57,8 @@ cargo run -p native_example --bin native_example -- --display-driver headless --
 `--resolution` applies to either graphical driver. Headless resolutions are
 limited to 2,073,600 pixels. Use `--display-driver native` to select the window
 driver explicitly. The headless mode starts the Debug application automatically
-because it has no physical input for opening it. The display-driver option
-conflicts with `--terminal`.
+in the background, so it does not cover the UI being inspected. The
+display-driver option conflicts with `--terminal`.
 
 In a second terminal, run the host client as the same OS user as the runtime:
 
