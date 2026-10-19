@@ -27,7 +27,7 @@ unsafe fn find_label(root: *mut lvgl::lv_obj_t, text: &str, contains: bool) -> *
             }
         }
         for index in 0..lvgl::lv_obj_get_child_count(root) {
-            let found = find_label(lvgl::lv_obj_get_child(root, index as i32), text, prefix);
+            let found = find_label(lvgl::lv_obj_get_child(root, index as i32), text, contains);
             if !found.is_null() {
                 return found;
             }
