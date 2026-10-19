@@ -86,10 +86,25 @@ async fn guest_opens_pages_edits_and_saves_large_file() {
     .await
     .unwrap();
     let handle =
-        xila::executable::execute(context, "/binaries/wasm", vec![path.into()], standard, None)
+        xila::executable::execute(
+            context,
+            "/binaries/wasm",
+            vec!["/binaries/text_editor".into()],
+            standard,
+            None,
+        )
             .await
             .unwrap();
-    action(manager, 3).await;
+    let path_text = std::ffi::CString::new(path).unwrap();
+    let root = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
+    {
+        let _lock = manager.synchronous_lock();
+        unsafe {
+            let path_input = lvgl::lv_obj_get_child(root, 1);
+            lvgl::lv_textarea_set_text(path_input, path_text.as_ptr());
+        }
+    }
+    action(manager, 4).await;
     wait_label(manager, 4, "Opened").await;
     action(manager, 1).await;
     wait_label(manager, 2, "4096").await;
