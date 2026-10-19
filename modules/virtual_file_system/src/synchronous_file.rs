@@ -193,7 +193,7 @@ impl<'a> SynchronousFile<'a> {
     }
 
     pub fn get_statistics(&mut self) -> Result<Statistics> {
-        let mut attributes = Attributes::new().set_mask(AttributeFlags::All);
+        let mut attributes = Attributes::new().set_mask(AttributeFlags::all());
 
         self.item
             .as_attributes_operations()
