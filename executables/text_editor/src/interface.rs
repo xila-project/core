@@ -249,7 +249,11 @@ impl Interface {
             return Ok(());
         };
         if forward {
-            println!("Text Editor next page: {} of {}", self.page_start, working.length());
+            println!(
+                "Text Editor next page: {} of {}",
+                self.page_start,
+                working.length()
+            );
             let next = self.page_start + self.page_length as u64;
             if next < working.length() {
                 self.page_start = next;
