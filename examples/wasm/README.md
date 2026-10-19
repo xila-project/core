@@ -14,7 +14,7 @@ RUSTUP_TOOLCHAIN=stable trunk serve
 Trunk copies `target/seed/wasm/seed.img` beside the runtime. Building the Rust
 runtime alone requires no prebuilt guest binaries; serving a fresh installation
 requires this image. Build guests and images with the same
-`EMBEDDED_I18N_LOCALE` as the runtime (`en` or `fr`).
+`EMBEDDED_I18N_LOCALE` as the runtime (`en`, `fr` or `es`).
 
 Use localhost or HTTPS in a browser supporting OPFS,
 `FileSystemFileHandle.createWritable`, and Web Locks.
