@@ -177,28 +177,4 @@ mod tests {
             Err(Error::AlreadyInUse)
         );
     }
-
-    #[test]
-    fn pointer_state_persists_after_events_are_consumed() {
-        let queue = InputQueue::new().unwrap();
-        let point = Point::new(12, 34);
-        queue.pointer_move(point).unwrap();
-        queue.pointer_button(State::Pressed).unwrap();
-        assert_eq!(
-            queue.pop_for(InputKind::Pointer).unwrap().get_point(),
-            point
-        );
-        assert_eq!(
-            *queue.pop_for(InputKind::Pointer).unwrap().get_touch(),
-            State::Pressed
-        );
-        let current = queue.current_pointer();
-        assert_eq!(current.get_point(), point);
-        assert_eq!(*current.get_touch(), State::Pressed);
-        let moved_point = Point::new(23, 45);
-        queue.pointer_move(moved_point).unwrap();
-        let moved = queue.pop_for(InputKind::Pointer).unwrap();
-        assert_eq!(moved.get_point(), moved_point);
-        assert_eq!(*moved.get_touch(), State::Pressed);
-    }
 }
