@@ -13,9 +13,9 @@ application namespace, not a global catalog.
 | --- | --- |
 | `en` — English | Existing supported locale (fallback) |
 | `fr` — French | Existing supported locale |
-| `es` — Spanish | New translated catalogs; needs CI and native-language review before merging |
-| `de` — German | Planned in #441 |
-| `pt-BR` — Brazilian Portuguese | Planned in #441; locale ranges need upstream support |
+| `es` — Spanish | Shipped locale; review of terminology and LVGL layouts remains welcome |
+| `de` — German | New translated catalogs; CI and native-language review required before merging |
+| `pt-BR` — Brazilian Portuguese | Planned in #441; font-range support is fixed upstream, verify pinned embedded-i18n release |
 
 ## Build / verify a locale
 
@@ -49,6 +49,14 @@ translate already-installed Wasm programs.
 On `main`, CI builds and publishes matching reference images per supported
 locale in `seed-images/{locale}/`; the localized browser demonstration is at
 `pages/demonstrations/wasm/{locale}/`.
+
+## Localization CI
+
+The localization workflow runs in **one job** for `en`, `fr`, `es`
+and `de`, sharing its setup while using a **separate Cargo target
+directory for each locale**. This deliberately avoids stale
+compile-time translations across successive builds. Font generation is
+also checked for Spanish and German.
 
 ## Contributing translations
 
