@@ -44,14 +44,13 @@ async fn write_ping_line<C: CommandContext>(
     context: &mut C,
     target: &str,
     resolved_target: &xila::network::IpAddress,
+    payload_size: usize,
 ) -> crate::Result<()> {
+    let unit = xila::internationalization::translate_plural!("PING data bytes", payload_size);
     context
         .write_out_fmt(format_args!(
-            "{}\n",
-            format_args!(
-                translate!("PING {} ({}): {} data bytes"),
-                target, resolved_target, 56
-            )
+            "PING {} ({}): {} {}\n",
+            target, resolved_target, payload_size, unit
         ))
         .await
 }
@@ -86,16 +85,19 @@ async fn ping_loop<C: CommandContext>(
             .await
         {
             Ok(duration) => {
+                let unit = xila::internationalization::translate_plural!(
+                    "ICMP bytes from",
+                    payload_size
+                );
                 context
                     .write_out_fmt(format_args!(
-                        "{}\n",
-                        format_args!(
-                            translate!("{} bytes from {}: icmp_seq={} time={:.2} ms"),
-                            payload_size,
-                            resolved_target,
-                            i,
-                            duration.as_milliseconds()
-                        )
+                        "{} {} {}: icmp_seq={} {}={:.2} ms\n",
+                        payload_size,
+                        unit,
+                        resolved_target,
+                        i,
+                        translate!("time"),
+                        duration.as_milliseconds()
                     ))
                     .await?;
             }
@@ -161,7 +163,7 @@ where
         }
     };
 
-    write_ping_line(context, target, &resolved_target).await?;
+    write_ping_line(context, target, &resolved_target, payload_size).await?;
     ping_loop(
         context,
         manager,
