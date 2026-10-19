@@ -80,7 +80,7 @@ async fn test_unnamed_pipe() {
     let (_, virtual_file_system) = initialize().await;
 
     let (mut pipe_read, mut pipe_write) =
-        File::create_unnamed_pipe(virtual_file_system, 512, StateFlags::None)
+        File::create_unnamed_pipe(virtual_file_system, 512, StateFlags::empty())
             .await
             .unwrap();
 
