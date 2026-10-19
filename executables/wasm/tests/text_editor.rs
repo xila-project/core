@@ -11,6 +11,7 @@ mod support;
 
 use core::time::Duration;
 use xila::{
+    file_system::{AccessFlags, CreateFlags, Flags},
     graphics::{Manager, lvgl},
     virtual_file_system::{File, SynchronousDirectory},
 };
@@ -65,9 +66,21 @@ async fn guest_opens_pages_edits_and_saves_large_file() {
         .unwrap();
     let path = "/configuration/shared/text_editor/document.txt";
     let original = "a".repeat(9000);
-    File::write_to_path(vfs, task, path, original.as_bytes())
-        .await
-        .unwrap();
+    let mut source = File::open(
+        vfs,
+        task,
+        path,
+        Flags::new(AccessFlags::Write, Some(CreateFlags::CreateTruncate), None),
+    )
+    .await
+    .unwrap();
+    let mut remaining = original.as_bytes();
+    while !remaining.is_empty() {
+        let written = source.write(remaining).await.unwrap();
+        assert_ne!(written, 0);
+        remaining = &remaining[written..];
+    }
+    source.close(vfs).await.unwrap();
     let binary = xila::executable::build_crate("text_editor").unwrap();
     drivers_std::loader::load_to_virtual_file_system(
         context.task_manager,
