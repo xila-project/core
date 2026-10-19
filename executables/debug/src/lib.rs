@@ -45,7 +45,7 @@ async fn run(standard: Standard<'static>, _: Vec<String>) -> Result<(), NonZeroU
         unsafe {
             graphics::lvgl::lv_label_set_text(
                 label,
-                c"Debug agent is ready. Use xila-ui-control from the host.".as_ptr(),
+                c"Debug agent is ready. Use xila-debug from the host.".as_ptr(),
             );
             graphics::lvgl::lv_obj_center(label);
         }
