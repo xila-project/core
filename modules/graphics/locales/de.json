@@ -1,0 +1,13 @@
+{
+  "Already in use": "Bereits in Verwendung",
+  "Already initialized": "Bereits initialisiert",
+  "Failed to create object": "Objekt konnte nicht erstellt werden",
+  "Failed to get resolution": "Auflösung konnte nicht ermittelt werden",
+  "Failed to register": "Registrierung fehlgeschlagen",
+  "Invalid reference": "Ungültige Referenz",
+  "Invalid window identifier": "Ungültige Fensterkennung",
+  "Not available": "Nicht verfügbar",
+  "Not initialized": "Nicht initialisiert",
+  "Not registered": "Nicht registriert",
+  "Out of memory": "Arbeitsspeicher erschöpft"
+}
