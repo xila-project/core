@@ -67,5 +67,6 @@
   "User": "Utilisateur",
   "User name: ": "Nom d'utilisateur: ",
   "{} bytes from {}: icmp_seq={} time={:.2} ms": "{} octets de {}: icmp_seq={} temps={:.2} ms",
-  "{} record(s) for domain '{}':": "Enregistrement(s) {} pour le domaine '{}':"
+  "DNS records for domain.one": "enregistrement pour le domaine",
+  "DNS records for domain.other": "enregistrements pour le domaine"
 }
