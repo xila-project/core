@@ -372,8 +372,8 @@ mod tests {
         assert_eq!(Permission::READ_WRITE.bits(), 0b110);
         assert_eq!(Permission::WRITE_EXECUTE.bits(), 0b011);
         assert_eq!(Permission::READ_EXECUTE.bits(), 0b101);
-        assert_eq!(Permission::empty().0, 0b000);
-        assert_eq!(Permission::all().0, 0b111);
+        assert_eq!(Permission::empty().bits(), 0b000);
+        assert_eq!(Permission::all().bits(), 0b111);
     }
 
     #[test]
