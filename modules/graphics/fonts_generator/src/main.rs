@@ -141,13 +141,15 @@ fn main() {
         .expect("Failed to canonicalize generated fonts directory path");
 
     let ranges_string = format_ranges(ranges.iter());
+    let signature = fingerprint_inputs(&locale, &fallback_locale, &ranges_string, &fonts_directory)
+        .expect("Failed to fingerprint font generation inputs");
+    let lock_contents = format!("// Input signature: {signature}\n// Ranges: {ranges_string}\n");
     let ranges_file_path = generated_fonts_directory.join(RANGES_FILE);
 
-    if fs::read_to_string(&ranges_file_path)
-        .unwrap_or_default()
-        .contains(&ranges_string)
+    if font_outputs_complete(&generated_fonts_directory)
+        && fs::read_to_string(&ranges_file_path).is_ok_and(|old| old == lock_contents)
     {
-        println!("Font ranges unchanged, skipping font generation.");
+        println!("Font inputs unchanged and all outputs present, skipping generation.");
         return;
     }
 
@@ -174,6 +176,123 @@ fn main() {
         .expect("Failed to generate font");
     }
 
-    fs::write(&ranges_file_path, format!("// Ranges: {}\n", ranges_string))
-        .expect("Failed to write ranges file");
+    fs::write(&ranges_file_path, lock_contents).expect("Failed to write ranges file");
+}
+
+fn fingerprint_inputs(
+    locale: &str,
+    fallback_locale: &str,
+    ranges: &str,
+    fonts_directory: &Path,
+) -> Result<String, String> {
+    // Stable, allocation-free hash state: the cache key must not depend on
+    // timestamps, randomized hash seeds, or the order of directory entries.
+    let mut hash: u64 = 0xcbf29ce484222325;
+    fn add(hash: &mut u64, bytes: &[u8]) {
+        let length = (bytes.len() as u64).to_le_bytes();
+        for byte in length.iter().chain(bytes.iter()) {
+            *hash = (*hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
+        }
+    }
+
+    add(&mut hash, locale.as_bytes());
+    add(&mut hash, fallback_locale.as_bytes());
+    add(&mut hash, ranges.as_bytes());
+    // Changes to generation options, glyph lists, or font mappings invalidate
+    // the cache even if the final locale ranges do not change.
+    add(&mut hash, include_bytes!("main.rs"));
+
+    let mut paths = std::collections::BTreeSet::new();
+    for (_, path, _, include_icons) in FONTS {
+        paths.insert(*path);
+        if *include_icons {
+            paths.insert("FontAwesome5-Solid+Brands+Regular.woff");
+        }
+    }
+    for path in paths {
+        add(&mut hash, path.as_bytes());
+        let contents = fs::read(fonts_directory.join(path))
+            .map_err(|error| format!("Failed to read font {path}: {error}"))?;
+        add(&mut hash, &contents);
+    }
+
+    Ok(format!("{hash:016x}"))
+}
+
+fn font_outputs_complete(directory: &Path) -> bool {
+    FONTS.iter().all(|(size, _, name, _)| {
+        let path = directory.join(format!("font_{name}_{size}.generated.c"));
+        fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_directory() -> std::path::PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = env::temp_dir().join(format!("xila-font-cache-{}-{stamp}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        directory
+    }
+
+    #[test]
+    fn signature_changes_with_locale_and_font_data() {
+        let directory = test_directory();
+        for (_, file, _, _) in FONTS {
+            fs::write(directory.join(file), b"original font").unwrap();
+        }
+        fs::write(
+            directory.join("FontAwesome5-Solid+Brands+Regular.woff"),
+            b"original icons",
+        )
+        .unwrap();
+
+        let original = fingerprint_inputs("en", "en", "32-127", &directory).unwrap();
+        assert_eq!(
+            original,
+            fingerprint_inputs("en", "en", "32-127", &directory).unwrap()
+        );
+        assert_ne!(
+            original,
+            fingerprint_inputs("fr", "en", "32-127", &directory).unwrap()
+        );
+        assert_ne!(
+            original,
+            fingerprint_inputs("en", "fr", "32-127", &directory).unwrap()
+        );
+        assert_ne!(
+            original,
+            fingerprint_inputs("en", "en", "32-128", &directory).unwrap()
+        );
+
+        fs::write(directory.join("Montserrat-Regular.ttf"), b"updated font").unwrap();
+        assert_ne!(
+            original,
+            fingerprint_inputs("en", "en", "32-127", &directory).unwrap()
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn missing_or_empty_generated_fonts_invalidate_cache() {
+        let directory = test_directory();
+        assert!(!font_outputs_complete(&directory));
+        for (size, _, name, _) in FONTS {
+            fs::write(
+                directory.join(format!("font_{name}_{size}.generated.c")),
+                b"generated font",
+            )
+            .unwrap();
+        }
+        assert!(font_outputs_complete(&directory));
+        fs::write(directory.join("font_montserrat_10.generated.c"), b"").unwrap();
+        assert!(!font_outputs_complete(&directory));
+        fs::remove_dir_all(directory).unwrap();
+    }
 }
