@@ -109,10 +109,7 @@ impl WorkingCopy {
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_nanos();
-            let path = parent.join(format!(
-                ".xila-text-editor-{}-{timestamp}-{sequence}",
-                std::process::id()
-            ));
+            let path = parent.join(format!(".xila-text-editor-{timestamp}-{sequence}"));
             match OpenOptions::new()
                 .read(true)
                 .write(true)
