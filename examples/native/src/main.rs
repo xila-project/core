@@ -404,6 +404,33 @@ async fn main(task_manager: &'static xila::task::Manager) {
         bootsplash.stop(graphics_manager).await.unwrap();
     }
 
+    // Headless sessions have no physical input with which to open the Debug
+    // application. Start its subsystem-backed transport before the shell so
+    // a host agent can inspect and control the UI immediately after boot.
+    if config.interface == cli::InterfaceMode::Graphical
+        && config.display_driver == cli::DisplayDriver::Headless
+    {
+        let debug_standard = Standard::open(
+            &"/devices/null",
+            &"/devices/null",
+            &"/devices/null",
+            task,
+            virtual_file_system,
+            executable_context,
+        )
+        .await
+        .expect("Failed to open standard files for the headless Debug app");
+        executable::execute(
+            executable_context,
+            &"/binaries/debug",
+            vec![],
+            debug_standard,
+            None,
+        )
+        .await
+        .expect("Failed to start the headless Debug app");
+    }
+
     let standard = Standard::open(
         &"/devices/standard_in",
         &"/devices/standard_out",
