@@ -6,9 +6,22 @@ pre-provisioned LittleFS seed. The runner creates the mutable disk at
 `/var/lib/xila/drive.img` the first time it starts. Keep host-shared files in
 explicit HostFS mounts; they are not copied into the LittleFS disk.
 
-The image currently has a Linux `amd64` build path. Multi-platform builds and
-publication are not enabled until the runtime and its dependencies have been
-validated end to end on each architecture.
+The image currently targets Linux `amd64` and is published to GitHub Container
+Registry as `ghcr.io/xila-project/xila-runtime` after the end-to-end smoke test
+passes. Multi-platform publication is not enabled until the runtime and its
+dependencies have been validated on each architecture.
+
+## Pull a published image
+
+The `main` branch publishes `latest` and a commit-SHA tag. A Git tag beginning
+with `v` publishes the matching version tag and a commit-SHA tag:
+
+```sh
+docker pull ghcr.io/xila-project/xila-runtime:latest
+docker pull ghcr.io/xila-project/xila-runtime:v1.2.3
+```
+
+Use either image in place of `xila-runtime:local` in the commands below.
 
 ## Run an application from a read-only host mount
 
@@ -106,8 +119,8 @@ still readable afterward. `SIGKILL` cannot flush pending state.
 
 ## Build status
 
-The container workflow builds the local `amd64` image and runs a WASI fixture
-under a read-only root. It checks read-only and writable HostFS mounts, LittleFS
-state persistence, guest exit-status propagation, and graceful signal handling.
-It does not publish an image. Multi-platform publication remains disabled until
-the same end-to-end checks pass on each published architecture.
+The container workflow builds the `amd64` image and runs a WASI fixture under a
+read-only root. It checks read-only and writable HostFS mounts, LittleFS state
+persistence, guest exit-status propagation, and graceful signal handling. Pull
+requests only build and test the image; pushes to `main` and `v*` tags publish it
+to GitHub Container Registry after those checks pass.
