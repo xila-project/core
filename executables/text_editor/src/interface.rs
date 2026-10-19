@@ -70,6 +70,7 @@ pub fn run() -> wasm::Result<()> {
                 ui.confirm_close = Some(ui.revision);
             } else if code == EventCode::ValueChanged as u32 && target == ui.actions {
                 let action = unsafe { buttonmatrix_get_selected_button(ui.actions)? };
+                println!("Text Editor action: {action}");
                 match action {
                     0 => ui.navigate(false)?,
                     1 => ui.navigate(true)?,
