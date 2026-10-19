@@ -159,6 +159,22 @@ mod tests {
     use xila::network::DnsQueryKind;
 
     #[test]
+    fn dns_record_count_selects_singular_and_plural() {
+        let (one, other) = match xila::internationalization::get_locale() {
+            "fr" => ("enregistrement pour le domaine", "enregistrements pour le domaine"),
+            _ => ("record for domain", "records for domain"),
+        };
+        assert_eq!(
+            xila::internationalization::translate_plural!("DNS records for domain", 1usize),
+            one
+        );
+        assert_eq!(
+            xila::internationalization::translate_plural!("DNS records for domain", 2usize),
+            other
+        );
+    }
+
+    #[test]
     fn format_kind_maps_a() {
         assert_eq!(format_kind(DnsQueryKind::A), "A");
     }
