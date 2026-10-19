@@ -11,14 +11,14 @@ use alloc::{
 use core::num::NonZeroUsize;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use debug_protocol::{InputState, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, Request};
+use debug_protocol::{
+    InputState, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, Request, ScreenshotMetadata,
+    ScreenshotPixelFormat,
+};
 use xila::{
     executable::{self, ExecutableTrait, Standard},
     file_system::AccessFlags,
-    graphics::{
-        self, EventKind, GET_RESOLUTION, Key, Point, ScreenshotRequest, State,
-        WRITE_SCREENSHOT_TO_PATH,
-    },
+    graphics::{self, EventKind, Key, State},
     task::{self, TaskIdentifier},
     virtual_file_system::{File, VirtualFileSystem},
 };
@@ -106,31 +106,6 @@ async fn serve_agent(
     )
     .await
     .map_err(|error| error.to_string())?;
-    let mut screen = File::open(
-        vfs,
-        task,
-        "/devices/debug/screen",
-        AccessFlags::READ_WRITE.into(),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-    let mut pointer = File::open(
-        vfs,
-        task,
-        "/devices/debug/pointer",
-        AccessFlags::Write.into(),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-    let mut keyboard = File::open(
-        vfs,
-        task,
-        "/devices/debug/keyboard",
-        AccessFlags::Write.into(),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-
     let mut request_buffer = alloc::vec![0; MAX_REQUEST_BYTES + 1];
     loop {
         if stopping.load(Ordering::Acquire) {
@@ -150,40 +125,46 @@ async fn serve_agent(
             }
             Err(error) => return Err(error.to_string()),
         };
-        let response = match parse_request(&request_buffer[..length]) {
-            Ok(request) => {
-                dispatch(request, context, &mut screen, &mut pointer, &mut keyboard).await
-            }
-            Err((code, message)) => error_response(code, &message),
+        let mut response = match parse_request(&request_buffer[..length]) {
+            Ok(request) => dispatch(request, context).await,
+            Err((code, message)) => DispatchResponse::json(error_response(code, &message)),
         };
-        let mut response = serde_json::to_vec(&response).map_err(|error| error.to_string())?;
-        if response.len() + 1 > MAX_RESPONSE_BYTES {
-            response = serde_json::to_vec(&error_response(
+        let mut response_bytes =
+            serde_json::to_vec(&response.value).map_err(|error| error.to_string())?;
+        if response_bytes.len() + 1 > MAX_RESPONSE_BYTES {
+            response_bytes = serde_json::to_vec(&error_response(
                 "response_too_large",
                 "Response exceeds the 64 KiB limit; request a smaller UI tree.",
             ))
             .map_err(|error| error.to_string())?;
+            response.payload = None;
         }
-        response.push(b'\n');
-        transport
-            .write(&response)
-            .await
-            .map_err(|error| error.to_string())?;
+        response_bytes.push(b'\n');
+        write_all(&mut transport, &response_bytes).await?;
+        if let Some(payload) = response.payload {
+            write_all(&mut transport, &payload).await?;
+        }
     }
 
-    keyboard
-        .close(vfs)
-        .await
-        .map_err(|error| error.to_string())?;
-    pointer
-        .close(vfs)
-        .await
-        .map_err(|error| error.to_string())?;
-    screen.close(vfs).await.map_err(|error| error.to_string())?;
     transport
         .close(vfs)
         .await
         .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+async fn write_all(file: &mut File<'_>, bytes: &[u8]) -> Result<(), String> {
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let written = file
+            .write(&bytes[offset..])
+            .await
+            .map_err(|error| error.to_string())?;
+        if written == 0 {
+            return Err("Transport returned a zero-length write.".into());
+        }
+        offset += written;
+    }
     Ok(())
 }
 
@@ -201,34 +182,58 @@ fn parse_request(bytes: &[u8]) -> Result<Request, (&'static str, String)> {
     Ok(request)
 }
 
+struct DispatchResponse {
+    value: serde_json::Value,
+    payload: Option<Vec<u8>>,
+}
+
+impl DispatchResponse {
+    fn json(value: serde_json::Value) -> Self {
+        Self {
+            value,
+            payload: None,
+        }
+    }
+}
+
 async fn dispatch(
     request: Request,
     context: &'static xila::executable::ExecutableContext,
-    screen: &mut File<'_>,
-    pointer: &mut File<'_>,
-    keyboard: &mut File<'_>,
-) -> serde_json::Value {
+) -> DispatchResponse {
+    let graphics_manager = graphics::ffi_manager();
+    let mut payload = None;
     let result: Result<serde_json::Value, (&'static str, String)> = match request {
         Request::Diagnostics => diagnostics(context).await,
-        Request::Resolution => resolution(screen)
+        Request::Resolution => graphics_manager
+            .get_resolution()
             .await
-            .map(|point| serde_json::json!({"width": point.get_x(), "height": point.get_y()})),
-        Request::Screenshot { path } => {
-            let Some(request) = ScreenshotRequest::new(&path) else {
-                return error_response("invalid_screenshot_path", "Path exceeds the native limit.");
-            };
-            match screen.control(WRITE_SCREENSHOT_TO_PATH, &request).await {
-                Ok(output) => {
-                    let dimensions = output;
+            .map(|point| serde_json::json!({"width": point.get_x(), "height": point.get_y()}))
+            .map_err(|error| ("display_unavailable", error.to_string())),
+        Request::Screenshot { path: _ } => match graphics_manager.capture_screen().await {
+            Ok(snapshot) => {
+                let metadata = ScreenshotMetadata {
+                    width: snapshot.width,
+                    height: snapshot.height,
+                    format: ScreenshotPixelFormat::Rgba8888,
+                    payload_bytes: snapshot.pixels_rgba.len(),
+                };
+                if debug_protocol::validate_screenshot_metadata(metadata).is_err() {
+                    Err((
+                        "screenshot_failed",
+                        "Snapshot has invalid dimensions.".into(),
+                    ))
+                } else {
+                    payload = Some(snapshot.pixels_rgba);
                     Ok(serde_json::json!({
-                        "width": dimensions.width,
-                        "height": dimensions.height,
-                        "path": path,
+                        "width": metadata.width,
+                        "height": metadata.height,
+                        "format": metadata.format,
+                        "payload_bytes": metadata.payload_bytes,
                     }))
                 }
-                Err(error) => Err(("screenshot_failed", error.to_string())),
             }
-        }
+            Err(error) => Err(("screenshot_failed", error.to_string())),
+        },
         Request::UiTree {
             max_elements,
             max_depth,
@@ -258,103 +263,52 @@ async fn dispatch(
             Err(error) => Err(("ui_tree_failed", error.to_string())),
         },
         Request::PointerMove { x, y } => {
-            let point = match resolution(screen).await {
-                Ok(point) => point,
-                Err(error) => return error_response(error.0, &error.1),
+            let point = match (i16::try_from(x), i16::try_from(y)) {
+                (Ok(x), Ok(y)) => graphics::Point::new(x, y),
+                _ => {
+                    return DispatchResponse::json(error_response(
+                        "invalid_coordinates",
+                        "Coordinates are outside the display.",
+                    ));
+                }
             };
-            if u32::try_from(point.get_x()).map_or(true, |width| x >= width)
-                || u32::try_from(point.get_y()).map_or(true, |height| y >= height)
-            {
-                Err((
+            match graphics_manager.inject_pointer_move(point).await {
+                Ok(()) => Ok(serde_json::json!({"x": x, "y": y})),
+                Err(graphics::Error::InvalidParameter) => Err((
                     "invalid_coordinates",
                     "Coordinates are outside the display.".into(),
-                ))
-            } else {
-                let mut bytes = [0; 6];
-                bytes[0] = 0;
-                bytes[1..3].copy_from_slice(&(x as i16).to_le_bytes());
-                bytes[3..5].copy_from_slice(&(y as i16).to_le_bytes());
-                bytes[5] = State::Released.into();
-                pointer
-                    .write(&bytes)
-                    .await
-                    .map(|_| serde_json::json!({"x": x, "y": y}))
-                    .map_err(|error| ("input_failed", error.to_string()))
+                )),
+                Err(error) => Err(("input_failed", error.to_string())),
             }
         }
-        Request::PointerButton { state } => {
-            let mut bytes = [0; 6];
-            bytes[0] = 1;
-            bytes[5] = state_to_graphics(state).into();
-            pointer
-                .write(&bytes)
-                .await
-                .map(|_| serde_json::json!({"state": state}))
-                .map_err(|error| ("input_failed", error.to_string()))
-        }
+        Request::PointerButton { state } => graphics_manager
+            .inject_pointer_button(state_to_graphics(state))
+            .await
+            .map(|()| serde_json::json!({"state": state}))
+            .map_err(|error| ("input_failed", error.to_string())),
         Request::Key { key: name, state } => match parse_key(&name) {
-            Some(key) => send_key(key, state, keyboard)
+            Some(key) => graphics_manager
+                .inject_key(key, state_to_graphics(state))
                 .await
                 .map(|()| serde_json::json!({"key": name, "state": state}))
-                .map_err(|error| ("input_failed", error)),
+                .map_err(|error| ("input_failed", error.to_string())),
             None => Err(("unsupported_key", "Key is not supported.".into())),
         },
-        Request::Text { text } => {
-            if !text.bytes().all(|byte| (b' '..=b'~').contains(&byte)) {
-                Err((
-                    "unsupported_character",
-                    "Only printable ASCII is supported.".into(),
-                ))
-            } else {
-                let mut count = 0;
-                let mut error = None;
-                for character in text.bytes() {
-                    for state in [InputState::Pressed, InputState::Released] {
-                        if let Err(value) =
-                            send_key(Key::Character(character), state, keyboard).await
-                        {
-                            error = Some(value);
-                            break;
-                        }
-                        count += 1;
-                    }
-                    if error.is_some() {
-                        break;
-                    }
-                }
-                match error {
-                    Some(error) => Err((
-                        "input_failed",
-                        alloc::format!("{error}; queued_events={count}"),
-                    )),
-                    None => Ok(serde_json::json!({"queued_events": count})),
-                }
-            }
-        }
+        Request::Text { text } => match graphics_manager.inject_text(&text).await {
+            Ok(count) => Ok(serde_json::json!({"queued_events": count * 2})),
+            Err(graphics::Error::InvalidParameter) => Err((
+                "unsupported_character",
+                "Only printable ASCII is supported.".into(),
+            )),
+            Err(error) => Err(("input_failed", error.to_string())),
+        },
     };
 
-    match result {
+    let value = match result {
         Ok(value) => serde_json::json!({"ok": true, "result": value}),
         Err((code, message)) => error_response(code, &message),
-    }
-}
-
-async fn resolution(screen: &mut File<'_>) -> Result<Point, (&'static str, String)> {
-    screen
-        .control(GET_RESOLUTION, &())
-        .await
-        .map_err(|error| ("display_unavailable", error.to_string()))
-}
-
-async fn send_key(key: Key, state: InputState, keyboard: &mut File<'_>) -> Result<(), String> {
-    let mut bytes = [0; 5];
-    bytes[..4].copy_from_slice(&u32::from(key).to_le_bytes());
-    bytes[4] = state_to_graphics(state).into();
-    keyboard
-        .write(&bytes)
-        .await
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+    };
+    DispatchResponse { value, payload }
 }
 
 fn parse_key(value: &str) -> Option<Key> {
