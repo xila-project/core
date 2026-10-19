@@ -1,0 +1,16 @@
+{
+  "Pixel Painter": "Edytor pikseli",
+  "Undo": "Cofnij",
+  "Clear": "Wyczyść",
+  "Save": "Zapisz",
+  "Open": "Otwórz",
+  "Ready - white erases": "Gotowe - biały kolor wymazuje",
+  "Unsaved drawing - close again to discard": "Niezapisany rysunek - zamknij ponownie, aby odrzucić",
+  "Unsaved drawing - Open again to discard": "Niezapisany rysunek - wybierz ponownie Otwórz, aby odrzucić",
+  "Enter an absolute file path": "Wpisz bezwzględną ścieżkę pliku",
+  "Opened": "Otwarto",
+  "Saved": "Zapisano",
+  "Invalid Pixel Painter file - drawing kept": "Nieprawidłowy plik Edytora pikseli - rysunek zachowano",
+  "Open failed - check path and storage": "Nie udało się otworzyć - sprawdź ścieżkę i pamięć",
+  "Save failed - drawing kept; check path and storage": "Nie udało się zapisać - rysunek zachowano; sprawdź ścieżkę i pamięć"
+}
