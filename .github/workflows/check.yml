@@ -563,7 +563,7 @@ jobs:
 
       - name: Cache | Trunk tools and dist
         if: github.event_name != 'pull_request'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           # Trunk downloads wasm-bindgen/wasm-opt into its ProjectDirs cache
           # (~/.cache/trunk/<tool>-<version>/); a version drift self-heals by
