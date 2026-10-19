@@ -13,6 +13,7 @@ mod hierarchy;
 mod home;
 mod item;
 mod r#macro;
+mod operation;
 mod pipe;
 mod synchronous_directory;
 mod synchronous_file;

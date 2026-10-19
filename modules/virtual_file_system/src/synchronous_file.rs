@@ -77,6 +77,91 @@ impl<'a> SynchronousFile<'a> {
 
     // - Operations
 
+    pub(crate) fn supports_polling(&self) -> bool {
+        self.item
+            .as_base_operations()
+            .is_some_and(|operations| operations.supports_polling())
+    }
+
+    pub(crate) fn cancel_operation(&mut self, operation: file_system::Operation) {
+        if let Some(operations) = self.item.as_base_operations() {
+            operations.cancel_operation(&mut self.context, operation);
+        }
+    }
+
+    pub(crate) fn poll_read(
+        &mut self,
+        cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+    ) -> core::task::Poll<Result<usize>> {
+        if !self.flags.get_access().contains(AccessFlags::Read) {
+            return core::task::Poll::Ready(Err(Error::InvalidMode));
+        }
+        let operations = self
+            .item
+            .as_base_operations()
+            .ok_or(Error::UnsupportedOperation)?;
+        let context = &mut self.context;
+        self.cursor.poll_update(|position| {
+            operations
+                .poll_read(context, cx, buffer, position)
+                .map(|result| {
+                    result
+                        .map(|count| (count, position + count as Size))
+                        .map_err(Error::from)
+                })
+        })
+    }
+
+    pub(crate) fn poll_write(
+        &mut self,
+        cx: &mut core::task::Context<'_>,
+        buffer: &[u8],
+    ) -> core::task::Poll<Result<usize>> {
+        if !self.flags.get_access().contains(AccessFlags::Write) {
+            return core::task::Poll::Ready(Err(Error::InvalidMode));
+        }
+        let operations = self
+            .item
+            .as_base_operations()
+            .ok_or(Error::UnsupportedOperation)?;
+        let context = &mut self.context;
+        self.cursor.poll_update(|position| {
+            operations
+                .poll_write(context, cx, buffer, position)
+                .map(|result| {
+                    result
+                        .map(|count| (count, position + count as Size))
+                        .map_err(Error::from)
+                })
+        })
+    }
+
+    pub(crate) fn poll_flush(
+        &mut self,
+        cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Result<()>> {
+        self.item
+            .as_base_operations()
+            .ok_or(Error::UnsupportedOperation)?
+            .poll_flush(&mut self.context, cx)
+            .map(|result| result.map_err(Error::from))
+    }
+
+    pub(crate) fn poll_control(
+        &mut self,
+        cx: &mut core::task::Context<'_>,
+        command: ControlCommandIdentifier,
+        input: &AnyByLayout,
+        output: &mut AnyByLayout,
+    ) -> core::task::Poll<Result<()>> {
+        self.item
+            .as_base_operations()
+            .ok_or(Error::UnsupportedOperation)?
+            .poll_control(&mut self.context, cx, command, input, output)
+            .map(|result| result.map_err(Error::from))
+    }
+
     pub fn write(&mut self, buffer: &[u8]) -> Result<usize> {
         if !self.flags.get_access().contains(AccessFlags::Write) {
             return Err(Error::InvalidMode);
