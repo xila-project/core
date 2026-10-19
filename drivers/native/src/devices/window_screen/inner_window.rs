@@ -197,13 +197,14 @@ pub struct FramebufferSnapshot {
 }
 
 fn convert_frame_to_rgba(frame: &[u8]) -> Result<Vec<u8>, String> {
-    if frame.len() % 4 != 0 {
+    if !frame.len().is_multiple_of(4) {
         return Err("Framebuffer has an incomplete pixel.".to_string());
     }
 
     let mut rgba = Vec::with_capacity(frame.len());
-    for bytes in frame.chunks_exact(4) {
-        let color = ColorRGBA8888::from(u32::from_ne_bytes(bytes.try_into().unwrap()));
+    let (pixels, _) = frame.as_chunks::<4>();
+    for bytes in pixels {
+        let color = ColorRGBA8888::from(u32::from_ne_bytes(*bytes));
         rgba.extend_from_slice(&[
             color.get_red(),
             color.get_green(),
