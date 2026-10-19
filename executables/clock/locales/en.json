@@ -23,6 +23,8 @@
   "No saved alarm": "No saved alarm",
   "Pause / resume": "Pause / resume",
   "Repeat on selected days; none means once. All times are UTC.": "Repeat on selected days; none means once. All times are UTC.",
+  "Recorded laps.one": "{count} lap recorded",
+  "Recorded laps.other": "{count} laps recorded",
   "Reset": "Reset",
   "Restart": "Restart",
   "Sat": "Sat",
