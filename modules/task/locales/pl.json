@@ -1,0 +1,16 @@
+{
+  "AlreadyInitialized": "Już zainicjalizowano",
+  "AlreadySet": "Już ustawiono",
+  "FailedToCreateThread": "Nie udało się utworzyć wątku",
+  "FailedToSpawnThread": "Nie udało się uruchomić wątku",
+  "InvalidEnvironmentVariable": "Nieprawidłowa zmienna środowiskowa",
+  "InvalidSpawnerIdentifier": "Nieprawidłowy identyfikator programu uruchamiającego",
+  "InvalidTaskIdentifier": "Nieprawidłowy identyfikator zadania",
+  "NoSpawnerAvailable": "Brak dostępnego programu uruchamiającego",
+  "NoThreadForTask": "Brak wątku dla zadania",
+  "NotInitialized": "Nie zainicjalizowano",
+  "ThreadAlreadyRegistered": "Wątek już zarejestrowany",
+  "ThreadNotRegistered": "Wątek nie jest zarejestrowany",
+  "TooManySpawners": "Za dużo programów uruchamiających",
+  "TooManyTasks": "Za dużo zadań"
+}
