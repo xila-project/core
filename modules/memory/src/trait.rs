@@ -78,7 +78,7 @@ pub trait ManagerTrait: Send + Sync {
         //     return Some(old_pointer);
         // }
 
-        let new_pointer = unsafe { self.allocate(CapabilityFlags::None, new_layout) }?;
+        let new_pointer = unsafe { self.allocate(CapabilityFlags::empty(), new_layout) }?;
 
         // Copy the old data to the new memory
 
