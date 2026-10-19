@@ -38,7 +38,8 @@ fn copy_strided_bgra_to_rgba(
         .map_err(|_| Error::OutOfMemory)?;
     for row in 0..height {
         let row_start = row * stride;
-        for pixel in source[row_start..row_start + row_bytes].chunks_exact(4) {
+        let (row_pixels, _) = source[row_start..row_start + row_bytes].as_chunks::<4>();
+        for pixel in row_pixels {
             // LVGL's ARGB8888 draw-buffer bytes are B, G, R, A on the
             // little-endian targets supported by the native renderer.
             pixels_rgba.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
