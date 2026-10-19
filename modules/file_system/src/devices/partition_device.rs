@@ -41,7 +41,7 @@ use crate::{
 ///
 /// // Now you can use partition_device like any other device
 /// let data = b"Hello, Partition!";
-/// partition_device.write(data, 0).unwrap();
+/// partition_device.write_sync(data, 0).unwrap();
 /// ```
 pub struct PartitionDevice<'a, D> {
     /// Base device containing this partition
@@ -146,61 +146,50 @@ impl<'a, D: BaseOperations> PartitionDevice<'a, D> {
 }
 
 impl<'a, D: DirectBaseOperations> DirectBaseOperations for PartitionDevice<'a, D> {
-    fn read(&self, buffer: &mut [u8], absolute_position: Size) -> Result<usize> {
-        let device_position = match self.get_device_position(absolute_position) {
-            Some(pos) => pos,
-            None => return Ok(0),
+    fn read(
+        &self,
+        cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        absolute_position: Size,
+    ) -> core::task::Poll<Result<usize>> {
+        let Some(position) = self.get_device_position(absolute_position) else {
+            return core::task::Poll::Ready(Ok(0));
         };
-
-        let read_size = self.get_total_buffer_length(absolute_position, buffer.len());
-
-        // Read from base device
-        let bytes_read = self
-            .base_device
-            .read(&mut buffer[..read_size], device_position)?;
-
-        Ok(bytes_read)
+        let length = self.get_total_buffer_length(absolute_position, buffer.len());
+        DirectBaseOperations::read(self.base_device, cx, &mut buffer[..length], position)
     }
 
-    fn write(&self, buffer: &[u8], absolute_position: Size) -> Result<usize> {
-        let device_position = match self.get_device_position(absolute_position) {
-            Some(pos) => pos,
-            None => return Ok(0),
+    fn write(
+        &self,
+        cx: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        absolute_position: Size,
+    ) -> core::task::Poll<Result<usize>> {
+        let Some(position) = self.get_device_position(absolute_position) else {
+            return core::task::Poll::Ready(Ok(0));
         };
-
-        let write_size = self.get_total_buffer_length(absolute_position, buffer.len());
-
-        // Write to base device
-        let bytes_written = self
-            .base_device
-            .write(&buffer[..write_size], device_position)?;
-
-        Ok(bytes_written)
+        let length = self.get_total_buffer_length(absolute_position, buffer.len());
+        DirectBaseOperations::write(self.base_device, cx, &buffer[..length], position)
     }
 
     fn write_pattern(
         &self,
+        cx: &mut core::task::Context<'_>,
         pattern: &[u8],
         count: usize,
         absolute_position: Size,
-    ) -> Result<usize> {
-        let device_position = match self.get_device_position(absolute_position) {
-            Some(pos) => pos,
-            None => return Ok(0),
+    ) -> core::task::Poll<Result<usize>> {
+        let Some(position) = self.get_device_position(absolute_position) else {
+            return core::task::Poll::Ready(Ok(0));
         };
-
-        let total_write_size = pattern.len() * count;
-        let maximum_write_size = self.get_total_buffer_length(absolute_position, total_write_size);
-
-        let adjusted_count = if total_write_size > maximum_write_size {
-            // Adjust count to fit within partition boundaries
-            maximum_write_size / pattern.len()
-        } else {
-            count
-        };
-
-        self.base_device
-            .write_pattern(pattern, adjusted_count, device_position)
+        if pattern.is_empty() {
+            return core::task::Poll::Ready(Ok(0));
+        }
+        let count = count.min(
+            self.get_total_buffer_length(absolute_position, pattern.len().saturating_mul(count))
+                / pattern.len(),
+        );
+        DirectBaseOperations::write_pattern(self.base_device, cx, pattern, count, position)
     }
 
     fn set_position(&self, current_position: Size, position: &Position) -> Result<Size> {
@@ -216,31 +205,31 @@ impl<'a, D: DirectBaseOperations> DirectBaseOperations for PartitionDevice<'a, D
         Ok(position)
     }
 
-    fn flush(&self) -> Result<()> {
-        self.base_device.flush()
+    fn flush(&self, cx: &mut core::task::Context<'_>) -> core::task::Poll<Result<()>> {
+        DirectBaseOperations::flush(self.base_device, cx)
     }
 
     fn control(
         &self,
+        cx: &mut core::task::Context<'_>,
         command: ControlCommandIdentifier,
         input: &AnyByLayout,
         output: &mut AnyByLayout,
-    ) -> Result<()> {
+    ) -> core::task::Poll<Result<()>> {
         match command {
             GET_BLOCK_SIZE::IDENTIFIER => {
-                let output = GET_BLOCK_SIZE::cast_output(output)?;
-
-                *output = self.block_size;
+                *GET_BLOCK_SIZE::cast_output(output)? = self.block_size;
+                core::task::Poll::Ready(Ok(()))
             }
             GET_BLOCK_COUNT::IDENTIFIER => {
-                *output
-                    .cast_mutable::<Size>()
-                    .ok_or(Error::InvalidParameter)? = self.get_block_count() as Size;
+                *GET_BLOCK_COUNT::cast_output(output)? = self.get_block_count();
+                core::task::Poll::Ready(Ok(()))
             }
-            _ => return self.base_device.control(command, input, output),
+            _ => DirectBaseOperations::control(self.base_device, cx, command, input, output),
         }
-
-        Ok(())
+    }
+    fn cancel_operation(&self, operation: crate::Operation) {
+        DirectBaseOperations::cancel_operation(self.base_device, operation);
     }
 }
 
@@ -266,6 +255,38 @@ mod tests {
     use crate::{MemoryDevice, implement_block_device_tests};
 
     use super::*;
+
+    struct Deferred(core::sync::atomic::AtomicUsize);
+    impl DirectBaseOperations for Deferred {
+        fn read(
+            &self,
+            _: &mut core::task::Context<'_>,
+            _: &mut [u8],
+            _: Size,
+        ) -> core::task::Poll<Result<usize>> {
+            core::task::Poll::Pending
+        }
+        fn write(
+            &self,
+            _: &mut core::task::Context<'_>,
+            _: &[u8],
+            _: Size,
+        ) -> core::task::Poll<Result<usize>> {
+            core::task::Poll::Pending
+        }
+        fn cancel_operation(&self, _: crate::Operation) {
+            self.0.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    #[test]
+    fn partition_forwards_pending_and_cancellation_to_its_device() {
+        let device = Deferred(core::sync::atomic::AtomicUsize::new(0));
+        let partition = PartitionDevice::new(&device, 0, 1, 512);
+        let mut cx = core::task::Context::from_waker(core::task::Waker::noop());
+        assert!(DirectBaseOperations::read(&partition, &mut cx, &mut [0], 0).is_pending());
+        DirectBaseOperations::cancel_operation(&partition, crate::Operation::Read);
+        assert_eq!(device.0.load(core::sync::atomic::Ordering::Relaxed), 1);
+    }
 
     implement_block_device_tests!(PartitionDevice::new(
         Box::leak(Box::new(MemoryDevice::<512>::new(1024 * 1024))),

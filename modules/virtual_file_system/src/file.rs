@@ -94,10 +94,7 @@ impl<'a> File<'a> {
         if self.nonblocking() {
             return self.0.write(buffer);
         }
-        if self.0.supports_polling() {
-            return crate::operation::write(&mut self.0, buffer).await;
-        }
-        poll(|| self.0.write(buffer)).await
+        crate::operation::write(&mut self.0, buffer).await
     }
 
     pub async fn read_slice_from_path(
@@ -164,12 +161,6 @@ impl<'a> File<'a> {
     }
 
     pub async fn write_line(&mut self, buffer: &[u8]) -> Result<usize> {
-        if !self.0.supports_polling() {
-            if self.nonblocking() {
-                return self.0.write_line(buffer);
-            }
-            return poll(|| self.0.write_line(buffer)).await;
-        }
         let mut written = 0;
         for part in [buffer, b"\n".as_slice()] {
             let mut offset = 0;
@@ -215,53 +206,17 @@ impl<'a> File<'a> {
         if self.nonblocking() {
             return self.0.read(buffer);
         }
-        if self.0.supports_polling() {
-            return crate::operation::read(&mut self.0, buffer).await;
-        }
-        poll(|| self.0.read(buffer)).await
+        crate::operation::read(&mut self.0, buffer).await
     }
 
     pub async fn read_until(&mut self, buffer: &mut [u8], delimiter: &[u8]) -> Result<usize> {
-        if !self.0.supports_polling() {
-            if self.nonblocking() {
-                return self.0.read_until(buffer, delimiter);
-            }
-            return poll(|| self.0.read_until(buffer, delimiter)).await;
+        if self.nonblocking() {
+            return self.0.read_until(buffer, delimiter);
         }
-        if delimiter.is_empty() {
-            return Err(Error::FileSystem(file_system::Error::InvalidParameter));
-        }
-        let mut length = 0;
-        while length < buffer.len() {
-            // Await the first byte only. Preserve the short-read contract once
-            // any bytes have been consumed, rather than replaying the helper.
-            let result = if length == 0 {
-                self.read(&mut buffer[..1]).await
-            } else {
-                self.0.read(&mut buffer[length..length + 1])
-            };
-            match result {
-                Ok(0) => break,
-                Ok(count) => length += count,
-                Err(
-                    Error::FileSystem(file_system::Error::RessourceBusy) | Error::RessourceBusy,
-                ) if length > 0 => break,
-                Err(error) => return Err(error),
-            }
-            if buffer[..length].ends_with(delimiter) {
-                break;
-            }
-        }
-        Ok(length)
+        crate::operation::read_until(&mut self.0, buffer, delimiter).await
     }
 
     pub async fn read_to_end(&mut self, buffer: &mut Vec<u8>, chunk_size: usize) -> Result<usize> {
-        if !self.0.supports_polling() {
-            if self.nonblocking() {
-                return self.0.read_to_end(buffer, chunk_size);
-            }
-            return poll(|| self.0.read_to_end(buffer, chunk_size)).await;
-        }
         if chunk_size == 0 {
             return Err(Error::FileSystem(file_system::Error::InvalidParameter));
         }
@@ -286,10 +241,7 @@ impl<'a> File<'a> {
         if self.nonblocking() {
             return self.0.flush();
         }
-        if self.0.supports_polling() {
-            return crate::operation::flush(&mut self.0).await;
-        }
-        poll(|| self.0.flush()).await
+        crate::operation::flush(&mut self.0).await
     }
 
     pub async fn duplicate(&self) -> Result<Self> {
@@ -320,10 +272,7 @@ impl<'a> File<'a> {
         if self.nonblocking() {
             return self.0.control(command, argument);
         }
-        if self.0.supports_polling() {
-            return crate::operation::control(&mut self.0, command, argument).await;
-        }
-        poll(|| self.0.control(command, argument)).await
+        crate::operation::control(&mut self.0, command, argument).await
     }
 
     pub fn get_access(&self) -> Result<AccessFlags> {

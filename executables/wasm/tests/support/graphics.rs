@@ -11,31 +11,47 @@ struct HeadlessDevice;
 impl MountOperations for HeadlessDevice {}
 impl DirectCharacterDevice for HeadlessDevice {}
 impl DirectBaseOperations for HeadlessDevice {
-    fn read(&self, buffer: &mut [u8], _: Size) -> file_system::Result<usize> {
-        let mut input = graphics::InputData::default();
-        buffer.copy_from_slice(input.as_mut());
-        Ok(buffer.len())
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        xila::file_system::ready(|| {
+            let mut input = graphics::InputData::default();
+            buffer.copy_from_slice(input.as_mut());
+            Ok(buffer.len())
+        })
     }
-    fn write(&self, buffer: &[u8], _: Size) -> file_system::Result<usize> {
-        Ok(buffer.len())
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        xila::file_system::ready(|| Ok(buffer.len()))
     }
     fn control(
         &self,
+        _cx: &mut core::task::Context<'_>,
         command: ControlCommandIdentifier,
         _: &AnyByLayout,
         output: &mut AnyByLayout,
-    ) -> file_system::Result<()> {
-        match command {
-            graphics::GET_RESOLUTION::IDENTIFIER => {
-                *graphics::GET_RESOLUTION::cast_output(output)? = graphics::Point::new(320, 240);
+    ) -> core::task::Poll<file_system::Result<()>> {
+        xila::file_system::ready(|| {
+            match command {
+                graphics::GET_RESOLUTION::IDENTIFIER => {
+                    *graphics::GET_RESOLUTION::cast_output(output)? =
+                        graphics::Point::new(320, 240);
+                }
+                graphics::WAS_RESIZED::IDENTIFIER => {
+                    *graphics::WAS_RESIZED::cast_output(output)? = false
+                }
+                graphics::SET_DRAWING_AREA::IDENTIFIER => (),
+                _ => return Err(file_system::Error::UnsupportedOperation),
             }
-            graphics::WAS_RESIZED::IDENTIFIER => {
-                *graphics::WAS_RESIZED::cast_output(output)? = false
-            }
-            graphics::SET_DRAWING_AREA::IDENTIFIER => (),
-            _ => return Err(file_system::Error::UnsupportedOperation),
-        }
-        Ok(())
+            Ok(())
+        })
     }
 }
 

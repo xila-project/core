@@ -538,32 +538,38 @@ impl BaseOperations for HostFileSystem {
     fn read(
         &self,
         context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
         buffer: &mut [u8],
         absolute_position: Size,
-    ) -> Result<usize> {
-        let handle = context
-            .get_private_data_of_type::<FileHandle>()
-            .ok_or(Error::InvalidContext)?;
-        let mut file = handle.0.lock().map_err(|_| Error::RessourceBusy)?;
-        file.seek(SeekFrom::Start(absolute_position))
-            .map_err(map_io_error)?;
-        file.read(buffer).map_err(map_io_error)
+    ) -> core::task::Poll<Result<usize>> {
+        file_system::ready(|| {
+            let handle = context
+                .get_private_data_of_type::<FileHandle>()
+                .ok_or(Error::InvalidContext)?;
+            let mut file = handle.0.lock().map_err(|_| Error::RessourceBusy)?;
+            file.seek(SeekFrom::Start(absolute_position))
+                .map_err(map_io_error)?;
+            file.read(buffer).map_err(map_io_error)
+        })
     }
 
     fn write(
         &self,
         context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
         buffer: &[u8],
         absolute_position: Size,
-    ) -> Result<usize> {
-        self.writable()?;
-        let handle = context
-            .get_private_data_of_type::<FileHandle>()
-            .ok_or(Error::InvalidContext)?;
-        let mut file = handle.0.lock().map_err(|_| Error::RessourceBusy)?;
-        file.seek(SeekFrom::Start(absolute_position))
-            .map_err(map_io_error)?;
-        file.write(buffer).map_err(map_io_error)
+    ) -> core::task::Poll<Result<usize>> {
+        file_system::ready(|| {
+            self.writable()?;
+            let handle = context
+                .get_private_data_of_type::<FileHandle>()
+                .ok_or(Error::InvalidContext)?;
+            let mut file = handle.0.lock().map_err(|_| Error::RessourceBusy)?;
+            file.seek(SeekFrom::Start(absolute_position))
+                .map_err(map_io_error)?;
+            file.write(buffer).map_err(map_io_error)
+        })
     }
 
     fn set_position(
@@ -589,15 +595,21 @@ impl BaseOperations for HostFileSystem {
         Ok(target)
     }
 
-    fn flush(&self, context: &mut Context) -> Result<()> {
-        let file = context
-            .get_private_data_of_type::<FileHandle>()
-            .ok_or(Error::InvalidContext)?;
-        file.0
-            .lock()
-            .map_err(|_| Error::RessourceBusy)?
-            .sync_all()
-            .map_err(map_io_error)
+    fn flush(
+        &self,
+        context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Result<()>> {
+        file_system::ready(|| {
+            let file = context
+                .get_private_data_of_type::<FileHandle>()
+                .ok_or(Error::InvalidContext)?;
+            file.0
+                .lock()
+                .map_err(|_| Error::RessourceBusy)?
+                .sync_all()
+                .map_err(map_io_error)
+        })
     }
 
     fn clone_context(&self, context: &Context) -> Result<Context> {
@@ -856,13 +868,13 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            BaseOperations::write(&filesystem, &mut context, b"data", 0),
+            BaseOperations::write_sync(&filesystem, &mut context, b"data", 0),
             Ok(4)
         );
         fs::write(root.join("file"), b"host").unwrap();
         let mut data = [0; 4];
         assert_eq!(
-            BaseOperations::read(&filesystem, &mut context, &mut data, 0),
+            BaseOperations::read_sync(&filesystem, &mut context, &mut data, 0),
             Ok(4)
         );
         assert_eq!(&data, b"host");
@@ -912,7 +924,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            BaseOperations::write(&readonly, &mut read_write_context, b"x", 0),
+            BaseOperations::write_sync(&readonly, &mut read_write_context, b"x", 0),
             Err(Error::PermissionDenied)
         );
         assert_eq!(
@@ -1016,7 +1028,7 @@ mod tests {
 
         MountOperations::unmount(&filesystem).unwrap();
         assert_eq!(
-            BaseOperations::write(&filesystem, &mut context, b"still open", 0),
+            BaseOperations::write_sync(&filesystem, &mut context, b"still open", 0),
             Ok(10)
         );
         assert_eq!(

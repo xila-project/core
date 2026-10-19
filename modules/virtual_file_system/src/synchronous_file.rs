@@ -77,12 +77,6 @@ impl<'a> SynchronousFile<'a> {
 
     // - Operations
 
-    pub(crate) fn supports_polling(&self) -> bool {
-        self.item
-            .as_base_operations()
-            .is_some_and(|operations| operations.supports_polling())
-    }
-
     pub(crate) fn cancel_operation(&mut self, operation: file_system::Operation) {
         if let Some(operations) = self.item.as_base_operations() {
             operations.cancel_operation(&mut self.context, operation);
@@ -104,7 +98,32 @@ impl<'a> SynchronousFile<'a> {
         let context = &mut self.context;
         self.cursor.poll_update(|position| {
             operations
-                .poll_read(context, cx, buffer, position)
+                .read(context, cx, buffer, position)
+                .map(|result| {
+                    result
+                        .map(|count| (count, position + count as Size))
+                        .map_err(Error::from)
+                })
+        })
+    }
+
+    pub(crate) fn poll_read_until(
+        &mut self,
+        cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        delimiter: &[u8],
+    ) -> core::task::Poll<Result<usize>> {
+        if !self.flags.get_access().contains(AccessFlags::Read) {
+            return core::task::Poll::Ready(Err(Error::InvalidMode));
+        }
+        let operations = self
+            .item
+            .as_base_operations()
+            .ok_or(Error::UnsupportedOperation)?;
+        let context = &mut self.context;
+        self.cursor.poll_update(|position| {
+            operations
+                .read_until(context, cx, buffer, position, delimiter)
                 .map(|result| {
                     result
                         .map(|count| (count, position + count as Size))
@@ -128,7 +147,7 @@ impl<'a> SynchronousFile<'a> {
         let context = &mut self.context;
         self.cursor.poll_update(|position| {
             operations
-                .poll_write(context, cx, buffer, position)
+                .write(context, cx, buffer, position)
                 .map(|result| {
                     result
                         .map(|count| (count, position + count as Size))
@@ -144,7 +163,7 @@ impl<'a> SynchronousFile<'a> {
         self.item
             .as_base_operations()
             .ok_or(Error::UnsupportedOperation)?
-            .poll_flush(&mut self.context, cx)
+            .flush(&mut self.context, cx)
             .map(|result| result.map_err(Error::from))
     }
 
@@ -158,7 +177,7 @@ impl<'a> SynchronousFile<'a> {
         self.item
             .as_base_operations()
             .ok_or(Error::UnsupportedOperation)?
-            .poll_control(&mut self.context, cx, command, input, output)
+            .control(&mut self.context, cx, command, input, output)
             .map(|result| result.map_err(Error::from))
     }
 
@@ -172,7 +191,7 @@ impl<'a> SynchronousFile<'a> {
             .ok_or(Error::UnsupportedOperation)?;
         let context = &mut self.context;
         self.cursor.update(|position| {
-            let count = operations.write(context, buffer, position)?;
+            let count = operations.write_sync(context, buffer, position)?;
             Ok((count, position + count as Size))
         })
     }
@@ -187,7 +206,7 @@ impl<'a> SynchronousFile<'a> {
             .ok_or(Error::UnsupportedOperation)?;
         let context = &mut self.context;
         self.cursor.update(|position| {
-            let count = operations.write_vectored(context, buffers, position)?;
+            let count = operations.write_vectored_sync(context, buffers, position)?;
             Ok((count, position + count as Size))
         })
     }
@@ -208,7 +227,7 @@ impl<'a> SynchronousFile<'a> {
             .ok_or(Error::UnsupportedOperation)?;
         let context = &mut self.context;
         self.cursor.update(|position| {
-            let count = operations.read(context, buffer, position)?;
+            let count = operations.read_sync(context, buffer, position)?;
             Ok((count, position + count as Size))
         })
     }
@@ -223,7 +242,7 @@ impl<'a> SynchronousFile<'a> {
             .ok_or(Error::UnsupportedOperation)?;
         let context = &mut self.context;
         self.cursor.update(|position| {
-            let count = operations.read_until(context, buffer, position, delimiter)?;
+            let count = operations.read_until_sync(context, buffer, position, delimiter)?;
             Ok((count, position + count as Size))
         })
     }
@@ -254,7 +273,7 @@ impl<'a> SynchronousFile<'a> {
         self.item
             .as_base_operations()
             .ok_or(Error::UnsupportedOperation)?
-            .flush(&mut self.context)?;
+            .flush_sync(&mut self.context)?;
 
         Ok(())
     }
@@ -332,7 +351,7 @@ impl<'a> SynchronousFile<'a> {
         self.item
             .as_base_operations()
             .ok_or(Error::UnsupportedOperation)?
-            .control(
+            .control_sync(
                 &mut self.context,
                 C::IDENTIFIER,
                 AnyByLayout::from(argument),
@@ -352,7 +371,7 @@ impl<'a> SynchronousFile<'a> {
         self.item
             .as_base_operations()
             .ok_or(Error::UnsupportedOperation)?
-            .control(&mut self.context, command, input, output)?;
+            .control_sync(&mut self.context, command, input, output)?;
 
         Ok(())
     }

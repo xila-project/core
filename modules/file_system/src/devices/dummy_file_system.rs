@@ -9,19 +9,21 @@ impl BaseOperations for DummyFileSystem {
     fn read(
         &self,
         _context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
         _buffer: &mut [u8],
         _absolute_position: Size,
-    ) -> Result<usize> {
-        todo!()
+    ) -> core::task::Poll<Result<usize>> {
+        crate::ready(|| todo!())
     }
 
     fn write(
         &self,
         _context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
         _buffer: &[u8],
         _absolute_position: Size,
-    ) -> Result<usize> {
-        todo!()
+    ) -> core::task::Poll<Result<usize>> {
+        crate::ready(|| todo!())
     }
 
     fn clone_context(&self, _context: &Context) -> Result<Context> {

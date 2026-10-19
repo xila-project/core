@@ -308,40 +308,54 @@ impl DriveDevice {
 }
 
 impl DirectBaseOperations for DriveDevice {
-    fn read(&self, buffer: &mut [u8], position: Size) -> file_system::Result<usize> {
-        let inner = self.0.inner.try_get()?;
-        let position = u32::try_from(position).map_err(|_| Error::InvalidParameter)?;
-        let size = inner.data.length();
-        if position > size {
-            return Err(Error::InvalidParameter);
-        }
-        let count = buffer.len().min((size - position) as usize);
-        inner
-            .data
-            .subarray(position, position + count as u32)
-            .copy_to(&mut buffer[..count]);
-        Ok(count)
-    }
-
-    fn write(&self, buffer: &[u8], position: Size) -> file_system::Result<usize> {
-        if !self.0.accepting_writes.load(Ordering::Acquire) {
-            return Err(Error::RessourceBusy);
-        }
-        let mut inner = self.0.inner.try_get()?;
-        let position = u32::try_from(position).map_err(|_| Error::InvalidParameter)?;
-        let size = inner.data.length();
-        if position > size {
-            return Err(Error::InvalidParameter);
-        }
-        let count = buffer.len().min((size - position) as usize);
-        if count != 0 {
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        position: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            let inner = self.0.inner.try_get()?;
+            let position = u32::try_from(position).map_err(|_| Error::InvalidParameter)?;
+            let size = inner.data.length();
+            if position > size {
+                return Err(Error::InvalidParameter);
+            }
+            let count = buffer.len().min((size - position) as usize);
             inner
                 .data
                 .subarray(position, position + count as u32)
-                .copy_from(&buffer[..count]);
-            inner.generation = inner.generation.wrapping_add(1);
-        }
-        Ok(count)
+                .copy_to(&mut buffer[..count]);
+            Ok(count)
+        })
+    }
+
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        position: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            if !self.0.accepting_writes.load(Ordering::Acquire) {
+                return Err(Error::RessourceBusy);
+            }
+            let mut inner = self.0.inner.try_get()?;
+            let position = u32::try_from(position).map_err(|_| Error::InvalidParameter)?;
+            let size = inner.data.length();
+            if position > size {
+                return Err(Error::InvalidParameter);
+            }
+            let count = buffer.len().min((size - position) as usize);
+            if count != 0 {
+                inner
+                    .data
+                    .subarray(position, position + count as u32)
+                    .copy_from(&buffer[..count]);
+                inner.generation = inner.generation.wrapping_add(1);
+            }
+            Ok(count)
+        })
     }
 
     fn set_position(&self, current: Size, position: &Position) -> file_system::Result<Size> {
@@ -350,26 +364,34 @@ impl DirectBaseOperations for DriveDevice {
     }
 
     /// Cache-only flush. OPFS durability requires awaiting `sync()`.
-    fn flush(&self) -> file_system::Result<()> {
-        let _inner = self.0.inner.try_get()?;
-        Ok(())
+    fn flush(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<file_system::Result<()>> {
+        file_system::ready(|| {
+            let _inner = self.0.inner.try_get()?;
+            Ok(())
+        })
     }
 
     fn control(
         &self,
+        _cx: &mut core::task::Context<'_>,
         command: ControlCommandIdentifier,
         _: &AnyByLayout,
         output: &mut AnyByLayout,
-    ) -> file_system::Result<()> {
-        let inner = self.0.inner.try_get()?;
-        match command {
-            GET_BLOCK_SIZE::IDENTIFIER => *GET_BLOCK_SIZE::cast_output(output)? = BLOCK_SIZE,
-            GET_BLOCK_COUNT::IDENTIFIER => {
-                *GET_BLOCK_COUNT::cast_output(output)? = inner.data.length() / BLOCK_SIZE;
+    ) -> core::task::Poll<file_system::Result<()>> {
+        file_system::ready(|| {
+            let inner = self.0.inner.try_get()?;
+            match command {
+                GET_BLOCK_SIZE::IDENTIFIER => *GET_BLOCK_SIZE::cast_output(output)? = BLOCK_SIZE,
+                GET_BLOCK_COUNT::IDENTIFIER => {
+                    *GET_BLOCK_COUNT::cast_output(output)? = inner.data.length() / BLOCK_SIZE;
+                }
+                _ => return Err(Error::UnsupportedOperation),
             }
-            _ => return Err(Error::UnsupportedOperation),
-        }
-        Ok(())
+            Ok(())
+        })
     }
 }
 

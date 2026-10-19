@@ -22,6 +22,18 @@ pub(crate) async fn read(file: &mut SynchronousFile<'_>, buffer: &mut [u8]) -> R
     poll_fn(|cx| guard.file.poll_read(cx, buffer)).await
 }
 
+pub(crate) async fn read_until(
+    file: &mut SynchronousFile<'_>,
+    buffer: &mut [u8],
+    delimiter: &[u8],
+) -> Result<usize> {
+    let guard = Guard {
+        file,
+        operation: Operation::Read,
+    };
+    poll_fn(|cx| guard.file.poll_read_until(cx, buffer, delimiter)).await
+}
+
 pub(crate) async fn write(file: &mut SynchronousFile<'_>, buffer: &[u8]) -> Result<usize> {
     let guard = Guard {
         file,

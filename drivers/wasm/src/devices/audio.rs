@@ -373,111 +373,164 @@ impl BaseOperations for WebAudioDevice {
         self.post_close(proxy.slot, proxy.id)
     }
 
-    fn read(&self, _context: &mut Context, _buffer: &mut [u8], _position: Size) -> Result<usize> {
-        Err(Error::UnsupportedOperation)
+    fn read(
+        &self,
+        _context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
+        _buffer: &mut [u8],
+        _position: Size,
+    ) -> core::task::Poll<Result<usize>> {
+        file_system::ready(|| Err(Error::UnsupportedOperation))
     }
 
-    fn write(&self, context: &mut Context, bytes: &[u8], _position: Size) -> Result<usize> {
-        let proxy = self.stream(context)?;
-        if !bytes.len().is_multiple_of(FRAME_BYTES) {
-            return Err(Error::InvalidParameter);
-        }
-        if bytes.is_empty() {
-            return Ok(0);
-        }
-        let slot = &self.bridge.slots[proxy.slot];
-        let count = slot.reserve(bytes.len().min(MAX_TRANSFER_BYTES) / FRAME_BYTES * FRAME_BYTES);
-        if count == 0 {
-            return Err(Error::RessourceBusy);
-        }
-        let (data, buffer) = make_bytes(&bytes[..count]);
-        let packet = packet("write", proxy.id);
-        if set(&packet, "bytes", data.as_ref()).is_err()
-            || self.bridge.send(&packet, &[buffer]).is_err()
-        {
-            slot.undo_reservation(count);
-            return Err(Error::InputOutput);
-        }
-        Ok(count)
+    fn write(
+        &self,
+        context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
+        bytes: &[u8],
+        _position: Size,
+    ) -> core::task::Poll<Result<usize>> {
+        file_system::ready(|| {
+            let proxy = self.stream(context)?;
+            if !bytes.len().is_multiple_of(FRAME_BYTES) {
+                return Err(Error::InvalidParameter);
+            }
+            if bytes.is_empty() {
+                return Ok(0);
+            }
+            let slot = &self.bridge.slots[proxy.slot];
+            let count =
+                slot.reserve(bytes.len().min(MAX_TRANSFER_BYTES) / FRAME_BYTES * FRAME_BYTES);
+            if count == 0 {
+                return Err(Error::RessourceBusy);
+            }
+            let (data, buffer) = make_bytes(&bytes[..count]);
+            let packet = packet("write", proxy.id);
+            if set(&packet, "bytes", data.as_ref()).is_err()
+                || self.bridge.send(&packet, &[buffer]).is_err()
+            {
+                slot.undo_reservation(count);
+                return Err(Error::InputOutput);
+            }
+            Ok(count)
+        })
     }
 
-    fn flush(&self, context: &mut Context) -> Result<()> {
-        let proxy = self.stream(context)?;
-        let slot = &self.bridge.slots[proxy.slot];
-        if slot.writable() == STREAM_BYTES {
-            Ok(())
-        } else {
-            Err(Error::RessourceBusy)
-        }
+    fn flush(
+        &self,
+        context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Result<()>> {
+        file_system::ready(|| {
+            let proxy = self.stream(context)?;
+            let slot = &self.bridge.slots[proxy.slot];
+            if slot.writable() == STREAM_BYTES {
+                Ok(())
+            } else {
+                Err(Error::RessourceBusy)
+            }
+        })
     }
 
     fn control(
         &self,
         context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
         command: ControlCommandIdentifier,
         input: &AnyByLayout,
         output: &mut AnyByLayout,
-    ) -> Result<()> {
-        let proxy = context
-            .get_private_data_mutable_of_type::<StreamProxy>()
-            .ok_or(Error::InvalidContext)?;
-        if input.get_size() > MAX_CONTROL_BYTES || output.get_size() > MAX_CONTROL_BYTES {
-            return Err(Error::InvalidParameter);
-        }
-        let slot = &self.bridge.slots[proxy.slot];
-        match command {
-            SET_CONFIGURATION::IDENTIFIER => {
-                validate::<SET_CONFIGURATION>(input, output)?;
-                let value = *SET_CONFIGURATION::cast_input(input)?;
-                value.validate()?;
-                if value != OUTPUT_CONFIGURATION {
-                    return Err(Error::UnsupportedOperation);
+    ) -> core::task::Poll<Result<()>> {
+        file_system::ready(|| {
+            let proxy = context
+                .get_private_data_mutable_of_type::<StreamProxy>()
+                .ok_or(Error::InvalidContext)?;
+            if input.get_size() > MAX_CONTROL_BYTES || output.get_size() > MAX_CONTROL_BYTES {
+                return Err(Error::InvalidParameter);
+            }
+            let slot = &self.bridge.slots[proxy.slot];
+            match command {
+                SET_CONFIGURATION::IDENTIFIER => {
+                    validate::<SET_CONFIGURATION>(input, output)?;
+                    let value = *SET_CONFIGURATION::cast_input(input)?;
+                    value.validate()?;
+                    if value != OUTPUT_CONFIGURATION {
+                        return Err(Error::UnsupportedOperation);
+                    }
+                    self.bridge.send_control(
+                        proxy.id,
+                        command,
+                        any_bytes(input),
+                        output.get_size(),
+                    )?;
+                    proxy.configuration = value;
                 }
-                self.bridge
-                    .send_control(proxy.id, command, any_bytes(input), output.get_size())?;
-                proxy.configuration = value;
-            }
-            GET_CONFIGURATION::IDENTIFIER => {
-                validate::<GET_CONFIGURATION>(input, output)?;
-                *GET_CONFIGURATION::cast_output(output)? = proxy.configuration;
-                self.bridge
-                    .send_control(proxy.id, command, any_bytes(input), output.get_size())?;
-            }
-            GET_WRITABLE::IDENTIFIER => {
-                validate::<GET_WRITABLE>(input, output)?;
-                *GET_WRITABLE::cast_output(output)? = slot.writable().min(u32::MAX as usize) as u32;
-                self.bridge
-                    .send_control(proxy.id, command, any_bytes(input), output.get_size())?;
-            }
-            SET_VOLUME::IDENTIFIER => {
-                validate::<SET_VOLUME>(input, output)?;
-                let value = *SET_VOLUME::cast_input(input)?;
-                if value > 100 {
-                    return Err(Error::InvalidParameter);
+                GET_CONFIGURATION::IDENTIFIER => {
+                    validate::<GET_CONFIGURATION>(input, output)?;
+                    *GET_CONFIGURATION::cast_output(output)? = proxy.configuration;
+                    self.bridge.send_control(
+                        proxy.id,
+                        command,
+                        any_bytes(input),
+                        output.get_size(),
+                    )?;
                 }
-                self.bridge
-                    .send_control(proxy.id, command, any_bytes(input), output.get_size())?;
-                proxy.volume = value;
+                GET_WRITABLE::IDENTIFIER => {
+                    validate::<GET_WRITABLE>(input, output)?;
+                    *GET_WRITABLE::cast_output(output)? =
+                        slot.writable().min(u32::MAX as usize) as u32;
+                    self.bridge.send_control(
+                        proxy.id,
+                        command,
+                        any_bytes(input),
+                        output.get_size(),
+                    )?;
+                }
+                SET_VOLUME::IDENTIFIER => {
+                    validate::<SET_VOLUME>(input, output)?;
+                    let value = *SET_VOLUME::cast_input(input)?;
+                    if value > 100 {
+                        return Err(Error::InvalidParameter);
+                    }
+                    self.bridge.send_control(
+                        proxy.id,
+                        command,
+                        any_bytes(input),
+                        output.get_size(),
+                    )?;
+                    proxy.volume = value;
+                }
+                GET_VOLUME::IDENTIFIER => {
+                    validate::<GET_VOLUME>(input, output)?;
+                    *GET_VOLUME::cast_output(output)? = proxy.volume;
+                    self.bridge.send_control(
+                        proxy.id,
+                        command,
+                        any_bytes(input),
+                        output.get_size(),
+                    )?;
+                }
+                START::IDENTIFIER => {
+                    validate::<START>(input, output)?;
+                    self.bridge.send_control(
+                        proxy.id,
+                        command,
+                        any_bytes(input),
+                        output.get_size(),
+                    )?;
+                }
+                STOP::IDENTIFIER => {
+                    validate::<STOP>(input, output)?;
+                    self.bridge.send_control(
+                        proxy.id,
+                        command,
+                        any_bytes(input),
+                        output.get_size(),
+                    )?;
+                }
+                _ => return Err(Error::UnsupportedOperation),
             }
-            GET_VOLUME::IDENTIFIER => {
-                validate::<GET_VOLUME>(input, output)?;
-                *GET_VOLUME::cast_output(output)? = proxy.volume;
-                self.bridge
-                    .send_control(proxy.id, command, any_bytes(input), output.get_size())?;
-            }
-            START::IDENTIFIER => {
-                validate::<START>(input, output)?;
-                self.bridge
-                    .send_control(proxy.id, command, any_bytes(input), output.get_size())?;
-            }
-            STOP::IDENTIFIER => {
-                validate::<STOP>(input, output)?;
-                self.bridge
-                    .send_control(proxy.id, command, any_bytes(input), output.get_size())?;
-            }
-            _ => return Err(Error::UnsupportedOperation),
-        }
-        Ok(())
+            Ok(())
+        })
     }
 
     fn clone_context(&self, _context: &Context) -> Result<Context> {

@@ -62,7 +62,7 @@ impl Cursor {
 
     pub fn update<T>(&self, operation: impl FnOnce(Size) -> Result<(T, Size)>) -> Result<T> {
         // Never hold the global critical section across device I/O. Contended
-        // duplicated streams return ResourceBusy for the caller's polling path.
+        // duplicated streams return ResourceBusy without changing the cursor.
         let position = self.0.lock(|position| position.borrow().clone());
         match position {
             Position::Exclusive(value) => {

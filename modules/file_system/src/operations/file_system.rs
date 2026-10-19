@@ -749,7 +749,7 @@ pub mod tests {
 
         // Write test data
         let test_data = b"Hello, File System!";
-        let write_result = fs.write(&mut context, test_data, 0);
+        let write_result = fs.write_sync(&mut context, test_data, 0);
         write_result.as_ref().unwrap();
         assert_eq!(
             write_result.unwrap(),
@@ -764,7 +764,7 @@ pub mod tests {
 
         // Read data back
         let mut buffer = alloc::vec![0u8; test_data.len()];
-        let read_result = BaseOperations::read(fs, &mut context, &mut buffer, 0);
+        let read_result = BaseOperations::read_sync(fs, &mut context, &mut buffer, 0);
         read_result.as_ref().unwrap();
         assert_eq!(
             read_result.unwrap(),
@@ -798,17 +798,17 @@ pub mod tests {
 
         // Test single write
         let data1 = b"First write. ";
-        let result = BaseOperations::write(fs, &mut context, data1, 0);
+        let result = BaseOperations::write_sync(fs, &mut context, data1, 0);
         result.unwrap();
 
         // Test sequential write
         let data2 = b"Second write.";
-        let result = BaseOperations::write(fs, &mut context, data2, data1.len() as Size);
+        let result = BaseOperations::write_sync(fs, &mut context, data2, data1.len() as Size);
         result.unwrap();
 
         // Test overwrite
         let overwrite_data = b"OVERWRITE";
-        let result = BaseOperations::write(fs, &mut context, overwrite_data, 0);
+        let result = BaseOperations::write_sync(fs, &mut context, overwrite_data, 0);
         result.unwrap();
 
         // Cleanup
@@ -833,7 +833,7 @@ pub mod tests {
         // Write a pattern multiple times
         let pattern = b"ABC";
         let count = 5;
-        let result = BaseOperations::write_pattern(fs, &mut context, pattern, count, 0);
+        let result = BaseOperations::write_pattern_sync(fs, &mut context, pattern, count, 0);
 
         if let Ok(bytes_written) = result {
             assert!(
@@ -847,7 +847,7 @@ pub mod tests {
                 .unwrap();
 
             let mut buffer = alloc::vec![0u8; bytes_written];
-            let read_result = BaseOperations::read(fs, &mut context, &mut buffer, 0);
+            let read_result = BaseOperations::read_sync(fs, &mut context, &mut buffer, 0);
             read_result.unwrap();
         }
 
@@ -876,7 +876,7 @@ pub mod tests {
         let buf3 = b"Third";
         let buffers = [buf1.as_slice(), buf2.as_slice(), buf3.as_slice()];
 
-        let result = BaseOperations::write_vectored(fs, &mut context, &buffers, 0);
+        let result = BaseOperations::write_vectored_sync(fs, &mut context, &buffers, 0);
         if let Ok(total_written) = result {
             let expected_total = buf1.len() + buf2.len() + buf3.len();
             assert!(
@@ -890,7 +890,7 @@ pub mod tests {
                 .unwrap();
 
             let mut buffer = alloc::vec![0u8; total_written];
-            let read_result = BaseOperations::read(fs, &mut context, &mut buffer, 0);
+            let read_result = BaseOperations::read_sync(fs, &mut context, &mut buffer, 0);
             read_result.unwrap();
         }
 
@@ -918,22 +918,22 @@ pub mod tests {
         let data2 = b"BBBB";
         let data3 = b"CCCC";
 
-        BaseOperations::write(fs, &mut context, data1, 0).unwrap();
-        BaseOperations::write(fs, &mut context, data2, 4).unwrap();
-        BaseOperations::write(fs, &mut context, data3, 8).unwrap();
+        BaseOperations::write_sync(fs, &mut context, data1, 0).unwrap();
+        BaseOperations::write_sync(fs, &mut context, data2, 4).unwrap();
+        BaseOperations::write_sync(fs, &mut context, data3, 8).unwrap();
 
         // Read from specific positions
         let mut buffer = alloc::vec![0u8; 4];
 
-        let result = BaseOperations::read(fs, &mut context, &mut buffer, 0);
+        let result = BaseOperations::read_sync(fs, &mut context, &mut buffer, 0);
         result.unwrap();
         assert_eq!(&buffer[..], b"AAAA", "Should read first chunk");
 
-        let result = BaseOperations::read(fs, &mut context, &mut buffer, 4);
+        let result = BaseOperations::read_sync(fs, &mut context, &mut buffer, 4);
         result.unwrap();
         assert_eq!(&buffer[..], b"BBBB", "Should read second chunk");
 
-        let result = BaseOperations::read(fs, &mut context, &mut buffer, 8);
+        let result = BaseOperations::read_sync(fs, &mut context, &mut buffer, 8);
         result.unwrap();
         assert_eq!(&buffer[..], b"CCCC", "Should read third chunk");
 
@@ -958,11 +958,11 @@ pub mod tests {
 
         // Write data with delimiter
         let test_data = b"Line 1\nLine 2\nLine 3\n";
-        BaseOperations::write(fs, &mut context, test_data, 0).unwrap();
+        BaseOperations::write_sync(fs, &mut context, test_data, 0).unwrap();
 
         // Read until newline
         let mut buffer = alloc::vec![0u8; 100];
-        let result = BaseOperations::read_until(fs, &mut context, &mut buffer, 0, b"\n");
+        let result = BaseOperations::read_until_sync(fs, &mut context, &mut buffer, 0, b"\n");
 
         if let Ok(bytes_read) = result {
             assert!(bytes_read > 0, "Should read some bytes");
@@ -990,10 +990,10 @@ pub mod tests {
 
         // Write data
         let data = b"Data to flush";
-        BaseOperations::write(fs, &mut context, data, 0).unwrap();
+        BaseOperations::write_sync(fs, &mut context, data, 0).unwrap();
 
         // Flush should succeed or be unsupported
-        let result = BaseOperations::flush(fs, &mut context);
+        let result = BaseOperations::flush_sync(fs, &mut context);
         assert!(
             result.is_ok() || matches!(result, Err(Error::UnsupportedOperation)),
             "Flush should succeed or be unsupported"
@@ -1020,7 +1020,7 @@ pub mod tests {
 
         // Try to read from empty file
         let mut buffer = alloc::vec![0u8; 100];
-        let result = BaseOperations::read(fs, &mut context, &mut buffer, 0);
+        let result = BaseOperations::read_sync(fs, &mut context, &mut buffer, 0);
 
         // Should either read 0 bytes or return an error
         if let Ok(bytes_read) = result {
@@ -1048,12 +1048,12 @@ pub mod tests {
 
         // Write a larger amount of data
         let large_data = alloc::vec![0xABu8; 4096];
-        let write_result = BaseOperations::write(fs, &mut context, &large_data, 0);
+        let write_result = BaseOperations::write_sync(fs, &mut context, &large_data, 0);
 
         if let Ok(bytes_written) = write_result {
             // Read back the data
             let mut read_buffer = alloc::vec![0u8; bytes_written];
-            let read_result = BaseOperations::read(fs, &mut context, &mut read_buffer, 0);
+            let read_result = BaseOperations::read_sync(fs, &mut context, &mut read_buffer, 0);
 
             if let Ok(bytes_read) = read_result {
                 assert_eq!(

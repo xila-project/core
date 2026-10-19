@@ -10,7 +10,7 @@ async fn existing_invalid_mbr_is_not_reformatted() {
     let drive = DriveDevice::new(Path::from_str(&name), 4 * 1024 * 1024)
         .await
         .unwrap();
-    drive.write(&[0x42; 512], 0).unwrap();
+    drive.write_sync(&[0x42; 512], 0).unwrap();
     drive.sync().await.unwrap();
     drop(drive);
     let drive = Box::leak(Box::new(
@@ -24,7 +24,7 @@ async fn existing_invalid_mbr_is_not_reformatted() {
     );
     drive.sync().await.unwrap();
     let mut bytes = [0; 512];
-    drive.read(&mut bytes, 0).unwrap();
+    drive.read_sync(&mut bytes, 0).unwrap();
     assert_eq!(bytes, [0x42; 512]);
     drive.unmount().unwrap();
     remove(&name).await;
@@ -42,7 +42,7 @@ async fn existing_unmountable_filesystem_is_not_reformatted() {
         PartitionKind::Xila,
     )
     .unwrap();
-    partition.write(&[0x42; 1024], 0).unwrap();
+    partition.write_sync(&[0x42; 1024], 0).unwrap();
     drive.sync().await.unwrap();
     drop(drive);
     let drive = Box::leak(Box::new(
@@ -56,7 +56,7 @@ async fn existing_unmountable_filesystem_is_not_reformatted() {
     );
     drive.sync().await.unwrap();
     let mut bytes = [0; 1024];
-    drive.read(&mut bytes, 2048 * 512).unwrap();
+    drive.read_sync(&mut bytes, 2048 * 512).unwrap();
     assert_eq!(bytes, [0x42; 1024]);
     drive.unmount().unwrap();
     remove(&name).await;
@@ -189,11 +189,11 @@ async fn new_placeholder_imports_a_seed_and_reopens_without_a_download() {
         AccessFlags::Write.into(),
     )
     .unwrap();
-    fs.write(&mut context, b"from-build", 0).unwrap();
+    fs.write_sync(&mut context, b"from-build", 0).unwrap();
     fs.close(&mut context).unwrap();
     drop(fs);
     let mut bytes = vec![0; 4 * 1024 * 1024];
-    DirectBaseOperations::read(source, &mut bytes, 0).unwrap();
+    DirectBaseOperations::read_sync(source, &mut bytes, 0).unwrap();
     source.discard_unsaved().unwrap();
     remove(&source_name).await;
     let array = js_sys::Uint8Array::from(bytes.as_slice());
@@ -221,7 +221,7 @@ async fn new_placeholder_imports_a_seed_and_reopens_without_a_download() {
     )
     .unwrap();
     let mut proof = [0; 10];
-    fs.read(&mut context, &mut proof, 0).unwrap();
+    fs.read_sync(&mut context, &mut proof, 0).unwrap();
     assert_eq!(&proof, b"from-build");
     fs.close(&mut context).unwrap();
     drop(fs);

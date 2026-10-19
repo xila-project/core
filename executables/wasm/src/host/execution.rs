@@ -138,19 +138,31 @@ mod clock_tests {
 
     struct WallClock(AtomicU64);
     impl DirectBaseOperations for WallClock {
-        fn read(&self, buffer: &mut [u8], _: Size) -> xila::file_system::Result<usize> {
-            let time = Duration::from_secs(self.0.load(Ordering::Relaxed));
-            let bytes = unsafe {
-                core::slice::from_raw_parts(
-                    (&time as *const Duration).cast::<u8>(),
-                    size_of::<Duration>(),
-                )
-            };
-            buffer[..bytes.len()].copy_from_slice(bytes);
-            Ok(bytes.len())
+        fn read(
+            &self,
+            _cx: &mut core::task::Context<'_>,
+            buffer: &mut [u8],
+            _: Size,
+        ) -> core::task::Poll<xila::file_system::Result<usize>> {
+            xila::file_system::ready(|| {
+                let time = Duration::from_secs(self.0.load(Ordering::Relaxed));
+                let bytes = unsafe {
+                    core::slice::from_raw_parts(
+                        (&time as *const Duration).cast::<u8>(),
+                        size_of::<Duration>(),
+                    )
+                };
+                buffer[..bytes.len()].copy_from_slice(bytes);
+                Ok(bytes.len())
+            })
         }
-        fn write(&self, _: &[u8], _: Size) -> xila::file_system::Result<usize> {
-            Err(xila::file_system::Error::UnsupportedOperation)
+        fn write(
+            &self,
+            _cx: &mut core::task::Context<'_>,
+            _: &[u8],
+            _: Size,
+        ) -> core::task::Poll<xila::file_system::Result<usize>> {
+            xila::file_system::ready(|| Err(xila::file_system::Error::UnsupportedOperation))
         }
     }
     impl MountOperations for WallClock {}

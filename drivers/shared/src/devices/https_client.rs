@@ -48,7 +48,7 @@ impl<T: DirectCharacterDevice + 'static> TryRng for RandomNumberGenerator<T> {
         if dest.is_empty() {
             return Ok(());
         }
-        if self.0.read(dest, 0)? != dest.len() {
+        if self.0.read_sync(dest, 0)? != dest.len() {
             // Never report success with missing entropy from a short read.
             return Err(Error::InputOutput);
         }
@@ -157,10 +157,13 @@ enum State {
 }
 
 struct HttpsClientContext {
+    waiters: Arc<file_system::WaitQueue<16>>,
+    waiter: file_system::Waiter,
     inner: Arc<Mutex<CriticalSectionRawMutex, HttpsClientInner>>,
 }
 
 struct HttpsClientInner {
+    generation: u64,
     state: State,
     response_headers: [u8; RESPONSE_SERIALIZED_HEADER_SIZE],
     response_headers_len: usize,
@@ -173,6 +176,8 @@ impl HttpsClientContext {
     fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(HttpsClientInner::new())),
+            waiters: Arc::new(file_system::WaitQueue::new()),
+            waiter: file_system::Waiter::new(),
         }
     }
 }
@@ -181,6 +186,7 @@ impl HttpsClientInner {
     fn new() -> Self {
         Self {
             state: State::Idle,
+            generation: 0,
             response_headers: [0; RESPONSE_SERIALIZED_HEADER_SIZE],
             response_headers_len: 0,
             response_headers_cursor: 0,
@@ -197,6 +203,7 @@ impl HttpsClientInner {
     }
 
     fn reset(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
         self.reset_buffers();
         self.state = State::Idle;
     }
@@ -358,6 +365,8 @@ async fn run_request<T: DirectCharacterDevice + 'static>(
     inner: Arc<Mutex<CriticalSectionRawMutex, HttpsClientInner>>,
     request: Vec<u8>,
     random_device: &'static T,
+    waiters: Arc<file_system::WaitQueue<16>>,
+    generation: u64,
 ) {
     let result = async {
         let parser = HttpRequestParser::from_buffer(&request);
@@ -430,7 +439,18 @@ async fn run_request<T: DirectCharacterDevice + 'static>(
     }
     .await;
 
+    complete_request(&inner, &waiters, generation, result).await;
+}
+async fn complete_request(
+    inner: &Mutex<CriticalSectionRawMutex, HttpsClientInner>,
+    waiters: &file_system::WaitQueue<16>,
+    generation: u64,
+    result: Result<(usize, [u8; RESPONSE_SERIALIZED_HEADER_SIZE], Vec<u8>)>,
+) {
     let mut guard = inner.lock().await;
+    if guard.generation != generation || !matches!(guard.state, State::InFlight) {
+        return;
+    }
 
     match result {
         Ok((serialized_headers_len, response_headers, response_body)) => {
@@ -456,6 +476,9 @@ async fn run_request<T: DirectCharacterDevice + 'static>(
             }
         }
     }
+
+    drop(guard);
+    waiters.wake_all();
 }
 
 pub struct HttpsClientDevice<T: DirectCharacterDevice + 'static> {
@@ -485,60 +508,91 @@ impl<T: DirectCharacterDevice + 'static> BaseOperations for HttpsClientDevice<T>
     }
 
     fn close(&self, context: &mut Context) -> Result<()> {
-        if let Some(client_context) = context.take_private_data_of_type::<HttpsClientContext>() {
+        if let Some(mut client_context) = context.take_private_data_of_type::<HttpsClientContext>()
+        {
+            let waiters = client_context.waiters.clone();
+            waiters.cancel(&mut client_context.waiter);
             let mut inner = task::block_on(client_context.inner.lock());
             inner.reset();
+            drop(inner);
+            client_context.waiters.wake_all();
         }
 
         Ok(())
     }
 
-    fn read(&self, context: &mut Context, buffer: &mut [u8], _: Size) -> Result<usize> {
+    fn read(
+        &self,
+        context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        _: Size,
+    ) -> core::task::Poll<Result<usize>> {
         let context = context
             .get_private_data_mutable_of_type::<HttpsClientContext>()
-            .ok_or(Error::InvalidParameter)?;
-
-        read_state_transition(context, buffer)
+            .ok_or(Error::InvalidContext)?;
+        poll_read_state(context, _cx, buffer)
     }
 
-    fn write(&self, context: &mut Context, buffer: &[u8], _: Size) -> Result<usize> {
-        let context = context
-            .get_private_data_mutable_of_type::<HttpsClientContext>()
-            .ok_or(Error::InvalidParameter)?;
+    fn write(
+        &self,
+        context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        _: Size,
+    ) -> core::task::Poll<Result<usize>> {
+        file_system::ready(|| {
+            let context = context
+                .get_private_data_mutable_of_type::<HttpsClientContext>()
+                .ok_or(Error::InvalidParameter)?;
 
-        write_state_gate(context)?;
+            let generation = write_state_gate(context)?;
 
-        let request = buffer.to_vec();
-        let inner = context.inner.clone();
+            let request = buffer.to_vec();
+            let inner = context.inner.clone();
+            let waiters = context.waiters.clone();
 
-        let task_manager = self.task_manager;
-        let network_manager = self.network_manager;
-        let parent = task::Manager::ROOT_TASK_IDENTIFIER;
+            let task_manager = self.task_manager;
+            let network_manager = self.network_manager;
+            let parent = task::Manager::ROOT_TASK_IDENTIFIER;
 
-        let random_device = self.random_device;
+            let random_device = self.random_device;
 
-        if let Err(spawn_error) =
-            task::block_on(
-                task_manager.spawn(parent, "HTTPS request worker", None, move |_| {
+            if let Err(spawn_error) = task::block_on(task_manager.spawn(
+                parent,
+                "HTTPS request worker",
+                None,
+                move |_| {
                     let inner_clone = inner.clone();
                     let request_owned = request;
                     async move {
-                        run_request(network_manager, inner_clone, request_owned, random_device)
-                            .await
+                        run_request(
+                            network_manager,
+                            inner_clone,
+                            request_owned,
+                            random_device,
+                            waiters,
+                            generation,
+                        )
+                        .await
                     }
-                }),
-            )
-        {
-            let mut inner = task::block_on(context.inner.lock());
-            inner.set_failed(Error::RessourceBusy);
-            log::error!(
-                "https_client: failed to spawn request worker: {:?}",
-                spawn_error
-            );
-            return Err(Error::RessourceBusy);
-        }
+                },
+            )) {
+                task::block_on(complete_request(
+                    &context.inner,
+                    &context.waiters,
+                    generation,
+                    Err(Error::RessourceBusy),
+                ));
+                log::error!(
+                    "https_client: failed to spawn request worker: {:?}",
+                    spawn_error
+                );
+                return Err(Error::RessourceBusy);
+            }
 
-        Ok(buffer.len())
+            Ok(buffer.len())
+        })
     }
 
     fn clone_context(&self, context: &Context) -> Result<Context> {
@@ -548,7 +602,16 @@ impl<T: DirectCharacterDevice + 'static> BaseOperations for HttpsClientDevice<T>
 
         Ok(Context::new(Some(HttpsClientContext {
             inner: source.inner.clone(),
+            waiters: source.waiters.clone(),
+            waiter: file_system::Waiter::new(),
         })))
+    }
+    fn cancel_operation(&self, context: &mut Context, operation: file_system::Operation) {
+        if operation == file_system::Operation::Read
+            && let Some(context) = context.get_private_data_mutable_of_type::<HttpsClientContext>()
+        {
+            context.waiters.cancel(&mut context.waiter);
+        }
     }
 }
 
@@ -556,22 +619,20 @@ impl<T: DirectCharacterDevice + 'static> MountOperations for HttpsClientDevice<T
 
 impl<T: DirectCharacterDevice + 'static> CharacterDevice for HttpsClientDevice<T> {}
 
-fn write_state_gate(context: &mut HttpsClientContext) -> Result<()> {
+fn write_state_gate(context: &mut HttpsClientContext) -> Result<u64> {
     let mut inner = task::block_on(context.inner.lock());
 
     match inner.state {
         State::Idle | State::Failed(_) => {
             inner.reset();
             inner.state = State::InFlight;
-            Ok(())
+            Ok(inner.generation)
         }
         State::InFlight | State::HeadersReady | State::BodyStreaming => Err(Error::RessourceBusy),
     }
 }
 
-fn read_state_transition(context: &mut HttpsClientContext, buffer: &mut [u8]) -> Result<usize> {
-    let mut inner = task::block_on(context.inner.lock());
-
+fn read_transition_inner(inner: &mut HttpsClientInner, buffer: &mut [u8]) -> Result<usize> {
     match inner.state {
         State::Idle => Ok(0),
         State::InFlight => Err(Error::RessourceBusy),
@@ -622,6 +683,34 @@ fn read_state_transition(context: &mut HttpsClientContext, buffer: &mut [u8]) ->
         }
     }
 }
+#[cfg(test)]
+fn read_state_transition(context: &mut HttpsClientContext, buffer: &mut [u8]) -> Result<usize> {
+    let mut inner = task::block_on(context.inner.lock());
+    read_transition_inner(&mut inner, buffer)
+}
+fn poll_read_state(
+    context: &mut HttpsClientContext,
+    cx: &mut core::task::Context<'_>,
+    buffer: &mut [u8],
+) -> core::task::Poll<Result<usize>> {
+    use core::task::Poll;
+    if buffer.is_empty() {
+        return Poll::Ready(Ok(0));
+    }
+    {
+        let mut inner = context.inner.try_lock().map_err(|_| Error::RessourceBusy)?;
+        if !matches!(inner.state, State::InFlight) {
+            return Poll::Ready(read_transition_inner(&mut inner, buffer));
+        }
+    }
+    context.waiters.register(&mut context.waiter, cx.waker())?;
+    let mut inner = context.inner.try_lock().map_err(|_| Error::RessourceBusy)?;
+    if matches!(inner.state, State::InFlight) {
+        Poll::Pending
+    } else {
+        Poll::Ready(read_transition_inner(&mut inner, buffer))
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -634,19 +723,31 @@ mod tests {
     }
 
     impl DirectBaseOperations for TestRandomDevice {
-        fn read(&self, buffer: &mut [u8], _: Size) -> Result<usize> {
-            if self.fail {
-                return Err(Error::InputOutput);
-            }
-            let count = buffer.len().min(self.limit);
-            for (index, byte) in buffer[..count].iter_mut().enumerate() {
-                *byte = (index + 1) as u8;
-            }
-            Ok(count)
+        fn read(
+            &self,
+            _cx: &mut core::task::Context<'_>,
+            buffer: &mut [u8],
+            _: Size,
+        ) -> core::task::Poll<Result<usize>> {
+            file_system::ready(|| {
+                if self.fail {
+                    return Err(Error::InputOutput);
+                }
+                let count = buffer.len().min(self.limit);
+                for (index, byte) in buffer[..count].iter_mut().enumerate() {
+                    *byte = (index + 1) as u8;
+                }
+                Ok(count)
+            })
         }
 
-        fn write(&self, _: &[u8], _: Size) -> Result<usize> {
-            Err(Error::UnsupportedOperation)
+        fn write(
+            &self,
+            _cx: &mut core::task::Context<'_>,
+            _: &[u8],
+            _: Size,
+        ) -> core::task::Poll<Result<usize>> {
+            file_system::ready(|| Err(Error::UnsupportedOperation))
         }
 
         fn set_position(&self, _: Size, _: &file_system::Position) -> Result<Size> {
@@ -786,5 +887,111 @@ mod tests {
             read_state_transition(&mut context, &mut buffer),
             Err(Error::RessourceBusy)
         );
+    }
+}
+
+#[cfg(test)]
+mod polling_regression {
+    extern crate std;
+    use super::*;
+    use core::task::{Context as TaskContext, Poll, Waker};
+    #[test]
+    fn in_flight_read_is_pending_but_a_failed_busy_result_stays_an_error() {
+        let mut context = HttpsClientContext::new();
+        let mut output = [0; 16];
+        let mut cx = TaskContext::from_waker(Waker::noop());
+        task::block_on(context.inner.lock()).state = State::InFlight;
+        assert_eq!(
+            poll_read_state(&mut context, &mut cx, &mut output),
+            Poll::Pending
+        );
+        task::block_on(context.inner.lock()).set_failed(Error::RessourceBusy);
+        assert_eq!(
+            poll_read_state(&mut context, &mut cx, &mut output),
+            Poll::Ready(Err(Error::RessourceBusy))
+        );
+    }
+}
+
+#[cfg(test)]
+mod completion_regression {
+    extern crate std;
+    use super::*;
+    use core::task::{Context as TaskContext, Poll, Waker};
+    use std::{
+        sync::{
+            Arc as StdArc,
+            atomic::{AtomicUsize, Ordering},
+        },
+        task::Wake,
+    };
+    #[derive(Default)]
+    struct Count(AtomicUsize);
+    impl Wake for Count {
+        fn wake(self: StdArc<Self>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    fn response() -> Result<(usize, [u8; RESPONSE_SERIALIZED_HEADER_SIZE], Vec<u8>)> {
+        let mut headers = [0; RESPONSE_SERIALIZED_HEADER_SIZE];
+        headers[..2].copy_from_slice(b"OK");
+        Ok((2, headers, Vec::new()))
+    }
+    #[test]
+    fn completion_notifies_the_pending_opening() {
+        let mut context = HttpsClientContext::new();
+        let generation = write_state_gate(&mut context).unwrap();
+        let count = StdArc::new(Count::default());
+        let waker = Waker::from(count.clone());
+        let mut cx = TaskContext::from_waker(&waker);
+        let mut output = [0; 8];
+        assert!(poll_read_state(&mut context, &mut cx, &mut output).is_pending());
+        assert_eq!(count.0.load(Ordering::Relaxed), 0);
+        task::block_on(complete_request(
+            &context.inner,
+            &context.waiters,
+            generation,
+            response(),
+        ));
+        assert_eq!(count.0.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            poll_read_state(&mut context, &mut cx, &mut output),
+            Poll::Ready(Ok(2))
+        );
+        assert_eq!(&output[..2], b"OK");
+        context.waiters.cancel(&mut context.waiter);
+    }
+    #[test]
+    fn an_old_request_cannot_publish_into_a_new_request_after_close() {
+        let mut context = HttpsClientContext::new();
+        let old = write_state_gate(&mut context).unwrap();
+        task::block_on(context.inner.lock()).reset();
+        let new = write_state_gate(&mut context).unwrap();
+        task::block_on(complete_request(
+            &context.inner,
+            &context.waiters,
+            old,
+            response(),
+        ));
+        let mut cx = TaskContext::from_waker(Waker::noop());
+        task::block_on(complete_request(
+            &context.inner,
+            &context.waiters,
+            old,
+            Err(Error::RessourceBusy),
+        ));
+        let mut output = [0; 8];
+        assert!(poll_read_state(&mut context, &mut cx, &mut output).is_pending());
+        task::block_on(complete_request(
+            &context.inner,
+            &context.waiters,
+            new,
+            response(),
+        ));
+        assert_eq!(
+            poll_read_state(&mut context, &mut cx, &mut output),
+            Poll::Ready(Ok(2))
+        );
+        context.waiters.cancel(&mut context.waiter);
     }
 }

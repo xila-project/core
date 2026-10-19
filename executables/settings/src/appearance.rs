@@ -131,25 +131,38 @@ mod tests {
     impl xila::file_system::MountOperations for HeadlessScreen {}
     impl xila::file_system::DirectCharacterDevice for HeadlessScreen {}
     impl xila::file_system::DirectBaseOperations for HeadlessScreen {
-        fn read(&self, _: &mut [u8], _: u64) -> xila::file_system::Result<usize> {
-            Ok(0)
+        fn read(
+            &self,
+            _cx: &mut core::task::Context<'_>,
+            _: &mut [u8],
+            _: u64,
+        ) -> core::task::Poll<xila::file_system::Result<usize>> {
+            xila::file_system::ready(|| Ok(0))
         }
-        fn write(&self, buffer: &[u8], _: u64) -> xila::file_system::Result<usize> {
-            Ok(buffer.len())
+        fn write(
+            &self,
+            _cx: &mut core::task::Context<'_>,
+            buffer: &[u8],
+            _: u64,
+        ) -> core::task::Poll<xila::file_system::Result<usize>> {
+            xila::file_system::ready(|| Ok(buffer.len()))
         }
         fn control(
             &self,
+            _cx: &mut core::task::Context<'_>,
             command: xila::file_system::ControlCommandIdentifier,
             _: &xila::shared::AnyByLayout,
             output: &mut xila::shared::AnyByLayout,
-        ) -> xila::file_system::Result<()> {
-            use xila::{file_system::ControlCommand, graphics::GET_RESOLUTION};
-            if command == GET_RESOLUTION::IDENTIFIER {
-                *GET_RESOLUTION::cast_output(output)? = xila::graphics::Point::new(800, 600);
-                Ok(())
-            } else {
-                Err(xila::file_system::Error::UnsupportedOperation)
-            }
+        ) -> core::task::Poll<xila::file_system::Result<()>> {
+            xila::file_system::ready(|| {
+                use xila::{file_system::ControlCommand, graphics::GET_RESOLUTION};
+                if command == GET_RESOLUTION::IDENTIFIER {
+                    *GET_RESOLUTION::cast_output(output)? = xila::graphics::Point::new(800, 600);
+                    Ok(())
+                } else {
+                    Err(xila::file_system::Error::UnsupportedOperation)
+                }
+            })
         }
     }
 }

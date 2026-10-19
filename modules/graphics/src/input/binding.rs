@@ -20,7 +20,7 @@ pub unsafe extern "C" fn binding_callback_function(
     let mut pointer_data = InputData::default();
 
     device
-        .read(pointer_data.as_mut(), 0)
+        .read_sync(pointer_data.as_mut(), 0)
         .expect("Error reading from input device");
 
     unsafe {

@@ -34,7 +34,7 @@ impl<'a> Manager<'a> {
         };
 
         device
-            .read(current_time_raw, 0)
+            .read_sync(current_time_raw, 0)
             .map_err(Error::DeviceError)?;
 
         Ok(current_time)

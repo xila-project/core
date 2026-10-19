@@ -187,25 +187,8 @@ impl Pipe {
             Ok(length)
         })
     }
-
-    // These helpers preserve the original single-attempt API.
-    pub async fn write(&self, data: &[u8]) -> Result<usize> {
-        match self.write_inner(data, None) {
-            Poll::Ready(result) => result,
-            Poll::Pending => unreachable!(),
-        }
-    }
-    pub async fn read(&self, data: &mut [u8]) -> Result<usize> {
-        match self.read_inner(data, None, None) {
-            Poll::Ready(result) => result,
-            Poll::Pending => unreachable!(),
-        }
-    }
 }
 impl BaseOperations for Pipe {
-    fn supports_polling(&self) -> bool {
-        true
-    }
     fn close(&self, context: &mut Context) -> Result<()> {
         let opening = context
             .take_private_data_of_type::<Opening>()
@@ -259,14 +242,8 @@ impl BaseOperations for Pipe {
         });
         drop(retired);
     }
-    fn read(&self, context: &mut Context, data: &mut [u8], _: Size) -> Result<usize> {
-        Self::opening(context, AccessFlags::Read)?;
-        match self.read_inner(data, None, None) {
-            Poll::Ready(result) => result,
-            Poll::Pending => unreachable!(),
-        }
-    }
-    fn poll_read(
+
+    fn read(
         &self,
         context: &mut Context,
         cx: &mut TaskContext<'_>,
@@ -279,27 +256,18 @@ impl BaseOperations for Pipe {
     fn read_until(
         &self,
         context: &mut Context,
+        cx: &mut TaskContext<'_>,
         data: &mut [u8],
         _: Size,
         delimiter: &[u8],
-    ) -> Result<usize> {
-        Self::opening(context, AccessFlags::Read)?;
+    ) -> Poll<Result<usize>> {
+        let opening = Self::opening(context, AccessFlags::Read)?;
         if delimiter.is_empty() {
-            return Err(Error::InvalidParameter);
+            return Poll::Ready(Err(Error::InvalidParameter));
         }
-        match self.read_inner(data, Some(delimiter), None) {
-            Poll::Ready(result) => result,
-            Poll::Pending => unreachable!(),
-        }
+        self.read_inner(data, Some(delimiter), Some((opening.slot, cx.waker())))
     }
-    fn write(&self, context: &mut Context, data: &[u8], _: Size) -> Result<usize> {
-        Self::opening(context, AccessFlags::Write)?;
-        match self.write_inner(data, None) {
-            Poll::Ready(result) => result,
-            Poll::Pending => unreachable!(),
-        }
-    }
-    fn poll_write(
+    fn write(
         &self,
         context: &mut Context,
         cx: &mut TaskContext<'_>,
@@ -316,44 +284,53 @@ impl MountOperations for Pipe {}
 mod regression_tests {
     extern crate std;
     use super::*;
-    #[task::test]
-    async fn short_read_does_not_pop_beyond_available_bytes() {
+    #[test]
+    fn short_read_does_not_pop_beyond_available_bytes() {
         let pipe = Pipe::new(4);
-        let _reader = pipe.open_context(AccessFlags::Read).unwrap();
-        assert_eq!(pipe.write(b"hi").await.unwrap(), 2);
+        let mut reader = pipe.open_context(AccessFlags::Read).unwrap();
+        let mut writer = pipe.open_context(AccessFlags::Write).unwrap();
+        assert_eq!(pipe.write_sync(&mut writer, b"hi", 0).unwrap(), 2);
         let mut output = [0; 8];
-        assert_eq!(pipe.read(&mut output).await.unwrap(), 2);
+        assert_eq!(pipe.read_sync(&mut reader, &mut output, 0).unwrap(), 2);
         assert_eq!(&output[..2], b"hi");
     }
-    #[task::test]
-    async fn writes_are_bounded_by_the_configured_capacity() {
+    #[test]
+    fn writes_are_bounded_by_the_configured_capacity() {
         let pipe = Pipe::new(4);
         let _reader = pipe.open_context(AccessFlags::Read).unwrap();
-        assert_eq!(pipe.write(b"abcdef").await.unwrap(), 4);
-        assert!(matches!(pipe.write(b"x").await, Err(Error::RessourceBusy)));
+        let mut writer = pipe.open_context(AccessFlags::Write).unwrap();
+        assert_eq!(pipe.write_sync(&mut writer, b"abcdef", 0).unwrap(), 4);
+        assert_eq!(
+            pipe.write_sync(&mut writer, b"x", 0),
+            Err(Error::RessourceBusy)
+        );
     }
-    #[task::test]
-    async fn eof_waits_for_every_writer_and_preserves_buffered_data() {
+    #[test]
+    fn eof_waits_for_every_writer_and_preserves_buffered_data() {
         let pipe = Pipe::new(4);
         let mut reader = pipe.open_context(AccessFlags::Read).unwrap();
         let mut writer = pipe.open_context(AccessFlags::Write).unwrap();
         let mut duplicate = pipe.clone_context(&writer).unwrap();
-        assert!(matches!(
-            pipe.read(&mut [0; 1]).await,
+        assert_eq!(
+            pipe.read_sync(&mut reader, &mut [0; 1], 0),
             Err(Error::RessourceBusy)
-        ));
-        pipe.write(b"hi").await.unwrap();
+        );
+        pipe.write_sync(&mut writer, b"hi", 0).unwrap();
         pipe.close(&mut writer).unwrap();
         let mut output = [0; 8];
-        assert_eq!(pipe.read(&mut output).await.unwrap(), 2);
-        assert!(matches!(
-            pipe.read(&mut output).await,
+        assert_eq!(pipe.read_sync(&mut reader, &mut output, 0).unwrap(), 2);
+        assert_eq!(
+            pipe.read_sync(&mut reader, &mut output, 0),
             Err(Error::RessourceBusy)
-        ));
+        );
         pipe.close(&mut duplicate).unwrap();
-        assert_eq!(pipe.read(&mut output).await.unwrap(), 0);
+        assert_eq!(pipe.read_sync(&mut reader, &mut output, 0).unwrap(), 0);
         pipe.close(&mut reader).unwrap();
-        assert!(matches!(pipe.write(b"x").await, Err(Error::InputOutput)));
+        let mut writer = pipe.open_context(AccessFlags::Write).unwrap();
+        assert_eq!(
+            pipe.write_sync(&mut writer, b"x", 0),
+            Err(Error::InputOutput)
+        );
     }
 }
 

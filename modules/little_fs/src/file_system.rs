@@ -347,22 +347,28 @@ impl BaseOperations for FileSystem {
     fn read(
         &self,
         context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
         buffer: &mut [u8],
         absolute_position: Size,
-    ) -> Result<usize> {
-        self.operation_with_context(context, |file_system, file: &mut File| {
-            file.read(file_system, buffer, absolute_position)
+    ) -> core::task::Poll<Result<usize>> {
+        file_system::ready(|| {
+            self.operation_with_context(context, |file_system, file: &mut File| {
+                file.read(file_system, buffer, absolute_position)
+            })
         })
     }
 
     fn write(
         &self,
         context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
         buffer: &[u8],
         absolute_position: Size,
-    ) -> Result<usize> {
-        self.operation_with_context(context, |file_system, file: &mut File| {
-            file.write(file_system, buffer, absolute_position)
+    ) -> core::task::Poll<Result<usize>> {
+        file_system::ready(|| {
+            self.operation_with_context(context, |file_system, file: &mut File| {
+                file.write(file_system, buffer, absolute_position)
+            })
         })
     }
 
@@ -377,9 +383,15 @@ impl BaseOperations for FileSystem {
         })
     }
 
-    fn flush(&self, context: &mut Context) -> Result<()> {
-        self.operation_with_context(context, |file_system, file: &mut File| {
-            file.flush(file_system)
+    fn flush(
+        &self,
+        context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Result<()>> {
+        file_system::ready(|| {
+            self.operation_with_context(context, |file_system, file: &mut File| {
+                file.flush(file_system)
+            })
         })
     }
 
@@ -686,7 +698,7 @@ mod tests {
             .unwrap();
         let expected = b"littlefs remount";
         assert_eq!(
-            file_system.write(&mut context, expected, 0).unwrap(),
+            file_system.write_sync(&mut context, expected, 0).unwrap(),
             expected.len()
         );
         BaseOperations::close(&file_system, &mut context).unwrap();
@@ -700,7 +712,7 @@ mod tests {
             .unwrap();
         let mut actual = [0; 16];
         assert_eq!(
-            BaseOperations::read(&file_system, &mut context, &mut actual, 0).unwrap(),
+            BaseOperations::read_sync(&file_system, &mut context, &mut actual, 0).unwrap(),
             expected.len()
         );
         assert_eq!(&actual, expected);

@@ -109,23 +109,35 @@ fn render_cpuinfo_text() -> String {
 }
 
 impl DirectBaseOperations for CpuInformationsDevice {
-    fn read(&self, buffer: &mut [u8], absolute_position: Size) -> Result<usize> {
-        let content = render_cpuinfo_text();
-        let bytes = content.as_bytes();
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        absolute_position: Size,
+    ) -> core::task::Poll<Result<usize>> {
+        file_system::ready(|| {
+            let content = render_cpuinfo_text();
+            let bytes = content.as_bytes();
 
-        let start = usize::try_from(absolute_position).unwrap_or(usize::MAX);
-        if start >= bytes.len() {
-            return Ok(0);
-        }
+            let start = usize::try_from(absolute_position).unwrap_or(usize::MAX);
+            if start >= bytes.len() {
+                return Ok(0);
+            }
 
-        let length = buffer.len().min(bytes.len() - start);
-        buffer[..length].copy_from_slice(&bytes[start..start + length]);
+            let length = buffer.len().min(bytes.len() - start);
+            buffer[..length].copy_from_slice(&bytes[start..start + length]);
 
-        Ok(length)
+            Ok(length)
+        })
     }
 
-    fn write(&self, _: &[u8], _: Size) -> Result<usize> {
-        Err(Error::UnsupportedOperation)
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        _: &[u8],
+        _: Size,
+    ) -> core::task::Poll<Result<usize>> {
+        file_system::ready(|| Err(Error::UnsupportedOperation))
     }
 }
 
@@ -161,17 +173,17 @@ mod tests {
     fn read_uses_absolute_offset_and_handles_eof() {
         let device = CpuInformationsDevice;
         let mut buffer = [0u8; 32];
-        let first = device.read(&mut buffer, 0).unwrap();
+        let first = device.read_sync(&mut buffer, 0).unwrap();
         assert!(first > 0);
 
-        let eof = device.read(&mut buffer, Size::MAX).unwrap();
+        let eof = device.read_sync(&mut buffer, Size::MAX).unwrap();
         assert_eq!(eof, 0);
     }
 
     #[test]
     fn write_is_not_supported() {
         let device = CpuInformationsDevice;
-        let result = device.write(b"ignored", 0);
+        let result = device.write_sync(b"ignored", 0);
         assert!(matches!(result, Err(Error::UnsupportedOperation)));
     }
 }

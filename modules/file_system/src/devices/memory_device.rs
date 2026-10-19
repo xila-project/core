@@ -41,12 +41,12 @@ use crate::{
 ///
 /// // Write some data
 /// let data = b"Hello, Memory Device!";
-/// device.write(data, 0).unwrap();
+/// device.write_sync(data, 0).unwrap();
 ///
 /// // Reset position and read back
 /// device.set_position(0, &Position::Start(0)).unwrap();
 /// let mut buffer = alloc::vec![0u8; data.len()];
-/// device.read(&mut buffer, 0).unwrap();
+/// device.read_sync(&mut buffer, 0).unwrap();
 /// assert_eq!(&buffer, data);
 /// ```
 ///
@@ -135,64 +135,81 @@ impl<const BLOCK_SIZE: u32> DirectBaseOperations for MemoryDevice<BLOCK_SIZE> {
     ///
     /// Reads data from the current position into the provided buffer.
     /// The position is automatically advanced by the number of bytes read.
-    fn read(&self, buffer: &mut [u8], absolute_position: Size) -> Result<usize> {
-        let inner = self
-            .0
-            .try_write()
-            .map_err(|_| crate::Error::RessourceBusy)?;
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        absolute_position: Size,
+    ) -> core::task::Poll<Result<usize>> {
+        crate::ready(|| {
+            let inner = self
+                .0
+                .try_write()
+                .map_err(|_| crate::Error::RessourceBusy)?;
 
-        let absolute_position = absolute_position as usize;
+            let absolute_position = absolute_position as usize;
 
-        let read_size = buffer
-            .len()
-            .min(inner.len().saturating_sub(absolute_position));
-        buffer[..read_size]
-            .copy_from_slice(&inner[absolute_position..absolute_position + read_size]);
-        Ok(read_size as _)
+            let read_size = buffer
+                .len()
+                .min(inner.len().saturating_sub(absolute_position));
+            buffer[..read_size]
+                .copy_from_slice(&inner[absolute_position..absolute_position + read_size]);
+            Ok(read_size as _)
+        })
     }
 
-    fn write(&self, buffer: &[u8], absolute_position: Size) -> Result<usize> {
-        let mut inner = self
-            .0
-            .try_write()
-            .map_err(|_| crate::Error::RessourceBusy)?;
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        absolute_position: Size,
+    ) -> core::task::Poll<Result<usize>> {
+        crate::ready(|| {
+            let mut inner = self
+                .0
+                .try_write()
+                .map_err(|_| crate::Error::RessourceBusy)?;
 
-        let absolute_position = absolute_position as usize;
+            let absolute_position = absolute_position as usize;
 
-        let write_size = buffer
-            .len()
-            .min(inner.len().saturating_sub(absolute_position));
-        inner[absolute_position..absolute_position + write_size]
-            .copy_from_slice(&buffer[..write_size]);
+            let write_size = buffer
+                .len()
+                .min(inner.len().saturating_sub(absolute_position));
+            inner[absolute_position..absolute_position + write_size]
+                .copy_from_slice(&buffer[..write_size]);
 
-        Ok(write_size as _)
+            Ok(write_size as _)
+        })
     }
 
     fn control(
         &self,
+        _cx: &mut core::task::Context<'_>,
         command: crate::ControlCommandIdentifier,
         _: &AnyByLayout,
         output: &mut AnyByLayout,
-    ) -> Result<()> {
-        match command {
-            GET_BLOCK_SIZE::IDENTIFIER => {
-                let output = GET_BLOCK_SIZE::cast_output(output)?;
-                *output = BLOCK_SIZE;
-            }
-            block_device::GET_BLOCK_COUNT::IDENTIFIER => {
-                let output = block_device::GET_BLOCK_COUNT::cast_output(output)?;
+    ) -> core::task::Poll<Result<()>> {
+        crate::ready(|| {
+            match command {
+                GET_BLOCK_SIZE::IDENTIFIER => {
+                    let output = GET_BLOCK_SIZE::cast_output(output)?;
+                    *output = BLOCK_SIZE;
+                }
+                block_device::GET_BLOCK_COUNT::IDENTIFIER => {
+                    let output = block_device::GET_BLOCK_COUNT::cast_output(output)?;
 
-                *output = (self
-                    .0
-                    .try_read()
-                    .map_err(|_| crate::Error::RessourceBusy)?
-                    .len()
-                    / BLOCK_SIZE as usize) as u32;
+                    *output = (self
+                        .0
+                        .try_read()
+                        .map_err(|_| crate::Error::RessourceBusy)?
+                        .len()
+                        / BLOCK_SIZE as usize) as u32;
+                }
+                _ => return Err(Error::UnsupportedOperation),
             }
-            _ => return Err(Error::UnsupportedOperation),
-        }
 
-        Ok(())
+            Ok(())
+        })
     }
 }
 

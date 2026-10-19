@@ -78,70 +78,79 @@ impl<const S: usize, const B: usize, const F: usize, const O: usize, const Q: us
     fn read(
         &self,
         _context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
         _buffer: &mut [u8],
         _absolute_position: Size,
-    ) -> Result<usize> {
-        Err(Error::UnsupportedOperation)
+    ) -> core::task::Poll<Result<usize>> {
+        file_system::ready(|| Err(Error::UnsupportedOperation))
     }
 
     fn write(
         &self,
         context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
         buffer: &[u8],
         _absolute_position: Size,
-    ) -> Result<usize> {
-        self.stream(context)?.write(buffer)
+    ) -> core::task::Poll<Result<usize>> {
+        file_system::ready(|| self.stream(context)?.write(buffer))
     }
 
-    fn flush(&self, context: &mut Context) -> Result<()> {
-        self.stream(context)?.flush()
+    fn flush(
+        &self,
+        context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Result<()>> {
+        file_system::ready(|| self.stream(context)?.flush())
     }
 
     fn control(
         &self,
         context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
         command: ControlCommandIdentifier,
         input: &AnyByLayout,
         output: &mut AnyByLayout,
-    ) -> Result<()> {
-        let stream = self.stream(context)?;
-        match command {
-            SET_CONFIGURATION::IDENTIFIER => {
-                validate_command::<SET_CONFIGURATION>(input, output)?;
-                let configuration = SET_CONFIGURATION::cast_input(input)?;
-                configuration.validate()?;
-                if *configuration != stream.configuration() {
-                    return Err(Error::UnsupportedOperation);
+    ) -> core::task::Poll<Result<()>> {
+        file_system::ready(|| {
+            let stream = self.stream(context)?;
+            match command {
+                SET_CONFIGURATION::IDENTIFIER => {
+                    validate_command::<SET_CONFIGURATION>(input, output)?;
+                    let configuration = SET_CONFIGURATION::cast_input(input)?;
+                    configuration.validate()?;
+                    if *configuration != stream.configuration() {
+                        return Err(Error::UnsupportedOperation);
+                    }
                 }
+                GET_CONFIGURATION::IDENTIFIER => {
+                    validate_command::<GET_CONFIGURATION>(input, output)?;
+                    *GET_CONFIGURATION::cast_output(output)? = stream.configuration();
+                }
+                GET_WRITABLE::IDENTIFIER => {
+                    validate_command::<GET_WRITABLE>(input, output)?;
+                    *GET_WRITABLE::cast_output(output)? =
+                        stream.writable().min(u32::MAX as usize) as u32;
+                }
+                SET_VOLUME::IDENTIFIER => {
+                    validate_command::<SET_VOLUME>(input, output)?;
+                    stream.set_volume(*SET_VOLUME::cast_input(input)?)?;
+                }
+                GET_VOLUME::IDENTIFIER => {
+                    validate_command::<GET_VOLUME>(input, output)?;
+                    *GET_VOLUME::cast_output(output)? = stream.volume()?;
+                }
+                START::IDENTIFIER => {
+                    validate_command::<START>(input, output)?;
+                    stream.start()?;
+                }
+                STOP::IDENTIFIER => {
+                    validate_command::<STOP>(input, output)?;
+                    stream.stop()?;
+                }
+                _ => return Err(Error::UnsupportedOperation),
             }
-            GET_CONFIGURATION::IDENTIFIER => {
-                validate_command::<GET_CONFIGURATION>(input, output)?;
-                *GET_CONFIGURATION::cast_output(output)? = stream.configuration();
-            }
-            GET_WRITABLE::IDENTIFIER => {
-                validate_command::<GET_WRITABLE>(input, output)?;
-                *GET_WRITABLE::cast_output(output)? =
-                    stream.writable().min(u32::MAX as usize) as u32;
-            }
-            SET_VOLUME::IDENTIFIER => {
-                validate_command::<SET_VOLUME>(input, output)?;
-                stream.set_volume(*SET_VOLUME::cast_input(input)?)?;
-            }
-            GET_VOLUME::IDENTIFIER => {
-                validate_command::<GET_VOLUME>(input, output)?;
-                *GET_VOLUME::cast_output(output)? = stream.volume()?;
-            }
-            START::IDENTIFIER => {
-                validate_command::<START>(input, output)?;
-                stream.start()?;
-            }
-            STOP::IDENTIFIER => {
-                validate_command::<STOP>(input, output)?;
-                stream.stop()?;
-            }
-            _ => return Err(Error::UnsupportedOperation),
-        }
-        Ok(())
+            Ok(())
+        })
     }
 
     fn clone_context(&self, _context: &Context) -> Result<Context> {

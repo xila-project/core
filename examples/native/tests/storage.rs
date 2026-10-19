@@ -35,7 +35,7 @@ impl Fixture {
         let fs =
             xila::little_fs::FileSystem::new_format(Box::leak(Box::new(partition)), 256).unwrap();
         drop(fs);
-        drive.flush().unwrap();
+        drive.flush_sync().unwrap();
         Self(path)
     }
 }
@@ -59,7 +59,7 @@ fn imports_once_and_preserves_existing_disk_without_seed() {
         .create_file(xila::file_system::Path::from_str("/user-kept-file"))
         .unwrap();
     drop(filesystem);
-    drive.flush().unwrap();
+    drive.flush_sync().unwrap();
     fs::remove_file(&seed).unwrap();
     let before = fs::read(&disk).unwrap();
     assert!(!storage::prepare_disk(&disk, &seed, SIZE).unwrap());

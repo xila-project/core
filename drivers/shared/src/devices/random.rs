@@ -3,14 +3,26 @@ use file_system::{DirectBaseOperations, DirectCharacterDevice, MountOperations, 
 pub struct RandomDevice;
 
 impl DirectBaseOperations for RandomDevice {
-    fn read(&self, buffer: &mut [u8], _: Size) -> file_system::Result<usize> {
-        getrandom::fill(buffer).map_err(|_| file_system::Error::Other)?;
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            getrandom::fill(buffer).map_err(|_| file_system::Error::Other)?;
 
-        Ok(buffer.len())
+            Ok(buffer.len())
+        })
     }
 
-    fn write(&self, _: &[u8], _: Size) -> file_system::Result<usize> {
-        Err(file_system::Error::UnsupportedOperation)
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        _: &[u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
     }
 
     fn set_position(

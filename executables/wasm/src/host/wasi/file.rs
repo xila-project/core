@@ -283,32 +283,45 @@ mod tests {
     impl DirectCharacterDevice for ControlDevice {}
 
     impl DirectBaseOperations for ControlDevice {
-        fn read(&self, _: &mut [u8], _: Size) -> file_system::Result<usize> {
-            Err(file_system::Error::UnsupportedOperation)
+        fn read(
+            &self,
+            _cx: &mut core::task::Context<'_>,
+            _: &mut [u8],
+            _: Size,
+        ) -> core::task::Poll<file_system::Result<usize>> {
+            xila::file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
         }
 
-        fn write(&self, buffer: &[u8], _: Size) -> file_system::Result<usize> {
-            Ok(buffer.len())
+        fn write(
+            &self,
+            _cx: &mut core::task::Context<'_>,
+            buffer: &[u8],
+            _: Size,
+        ) -> core::task::Poll<file_system::Result<usize>> {
+            xila::file_system::ready(|| Ok(buffer.len()))
         }
 
         fn control(
             &self,
+            _cx: &mut core::task::Context<'_>,
             command: ControlCommandIdentifier,
             input: &AnyByLayout,
             output: &mut AnyByLayout,
-        ) -> file_system::Result<()> {
-            CONTROL_CALLS.fetch_add(1, Ordering::SeqCst);
-            if command != CONTROL {
-                return Err(file_system::Error::UnsupportedOperation);
-            }
-            let input = input
-                .cast::<u32>()
-                .ok_or(file_system::Error::InvalidParameter)?;
-            let output = output
-                .cast_mutable::<u32>()
-                .ok_or(file_system::Error::InvalidParameter)?;
-            *output = input.wrapping_add(1);
-            Ok(())
+        ) -> core::task::Poll<file_system::Result<()>> {
+            xila::file_system::ready(|| {
+                CONTROL_CALLS.fetch_add(1, Ordering::SeqCst);
+                if command != CONTROL {
+                    return Err(file_system::Error::UnsupportedOperation);
+                }
+                let input = input
+                    .cast::<u32>()
+                    .ok_or(file_system::Error::InvalidParameter)?;
+                let output = output
+                    .cast_mutable::<u32>()
+                    .ok_or(file_system::Error::InvalidParameter)?;
+                *output = input.wrapping_add(1);
+                Ok(())
+            })
         }
     }
 
