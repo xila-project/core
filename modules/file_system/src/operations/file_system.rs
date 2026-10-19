@@ -3,6 +3,16 @@ use crate::{
 };
 
 pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOperations {
+    /// Return the fields this backend can accept through `set_attributes`.
+    ///
+    /// This is a capability hint for VFS-managed default metadata during file
+    /// creation and open. Explicit attribute mutations still call
+    /// `set_attributes` and receive the backend's normal errors. Existing
+    /// implementations default to the historical all-fields behavior.
+    fn writable_attributes(&self) -> crate::AttributeFlags {
+        crate::AttributeFlags::all()
+    }
+
     fn lookup_directory(&self, context: &mut Context, path: &Path) -> Result<()>;
 
     fn lookup_file(&self, context: &mut Context, path: &Path, flags: Flags) -> Result<()>;
@@ -61,8 +71,22 @@ pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOper
 
     // - Statistics
 
+    /// Populate the requested attributes for a path.
+    ///
+    /// On entry, `attributes.get_mask()` selects the fields requested by the
+    /// caller. On success, the mask must contain only fields that were both
+    /// requested and populated with meaningful values. Backends may omit
+    /// unavailable fields; they must not fabricate values to satisfy a request.
+    /// An empty mask is a successful no-op.
     fn get_attributes(&self, path: &Path, attributes: &mut Attributes) -> Result<()>;
 
+    /// Change the fields selected by `attributes.get_mask()` for a path.
+    ///
+    /// An empty mask is a successful no-op. If any requested field is
+    /// unsupported, the operation must return [`crate::Error::UnsupportedOperation`]
+    /// before changing any supported field. A later backend I/O or permission
+    /// failure may occur after an earlier supported field was changed; this
+    /// operation does not promise rollback for such failures.
     fn set_attributes(&self, path: &Path, attributes: &Attributes) -> Result<()>;
 }
 
@@ -161,8 +185,29 @@ pub mod tests {
 
     use super::*;
     use crate::{
-        AccessFlags, Attributes, BaseOperations, Context, Error, Kind, Permissions, Size, Time,
+        AccessFlags, AttributeFlags, Attributes, BaseOperations, Context, Error, Kind, Permissions,
+        Size, Time,
     };
+    use users::{GroupIdentifier, UserIdentifier};
+
+    /// Attribute capabilities used by the generic test suite.
+    ///
+    /// This is test configuration only; it is not a runtime query on
+    /// [`FileSystemOperations`].
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct FileSystemTestCapabilities {
+        pub readable: AttributeFlags,
+        pub writable: AttributeFlags,
+    }
+
+    impl Default for FileSystemTestCapabilities {
+        fn default() -> Self {
+            Self {
+                readable: AttributeFlags::all(),
+                writable: AttributeFlags::all(),
+            }
+        }
+    }
 
     /// Generic test suite for file system operations.
     ///
@@ -367,31 +412,121 @@ pub mod tests {
     where
         F: FileSystemOperations,
     {
-        let test_file = Path::new("/attr_test.txt");
+        test_attribute_operations_with_capabilities(fs, FileSystemTestCapabilities::default());
+    }
 
-        // Create test file
+    /// Test attribute operations for a backend with explicitly configured
+    /// readable and writable fields.
+    pub fn test_attribute_operations_with_capabilities<F>(
+        fs: &F,
+        capabilities: FileSystemTestCapabilities,
+    ) where
+        F: FileSystemOperations,
+    {
+        let test_file = Path::new("/attr_test.txt");
         fs.create_file(test_file).unwrap();
 
-        // Modify and set attributes
-        let new_attrs = Attributes::new()
+        let writable = capabilities.writable.intersection(AttributeFlags::all());
+        let readable = capabilities.readable.intersection(AttributeFlags::all());
+        let expected = Attributes::new()
+            .set_size(0)
             .set_permissions(Permissions::ALL_READ_WRITE)
             .set_kind(Kind::File)
-            .set_user(UserIdentifier::ROOT)
+            .set_user(UserIdentifier::new(42))
+            .set_group(GroupIdentifier::new(43))
             .set_inode(42)
-            .set_status(Time::new(0));
+            .set_creation(Time::new(1))
+            .set_modification(Time::new(2))
+            .set_access(Time::new(3))
+            .set_status(Time::new(4));
 
-        FileSystemOperations::set_attributes(fs, test_file, &new_attrs).unwrap();
+        let mut requested_write = expected.clone().set_mask(writable);
+        FileSystemOperations::set_attributes(fs, test_file, &requested_write).unwrap();
 
-        // Get attributes
-        let mut attrs = Attributes::new();
-        FileSystemOperations::get_attributes(fs, test_file, &mut attrs).unwrap();
+        // Empty masks are no-ops.
+        requested_write = requested_write.set_mask(AttributeFlags::empty());
+        FileSystemOperations::set_attributes(fs, test_file, &requested_write).unwrap();
 
-        // Verify attributes were changed
-        let mut updated_attrs = Attributes::new();
-        FileSystemOperations::get_attributes(fs, test_file, &mut updated_attrs).unwrap();
+        let mut actual = Attributes::new().set_mask(readable);
+        FileSystemOperations::get_attributes(fs, test_file, &mut actual).unwrap();
+        assert_eq!(
+            actual.get_mask(),
+            readable,
+            "backend returned an inaccurate attribute mask"
+        );
+        assert_attribute_values(&expected, &actual, readable.intersection(writable));
+        if readable.contains(AttributeFlags::Size) {
+            assert_eq!(
+                actual.get_size(),
+                Some(&0),
+                "new file should have size zero"
+            );
+        }
 
-        // Cleanup
+        let subset = readable.intersection(AttributeFlags::Kind | AttributeFlags::Size);
+        if !subset.is_empty() {
+            let mut subset_result = Attributes::new().set_mask(subset);
+            FileSystemOperations::get_attributes(fs, test_file, &mut subset_result).unwrap();
+            assert_eq!(
+                subset_result.get_mask(),
+                subset,
+                "backend ignored the requested read mask"
+            );
+            if subset.contains(AttributeFlags::Kind) {
+                assert_eq!(subset_result.get_kind(), Some(&Kind::File));
+            }
+            if subset.contains(AttributeFlags::Size) {
+                assert_eq!(subset_result.get_size(), Some(&0));
+            }
+        }
+
+        let unsupported = AttributeFlags::all().difference(writable);
+        if !unsupported.is_empty() {
+            let changed = Attributes::new()
+                .set_permissions(Permissions::NONE)
+                .set_kind(Kind::Directory)
+                .set_user(UserIdentifier::ROOT)
+                .set_group(GroupIdentifier::ROOT)
+                .set_inode(99)
+                .set_creation(Time::new(11))
+                .set_modification(Time::new(12))
+                .set_access(Time::new(13))
+                .set_status(Time::new(14))
+                .set_mask(AttributeFlags::all());
+            assert!(matches!(
+                FileSystemOperations::set_attributes(fs, test_file, &changed),
+                Err(Error::UnsupportedOperation)
+            ));
+
+            let mut after_rejection = Attributes::new().set_mask(readable);
+            FileSystemOperations::get_attributes(fs, test_file, &mut after_rejection).unwrap();
+            assert_eq!(after_rejection.get_mask(), readable);
+            assert_attribute_values(&expected, &after_rejection, readable.intersection(writable));
+        }
+
         fs.remove(test_file).unwrap();
+    }
+
+    fn assert_attribute_values(expected: &Attributes, actual: &Attributes, mask: AttributeFlags) {
+        macro_rules! assert_field {
+            ($flag:expr, $getter:ident) => {
+                if mask.contains($flag) {
+                    assert_eq!(actual.$getter(), expected.$getter());
+                }
+            };
+        }
+
+        assert_field!(AttributeFlags::Inode, get_inode);
+        assert_field!(AttributeFlags::Kind, get_kind);
+        assert_field!(AttributeFlags::Size, get_size);
+        assert_field!(AttributeFlags::Links, get_links);
+        assert_field!(AttributeFlags::CreationTime, get_creation);
+        assert_field!(AttributeFlags::ModificationTime, get_modification);
+        assert_field!(AttributeFlags::AccessTime, get_access);
+        assert_field!(AttributeFlags::StatusTime, get_status);
+        assert_field!(AttributeFlags::Permissions, get_permissions);
+        assert_field!(AttributeFlags::User, get_user);
+        assert_field!(AttributeFlags::Group, get_group);
     }
 
     /// Test attribute operations on directories
@@ -405,7 +540,7 @@ pub mod tests {
         fs.create_directory(test_dir).unwrap();
 
         // Get directory attributes
-        let mut attrs = Attributes::new();
+        let mut attrs = Attributes::new().set_mask(AttributeFlags::Kind);
         FileSystemOperations::get_attributes(fs, test_dir, &mut attrs).unwrap();
 
         // Verify it's a directory
@@ -435,7 +570,7 @@ pub mod tests {
         );
 
         // Test getting attributes of non-existent file
-        let mut attrs = Attributes::new();
+        let mut attrs = Attributes::new().set_mask(AttributeFlags::all());
         FileSystemOperations::get_attributes(fs, nonexistent, &mut attrs).unwrap_err();
     }
 
@@ -557,7 +692,7 @@ pub mod tests {
         result.unwrap_err();
 
         // Should be able to get root attributes
-        let mut attrs = Attributes::new();
+        let mut attrs = Attributes::new().set_mask(AttributeFlags::all());
         FileSystemOperations::get_attributes(fs, root, &mut attrs).unwrap();
     }
 
@@ -1220,6 +1355,12 @@ pub mod tests {
     #[macro_export]
     macro_rules! implement_file_system_tests {
         ($fs:expr) => {
+            $crate::implement_file_system_tests!(@impl $fs, None);
+        };
+        ($fs:expr, $attribute_capabilities:expr) => {
+            $crate::implement_file_system_tests!(@impl $fs, Some($attribute_capabilities));
+        };
+        (@impl $fs:expr, $attribute_capabilities:expr) => {
             // Basic file system structure tests
             #[test]
             fn test_file_operations() {
@@ -1267,7 +1408,10 @@ pub mod tests {
             #[test]
             fn test_attribute_operations() {
                 let fs = $fs;
-                $crate::file_system::tests::test_attribute_operations(&fs);
+                match $attribute_capabilities {
+                    Some(capabilities) => $crate::file_system::tests::test_attribute_operations_with_capabilities(&fs, capabilities),
+                    None => $crate::file_system::tests::test_attribute_operations(&fs),
+                }
             }
 
             #[test]
@@ -1419,5 +1563,4 @@ pub mod tests {
         };
     }
     pub use implement_file_system_tests;
-    use users::UserIdentifier;
 }

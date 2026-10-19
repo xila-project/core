@@ -6,13 +6,29 @@ use alloc::vec::Vec;
 use core::ffi::{CStr, c_char};
 
 pub const MAX_STRING_BYTES: usize = 1024;
+pub const MAX_TEXTAREA_BYTES: usize = 4097;
 /// Includes the sentinel. Calculator uses 48 entries.
 pub const MAX_MAP_ENTRIES: usize = 64;
 /// Includes every string's NUL and the native empty-string sentinel.
 pub const MAX_MAP_BYTES: usize = 8192;
 
 pub fn read_c_string<'a>(memory: &'a GuestMemory<'_>, offset: WasmUsize) -> Result<&'a CStr> {
-    for index in 0..MAX_STRING_BYTES {
+    read_c_string_with_limit(memory, offset, MAX_STRING_BYTES)
+}
+
+pub fn read_textarea_string<'a>(
+    memory: &'a GuestMemory<'_>,
+    offset: WasmUsize,
+) -> Result<&'a CStr> {
+    read_c_string_with_limit(memory, offset, MAX_TEXTAREA_BYTES)
+}
+
+fn read_c_string_with_limit<'a>(
+    memory: &'a GuestMemory<'_>,
+    offset: WasmUsize,
+    limit: usize,
+) -> Result<&'a CStr> {
+    for index in 0..limit {
         let address = offset
             .checked_add(index as WasmUsize)
             .ok_or(GraphicsError::InvalidMemory)?;

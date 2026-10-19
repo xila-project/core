@@ -1,0 +1,11 @@
+.git
+.github
+.agents
+.codex
+.devbox
+.dev-environment
+target
+node_modules
+docs
+*.img
+*.log

@@ -2,7 +2,7 @@ use core::{ffi::CStr, mem::MaybeUninit};
 
 use crate::{attributes::InternalAttributes, error::convert_result, littlefs};
 use alloc::{boxed::Box, ffi::CString, string::ToString};
-use file_system::{Attributes, Entry, Kind, Path, Result, Size};
+use file_system::{Attributes, Entry, Error, Kind, Path, Result, Size};
 
 #[repr(transparent)]
 pub struct Directory {
@@ -50,6 +50,11 @@ impl Directory {
     }
 
     pub fn get_attributes(&self, attributes: &mut Attributes) -> Result<()> {
+        let requested = attributes.get_mask();
+        *attributes = attributes
+            .clone()
+            .set_mask(requested.intersection(file_system::AttributeFlags::Kind));
+
         if let Some(kind) = attributes.get_mutable_kind() {
             *kind = file_system::Kind::Directory;
         }
@@ -57,8 +62,12 @@ impl Directory {
         Ok(())
     }
 
-    pub fn set_attributes(&self, _attributes: &Attributes) -> Result<()> {
-        Ok(())
+    pub fn set_attributes(&self, attributes: &Attributes) -> Result<()> {
+        if attributes.get_mask().is_empty() {
+            Ok(())
+        } else {
+            Err(Error::UnsupportedOperation)
+        }
     }
 
     pub fn rewind(&mut self, file_system: &mut littlefs::lfs_t) -> Result<()> {

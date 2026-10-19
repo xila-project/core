@@ -1,6 +1,6 @@
 use core::{fmt::Debug, mem::MaybeUninit};
 
-use file_system::{Attributes, Inode, Kind, Permissions, Result, Time};
+use file_system::{AttributeFlags, Attributes, Error, Inode, Kind, Permissions, Result, Time};
 use users::{GroupIdentifier, UserIdentifier};
 
 #[derive(Clone)]
@@ -38,6 +38,18 @@ impl Debug for InternalAttributes {
 impl InternalAttributes {
     pub const IDENTIFIER: u8 = 1;
 
+    pub const PERSISTED_ATTRIBUTE_FLAGS: AttributeFlags = AttributeFlags::all()
+        .difference(AttributeFlags::Size)
+        .difference(AttributeFlags::Links);
+
+    pub fn validate_attribute_mask(mask: AttributeFlags) -> Result<()> {
+        if mask.difference(Self::PERSISTED_ATTRIBUTE_FLAGS).is_empty() {
+            Ok(())
+        } else {
+            Err(Error::UnsupportedOperation)
+        }
+    }
+
     pub fn new_uninitialized() -> MaybeUninit<Self> {
         MaybeUninit::new(Self {
             inode: 0,
@@ -54,6 +66,10 @@ impl InternalAttributes {
     }
 
     pub fn update_attributes(&self, statistics: &mut Attributes) -> Result<()> {
+        let requested = statistics.get_mask();
+        let available = requested.intersection(Self::PERSISTED_ATTRIBUTE_FLAGS);
+        *statistics = statistics.clone().set_mask(available);
+
         if let Some(inode) = statistics.get_mutable_inode() {
             *inode = self.inode;
         }

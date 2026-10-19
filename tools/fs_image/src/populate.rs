@@ -29,9 +29,14 @@ fn attributes(path: &str, kind: Kind) -> Attributes {
         .set_mask(AttributeFlags::all())
         .set_kind(kind)
         .set_permissions(Permissions::from_octal(permissions).unwrap());
+    // Size and link count are read-only, filesystem-computed attributes.
+    result = result
+        .set_mask(AttributeFlags::all().difference(AttributeFlags::Size | AttributeFlags::Links));
     if matches!(
         path,
-        "/configuration/shared/clock" | "/configuration/shared/pixel_painter"
+        "/configuration/shared/clock"
+            | "/configuration/shared/pixel_painter"
+            | "/configuration/shared/text_editor"
     ) {
         result = result
             .set_user(users::UserIdentifier::new(1000))

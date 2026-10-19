@@ -9,6 +9,9 @@ use users::{GroupIdentifier, UserIdentifier};
 
 pub(super) struct InternalFileSystem {
     pub reference_count: usize,
+    /// Whether this filesystem participates in path resolution. Inactive
+    /// entries remain here while open contexts still hold its static handle.
+    pub is_mounted: bool,
     pub mount_point: PathOwned,
     pub file_system: &'static dyn FileSystemOperations,
 }
@@ -73,6 +76,9 @@ impl VirtualFileSystem {
         let path_components = path.get_components();
 
         for (i, file_system) in file_systems.iter().enumerate() {
+            if !file_system.is_mounted {
+                continue;
+            }
             let mount_point: &Path = file_system.mount_point.as_ref();
             let mount_point_components = mount_point.get_components();
 
@@ -304,16 +310,19 @@ mod tests {
         let file_systems: FileSystemsArray = vec![
             InternalFileSystem {
                 reference_count: 1,
+                is_mounted: true,
                 mount_point: PathOwned::new("/".to_string()).unwrap(),
                 file_system: Box::leak(Box::new(DummyFileSystem)),
             },
             InternalFileSystem {
                 reference_count: 1,
+                is_mounted: true,
                 mount_point: PathOwned::new("/Foo".to_string()).unwrap(),
                 file_system: Box::leak(Box::new(DummyFileSystem)),
             },
             InternalFileSystem {
                 reference_count: 1,
+                is_mounted: true,
                 mount_point: PathOwned::new("/Foo/Bar".to_string()).unwrap(),
                 file_system: Box::leak(Box::new(DummyFileSystem)),
             },
@@ -342,5 +351,37 @@ mod tests {
 
         assert_eq!(i, 1);
         assert_eq!(relative_path, Path::ROOT);
+    }
+
+    #[test]
+    fn path_resolution_skips_detached_mounts_after_remount() {
+        let old = Box::leak(Box::new(DummyFileSystem));
+        let replacement = Box::leak(Box::new(DummyFileSystem));
+        let file_systems: FileSystemsArray = vec![
+            InternalFileSystem {
+                reference_count: 1,
+                is_mounted: true,
+                mount_point: PathOwned::new("/".to_string()).unwrap(),
+                file_system: Box::leak(Box::new(DummyFileSystem)),
+            },
+            InternalFileSystem {
+                reference_count: 2,
+                is_mounted: false,
+                mount_point: PathOwned::new("/Foo".to_string()).unwrap(),
+                file_system: old,
+            },
+            InternalFileSystem {
+                reference_count: 1,
+                is_mounted: true,
+                mount_point: PathOwned::new("/Foo".to_string()).unwrap(),
+                file_system: replacement,
+            },
+        ];
+
+        let (filesystem, relative_path, index) =
+            VirtualFileSystem::get_file_system_from_path(&file_systems, &"/Foo/app").unwrap();
+        assert_eq!(index, 2);
+        assert!(core::ptr::eq(filesystem.file_system, replacement));
+        assert_eq!(relative_path.as_str(), "/app");
     }
 }

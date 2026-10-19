@@ -155,6 +155,10 @@ impl MountOperations for FileSystem {
 }
 
 impl FileSystemOperations for FileSystem {
+    fn writable_attributes(&self) -> file_system::AttributeFlags {
+        InternalAttributes::PERSISTED_ATTRIBUTE_FLAGS
+    }
+
     fn rename(&self, source: &Path, destination: &Path) -> Result<()> {
         self.operation(|file_system| {
             let source = CString::new(source.as_str()).map_err(|_| Error::InvalidParameter)?;
@@ -213,6 +217,11 @@ impl FileSystemOperations for FileSystem {
     }
 
     fn get_attributes(&self, path: &Path, attributes: &mut Attributes) -> Result<()> {
+        let requested = attributes.get_mask();
+        if requested.is_empty() {
+            return Ok(());
+        }
+
         self.operation(|file_system| {
             let path = CString::new(path.as_str()).map_err(|_| Error::InvalidParameter)?;
 
@@ -231,14 +240,14 @@ impl FileSystemOperations for FileSystem {
 
             internal_attributes.update_attributes(attributes)?;
 
-            if let Some(size) = attributes.get_mutable_size() {
+            if requested.contains(AttributeFlags::Size) && internal_attributes.kind == Kind::File {
                 let mut info = littlefs::lfs_info::default();
 
                 convert_result(unsafe {
                     littlefs::lfs_stat(file_system, path.as_ptr(), &mut info)
                 })?;
 
-                *size = info.size as Size;
+                *attributes = attributes.clone().set_size(info.size as Size);
             }
 
             Ok(())
@@ -246,13 +255,19 @@ impl FileSystemOperations for FileSystem {
     }
 
     fn set_attributes(&self, path: &Path, attributes: &Attributes) -> Result<()> {
+        let mask = attributes.get_mask();
+        if mask.is_empty() {
+            return Ok(());
+        }
+        InternalAttributes::validate_attribute_mask(mask)?;
+
         self.operation(|file_system| {
             let path = CString::new(path.as_str()).map_err(|_| Error::InvalidParameter)?;
 
             let mut internal_attributes =
                 unsafe { InternalAttributes::new_uninitialized().assume_init() };
 
-            if attributes.get_mask() != AttributeFlags::all() {
+            if mask != InternalAttributes::PERSISTED_ATTRIBUTE_FLAGS {
                 convert_result(unsafe {
                     littlefs::lfs_getattr(
                         file_system,
@@ -283,10 +298,16 @@ impl FileSystemOperations for FileSystem {
 
 impl AttributeOperations for FileSystem {
     fn get_attributes(&self, context: &mut Context, attributes: &mut Attributes) -> Result<()> {
+        if attributes.get_mask().is_empty() {
+            return Ok(());
+        }
+
         if let Some(file) = context.get_private_data_of_type::<SharedContext<File>>() {
-            file.try_lock()
-                .map_err(|_| Error::RessourceBusy)?
-                .get_attributes(attributes)
+            self.operation(|file_system| {
+                file.try_lock()
+                    .map_err(|_| Error::RessourceBusy)?
+                    .get_attributes(file_system, attributes)
+            })
         } else if let Some(directory) =
             context.get_private_data_of_type::<SharedContext<Directory>>()
         {
@@ -300,6 +321,11 @@ impl AttributeOperations for FileSystem {
     }
 
     fn set_attributes(&self, context: &mut Context, attributes: &Attributes) -> Result<()> {
+        let mask = attributes.get_mask();
+        if mask.is_empty() {
+            return Ok(());
+        }
+
         if let Some(file) = context.get_private_data_of_type::<SharedContext<File>>() {
             file.try_lock()
                 .map_err(|_| Error::RessourceBusy)?
@@ -484,7 +510,10 @@ pub fn mount_disk<D: DirectBlockDevice>(
 mod tests {
     extern crate std;
 
-    use file_system::{MemoryDevice, file_system::tests::implement_file_system_tests};
+    use file_system::{
+        AttributeFlags, MemoryDevice,
+        file_system::tests::{FileSystemTestCapabilities, implement_file_system_tests},
+    };
 
     use super::*;
 
@@ -504,7 +533,141 @@ mod tests {
         FileSystem::new(device, CACHE_SIZE).unwrap()
     }
 
-    implement_file_system_tests!(initialize());
+    implement_file_system_tests!(
+        initialize(),
+        FileSystemTestCapabilities {
+            readable: AttributeFlags::all().difference(AttributeFlags::Links),
+            writable: AttributeFlags::all()
+                .difference(AttributeFlags::Size | AttributeFlags::Links),
+        }
+    );
+
+    #[test]
+    fn littlefs_unsupported_attribute_masks_are_rejected_without_mutation() {
+        let fs = initialize();
+        let file = Path::new("/unsupported-attributes.txt");
+        FileSystemOperations::create_file(&fs, file).unwrap();
+
+        let original_permissions = file_system::Permissions::ALL_READ_WRITE;
+        FileSystemOperations::set_attributes(
+            &fs,
+            file,
+            &Attributes::new().set_permissions(original_permissions),
+        )
+        .unwrap();
+
+        for mask in [AttributeFlags::Size, AttributeFlags::Links] {
+            let unsupported = Attributes::new().set_size(12).set_links(2).set_mask(mask);
+            assert_eq!(
+                FileSystemOperations::set_attributes(&fs, file, &unsupported),
+                Err(Error::UnsupportedOperation)
+            );
+        }
+
+        let mixed = Attributes::new()
+            .set_permissions(file_system::Permissions::NONE)
+            .set_size(12)
+            .set_mask(AttributeFlags::Permissions | AttributeFlags::Size);
+        assert_eq!(
+            FileSystemOperations::set_attributes(&fs, file, &mixed),
+            Err(Error::UnsupportedOperation)
+        );
+
+        let mut actual = Attributes::new().set_mask(AttributeFlags::Permissions);
+        FileSystemOperations::get_attributes(&fs, file, &mut actual).unwrap();
+        assert_eq!(actual.get_permissions(), Some(&original_permissions));
+
+        let mut file_context = Context::new_empty();
+        fs.lookup_file(
+            &mut file_context,
+            file,
+            file_system::AccessFlags::Read.into(),
+        )
+        .unwrap();
+        let mut file_attributes = Attributes::new()
+            .set_mask(AttributeFlags::Kind | AttributeFlags::Size | AttributeFlags::Links);
+        AttributeOperations::get_attributes(&fs, &mut file_context, &mut file_attributes).unwrap();
+        assert_eq!(
+            file_attributes.get_mask(),
+            AttributeFlags::Kind | AttributeFlags::Size
+        );
+        assert_eq!(file_attributes.get_kind(), Some(&Kind::File));
+        assert_eq!(file_attributes.get_size(), Some(&0));
+        assert_eq!(
+            AttributeOperations::set_attributes(
+                &fs,
+                &mut file_context,
+                &Attributes::new().set_size(8),
+            ),
+            Err(Error::UnsupportedOperation)
+        );
+        BaseOperations::close(&fs, &mut file_context).unwrap();
+
+        let directory = Path::new("/unsupported-attributes-dir");
+        FileSystemOperations::create_directory(&fs, directory).unwrap();
+        let mut path_directory_attributes = Attributes::new()
+            .set_mask(AttributeFlags::Kind | AttributeFlags::Size | AttributeFlags::Links);
+        FileSystemOperations::get_attributes(&fs, directory, &mut path_directory_attributes)
+            .unwrap();
+        assert_eq!(path_directory_attributes.get_mask(), AttributeFlags::Kind);
+
+        let mut directory_context = Context::new_empty();
+        fs.lookup_directory(&mut directory_context, directory)
+            .unwrap();
+        let mut directory_attributes = Attributes::new()
+            .set_mask(AttributeFlags::Kind | AttributeFlags::Size | AttributeFlags::Links);
+        AttributeOperations::get_attributes(&fs, &mut directory_context, &mut directory_attributes)
+            .unwrap();
+        assert_eq!(directory_attributes.get_mask(), AttributeFlags::Kind);
+        assert_eq!(directory_attributes.get_kind(), Some(&Kind::Directory));
+        assert_eq!(
+            AttributeOperations::set_attributes(
+                &fs,
+                &mut directory_context,
+                &Attributes::new().set_mask(AttributeFlags::Kind),
+            ),
+            Err(Error::UnsupportedOperation)
+        );
+        AttributeOperations::set_attributes(&fs, &mut directory_context, &Attributes::new())
+            .unwrap();
+        DirectoryOperations::close(&fs, &mut directory_context).unwrap();
+
+        assert_eq!(
+            FileSystemOperations::set_attributes(
+                &fs,
+                Path::new("/missing-attributes.txt"),
+                &Attributes::new().set_permissions(file_system::Permissions::NONE),
+            ),
+            Err(Error::NotFound)
+        );
+    }
+
+    #[test]
+    fn littlefs_rejects_unsupported_attribute_all_mask_without_mutation() {
+        let fs = initialize();
+        let file = Path::new("/all-attributes.txt");
+        FileSystemOperations::create_file(&fs, file).unwrap();
+        let original = file_system::Permissions::ALL_READ_WRITE;
+        FileSystemOperations::set_attributes(
+            &fs,
+            file,
+            &Attributes::new().set_permissions(original),
+        )
+        .unwrap();
+
+        let unsupported = Attributes::new()
+            .set_permissions(file_system::Permissions::NONE)
+            .set_inode(999)
+            .set_mask(AttributeFlags::all());
+        assert_eq!(
+            FileSystemOperations::set_attributes(&fs, file, &unsupported),
+            Err(Error::UnsupportedOperation)
+        );
+
+        let mut after_rejection = Attributes::new().set_mask(AttributeFlags::Permissions);
+        FileSystemOperations::get_attributes(&fs, file, &mut after_rejection).unwrap();
+        assert_eq!(after_rejection.get_permissions(), Some(&original));
+    }
 
     #[test]
     fn filesystem_contents_survive_unmount_and_remount() {

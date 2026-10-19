@@ -63,6 +63,7 @@ impl VirtualFileSystem {
     ) -> Self {
         let file_systems = vec![InternalFileSystem {
             reference_count: 1,
+            is_mounted: true,
             mount_point: Path::ROOT.to_owned(),
             file_system: Box::leak(Box::new(root_file_system)),
         }];
@@ -109,23 +110,38 @@ impl VirtualFileSystem {
             return Err(Error::InvalidPath);
         }
 
-        let file_systems = self.file_systems.write().await;
+        let mut file_systems = self.file_systems.write().await;
 
         let parent_path = path.go_parent().ok_or(Error::InvalidPath)?;
 
-        let (underlying_file_system, relative_path, _) =
+        let (underlying_file_system, _, _) =
             Self::get_file_system_from_path(&file_systems, &parent_path)?; // Get the file system identifier and the relative path
+        let relative_path = path
+            .strip_prefix_absolute(&underlying_file_system.mount_point)
+            .ok_or(Error::InvalidPath)?;
 
         let mut attributes =
             Attributes::new().set_mask(AttributeFlags::Kind | AttributeFlags::Inode);
-        Self::get_attributes(underlying_file_system.file_system, path, &mut attributes).await?;
+        Self::get_attributes(
+            underlying_file_system.file_system,
+            relative_path,
+            &mut attributes,
+        )
+        .await?;
 
         let kind = attributes.get_kind().ok_or(Error::MissingAttribute)?;
         let inode = *attributes.get_inode().ok_or(Error::MissingAttribute)?;
 
         match kind {
             Kind::Directory => {
-                let (file_system, _, _) = Self::get_file_system_from_path(&file_systems, &path)?;
+                let mountpoint_index = file_systems
+                    .iter()
+                    .position(|file_system| {
+                        let mount_point: &Path = file_system.mount_point.as_ref();
+                        file_system.is_mounted && mount_point == path
+                    })
+                    .ok_or(Error::InvalidPath)?;
+                let file_system = &file_systems[mountpoint_index];
 
                 if file_system.reference_count > 1 && !force {
                     return Err(Error::RessourceBusy);
@@ -133,6 +149,7 @@ impl VirtualFileSystem {
 
                 underlying_file_system.file_system.remove(relative_path)?;
                 file_system.file_system.unmount()?;
+                file_systems[mountpoint_index].is_mounted = false;
             }
             Kind::BlockDevice => {
                 let mut block_devices = self.block_device.write().await;
@@ -172,7 +189,9 @@ impl VirtualFileSystem {
         let mut character_devices = self.character_device.write().await;
 
         for file_system in file_systems.drain(..) {
-            file_system.file_system.unmount()?;
+            if file_system.is_mounted {
+                file_system.file_system.unmount()?;
+            }
             let _: Box<dyn FileSystemOperations> =
                 unsafe { Box::from_raw(file_system.file_system as *const _ as *mut _) };
         }
@@ -231,6 +250,10 @@ impl VirtualFileSystem {
         }
 
         let attributes = Attributes::new().set_access(time);
+        let mask = attributes
+            .get_mask()
+            .intersection(file_system.file_system.writable_attributes());
+        let attributes = attributes.set_mask(mask);
         Self::set_attributes(file_system.file_system, relative_path, &attributes).await?;
 
         let mut context = Context::new_empty();
@@ -312,6 +335,10 @@ impl VirtualFileSystem {
                 .set_access(time)
                 .set_permissions(Permissions::FILE_DEFAULT)
                 .set_kind(Kind::File);
+            let mask = attributes
+                .get_mask()
+                .intersection(file_system.file_system.writable_attributes());
+            let attributes = attributes.set_mask(mask);
             Self::set_attributes(file_system.file_system, relative_path, &attributes).await?;
         } else {
             return Err(Error::FileSystem(file_system::Error::NotFound));
@@ -325,11 +352,15 @@ impl VirtualFileSystem {
         } else {
             Attributes::new().set_access(time)
         };
+        let mask = attributes
+            .get_mask()
+            .intersection(file_system.file_system.writable_attributes());
+        let attributes = attributes.set_mask(mask);
         Self::set_attributes(file_system.file_system, relative_path, &attributes).await?;
 
         let mut attributes =
             Attributes::new().set_mask(AttributeFlags::Inode | AttributeFlags::Kind);
-        Self::get_attributes(file_system.file_system, path, &mut attributes).await?;
+        Self::get_attributes(file_system.file_system, relative_path, &mut attributes).await?;
 
         let kind = attributes.get_kind().ok_or(Error::MissingAttribute)?;
         let inode = *attributes.get_inode().ok_or(Error::MissingAttribute)?;
@@ -415,25 +446,46 @@ impl VirtualFileSystem {
 
         let mut file_systems = self.file_systems.write().await; // Get the file systems
 
+        if file_systems.iter().any(|file_system| {
+            let mount_point: &Path = file_system.mount_point.as_ref();
+            file_system.is_mounted && mount_point == path
+        }) {
+            return Err(Error::AlreadyExists);
+        }
+
         let (parent_file_system, relative_path, _) =
             Self::get_mutable_file_system_from_path(&mut file_systems, &path)?; // Get the file system identifier and the relative path
 
         let (_, user, _) = self.get_time_user_group(task).await?;
 
-        let parent_path = path.go_parent().ok_or(Error::InvalidPath)?;
-
         self.check_permissions(
             parent_file_system.file_system,
-            parent_path,
+            relative_path.go_parent().ok_or(Error::InvalidPath)?,
             Permission::Write,
             user,
         )
         .await?;
 
         if let ItemStatic::FileSystem(_) = item {
-            parent_file_system
+            match parent_file_system
                 .file_system
-                .create_directory(relative_path)?;
+                .create_directory(relative_path)
+            {
+                Ok(()) => {}
+                Err(file_system::Error::AlreadyExists) => {
+                    let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
+                    Self::get_attributes(
+                        parent_file_system.file_system,
+                        relative_path,
+                        &mut attributes,
+                    )
+                    .await?;
+                    if attributes.get_kind() != Some(&Kind::Directory) {
+                        return Err(Error::AlreadyExists);
+                    }
+                }
+                Err(error) => return Err(error.into()),
+            }
         } else {
             parent_file_system.file_system.create_file(relative_path)?;
         }
@@ -496,15 +548,11 @@ impl VirtualFileSystem {
             .set_kind(underlying_kind)
             .set_permissions(Permissions::DEVICE_DEFAULT)
             .set_inode(inode);
+        let mask = attributes
+            .get_mask()
+            .intersection(parent_file_system.file_system.writable_attributes());
+        let attributes = attributes.set_mask(mask);
         Self::set_attributes(parent_file_system.file_system, relative_path, &attributes).await?;
-
-        if let ItemStatic::FileSystem(file_system) = item {
-            file_systems.push(InternalFileSystem {
-                reference_count: 1,
-                mount_point: path.to_owned(),
-                file_system,
-            });
-        }
 
         poll(|| {
             Ok(item
@@ -513,6 +561,15 @@ impl VirtualFileSystem {
                 .mount()?)
         })
         .await?;
+
+        if let ItemStatic::FileSystem(file_system) = item {
+            file_systems.push(InternalFileSystem {
+                reference_count: 1,
+                is_mounted: true,
+                mount_point: path.to_owned(),
+                file_system,
+            });
+        }
 
         Ok(())
     }
@@ -596,7 +653,7 @@ impl VirtualFileSystem {
 
         self.check_permissions(
             file_system.file_system,
-            path.as_ref().go_parent().ok_or(Error::InvalidPath)?,
+            relative_path.go_parent().ok_or(Error::InvalidPath)?,
             Permission::Write,
             user,
         )
@@ -605,7 +662,7 @@ impl VirtualFileSystem {
         let mut attributes =
             Attributes::new().set_mask(AttributeFlags::Kind | AttributeFlags::Inode);
 
-        Self::get_attributes(file_system.file_system, path.as_ref(), &mut attributes).await?;
+        Self::get_attributes(file_system.file_system, relative_path, &mut attributes).await?;
 
         let inode = *attributes.get_inode().ok_or(Error::MissingAttribute)?;
         let kind = attributes.get_kind().ok_or(Error::MissingAttribute)?;
@@ -635,7 +692,7 @@ impl VirtualFileSystem {
         // Get the parent directory attributes
         self.check_permissions(
             file_system.file_system,
-            path.as_ref().go_parent().ok_or(Error::InvalidPath)?,
+            relative_path.go_parent().ok_or(Error::InvalidPath)?,
             Permission::Write,
             user,
         )
@@ -662,8 +719,12 @@ impl VirtualFileSystem {
             .set_status(time)
             .set_kind(Kind::Directory)
             .set_permissions(Permissions::DIRECTORY_DEFAULT);
+        let mask = attributes
+            .get_mask()
+            .intersection(file_system.file_system.writable_attributes());
+        let attributes = attributes.set_mask(mask);
 
-        Self::set_attributes(file_system.file_system, path.as_ref(), &attributes).await?;
+        Self::set_attributes(file_system.file_system, relative_path, &attributes).await?;
 
         Ok(())
     }

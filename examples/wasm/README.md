@@ -21,7 +21,7 @@ Use localhost or HTTPS in a browser supporting OPFS,
 
 ## Running guest WebAssembly applications
 
-Calculator, Clock, Pixel Painter and Synth are provisioned in `seed.img` at build time,
+Calculator, Clock, Pixel Painter, Text Editor and Synth are provisioned in `seed.img` at build time,
 along with their shortcuts. The first startup streams this image into the disk
 cache only when the selected OPFS file is absent or zero bytes. It validates and
 mounts LittleFS before account initialization and the first persistent commit.
@@ -39,12 +39,13 @@ open; browser background-tab throttling can delay them.
 On a fresh disk, log in as **administrator** with an empty password; otherwise
 use your saved credentials. Open the application drawer using the Xila button
 in the dock. Select
-**Calculator**, **Clock**, **Pixel Painter** or **Synth**. They can also be launched from Xila's terminal:
+**Calculator**, **Clock**, **Pixel Painter**, **Text Editor** or **Synth**. Text Editor uses a temporary on-disk working copy and edits UTF-8-safe 4 KiB pages. They can also be launched from Xila's terminal:
 
 ```text
 /binaries/wasm /binaries/calculator
 /binaries/wasm /binaries/clock
 /binaries/wasm /binaries/pixel_painter
+/binaries/wasm /binaries/text_editor
 /binaries/wasm /binaries/synth
 ```
 

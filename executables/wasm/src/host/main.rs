@@ -26,8 +26,11 @@ const INSTALL_FUNCTION_NAME: &str = "__install";
 
 #[cfg(test)]
 mod parser_tests {
-    use super::WasmArguments;
-    use alloc::string::ToString;
+    use super::{WasmArguments, split_guest_arguments};
+    use alloc::{
+        string::{String, ToString},
+        vec,
+    };
 
     #[test]
     fn defaults_and_install_flag_preserve_existing_behavior() {
@@ -91,6 +94,34 @@ mod parser_tests {
                 .contains("similar argument exists: '--install'")
         );
     }
+
+    #[test]
+    fn separates_guest_arguments_from_wasm_runner_options() {
+        let arguments = vec![
+            "--instruction-limit".to_string(),
+            "42".to_string(),
+            "/application/app.wasm".to_string(),
+            "--".to_string(),
+            "first".to_string(),
+            "--guest-option".to_string(),
+        ];
+        let (runner, guest) = split_guest_arguments(&arguments);
+        assert_eq!(runner.len(), 3);
+        assert_eq!(
+            guest,
+            &[String::from("first"), String::from("--guest-option")]
+        );
+        let parsed =
+            WasmArguments::from_args(runner.iter().map(|argument| argument.as_str())).unwrap();
+        assert_eq!(parsed.path, "/application/app.wasm");
+    }
+
+    #[test]
+    fn guest_exit_status_preserves_representable_codes() {
+        assert!(super::guest_exit_status(0).is_ok());
+        assert_eq!(super::guest_exit_status(7).unwrap_err().get(), 7);
+        assert_eq!(super::guest_exit_status(300).unwrap_err().get(), 255);
+    }
 }
 
 #[derive(GetArgs)]
@@ -117,7 +148,8 @@ pub async fn main(
     mut standard: Standard<'static>,
     arguments: Vec<String>,
 ) -> core::result::Result<(), NonZeroUsize> {
-    let arguments = match WasmArguments::from_args(arguments.iter().map(|s| s.as_str())) {
+    let (runtime_arguments, guest_arguments) = split_guest_arguments(&arguments);
+    let arguments = match WasmArguments::from_args(runtime_arguments.iter().map(|s| s.as_str())) {
         Ok(args) => args,
         Err(error) if error.is_help() || error.is_version() => {
             writeln!(standard.out(), "{error}").ok();
@@ -129,14 +161,36 @@ pub async fn main(
         }
     };
 
-    main_inner(standard.duplicate().await.unwrap(), arguments)
-        .await
-        .map_err(|e| {
-            writeln!(standard.error(), "Error: {:?}", e).unwrap();
-            NonZeroUsize::new(1).unwrap()
-        })?;
+    match main_inner(
+        standard.duplicate().await.unwrap(),
+        arguments,
+        guest_arguments.to_vec(),
+    )
+    .await
+    {
+        Ok(()) | Err(Error::Runtime(0)) => Ok(()),
+        Err(Error::Runtime(code)) => guest_exit_status(code),
+        Err(Error::Interrupted) => Err(NonZeroUsize::new(1).unwrap()),
+        Err(error) => {
+            writeln!(standard.error(), "Error: {:?}", error).unwrap();
+            Err(NonZeroUsize::new(1).unwrap())
+        }
+    }
+}
 
-    Ok(())
+fn guest_exit_status(code: i32) -> core::result::Result<(), NonZeroUsize> {
+    if code == 0 {
+        Ok(())
+    } else {
+        Err(NonZeroUsize::new(code.clamp(1, 255) as usize).unwrap())
+    }
+}
+
+fn split_guest_arguments(arguments: &[String]) -> (&[String], &[String]) {
+    match arguments.iter().position(|argument| argument == "--") {
+        Some(separator) => (&arguments[..separator], &arguments[separator + 1..]),
+        None => (arguments, &[]),
+    }
 }
 
 async fn read_file(path: &str, context: &'static ExecutableContext) -> Result<Vec<u8>> {
@@ -159,7 +213,11 @@ async fn read_file(path: &str, context: &'static ExecutableContext) -> Result<Ve
     Ok(buffer)
 }
 
-async fn main_inner(standard: Standard<'static>, arguments: WasmArguments<'_>) -> Result<()> {
+async fn main_inner(
+    standard: Standard<'static>,
+    arguments: WasmArguments<'_>,
+    guest_arguments: Vec<String>,
+) -> Result<()> {
     let context = standard.context;
     let WasmArguments {
         path,
@@ -199,7 +257,11 @@ async fn main_inner(standard: Standard<'static>, arguments: WasmArguments<'_>) -
             wasi: WasiContext {
                 files: alloc::collections::BTreeMap::new(),
                 next_fd: 3,
-                arguments: alloc::vec![path.to_string()],
+                arguments: {
+                    let mut arguments = alloc::vec![path.to_string()];
+                    arguments.extend(guest_arguments);
+                    arguments
+                },
                 environment: context
                     .task_manager
                     .get_environment_variables(task)
