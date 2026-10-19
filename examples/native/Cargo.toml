@@ -20,13 +20,14 @@ debug_application = { workspace = true }
 drivers_core = { workspace = true }
 drivers_std = { workspace = true }
 drivers_shared = { workspace = true }
-drivers_native = { workspace = true, features = ["audio"] }
-audio = { workspace = true }
+drivers_native = { workspace = true }
+audio = { workspace = true, optional = true }
 getargs = { version = "0.5" }
 getargs-derive = { workspace = true }
 
 [features]
 default = []
+audio = ["dep:audio", "drivers_native/audio"]
 # Compatibility flag: bundled applications now always come from the seed.
 prebuilt-applications = []
 profiling = ["drivers_std/profiling", "prebuilt-applications"]
