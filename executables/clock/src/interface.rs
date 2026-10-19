@@ -485,8 +485,14 @@ impl Interface {
         };
         let mut laps = String::new();
         if active == 2 {
+            use core::fmt::Write;
+            let count = self.watch.laps().len();
+            if count != 0 {
+                // Compiled locale forms; selection does not allocate.
+                let _ = embedded_i18n::translate_plural_write!(&mut laps, "Recorded laps", count);
+                laps.push('\n');
+            }
             for (index, lap) in self.watch.laps().iter().enumerate() {
-                use core::fmt::Write;
                 let _ = writeln!(laps, "{}: {}", index + 1, format_duration(*lap, true));
             }
         }
