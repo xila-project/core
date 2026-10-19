@@ -3,6 +3,7 @@ use alloc::{
     vec,
     vec::Vec,
 };
+use core::str;
 use file_system::DirectCharacterDevice;
 use synchronization::blocking_mutex::raw::CriticalSectionRawMutex;
 use synchronization::mutex::{Mutex, MutexGuard};
@@ -38,6 +39,16 @@ pub fn ffi_manager() -> &'static Manager {
     unsafe { &*manager }
 }
 
+/// Return the graphics capability when initialized, without panicking during startup.
+pub fn try_ffi_manager() -> Option<&'static Manager> {
+    let manager = FFI_GRAPHICS_MANAGER.load(Ordering::Acquire);
+    if manager.is_null() {
+        None
+    } else {
+        Some(unsafe { &*manager })
+    }
+}
+
 pub async fn initialize(
     time_manager: &'static time::Manager<'static>,
     screen_device: &'static dyn DirectCharacterDevice,
@@ -69,10 +80,172 @@ pub struct Manager {
     global_lock: Mutex<CriticalSectionRawMutex, ()>,
 }
 
+/// A bounded, pointer-free description of one LVGL object.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UiElement {
+    /// Position in the depth-first snapshot, valid only for that snapshot.
+    pub id: u32,
+    pub parent_id: Option<u32>,
+    pub role: String,
+    pub text: Option<String>,
+    /// Inclusive screen coordinates `(x1, y1, x2, y2)`.
+    pub bounds: (i32, i32, i32, i32),
+}
+
+/// Bounds for UI tree snapshots. These limits keep diagnostics safe on small targets.
+pub const UI_TREE_MAX_ELEMENTS: usize = 256;
+pub const UI_TREE_MAX_DEPTH: usize = 24;
+const UI_ELEMENT_MAX_TEXT_BYTES: usize = 512;
+
 impl Manager {
+    /// Snapshot a bounded depth-first view of the currently mounted UI tree.
+    ///
+    /// Element IDs are indexes into this snapshot and must not be retained across
+    /// snapshots. No LVGL pointer is returned to the caller.
+    pub async fn inspect_ui_tree(
+        &self,
+        max_elements: usize,
+        max_depth: usize,
+    ) -> Result<Vec<UiElement>> {
+        validate_ui_tree_limits(max_elements, max_depth)?;
+
+        let _lock = self.global_lock.lock().await;
+        let inner = self.inner.read().await;
+        if inner.window_parent.is_null() {
+            return Err(Error::NotAvailable);
+        }
+
+        let mut elements = Vec::with_capacity(max_elements);
+        unsafe {
+            inspect_children(
+                inner.window_parent,
+                None,
+                0,
+                max_depth,
+                max_elements,
+                &mut elements,
+            );
+        }
+        Ok(elements)
+    }
+
     pub fn lock_function_sync<T>(&self, function: impl FnOnce() -> Result<T>) -> Result<T> {
         task::block_on(self.lock_function(function))
     }
+}
+
+fn validate_ui_tree_limits(max_elements: usize, max_depth: usize) -> Result<()> {
+    if max_elements == 0
+        || max_elements > UI_TREE_MAX_ELEMENTS
+        || max_depth == 0
+        || max_depth > UI_TREE_MAX_DEPTH
+    {
+        Err(Error::InvalidParameter)
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod ui_tree_tests {
+    use super::*;
+
+    #[test]
+    fn tree_limits_are_bounded() {
+        assert_eq!(validate_ui_tree_limits(1, 1), Ok(()));
+        assert_eq!(
+            validate_ui_tree_limits(UI_TREE_MAX_ELEMENTS + 1, 1),
+            Err(Error::InvalidParameter)
+        );
+        assert_eq!(
+            validate_ui_tree_limits(1, UI_TREE_MAX_DEPTH + 1),
+            Err(Error::InvalidParameter)
+        );
+        assert_eq!(validate_ui_tree_limits(0, 1), Err(Error::InvalidParameter));
+    }
+}
+
+unsafe fn inspect_children(
+    object: *mut lvgl::lv_obj_t,
+    parent_id: Option<u32>,
+    depth: usize,
+    max_depth: usize,
+    max_elements: usize,
+    elements: &mut Vec<UiElement>,
+) {
+    if object.is_null() || depth >= max_depth || elements.len() >= max_elements {
+        return;
+    }
+
+    let id = elements.len() as u32;
+    let class = unsafe { lvgl::lv_obj_get_class(object) };
+    let role = if class.is_null() {
+        String::from("unknown")
+    } else {
+        unsafe { bounded_c_string((*class).name) }.unwrap_or_else(|| String::from("unknown"))
+    };
+
+    let mut area = lvgl::lv_area_t::default();
+    unsafe { lvgl::lv_obj_get_coords(object, &mut area) };
+
+    let text = unsafe {
+        if lvgl::lv_obj_check_type(object, &lvgl::lv_label_class) {
+            bounded_c_string(lvgl::lv_label_get_text(object))
+        } else if lvgl::lv_obj_check_type(object, &lvgl::lv_textarea_class) {
+            bounded_c_string(lvgl::lv_textarea_get_text(object))
+        } else {
+            None
+        }
+    };
+
+    elements.push(UiElement {
+        id,
+        parent_id,
+        role,
+        text,
+        bounds: (area.x1, area.y1, area.x2, area.y2),
+    });
+
+    if depth + 1 >= max_depth || elements.len() >= max_elements {
+        return;
+    }
+
+    let child_count = unsafe { lvgl::lv_obj_get_child_count(object) };
+    for index in 0..child_count {
+        if elements.len() >= max_elements {
+            break;
+        }
+        let child = unsafe { lvgl::lv_obj_get_child(object, index as i32) };
+        unsafe {
+            inspect_children(
+                child,
+                Some(id),
+                depth + 1,
+                max_depth,
+                max_elements,
+                elements,
+            );
+        }
+    }
+}
+
+/// Copy a valid C string with a hard byte cap without scanning past its NUL.
+unsafe fn bounded_c_string(pointer: *const core::ffi::c_char) -> Option<String> {
+    if pointer.is_null() {
+        return None;
+    }
+
+    let bytes = pointer.cast::<u8>();
+    let mut length = 0;
+    while length < UI_ELEMENT_MAX_TEXT_BYTES && unsafe { *bytes.add(length) } != 0 {
+        length += 1;
+    }
+
+    let slice = unsafe { core::slice::from_raw_parts(bytes, length) };
+    Some(match str::from_utf8(slice) {
+        Ok(text) => text.into(),
+        Err(_) => String::from_utf8_lossy(slice).into_owned(),
+    })
 }
 
 impl Drop for Manager {

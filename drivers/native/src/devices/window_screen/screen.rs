@@ -2,7 +2,9 @@ use file_system::{
     ControlCommand, ControlCommandIdentifier, DirectBaseOperations, DirectCharacterDevice,
     MountOperations, Size,
 };
-use graphics::{Area, GET_RESOLUTION, RenderingColor, SET_DRAWING_AREA, WAS_RESIZED};
+use graphics::{
+    Area, GET_RESOLUTION, RenderingColor, SET_DRAWING_AREA, WAS_RESIZED, WRITE_SCREENSHOT_TO_PATH,
+};
 use shared::{AnyByLayout, align_slice_to};
 
 use crate::window_screen::inner_window::InnerWindow;
@@ -68,6 +70,15 @@ impl<'a> DirectBaseOperations for ScreenDevice<'a> {
                     let was_resized: &mut bool = WAS_RESIZED::cast_output(output)?;
 
                     *was_resized = task::block_on(self.0.was_resized()).unwrap();
+                }
+                WRITE_SCREENSHOT_TO_PATH::IDENTIFIER => {
+                    let request = WRITE_SCREENSHOT_TO_PATH::cast_input(input)?;
+                    let path = request.path().ok_or(file_system::Error::InvalidParameter)?;
+                    let dimensions = task::block_on(super::screenshot::write_png(
+                        std::path::Path::new(path),
+                    ))
+                    .map_err(|_| file_system::Error::InputOutput)?;
+                    *WRITE_SCREENSHOT_TO_PATH::cast_output(output)? = dimensions;
                 }
                 _ => return Err(file_system::Error::UnsupportedOperation),
             }

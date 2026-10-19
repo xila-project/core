@@ -1,4 +1,4 @@
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 
 use graphics::{Area, ColorRGBA8888, Point, RenderingColor};
 use pixels::Pixels;
@@ -8,6 +8,7 @@ use winit::window;
 struct Inner {
     window: Arc<window::Window>,
     pixels: Pixels<'static>,
+    framebuffer_size: Point,
     drawing_area: Area,
     was_resized: bool,
 }
@@ -57,14 +58,21 @@ impl InnerWindow {
             .map_err(|error| format!("Pixels resize error: {error:?}"))?;
 
         inner.was_resized = true;
+        inner.framebuffer_size = new_size;
 
         Ok(())
     }
 
-    pub async fn replace(&self, window: Arc<window::Window>, pixels: Pixels<'static>) {
+    pub async fn replace(
+        &self,
+        window: Arc<window::Window>,
+        pixels: Pixels<'static>,
+        framebuffer_size: Point,
+    ) {
         let new_inner = Inner {
             window,
             pixels,
+            framebuffer_size,
             drawing_area: Area::default(),
             was_resized: true,
         };
@@ -75,21 +83,37 @@ impl InnerWindow {
     pub async fn get_resolution(&self) -> Option<Point> {
         let inner = self.0.read().await;
 
-        inner.as_ref().map(|inner| {
-            let size = inner.window.inner_size();
-            graphics::Point::new(size.width as i16, size.height as i16)
+        inner.as_ref().map(|inner| inner.framebuffer_size)
+    }
+
+    pub async fn snapshot_rgba(&self) -> Result<FramebufferSnapshot, String> {
+        let inner = self.0.read().await;
+        let inner = inner
+            .as_ref()
+            .ok_or_else(|| "Window is None.".to_string())?;
+        let width = inner.framebuffer_size.get_x() as u32;
+        let height = inner.framebuffer_size.get_y() as u32;
+        let pixels = inner.pixels.frame();
+        let expected_len = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|count| count.checked_mul(4))
+            .ok_or_else(|| "Framebuffer dimensions overflow.".to_string())?;
+
+        if pixels.len() != expected_len {
+            return Err("Framebuffer dimensions do not match pixel storage.".to_string());
+        }
+
+        Ok(FramebufferSnapshot {
+            width,
+            height,
+            rgba: convert_frame_to_rgba(pixels)?,
         })
     }
 
     pub async fn render(&self) -> Result<(), String> {
         let mut inner = self.0.write().await;
 
-        let Inner {
-            pixels,
-            window,
-            drawing_area: _,
-            was_resized: _,
-        } = inner
+        let Inner { pixels, window, .. } = inner
             .as_mut()
             .ok_or_else(|| "Window is None.".to_string())?;
 
@@ -121,7 +145,7 @@ impl InnerWindow {
             pixels,
             window,
             drawing_area,
-            was_resized: _,
+            ..
         } = inner
             .as_mut()
             .ok_or_else(|| "Window is None.".to_string())?;
@@ -162,5 +186,50 @@ impl InnerWindow {
         }
 
         Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FramebufferSnapshot {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+fn convert_frame_to_rgba(frame: &[u8]) -> Result<Vec<u8>, String> {
+    if frame.len() % 4 != 0 {
+        return Err("Framebuffer has an incomplete pixel.".to_string());
+    }
+
+    let mut rgba = Vec::with_capacity(frame.len());
+    for bytes in frame.chunks_exact(4) {
+        let color = ColorRGBA8888::from(u32::from_ne_bytes(bytes.try_into().unwrap()));
+        rgba.extend_from_slice(&[
+            color.get_red(),
+            color.get_green(),
+            color.get_blue(),
+            color.get_alpha(),
+        ]);
+    }
+    Ok(rgba)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rgba_conversion_preserves_channel_order() {
+        let color = ColorRGBA8888::new(0x12, 0x34, 0x56, 0x78);
+        let input = color.as_u32().to_ne_bytes();
+        assert_eq!(
+            convert_frame_to_rgba(&input).unwrap(),
+            [0x12, 0x34, 0x56, 0x78]
+        );
+    }
+
+    #[test]
+    fn rgba_conversion_rejects_partial_pixel() {
+        assert!(convert_frame_to_rgba(&[1, 2, 3]).is_err());
     }
 }

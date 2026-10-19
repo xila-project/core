@@ -2,19 +2,26 @@ use file_system::{DirectBaseOperations, DirectCharacterDevice, MountOperations, 
 use graphics::{InputData, Key, State};
 use synchronization::{
     blocking_mutex::raw::{CriticalSectionRawMutex, RawMutex},
-    channel::Receiver,
+    channel::{Receiver, Sender},
 };
 
-pub struct KeyboardDevice<M, const N: usize>(Receiver<'static, M, (Key, State), N>)
+pub struct KeyboardDevice<M, const N: usize>
 where
-    M: RawMutex + 'static;
+    M: RawMutex + 'static,
+{
+    receiver: Receiver<'static, M, (Key, State), N>,
+    sender: Sender<'static, M, (Key, State), N>,
+}
 
 impl<M, const N: usize> KeyboardDevice<M, N>
 where
     M: RawMutex + 'static,
 {
-    pub fn new(receiver: Receiver<'static, M, (Key, State), N>) -> Self {
-        Self(receiver)
+    pub fn new(
+        receiver: Receiver<'static, M, (Key, State), N>,
+        sender: Sender<'static, M, (Key, State), N>,
+    ) -> Self {
+        Self { receiver, sender }
     }
 }
 
@@ -48,10 +55,24 @@ impl<const N: usize> DirectBaseOperations for KeyboardDevice<CriticalSectionRawM
     fn write(
         &self,
         _cx: &mut core::task::Context<'_>,
-        _: &[u8],
+        buffer: &[u8],
         _: Size,
     ) -> core::task::Poll<file_system::Result<usize>> {
-        file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
+        file_system::ready(|| {
+            if buffer.len() != 5 {
+                return Err(file_system::Error::InvalidParameter);
+            }
+            let key_code = u32::from_le_bytes(buffer[..4].try_into().unwrap());
+            let key = Key::from(key_code);
+            if u32::from(key) != key_code
+                || matches!(key, Key::Character(character) if !(b' '..=b'~').contains(&character))
+            {
+                return Err(file_system::Error::InvalidParameter);
+            }
+            let state = State::try_from(buffer[4]).map_err(|_| file_system::Error::InvalidParameter)?;
+            self.sender.try_send((key, state)).map_err(|_| file_system::Error::RessourceBusy)?;
+            Ok(buffer.len())
+        })
     }
 }
 

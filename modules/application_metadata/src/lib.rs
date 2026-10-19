@@ -12,6 +12,9 @@ pub const GUESTS: &[&str] = &[
     "text_editor",
     "weather",
 ];
+#[cfg(unix)]
+pub const NATIVE: &[&str] = &["file_manager", "terminal", "settings", "debug"];
+#[cfg(not(unix))]
 pub const NATIVE: &[&str] = &["file_manager", "terminal", "settings"];
 pub const PENDING_PATH: &str = "/system/.seed-pending";
 pub const PENDING_CONTENT: &[u8] = b"xila-seed-v1\n";
@@ -42,6 +45,7 @@ pub fn shortcut(name: &str) -> Option<String> {
             [158, 158, 158],
             false,
         ),
+        "debug" => ("Debug", "Db", [235, 87, 87], false),
         _ => return None,
     };
     let command = if guest { "wasm" } else { name };

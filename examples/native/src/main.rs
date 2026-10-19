@@ -150,6 +150,46 @@ async fn main(task_manager: &'static xila::task::Manager) {
         .create_directory(task, &"/devices/cpu")
         .await;
 
+    #[cfg(unix)]
+    if graphics_manager.is_some() {
+        virtual_file_system
+            .create_directory(task, &"/devices/debug")
+            .await
+            .expect("Failed to create debug device directory");
+        virtual_file_system
+            .mount_character_device(
+                task,
+                "/devices/debug/transport",
+                drivers_native::window_screen::DebugTransportDevice,
+            )
+            .await
+            .expect("Failed to mount debug transport");
+        virtual_file_system
+            .mount_character_device(
+                task,
+                "/devices/debug/screen",
+                drivers_native::window_screen::debug_screen_device(),
+            )
+            .await
+            .expect("Failed to mount debug screen access");
+        virtual_file_system
+            .mount_character_device(
+                task,
+                "/devices/debug/pointer",
+                drivers_native::window_screen::debug_pointer_device(),
+            )
+            .await
+            .expect("Failed to mount debug pointer access");
+        virtual_file_system
+            .mount_character_device(
+                task,
+                "/devices/debug/keyboard",
+                drivers_native::window_screen::debug_keyboard_device(),
+            )
+            .await
+            .expect("Failed to mount debug keyboard access");
+    }
+
     // Keep the mixer pinned for the lifetime of every mounted VFS stream.
     let audio_system: &'static audio::AudioSystem =
         Box::leak(Box::new(audio::AudioSystem::new().unwrap()));
@@ -311,6 +351,8 @@ async fn main(task_manager: &'static xila::task::Manager) {
             ),
             (&"/binaries/terminal", terminal::TerminalExecutable),
             (&"/binaries/settings", settings::SettingsExecutable),
+            #[cfg(unix)]
+            (&"/binaries/debug", debug_application::DebugExecutable),
             (&"/binaries/wasm", wasm::WasmExecutable),
         ]
     )
