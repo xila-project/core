@@ -48,7 +48,7 @@ async fn action(manager: &Manager, button: u32) {
         assert_eq!(lvgl::lv_buttonmatrix_get_selected_button(matrix), button);
         lvgl::lv_obj_send_event(
             matrix,
-            lvgl::lv_event_code_t_LV_EVENT_CLICKED,
+            lvgl::lv_event_code_t_LV_EVENT_VALUE_CHANGED,
             core::ptr::null_mut(),
         );
     }
