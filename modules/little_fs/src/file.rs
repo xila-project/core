@@ -2,7 +2,7 @@ use super::{convert_flags, convert_result, littlefs};
 use crate::attributes::InternalAttributes;
 use alloc::{boxed::Box, ffi::CString};
 use core::ffi::c_void;
-use file_system::{Attributes, Error, Flags, Path, Position, Result, Size};
+use file_system::{AttributeFlags, Attributes, Error, Flags, Path, Position, Result, Size};
 
 fn convert_position(position: &Position) -> (i32, i32) {
     match position {
@@ -99,13 +99,30 @@ impl File {
         Ok(())
     }
 
-    pub fn get_attributes(&mut self, attributes: &mut Attributes) -> Result<()> {
+    pub fn get_attributes(
+        &mut self,
+        file_system: &mut littlefs::lfs_t,
+        attributes: &mut Attributes,
+    ) -> Result<()> {
+        let requested = attributes.get_mask();
         self.internal_attributes.update_attributes(attributes)?;
+
+        if requested.contains(AttributeFlags::Size) {
+            let size =
+                convert_result(unsafe { littlefs::lfs_file_size(file_system, &mut self.file) })?;
+            *attributes = attributes.clone().set_size(size as Size);
+        }
 
         Ok(())
     }
 
     pub fn set_attributes(&mut self, attributes: &Attributes) -> Result<()> {
+        let mask = attributes.get_mask();
+        if mask.is_empty() {
+            return Ok(());
+        }
+        InternalAttributes::validate_attribute_mask(mask)?;
+
         self.internal_attributes
             .update_with_attributes(attributes)?;
 

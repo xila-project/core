@@ -28,6 +28,12 @@ pixels = "0.17.1"
 winit = { version = "0.30", features = ["rwh_05"] }
 rand = "0.10.0"
 libc = { version = "0.2" }
+cap-std = "4.0.3"
+users = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1.1.5", features = ["fs"] }
+
 embassy-executor = { workspace = true, default-features = false, features = [
   "platform-std",
   "executor-thread",

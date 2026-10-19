@@ -4,7 +4,11 @@ extern crate abi_definitions;
 
 use task::TaskIdentifier;
 
-use file_system::{AccessFlags, CreateFlags, Flags, MemoryDevice, Path, Position, StateFlags};
+use drivers_native::host_file_system::{HostFileSystem, HostFileSystemOptions};
+use file_system::{
+    AccessFlags, AttributeFlags, Attributes, CreateFlags, FileSystemOperations, Flags,
+    MemoryDevice, Path, Position, StateFlags,
+};
 #[cfg(target_os = "linux")]
 use task::test;
 use virtual_file_system::{File, VirtualFileSystem};
@@ -138,6 +142,78 @@ async fn test_named_pipe() {
     core::mem::drop(pipe_write);
 
     virtual_file_system.remove(task, pipe_path).await.unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn forced_unmount_can_remount_the_same_path_with_a_new_filesystem() {
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    static NEXT_ROOT: AtomicUsize = AtomicUsize::new(0);
+    let root = std::env::temp_dir().join(format!(
+        "xila-vfs-hostfs-{}-{}",
+        std::process::id(),
+        NEXT_ROOT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let first_root = root.join("first");
+    let second_root = root.join("second");
+    fs::create_dir_all(&first_root).unwrap();
+    fs::create_dir_all(&second_root).unwrap();
+    fs::write(first_root.join("app"), b"old").unwrap();
+    fs::write(second_root.join("app"), b"new").unwrap();
+
+    let (task, virtual_file_system) = initialize().await;
+    let first_filesystem =
+        HostFileSystem::open(&first_root, HostFileSystemOptions::default()).unwrap();
+    let mut host_attributes = Attributes::new().set_mask(AttributeFlags::Kind);
+    FileSystemOperations::get_attributes(
+        &first_filesystem,
+        Path::new("/app"),
+        &mut host_attributes,
+    )
+    .unwrap();
+    virtual_file_system
+        .mount_file_system(first_filesystem, Path::new("/host"), task)
+        .await
+        .unwrap();
+    let old_file = File::open(
+        virtual_file_system,
+        task,
+        "/host/app",
+        AccessFlags::Read.into(),
+    )
+    .await
+    .unwrap();
+
+    virtual_file_system.unmount("/host", true).await.unwrap();
+    virtual_file_system
+        .mount_file_system(
+            HostFileSystem::open(&second_root, HostFileSystemOptions::default()).unwrap(),
+            Path::new("/host"),
+            task,
+        )
+        .await
+        .unwrap();
+
+    let mut new_file = File::open(
+        virtual_file_system,
+        task,
+        "/host/app",
+        AccessFlags::Read.into(),
+    )
+    .await
+    .unwrap();
+    let mut data = [0; 3];
+    new_file.read(&mut data).await.unwrap();
+    assert_eq!(&data, b"new");
+
+    old_file.close(virtual_file_system).await.unwrap();
+    new_file.close(virtual_file_system).await.unwrap();
+    let _ = fs::remove_dir_all(PathBuf::from(root));
 }
 
 #[cfg(target_os = "linux")]
