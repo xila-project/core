@@ -104,6 +104,17 @@ ESP-IDF, flashing and serial permissions need separate setup: follow the esp-rs
 [RISC-V](https://docs.esp-rs.org/book/installation/riscv.html) guides after leaving
 development container. Host/WASM checks do not prove ESP32, nRF, STM32 or other hardware correctness.
 
+## Localization
+
+Xila embeds each language at compile time and tracks per-crate translations with
+[Tolgee](https://translate.anneraud.fr/engage/xila-core/). English (`en`)
+is the fallback, with French (`fr`) and Spanish (`es`) catalogs. Build
+the host, Wasm applications, fonts and seed image with the **same**
+`EMBEDDED_I18N_LOCALE` value.
+
+See [localized build and contribution instructions](docs/localization.md) for
+validation commands, translation review and artifact compatibility.
+
 ## Graphics theme
 
 Graphics uses [lvgl_theme_shadcn](https://github.com/AlixANNERAUD/lvgl_theme_shadcn)
