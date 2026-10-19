@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bitflags = { version = "2", default-features = false }
 file_system = { workspace = true }
 synchronization = { workspace = true }
 time = { workspace = true }
