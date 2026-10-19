@@ -103,7 +103,7 @@ async fn guest_opens_pages_edits_and_saves_large_file() {
             lvgl::lv_textarea_set_text(path_input, path_text.as_ptr());
         }
     }
-    action(manager, 4).await;
+    action(manager, 3).await;
     wait_label(manager, 4, "Opened").await;
     action(manager, 1).await;
     wait_label(manager, 2, "4096").await;
