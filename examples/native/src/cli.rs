@@ -24,7 +24,6 @@ pub struct Config {
     pub interface: InterfaceMode,
     pub networking: bool,
     pub display_driver: DisplayDriver,
-    pub display_driver_explicit: bool,
     pub resolution: (i16, i16),
     pub disk_path: String,
     pub seed_image: String,
@@ -118,7 +117,6 @@ where
         },
         networking: arguments.network || !arguments.no_network,
         display_driver: arguments.display_driver.unwrap_or_default(),
-        display_driver_explicit: arguments.display_driver.is_some(),
         resolution: arguments.resolution,
         disk_path: arguments.disk_path.to_string(),
         seed_image: arguments.seed_image.to_string(),
@@ -138,7 +136,6 @@ mod tests {
         assert_eq!(config.interface, InterfaceMode::Graphical);
         assert!(config.networking);
         assert_eq!(config.display_driver, DisplayDriver::Native);
-        assert!(!config.display_driver_explicit);
         assert_eq!(config.resolution, (800, 600));
         assert_eq!(config.disk_path, "./drive.img");
         assert_eq!(config.disk_size, 16 * 1024 * 1024);
@@ -173,7 +170,6 @@ mod tests {
     fn parses_headless_display_driver() {
         let config = parse(["--display-driver", "headless"]).unwrap();
         assert_eq!(config.display_driver, DisplayDriver::Headless);
-        assert!(config.display_driver_explicit);
         assert_eq!(
             parse(["--display-driver", "native"])
                 .unwrap()
