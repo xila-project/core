@@ -4,12 +4,12 @@ use bitflags::bitflags;
 
 use crate::Kind;
 
-bitbitflags! {
+bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct Special: u8 {
-        const Sticky = 1 << 0;
-        const SetUserIdentifier = 1 << 1;
-        const SetGroupIdentifier = 1 << 2;
+    pub struct Permission: u8 {
+        const Execute = 1 << 0;
+        const Write = 1 << 1;
+        const Read = 1 << 2;
     }
 }
 
@@ -53,15 +53,12 @@ impl Display for Permission {
     }
 }
 
-flags! {
-    /// The special permissions of a file or directory.
-    pub enum Special: u8 {
-        /// Sticky bit.
-        Sticky,
-        /// Set user identifier.
-        SetUserIdentifier,
-        /// Set group identifier.
-        SetGroupIdentifier,
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Special: u8 {
+        const Sticky = 1 << 0;
+        const SetUserIdentifier = 1 << 1;
+        const SetGroupIdentifier = 1 << 2;
     }
 }
 
@@ -246,25 +243,25 @@ impl Permissions {
 
     /// Sets the permission for the user.
     pub fn set_user(mut self, user: Permission) -> Self {
-        self = Self::from_bits_retain((self.bits() & 0o7077) | (user.to_unix() as u16) << 6);
+        self.0 = (self.0 & 0o7077) | (user.to_unix() as u16) << 6;
         self
     }
 
     /// Sets the permission for the group.
     pub fn set_group(mut self, group: Permission) -> Self {
-        self = Self::from_bits_retain((self.bits() & 0o7707) | (group.to_unix() as u16) << 3);
+        self.0 = (self.0 & 0o7707) | (group.to_unix() as u16) << 3;
         self
     }
 
     /// Sets the permission for others.
     pub fn set_others(mut self, others: Permission) -> Self {
-        self = Self::from_bits_retain((self.bits() & 0o7770) | others.to_unix() as u16);
+        self.0 = (self.0 & 0o7770) | others.to_unix() as u16;
         self
     }
 
     /// Sets the special permissions.
     pub fn set_special(mut self, special: Special) -> Self {
-        self = Self::from_bits_retain((self.bits() & 0o0777) | (special.to_unix() as u16) << 9);
+        self.0 = (self.0 & 0o0777) | (special.to_unix() as u16) << 9;
         self
     }
 
@@ -280,7 +277,7 @@ impl Permissions {
 
     /// Gets the permission for others.
     pub fn get_others(&self) -> Permission {
-        Permission::from_unix((self.bits() & 0b111) as u8).unwrap()
+        Permission::from_unix((self.0 & 0b111) as u8).unwrap()
     }
 
     /// Gets the special permissions.
