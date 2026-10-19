@@ -291,12 +291,12 @@ impl Permissions {
             return None;
         }
 
-        Some(Self::from_bits_retain(unix))
+        Some(Self(unix))
     }
 
     /// Converts the permission to a Unix permission.
     pub const fn as_u16(&self) -> u16 {
-        self.bits()
+        self.0
     }
 }
 
@@ -504,5 +504,16 @@ mod tests {
         assert!(!no.contains(write_execute));
         assert!(!no.contains(full));
         assert!(no.contains(no));
+    }
+
+    #[test]
+    fn test_permission_unknown_bits() {
+        assert_eq!(Permission::from_bits(1 << 3), None);
+        assert_eq!(Permission::from_bits_truncate(0b1_1111), Permission::all());
+        assert_eq!(Permission::from_bits_retain(1 << 3).bits(), 1 << 3);
+
+        assert_eq!(Special::from_bits(1 << 3), None);
+        assert_eq!(Special::from_bits_truncate(0b1_1111), Special::all());
+        assert_eq!(Special::from_bits_retain(1 << 3).bits(), 1 << 3);
     }
 }
