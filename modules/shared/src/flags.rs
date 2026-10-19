@@ -461,4 +461,43 @@ mod tests {
         // Test bits_used - with 4 flags at positions 0-3, we need 4 bits
         assert_eq!(CustomFlags::bits_used(), 4);
     }
+
+    // Compatibility baseline for a potential bitflags 2 migration (#347).
+    // These tests intentionally exercise behavior that differs from bitflags'
+    // defaults or is relied upon by callers across Xila.
+    #[test]
+    fn compatibility_layout_and_unknown_bits() {
+        assert_eq!(core::mem::size_of::<TestFlags>(), core::mem::size_of::<u8>());
+        assert_eq!(core::mem::align_of::<TestFlags>(), core::mem::align_of::<u8>());
+        assert_eq!(core::mem::size_of::<CustomFlags>(), core::mem::size_of::<u16>());
+        assert_eq!(core::mem::align_of::<CustomFlags>(), core::mem::align_of::<u16>());
+
+        assert_eq!(TestFlags::None.bits(), 0);
+        assert_eq!(TestFlags::All.bits(), 0b111);
+        assert_eq!(TestFlags::from_bits(0b1000), None);
+        assert_eq!(TestFlags::from_bits_truncate(0b1001).bits(), 1);
+
+        // The current complement retains unknown bits; bitflags' ! operator
+        // normally restricts its result to defined flags.
+        assert_eq!((!TestFlags::FlagA).bits(), !1u8);
+        let raw = unsafe { TestFlags::from_bits_unchecked(0b1000) };
+        assert_eq!(raw.bits(), 0b1000);
+        assert_eq!(raw.intersection(TestFlags::All).bits(), 0);
+        assert_eq!(raw.union(TestFlags::FlagA).bits(), 0b1001);
+    }
+
+    #[test]
+    fn compatibility_const_api() {
+        const FLAGS: TestFlags = TestFlags::None
+            .insert(TestFlags::FlagA)
+            .set(TestFlags::FlagB, true)
+            .toggle(TestFlags::FlagA);
+        const REMAINING: TestFlags = FLAGS.difference(TestFlags::FlagA);
+        const USED: u8 = TestFlags::bits_used();
+        assert_eq!(FLAGS.bits(), 0b010);
+        assert_eq!(REMAINING.bits(), 0b010);
+        assert_eq!(USED, 3);
+        assert_eq!(FLAGS.count_ones(), 1);
+    }
+
 }
