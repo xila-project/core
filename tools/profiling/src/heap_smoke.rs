@@ -48,7 +48,7 @@ pub(crate) fn run() -> Result<()> {
             "[package]\nname = \"xila_heaptrack_probe\"\nversion = \"0.0.0\"\nedition = \"2024\"\n[workspace]\n[dependencies]\ndrivers_std = {{ path = {}, features = {} }}\nmemory = {{ path = {} }}\ncritical-section = {{ version = \"1.2\", features = [\"std\"] }}\n",
             quote(root.join("drivers/std"))?,
             if enabled { "[\"heaptrack\"]" } else { "[]" },
-            quote(root.join("modules/memory"))?
+            quote(root.join("subsystems/memory"))?
         );
         fs::write(scratch.0.join("Cargo.toml"), manifest)?;
         checked(

@@ -50,7 +50,8 @@ jobs:
         with:
           filters: |
             shared: &shared
-              - 'modules/**'
+              - 'subsystems/**'
+              - 'libraries/**'
               - '**/Cargo.{toml,lock}'
               - '**/.cargo/**'
               - '**/Makefile.toml'
@@ -110,7 +111,7 @@ jobs:
               - 'Makefile.toml'
               - 'tolgee.extractor.mjs'
               - 'tolgee.config.ts'
-              - 'modules/graphics/fonts_generator/**'
+              - 'subsystems/graphics/fonts_generator/**'
             i18n_en:
               - '**/locales/en.json'
             i18n_fr:

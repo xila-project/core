@@ -1,6 +1,6 @@
 # Project Overview
 
-Xila is an embedded operating system written in Rust for low-power microcontrollers, including ESP32, nRF, and STM32 targets. This Cargo workspace separates reusable functionality into `modules/`, platform support into `drivers/`, and applications/runtimes into `executables/`; code must account for constrained RAM, flash, and target capabilities.
+Xila is an embedded operating system written in Rust for low-power microcontrollers, including ESP32, nRF, and STM32 targets. This Cargo workspace separates runtime-owned services into `subsystems/`, reusable contracts and implementations into `libraries/`, platform support into `drivers/`, and applications/runtimes into `executables/`; code must account for constrained RAM, flash, and target capabilities.
 
 # Build & Test Commands
 
@@ -19,10 +19,10 @@ These tasks are defined in `Makefile.toml`; CI is the source of truth for target
 - Visual identity is defined in `xila-project/brand`: Montserrat Regular 400 for proportional UI text, SemiBold 600 for web headings, and Bold 700 for the wordmark and emphasis. Preserve the embedded Regular glyph subsets and Unscii terminal font unless a task explicitly needs more weights. Browser fonts and README logos are local deployment copies; record their exact brand source revision when updating them. Never make builds fetch assets from the private brand repository.
 
 - Put changes in the crate that owns the behavior and follow its existing APIs, error handling, feature flags, and tests.
-- Keep reusable modules portable: preserve `no_std` operation and isolate host-only code and dependencies behind target-specific Cargo sections or conditional compilation.
+- Keep reusable libraries portable: preserve `no_std` operation and isolate host-only code and dependencies behind target-specific Cargo sections or conditional compilation.
 - Check a crate's `Cargo.toml`, features, and consumers before changing dependencies or enabling features. Preserve intentional `default-features = false`, optional dependencies, and target-specific dependency boundaries.
 - Treat every byte as important: consider RAM, flash, stack, and peak allocation costs. Prefer bounded or caller-provided storage where appropriate; account for capacity, lifetime, and allocation behavior when using `Vec`, `String`, or `Box`. Avoid unnecessary allocations, copies, buffers, large static data, and dependencies.
-- Keep target support explicit. Put hardware-specific adaptation in the relevant driver and keep reusable OS behavior in modules.
+- Keep target support explicit. Put hardware-specific adaptation in the relevant driver and keep runtime orchestration in subsystems and reusable contracts in libraries.
 - When inspecting or improving the native graphical UI, use the Debug agent instead of relying on source inspection alone. Start `native_example` with `--display-driver headless` to work without X11 or Wayland (`--display-driver native` selects the windowed driver and remains the default). Headless mode starts the Debug transport in the background; then, as the same OS user, prefix these commands with `cargo run -p drivers_native --bin xila-debug --`: `diagnostics`, `resolution`, `screenshot /tmp/xila-ui.png`, and `ui-tree`. Use `pointer move X Y` followed by `pointer button press|release`, or `key NAME press|release` and `text TEXT`, to interact. The Debug application gets screen capture, UI state, and injected input through Xila graphics APIs; diagnostics use Xila task and memory APIs. Drivers supply output and physical inputs but are not queried or controlled by the Debug application. The client writes screenshot PNGs to the requested host path. JSON headers are capped at 64 KiB, screenshot payloads at 8 MiB, requests at 16 KiB, and printable ASCII text at 4096 bytes. The native control transport is available on Unix hosts only. See `examples/native/README.md` for the complete headless workflow.
 - Identify the generator or build script for generated sources and assets before changing them. Keep generated files and build output out of source changes unless the task explicitly requires updating generated assets.
 

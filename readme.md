@@ -26,7 +26,7 @@ resource-constrained devices.
 - **Graphical interfaces:** build on LVGL, the shared Shadcn theme, and Xila's
   graphical shell.
 - **OS building blocks:** work with task scheduling, a virtual filesystem,
-  device drivers, and networking through reusable Rust modules.
+  device drivers, and networking through portable Rust crates.
 - **Native development:** develop and investigate CPU and memory use on Linux
   before validating shared code on your intended embedded target.
 
@@ -73,7 +73,7 @@ npm exec prettier -- --check "**/*.json"
 ```
 
 For opt-in native PCM playback using nanoaudio, see
-[the audio module](modules/audio/README.md). Run its tone example with
+[the audio library](libraries/audio/README.md). Run its tone example with
 `cargo run -p drivers_native --features audio --example audio` inside the shell.
 
 For GUI builds from a **Wayland desktop**, use the wrapper's `--gui` option and
@@ -237,7 +237,8 @@ feature. It does not require installing heaptrack or access to perf events.
 
 | Directory                      | Contents                                                                     |
 | ------------------------------ | ---------------------------------------------------------------------------- |
-| [`modules/`](modules/)         | Reusable OS modules, including tasks, filesystems, graphics, and networking. |
+| [`subsystems/`](subsystems/)   | Runtime-owned services: tasks, VFS, networking, graphics, memory, and time.   |
+| [`libraries/`](libraries/)     | Reusable contracts, algorithms, adapters, and concrete implementations.      |
 | [`drivers/`](drivers/)         | Platform support and device drivers.                                         |
 | [`executables/`](executables/) | Shells, applications, and the Wasm runtime and guest bindings.               |
 | [`examples/`](examples/)       | Native and browser integration examples.                                     |

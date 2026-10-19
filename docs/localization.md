@@ -5,7 +5,7 @@ Xila embeds the selected locale **at compile time** through
 runtime memory usage and the language-selection logic out of MCU builds.
 English (`en`) is the fallback language.
 
-The Core catalogs live beside each crate at `modules/**/locales/` or
+The Core catalogs live beside each crate at `subsystems/**/locales/`, `libraries/**/locales/`, or
 `executables/**/locales/`; application-local strings belong in the
 application namespace, not a global catalog.
 
