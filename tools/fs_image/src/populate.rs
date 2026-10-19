@@ -30,9 +30,8 @@ fn attributes(path: &str, kind: Kind) -> Attributes {
         .set_kind(kind)
         .set_permissions(Permissions::from_octal(permissions).unwrap());
     // Size and link count are read-only, filesystem-computed attributes.
-    result = result.set_mask(
-        AttributeFlags::All.difference(AttributeFlags::Size | AttributeFlags::Links),
-    );
+    result = result
+        .set_mask(AttributeFlags::All.difference(AttributeFlags::Size | AttributeFlags::Links));
     if matches!(
         path,
         "/configuration/shared/clock"
