@@ -10,7 +10,7 @@ pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOper
     /// `set_attributes` and receive the backend's normal errors. Existing
     /// implementations default to the historical all-fields behavior.
     fn writable_attributes(&self) -> crate::AttributeFlags {
-        crate::AttributeFlags::All
+        crate::AttributeFlags::all()
     }
 
     fn lookup_directory(&self, context: &mut Context, path: &Path) -> Result<()>;
@@ -203,8 +203,8 @@ pub mod tests {
     impl Default for FileSystemTestCapabilities {
         fn default() -> Self {
             Self {
-                readable: AttributeFlags::All,
-                writable: AttributeFlags::All,
+                readable: AttributeFlags::all(),
+                writable: AttributeFlags::all(),
             }
         }
     }
@@ -426,8 +426,8 @@ pub mod tests {
         let test_file = Path::new("/attr_test.txt");
         fs.create_file(test_file).unwrap();
 
-        let writable = capabilities.writable.intersection(AttributeFlags::All);
-        let readable = capabilities.readable.intersection(AttributeFlags::All);
+        let writable = capabilities.writable.intersection(AttributeFlags::all());
+        let readable = capabilities.readable.intersection(AttributeFlags::all());
         let expected = Attributes::new()
             .set_size(0)
             .set_permissions(Permissions::ALL_READ_WRITE)
@@ -444,7 +444,7 @@ pub mod tests {
         FileSystemOperations::set_attributes(fs, test_file, &requested_write).unwrap();
 
         // Empty masks are no-ops.
-        requested_write = requested_write.set_mask(AttributeFlags::None);
+        requested_write = requested_write.set_mask(AttributeFlags::empty());
         FileSystemOperations::set_attributes(fs, test_file, &requested_write).unwrap();
 
         let mut actual = Attributes::new().set_mask(readable);
@@ -480,7 +480,7 @@ pub mod tests {
             }
         }
 
-        let unsupported = AttributeFlags::All.difference(writable);
+        let unsupported = AttributeFlags::all().difference(writable);
         if !unsupported.is_empty() {
             let changed = Attributes::new()
                 .set_permissions(Permissions::NONE)
@@ -492,7 +492,7 @@ pub mod tests {
                 .set_modification(Time::new(12))
                 .set_access(Time::new(13))
                 .set_status(Time::new(14))
-                .set_mask(AttributeFlags::All);
+                .set_mask(AttributeFlags::all());
             assert!(matches!(
                 FileSystemOperations::set_attributes(fs, test_file, &changed),
                 Err(Error::UnsupportedOperation)
@@ -570,7 +570,7 @@ pub mod tests {
         );
 
         // Test getting attributes of non-existent file
-        let mut attrs = Attributes::new().set_mask(AttributeFlags::All);
+        let mut attrs = Attributes::new().set_mask(AttributeFlags::all());
         FileSystemOperations::get_attributes(fs, nonexistent, &mut attrs).unwrap_err();
     }
 
@@ -692,7 +692,7 @@ pub mod tests {
         result.unwrap_err();
 
         // Should be able to get root attributes
-        let mut attrs = Attributes::new().set_mask(AttributeFlags::All);
+        let mut attrs = Attributes::new().set_mask(AttributeFlags::all());
         FileSystemOperations::get_attributes(fs, root, &mut attrs).unwrap();
     }
 

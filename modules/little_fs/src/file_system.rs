@@ -536,8 +536,9 @@ mod tests {
     implement_file_system_tests!(
         initialize(),
         FileSystemTestCapabilities {
-            readable: AttributeFlags::All.difference(AttributeFlags::Links),
-            writable: AttributeFlags::All.difference(AttributeFlags::Size | AttributeFlags::Links),
+            readable: AttributeFlags::all().difference(AttributeFlags::Links),
+            writable: AttributeFlags::all()
+                .difference(AttributeFlags::Size | AttributeFlags::Links),
         }
     );
 
@@ -657,7 +658,7 @@ mod tests {
         let unsupported = Attributes::new()
             .set_permissions(file_system::Permissions::NONE)
             .set_inode(999)
-            .set_mask(AttributeFlags::All);
+            .set_mask(AttributeFlags::all());
         assert_eq!(
             FileSystemOperations::set_attributes(&fs, file, &unsupported),
             Err(Error::UnsupportedOperation)

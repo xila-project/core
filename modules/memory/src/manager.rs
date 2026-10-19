@@ -101,7 +101,7 @@ impl<'a> Manager<'a> {
 
         let pointer = match NonNull::new(pointer) {
             Some(pointer) => unsafe { self.0.reallocate(pointer, layout, new_layout) },
-            None => unsafe { self.0.allocate(CapabilityFlags::None, new_layout) },
+            None => unsafe { self.0.allocate(CapabilityFlags::empty(), new_layout) },
         };
 
         pointer.map_or(null_mut(), |ptr| ptr.as_ptr())
@@ -173,7 +173,7 @@ impl<'a> Manager<'a> {
 /// - Deallocation uses the same layout that was used for allocation
 unsafe impl<'a> GlobalAlloc for Manager<'a> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        unsafe { self.allocate(CapabilityFlags::None, layout) }
+        unsafe { self.allocate(CapabilityFlags::empty(), layout) }
     }
 
     unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {

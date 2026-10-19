@@ -38,7 +38,7 @@ impl Debug for InternalAttributes {
 impl InternalAttributes {
     pub const IDENTIFIER: u8 = 1;
 
-    pub const PERSISTED_ATTRIBUTE_FLAGS: AttributeFlags = AttributeFlags::All
+    pub const PERSISTED_ATTRIBUTE_FLAGS: AttributeFlags = AttributeFlags::all()
         .difference(AttributeFlags::Size)
         .difference(AttributeFlags::Links);
 

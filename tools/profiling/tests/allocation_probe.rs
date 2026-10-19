@@ -6,7 +6,7 @@ fn main() {
     unsafe {
         let layout = Layout::from_size_align(37, 32).unwrap();
         assert!(manager.allocate(CapabilityFlags::DirectMemoryAccess, layout).is_none());
-        let first = manager.allocate(CapabilityFlags::None, layout).unwrap();
+        let first = manager.allocate(CapabilityFlags::empty(), layout).unwrap();
         assert_eq!(first.as_ptr() as usize % 32, 0);
         first.as_ptr().write(42);
         let next_layout = Layout::from_size_align(79, 32).unwrap();

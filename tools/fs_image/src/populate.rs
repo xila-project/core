@@ -26,12 +26,12 @@ fn attributes(path: &str, kind: Kind) -> Attributes {
         0o644
     };
     let mut result = Attributes::new()
-        .set_mask(AttributeFlags::All)
+        .set_mask(AttributeFlags::all())
         .set_kind(kind)
         .set_permissions(Permissions::from_octal(permissions).unwrap());
     // Size and link count are read-only, filesystem-computed attributes.
     result = result
-        .set_mask(AttributeFlags::All.difference(AttributeFlags::Size | AttributeFlags::Links));
+        .set_mask(AttributeFlags::all().difference(AttributeFlags::Size | AttributeFlags::Links));
     if matches!(
         path,
         "/configuration/shared/clock"
@@ -66,7 +66,7 @@ pub fn verify(fs: &little_fs::FileSystem, root: Option<&Directory>) -> Result<()
 
 fn verify_attributes(fs: &little_fs::FileSystem, path: &str, kind: Kind) -> Result<()> {
     // Size/links are computed by the filesystem rather than stored attributes.
-    let mut actual = Attributes::new().set_mask(AttributeFlags::All);
+    let mut actual = Attributes::new().set_mask(AttributeFlags::all());
     fs.get_attributes(path.as_ref(), &mut actual)?;
     let expected = attributes(path, kind);
     if actual.get_kind() != expected.get_kind()
@@ -236,7 +236,7 @@ mod mutation_tests {
         )
         .unwrap();
         populate(&filesystem, Some(&source)).unwrap();
-        let mut attributes = Attributes::new().set_mask(AttributeFlags::All);
+        let mut attributes = Attributes::new().set_mask(AttributeFlags::all());
         filesystem
             .get_attributes("/approved".as_ref(), &mut attributes)
             .unwrap();

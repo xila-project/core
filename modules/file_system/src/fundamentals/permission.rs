@@ -1,39 +1,33 @@
 use core::fmt::{self, Display};
 
-use shared::flags;
+use bitflags::bitflags;
 
 use crate::Kind;
 
-flags! {
-    /// The permissions of a file or directory.
-    pub enum Permission: u8 {
-        Execute,
-        Write,
-        Read,
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Permission: u8 {
+        const Execute = 1 << 0;
+        const Write = 1 << 1;
+        const Read = 1 << 2;
     }
 }
 
 impl Permission {
-    pub const READ_WRITE: Self = Permission::None
-        .insert(Permission::Read)
-        .insert(Permission::Write);
-    pub const READ_EXECUTE: Self = Permission::None
-        .insert(Permission::Read)
-        .insert(Permission::Execute);
-    pub const WRITE_EXECUTE: Self = Permission::None
-        .insert(Permission::Write)
-        .insert(Permission::Execute);
+    pub const READ_WRITE: Self = Permission::Read.union(Permission::Write);
+    pub const READ_EXECUTE: Self = Permission::Read.union(Permission::Execute);
+    pub const WRITE_EXECUTE: Self = Permission::Write.union(Permission::Execute);
 
     pub const fn from_unix(unix: u8) -> Option<Self> {
         if unix > 0b111 {
             return None;
         }
 
-        Some(Self(unix))
+        Some(Self::from_bits_retain(unix))
     }
 
     pub const fn to_unix(&self) -> u8 {
-        self.0
+        self.bits()
     }
 }
 
@@ -59,15 +53,12 @@ impl Display for Permission {
     }
 }
 
-flags! {
-    /// The special permissions of a file or directory.
-    pub enum Special: u8 {
-        /// Sticky bit.
-        Sticky,
-        /// Set user identifier.
-        SetUserIdentifier,
-        /// Set group identifier.
-        SetGroupIdentifier,
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Special: u8 {
+        const Sticky = 1 << 0;
+        const SetUserIdentifier = 1 << 1;
+        const SetGroupIdentifier = 1 << 2;
     }
 }
 
@@ -106,7 +97,7 @@ impl fmt::Display for Special {
 /// let user = Permission::Read; // Read only
 /// let group = Permission::Write; // Write only
 /// let others = Permission::Execute; // Execute only
-/// let special = Special::None;
+/// let special = Special::empty();
 ///
 /// let permissions = Permissions::new(user, group, others, special);
 ///
@@ -143,15 +134,15 @@ impl From<(Permission, Permission, Permission, Special)> for Permissions {
 
 impl Permissions {
     pub const NONE: Self = Self::new(
-        Permission::None,
-        Permission::None,
-        Permission::None,
+        Permission::empty(),
+        Permission::empty(),
+        Permission::empty(),
         Special::NONE,
     );
     pub const ALL_FULL: Self = Self::new(
-        Permission::All,
-        Permission::All,
-        Permission::All,
+        Permission::all(),
+        Permission::all(),
+        Permission::all(),
         Special::NONE,
     );
     pub const ALL_READ_WRITE: Self = Self::new(
@@ -161,19 +152,19 @@ impl Permissions {
         Special::NONE,
     );
     pub const USER_FULL: Self = Self::new(
-        Permission::All,
-        Permission::None,
-        Permission::None,
+        Permission::all(),
+        Permission::empty(),
+        Permission::empty(),
         Special::NONE,
     );
     pub const USER_READ_WRITE: Self = Self::new(
         Permission::READ_WRITE,
-        Permission::None,
-        Permission::None,
+        Permission::empty(),
+        Permission::empty(),
         Special::NONE,
     );
     pub const EXECUTABLE: Self = Self::new(
-        Permission::All,
+        Permission::all(),
         Permission::READ_EXECUTE,
         Permission::READ_EXECUTE,
         Special::NONE,
@@ -185,13 +176,13 @@ impl Permissions {
         Special::NONE,
     );
     pub const DIRECTORY_DEFAULT: Self = Self::new(
-        Permission::All,
-        Permission::All,
+        Permission::all(),
+        Permission::all(),
         Permission::READ_EXECUTE,
         Special::NONE,
     );
     pub const DEVICE_DEFAULT: Self = Self::new(
-        Permission::All,
+        Permission::all(),
         Permission::READ_WRITE,
         Permission::READ_WRITE,
         Special::NONE,
@@ -216,7 +207,7 @@ impl Permissions {
     pub const fn new_default(r#type: Kind) -> Self {
         match r#type {
             Kind::Directory => Self::new(
-                Permission::All,
+                Permission::all(),
                 Permission::READ_EXECUTE,
                 Permission::READ_EXECUTE,
                 Special::NONE,
@@ -229,12 +220,12 @@ impl Permissions {
             ),
             Kind::Pipe => Self::new(
                 Permission::READ_WRITE,
-                Permission::None,
-                Permission::None,
+                Permission::empty(),
+                Permission::empty(),
                 Special::NONE,
             ),
             Kind::BlockDevice => Self::new(
-                Permission::All,
+                Permission::all(),
                 Permission::READ_WRITE,
                 Permission::READ_WRITE,
                 Special::NONE,
@@ -242,7 +233,7 @@ impl Permissions {
             Kind::CharacterDevice => Self::new(
                 Permission::READ_WRITE,
                 Permission::READ_WRITE,
-                Permission::None,
+                Permission::empty(),
                 Special::NONE,
             ),
             Kind::Socket => Self::ALL_READ_WRITE,
@@ -310,44 +301,44 @@ impl Permissions {
 }
 
 impl Special {
-    pub const NONE: Self = Self(0);
-    pub const STICKY: Self = Self(1);
-    pub const SET_USER_IDENTIFIER: Self = Self(2);
-    pub const SET_GROUP_IDENTIFIER: Self = Self(4);
+    pub const NONE: Self = Self::empty();
+    pub const STICKY: Self = Self::from_bits_retain(1);
+    pub const SET_USER_IDENTIFIER: Self = Self::from_bits_retain(2);
+    pub const SET_GROUP_IDENTIFIER: Self = Self::from_bits_retain(4);
 
     pub fn new(sticky: bool, set_gid: bool, set_uid: bool) -> Self {
-        Self((sticky as u8) | (set_gid as u8) << 1 | (set_uid as u8) << 2)
+        Self::from_bits_retain((sticky as u8) | (set_gid as u8) << 1 | (set_uid as u8) << 2)
     }
 
     pub fn set_sticky(mut self, sticky: bool) -> Self {
-        self.0 = (self.0 & 0b110) | sticky as u8;
+        self = Self::from_bits_retain((self.bits() & 0b110) | sticky as u8);
         self
     }
 
     pub fn set_set_group_identifier(mut self, set_gid: bool) -> Self {
-        self.0 = (self.0 & 0b101) | (set_gid as u8) << 1;
+        self = Self::from_bits_retain((self.bits() & 0b101) | (set_gid as u8) << 1);
         self
     }
 
     pub fn set_set_user_identifier(mut self, set_uid: bool) -> Self {
-        self.0 = (self.0 & 0b011) | (set_uid as u8) << 2;
+        self = Self::from_bits_retain((self.bits() & 0b011) | (set_uid as u8) << 2);
         self
     }
 
     pub const fn get_sticky(&self) -> bool {
-        self.0 & 0b001 != 0
+        self.bits() & 0b001 != 0
     }
 
     pub const fn get_set_group_identifier(&self) -> bool {
-        self.0 & 0b010 != 0
+        self.bits() & 0b010 != 0
     }
 
     pub const fn get_set_user_identifier(&self) -> bool {
-        self.0 & 0b100 != 0
+        self.bits() & 0b100 != 0
     }
 
     pub const fn to_unix(&self) -> u8 {
-        self.0
+        self.bits()
     }
 
     pub fn from_unix(unix: u8) -> Option<Self> {
@@ -355,7 +346,7 @@ impl Special {
             return None;
         }
 
-        Some(Self(unix))
+        Some(Self::from_bits_retain(unix))
     }
 }
 
@@ -375,14 +366,14 @@ mod tests {
 
     #[test]
     fn test_new_permission() {
-        assert_eq!(Permission::Read.0, 0b100);
-        assert_eq!(Permission::Write.0, 0b010);
-        assert_eq!(Permission::Execute.0, 0b001);
-        assert_eq!(Permission::READ_WRITE.0, 0b110);
-        assert_eq!(Permission::WRITE_EXECUTE.0, 0b011);
-        assert_eq!(Permission::READ_EXECUTE.0, 0b101);
-        assert_eq!(Permission::None.0, 0b000);
-        assert_eq!(Permission::All.0, 0b111);
+        assert_eq!(Permission::Read.bits(), 0b100);
+        assert_eq!(Permission::Write.bits(), 0b010);
+        assert_eq!(Permission::Execute.bits(), 0b001);
+        assert_eq!(Permission::READ_WRITE.bits(), 0b110);
+        assert_eq!(Permission::WRITE_EXECUTE.bits(), 0b011);
+        assert_eq!(Permission::READ_EXECUTE.bits(), 0b101);
+        assert_eq!(Permission::empty().bits(), 0b000);
+        assert_eq!(Permission::all().bits(), 0b111);
     }
 
     #[test]
@@ -393,9 +384,9 @@ mod tests {
         assert_eq!(write.to_unix(), 2);
         let execute = Permission::Execute;
         assert_eq!(execute.to_unix(), 1);
-        let full = Permission::All;
+        let full = Permission::all();
         assert_eq!(full.to_unix(), 7);
-        let none = Permission::None;
+        let none = Permission::empty();
         assert_eq!(none.to_unix(), 0);
     }
 
@@ -408,9 +399,9 @@ mod tests {
         let execute = Permission::from_unix(1).unwrap();
         assert_eq!(execute, Permission::Execute);
         let full = Permission::from_unix(7).unwrap();
-        assert_eq!(full, Permission::All);
+        assert_eq!(full, Permission::all());
         let no = Permission::from_unix(0).unwrap();
-        assert_eq!(no, Permission::None);
+        assert_eq!(no, Permission::empty());
     }
 
     #[test]
@@ -439,8 +430,8 @@ mod tests {
         let read_execute = Permission::READ_EXECUTE;
         let write_execute = Permission::WRITE_EXECUTE;
         let execute = Permission::Execute;
-        let full = Permission::All;
-        let no = Permission::None;
+        let full = Permission::all();
+        let no = Permission::empty();
 
         assert!(full.contains(read));
         assert!(full.contains(write));
@@ -513,5 +504,16 @@ mod tests {
         assert!(!no.contains(write_execute));
         assert!(!no.contains(full));
         assert!(no.contains(no));
+    }
+
+    #[test]
+    fn test_permission_unknown_bits() {
+        assert_eq!(Permission::from_bits(1 << 3), None);
+        assert_eq!(Permission::from_bits_truncate(0b1_1111), Permission::all());
+        assert_eq!(Permission::from_bits_retain(1 << 3).bits(), 1 << 3);
+
+        assert_eq!(Special::from_bits(1 << 3), None);
+        assert_eq!(Special::from_bits_truncate(0b1_1111), Special::all());
+        assert_eq!(Special::from_bits_retain(1 << 3).bits(), 1 << 3);
     }
 }

@@ -1,14 +1,14 @@
-use shared::{AnyByLayout, flags};
+use bitflags::bitflags;
+use shared::AnyByLayout;
 
 use crate::{Error, Result};
 
-flags! {
-    /// The kinds of control commands.
-    pub enum ControlDirectionFlags: u8 {
-        /// Read data from the device.
-        Read,
-        /// Write data to the device.
-        Write,
+bitflags! {
+    /// Direction of control commands.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct ControlDirectionFlags: u8 {
+        const Read = 1 << 0;
+        const Write = 1 << 1;
     }
 }
 
@@ -154,7 +154,7 @@ impl ControlCommandIdentifier {
 
     pub const fn get_direction(&self) -> ControlDirectionFlags {
         let direction = (self.0 >> Self::DIRECTION_SHIFT) & ((1 << Self::DIRECTION_SIZE) - 1);
-        ControlDirectionFlags(direction as u8)
+        ControlDirectionFlags::from_bits_retain(direction as u8)
     }
 
     pub const fn get_size(&self) -> usize {
@@ -198,6 +198,23 @@ mod tests {
             MAX_ENCODED_SIZE + 1,
             0,
             0,
+        );
+    }
+
+    #[test]
+    fn control_direction_flag_bit_values_and_unknown_bits() {
+        assert_eq!(ControlDirectionFlags::Read.bits(), 1 << 0);
+        assert_eq!(ControlDirectionFlags::Write.bits(), 1 << 1);
+        assert_eq!(ControlDirectionFlags::all().bits(), 0b11);
+
+        assert_eq!(ControlDirectionFlags::from_bits(1 << 2), None);
+        assert_eq!(
+            ControlDirectionFlags::from_bits_truncate(0b111),
+            ControlDirectionFlags::all()
+        );
+        assert_eq!(
+            ControlDirectionFlags::from_bits_retain(1 << 2).bits(),
+            1 << 2
         );
     }
 }

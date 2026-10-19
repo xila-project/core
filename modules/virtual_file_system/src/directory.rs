@@ -19,7 +19,7 @@ impl<'a> Directory<'a> {
         let flags = Flags::new(
             flags.get_access(),
             Some(flags.get_create()),
-            Some(flags.get_state().insert(StateFlags::NonBlocking)),
+            Some(flags.get_state().union(StateFlags::NonBlocking)),
         );
 
         Self(SynchronousDirectory::new(

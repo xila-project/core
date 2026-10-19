@@ -107,7 +107,7 @@ pub fn test_basic_allocation(allocator: impl ManagerTrait) {
     let manager = Manager::new(&allocator);
 
     let layout = Layout::from_size_align(64, 8).unwrap();
-    let ptr = unsafe { manager.allocate(CapabilityFlags::None, layout) };
+    let ptr = unsafe { manager.allocate(CapabilityFlags::empty(), layout) };
 
     assert!(
         !ptr.is_null(),
@@ -137,7 +137,7 @@ pub fn test_zero_sized_allocation(allocator: impl ManagerTrait) {
     let manager = Manager::new(&allocator);
 
     let layout = Layout::from_size_align(0, 1).unwrap();
-    let ptr = unsafe { manager.allocate(CapabilityFlags::None, layout) };
+    let ptr = unsafe { manager.allocate(CapabilityFlags::empty(), layout) };
 
     assert!(
         ptr.is_null(),
@@ -162,7 +162,7 @@ pub fn test_aligned_allocation(allocator: impl ManagerTrait) {
 
     for &align in &alignments {
         let layout = Layout::from_size_align(256, align).unwrap();
-        let ptr = unsafe { manager.allocate(CapabilityFlags::None, layout) };
+        let ptr = unsafe { manager.allocate(CapabilityFlags::empty(), layout) };
 
         assert!(
             !ptr.is_null(),
@@ -235,7 +235,7 @@ pub fn test_deallocation(allocator: impl ManagerTrait) {
 
     let initial_used = manager.get_used();
 
-    let ptr = unsafe { manager.allocate(CapabilityFlags::None, layout) };
+    let ptr = unsafe { manager.allocate(CapabilityFlags::empty(), layout) };
     assert!(!ptr.is_null(), "Allocation should succeed");
 
     let used_after_alloc = manager.get_used();
@@ -265,7 +265,7 @@ pub fn test_reallocation_grow(allocator: impl ManagerTrait) {
     let new_size = 256;
     let layout = Layout::from_size_align(initial_size, 8).unwrap();
 
-    let ptr = unsafe { manager.allocate(CapabilityFlags::None, layout) };
+    let ptr = unsafe { manager.allocate(CapabilityFlags::empty(), layout) };
     assert!(!ptr.is_null(), "Initial allocation should succeed");
 
     // Write pattern to memory
@@ -310,7 +310,7 @@ pub fn test_reallocation_shrink(allocator: impl ManagerTrait) {
     let new_size = 64;
     let layout = Layout::from_size_align(initial_size, 8).unwrap();
 
-    let ptr = unsafe { manager.allocate(CapabilityFlags::None, layout) };
+    let ptr = unsafe { manager.allocate(CapabilityFlags::empty(), layout) };
     assert!(!ptr.is_null(), "Initial allocation should succeed");
 
     // Write pattern to memory
@@ -351,7 +351,7 @@ pub fn test_reallocation_same_size(allocator: impl ManagerTrait) {
     let size = 128;
     let layout = Layout::from_size_align(size, 8).unwrap();
 
-    let ptr = unsafe { manager.allocate(CapabilityFlags::None, layout) };
+    let ptr = unsafe { manager.allocate(CapabilityFlags::empty(), layout) };
     assert!(!ptr.is_null(), "Initial allocation should succeed");
 
     // Write pattern to memory
@@ -401,7 +401,7 @@ pub fn test_multiple_allocations(allocator: impl ManagerTrait) {
     for (i, allocation) in allocations.iter_mut().enumerate().take(NUM_ALLOCATIONS) {
         let size = 64 + i * 32;
         let layout = Layout::from_size_align(size, 8).unwrap();
-        let ptr = unsafe { manager.allocate(CapabilityFlags::None, layout) };
+        let ptr = unsafe { manager.allocate(CapabilityFlags::empty(), layout) };
 
         assert!(!ptr.is_null(), "Allocation {} should succeed", i);
 
@@ -449,7 +449,7 @@ pub fn test_memory_statistics(allocator: impl ManagerTrait) {
     //let initial_free = manager.get_free();
 
     let layout = Layout::from_size_align(1024, 8).unwrap();
-    let ptr = unsafe { manager.allocate(CapabilityFlags::None, layout) };
+    let ptr = unsafe { manager.allocate(CapabilityFlags::empty(), layout) };
 
     assert!(!ptr.is_null(), "Allocation should succeed");
 
@@ -500,7 +500,7 @@ pub fn test_cache_flush_operations(allocator: impl ManagerTrait) {
 
     // Test instruction cache flush with allocated memory
     let layout = Layout::from_size_align(256, 8).unwrap();
-    let ptr = unsafe { manager.allocate(CapabilityFlags::None, layout) };
+    let ptr = unsafe { manager.allocate(CapabilityFlags::empty(), layout) };
 
     if !ptr.is_null() {
         unsafe {
@@ -521,7 +521,7 @@ pub fn test_large_allocation(allocator: impl ManagerTrait) {
     let large_size = 1024 * 1024; // 1 MB
     let layout = Layout::from_size_align(large_size, 8).unwrap();
 
-    let ptr = unsafe { manager.allocate(CapabilityFlags::None, layout) };
+    let ptr = unsafe { manager.allocate(CapabilityFlags::empty(), layout) };
 
     if !ptr.is_null() {
         // If allocation succeeded, verify we can use the memory
@@ -561,7 +561,7 @@ pub fn test_allocation_pattern(allocator: impl ManagerTrait) {
     for i in 0..5 {
         let size = 128 + i * 64;
         let layout = Layout::from_size_align(size, 8).unwrap();
-        let ptr = unsafe { manager.allocate(CapabilityFlags::None, layout) };
+        let ptr = unsafe { manager.allocate(CapabilityFlags::empty(), layout) };
         assert!(!ptr.is_null(), "Allocation should succeed");
         ptrs.push((ptr, layout));
     }
@@ -577,7 +577,7 @@ pub fn test_allocation_pattern(allocator: impl ManagerTrait) {
     for i in 0..3 {
         let size = 96 + i * 32;
         let layout = Layout::from_size_align(size, 8).unwrap();
-        let ptr = unsafe { manager.allocate(CapabilityFlags::None, layout) };
+        let ptr = unsafe { manager.allocate(CapabilityFlags::empty(), layout) };
         assert!(!ptr.is_null(), "Allocation should succeed");
         ptrs.push((ptr, layout));
     }

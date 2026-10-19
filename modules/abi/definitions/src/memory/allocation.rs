@@ -302,7 +302,7 @@ pub unsafe extern "C" fn xila_memory_allocate(
             warning!(
                 "xila_memory_allocate called with invalid capabilities: {capabilities:?}, ignoring"
             );
-            CapabilityFlags::None
+            CapabilityFlags::empty()
         }
     };
 

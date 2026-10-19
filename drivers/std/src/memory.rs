@@ -38,7 +38,7 @@ impl MemoryManager {
             regions: Mutex::new(RefCell::new([
                 Region {
                     heap: Heap::empty(),
-                    capabilities: CapabilityFlags::None,
+                    capabilities: CapabilityFlags::empty(),
                     slice: &mut [],
                 },
                 Region {
@@ -310,7 +310,7 @@ mod tests {
 
         // Allocate some memory using the test manager directly
         let layout = Layout::from_size_align(128, 8).unwrap();
-        let capabilities = CapabilityFlags::None;
+        let capabilities = CapabilityFlags::empty();
 
         unsafe {
             let allocation = test_manager.allocate(capabilities, layout);
@@ -334,7 +334,7 @@ mod tests {
 
             // Allocate some memory
             let layout = Layout::from_size_align(128, 8).unwrap();
-            let capabilities = CapabilityFlags::None;
+            let capabilities = CapabilityFlags::empty();
 
             let allocation = manager.allocate(capabilities, layout);
             assert!(allocation.is_some());
@@ -359,7 +359,7 @@ mod tests {
 
             // Perform an initial allocation to trigger initialization
             let layout = Layout::from(Layout::from_size_align(128, 8).unwrap());
-            let capabilities = CapabilityFlags::None;
+            let capabilities = CapabilityFlags::empty();
             let allocation = manager.allocate(capabilities, layout);
             assert!(allocation.is_some());
             if let Some(pointer) = allocation {
@@ -401,7 +401,7 @@ mod tests {
 
             // Allocate some memory
             let layout = Layout::from_size_align(128, 8).unwrap();
-            let capabilities = CapabilityFlags::None;
+            let capabilities = CapabilityFlags::empty();
 
             let allocation = manager.allocate(capabilities, layout);
             assert!(allocation.is_some());
@@ -441,7 +441,7 @@ mod tests {
             // to trigger expansion
             let _page_size = get_page_size();
             let layout = Layout::from_size_align(INITIAL_HEAP_SIZE, 8).unwrap();
-            let capabilities: CapabilityFlags = CapabilityFlags::None;
+            let capabilities: CapabilityFlags = CapabilityFlags::empty();
 
             let allocation1 = manager.allocate(capabilities, layout);
             assert!(allocation1.is_some());
@@ -467,7 +467,7 @@ mod tests {
 
             // Allocate some memory
             let layout = Layout::from_size_align(128, 8).unwrap();
-            let capabilities = CapabilityFlags::None;
+            let capabilities = CapabilityFlags::empty();
 
             let allocation = manager.allocate(capabilities, layout);
             assert!(allocation.is_some());
