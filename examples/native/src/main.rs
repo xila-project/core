@@ -190,30 +190,33 @@ async fn main(task_manager: &'static xila::task::Manager) {
             .expect("Failed to mount debug keyboard access");
     }
 
-    // Keep the mixer pinned for the lifetime of every mounted VFS stream.
-    let audio_system: &'static audio::AudioSystem =
-        Box::leak(Box::new(audio::AudioSystem::new().unwrap()));
-    // SAFETY: the leaked service can never move or be freed.
-    let audio_system = unsafe { core::pin::Pin::new_unchecked(audio_system) };
-    let mut audio_runner = match drivers_native::audio::new(audio_system, 1) {
-        Ok(runner) => {
-            let _ = virtual_file_system
-                .create_directory(task, &"/devices/audio")
-                .await;
-            virtual_file_system
-                .mount_character_device(
-                    task,
-                    "/devices/audio/playback",
-                    audio::AudioStreamDevice::new(audio_system),
-                )
-                .await
-                .expect("Failed to mount audio playback");
-            log::information!("Native audio ready");
-            Some(runner)
-        }
-        Err(error) => {
-            log::warning!("Audio unavailable; applications can run silently: {error}");
-            None
+    #[cfg(feature = "audio")]
+    let mut audio_runner = {
+        // Keep the mixer pinned for the lifetime of every mounted VFS stream.
+        let audio_system: &'static audio::AudioSystem =
+            Box::leak(Box::new(audio::AudioSystem::new().unwrap()));
+        // SAFETY: the leaked service can never move or be freed.
+        let audio_system = unsafe { core::pin::Pin::new_unchecked(audio_system) };
+        match drivers_native::audio::new(audio_system, 1) {
+            Ok(runner) => {
+                let _ = virtual_file_system
+                    .create_directory(task, &"/devices/audio")
+                    .await;
+                virtual_file_system
+                    .mount_character_device(
+                        task,
+                        "/devices/audio/playback",
+                        audio::AudioStreamDevice::new(audio_system),
+                    )
+                    .await
+                    .expect("Failed to mount audio playback");
+                log::information!("Native audio ready");
+                Some(runner)
+            }
+            Err(error) => {
+                log::warning!("Audio unavailable; applications can run silently: {error}");
+                None
+            }
         }
     };
 
@@ -417,6 +420,7 @@ async fn main(task_manager: &'static xila::task::Manager) {
         {
             break;
         }
+        #[cfg(feature = "audio")]
         if let Some(runner) = &audio_runner
             && let Err(error) = runner.check()
         {
@@ -427,6 +431,7 @@ async fn main(task_manager: &'static xila::task::Manager) {
     }
 
     virtual_file_system.uninitialize().await;
+    #[cfg(feature = "audio")]
     drop(audio_runner);
 }
 
