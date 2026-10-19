@@ -55,7 +55,8 @@
   "No {} records found for domain '{}'": "Aucun enregistrement {} trouvé pour le domaine '{}'",
   "Option does not require a value": "L'option ne nécessite pas de valeur",
   "Option requires a value": "L'option nécessite une valeur",
-  "PING {} ({}): {} data bytes": "PING {} ({}): {} octets de données",
+  "PING data bytes.one": "octet de données",
+  "PING data bytes.other": "octets de données",
   "Password: ": "Mot de passe: ",
   "Permissions": "Permissions",
   "Request timeout for icmp_seq {}": "Délai d'attente dépassé pour icmp_seq {}",
@@ -66,7 +67,9 @@
   "Usage: shell -c COMMAND": "Utilisation : shell -c COMMANDE",
   "User": "Utilisateur",
   "User name: ": "Nom d'utilisateur: ",
-  "{} bytes from {}: icmp_seq={} time={:.2} ms": "{} octets de {}: icmp_seq={} temps={:.2} ms",
+  "ICMP bytes from.one": "octet de",
+  "ICMP bytes from.other": "octets de",
+  "time": "temps",
   "DNS records for domain.one": "enregistrement pour le domaine",
   "DNS records for domain.other": "enregistrements pour le domaine"
 }
