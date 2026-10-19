@@ -12,7 +12,7 @@ mod support;
 use core::time::Duration;
 use xila::{
     file_system::{AccessFlags, CreateFlags, Flags},
-    graphics::{Manager, lvgl},
+    graphics::{EventKind, Manager, Window, lvgl},
     virtual_file_system::{File, SynchronousDirectory},
 };
 
@@ -43,6 +43,8 @@ async fn action(manager: &Manager, button: u32) {
     let root = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
     let _lock = manager.synchronous_lock();
     unsafe {
+        let mut window = Window::from_raw(root).unwrap();
+        while window.as_mut().pop_event().is_some() {}
         let matrix = lvgl::lv_obj_get_child(root, 0);
         lvgl::lv_buttonmatrix_set_selected_button(matrix, button);
         assert_eq!(lvgl::lv_buttonmatrix_get_selected_button(matrix), button);
@@ -54,6 +56,9 @@ async fn action(manager: &Manager, button: u32) {
             ),
             lvgl::lv_result_t_LV_RESULT_OK
         );
+        let event = window.as_ref().peek_event().unwrap();
+        assert_eq!(event.code, EventKind::ValueChanged);
+        assert_eq!(event.target, matrix);
     }
 }
 
