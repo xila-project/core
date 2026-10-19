@@ -1,0 +1,10 @@
+{
+  "Enter your command ...": "Introduce un comando...",
+  "Failed to create object": "No se pudo crear el objeto",
+  "Failed to execute: {}": "No se pudo ejecutar: {}",
+  "Failed to get task identifier: {}": "No se pudo obtener el identificador de tarea: {}",
+  "Failed to mount device: {}": "No se pudo montar el dispositivo: {}",
+  "Graphics: {}": "Gráficos: {}",
+  "Resource busy": "Recurso ocupado",
+  "UTF-8: {}": "UTF-8: {}"
+}
