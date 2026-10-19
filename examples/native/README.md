@@ -44,3 +44,36 @@ With the `audio` feature enabled, the example mounts `/devices/audio/playback`
 using the default host audio output. Audio initialization failures are logged
 and leave the rest of the OS usable.
 See [Synth](../../executables/synth/README.md) for controls, silent mode and checks.
+
+## Inspecting the graphical UI
+
+The graphical interface uses the native window driver by default. Select the
+output-only headless driver to run without an X11 or Wayland display server:
+
+```sh
+cargo run -p native_example -- --display-driver headless --resolution 800x600
+```
+
+`--resolution` applies to either graphical driver. Headless resolutions are
+limited to 2,073,600 pixels. Use `--display-driver native` to select the window
+driver explicitly. The display-driver option conflicts with `--terminal`.
+
+In a second terminal, run the host client as the same OS user as the runtime:
+
+```sh
+cargo run -p drivers_native --bin xila-debug -- diagnostics
+cargo run -p drivers_native --bin xila-debug -- resolution
+cargo run -p drivers_native --bin xila-debug -- screenshot /tmp/xila-ui.png
+cargo run -p drivers_native --bin xila-debug -- ui-tree
+cargo run -p drivers_native --bin xila-debug -- pointer move 120 80
+cargo run -p drivers_native --bin xila-debug -- pointer button press
+cargo run -p drivers_native --bin xila-debug -- key enter press
+cargo run -p drivers_native --bin xila-debug -- text 'hello xila'
+```
+
+The Debug application uses Xila graphics, task, and memory subsystem APIs for
+screen capture, UI inspection, input injection, and diagnostics. The selected
+driver only supplies display output and any physical inputs. The host client
+receives a bounded raw RGBA screenshot and writes it as PNG to the requested
+path. JSON headers are limited to 64 KiB and screenshot data to 8 MiB. The
+transport is available on Unix hosts.
