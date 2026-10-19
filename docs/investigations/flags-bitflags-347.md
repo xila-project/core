@@ -48,3 +48,9 @@ The maintainer explicitly permits breaking changes and prioritizes code cleanlin
 Breaking **source API** compatibility is acceptable; changes to persistent filesystem encodings, hardware protocol fields, and ABI used across separately built components must still be explicit and tested. The existing regression tests describe legacy behavior, not necessarily required future behavior; revise tests for intentionally changed semantics (notably `Not` and `Debug`) rather than constraining the new implementation to old quirks.
 
 The initial issue's investigation/measurement gate remains in place until a measured go/no-go decision, unless explicitly amended by the maintainer.
+
+## Implementation status
+
+The draft PR now replaces the macro declarations with `bitflags` 2 in memory, network, and filesystem, updates direct Cargo dependencies and the existing locked `bitflags` package, migrates identified call sites, and deletes `modules/shared/src/flags.rs`. The remaining filesystem packed wrappers (`Flags` and `Permissions`) are intentionally retained: they encode multiple independent bit fields and are not plain flag sets.
+
+**Validation limitation:** No native, WASM, or ESP32 build was run in this environment (the container cannot resolve github.com). GitHub's combined status endpoint returned no statuses when checked. Treat the PR as an unverified draft and expect follow-up fixes after CI. The original legacy behavior tests for the deleted macro were removed along with the macro; the filesystem tests still cover important numeric encodings.
