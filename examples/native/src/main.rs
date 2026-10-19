@@ -67,33 +67,54 @@ async fn main(task_manager: &'static xila::task::Manager) {
     let (graphics_manager, bootsplash): (Option<&'static graphics::Manager>, Option<Bootsplash>) =
         if config.interface == cli::InterfaceMode::Graphical {
             let resolution = graphics::Point::new(config.resolution.0, config.resolution.1);
-            let (screen_device, pointer_device, keyboard_device, mut runner) =
-                drivers_native::window_screen::new(resolution)
-                    .await
-                    .unwrap();
-            let (screen_device, pointer_device, keyboard_device) = (
-                Box::leak(Box::new(screen_device)),
-                Box::leak(Box::new(pointer_device)),
-                Box::leak(Box::new(keyboard_device)),
-            );
-
-            let graphics_manager = graphics::initialize(
-                time_manager,
-                screen_device,
-                pointer_device,
-                graphics::InputKind::Pointer,
-                graphics::get_minimal_buffer_size(&resolution),
-                true,
-            )
-            .await;
+            let (graphics_manager, event_runner) = match config.display_driver {
+                cli::DisplayDriver::Native => {
+                    let (screen_device, pointer_device, keyboard_device, runner) =
+                        drivers_native::window_screen::new(resolution)
+                            .await
+                            .unwrap();
+                    let (screen_device, pointer_device, keyboard_device) = (
+                        Box::leak(Box::new(screen_device)),
+                        Box::leak(Box::new(pointer_device)),
+                        Box::leak(Box::new(keyboard_device)),
+                    );
+                    let pointer_device: &'static dyn xila::file_system::DirectCharacterDevice =
+                        pointer_device;
+                    let keyboard_device: &'static dyn xila::file_system::DirectCharacterDevice =
+                        keyboard_device;
+                    let input_devices = [
+                        (pointer_device, graphics::InputKind::Pointer),
+                        (keyboard_device, graphics::InputKind::Keypad),
+                    ];
+                    let manager = graphics::initialize_with_input_devices(
+                        time_manager,
+                        screen_device,
+                        &input_devices,
+                        graphics::get_minimal_buffer_size(&resolution),
+                        true,
+                    )
+                    .await;
+                    (manager, Some(runner))
+                }
+                cli::DisplayDriver::Headless => {
+                    let screen_device = Box::leak(Box::new(
+                        drivers_headless::HeadlessScreenDevice::new(resolution)
+                            .expect("Invalid headless display resolution"),
+                    ));
+                    let manager = graphics::initialize_with_input_devices(
+                        time_manager,
+                        screen_device,
+                        &[],
+                        graphics::get_minimal_buffer_size(&resolution),
+                        true,
+                    )
+                    .await;
+                    (manager, None)
+                }
+            };
             let graphics_manager: &'static graphics::Manager =
                 Box::leak(Box::new(graphics_manager));
             graphics::set_ffi_manager(graphics_manager);
-
-            graphics_manager
-                .add_input_device(keyboard_device, graphics::InputKind::Keypad)
-                .await
-                .unwrap();
 
             task_manager
                 .spawn(task, "Graphics", None, |_| {
@@ -102,12 +123,14 @@ async fn main(task_manager: &'static xila::task::Manager) {
                 .await
                 .unwrap();
 
-            task_manager
-                .spawn(task, "Event Loop", None, async move |_| {
-                    runner.run().await;
-                })
-                .await
-                .unwrap();
+            if let Some(mut runner) = event_runner {
+                task_manager
+                    .spawn(task, "Event Loop", None, async move |_| {
+                        runner.run().await;
+                    })
+                    .await
+                    .unwrap();
+            }
 
             let bootsplash = Bootsplash::new(graphics_manager).await.unwrap();
             (Some(graphics_manager), Some(bootsplash))
@@ -164,30 +187,6 @@ async fn main(task_manager: &'static xila::task::Manager) {
             )
             .await
             .expect("Failed to mount debug transport");
-        virtual_file_system
-            .mount_character_device(
-                task,
-                "/devices/debug/screen",
-                drivers_native::window_screen::debug_screen_device(),
-            )
-            .await
-            .expect("Failed to mount debug screen access");
-        virtual_file_system
-            .mount_character_device(
-                task,
-                "/devices/debug/pointer",
-                drivers_native::window_screen::debug_pointer_device(),
-            )
-            .await
-            .expect("Failed to mount debug pointer access");
-        virtual_file_system
-            .mount_character_device(
-                task,
-                "/devices/debug/keyboard",
-                drivers_native::window_screen::debug_keyboard_device(),
-            )
-            .await
-            .expect("Failed to mount debug keyboard access");
     }
 
     #[cfg(feature = "audio")]
