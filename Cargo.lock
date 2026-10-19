@@ -1621,7 +1621,7 @@ dependencies = [
 name = "file_system"
 version = "0.1.0"
 dependencies = [
- "bitflags",
+ "bitflags 2.13.2",
  "drivers_core",
  "drivers_native",
  "drivers_shared",
@@ -2511,7 +2511,7 @@ dependencies = [
 name = "memory"
 version = "0.1.0"
 dependencies = [
- "bitflags",
+ "bitflags 2.13.2",
  "critical-section",
  "linked_list_allocator",
  "log 0.1.0",
@@ -2751,8 +2751,8 @@ dependencies = [
 name = "network"
 version = "0.1.0"
 dependencies = [
- "bitflags",
  "abi_definitions",
+ "bitflags 2.13.2",
  "drivers_shared",
  "drivers_std",
  "embassy-futures",
