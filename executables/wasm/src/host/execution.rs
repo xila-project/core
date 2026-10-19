@@ -58,10 +58,16 @@ pub async fn run(
     store.set_fuel(instruction_limit.get() as u64)?;
     let mut call = start.call_resumable(&mut *store, ())?;
     loop {
+        if super::shutdown_requested() {
+            return Err(Error::Interrupted);
+        }
         call = match call {
             TypedResumableCall::Finished(()) => return Ok(()),
             TypedResumableCall::OutOfFuel(call) => {
                 xila::task::yield_now().await;
+                if super::shutdown_requested() {
+                    return Err(Error::Interrupted);
+                }
                 // A single bulk operation may require more than one normal quantum.
                 let fuel = u64::from(instruction_limit.get()).max(call.required_fuel());
                 store.set_fuel(fuel)?;
@@ -82,11 +88,16 @@ pub async fn run(
                         }
                         PendingCall::ClockPoll { poll, memory } => {
                             loop {
+                                if super::shutdown_requested() {
+                                    return Err(Error::Interrupted);
+                                }
                                 let delay = poll.delay(clock_now(context)?);
                                 if !delay.is_zero() {
-                                    // Bound timer arithmetic and periodically recheck realtime.
-                                    xila::task::Manager::sleep(delay.min(Duration::from_secs(60)))
-                                        .await;
+                                    // Bound timer and signal polling latency.
+                                    xila::task::Manager::sleep(
+                                        delay.min(Duration::from_millis(50)),
+                                    )
+                                    .await;
                                 } else {
                                     xila::task::yield_now().await;
                                 }

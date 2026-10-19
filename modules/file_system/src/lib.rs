@@ -119,6 +119,7 @@ pub use context::*;
 
 pub use devices::*;
 pub use fundamentals::*;
+pub use operations::file_system::tests;
 pub use operations::*;
 pub use time::*;
 

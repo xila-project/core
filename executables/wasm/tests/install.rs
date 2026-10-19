@@ -64,7 +64,7 @@ async fn install_selects_install_export_and_never_falls_back_to_main() {
             r#"(func (export "_start") i32.const 0 call $exit)
              (func (export "__install") i32.const 7 call $exit)"#,
             vec!["--install".into(), path.into()],
-            -1,
+            -7,
         ),
         (
             r#"(func (export "_start") i32.const 0 call $exit)"#,
