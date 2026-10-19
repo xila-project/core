@@ -61,14 +61,16 @@ async fn resolve_record<C: CommandContext>(
 ) -> Result<()> {
     match network_manager.resolve(domain, kind, true, None).await {
         Ok(ip) => {
+            let count = ip.len();
+            let record_label = embedded_i18n::translate_plural!("DNS records for domain", count);
+            // DNS record types (A, AAAA, etc.) remain invariant CLI identifiers.
             context
                 .write_out_fmt(format_args!(
-                    "{}\n",
-                    format_args!(
-                        translate!("{} record(s) for domain '{}':"),
-                        format_kind(kind),
-                        domain
-                    )
+                    "{}: {} {} '{}':\n",
+                    format_kind(kind),
+                    count,
+                    record_label,
+                    domain
                 ))
                 .await?;
             for address in &ip {
