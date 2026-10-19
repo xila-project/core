@@ -94,6 +94,7 @@ async fn guest_opens_pages_edits_and_saves_large_file() {
     )
     .await
     .unwrap();
+    wait_label(manager, 4, "Choose a path").await;
     let path_text = std::ffi::CString::new(path).unwrap();
     let root = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
     {
