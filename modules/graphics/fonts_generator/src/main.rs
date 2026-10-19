@@ -236,7 +236,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let directory = env::temp_dir().join(format!("xila-font-cache-{}-{stamp}", std::process::id()));
+        let directory = env::temp_dir().join(format!(
+            "xila-font-cache-{}-{stamp}",
+            std::process::id()
+        ));
         fs::create_dir_all(&directory).unwrap();
         directory
     }
