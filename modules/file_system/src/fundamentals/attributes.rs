@@ -1,22 +1,22 @@
 use crate::{Inode, Kind, Permissions, Size, Time};
 use core::fmt::Debug;
-use shared::flags;
+use bitflags::bitflags;
 use users::{GroupIdentifier, UserIdentifier};
 
-flags! {
-    /// Flags for file creation.
-    pub enum AttributeFlags: u16 {
-        Inode,
-        Kind,
-        Size,
-        Links,
-        CreationTime,
-        ModificationTime,
-        AccessTime,
-        StatusTime,
-        Permissions,
-        User,
-        Group,
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct AttributeFlags: u16 {
+        const Inode = 1 << 0;
+        const Kind = 1 << 1;
+        const Size = 1 << 2;
+        const Links = 1 << 3;
+        const CreationTime = 1 << 4;
+        const ModificationTime = 1 << 5;
+        const AccessTime = 1 << 6;
+        const StatusTime = 1 << 7;
+        const Permissions = 1 << 8;
+        const User = 1 << 9;
+        const Group = 1 << 10;
     }
 }
 
@@ -70,7 +70,7 @@ macro_rules! generate_attribute_accessors {
         }
 
         pub fn $setter(mut self, $field: $field_type) -> Self {
-            self.mask = self.mask.insert($mask_flag);
+            self.mask.insert($mask_flag);
             self.$field = $field;
 
             self
@@ -98,7 +98,7 @@ impl Attributes {
             permissions: Permissions::NONE,
             user: UserIdentifier::ROOT,
             group: GroupIdentifier::ROOT,
-            mask: AttributeFlags::None,
+            mask: AttributeFlags::empty(),
         }
     }
 
@@ -236,7 +236,7 @@ mod tests {
         assert_eq!(attrs.permissions, Permissions::NONE);
         assert_eq!(attrs.user, UserIdentifier::ROOT);
         assert_eq!(attrs.group, GroupIdentifier::ROOT);
-        assert_eq!(attrs.mask, AttributeFlags::None);
+        assert_eq!(attrs.mask, AttributeFlags::empty());
     }
 
     #[test]
