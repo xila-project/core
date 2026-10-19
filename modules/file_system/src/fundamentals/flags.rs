@@ -1,6 +1,6 @@
-use core::fmt::Debug;
-use bitflags::bitflags;
 use super::Permission;
+use bitflags::bitflags;
+use core::fmt::Debug;
 
 bitflags! {
     /// File access permissions.
@@ -220,5 +220,49 @@ mod tests {
         let flags = Flags::new(mode, None, None);
         let flags_u16: u16 = flags.into();
         assert_eq!(flags_u16, flags.0);
+    }
+
+    #[test]
+    fn test_flag_bit_values_and_unknown_bits() {
+        assert_eq!(AccessFlags::Read.bits(), 1 << 0);
+        assert_eq!(AccessFlags::Write.bits(), 1 << 1);
+        assert_eq!(CreateFlags::Create.bits(), 1 << 0);
+        assert_eq!(CreateFlags::Exclusive.bits(), 1 << 1);
+        assert_eq!(CreateFlags::Truncate.bits(), 1 << 2);
+        assert_eq!(StateFlags::Append.bits(), 1 << 0);
+        assert_eq!(StateFlags::NonBlocking.bits(), 1 << 1);
+        assert_eq!(StateFlags::Synchronous.bits(), 1 << 2);
+        assert_eq!(StateFlags::SynchronousDataOnly.bits(), 1 << 3);
+
+        assert_eq!(AccessFlags::all().bits(), 0b11);
+        assert_eq!(CreateFlags::all().bits(), 0b111);
+        assert_eq!(StateFlags::all().bits(), 0b1111);
+
+        // Unknown bits are rejected by `from_bits`, dropped by truncation and
+        // preserved by `from_bits_retain`.
+        assert_eq!(AccessFlags::from_bits(1 << 2), None);
+        assert_eq!(CreateFlags::from_bits(1 << 3), None);
+        assert_eq!(StateFlags::from_bits(1 << 4), None);
+        assert_eq!(AccessFlags::from_bits_truncate(0b111), AccessFlags::all());
+        assert_eq!(StateFlags::from_bits_truncate(0b1_1111), StateFlags::all());
+        assert_eq!(StateFlags::from_bits_retain(1 << 4).bits(), 1 << 4);
+    }
+
+    #[test]
+    fn test_flags_packed_encoding_is_stable() {
+        let flags = Flags::new(
+            AccessFlags::Read | AccessFlags::Write,
+            Some(CreateFlags::Create | CreateFlags::Exclusive),
+            Some(StateFlags::Append),
+        );
+
+        // Mode occupies bits 0-1, open bits 2-4 and status bits 5-8.
+        let expected: u16 = 0b11 | (0b011 << 2) | (0b0001 << 5);
+        assert_eq!(u16::from(flags), expected);
+
+        let (access, create, state) = flags.split();
+        assert_eq!(access, AccessFlags::READ_WRITE);
+        assert_eq!(create, CreateFlags::Create | CreateFlags::Exclusive);
+        assert_eq!(state, StateFlags::Append);
     }
 }

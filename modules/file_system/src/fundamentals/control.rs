@@ -1,5 +1,5 @@
-use shared::AnyByLayout;
 use bitflags::bitflags;
+use shared::AnyByLayout;
 
 use crate::{Error, Result};
 
@@ -198,6 +198,23 @@ mod tests {
             MAX_ENCODED_SIZE + 1,
             0,
             0,
+        );
+    }
+
+    #[test]
+    fn control_direction_flag_bit_values_and_unknown_bits() {
+        assert_eq!(ControlDirectionFlags::Read.bits(), 1 << 0);
+        assert_eq!(ControlDirectionFlags::Write.bits(), 1 << 1);
+        assert_eq!(ControlDirectionFlags::all().bits(), 0b11);
+
+        assert_eq!(ControlDirectionFlags::from_bits(1 << 2), None);
+        assert_eq!(
+            ControlDirectionFlags::from_bits_truncate(0b111),
+            ControlDirectionFlags::all()
+        );
+        assert_eq!(
+            ControlDirectionFlags::from_bits_retain(1 << 2).bits(),
+            1 << 2
         );
     }
 }

@@ -1,6 +1,6 @@
 use crate::{Inode, Kind, Permissions, Size, Time};
-use core::fmt::Debug;
 use bitflags::bitflags;
+use core::fmt::Debug;
 use users::{GroupIdentifier, UserIdentifier};
 
 bitflags! {
@@ -406,5 +406,28 @@ mod tests {
 
         assert_eq!(attrs1, attrs2);
         assert_ne!(attrs1, attrs3);
+    }
+
+    #[test]
+    fn test_attribute_flags_bit_values_and_unknown_bits() {
+        assert_eq!(AttributeFlags::Inode.bits(), 1 << 0);
+        assert_eq!(AttributeFlags::Kind.bits(), 1 << 1);
+        assert_eq!(AttributeFlags::Size.bits(), 1 << 2);
+        assert_eq!(AttributeFlags::Links.bits(), 1 << 3);
+        assert_eq!(AttributeFlags::CreationTime.bits(), 1 << 4);
+        assert_eq!(AttributeFlags::ModificationTime.bits(), 1 << 5);
+        assert_eq!(AttributeFlags::AccessTime.bits(), 1 << 6);
+        assert_eq!(AttributeFlags::StatusTime.bits(), 1 << 7);
+        assert_eq!(AttributeFlags::Permissions.bits(), 1 << 8);
+        assert_eq!(AttributeFlags::User.bits(), 1 << 9);
+        assert_eq!(AttributeFlags::Group.bits(), 1 << 10);
+        assert_eq!(AttributeFlags::all().bits(), (1 << 11) - 1);
+
+        assert_eq!(AttributeFlags::from_bits(1 << 11), None);
+        assert_eq!(
+            AttributeFlags::from_bits_truncate((1 << 12) - 1),
+            AttributeFlags::all()
+        );
+        assert_eq!(AttributeFlags::from_bits_retain(1 << 11).bits(), 1 << 11);
     }
 }
