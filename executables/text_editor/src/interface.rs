@@ -117,10 +117,16 @@ impl Interface {
                 },
             )?;
             object_set_flex_flow(window, FlexFlow::Column)?;
-            object_set_padding(window, 4)?;
+            object_set_padding(window, 10)?;
+            let title = label_create(window)?;
+            label_set_text(title, translate!(c"Text Editor").as_ptr().cast_mut())?;
+            object_set_width(title, percentage(100)?)?;
+            object_set_height(title, 34)?;
+            object_set_text_size(title, 24)?;
             let actions = buttonmatrix_create(window)?;
             object_set_width(actions, percentage(100)?)?;
-            object_set_height(actions, 36)?;
+            object_set_height(actions, 44)?;
+            object_set_padding(actions, 4)?;
             let action_map = [
                 translate!(c"Previous").as_ptr(),
                 translate!(c"Next").as_ptr(),
@@ -140,15 +146,19 @@ impl Interface {
             let initial = CString::new(initial).map_err(|_| -1)?;
             textarea_set_text(path, initial.as_ptr())?;
             object_set_width(path, percentage(100)?)?;
-            object_set_height(path, 36)?;
+            object_set_height(path, 40)?;
             let page_label = label_create(window)?;
             object_set_width(page_label, percentage(100)?)?;
+            object_set_height(page_label, 28)?;
+            object_set_text_size(page_label, 14)?;
             let text = textarea_create(window)?;
             textarea_set_max_length(text, PAGE_BYTES as u32)?;
             object_set_width(text, percentage(100)?)?;
             object_set_flex_grow(text, 1)?;
             let status = label_create(window)?;
             object_set_width(status, percentage(100)?)?;
+            object_set_height(status, 30)?;
+            object_set_text_size(status, 14)?;
             let keyboard = keyboard_create(window)?;
             object_set_height(keyboard, 110)?;
             object_add_flag(keyboard, ObjectFlag::Hidden)?;
