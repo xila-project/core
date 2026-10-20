@@ -81,7 +81,7 @@ impl VirtualFileSystem {
                 }
                 return Ok(read);
             }
-            Err(Error::UnsupportedOperation) => {}
+            Err(Error::FileSystem(file_system::Error::UnsupportedOperation)) => {}
             Err(error) => return Err(error),
         }
 
@@ -110,16 +110,33 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
     ) -> Result<ResolvedPath<'a>> {
         let require_directory = path.as_str().len() > 1 && path.as_str().ends_with('/');
-        let resolved = self
-            .resolve_path_inner(
+        let resolved = if require_directory {
+            let normalized = PathOwned::try_from(path.as_str().trim_end_matches('/'))
+                .map_err(|_| Error::InvalidPath)?;
+            let resolved = self
+                .resolve_path_inner(
+                    file_systems,
+                    &normalized,
+                    true,
+                    allow_missing_final,
+                    user,
+                    task,
+                )
+                .await?;
+            ResolvedPath::Owned(
+                PathOwned::try_from(resolved.as_str()).map_err(|_| Error::InvalidPath)?,
+            )
+        } else {
+            self.resolve_path_inner(
                 file_systems,
                 path,
-                follow_final || require_directory,
+                follow_final,
                 allow_missing_final,
                 user,
                 task,
             )
-            .await?;
+            .await?
+        };
         if require_directory {
             let (file_system, relative_path, _) =
                 Self::get_file_system_from_path(file_systems, &resolved)?;

@@ -619,22 +619,22 @@ async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
     }
 
     let link_stats = vfs
-        .get_link_statistics(Path::from_str("/links/absolute"))
+        .get_link_statistics(&Path::from_str("/links/absolute"))
         .await
         .unwrap();
     assert_eq!(link_stats.kind, file_system::Kind::SymbolicLink);
     assert_eq!(link_stats.size, "/links/original".len() as u64);
     assert_eq!(
-        vfs.get_statistics(Path::from_str("/links/absolute"))
+        vfs.get_statistics(&Path::from_str("/links/absolute"))
             .await
             .unwrap()
             .kind,
         file_system::Kind::File
     );
-    assert!(matches!(
-        vfs.get_statistics(Path::from_str("/links/absolute/")).await,
-        Err(VfsError::NotADirectory)
-    ));
+    let trailing_slash_stats = vfs
+        .get_statistics(&Path::from_str("/links/absolute/"))
+        .await;
+    assert!(matches!(trailing_slash_stats, Err(VfsError::NotADirectory)));
 
     let mut target = [0; 64];
     let length = vfs
@@ -651,14 +651,14 @@ async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
     .await
     .unwrap();
     assert_eq!(
-        vfs.get_link_statistics(Path::from_str("/links/dangling"))
+        vfs.get_link_statistics(&Path::from_str("/links/dangling"))
             .await
             .unwrap()
             .kind,
         file_system::Kind::SymbolicLink
     );
     assert!(
-        vfs.get_statistics(Path::from_str("/links/dangling"))
+        vfs.get_statistics(&Path::from_str("/links/dangling"))
             .await
             .is_err()
     );
@@ -703,7 +703,7 @@ async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
     .await
     .unwrap();
     assert_eq!(
-        vfs.get_link_statistics(Path::from_str("/links/renamed"))
+        vfs.get_link_statistics(&Path::from_str("/links/renamed"))
             .await
             .unwrap()
             .kind,
@@ -713,7 +713,7 @@ async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
         .await
         .unwrap();
     assert_eq!(
-        vfs.get_statistics(Path::from_str("/links/original"))
+        vfs.get_statistics(&Path::from_str("/links/original"))
             .await
             .unwrap()
             .size,

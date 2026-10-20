@@ -972,7 +972,7 @@ impl VirtualFileSystem {
         .await
         {
             Ok(read) => Ok(read),
-            Err(Error::UnsupportedOperation) => {
+            Err(Error::FileSystem(file_system::Error::UnsupportedOperation)) => {
                 let mut context = Context::new_empty();
                 poll(|| {
                     Ok(file_system.file_system.lookup_file(

@@ -743,7 +743,7 @@ mod symlink_tests {
 
         let target = b"../data/target";
         let mut context = Context::new_empty();
-        FileOperations::lookup_file(
+        FileSystemOperations::lookup_file(
             &filesystem,
             &mut context,
             link,
