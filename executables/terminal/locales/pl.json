@@ -6,5 +6,7 @@
   "Failed to mount device: {}": "Nie udało się zamontować urządzenia: {}",
   "Graphics: {}": "Grafika: {}",
   "Resource busy": "Zasób zajęty",
+  "Terminal session": "Sesja terminala",
+  "Type a command and press Enter": "Wpisz polecenie i naciśnij Enter",
   "UTF-8: {}": "UTF-8: {}"
 }

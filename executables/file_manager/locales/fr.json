@@ -1,4 +1,9 @@
 {
+  "Browse and manage your files": "Parcourez et gérez vos fichiers",
+  "Contents": "Contenu",
   "Error handling file manager event: {:?}": "Erreur lors du traitement de l'evenement du gestionnaire de fichiers : {:?}",
-  "Invalid path entered: {}": "Chemin invalide saisi : {}"
+  "Files": "Fichiers",
+  "Invalid path entered: {}": "Chemin invalide saisi : {}",
+  "1 item": "1 élément",
+  "{} items": "{} éléments"
 }

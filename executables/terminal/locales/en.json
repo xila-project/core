@@ -6,5 +6,7 @@
   "Failed to mount device: {}": "Failed to mount device: {}",
   "Graphics: {}": "Graphics: {}",
   "Resource busy": "Resource busy",
+  "Terminal session": "Terminal session",
+  "Type a command and press Enter": "Type a command and press Enter",
   "UTF-8: {}": "UTF-8: {}"
 }
