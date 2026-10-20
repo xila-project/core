@@ -146,6 +146,7 @@ def collect(repo, run_id):
     attempt_run = json.loads(gh("api", base))
     pages = json.loads(gh("api", "--paginate", "--slurp", f"{base}/jobs?per_page=100"))
     result = job_metrics([job for page in pages for job in page["jobs"]])
+    result["successful_sample"] = result["successful_sample"] and run["conclusion"] == "success"
     result.update({key: run[key] for key in ("id", "head_sha", "event", "conclusion", "run_attempt", "created_at")})
     result["url"] = run["html_url"]
     # Scope jobs and logs to one attempt. Original created_at includes potentially
@@ -153,7 +154,14 @@ def collect(repo, run_id):
     result["attempt_started_at"] = attempt_run["run_started_at"]
     ends = [job["completed_at"] for page in pages for job in page["jobs"] if job.get("completed_at") and job["conclusion"] != "skipped"]
     result["wall_minutes"] = round(seconds(result["attempt_started_at"], max(ends)) / 60, 3) if ends else None
-    result["logs"] = log_metrics(gh("run", "view", str(run_id), "--repo", repo, "--attempt", str(attempt), "--log"))
+    try:
+        result["logs"] = log_metrics(gh("run", "view", str(run_id), "--repo", repo, "--attempt", str(attempt), "--log"))
+        result["logs_available"] = True
+    except subprocess.CalledProcessError:
+        # Cancelled jobs can have no downloadable log. Preserve API timings and
+        # make missing evidence explicit rather than treating it as zero work.
+        result["logs"] = None
+        result["logs_available"] = False
     return result
 
 

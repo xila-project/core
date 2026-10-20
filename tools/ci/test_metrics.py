@@ -1,4 +1,5 @@
 import unittest
+import subprocess
 from unittest.mock import patch
 
 import metrics
@@ -21,6 +22,26 @@ class MetricsTests(unittest.TestCase):
         for value, expected in [("true", True), ("false", False)]:
             result = metrics.log_metrics(f"test\tUNKNOWN STEP\t2026-10-20T00:00:00Z Rust cache exact hit: {value}")
             self.assertIs(result["test"]["rust_cache_exact_hit"], expected)
+
+    def test_failed_workflow_is_not_a_successful_sample_even_if_jobs_succeeded(self):
+        import json
+        run = {"id": 42, "run_attempt": 1, "head_sha": "abc", "event": "push", "conclusion": "cancelled", "created_at": "2026-10-20T00:00:00Z", "html_url": "https://example/run"}
+        attempt = {"run_started_at": "2026-10-20T00:00:00Z"}
+        jobs = [{"jobs": [{"name": "test", "conclusion": "success", "started_at": "2026-10-20T00:00:00Z", "completed_at": "2026-10-20T00:01:00Z", "steps": []}]}]
+        with patch.object(metrics, "gh", side_effect=[json.dumps(run), json.dumps(attempt), json.dumps(jobs), ""]):
+            result = metrics.collect("owner/repo", 42)
+        self.assertFalse(result["successful_sample"])
+
+    def test_missing_cancelled_job_logs_do_not_discard_runner_cost(self):
+        import json
+        run = {"id": 42, "run_attempt": 1, "head_sha": "abc", "event": "push", "conclusion": "cancelled", "created_at": "2026-10-20T00:00:00Z", "html_url": "https://example/run"}
+        attempt = {"run_started_at": "2026-10-20T00:00:00Z"}
+        jobs = [{"jobs": [{"name": "test", "conclusion": "cancelled", "started_at": "2026-10-20T00:00:00Z", "completed_at": "2026-10-20T00:01:00Z", "steps": []}]}]
+        with patch.object(metrics, "gh", side_effect=[json.dumps(run), json.dumps(attempt), json.dumps(jobs), subprocess.CalledProcessError(1, "gh")]):
+            result = metrics.collect("owner/repo", 42)
+        self.assertEqual(result["runner_minutes"], 1)
+        self.assertFalse(result["logs_available"])
+        self.assertFalse(result["successful_sample"])
 
     def test_runner_minutes_include_post_steps_not_queue_or_skipped_jobs(self):
         jobs = [
