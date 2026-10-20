@@ -78,6 +78,13 @@ class WorkflowPolicy(unittest.TestCase):
         formatting = filters.split("            format:\n")[1].split("            host:\n")[0]
         self.assertIn("'tools/ci/**'", formatting)
 
+    def test_new_benchmark_actions_are_pinned_and_report_archive_hit(self):
+        text = (ROOT / ".github/workflows/cache-benchmark.yml").read_text()
+        for action in re.findall(r"uses: ([^\s]+)", text):
+            if not action.startswith("./"):
+                self.assertRegex(action, r"@[0-9a-f]{40}$")
+        self.assertIn("steps.rust-cache.outputs.cache-hit", text)
+
     def test_zstd_is_available_before_rust_cache(self):
         text = (ROOT / ".github/actions/setup/action.yml").read_text()
         self.assertIn("uses: ./.github/actions/cache-tools", text)
