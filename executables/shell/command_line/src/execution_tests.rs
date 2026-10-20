@@ -772,7 +772,21 @@ async fn mv_checks_write_permission_on_both_parent_directories() {
             .unwrap(),
         1
     );
+    // The rejected operation must leave the source in place. Check it as its
+    // owner because the current user cannot traverse this directory.
+    shell
+        .context
+        .task_manager
+        .set_user(shell.task, owner)
+        .await
+        .unwrap();
     assert!(vfs.get_statistics(&"/mv-protected/source").await.is_ok());
+    shell
+        .context
+        .task_manager
+        .set_user(shell.task, other)
+        .await
+        .unwrap();
     assert_eq!(
         shell
             .execute_line("mv /mv-public/source /mv-protected/denied")

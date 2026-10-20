@@ -40,6 +40,13 @@ pub(super) enum ResolvedPath<'a> {
     Owned(PathOwned),
 }
 
+struct ResolutionState {
+    resolved: PathOwned,
+    pending: String,
+    links_followed: usize,
+    target_buffer: Vec<u8>,
+}
+
 impl core::ops::Deref for ResolvedPath<'_> {
     type Target = Path;
 
@@ -238,14 +245,16 @@ impl VirtualFileSystem {
                 return self
                     .resolve_pending(
                         file_systems,
-                        resolved,
-                        pending,
-                        1,
+                        ResolutionState {
+                            resolved,
+                            pending,
+                            links_followed: 1,
+                            target_buffer,
+                        },
                         follow_final,
                         allow_missing_final,
                         user,
                         task,
-                        target_buffer,
                     )
                     .await;
             }
@@ -265,14 +274,16 @@ impl VirtualFileSystem {
         let pending = String::from(text.strip_prefix('/').unwrap_or(text));
         self.resolve_pending(
             file_systems,
-            PathOwned::root(),
-            pending,
-            0,
+            ResolutionState {
+                resolved: PathOwned::root(),
+                pending,
+                links_followed: 0,
+                target_buffer,
+            },
             follow_final,
             allow_missing_final,
             user,
             task,
-            target_buffer,
         )
         .await
     }
@@ -280,17 +291,21 @@ impl VirtualFileSystem {
     async fn resolve_pending<'a>(
         &self,
         file_systems: &FileSystemsArray,
-        mut resolved: PathOwned,
-        mut pending: String,
-        mut links_followed: usize,
+        state: ResolutionState,
         follow_final: bool,
         allow_missing_final: bool,
         user: UserIdentifier,
         task: TaskIdentifier,
-        mut target_buffer: Vec<u8>,
     ) -> Result<ResolvedPath<'a>> {
         const MAX_PATH_LENGTH: usize = 4096;
         const MAX_SYMLINKS: usize = 40;
+
+        let ResolutionState {
+            mut resolved,
+            mut pending,
+            mut links_followed,
+            mut target_buffer,
+        } = state;
 
         while !pending.is_empty() {
             let separator = pending.find('/').unwrap_or(pending.len());
