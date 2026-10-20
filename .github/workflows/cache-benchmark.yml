@@ -72,12 +72,13 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           prefix-key: experiment-${{ inputs.namespace }}
-          shared-key: ${{ matrix.strategy }}
+          # In this rust-cache revision shared-key overrides key, not combines
+          # with it. Put source identity in the effective shared key itself.
+          shared-key: ${{ matrix.strategy == 'workspace' && format('workspace-{0}', github.sha) || matrix.strategy }}
           cache-bin: "false"
           cache-workspace-crates: ${{ matrix.strategy == 'workspace' }}
           # Workspace artifacts require a changing source key (#348). Checkout
           # mtimes can still invalidate them: measure, don't assume a no-op.
-          key: ${{ matrix.strategy == 'workspace' && github.sha || '' }}
 
       - name: Run | Identical host workload
         run: |
