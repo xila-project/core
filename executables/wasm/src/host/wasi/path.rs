@@ -193,7 +193,7 @@ define_wasi_module! {
             let stats = if flags & 1 != 0 {
                 task::block_on(vfs.get_statistics_for_task(task_id, &absolute_path))
             } else {
-                task::block_on(vfs.get_link_statistics(&absolute_path))
+                task::block_on(vfs.get_link_statistics_for_task(task_id, &absolute_path))
             }.map_err(vfs_error)?;
             let filestat = make_filestat(&stats);
             let memory = get_memory(&caller).ok_or(Error::Fault)?;
