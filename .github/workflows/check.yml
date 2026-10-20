@@ -79,9 +79,10 @@ jobs:
             format:
               - *shared
               - '**/*.{rs,toml,json}'
+              - 'tools/ci/**'
             host:
               - *shared
-              - 'tools/profiling/**'
+              - 'tools/**'
               - 'src/**'
               - 'drivers/**'
               - 'executables/**'
@@ -244,24 +245,23 @@ jobs:
         with:
           cache-workspaces: "executables/wasm/tests/translation -> target"
           cache-key: wasm-translation-${{ matrix.memory }}
+          node-dependencies: "false"
+          lockfile-manifests: executables/wasm/tests/translation/Cargo.toml
 
       # Keep main's plain dependency artifacts compatible with PR test builds.
-      - name: Check | Translation tests
+      # Default cargo test includes the borrowing compile-fail doctests too.
+      - name: Check | Translation tests and borrowing compile-fail doctests
         run: >-
           cargo +${XILA_RUST_TOOLCHAIN} test --locked
-          --manifest-path executables/wasm/tests/translation/Cargo.toml
-          --no-default-features --features ${{ matrix.memory }}
-
-      - name: Check | Borrowing compile-fail doctests
-        run: >-
-          cargo +${XILA_RUST_TOOLCHAIN} test --locked --doc
           --manifest-path executables/wasm/tests/translation/Cargo.toml
           --no-default-features --features ${{ matrix.memory }}
 
   wasm-extended:
     name: WASM ABI coverage and Miri (${{ matrix.memory }})
     needs: [wasm-translation]
-    if: github.event_name != 'pull_request'
+    # changes is intentionally skipped on main; override implicit success()
+    # across that ancestor, but never run after failed translation tests.
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.wasm-translation.result == 'success' }}
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/xila-project/development-environment:main
@@ -283,6 +283,8 @@ jobs:
         with:
           cache-workspaces: "executables/wasm/tests/translation -> target/llvm-cov-target"
           cache-key: wasm-extended-${{ matrix.memory }}
+          node-dependencies: "false"
+          lockfile-manifests: executables/wasm/tests/translation/Cargo.toml
 
       - name: Check | Translation coverage
         run: >-
@@ -337,6 +339,9 @@ jobs:
 
       - name: Check | Formatting (TOML)
         run: cargo make --skip-init-end-tasks format-toml --check
+
+      - name: Check | CI policy and measurement regressions
+        run: python3 -m unittest discover -s tools/ci -v
 
       - name: Check | Formatting (Rust)
         run: cargo make --skip-init-end-tasks format-rust -- --check
@@ -421,6 +426,9 @@ jobs:
             . -> target
             tools/profiling -> target
           cache-key: host-test
+          lockfile-manifests: |
+            Cargo.toml
+            tools/profiling/Cargo.toml
 
       - name: Check | Profiling runner
         run: |
@@ -448,7 +456,8 @@ jobs:
   host-coverage:
     name: Host coverage and profiling checks
     needs: [host-test]
-    if: github.event_name != 'pull_request'
+    # A skipped changes ancestor must not disable main coverage/profiling.
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.host-test.result == 'success' }}
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/xila-project/development-environment:main
