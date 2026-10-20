@@ -1,0 +1,92 @@
+name: Cache benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: "Fresh namespace = cold; repeat same namespace/ref = warm. Experiment caches consume repository quota."
+        type: string
+        default: "480-v1"
+      strategy:
+        description: "One candidate at a time by default; all costs four workspace test builds."
+        type: choice
+        default: dependencies
+        options: [dependencies, combined, sccache, workspace, all]
+
+permissions:
+  contents: read
+  packages: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  benchmark:
+    name: Cache experiment (${{ matrix.strategy }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    container:
+      # Fixed image for comparable cold/warm samples; update deliberately.
+      image: ghcr.io/xila-project/development-environment@sha256:3d9738f5f02afd9147be66b2c84908a56b24da68138ba03ca88885c973f11f09
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    strategy:
+      fail-fast: false
+      # Isolate candidates from each other's GHAC rate limits and CPU contention.
+      max-parallel: 1
+      matrix:
+        strategy: ${{ fromJSON(inputs.strategy == 'all' && '["dependencies","combined","sccache","workspace"]' || format('["{0}"]', inputs.strategy)) }}
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_RW_MODE: READ_WRITE
+      SCCACHE_GHA_VERSION: experiment-${{ inputs.namespace }}-${{ matrix.strategy }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/cache-tools
+
+      - name: Setup | Fixed tools and fonts dependencies
+        run: |
+          source development/toolchains.env
+          echo "RUSTUP_TOOLCHAIN=$XILA_RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+          npm ci
+
+      - uses: ./.github/actions/cache-diagnostics
+        if: matrix.strategy != 'dependencies'
+
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+        if: matrix.strategy != 'dependencies'
+        with:
+          version: v0.18.0
+
+      - name: Setup | Compiler wrapper
+        # The image sets RUSTC_WRAPPER even without sccache-action.
+        if: matrix.strategy == 'dependencies'
+        run: echo 'RUSTC_WRAPPER=' >> "$GITHUB_ENV"
+
+      - name: Cache | Cargo dependencies or source-keyed workspace
+        if: matrix.strategy != 'sccache'
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          prefix-key: experiment-${{ inputs.namespace }}
+          shared-key: ${{ matrix.strategy }}
+          cache-bin: "false"
+          cache-workspace-crates: ${{ matrix.strategy == 'workspace' }}
+          # Workspace artifacts require a changing source key (#348). Checkout
+          # mtimes can still invalidate them: measure, don't assume a no-op.
+          key: ${{ matrix.strategy == 'workspace' && github.sha || '' }}
+
+      - name: Run | Identical host workload
+        run: |
+          cargo run --locked --package fonts_generator
+          cargo test --locked --workspace --timings
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: cache-timings-${{ matrix.strategy }}
+          path: target/cargo-timings/
+          if-no-files-found: warn

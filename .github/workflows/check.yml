@@ -245,17 +245,13 @@ jobs:
           cache-workspaces: "executables/wasm/tests/translation -> target"
           cache-key: wasm-translation-${{ matrix.memory }}
           node-dependencies: "false"
+          lockfile-manifests: executables/wasm/tests/translation/Cargo.toml
 
       # Keep main's plain dependency artifacts compatible with PR test builds.
-      - name: Check | Translation tests
+      # Default cargo test includes the borrowing compile-fail doctests too.
+      - name: Check | Translation tests and borrowing compile-fail doctests
         run: >-
           cargo +${XILA_RUST_TOOLCHAIN} test --locked
-          --manifest-path executables/wasm/tests/translation/Cargo.toml
-          --no-default-features --features ${{ matrix.memory }}
-
-      - name: Check | Borrowing compile-fail doctests
-        run: >-
-          cargo +${XILA_RUST_TOOLCHAIN} test --locked --doc
           --manifest-path executables/wasm/tests/translation/Cargo.toml
           --no-default-features --features ${{ matrix.memory }}
 
@@ -287,6 +283,7 @@ jobs:
           cache-workspaces: "executables/wasm/tests/translation -> target/llvm-cov-target"
           cache-key: wasm-extended-${{ matrix.memory }}
           node-dependencies: "false"
+          lockfile-manifests: executables/wasm/tests/translation/Cargo.toml
 
       - name: Check | Translation coverage
         run: >-
@@ -428,6 +425,9 @@ jobs:
             . -> target
             tools/profiling -> target
           cache-key: host-test
+          lockfile-manifests: |
+            Cargo.toml
+            tools/profiling/Cargo.toml
 
       - name: Check | Profiling runner
         run: |
