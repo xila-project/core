@@ -565,3 +565,194 @@ mod polling;
 #[cfg(target_os = "linux")]
 #[path = "support/device_polling.rs"]
 mod device_polling;
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
+    use virtual_file_system::Error as VfsError;
+
+    let (task, vfs) = initialize().await;
+    vfs.create_directory(task, &Path::from_str("/links"))
+        .await
+        .unwrap();
+    let mut original = File::open(
+        vfs,
+        task,
+        "/links/original",
+        Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
+    )
+    .await
+    .unwrap();
+    original.write(b"hello").await.unwrap();
+    original.close(vfs).await.unwrap();
+
+    vfs.create_symlink(
+        task,
+        Path::from_str("/links/original"),
+        Path::from_str("/links/absolute"),
+    )
+    .await
+    .unwrap();
+    vfs.create_symlink(
+        task,
+        Path::from_str("original"),
+        Path::from_str("/links/relative"),
+    )
+    .await
+    .unwrap();
+    vfs.create_symlink(
+        task,
+        Path::from_str("relative"),
+        Path::from_str("/links/chain"),
+    )
+    .await
+    .unwrap();
+
+    for path in ["/links/absolute", "/links/relative", "/links/chain"] {
+        let mut file = File::open(vfs, task, path, AccessFlags::Read.into())
+            .await
+            .unwrap();
+        let mut contents = [0; 5];
+        assert_eq!(file.read(&mut contents).await.unwrap(), contents.len());
+        assert_eq!(&contents, b"hello");
+        file.close(vfs).await.unwrap();
+    }
+
+    let link_stats = vfs
+        .get_link_statistics(Path::from_str("/links/absolute"))
+        .await
+        .unwrap();
+    assert_eq!(link_stats.kind, file_system::Kind::SymbolicLink);
+    assert_eq!(link_stats.size, "/links/original".len() as u64);
+    assert_eq!(
+        vfs.get_statistics(Path::from_str("/links/absolute"))
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::File
+    );
+
+    let mut target = [0; 64];
+    let length = vfs
+        .read_symlink(task, Path::from_str("/links/absolute"), &mut target)
+        .await
+        .unwrap();
+    assert_eq!(&target[..length], b"/links/original");
+
+    vfs.create_symlink(
+        task,
+        Path::from_str("/missing-target"),
+        Path::from_str("/links/dangling"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        vfs.get_link_statistics(Path::from_str("/links/dangling"))
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::SymbolicLink
+    );
+    assert!(
+        vfs.get_statistics(Path::from_str("/links/dangling"))
+            .await
+            .is_err()
+    );
+
+    vfs.create_symlink(
+        task,
+        Path::from_str("loop-b"),
+        Path::from_str("/links/loop-a"),
+    )
+    .await
+    .unwrap();
+    vfs.create_symlink(
+        task,
+        Path::from_str("loop-a"),
+        Path::from_str("/links/loop-b"),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        File::open(vfs, task, "/links/loop-a", AccessFlags::Read.into()).await,
+        Err(VfsError::FileSystem(
+            file_system::Error::InvalidSymbolicLink
+        ))
+    ));
+
+    assert!(matches!(
+        File::open(
+            vfs,
+            task,
+            "/links/absolute",
+            Flags::new(AccessFlags::Read, Some(CreateFlags::CREATE_EXCLUSIVE), None)
+        )
+        .await,
+        Err(VfsError::AlreadyExists)
+    ));
+
+    vfs.rename(
+        task,
+        &Path::from_str("/links/relative"),
+        &Path::from_str("/links/renamed"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        vfs.get_link_statistics(Path::from_str("/links/renamed"))
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::SymbolicLink
+    );
+    vfs.remove(task, Path::from_str("/links/renamed"))
+        .await
+        .unwrap();
+    assert_eq!(
+        vfs.get_statistics(Path::from_str("/links/original"))
+            .await
+            .unwrap()
+            .size,
+        5
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn symlink_targets_can_cross_filesystem_mounts() {
+    let (task, vfs) = initialize().await;
+    let device = MemoryDevice::<512>::new_static(256 * 512);
+    little_fs::FileSystem::format(device, 256).unwrap();
+    vfs.mount_file_system(
+        little_fs::FileSystem::new(device, 256).unwrap(),
+        Path::from_str("/other"),
+        task,
+    )
+    .await
+    .unwrap();
+    let mut target = File::open(
+        vfs,
+        task,
+        "/other/target",
+        Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
+    )
+    .await
+    .unwrap();
+    target.write(b"mounted").await.unwrap();
+    target.close(vfs).await.unwrap();
+
+    vfs.create_symlink(
+        task,
+        Path::from_str("/other/target"),
+        Path::from_str("/cross-mount"),
+    )
+    .await
+    .unwrap();
+    let mut link = File::open(vfs, task, "/cross-mount", AccessFlags::Read.into())
+        .await
+        .unwrap();
+    let mut contents = [0; 7];
+    assert_eq!(link.read(&mut contents).await.unwrap(), contents.len());
+    assert_eq!(&contents, b"mounted");
+    link.close(vfs).await.unwrap();
+}

@@ -52,6 +52,8 @@ pub enum Error<'a> {
     FailedToWriteFile(virtual_file_system::Error),
     LineTooLong,
     FailedToRename(virtual_file_system::Error),
+    FailedToCreateSymbolicLink(virtual_file_system::Error),
+    FailedToReadSymbolicLink(virtual_file_system::Error),
 }
 
 impl<A: getargs::Argument> From<getargs::Error<A>> for Error<'_> {
@@ -97,6 +99,20 @@ impl Display for Error<'_> {
             Error::LineTooLong => write!(formatter, translate!("Line too long")),
             Error::FailedToRename(error) => {
                 write!(formatter, translate!("Failed to rename path: {}"), error)
+            }
+            Error::FailedToCreateSymbolicLink(error) => {
+                write!(
+                    formatter,
+                    translate!("Failed to create symbolic link: {}"),
+                    error
+                )
+            }
+            Error::FailedToReadSymbolicLink(error) => {
+                write!(
+                    formatter,
+                    translate!("Failed to read symbolic link: {}"),
+                    error
+                )
             }
             Error::AuthenticationFailed(error) => {
                 write!(formatter, translate!("Authentication failed: {}"), error)

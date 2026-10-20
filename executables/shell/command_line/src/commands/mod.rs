@@ -14,6 +14,7 @@ mod head;
 mod help;
 mod ip;
 mod list;
+mod ln;
 mod mv;
 mod ping;
 mod print_working_directory;
@@ -127,6 +128,8 @@ pub enum UserCommandKind {
     Help,
     Tree,
     Move,
+    Link,
+    ReadLink,
 }
 
 /// Names and help text shared by command resolution and `help`.
@@ -154,6 +157,16 @@ const BUILTINS: &[(&str, UserCommandKind, &str)] = &[
         "Usage: echo [TEXT]...\nPrint text and expand environment variables.",
     ),
     ("ls", UserCommandKind::List, list::ListArguments::HELP),
+    (
+        "ln",
+        UserCommandKind::Link,
+        "Usage: ln TARGET LINK\nCreate a symbolic link.",
+    ),
+    (
+        "readlink",
+        UserCommandKind::ReadLink,
+        "Usage: readlink LINK\nPrint a symbolic link target.",
+    ),
     ("clear", UserCommandKind::Clear, clear::ClearArguments::HELP),
     (
         "cat",
@@ -324,6 +337,8 @@ where
         UserCommandKind::Help => help::HelpCommand.execute(context, options, paths).await,
         UserCommandKind::Tree => TreeCommand.execute(context, options, paths).await,
         UserCommandKind::Move => MoveCommand.execute(context, options, paths).await,
+        UserCommandKind::Link => ln::LinkCommand.execute(context, options, paths).await,
+        UserCommandKind::ReadLink => ln::ReadLinkCommand.execute(context, options, paths).await,
     };
 
     match result {

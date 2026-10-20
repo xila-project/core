@@ -26,6 +26,15 @@ pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOper
         crate::AttributeFlags::all()
     }
 
+    /// Return the fields that are stored durably by this filesystem.
+    ///
+    /// The VFS uses this to select representations that rely on metadata
+    /// surviving an unmount and remount. A writable field is not necessarily
+    /// persistent (for example, a synthesized host attribute).
+    fn persistent_attributes(&self) -> crate::AttributeFlags {
+        crate::AttributeFlags::empty()
+    }
+
     fn lookup_directory(&self, context: &mut Context, path: &Path) -> Result<()>;
 
     fn lookup_file(&self, context: &mut Context, path: &Path, flags: Flags) -> Result<()>;

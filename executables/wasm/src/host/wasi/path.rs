@@ -100,6 +100,41 @@ define_wasi_module! {
         })
     }
 
+    fn path_symlink(caller: Caller<GlobalStore>, old_path_ptr: WasmUsize, old_path_len: WasmUsize, fd: i32, new_path_ptr: WasmUsize, new_path_len: WasmUsize) -> Result<WasiResult, wasmi::Error> {
+        wrap_function!({
+            let mut caller = caller;
+            let target = copy_guest_path(&mut caller, old_path_ptr, old_path_len)?;
+            let link = copy_guest_path(&mut caller, new_path_ptr, new_path_len)?;
+            let (task_id, directory) = base_path(&caller, fd)?;
+            let target = core::str::from_utf8(&target).map_err(|_| Error::Ilseq)?;
+            let link = core::str::from_utf8(&link).map_err(|_| Error::Ilseq)?;
+            let link = resolve_guest_path(&directory, link)?;
+            task::block_on(caller.data().context.virtual_file_system.create_symlink(task_id, Path::from_str(target), &link)).map_err(vfs_error)?;
+            Ok(())
+        })
+    }
+
+    fn path_readlink(caller: Caller<GlobalStore>, fd: i32, path_ptr: WasmUsize, path_len: WasmUsize, buf_ptr: WasmUsize, buf_len: WasmUsize, used_ptr: WasmUsize) -> Result<WasiResult, wasmi::Error> {
+        wrap_function!({
+            let mut caller = caller;
+            let path_bytes = copy_guest_path(&mut caller, path_ptr, path_len)?;
+            let (task_id, directory) = base_path(&caller, fd)?;
+            let relative = core::str::from_utf8(&path_bytes).map_err(|_| Error::Ilseq)?;
+            let absolute_path = resolve_guest_path(&directory, relative)?;
+            let memory = get_memory(&caller).ok_or(Error::Fault)?;
+            let output = GuestSlice::new(buf_ptr, buf_len);
+            let used = GuestPointer::<WasmUsize>::new(used_ptr);
+            let mut target = alloc::vec![0; 4096];
+            let length = task::block_on(caller.data().context.virtual_file_system.read_symlink(task_id, &absolute_path, &mut target)).map_err(vfs_error)?;
+            let mut guest = borrow_memory(&memory, &mut caller);
+            guest.validate_pointer(used).ok_or(Error::Fault)?;
+            let copied = core::cmp::min(length, buf_len as usize);
+            guest.bytes_mut(output).ok_or(Error::Fault)?[..copied].copy_from_slice(&target[..copied]);
+            guest.write(used, copied as WasmUsize).ok_or(Error::Fault)?;
+            Ok(())
+        })
+    }
+
     fn path_unlink_file(caller: Caller<GlobalStore>, fd: i32, path_ptr: WasmUsize, path_len: WasmUsize) -> Result<WasiResult, wasmi::Error> {
         wrap_function!({
             let mut caller = caller;
@@ -108,7 +143,7 @@ define_wasi_module! {
             let relative = core::str::from_utf8(&path_bytes).map_err(|_| Error::Ilseq)?;
             let absolute_path = resolve_guest_path(&directory, relative)?;
             let vfs = caller.data().context.virtual_file_system;
-            let statistics = task::block_on(vfs.get_statistics_for_task(task_id, &absolute_path)).map_err(vfs_error)?;
+            let statistics = task::block_on(vfs.get_link_statistics(&absolute_path)).map_err(vfs_error)?;
             if statistics.kind == xila::file_system::Kind::Directory {
                 return Err(Error::Isdir.into());
             }
@@ -147,14 +182,19 @@ define_wasi_module! {
         })
     }
 
-    fn path_filestat_get(caller: Caller<GlobalStore>, fd: i32, _flags: i32, path_ptr: WasmUsize, path_len: WasmUsize, buf_ptr: WasmUsize) -> Result<WasiResult, wasmi::Error> {
+    fn path_filestat_get(caller: Caller<GlobalStore>, fd: i32, flags: i32, path_ptr: WasmUsize, path_len: WasmUsize, buf_ptr: WasmUsize) -> Result<WasiResult, wasmi::Error> {
         wrap_function!({
             let mut caller = caller;
             let path_bytes = copy_guest_path(&mut caller, path_ptr, path_len)?;
             let (task_id, directory) = base_path(&caller, fd)?;
             let relative = core::str::from_utf8(&path_bytes).map_err(|_| Error::Ilseq)?;
             let absolute_path = resolve_guest_path(&directory, relative)?;
-            let stats = task::block_on(caller.data().context.virtual_file_system.get_statistics_for_task(task_id, &absolute_path)).map_err(vfs_error)?;
+            let vfs = caller.data().context.virtual_file_system;
+            let stats = if flags & 1 != 0 {
+                task::block_on(vfs.get_statistics_for_task(task_id, &absolute_path))
+            } else {
+                task::block_on(vfs.get_link_statistics(&absolute_path))
+            }.map_err(vfs_error)?;
             let filestat = make_filestat(&stats);
             let memory = get_memory(&caller).ok_or(Error::Fault)?;
             borrow_memory(&memory, &mut caller).write(GuestPointer::new(buf_ptr), filestat).ok_or(Error::Fault)?;

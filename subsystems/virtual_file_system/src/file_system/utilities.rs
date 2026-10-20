@@ -1,8 +1,8 @@
 use crate::{Error, Result, VirtualFileSystem, pipe::Pipe, poll};
 use alloc::{borrow::ToOwned, collections::btree_map::BTreeMap, string::String, vec::Vec};
 use exported_file_system::{
-    AttributeFlags, Attributes, BlockDevice, CharacterDevice, FileSystemOperations, Inode, Kind,
-    Path, PathOwned, Permission, Permissions, Time,
+    AccessFlags, AttributeFlags, Attributes, BlockDevice, CharacterDevice, Context,
+    FileSystemOperations, Flags, Inode, Kind, Path, PathOwned, Permission, Permissions, Time,
 };
 use task::TaskIdentifier;
 use users::{GroupIdentifier, UserIdentifier};
@@ -35,30 +35,205 @@ pub(super) type CharacterDevicesMap = BTreeMap<Inode, InternalCharacterDevice>;
 pub(super) type BlockDevicesMap = BTreeMap<Inode, InternalBlockDevice>;
 pub(super) type PipeMap = BTreeMap<Inode, InternalPipe>;
 
+pub(super) enum ResolvedPath<'a> {
+    Borrowed(&'a Path),
+    Owned(PathOwned),
+}
+
+impl core::ops::Deref for ResolvedPath<'_> {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Borrowed(path) => path,
+            Self::Owned(path) => path,
+        }
+    }
+}
+
+impl AsRef<Path> for ResolvedPath<'_> {
+    fn as_ref(&self) -> &Path {
+        self
+    }
+}
+
 impl VirtualFileSystem {
-    /// Resolve symlinks component by component. Target data is read only when a
-    /// link is encountered and all expansion is bounded to one path and one
-    /// reusable target buffer.
-    pub(super) async fn resolve_path(
+    /// Read persisted link payloads through ordinary file operations, falling
+    /// back to a backend adapter only for native host links.
+    pub(super) async fn read_link_payload(
+        file_system: &dyn FileSystemOperations,
+        path: &Path,
+        buffer: &mut Vec<u8>,
+    ) -> Result<usize> {
+        const MAX_TARGET_LENGTH: usize = 4096;
+        let mut attributes = Attributes::new().set_mask(AttributeFlags::Size);
+        Self::get_attributes(file_system, path, &mut attributes).await?;
+        let size = *attributes.get_size().ok_or(Error::MissingAttribute)? as usize;
+        if size == 0 || size > MAX_TARGET_LENGTH {
+            return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
+        }
+
+        buffer.resize(size, 0);
+        match poll(|| Ok(file_system.read_symlink(path, buffer.as_mut_slice())?)).await {
+            Ok(read) => {
+                if read != size {
+                    return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
+                }
+                return Ok(read);
+            }
+            Err(Error::UnsupportedOperation) => {}
+            Err(error) => return Err(error),
+        }
+
+        let mut context = Context::new_empty();
+        poll(|| Ok(file_system.lookup_file(&mut context, path, Flags::from(AccessFlags::Read))?))
+            .await?;
+        let read = file_system.read_sync(&mut context, buffer.as_mut_slice(), 0);
+        let close = exported_file_system::BaseOperations::close(file_system, &mut context);
+        let read = read?;
+        close?;
+        if read != size {
+            return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
+        }
+        Ok(read)
+    }
+
+    /// Resolve symlinks component by component. Canonical paths without links
+    /// stay borrowed; scratch storage is created only after normalization or a link.
+    pub(super) async fn resolve_path<'a>(
         &self,
         file_systems: &FileSystemsArray,
-        path: &Path,
+        path: &'a Path,
         follow_final: bool,
         allow_missing_final: bool,
         user: UserIdentifier,
         task: TaskIdentifier,
-    ) -> Result<PathOwned> {
+    ) -> Result<ResolvedPath<'a>> {
         const MAX_PATH_LENGTH: usize = 4096;
-        const MAX_SYMLINKS: usize = 40;
-
         if !path.is_valid() || !path.is_absolute() || path.get_length() > MAX_PATH_LENGTH {
             return Err(Error::InvalidPath);
         }
 
-        let mut resolved = PathOwned::root();
-        let mut pending = String::from(path.as_str().strip_prefix('/').unwrap_or(path.as_str()));
+        // Fast path: walk borrowed prefixes first. This avoids allocating a
+        // String/PathOwned and a target buffer for ordinary paths.
+        let text = path.as_str();
+        let mut component_start = 1;
+        let mut parent_end = 1;
         let mut target_buffer = Vec::new();
-        let mut links_followed = 0;
+        while component_start < text.len() {
+            let component_end = text[component_start..]
+                .find('/')
+                .map_or(text.len(), |offset| component_start + offset);
+            let component = &text[component_start..component_end];
+            if component.is_empty() || component == "." || component == ".." {
+                break;
+            }
+            let has_remaining = component_end < text.len();
+            let parent = Path::from_str(&text[..parent_end]);
+            let (parent_file_system, parent_relative, _) =
+                Self::get_file_system_from_path(file_systems, &parent)?;
+            self.check_permissions(
+                parent_file_system.file_system,
+                parent_relative,
+                Permission::Execute,
+                user,
+                task,
+            )
+            .await?;
+
+            let candidate = Path::from_str(&text[..component_end]);
+            let (file_system, relative_path, _) =
+                Self::get_file_system_from_path(file_systems, &candidate)?;
+            let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
+            match Self::get_attributes(file_system.file_system, relative_path, &mut attributes)
+                .await
+            {
+                Ok(()) => {}
+                Err(Error::FileSystem(file_system::Error::NotFound))
+                    if !has_remaining && allow_missing_final =>
+                {
+                    return Ok(ResolvedPath::Borrowed(path));
+                }
+                Err(error) => return Err(error),
+            }
+            let kind = *attributes.get_kind().ok_or(Error::MissingAttribute)?;
+            if kind == Kind::SymbolicLink && (has_remaining || follow_final) {
+                let length = Self::read_link_payload(
+                    file_system.file_system,
+                    relative_path,
+                    &mut target_buffer,
+                )
+                .await?;
+                let target = core::str::from_utf8(&target_buffer[..length])
+                    .map_err(|_| Error::FileSystem(file_system::Error::InvalidSymbolicLink))?;
+                if !Path::new(target).is_valid() || target.is_empty() {
+                    return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
+                }
+
+                let mut pending = String::with_capacity(target.len() + text.len() - component_end);
+                pending.push_str(target);
+                pending.push_str(&text[component_end..]);
+                let resolved = if target.starts_with('/') {
+                    PathOwned::root()
+                } else {
+                    PathOwned::try_from(&text[..parent_end]).map_err(|_| Error::InvalidPath)?
+                };
+                return self
+                    .resolve_pending(
+                        file_systems,
+                        resolved,
+                        pending,
+                        1,
+                        follow_final,
+                        allow_missing_final,
+                        user,
+                        task,
+                        target_buffer,
+                    )
+                    .await;
+            }
+            if has_remaining && kind != Kind::Directory {
+                return Err(Error::NotADirectory);
+            }
+            parent_end = component_end;
+            component_start = component_end + 1;
+        }
+
+        if component_start >= text.len() {
+            return Ok(ResolvedPath::Borrowed(path));
+        }
+
+        // Dot components and repeated separators need a normalized working
+        // path. This allocation is outside the common canonical-path flow.
+        let pending = String::from(text.strip_prefix('/').unwrap_or(text));
+        self.resolve_pending(
+            file_systems,
+            PathOwned::root(),
+            pending,
+            0,
+            follow_final,
+            allow_missing_final,
+            user,
+            task,
+            target_buffer,
+        )
+        .await
+    }
+
+    async fn resolve_pending<'a>(
+        &self,
+        file_systems: &FileSystemsArray,
+        mut resolved: PathOwned,
+        mut pending: String,
+        mut links_followed: usize,
+        follow_final: bool,
+        allow_missing_final: bool,
+        user: UserIdentifier,
+        task: TaskIdentifier,
+        mut target_buffer: Vec<u8>,
+    ) -> Result<ResolvedPath<'a>> {
+        const MAX_PATH_LENGTH: usize = 4096;
+        const MAX_SYMLINKS: usize = 40;
 
         while !pending.is_empty() {
             let separator = pending.find('/').unwrap_or(pending.len());
@@ -107,7 +282,7 @@ impl VirtualFileSystem {
                 Err(Error::FileSystem(file_system::Error::NotFound))
                     if !has_remaining && allow_missing_final =>
                 {
-                    return Ok(candidate);
+                    return Ok(ResolvedPath::Owned(candidate));
                 }
                 Err(error) => return Err(error),
             }
@@ -118,14 +293,11 @@ impl VirtualFileSystem {
                 if links_followed > MAX_SYMLINKS {
                     return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
                 }
-                if target_buffer.is_empty() {
-                    target_buffer.resize(MAX_PATH_LENGTH, 0);
-                }
-                let target_length = poll(|| {
-                    Ok(file_system
-                        .file_system
-                        .read_symlink(relative_path, &mut target_buffer)?)
-                })
+                let target_length = Self::read_link_payload(
+                    file_system.file_system,
+                    relative_path,
+                    &mut target_buffer,
+                )
                 .await?;
                 let target = core::str::from_utf8(&target_buffer[..target_length])
                     .map_err(|_| Error::FileSystem(file_system::Error::InvalidSymbolicLink))?;
@@ -136,8 +308,7 @@ impl VirtualFileSystem {
                     return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
                 }
 
-                let absolute_target = target.starts_with('/');
-                if absolute_target {
+                if target.starts_with('/') {
                     resolved = PathOwned::root();
                 }
                 pending.drain(..consumed);
@@ -159,7 +330,7 @@ impl VirtualFileSystem {
             pending.drain(..consumed);
         }
 
-        Ok(resolved)
+        Ok(ResolvedPath::Owned(resolved))
     }
 
     pub(super) async fn has_permissions(

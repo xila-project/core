@@ -255,7 +255,9 @@ impl HostFileSystem {
         {
             result = result.set_kind(kind);
         }
-        if requested.contains(AttributeFlags::Size) && metadata.is_file() {
+        if requested.contains(AttributeFlags::Size)
+            && (metadata.is_file() || metadata.file_type().is_symlink())
+        {
             result = result.set_size(metadata.len());
         }
         if requested.contains(AttributeFlags::Inode)
@@ -397,28 +399,13 @@ impl FileSystemOperations for HostFileSystem {
             return Err(Error::InvalidSymbolicLink);
         }
         let link = Self::relative_path(link)?;
-        let target = if target.is_absolute() {
-            // Host absolute symlinks name the host root. Store a relative path
-            // from the link's parent instead, preserving Xila-root semantics.
-            let parent_depth = link.parent().map_or(0, |parent| {
-                parent
-                    .components()
-                    .filter(|component| matches!(component, Component::Normal(_)))
-                    .count()
-            });
-            let mut relative_target = PathBuf::new();
-            for _ in 0..parent_depth {
-                relative_target.push("..");
-            }
-            for component in StdPath::new(target.as_str()).components() {
-                if let Component::Normal(component) = component {
-                    relative_target.push(component);
-                }
-            }
-            relative_target
-        } else {
-            StdPath::new(target.as_str()).to_path_buf()
-        };
+        if target.is_absolute() {
+            // The VFS converts absolute Xila targets into relative namespace
+            // paths before calling this native adapter. An unadapted absolute
+            // target is ambiguous with a host-absolute link and is rejected.
+            return Err(Error::UnsupportedOperation);
+        }
+        let target = StdPath::new(target.as_str()).to_path_buf();
         self.root()?.symlink(target, &link).map_err(map_io_error)
     }
 
@@ -746,15 +733,24 @@ impl AttributeOperations for HostFileSystem {
 impl DirectoryOperations for HostFileSystem {
     fn read(&self, context: &mut Context) -> Result<Option<Entry>> {
         loop {
-            let (entry, position) = {
+            let (entry, position, symlink_metadata) = {
                 let handle = context
                     .get_private_data_mutable_of_type::<DirectoryHandle>()
                     .ok_or(Error::InvalidContext)?;
                 let entry = handle.entries.next().transpose().map_err(map_io_error)?;
-                if entry.is_some() {
+                let mut symlink_metadata = None;
+                if let Some(entry) = entry.as_ref() {
                     handle.position += 1;
+                    if entry.file_type().map_err(map_io_error)?.is_symlink() {
+                        symlink_metadata = Some(
+                            handle
+                                .directory
+                                .symlink_metadata(entry.file_name())
+                                .map_err(map_io_error)?,
+                        );
+                    }
                 }
-                (entry, handle.position)
+                (entry, handle.position, symlink_metadata)
             };
             let Some(entry) = entry else { return Ok(None) };
             let name = match entry.file_name().into_string() {
@@ -771,11 +767,9 @@ impl DirectoryOperations for HostFileSystem {
             } else {
                 continue;
             };
-            // DirEntry::metadata follows the target, which would hide dangling
-            // links and make listing an escaping link fail. We do not expose a
-            // fabricated target size for links.
             let (inode, size) = if kind.is_symlink() {
-                (position, 0)
+                let metadata = symlink_metadata.ok_or(Error::InternalError)?;
+                (position, metadata.len())
             } else {
                 let metadata = entry.metadata().map_err(map_io_error)?;
                 (stable_inode(&metadata).unwrap_or(position), metadata.len())
