@@ -6,11 +6,11 @@ use crate::{
     attributes::InternalAttributes,
     configuration::{self},
 };
-use alloc::{boxed::Box, ffi::CString};
+use alloc::{boxed::Box, ffi::CString, format};
 use file_system::{
-    AttributeFlags, AttributeOperations, Attributes, BaseOperations, Context, DirectBlockDevice,
-    DirectoryOperations, Entry, Error, FileOperations, FileSystemOperations, Flags, Kind,
-    MountOperations, Path, Position, Result, Size, mount::MutexMountWrapper,
+    AccessFlags, AttributeFlags, AttributeOperations, Attributes, BaseOperations, Context,
+    DirectBlockDevice, DirectoryOperations, Entry, Error, FileOperations, FileSystemOperations,
+    Flags, Kind, MountOperations, Path, Position, Result, Size, mount::MutexMountWrapper,
 };
 use synchronization::{Arc, blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 
@@ -157,6 +157,89 @@ impl MountOperations for FileSystem {
 impl FileSystemOperations for FileSystem {
     fn writable_attributes(&self) -> file_system::AttributeFlags {
         InternalAttributes::PERSISTED_ATTRIBUTE_FLAGS
+    }
+
+    fn create_symlink(&self, target: &Path, link: &Path) -> Result<()> {
+        if !target.is_valid() || target.is_empty() || target.get_length() > 4096 {
+            return Err(Error::InvalidSymbolicLink);
+        }
+
+        self.operation(|file_system| {
+            let link = CString::new(link.as_str()).map_err(|_| Error::InvalidParameter)?;
+            let mut info = littlefs::lfs_info::default();
+            match unsafe { littlefs::lfs_stat(file_system, link.as_ptr(), &mut info) } {
+                0 => return Err(Error::AlreadyExists),
+                error => match convert_result(error) {
+                    Err(Error::NotFound) => {}
+                    Err(error) => return Err(error),
+                    Ok(_) => return Err(Error::AlreadyExists),
+                },
+            }
+
+            // Stage in the same directory. lfs_file_sync commits the complete
+            // payload and its custom attributes together before rename publishes
+            // the entry at its requested name.
+            let temporary = format!("{}.xila-symlink-tmp", link.to_string_lossy());
+            let temporary_path = Path::new(&temporary);
+            let result = (|| {
+                File::create(file_system, temporary_path)?;
+                let mut file =
+                    File::lookup(file_system, temporary_path, Flags::from(AccessFlags::Write))?;
+                let write_result = (|| {
+                    let written = file.write(file_system, target.as_str().as_bytes(), 0)?;
+                    if written != target.get_length() {
+                        return Err(Error::InputOutput);
+                    }
+                    file.set_attributes(&Attributes::new().set_kind(Kind::SymbolicLink))?;
+                    file.flush(file_system)?;
+                    Ok(())
+                })();
+                let close_result = file.close(file_system);
+                write_result?;
+                close_result?;
+
+                let destination = CString::new(link.to_string_lossy().as_bytes())
+                    .map_err(|_| Error::InvalidParameter)?;
+                let source =
+                    CString::new(temporary.as_bytes()).map_err(|_| Error::InvalidParameter)?;
+                convert_result(unsafe {
+                    littlefs::lfs_rename(file_system, source.as_ptr(), destination.as_ptr())
+                })
+                .map(|_| ())
+            })();
+            if result.is_err() {
+                if let Ok(temporary) = CString::new(temporary.as_bytes()) {
+                    let _ = unsafe { littlefs::lfs_remove(file_system, temporary.as_ptr()) };
+                }
+            }
+            result
+        })
+    }
+
+    fn read_symlink(&self, link: &Path, buffer: &mut [u8]) -> Result<usize> {
+        self.operation(|file_system| {
+            let mut file = File::lookup(file_system, link, Flags::from(AccessFlags::Read))?;
+            let mut attributes =
+                Attributes::new().set_mask(AttributeFlags::Kind | AttributeFlags::Size);
+            file.get_attributes(file_system, &mut attributes)?;
+            if attributes.get_kind() != Some(&Kind::SymbolicLink) {
+                let _ = file.close(file_system);
+                return Err(Error::InvalidSymbolicLink);
+            }
+            let size = *attributes.get_size().ok_or(Error::NoAttribute)?;
+            if size > 4096 || size > buffer.len() as Size {
+                let _ = file.close(file_system);
+                return Err(Error::NameTooLong);
+            }
+            let read_result = file.read(file_system, &mut buffer[..size as usize], 0);
+            let close_result = file.close(file_system);
+            let read = read_result?;
+            close_result?;
+            if read != size as usize {
+                return Err(Error::InvalidSymbolicLink);
+            }
+            Ok(read)
+        })
     }
 
     fn rename(&self, source: &Path, destination: &Path) -> Result<()> {
