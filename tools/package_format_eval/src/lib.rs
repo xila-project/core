@@ -3,7 +3,10 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 mod reader_probes;
-pub use reader_probes::{ProbeReport, probe_candidate, probe_candidate_for_path};
+pub use reader_probes::{
+    ExtractionReport, ProbeReport, extract_candidate_file_backed, probe_candidate,
+    probe_candidate_for_path,
+};
 
 const BLOCK_SIZE: usize = 4096;
 const MANIFEST_PATH: &str = ".xila/manifest";
@@ -99,6 +102,27 @@ struct EncodedFile<'a> {
 
 pub fn build_candidate_archives(fixtures: &[Fixture]) -> io::Result<Vec<CandidateArchive>> {
     let encoded_files = encode_files(fixtures)?;
+    build_candidate_archives_from_encoded(&encoded_files)
+}
+
+pub fn build_candidate_archives_uncompressed(
+    fixtures: &[Fixture],
+) -> io::Result<Vec<CandidateArchive>> {
+    let encoded_files = fixtures
+        .iter()
+        .map(|fixture| EncodedFile {
+            fixture,
+            data: fixture.data.clone(),
+            compression: Compression::None,
+            frame_bytes: 0,
+        })
+        .collect::<Vec<_>>();
+    build_candidate_archives_from_encoded(&encoded_files)
+}
+
+fn build_candidate_archives_from_encoded(
+    encoded_files: &[EncodedFile<'_>],
+) -> io::Result<Vec<CandidateArchive>> {
     let manifest = postcard::to_allocvec(&Manifest {
         version: 1,
         files: encoded_files
@@ -114,9 +138,9 @@ pub fn build_candidate_archives(fixtures: &[Fixture]) -> io::Result<Vec<Candidat
     .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
 
     Ok(vec![
-        build_cpio(&manifest, &encoded_files)?,
-        build_tar(&manifest, &encoded_files)?,
-        build_custom(&manifest, &encoded_files)?,
+        build_cpio(&manifest, encoded_files)?,
+        build_tar(&manifest, encoded_files)?,
+        build_custom(&manifest, encoded_files)?,
     ])
 }
 
