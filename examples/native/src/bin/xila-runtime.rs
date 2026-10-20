@@ -64,11 +64,23 @@ struct Config {
     seed: PathBuf,
     mounts: Vec<MountSpec>,
     environment: Vec<(String, String)>,
+    shell: bool,
     executable: String,
     arguments: Vec<String>,
 }
 
-const USAGE: &str = "Usage: xila-runtime run [--disk PATH] [--seed PATH] [--network=none] [--mount host=PATH,xila=PATH,ro|rw[,uid=N,gid=N,file_mode=OCTAL,directory_mode=OCTAL]] [--env KEY=VALUE]... -- <Xila executable> [arguments...]\n\nRuns a Xila VFS executable without graphics or an interactive shell. Host directories are visible only through explicit --mount capabilities. Networking is disabled.";
+const SHELL_EXECUTABLE: &str = "/binaries/command_line_shell";
+
+const USAGE: &str = concat!(
+    "Usage:\n",
+    "  xila-runtime run [OPTIONS] -- <Xila executable> [arguments...]\n",
+    "  xila-runtime shell [OPTIONS]\n\n",
+    "Options: [--disk PATH] [--seed PATH] [--network=none]\n",
+    "  [--mount host=PATH,xila=PATH,ro|rw[,uid=N,gid=N,file_mode=OCTAL,directory_mode=OCTAL]]\n",
+    "  [--env KEY=VALUE]...\n\n",
+    "The shell reuses Xila's command-line shell and requires stdin for login.\n",
+    "Host directories are available only through explicit mounts; networking is disabled.",
+);
 
 fn parse_mount(value: &str) -> Result<MountSpec, String> {
     let mut host = None;
@@ -150,9 +162,11 @@ where
         .into_iter()
         .map(|argument| argument.as_ref().to_string());
     let command = arguments.next().ok_or_else(|| USAGE.to_string())?;
-    if command != "run" {
-        return Err(USAGE.to_string());
-    }
+    let shell = match command.as_str() {
+        "run" => false,
+        "shell" => true,
+        _ => return Err(USAGE.to_string()),
+    };
 
     let mut disk = PathBuf::from("/var/lib/xila/drive.img");
     let mut seed = PathBuf::from("/usr/share/xila/base.img");
@@ -163,6 +177,11 @@ where
     let mut arguments = arguments.peekable();
     while let Some(argument) = arguments.next() {
         if argument == "--" {
+            if shell {
+                return Err(format!(
+                    "shell does not accept an executable or arguments\n{USAGE}"
+                ));
+            }
             app = arguments.next();
             app_arguments.extend(arguments);
             break;
@@ -200,7 +219,14 @@ where
         }
     }
 
-    let executable = app.ok_or_else(|| format!("missing Xila executable after --\n{USAGE}"))?;
+    if shell && environment.iter().any(|(name, _)| name == "User") {
+        return Err("shell mode does not allow overriding the authenticated User".to_string());
+    }
+    let executable = if shell {
+        SHELL_EXECUTABLE.to_string()
+    } else {
+        app.ok_or_else(|| format!("missing Xila executable after --\n{USAGE}"))?
+    };
     if !is_valid_vfs_path(&executable) {
         return Err("the executable must be an absolute Xila VFS path".to_string());
     }
@@ -209,6 +235,7 @@ where
         seed,
         mounts,
         environment,
+        shell,
         executable,
         arguments: app_arguments,
     })
@@ -318,6 +345,10 @@ async fn run_runtime(
         virtual_file_system::initialize(task_manager, users_manager, time_manager, root)
             .map_err(|error| format!("cannot initialize VFS: {error:?}"))?,
     ));
+    xila::abi_definitions::initialize(xila::abi_definitions::RuntimeContext {
+        virtual_file_system: vfs,
+        time_manager,
+    });
     let task = task_manager.get_current_task_identifier().await;
     virtual_file_system::create_default_hierarchy(vfs, task)
         .await
@@ -381,6 +412,11 @@ async fn run_runtime(
                 CharacterDevice,
                 drivers_shared::devices::RandomDevice
             ),
+            (
+                &"/devices/hasher",
+                CharacterDevice,
+                drivers_shared::devices::HashDevice
+            ),
             (&"/devices/null", CharacterDevice, drivers_core::NullDevice),
         ]
     )
@@ -399,10 +435,25 @@ async fn run_runtime(
         context,
         vfs,
         task,
-        &[(&"/binaries/wasm", wasm::WasmExecutable),]
+        &[
+            (&"/binaries/wasm", wasm::WasmExecutable),
+            (&SHELL_EXECUTABLE, command_line_shell::ShellExecutable),
+        ]
     )
     .await
     .map_err(|error| format!("cannot mount WASM executable: {error:?}"))?;
+
+    if config.shell {
+        let authentication_context = xila::authentication::Context {
+            virtual_file_system: vfs,
+            task_manager,
+            users_manager,
+            task,
+        };
+        xila::authentication::initialize_seeded(&authentication_context)
+            .await
+            .map_err(|error| format!("cannot initialize shell accounts: {error:?}"))?;
+    }
 
     wasm::clear_shutdown_request();
 
@@ -515,6 +566,7 @@ mod tests {
             config.environment,
             vec![(String::from("MODE"), String::from("production"))]
         );
+        assert!(!config.shell);
         assert_eq!(config.executable, "/binaries/wasm");
         assert_eq!(
             config.arguments,
@@ -524,6 +576,38 @@ mod tests {
                 String::from("b")
             ]
         );
+    }
+
+    #[test]
+    fn parses_interactive_shell_with_shared_runtime_options() {
+        let config = parse_args([
+            "shell",
+            "--disk",
+            "shell.img",
+            "--network=none",
+            "--mount",
+            "host=/mnt/apps,xila=/apps,ro",
+            "--env",
+            "MODE=development",
+        ])
+        .unwrap();
+        assert!(config.shell);
+        assert_eq!(config.disk, PathBuf::from("shell.img"));
+        assert_eq!(config.executable, SHELL_EXECUTABLE);
+        assert!(config.arguments.is_empty());
+        assert_eq!(config.mounts.len(), 1);
+        assert!(config.mounts[0].read_only);
+        assert_eq!(
+            config.environment,
+            vec![("MODE".into(), "development".into())]
+        );
+    }
+
+    #[test]
+    fn shell_rejects_extra_arguments_and_user_impersonation() {
+        assert!(parse_args(["shell", "--", "/binaries/wasm"]).is_err());
+        assert!(parse_args(["shell", "--env", "User=administrator"]).is_err());
+        assert!(parse_args(["shell", "--network=host"]).is_err());
     }
 
     #[test]

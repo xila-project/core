@@ -113,4 +113,6 @@ VOLUME ["/var/lib/xila"]
 USER 10001:10001
 WORKDIR /var/lib/xila
 ENTRYPOINT ["/usr/bin/xila-runtime"]
-CMD ["run", "--disk", "/var/lib/xila/drive.img", "--seed", "/usr/share/xila/base.img", "--network=none"]
+# Running the image with an attached terminal opens the Xila CLI shell.
+# One-shot WASI execution remains available with an explicit `run -- ...`.
+CMD ["shell", "--network=none"]
