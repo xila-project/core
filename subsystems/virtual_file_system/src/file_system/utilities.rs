@@ -1,8 +1,8 @@
 use crate::{Error, Result, VirtualFileSystem, pipe::Pipe, poll};
-use alloc::{collections::btree_map::BTreeMap, vec::Vec};
+use alloc::{borrow::ToOwned, collections::btree_map::BTreeMap, string::String, vec::Vec};
 use exported_file_system::{
-    AttributeFlags, Attributes, BlockDevice, CharacterDevice, FileSystemOperations, Inode, Path,
-    PathOwned, Permission, Permissions, Time,
+    AttributeFlags, Attributes, BlockDevice, CharacterDevice, FileSystemOperations, Inode, Kind,
+    Path, PathOwned, Permission, Permissions, Time,
 };
 use task::TaskIdentifier;
 use users::{GroupIdentifier, UserIdentifier};
@@ -36,6 +36,132 @@ pub(super) type BlockDevicesMap = BTreeMap<Inode, InternalBlockDevice>;
 pub(super) type PipeMap = BTreeMap<Inode, InternalPipe>;
 
 impl VirtualFileSystem {
+    /// Resolve symlinks component by component. Target data is read only when a
+    /// link is encountered and all expansion is bounded to one path and one
+    /// reusable target buffer.
+    pub(super) async fn resolve_path(
+        &self,
+        file_systems: &FileSystemsArray,
+        path: &Path,
+        follow_final: bool,
+        allow_missing_final: bool,
+        user: UserIdentifier,
+        task: TaskIdentifier,
+    ) -> Result<PathOwned> {
+        const MAX_PATH_LENGTH: usize = 4096;
+        const MAX_SYMLINKS: usize = 40;
+
+        if !path.is_valid() || !path.is_absolute() || path.get_length() > MAX_PATH_LENGTH {
+            return Err(Error::InvalidPath);
+        }
+
+        let mut resolved = PathOwned::root();
+        let mut pending = String::from(path.as_str().strip_prefix('/').unwrap_or(path.as_str()));
+        let mut target_buffer = Vec::new();
+        let mut links_followed = 0;
+
+        while !pending.is_empty() {
+            let separator = pending.find('/').unwrap_or(pending.len());
+            let component = &pending[..separator];
+            let mut consumed = separator;
+            while consumed < pending.len() && pending.as_bytes()[consumed] == b'/' {
+                consumed += 1;
+            }
+            let has_remaining = consumed < pending.len();
+
+            if component.is_empty() || component == "." {
+                pending.drain(..consumed.max(1));
+                continue;
+            }
+
+            let (parent_file_system, parent_relative, _) =
+                Self::get_file_system_from_path(file_systems, &resolved)?;
+            self.check_permissions(
+                parent_file_system.file_system,
+                parent_relative,
+                Permission::Execute,
+                user,
+                task,
+            )
+            .await?;
+
+            if component == ".." {
+                if let Some(parent) = resolved.go_parent() {
+                    resolved = parent.to_owned();
+                }
+                pending.drain(..consumed.max(1));
+                continue;
+            }
+
+            let candidate = resolved
+                .to_owned()
+                .join(Path::from_str(component))
+                .ok_or(Error::InvalidPath)?;
+            let (file_system, relative_path, _) =
+                Self::get_file_system_from_path(file_systems, &candidate)?;
+            let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
+            match Self::get_attributes(file_system.file_system, relative_path, &mut attributes)
+                .await
+            {
+                Ok(()) => {}
+                Err(Error::FileSystem(file_system::Error::NotFound))
+                    if !has_remaining && allow_missing_final =>
+                {
+                    return Ok(candidate);
+                }
+                Err(error) => return Err(error),
+            }
+            let kind = *attributes.get_kind().ok_or(Error::MissingAttribute)?;
+
+            if kind == Kind::SymbolicLink && (has_remaining || follow_final) {
+                links_followed += 1;
+                if links_followed > MAX_SYMLINKS {
+                    return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
+                }
+                if target_buffer.is_empty() {
+                    target_buffer.resize(MAX_PATH_LENGTH, 0);
+                }
+                let target_length = poll(|| {
+                    Ok(file_system
+                        .file_system
+                        .read_symlink(relative_path, &mut target_buffer)?)
+                })
+                .await?;
+                let target = core::str::from_utf8(&target_buffer[..target_length])
+                    .map_err(|_| Error::FileSystem(file_system::Error::InvalidSymbolicLink))?;
+                if target.is_empty()
+                    || target_length > MAX_PATH_LENGTH
+                    || !Path::new(target).is_valid()
+                {
+                    return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
+                }
+
+                let absolute_target = target.starts_with('/');
+                if absolute_target {
+                    resolved = PathOwned::root();
+                }
+                pending.drain(..consumed);
+                let target = target.trim_start_matches('/');
+                if !target.is_empty() && !pending.is_empty() {
+                    pending.insert(0, '/');
+                }
+                pending.insert_str(0, target);
+                if resolved.get_length().saturating_add(pending.len()) > MAX_PATH_LENGTH {
+                    return Err(Error::FileSystem(file_system::Error::NameTooLong));
+                }
+                continue;
+            }
+
+            if has_remaining && kind != Kind::Directory {
+                return Err(Error::NotADirectory);
+            }
+            resolved = candidate;
+            pending.drain(..consumed);
+        }
+
+        Ok(resolved)
+    }
+
     pub(super) async fn has_permissions(
         users_manager: &users::Manager,
         current_user: UserIdentifier,
