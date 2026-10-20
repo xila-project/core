@@ -6,6 +6,10 @@ inputs:
     description: "Setup profile: 'full' (default) or 'minimal' for lightweight jobs (format only)."
     required: false
     default: full
+  node-dependencies:
+    description: "Install npm tools (required by font generation); disable for ABI-only Rust jobs."
+    required: false
+    default: "true"
   cache-workspaces:
     description: "Cargo workspace -> target directory mappings for the job's Rust cache."
     required: false
@@ -28,7 +32,9 @@ runs:
 
     - name: Setup | sccache
       if: inputs.profile != 'minimal'
-      uses: mozilla-actions/sccache-action@v0.0.9
+      uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      with:
+        version: v0.18.0
 
     - name: Setup | Export sccache env
       if: inputs.profile != 'minimal'
@@ -38,8 +44,9 @@ runs:
         echo "SCCACHE_GHA_RW_MODE=${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}" >> "$GITHUB_ENV"
 
     - name: Setup | npm cache
+      if: inputs.node-dependencies == 'true'
       id: npm-cache
-      uses: actions/cache@v4
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: ~/.npm
         key: npm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
@@ -47,13 +54,14 @@ runs:
           npm-${{ runner.os }}-
 
     - name: Setup | Report npm cache
+      if: inputs.node-dependencies == 'true'
       shell: bash
       run: 'echo "npm cache exact hit: ${{ steps.npm-cache.outputs.cache-hit }}"'
 
     - name: Setup | Rust cache
       if: inputs.profile != 'minimal'
       id: rust-cache
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: ${{ inputs.cache-workspaces }}
         # The action itself hashes Cargo manifests/lockfiles, rustc, .cargo
@@ -78,5 +86,6 @@ runs:
         done
 
     - name: Setup | npm dependencies
+      if: inputs.node-dependencies == 'true'
       shell: bash
       run: npm ci
