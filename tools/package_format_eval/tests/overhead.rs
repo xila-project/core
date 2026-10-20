@@ -90,6 +90,10 @@ fn evaluate_command_writes_candidate_archives_and_csv_beneath_output() {
     ] {
         assert!(output.join(filename).is_file(), "missing {filename}");
     }
+    let summary = std::fs::read_to_string(output.join("summary.json")).unwrap();
+    assert!(summary.contains("\"read_buffer_ceiling\""));
+    assert!(summary.contains("\"archive_hash\""));
+    assert!(summary.contains("\"tool_versions\""));
     assert!(
         std::fs::read(output.join("package.xpk"))
             .unwrap()

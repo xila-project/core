@@ -363,11 +363,16 @@ pub fn write_evaluation(output_dir: &Path, seed: u64) -> io::Result<Vec<Candidat
         if index != 0 {
             json.push_str(",\n");
         }
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        archive.bytes.hash(&mut hasher);
+        let probe = probe_candidate(archive, 127)?;
         json.push_str(&format!(
-            "  {{\"format\":\"{}\",\"archive_bytes\":{},\"manifest_bytes\":{},\"name_bytes\":{},\"header_bytes\":{},\"padding_bytes\":{},\"compression_frame_bytes\":{},\"stored_payload_bytes\":{}}}",
+            "  {{\"format\":\"{}\",\"archive_bytes\":{},\"manifest_bytes\":{},\"name_bytes\":{},\"header_bytes\":{},\"padding_bytes\":{},\"compression_frame_bytes\":{},\"stored_payload_bytes\":{},\"read_buffer_ceiling\":{},\"entries_read\":{},\"archive_hash\":\"{:016x}\",\"tool_versions\":{{\"package_format_eval\":\"{}\",\"tar\":\"0.4.46\",\"hadris_cpio\":\"2.5.0\",\"lz4_flex\":\"0.12.2\"}},\"hardware_measurements\":null}}",
             archive.format.name(), archive.bytes.len(), archive.manifest_bytes, archive.name_bytes,
             archive.header_bytes, archive.padding_bytes, archive.compression_frame_bytes,
-            archive.stored_payload_bytes
+            archive.stored_payload_bytes, probe.peak_user_buffer, probe.entry_count, hasher.finish(),
+            env!("CARGO_PKG_VERSION")
         ));
     }
     json.push_str("\n]\n");
