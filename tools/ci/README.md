@@ -33,14 +33,16 @@ python3 tools/ci/metrics.py \
   --output target/ci-metrics/baseline.json
 ```
 
-The report records commit/event/attempt, workflow wall time (creation to last
+The report records commit/event/attempt, workflow wall time (attempt start to last
 non-skipped job completion), execution span, aggregate runner occupancy,
-per-job/per-step duration and conclusion, Cargo `Compiling`/`Checking` line
+per-job/per-step duration and conclusion, archive exact-hit outcomes, Cargo `Compiling`/`Checking` line
 counts, last sccache JSON statistics and Rust cache transfer sizes/times.
 Post-job cache compression/save is included in job occupancy. These are not
 GitHub billed/rounded minutes. A Cargo line is not a rustc invocation; sccache
 counts cacheable requests, not Cargo-fresh units, linking or all build scripts.
 Cache archive exact hit, Cargo freshness and compiler-cache hit are distinct.
+Jobs and logs are attempt-scoped: rerunning a workflow does not count days of
+inter-attempt delay or mix retained jobs from older attempts into the sample.
 
 Transfers are measured from rust-cache's restore/save markers to its completion
 marker. They include archive compression/decompression, not just network I/O.

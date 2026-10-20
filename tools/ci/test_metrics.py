@@ -1,9 +1,27 @@
 import unittest
+from unittest.mock import patch
 
 import metrics
 
 
 class MetricsTests(unittest.TestCase):
+    def test_reruns_use_attempt_specific_jobs_logs_and_wall_origin(self):
+        import json
+        run = {"id": 42, "run_attempt": 2, "head_sha": "abc", "event": "push", "conclusion": "success", "created_at": "2026-10-19T00:00:00Z", "html_url": "https://example/run"}
+        attempt = {"run_started_at": "2026-10-20T00:00:00Z"}
+        jobs = [{"jobs": [{"name": "test", "conclusion": "success", "started_at": "2026-10-20T00:00:00Z", "completed_at": "2026-10-20T00:01:00Z", "steps": []}]}]
+        with patch.object(metrics, "gh", side_effect=[json.dumps(run), json.dumps(attempt), json.dumps(jobs), ""]) as gh:
+            result = metrics.collect("owner/repo", 42)
+        self.assertEqual(result["wall_minutes"], 1)
+        self.assertEqual(result["runner_minutes"], 1)
+        self.assertIn("repos/owner/repo/actions/runs/42/attempts/2/jobs?per_page=100", gh.call_args_list[2].args)
+        self.assertIn("--attempt", gh.call_args_list[3].args)
+
+    def test_archive_hit_is_preserved_separately_from_compiler_hits(self):
+        for value, expected in [("true", True), ("false", False)]:
+            result = metrics.log_metrics(f"test\tUNKNOWN STEP\t2026-10-20T00:00:00Z Rust cache exact hit: {value}")
+            self.assertIs(result["test"]["rust_cache_exact_hit"], expected)
+
     def test_runner_minutes_include_post_steps_not_queue_or_skipped_jobs(self):
         jobs = [
             {"name": "test", "conclusion": "success", "started_at": "2026-10-20T00:01:00Z", "completed_at": "2026-10-20T00:03:00Z", "steps": [{"name": "Post cache", "started_at": "2026-10-20T00:02:00Z", "completed_at": "2026-10-20T00:03:00Z", "conclusion": "success"}]},

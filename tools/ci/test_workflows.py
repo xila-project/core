@@ -70,6 +70,13 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn("prefix-key: experiment-", text)
         self.assertIn("SCCACHE_GHA_VERSION:", text)
         self.assertIn("max-parallel: 1", text)
+        shared = re.search(r"          shared-key: (.*)", text)[1]
+        self.assertIn("github.sha", shared)
+
+    def test_python_ci_tools_select_their_own_regressions(self):
+        filters = job("check.yml", "changes")
+        formatting = filters.split("            format:\n")[1].split("            host:\n")[0]
+        self.assertIn("'tools/ci/**'", formatting)
 
     def test_zstd_is_available_before_rust_cache(self):
         text = (ROOT / ".github/actions/setup/action.yml").read_text()

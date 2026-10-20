@@ -79,6 +79,7 @@ jobs:
             format:
               - *shared
               - '**/*.{rs,toml,json}'
+              - 'tools/ci/**'
             host:
               - *shared
               - 'tools/**'

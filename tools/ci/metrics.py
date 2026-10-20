@@ -92,6 +92,9 @@ def log_metrics(log):
         time, line = match.groups()
         line = ansi.sub("", line)
         row = jobs.setdefault(name, {"cargo_compiling": 0, "cargo_checking": 0, "cache_transfers": []})
+        exact_hit = re.fullmatch(r"Rust cache exact hit: (true|false)", line)
+        if exact_hit:
+            row["rust_cache_exact_hit"] = exact_hit[1] == "true"
         if re.match(r"\s*Compiling \S+ v", line):
             row["cargo_compiling"] += 1
         if re.match(r"\s*Checking \S+ v", line):
@@ -138,14 +141,19 @@ def gh(*args):
 
 def collect(repo, run_id):
     run = json.loads(gh("api", f"repos/{repo}/actions/runs/{run_id}"))
-    pages = json.loads(gh("api", "--paginate", "--slurp", f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest&per_page=100"))
+    attempt = run["run_attempt"]
+    base = f"repos/{repo}/actions/runs/{run_id}/attempts/{attempt}"
+    attempt_run = json.loads(gh("api", base))
+    pages = json.loads(gh("api", "--paginate", "--slurp", f"{base}/jobs?per_page=100"))
     result = job_metrics([job for page in pages for job in page["jobs"]])
     result.update({key: run[key] for key in ("id", "head_sha", "event", "conclusion", "run_attempt", "created_at")})
     result["url"] = run["html_url"]
-    # Do not use updated_at: reruns, metadata and artifact changes can alter it.
+    # Scope jobs and logs to one attempt. Original created_at includes potentially
+    # days of inter-attempt delay; updated_at changes with artifacts/metadata.
+    result["attempt_started_at"] = attempt_run["run_started_at"]
     ends = [job["completed_at"] for page in pages for job in page["jobs"] if job.get("completed_at") and job["conclusion"] != "skipped"]
-    result["wall_minutes"] = round(seconds(run["created_at"], max(ends)) / 60, 3) if ends else None
-    result["logs"] = log_metrics(gh("run", "view", str(run_id), "--repo", repo, "--log"))
+    result["wall_minutes"] = round(seconds(result["attempt_started_at"], max(ends)) / 60, 3) if ends else None
+    result["logs"] = log_metrics(gh("run", "view", str(run_id), "--repo", repo, "--attempt", str(attempt), "--log"))
     return result
 
 

@@ -1,7 +1,7 @@
 name: Cache benchmark
 
 on:
-  # Disposable study branch only; this trigger is not part of Core PR #481.
+  # Disposable study branch only; not part of Core PR #481.
   push:
     branches: [ci/480-cache-experiments]
   workflow_dispatch:
@@ -45,7 +45,7 @@ jobs:
       CARGO_INCREMENTAL: "0"
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_GHA_RW_MODE: READ_WRITE
-      SCCACHE_GHA_VERSION: experiment-${{ inputs.namespace || '480-d49f1d83' }}-${{ matrix.strategy }}
+      SCCACHE_GHA_VERSION: experiment-${{ inputs.namespace || '480-a930fc10' }}-${{ matrix.strategy }}
     steps:
       - uses: actions/checkout@v7
 
@@ -74,13 +74,14 @@ jobs:
         if: matrix.strategy != 'sccache'
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
-          prefix-key: experiment-${{ inputs.namespace || '480-d49f1d83' }}
-          shared-key: ${{ matrix.strategy }}
+          prefix-key: experiment-${{ inputs.namespace || '480-a930fc10' }}
+          # In this rust-cache revision shared-key overrides key, not combines
+          # with it. Put source identity in the effective shared key itself.
+          shared-key: ${{ matrix.strategy == 'workspace' && format('workspace-{0}', github.sha) || matrix.strategy }}
           cache-bin: "false"
           cache-workspace-crates: ${{ matrix.strategy == 'workspace' }}
           # Workspace artifacts require a changing source key (#348). Checkout
           # mtimes can still invalidate them: measure, don't assume a no-op.
-          key: ${{ matrix.strategy == 'workspace' && github.sha || '' }}
 
       - name: Run | Identical host workload
         run: |
