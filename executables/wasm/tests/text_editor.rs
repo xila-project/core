@@ -70,13 +70,9 @@ async fn guest_opens_pages_edits_and_saves_large_file() {
     standard.context = context;
     let task = context.task_manager.get_current_task_identifier().await;
     let vfs = context.virtual_file_system;
-    vfs.ensure_user_application_directories(
-        task,
-        xila::users::UserIdentifier::ROOT,
-        "text_editor",
-    )
-    .await
-    .unwrap();
+    vfs.ensure_user_application_directories(task, xila::users::UserIdentifier::ROOT, "text_editor")
+        .await
+        .unwrap();
     let path = "/users/0/applications/text_editor/data/document.txt";
     let original = "a".repeat(9000);
     let mut source = File::open(

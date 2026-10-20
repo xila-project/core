@@ -314,7 +314,7 @@ async fn clear_temporary_removes_nested_contents_and_preserves_root() {
         virtual_file_system,
         task,
         "/temporary/sessions/nested/state",
-        Flags::new(AccessFlags::WRITE, Some(CreateFlags::Create), None),
+        Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
     )
     .await
     .unwrap();
@@ -357,7 +357,7 @@ async fn hierarchy_reports_non_directory_conflicts() {
         virtual_file_system,
         task,
         "/system",
-        Flags::new(AccessFlags::WRITE, Some(CreateFlags::Create), None),
+        Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
     )
     .await
     .unwrap();
@@ -393,7 +393,7 @@ async fn global_application_storage_is_private_and_user_app_storage_is_separate(
         vfs,
         task,
         "/data/applications/clock/state",
-        Flags::new(AccessFlags::WRITE, Some(CreateFlags::Create), None),
+        Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
     )
     .await
     .unwrap();
@@ -409,15 +409,9 @@ async fn global_application_storage_is_private_and_user_app_storage_is_separate(
         .ensure_user_application_directories(task, second_user, "clock")
         .await;
     assert!(second_home.is_err(), "unknown accounts must not get homes");
-    assert_eq!(
-        first_home.as_str(),
-        "/users/1000/applications/clock"
-    );
+    assert_eq!(first_home.as_str(), "/users/1000/applications/clock");
     let user_data = first_home.append("data").unwrap();
-    assert_eq!(
-        vfs.get_statistics(&user_data).await.unwrap().user,
-        user
-    );
+    assert_eq!(vfs.get_statistics(&user_data).await.unwrap().user, user);
     assert_ne!(global_directory.as_str(), user_data.as_str());
 
     let task_manager = vfs.task_manager();
@@ -427,12 +421,17 @@ async fn global_application_storage_is_private_and_user_app_storage_is_separate(
         .set_application_identifier(task, Some(clock))
         .await
         .unwrap();
-    File::open(vfs, task, "/data/applications/clock/state", AccessFlags::Read.into())
-        .await
-        .unwrap()
-        .close(vfs)
-        .await
-        .unwrap();
+    File::open(
+        vfs,
+        task,
+        "/data/applications/clock/state",
+        AccessFlags::Read.into(),
+    )
+    .await
+    .unwrap()
+    .close(vfs)
+    .await
+    .unwrap();
 
     task_manager
         .set_application_identifier(
@@ -442,10 +441,21 @@ async fn global_application_storage_is_private_and_user_app_storage_is_separate(
         .await
         .unwrap();
     assert!(matches!(
-        File::open(vfs, task, "/data/applications/clock/state", AccessFlags::Read.into()).await,
+        File::open(
+            vfs,
+            task,
+            "/data/applications/clock/state",
+            AccessFlags::Read.into()
+        )
+        .await,
         Err(virtual_file_system::Error::PermissionDenied)
     ));
 }
 
 #[cfg(target_os = "linux")]
-#[path = "suppor
+#[path = "support/polling.rs"]
+mod polling;
+
+#[cfg(target_os = "linux")]
+#[path = "support/device_polling.rs"]
+mod device_polling;

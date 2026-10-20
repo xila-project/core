@@ -200,8 +200,7 @@ impl VirtualFileSystem {
         if current_user != UserIdentifier::ROOT {
             let task_application = self.task_manager.get_application_identifier(task).await?;
             if application_scope(path.as_ref()).is_some() {
-                if !application_access_allowed(path.as_ref(), task_application, asked_permissions)
-                {
+                if !application_access_allowed(path.as_ref(), task_application, asked_permissions) {
                     return Err(Error::PermissionDenied);
                 }
                 // Application identity is the ownership boundary for global app trees;

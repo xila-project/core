@@ -41,8 +41,6 @@ pub fn generate_font<'a>(
         .join(",");
 
     let mut arguments = vec![
-        "--yes",
-        "github:lvgl/lv_font_conv",
         "--bpp",
         &bits_per_pixel,
         "--size",
@@ -76,7 +74,7 @@ pub fn generate_font<'a>(
         output_path.as_ref().to_str().unwrap(),
     ]);
 
-    let command = Command::new("npx").args(arguments).spawn().map_err(|err| {
+    let command = Command::new("lv_font_conv").args(arguments).spawn().map_err(|err| {
         format!(
             "Failed to execute lv_font_conv command. Is lv_font_conv installed and in your PATH? Error: {}",
             err
