@@ -7,6 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   packages: read
   pages: write
@@ -35,164 +36,150 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
 
+      - name: Find previous deployment artifacts
+        id: previous
+        if: github.event_name == 'push'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: "deploy.yml",
+              branch: "main",
+              status: "completed",
+              per_page: 100,
+            });
+            const previous = runs.find(run =>
+              run.id !== context.runId && run.conclusion === "success"
+            );
+            if (!previous) {
+              core.setOutput('available', 'false');
+              return;
+            }
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: previous.id,
+              per_page: 100,
+            });
+            const names = new Set(artifacts.filter(a => !a.expired).map(a => a.name));
+            const required = ['github-pages', 'reference-filesystem-images'];
+            if (!required.every(name => names.has(name))) {
+              core.setOutput('available', 'false');
+              return;
+            }
+            core.setOutput('available', 'true');
+            core.setOutput('run_id', String(previous.id));
+            core.setOutput('sha', previous.head_sha);
+
+      - name: Select deployment scope
+        id: scope
+        env:
+          PREVIOUS_AVAILABLE: ${{ steps.previous.outputs.available }}
+          PREVIOUS_SHA: ${{ steps.previous.outputs.sha }}
+        run: |
+          set -euo pipefail
+          echo 'incremental=false' >> "$GITHUB_OUTPUT"
+          echo 'locales=' >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_EVENT_NAME" != "push" || "$PREVIOUS_AVAILABLE" != "true" ]]; then
+            exit 0
+          fi
+
+          git fetch --no-tags --depth=1 origin "$PREVIOUS_SHA"
+          declare -A changed_locales=()
+          changed_files=0
+          catalog_only=true
+          while IFS= read -r -d '' file; do
+            changed_files=$((changed_files + 1))
+            if [[ "$file" =~ (^|/)locales/(en|fr|es|de|pt-BR|it|pl)\.json$ ]]; then
+              changed_locales["${BASH_REMATCH[2]}"]=1
+            else
+              catalog_only=false
+            fi
+          done < <(git diff --name-only -z "$PREVIOUS_SHA" "$GITHUB_SHA")
+
+          if [[ "$catalog_only" != "true" || "$changed_files" -eq 0 || ${#changed_locales[@]} -eq 0 ]]; then
+            exit 0
+          fi
+          locales=()
+          for locale in en fr es de pt-BR it pl; do
+            [[ -n "${changed_locales[$locale]:-}" ]] && locales+=("$locale")
+          done
+          echo 'incremental=true' >> "$GITHUB_OUTPUT"
+          printf 'locales=%s\n' "${locales[*]}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore previous Pages artifact
+        if: steps.scope.outputs.incremental == 'true'
+        uses: actions/download-artifact@v5
+        with:
+          name: github-pages
+          run-id: ${{ steps.previous.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          path: previous-pages
+
+      - name: Restore previous reference images
+        if: steps.scope.outputs.incremental == 'true'
+        uses: actions/download-artifact@v5
+        with:
+          name: reference-filesystem-images
+          run-id: ${{ steps.previous.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          path: seed-images
+
+      - name: Prepare Pages input
+        env:
+          INCREMENTAL: ${{ steps.scope.outputs.incremental }}
+        run: |
+          set -euo pipefail
+          mkdir -p pages seed-images
+          if [[ "$INCREMENTAL" == "true" ]]; then
+            tar -xf previous-pages/artifact.tar -C pages
+          fi
+
       - name: Build | Documentation (Host)
+        if: steps.scope.outputs.incremental != 'true'
         run: |
           cargo make doc-host
           mkdir -p ./pages/host/
           cp -r ./target/x86_64-unknown-linux-gnu/doc/* ./pages/host/
 
       - name: Build | Documentation (Guest)
+        if: steps.scope.outputs.incremental != 'true'
         run: |
           cargo make doc-guest
           mkdir -p ./pages/guest/
           cp -r ./target/wasm32-unknown-unknown/doc/* ./pages/guest/
 
-      # NOTE: each locale must build separately. EMBEDDED_I18N_LOCALE is baked in
-      # at compile time by the embedded-i18n proc macro (calculator/clock
-      # strings), provisioned into separate LittleFS seed images, and
-      # selects per-locale font subsets in generate-fonts. A single build
-      # copied between locale dirs would serve wrong-locale strings and
-      # miss language-specific glyphs. Shared setup (checkout, toolchains, docs) runs once
-      # above; only the locale-dependent steps repeat per locale.
-      - name: Build | WASM demonstration (en)
+      # Each locale needs its own compile-time strings, fonts, and disk images.
+      # Catalog-only changes reuse the previous published artifact and rebuild
+      # just the affected locale(s); all other changes rebuild all locales.
+      - name: Build | WASM demonstrations
         env:
-          EMBEDDED_I18N_LOCALE: en
+          LOCALES: ${{ steps.scope.outputs.locales || 'en fr es de pt-BR it pl' }}
         run: |
-          cargo make generate-fonts
-          cargo build -p calculator -p weather -p clock -p pixel_painter -p synth --target wasm32-wasip1 --release
-          cargo make prepare-wasm-image
-          cargo run -p fs_image -- target/seed/wasm/repeated.img 16777216 --bundle wasm --applications-dir target/wasm32-wasip1/release
-          cmp target/seed/wasm/seed.img target/seed/wasm/repeated.img
-          rm target/seed/wasm/repeated.img
-          mkdir -p seed-images/$EMBEDDED_I18N_LOCALE
-          cp target/seed/wasm/seed.img seed-images/$EMBEDDED_I18N_LOCALE/wasm.img
-          cargo run -p fs_image -- seed-images/$EMBEDDED_I18N_LOCALE/native.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release
-          cargo run -p fs_image -- target/seed/wasm/native-repeated.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release
-          cmp seed-images/$EMBEDDED_I18N_LOCALE/native.img target/seed/wasm/native-repeated.img
-          rm target/seed/wasm/native-repeated.img
-          (cd examples/wasm && RUSTUP_TOOLCHAIN="$XILA_NIGHTLY_TOOLCHAIN" trunk build --release --public-url ./)
-          mkdir -p pages/demonstrations/wasm/en/
-          cp -r examples/wasm/dist/* pages/demonstrations/wasm/en/
-
-      - name: Build | WASM demonstration (fr)
-        env:
-          EMBEDDED_I18N_LOCALE: fr
-        run: |
-          cargo make generate-fonts
-          cargo build -p calculator -p weather -p clock -p pixel_painter -p synth --target wasm32-wasip1 --release
-          cargo make prepare-wasm-image
-          cargo run -p fs_image -- target/seed/wasm/repeated.img 16777216 --bundle wasm --applications-dir target/wasm32-wasip1/release
-          cmp target/seed/wasm/seed.img target/seed/wasm/repeated.img
-          rm target/seed/wasm/repeated.img
-          mkdir -p seed-images/$EMBEDDED_I18N_LOCALE
-          cp target/seed/wasm/seed.img seed-images/$EMBEDDED_I18N_LOCALE/wasm.img
-          cargo run -p fs_image -- seed-images/$EMBEDDED_I18N_LOCALE/native.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release
-          cargo run -p fs_image -- target/seed/wasm/native-repeated.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release
-          cmp seed-images/$EMBEDDED_I18N_LOCALE/native.img target/seed/wasm/native-repeated.img
-          rm target/seed/wasm/native-repeated.img
-          (cd examples/wasm && RUSTUP_TOOLCHAIN="$XILA_NIGHTLY_TOOLCHAIN" trunk build --release --public-url ./)
-          mkdir -p pages/demonstrations/wasm/fr/
-          cp -r examples/wasm/dist/* pages/demonstrations/wasm/fr/
-
-      - name: Build | WASM demonstration (es)
-        env:
-          EMBEDDED_I18N_LOCALE: es
-        run: |
-          cargo make generate-fonts
-          cargo build -p calculator -p weather -p clock -p pixel_painter -p synth --target wasm32-wasip1 --release
-          cargo make prepare-wasm-image
-          cargo run -p fs_image -- target/seed/wasm/repeated.img 16777216 --bundle wasm --applications-dir target/wasm32-wasip1/release
-          cmp target/seed/wasm/seed.img target/seed/wasm/repeated.img
-          rm target/seed/wasm/repeated.img
-          mkdir -p seed-images/$EMBEDDED_I18N_LOCALE
-          cp target/seed/wasm/seed.img seed-images/$EMBEDDED_I18N_LOCALE/wasm.img
-          cargo run -p fs_image -- seed-images/$EMBEDDED_I18N_LOCALE/native.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release
-          cargo run -p fs_image -- target/seed/wasm/native-repeated.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release
-          cmp seed-images/$EMBEDDED_I18N_LOCALE/native.img target/seed/wasm/native-repeated.img
-          rm target/seed/wasm/native-repeated.img
-          (cd examples/wasm && RUSTUP_TOOLCHAIN="$XILA_NIGHTLY_TOOLCHAIN" trunk build --release --public-url ./)
-          mkdir -p pages/demonstrations/wasm/es/
-          cp -r examples/wasm/dist/* pages/demonstrations/wasm/es/
-
-      - name: Build | WASM demonstration (de)
-        env:
-          EMBEDDED_I18N_LOCALE: de
-        run: |
-          cargo make generate-fonts
-          cargo build -p calculator -p weather -p clock -p pixel_painter -p synth --target wasm32-wasip1 --release
-          cargo make prepare-wasm-image
-          cargo run -p fs_image -- target/seed/wasm/repeated.img 16777216 --bundle wasm --applications-dir target/wasm32-wasip1/release
-          cmp target/seed/wasm/seed.img target/seed/wasm/repeated.img
-          rm target/seed/wasm/repeated.img
-          mkdir -p seed-images/$EMBEDDED_I18N_LOCALE
-          cp target/seed/wasm/seed.img seed-images/$EMBEDDED_I18N_LOCALE/wasm.img
-          cargo run -p fs_image -- seed-images/$EMBEDDED_I18N_LOCALE/native.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release
-          cargo run -p fs_image -- target/seed/wasm/native-repeated.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release
-          cmp seed-images/$EMBEDDED_I18N_LOCALE/native.img target/seed/wasm/native-repeated.img
-          rm target/seed/wasm/native-repeated.img
-          (cd examples/wasm && RUSTUP_TOOLCHAIN="$XILA_NIGHTLY_TOOLCHAIN" trunk build --release --public-url ./)
-          mkdir -p pages/demonstrations/wasm/de/
-          cp -r examples/wasm/dist/* pages/demonstrations/wasm/de/
-
-      - name: Build | WASM demonstration (pt-BR)
-        env:
-          EMBEDDED_I18N_LOCALE: pt-BR
-        run: |
-          cargo make generate-fonts
-          cargo build -p calculator -p weather -p clock -p pixel_painter -p synth --target wasm32-wasip1 --release
-          cargo make prepare-wasm-image
-          cargo run -p fs_image -- target/seed/wasm/repeated.img 16777216 --bundle wasm --applications-dir target/wasm32-wasip1/release
-          cmp target/seed/wasm/seed.img target/seed/wasm/repeated.img
-          rm target/seed/wasm/repeated.img
-          mkdir -p seed-images/$EMBEDDED_I18N_LOCALE
-          cp target/seed/wasm/seed.img seed-images/$EMBEDDED_I18N_LOCALE/wasm.img
-          cargo run -p fs_image -- seed-images/$EMBEDDED_I18N_LOCALE/native.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release
-          cargo run -p fs_image -- target/seed/wasm/native-repeated.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release
-          cmp seed-images/$EMBEDDED_I18N_LOCALE/native.img target/seed/wasm/native-repeated.img
-          rm target/seed/wasm/native-repeated.img
-          (cd examples/wasm && RUSTUP_TOOLCHAIN="$XILA_NIGHTLY_TOOLCHAIN" trunk build --release --public-url ./)
-          mkdir -p pages/demonstrations/wasm/pt-BR/
-          cp -r examples/wasm/dist/* pages/demonstrations/wasm/pt-BR/
-
-      - name: Build | WASM demonstration (it)
-        env:
-          EMBEDDED_I18N_LOCALE: it
-        run: |
-          cargo make generate-fonts
-          cargo build -p calculator -p weather -p clock -p pixel_painter -p synth --target wasm32-wasip1 --release
-          cargo make prepare-wasm-image
-          cargo run -p fs_image -- target/seed/wasm/repeated.img 16777216 --bundle wasm --applications-dir target/wasm32-wasip1/release
-          cmp target/seed/wasm/seed.img target/seed/wasm/repeated.img
-          rm target/seed/wasm/repeated.img
-          mkdir -p seed-images/$EMBEDDED_I18N_LOCALE
-          cp target/seed/wasm/seed.img seed-images/$EMBEDDED_I18N_LOCALE/wasm.img
-          cargo run -p fs_image -- seed-images/$EMBEDDED_I18N_LOCALE/native.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release
-          cargo run -p fs_image -- target/seed/wasm/native-repeated.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release
-          cmp seed-images/$EMBEDDED_I18N_LOCALE/native.img target/seed/wasm/native-repeated.img
-          rm target/seed/wasm/native-repeated.img
-          (cd examples/wasm && RUSTUP_TOOLCHAIN="$XILA_NIGHTLY_TOOLCHAIN" trunk build --release --public-url ./)
-          mkdir -p pages/demonstrations/wasm/it/
-          cp -r examples/wasm/dist/* pages/demonstrations/wasm/it/
-
-      - name: Build | WASM demonstration (pl)
-        env:
-          EMBEDDED_I18N_LOCALE: pl
-        run: |
-          cargo make generate-fonts
-          cargo build -p calculator -p weather -p clock -p pixel_painter -p synth --target wasm32-wasip1 --release
-          cargo make prepare-wasm-image
-          cargo run -p fs_image -- target/seed/wasm/repeated.img 16777216 --bundle wasm --applications-dir target/wasm32-wasip1/release
-          cmp target/seed/wasm/seed.img target/seed/wasm/repeated.img
-          rm target/seed/wasm/repeated.img
-          mkdir -p seed-images/$EMBEDDED_I18N_LOCALE
-          cp target/seed/wasm/seed.img seed-images/$EMBEDDED_I18N_LOCALE/wasm.img
-          cargo run -p fs_image -- seed-images/$EMBEDDED_I18N_LOCALE/native.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release
-          cargo run -p fs_image -- target/seed/wasm/native-repeated.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release
-          cmp seed-images/$EMBEDDED_I18N_LOCALE/native.img target/seed/wasm/native-repeated.img
-          rm target/seed/wasm/native-repeated.img
-          (cd examples/wasm && RUSTUP_TOOLCHAIN="$XILA_NIGHTLY_TOOLCHAIN" trunk build --release --public-url ./)
-          mkdir -p pages/demonstrations/wasm/pl/
-          cp -r examples/wasm/dist/* pages/demonstrations/wasm/pl/
+          set -euo pipefail
+          for locale in $LOCALES; do
+            echo "::group::WASM demonstration ($locale)"
+            export EMBEDDED_I18N_LOCALE="$locale"
+            cargo make prepare-wasm-image
+            cargo run -p fs_image -- target/seed/wasm/repeated.img 16777216 --bundle wasm --applications-dir target/wasm32-wasip1/release
+            cmp target/seed/wasm/seed.img target/seed/wasm/repeated.img
+            rm target/seed/wasm/repeated.img
+            rm -rf "seed-images/$locale" "pages/demonstrations/wasm/$locale"
+            mkdir -p "seed-images/$locale"
+            cp target/seed/wasm/seed.img "seed-images/$locale/wasm.img"
+            cargo run -p fs_image -- "seed-images/$locale/native.img" 16777216 --bundle native --applications-dir target/wasm32-wasip1/release
+            cargo run -p fs_image -- target/seed/wasm/native-repeated.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release
+            cmp "seed-images/$locale/native.img" target/seed/wasm/native-repeated.img
+            rm target/seed/wasm/native-repeated.img
+            (cd examples/wasm && RUSTUP_TOOLCHAIN="$XILA_NIGHTLY_TOOLCHAIN" trunk build --release --public-url ./)
+            mkdir -p "pages/demonstrations/wasm/$locale"
+            cp -r examples/wasm/dist/* "pages/demonstrations/wasm/$locale/"
+            echo "::endgroup::"
+          done
 
       - name: Upload reference disk images
         uses: actions/upload-artifact@v7
