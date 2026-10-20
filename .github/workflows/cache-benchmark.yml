@@ -1,6 +1,9 @@
 name: Cache benchmark
 
 on:
+  # Disposable study branch only; this trigger is not part of Core PR #481.
+  push:
+    branches: [ci/480-cache-experiments]
   workflow_dispatch:
     inputs:
       namespace:
@@ -37,12 +40,12 @@ jobs:
       # Isolate candidates from each other's GHAC rate limits and CPU contention.
       max-parallel: 1
       matrix:
-        strategy: ${{ fromJSON(inputs.strategy == 'all' && '["dependencies","combined","sccache","workspace"]' || format('["{0}"]', inputs.strategy)) }}
+        strategy: ${{ fromJSON((inputs.strategy == 'all' || github.event_name == 'push') && '["dependencies","combined","sccache","workspace"]' || format('["{0}"]', inputs.strategy)) }}
     env:
       CARGO_INCREMENTAL: "0"
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_GHA_RW_MODE: READ_WRITE
-      SCCACHE_GHA_VERSION: experiment-${{ inputs.namespace }}-${{ matrix.strategy }}
+      SCCACHE_GHA_VERSION: experiment-${{ inputs.namespace || '480-d49f1d83' }}-${{ matrix.strategy }}
     steps:
       - uses: actions/checkout@v7
 
@@ -71,7 +74,7 @@ jobs:
         if: matrix.strategy != 'sccache'
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
-          prefix-key: experiment-${{ inputs.namespace }}
+          prefix-key: experiment-${{ inputs.namespace || '480-d49f1d83' }}
           shared-key: ${{ matrix.strategy }}
           cache-bin: "false"
           cache-workspace-crates: ${{ matrix.strategy == 'workspace' }}
