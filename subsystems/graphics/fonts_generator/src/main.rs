@@ -93,13 +93,13 @@ pub fn generate_font<'a>(
                 err
             )
         })?
-    .wait()
-    .map_err(|err| {
-        format!(
-            "Failed to wait for lv_font_conv command to finish. Error: {}",
-            err
-        )
-    })?;
+        .wait()
+        .map_err(|err| {
+            format!(
+                "Failed to wait for lv_font_conv command to finish. Error: {}",
+                err
+            )
+        })?;
 
     if !command.success() {
         return Err("lv_font_conv command failed".to_string());
