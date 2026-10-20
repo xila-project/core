@@ -478,6 +478,12 @@ impl Interface {
     ) -> wasm::Result<*mut Object> {
         unsafe {
             let button = button_create(parent)?;
+            let variant = match action {
+                Action::AlarmDelete => ThemeVariant::Destructive,
+                Action::AlarmSave | Action::TimerStart => ThemeVariant::Default,
+                _ => ThemeVariant::Outline,
+            };
+            object_set_theme_variant(button, variant as u32)?;
             let label = label_create(button)?;
             label_set_text(label, text.as_ptr())?;
             // Window events identify the control rather than its child label.

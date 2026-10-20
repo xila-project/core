@@ -2,12 +2,12 @@ use crate::engine::evaluate_expression;
 use embedded_i18n::translate;
 use std::{ptr::null_mut, thread::sleep};
 use wasm::{
-    self, Color, EVENT_CLOSE_REQUESTED, EventCode, FlexFlow, Object, ObjectFlag,
-    buttonmatrix_create, buttonmatrix_get_selected_button, buttonmatrix_set_map, label_create,
-    label_set_text, object_add_flag, object_create, object_set_flex_align, object_set_flex_flow,
-    object_set_flex_grow, object_set_height, object_set_padding, object_set_style_text_align,
-    object_set_text_size, object_set_width, percentage, size_content, window_create,
-    window_pop_event, window_set_icon, FlexAlign, TextAlign, PART_MAIN,
+    self, Color, EVENT_CLOSE_REQUESTED, EventCode, FlexAlign, FlexFlow, Object, ObjectFlag,
+    PART_MAIN, TextAlign, buttonmatrix_create, buttonmatrix_get_selected_button,
+    buttonmatrix_set_map, label_create, label_set_text, object_add_flag, object_create,
+    object_set_flex_align, object_set_flex_flow, object_set_flex_grow, object_set_height,
+    object_set_padding, object_set_style_text_align, object_set_text_size, object_set_width,
+    percentage, size_content, window_create, window_pop_event, window_set_icon,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]

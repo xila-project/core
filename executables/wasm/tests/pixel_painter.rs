@@ -19,6 +19,52 @@ use xila::{
     virtual_file_system::File,
 };
 
+unsafe fn find_class(
+    root: *mut lvgl::lv_obj_t,
+    class: *const lvgl::lv_obj_class_t,
+    ordinal: usize,
+    found: &mut usize,
+) -> *mut lvgl::lv_obj_t {
+    unsafe {
+        if lvgl::lv_obj_has_class(root, class) {
+            if *found == ordinal {
+                return root;
+            }
+            *found += 1;
+        }
+        for index in 0..lvgl::lv_obj_get_child_count(root) {
+            let object = find_class(
+                lvgl::lv_obj_get_child(root, index as i32),
+                class,
+                ordinal,
+                found,
+            );
+            if !object.is_null() {
+                return object;
+            }
+        }
+        core::ptr::null_mut()
+    }
+}
+
+unsafe fn find_label(root: *mut lvgl::lv_obj_t, expected: &str) -> *mut lvgl::lv_obj_t {
+    unsafe {
+        if lvgl::lv_obj_has_class(root, &lvgl::lv_label_class) {
+            let text = core::ffi::CStr::from_ptr(lvgl::lv_label_get_text(root)).to_bytes();
+            if text == expected.as_bytes() {
+                return root;
+            }
+        }
+        for index in 0..lvgl::lv_obj_get_child_count(root) {
+            let label = find_label(lvgl::lv_obj_get_child(root, index as i32), expected);
+            if !label.is_null() {
+                return label;
+            }
+        }
+        core::ptr::null_mut()
+    }
+}
+
 async fn status(manager: &Manager, expected: &str) {
     let mut observed = String::new();
     for _ in 0..400 {
@@ -26,7 +72,7 @@ async fn status(manager: &Manager, expected: &str) {
             let root = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
             let _lock = manager.synchronous_lock();
             unsafe {
-                let label = lvgl::lv_obj_get_child(root, 4);
+                let label = find_label(root, expected);
                 if !label.is_null() {
                     observed = core::ffi::CStr::from_ptr(lvgl::lv_label_get_text(label))
                         .to_string_lossy()
@@ -46,7 +92,12 @@ async fn action(manager: &Manager, button: u32) {
     let root = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
     let _lock = manager.synchronous_lock();
     unsafe {
-        let matrix = lvgl::lv_obj_get_child(root, 1);
+        let mut found = 0;
+        let matrix = find_class(root, &lvgl::lv_buttonmatrix_class, 0, &mut found);
+        assert!(
+            !matrix.is_null(),
+            "Pixel Painter should contain its action matrix"
+        );
         lvgl::lv_buttonmatrix_set_selected_button(matrix, button);
         lvgl::lv_obj_send_event(
             matrix,
@@ -101,7 +152,12 @@ async fn real_painter_guest_draws_saves_opens_and_preserves_work_on_errors() {
         let root = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
         unsafe {
             lvgl::lv_obj_update_layout(root);
-            let canvas = lvgl::lv_obj_get_child(root, 3);
+            // Pixel Painter creates its direct canvas after the path field.
+            let canvas = lvgl::lv_obj_get_child(root, 4);
+            assert!(
+                !canvas.is_null(),
+                "Pixel Painter should contain its drawing canvas"
+            );
             let mut area = lvgl::lv_area_t::default();
             lvgl::lv_obj_get_content_coords(canvas, &mut area);
             assert!(area.y2 > area.y1, "canvas needs usable height");
@@ -173,7 +229,17 @@ async fn real_painter_guest_draws_saves_opens_and_preserves_work_on_errors() {
         let _lock = manager.synchronous_lock();
         let long_path = std::ffi::CString::new(format!("/{}", "é".repeat(130))).unwrap();
         unsafe {
-            let input = lvgl::lv_obj_get_child(root as *mut lvgl::lv_obj_t, 2);
+            let mut found = 0;
+            let input = find_class(
+                root as *mut lvgl::lv_obj_t,
+                &lvgl::lv_textarea_class,
+                0,
+                &mut found,
+            );
+            assert!(
+                !input.is_null(),
+                "Pixel Painter should contain a path field"
+            );
             lvgl::lv_textarea_set_text(input, long_path.as_ptr());
         }
     }
@@ -187,7 +253,17 @@ async fn real_painter_guest_draws_saves_opens_and_preserves_work_on_errors() {
         let _lock = manager.synchronous_lock();
         let path = std::ffi::CString::new(path).unwrap();
         unsafe {
-            let input = lvgl::lv_obj_get_child(root as *mut lvgl::lv_obj_t, 2);
+            let mut found = 0;
+            let input = find_class(
+                root as *mut lvgl::lv_obj_t,
+                &lvgl::lv_textarea_class,
+                0,
+                &mut found,
+            );
+            assert!(
+                !input.is_null(),
+                "Pixel Painter should contain a path field"
+            );
             lvgl::lv_textarea_set_text(input, path.as_ptr());
         }
     }

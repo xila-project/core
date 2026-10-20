@@ -63,6 +63,50 @@ fn generate() {
         ("object_set_height", &["*mut lv_obj_t", "i32"], "None", None),
         ("object_set_width", &["*mut lv_obj_t", "i32"], "None", None),
         (
+            "object_get_content_width",
+            &["*const lv_obj_t"],
+            "I32",
+            Some("i32"),
+        ),
+        (
+            "object_set_pos",
+            &["*mut lv_obj_t", "i32", "i32"],
+            "None",
+            None,
+        ),
+        ("object_set_layout", &["*mut lv_obj_t", "u32"], "None", None),
+        (
+            "object_set_theme_variant",
+            &["*mut lv_obj_t", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "object_set_theme_error",
+            &["*mut lv_obj_t", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "slider_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "slider_set_range",
+            &["*mut lv_obj_t", "i32", "i32"],
+            "None",
+            None,
+        ),
+        (
+            "slider_set_value",
+            &["*mut lv_obj_t", "i32", "lv_anim_enable_t"],
+            "None",
+            None,
+        ),
+        ("slider_get_value", &["*const lv_obj_t"], "I32", Some("i32")),
+        (
             "object_set_flex_align",
             &[
                 "*mut lv_obj_t",
@@ -240,6 +284,18 @@ fn generate() {
         (
             "object_set_text_size",
             &["*mut lv_obj_t", "u8"],
+            "None",
+            None,
+        ),
+        (
+            "object_set_background_rgb",
+            &["*mut lv_obj_t", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "object_set_text_rgb",
+            &["*mut lv_obj_t", "u32"],
             "None",
             None,
         ),

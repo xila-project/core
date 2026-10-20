@@ -280,10 +280,7 @@ impl Desk {
             let name = CString::new(name).map_err(Error::NullCharacterInString)?;
 
             lvgl::lv_label_set_text(label, name.as_ptr());
-            lvgl::lv_label_set_long_mode(
-                label,
-                lvgl::lv_label_long_mode_t_LV_LABEL_LONG_MODE_WRAP,
-            );
+            lvgl::lv_label_set_long_mode(label, lvgl::lv_label_long_mode_t_LV_LABEL_LONG_MODE_WRAP);
             lvgl::lv_obj_set_width(label, lvgl::lv_pct(100));
             lvgl::lv_obj_set_style_text_align(
                 label,

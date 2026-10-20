@@ -46,6 +46,7 @@ pub(crate) enum Kind {
     Roller,
     Arc,
     List,
+    Slider,
 }
 
 struct Entry {

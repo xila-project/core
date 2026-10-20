@@ -246,7 +246,11 @@ impl FileManager {
             lvgl::lv_obj_set_style_pad_all(self.toolbar, 0, lvgl::LV_STATE_DEFAULT);
             lvgl::lv_obj_set_style_pad_column(self.toolbar, 6, lvgl::LV_STATE_DEFAULT);
             lvgl::lv_obj_set_style_border_width(self.toolbar, 0, lvgl::LV_STATE_DEFAULT);
-            lvgl::lv_obj_set_style_bg_opa(self.toolbar, lvgl::LV_OPA_TRANSP, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_style_bg_opa(
+                self.toolbar,
+                lvgl::LV_OPA_TRANSP,
+                lvgl::LV_STATE_DEFAULT,
+            );
             lvgl::lv_obj_set_flex_align(
                 self.toolbar,
                 lvgl::lv_flex_align_t_LV_FLEX_ALIGN_START,

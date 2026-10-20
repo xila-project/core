@@ -4,12 +4,12 @@ use std::string::ToString;
 use std::thread::sleep;
 
 use wasm::{
-    EventCode, FlexAlign, FlexFlow, Object, TextAlign, button_create, label_create,
-    label_set_text, object_create, object_set_flex_align, object_set_flex_flow,
+    EventCode, FlexAlign, FlexFlow, Object, PART_MAIN, TextAlign, ThemeVariant, button_create,
+    label_create, label_set_text, object_create, object_set_flex_align, object_set_flex_flow,
     object_set_flex_grow, object_set_height, object_set_padding, object_set_style_text_align,
-    object_set_text_size, object_set_width, percentage, size_content, tabview_add_tab,
-    tabview_create, textarea_create, textarea_get_text, textarea_get_text_length,
-    textarea_set_one_line, window_create, window_pop_event, PART_MAIN,
+    object_set_text_size, object_set_theme_error, object_set_theme_variant, object_set_width,
+    percentage, size_content, tabview_add_tab, tabview_create, textarea_create, textarea_get_text,
+    textarea_get_text_length, textarea_set_one_line, window_create, window_pop_event,
 };
 
 use weather::{
@@ -56,6 +56,7 @@ impl Interface {
             object_set_flex_grow(city_input, 1)?;
 
             let refresh_button = button_create(search_row)?;
+            object_set_theme_variant(refresh_button, ThemeVariant::Default as u32)?;
             let refresh_label = label_create(refresh_button)?;
             label_set_text(refresh_label, c"Refresh".as_ptr() as *mut _)?;
 
@@ -128,7 +129,10 @@ impl Interface {
         }
     }
 
-    fn set_status(&self, text: &str) {
+    fn set_status(&self, text: &str, error: bool) {
+        unsafe {
+            let _ = object_set_theme_error(self.status_label, u32::from(error));
+        }
         self.set_label_text(self.status_label, text);
     }
 
@@ -158,12 +162,12 @@ impl Interface {
 
         let city = city.trim();
         if city.is_empty() {
-            self.set_status("Enter a city name");
+            self.set_status("Enter a city name", true);
             self.in_flight = false;
             return;
         }
 
-        self.set_status("Loading...");
+        self.set_status("Loading...", false);
 
         match fetch_weather(city) {
             Ok(data) => {
@@ -193,11 +197,11 @@ impl Interface {
                 self.set_label_text(self.hourly_label, &hourly);
                 self.set_label_text(self.daily_label, &daily);
                 self.set_label_text(self.meta_label, &meta);
-                self.set_status("Updated");
+                self.set_status("Updated", false);
             }
             Err(error) => {
                 let message = map_status_message(&error);
-                self.set_status(&message);
+                self.set_status(&message, true);
             }
         }
 

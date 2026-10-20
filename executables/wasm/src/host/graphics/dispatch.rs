@@ -8,6 +8,16 @@ use crate::host::translation::{GuestMemory, GuestPointer, GuestSlice, WasmUsize}
 use core::ptr::NonNull;
 use xila::graphics::{Color, Window, lvgl};
 
+fn font_for_text_size(size: WasmUsize) -> Result<&'static lvgl::lv_font_t> {
+    match size {
+        1..=12 => Ok(xila::graphics::fonts::get_font_small()),
+        13..=16 => Ok(xila::graphics::fonts::get_font_medium()),
+        17..=23 => Ok(xila::graphics::fonts::get_font_large()),
+        24..=255 => Ok(xila::graphics::fonts::get_font_extra_large()),
+        _ => Err(GraphicsError::InvalidValue),
+    }
+}
+
 pub struct GraphicsCall {
     pub function: i32,
     pub arguments: [WasmUsize; 7],
@@ -68,7 +78,8 @@ pub fn dispatch(
         | Function::RollerCreate
         | Function::SwitchCreate
         | Function::ArcCreate
-        | Function::ListCreate => {
+        | Function::ListCreate
+        | Function::SliderCreate => {
             state.ensure_capacity()?;
             let (pointer, kind, parent) = if function == Function::WindowCreate {
                 let window = xila::task::block_on(manager.create_window())
@@ -99,6 +110,7 @@ pub fn dispatch(
                         Function::SwitchCreate => (lvgl::lv_switch_create(parent), Kind::Object),
                         Function::ArcCreate => (lvgl::lv_arc_create(parent), Kind::Arc),
                         Function::ListCreate => (lvgl::lv_list_create(parent), Kind::List),
+                        Function::SliderCreate => (lvgl::lv_slider_create(parent), Kind::Slider),
                         _ => unreachable!(),
                     }
                 };
@@ -212,14 +224,88 @@ pub fn dispatch(
         }
         Function::ObjectSetTextSize => {
             let object = state.object(a, None)?;
-            let font = match b {
-                10 => xila::graphics::fonts::get_font_small(),
-                14 => xila::graphics::fonts::get_font_medium(),
-                18 => xila::graphics::fonts::get_font_large(),
-                28 => xila::graphics::fonts::get_font_extra_large(),
+            let font = font_for_text_size(b)?;
+            unsafe { lvgl::lv_obj_set_style_text_font(object, font, 0) };
+        }
+        Function::ObjectGetContentWidth => {
+            let object = state.object(a, None)?;
+            let width = unsafe {
+                lvgl::lv_obj_update_layout(object);
+                lvgl::lv_obj_get_content_width(object)
+            };
+            memory
+                .write(GuestPointer::new(call.result), width)
+                .expect("validated result");
+        }
+        Function::ObjectSetPos => {
+            let object = state.object(a, None)?;
+            unsafe { lvgl::lv_obj_set_pos(object, b as i32, c as i32) };
+        }
+        Function::ObjectSetLayout => {
+            let object = state.object(a, None)?;
+            let layout = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            if layout > lvgl::lv_layout_t_LV_LAYOUT_FLEX {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_obj_set_layout(object, layout) };
+        }
+        Function::ObjectSetThemeVariant => {
+            let object = state.object(a, Some(Kind::Object))?;
+            let variant = match b {
+                0 => lvgl::lv_theme_shadcn_variant_t_LV_THEME_SHADCN_VARIANT_DEFAULT,
+                1 => lvgl::lv_theme_shadcn_variant_t_LV_THEME_SHADCN_VARIANT_SECONDARY,
+                2 => lvgl::lv_theme_shadcn_variant_t_LV_THEME_SHADCN_VARIANT_OUTLINE,
+                3 => lvgl::lv_theme_shadcn_variant_t_LV_THEME_SHADCN_VARIANT_GHOST,
+                4 => lvgl::lv_theme_shadcn_variant_t_LV_THEME_SHADCN_VARIANT_DESTRUCTIVE,
                 _ => return Err(GraphicsError::InvalidValue),
             };
-            unsafe { lvgl::lv_obj_set_style_text_font(object, font, 0) };
+            unsafe { lvgl::lv_theme_shadcn_set_variant(object, variant) };
+        }
+        Function::ObjectSetThemeError => {
+            let object = state.object(a, None)?;
+            if b > 1 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_theme_shadcn_set_error(object, b != 0) };
+        }
+        Function::SliderSetRange => {
+            let slider = state.object(a, Some(Kind::Slider))?;
+            let minimum = i32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let maximum = i32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            if minimum < 0 || minimum >= maximum || maximum > 100_000 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_slider_set_range(slider, minimum, maximum) };
+        }
+        Function::SliderSetValue => {
+            let slider = state.object(a, Some(Kind::Slider))?;
+            let value = i32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            if c > 1 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_slider_set_value(slider, value, c != 0) };
+        }
+        Function::SliderGetValue => {
+            let slider = state.object(a, Some(Kind::Slider))?;
+            let value = unsafe { lvgl::lv_slider_get_value(slider) };
+            memory
+                .write(GuestPointer::new(call.result), value)
+                .expect("validated result");
+        }
+        Function::ObjectSetBackgroundRgb | Function::ObjectSetTextRgb => {
+            let object = state.object(a, None)?;
+            let color = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            if color > 0x00ff_ffff {
+                return Err(GraphicsError::InvalidValue);
+            }
+            let color = unsafe { lvgl::lv_color_hex(color) };
+            unsafe {
+                if function == Function::ObjectSetBackgroundRgb {
+                    lvgl::lv_obj_set_style_bg_color(object, color, lvgl::LV_STATE_DEFAULT);
+                } else {
+                    lvgl::lv_obj_set_style_text_color(object, color, lvgl::LV_STATE_DEFAULT);
+                }
+            }
         }
         Function::ObjectSetStyleTextAlign => {
             let object = state.object(a, None)?;
@@ -508,4 +594,41 @@ pub fn dispatch(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_sizes_choose_the_nearest_embedded_font() {
+        let cases = [
+            (10, xila::graphics::fonts::get_font_small()),
+            (12, xila::graphics::fonts::get_font_small()),
+            (14, xila::graphics::fonts::get_font_medium()),
+            (16, xila::graphics::fonts::get_font_medium()),
+            (18, xila::graphics::fonts::get_font_large()),
+            (20, xila::graphics::fonts::get_font_large()),
+            (24, xila::graphics::fonts::get_font_extra_large()),
+            (28, xila::graphics::fonts::get_font_extra_large()),
+            (30, xila::graphics::fonts::get_font_extra_large()),
+            (36, xila::graphics::fonts::get_font_extra_large()),
+        ];
+
+        for (size, expected) in cases {
+            assert!(core::ptr::eq(font_for_text_size(size).unwrap(), expected));
+        }
+    }
+
+    #[test]
+    fn text_sizes_reject_zero_and_values_outside_the_binding_range() {
+        assert!(matches!(
+            font_for_text_size(0),
+            Err(GraphicsError::InvalidValue)
+        ));
+        assert!(matches!(
+            font_for_text_size(256),
+            Err(GraphicsError::InvalidValue)
+        ));
+    }
 }

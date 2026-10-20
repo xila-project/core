@@ -89,12 +89,157 @@ async fn checked_graphics_core_owns_objects_maps_and_events() {
     call(
         &mut state,
         &mut memory,
+        Function::SliderCreate,
+        &[container],
+        1,
+    )
+    .unwrap();
+    let slider = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::SliderSetRange,
+        &[slider, 0, 100],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::SliderSetValue,
+        &[slider, 37, 0],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::SliderGetValue,
+        &[slider],
+        68,
+    )
+    .unwrap();
+    assert_eq!(memory.read::<i32>(GuestPointer::new(68)).unwrap(), 37);
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::SliderSetRange,
+            &[slider, 100, 0],
+            0
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    assert_eq!(
+        call(&mut state, &mut memory, Function::SliderGetValue, &[0], 68),
+        Err(GraphicsError::InvalidHandle)
+    );
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetThemeVariant,
+        &[container, 2],
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ObjectSetThemeVariant,
+            &[container, 5],
+            0
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetThemeError,
+        &[container, 1],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetThemeError,
+        &[container, 0],
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ObjectSetThemeError,
+            &[container, 2],
+            0
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    call(
+        &mut state,
+        &mut memory,
         Function::LabelCreate,
         &[container],
         1,
     )
     .unwrap();
     let label = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetWidth,
+        &[container, 123],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectGetContentWidth,
+        &[container],
+        64,
+    )
+    .unwrap();
+    assert!(memory.read::<i32>(GuestPointer::new(64)).unwrap() > 0);
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetBackgroundRgb,
+        &[container, 0x123456],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetTextRgb,
+        &[container, 0xabcdef],
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ObjectSetBackgroundRgb,
+            &[container, 0x0100_0000],
+            0,
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    {
+        let _lock = manager.synchronous_lock();
+        unsafe {
+            let container_pointer = lvgl::lv_obj_get_child(window_pointer, 0);
+            let background = lvgl::lv_obj_get_style_bg_color(container_pointer, lvgl::LV_PART_MAIN);
+            let text = lvgl::lv_obj_get_style_text_color(container_pointer, lvgl::LV_PART_MAIN);
+            assert_eq!(lvgl::lv_color_to_u32(background) & 0x00ff_ffff, 0x123456);
+            assert_eq!(lvgl::lv_color_to_u32(text) & 0x00ff_ffff, 0xabcdef);
+        }
+    }
     assert_eq!(
         call(
             &mut state,
@@ -367,7 +512,7 @@ async fn checked_graphics_core_owns_objects_maps_and_events() {
         ),
         Err(GraphicsError::InvalidHandle)
     );
-    for _ in 5..256 {
+    for _ in 6..256 {
         call(
             &mut state,
             &mut memory,
@@ -486,6 +631,154 @@ async fn checked_graphics_core_owns_objects_maps_and_events() {
     let root = handle(&memory);
     call(&mut state, &mut memory, Function::ButtonCreate, &[root], 1).unwrap();
     let button = handle(&memory);
+    // The shared polish contract uses closed variants and bounded sliders.
+    for variant in 0..5 {
+        call(
+            &mut state,
+            &mut memory,
+            Function::ObjectSetThemeVariant,
+            &[button, variant],
+            0,
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ObjectSetThemeVariant,
+            &[button, 5],
+            0
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ObjectSetThemeVariant,
+            &[root, 0],
+            0
+        ),
+        Err(GraphicsError::InvalidHandle)
+    );
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ObjectSetThemeVariant,
+            &[999, 0],
+            0
+        ),
+        Err(GraphicsError::InvalidHandle)
+    );
+    assert_eq!(
+        call(&mut state, &mut memory, Function::SliderCreate, &[999], 1),
+        Err(GraphicsError::InvalidHandle)
+    );
+    for output in [0, 4095] {
+        assert_eq!(
+            call(
+                &mut state,
+                &mut memory,
+                Function::SliderCreate,
+                &[root],
+                output
+            ),
+            Err(GraphicsError::InvalidMemory)
+        );
+    }
+    call(&mut state, &mut memory, Function::SliderCreate, &[root], 1).unwrap();
+    let slider = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::SliderSetRange,
+        &[slider, 0, 100],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::SliderSetValue,
+        &[slider, 37, 0],
+        0,
+    )
+    .unwrap();
+    for (min, max) in [(100, 0), (10, 10), (0, 100_001), (WasmUsize::MAX, 100)] {
+        assert_eq!(
+            call(
+                &mut state,
+                &mut memory,
+                Function::SliderSetRange,
+                &[slider, min, max],
+                0
+            ),
+            Err(GraphicsError::InvalidValue)
+        );
+    }
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::SliderSetValue,
+            &[slider, WasmUsize::MAX, 0],
+            0
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    for object in [0, 999, button] {
+        for (function, args, output) in [
+            (Function::SliderSetRange, vec![object, 0, 100], 0),
+            (Function::SliderSetValue, vec![object, 37, 0], 0),
+            (Function::SliderGetValue, vec![object], 64),
+        ] {
+            assert_eq!(
+                call(&mut state, &mut memory, function, &args, output),
+                Err(GraphicsError::InvalidHandle)
+            );
+        }
+    }
+    for output in [0, 4095] {
+        assert_eq!(
+            call(
+                &mut state,
+                &mut memory,
+                Function::SliderGetValue,
+                &[slider],
+                output
+            ),
+            Err(GraphicsError::InvalidMemory)
+        );
+    }
+    call(
+        &mut state,
+        &mut memory,
+        Function::SliderGetValue,
+        &[slider],
+        64,
+    )
+    .unwrap();
+    assert_eq!(memory.read::<i32>(GuestPointer::new(64)), Some(37));
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectDelete,
+        &[slider],
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::SliderGetValue,
+            &[slider],
+            64
+        ),
+        Err(GraphicsError::InvalidHandle)
+    );
     call(
         &mut state,
         &mut memory,

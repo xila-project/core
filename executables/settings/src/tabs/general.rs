@@ -28,10 +28,7 @@ impl GeneralTab {
 
         // Keep the overview useful while this tab has no general controls yet.
         unsafe {
-            lvgl::lv_obj_set_flex_flow(
-                tab_container,
-                lvgl::lv_flex_flow_t_LV_FLEX_FLOW_COLUMN,
-            );
+            lvgl::lv_obj_set_flex_flow(tab_container, lvgl::lv_flex_flow_t_LV_FLEX_FLOW_COLUMN);
             lvgl::lv_obj_set_style_pad_all(tab_container, 18, lvgl::LV_STATE_DEFAULT);
             lvgl::lv_obj_set_style_pad_row(tab_container, 12, lvgl::LV_STATE_DEFAULT);
 

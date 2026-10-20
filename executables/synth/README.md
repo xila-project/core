@@ -10,9 +10,11 @@ open **Synth** from the application drawer, or run:
 ```
 
 Hold a note to play; release it or move the pointer away to release the voice.
+The on-screen octave uses white natural keys and raised black accidental keys.
 The key label gains `*` while held. Octave controls cover octaves 2 through 6;
-changing octave stops held voices. **Sound** cycles sine, square and triangle
-for newly triggered notes. Volume changes in steps of 10%, initially 70%.
+changing octave stops held voices. **Waveform** cycles sine, square and triangle
+for newly triggered notes. Volume is continuously adjustable from 0 to 100%,
+initially 70%.
 The controls are session-local. The current input driver supplies a single
 pointer; eight synthesis voices do not imply eight-finger touch support.
 
@@ -41,10 +43,10 @@ and partial writes, and run the real guest through graphics events, WASI
 `fd_control`, VFS playback and the mixer. These tests do not prove audible sound.
 For an interactive smoke test on either example:
 
-1. Launch Synth without audio available; hold/release a key and check its `*`.
-2. Enable host audio, choose **Retry audio**, and check **Audio ready**.
+1. Launch Synth without audio available; hold/release a key and check its visual feedback.
+2. Enable host audio, choose **Retry audio**, and check **Audio output ready**.
 3. Hold a key: check sound and visual feedback. Release or drag away: check silence.
-4. Change octave, sound and volume; play again and check each change.
+4. Change octave, waveform and volume; play again and check each change.
 5. Close and reopen the application; check that playback stops and starts normally.
 
 WT32-SC01 Plus speaker output still requires the I2S driver in #326 and a physical

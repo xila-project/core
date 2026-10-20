@@ -52,10 +52,7 @@ impl InterfacePanel {
 
                 lvgl::lv_obj_set_size(list, lvgl::lv_pct(100), lvgl::lv_pct(100));
                 lvgl::lv_obj_set_style_pad_all(list, 8, lvgl::LV_STATE_DEFAULT);
-                xila::graphics::theme::set_surface(
-                    list,
-                    xila::graphics::theme::Surface::Card,
-                );
+                xila::graphics::theme::set_surface(list, xila::graphics::theme::Surface::Card);
 
                 write!(
                     format_buffer,
@@ -312,6 +309,10 @@ impl InterfacePanel {
         let cancel_button = unsafe {
             // Cancel button
             let cancel_button = lvgl::lv_button_create(button_container);
+            lvgl::lv_theme_shadcn_set_variant(
+                cancel_button,
+                lvgl::lv_theme_shadcn_variant_t_LV_THEME_SHADCN_VARIANT_OUTLINE,
+            );
             let cancel_label = lvgl::lv_label_create(cancel_button);
             let cancel_text = translate!(c"Cancel");
             lvgl::lv_label_set_text(cancel_label, cancel_text.as_ptr() as *const _);
@@ -329,6 +330,10 @@ impl InterfacePanel {
         // Apply button
         let apply_button = unsafe {
             let apply_button = lvgl::lv_button_create(button_container);
+            lvgl::lv_theme_shadcn_set_variant(
+                apply_button,
+                lvgl::lv_theme_shadcn_variant_t_LV_THEME_SHADCN_VARIANT_DEFAULT,
+            );
             let apply_label = lvgl::lv_label_create(apply_button);
             let apply_text = translate!(c"Apply");
             lvgl::lv_label_set_text(apply_label, apply_text.as_ptr() as *const _);
