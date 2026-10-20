@@ -36,15 +36,6 @@ jobs:
       host: ${{ steps.filter.outputs.host }}
       guest: ${{ steps.filter.outputs.guest }}
       localization: ${{ steps.filter.outputs.localization }}
-      i18n_code: ${{ steps.filter.outputs.i18n_code }}
-      i18n_en: ${{ steps.filter.outputs.i18n_en }}
-      i18n_fr: ${{ steps.filter.outputs.i18n_fr }}
-      i18n_es: ${{ steps.filter.outputs.i18n_es }}
-      i18n_de: ${{ steps.filter.outputs.i18n_de }}
-      i18n_pt_br: ${{ steps.filter.outputs.i18n_pt_br }}
-      i18n_it: ${{ steps.filter.outputs.i18n_it }}
-      i18n_pl: ${{ steps.filter.outputs.i18n_pl }}
-      locales: ${{ steps.locales.outputs.matrix }}
     steps:
       - uses: dorny/paths-filter@v4
         id: filter
@@ -103,62 +94,9 @@ jobs:
               - '**/localization/**'
               - 'executables/wasm/src/host/translation/**'
               - 'executables/wasm/tests/translation/**'
-            i18n_code:
-              - '**/*.rs'
-              - '**/Cargo.toml'
-              - 'Cargo.toml'
-              - '**/build.rs'
-              - '**/build/**'
-              - 'Makefile.toml'
-              - 'tolgee.extractor.mjs'
-              - 'tolgee.config.ts'
-              - 'subsystems/graphics/fonts_generator/**'
-            i18n_en:
-              - '**/locales/en.json'
-            i18n_fr:
-              - '**/locales/fr.json'
-            i18n_es:
-              - '**/locales/es.json'
-            i18n_de:
-              - '**/locales/de.json'
-            i18n_pt_br:
-              - '**/locales/pt-BR.json'
-            i18n_it:
-              - '**/locales/it.json'
-            i18n_pl:
-              - '**/locales/pl.json'
-      - name: Select localization matrix
-        id: locales
-        env:
-          I18N_CODE_CHANGED: ${{ steps.filter.outputs.i18n_code }}
-          I18N_EN_CHANGED: ${{ steps.filter.outputs.i18n_en }}
-          I18N_FR_CHANGED: ${{ steps.filter.outputs.i18n_fr }}
-          I18N_ES_CHANGED: ${{ steps.filter.outputs.i18n_es }}
-          I18N_DE_CHANGED: ${{ steps.filter.outputs.i18n_de }}
-          I18N_PT_BR_CHANGED: ${{ steps.filter.outputs.i18n_pt_br }}
-          I18N_IT_CHANGED: ${{ steps.filter.outputs.i18n_it }}
-          I18N_PL_CHANGED: ${{ steps.filter.outputs.i18n_pl }}
-        run: |
-          set -euo pipefail
-          locales=(en fr es de pt-BR it pl)
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$I18N_CODE_CHANGED" == "false" ]]; then
-            locales=()
-            [[ "$I18N_EN_CHANGED" == "true" ]] && locales+=(en)
-            [[ "$I18N_FR_CHANGED" == "true" ]] && locales+=(fr)
-            [[ "$I18N_ES_CHANGED" == "true" ]] && locales+=(es)
-            [[ "$I18N_DE_CHANGED" == "true" ]] && locales+=(de)
-            [[ "$I18N_PT_BR_CHANGED" == "true" ]] && locales+=(pt-BR)
-            [[ "$I18N_IT_CHANGED" == "true" ]] && locales+=(it)
-            [[ "$I18N_PL_CHANGED" == "true" ]] && locales+=(pl)
-            if [[ ${#locales[@]} -eq 0 ]]; then
-              locales=(en fr es de pt-BR it pl)
-            fi
-          fi
-          locale_json="$(printf '"%s",' "${locales[@]}")"
-          echo "matrix=[${locale_json%,}]" >> "$GITHUB_OUTPUT"
 
   localization:
-    name: Localization checks (${{ matrix.locale }})
+    name: Localization checks (all locales)
     needs: [changes]
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.localization == 'true') }}
     runs-on: ubuntu-latest
@@ -168,14 +106,13 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      max-parallel: 7
-      matrix:
-        locale: ${{ fromJSON(needs.changes.outputs.locales || '["en", "fr", "es", "de", "pt-BR", "it", "pl"]') }}
     env:
-      EMBEDDED_I18N_LOCALE: ${{ matrix.locale }}
+      # One compilation validates all catalogs. French covers the glyph ranges
+      # needed by the shipped locales, so font generation also runs only once.
+      EMBEDDED_I18N_LOCALE: fr
+      EMBEDDED_I18N_LOCALES: en,fr,es,de,pt-BR,it,pl
       EMBEDDED_I18N_STRICT: "1"
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target/localization/all
     steps:
       - name: Setup | Checkout repository
         uses: actions/checkout@v7
@@ -183,19 +120,14 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
-          cache-key: localization-${{ matrix.locale }}
+          cache-workspaces: ". -> target/localization/all"
+          cache-key: localization-all-locales-v1
 
       - name: Check | Tolgee Rust extractor regression tests
         run: node --test tolgee.extractor.test.mjs
 
       - name: Check | Strict translations and font subsets
-        run: |
-          set -euo pipefail
-          echo "Checking locale: $EMBEDDED_I18N_LOCALE"
-          # cargo-make's init_task generates locale-specific fonts before
-          # check-localization. Run each locale independently to parallelize
-          # compile-time translation checks without sharing Cargo outputs.
-          cargo make check-localization
+        run: cargo make check-localization
 
   # Job-level skips satisfy required checks. PR runs are path-filtered and
   # main/manual runs and filter failures run the full suite; !cancelled()
