@@ -178,7 +178,7 @@ define_wasi_module! {
             let relative = core::str::from_utf8(&path_bytes).map_err(|_| Error::Ilseq)?;
             let absolute_path = resolve_guest_path(&directory, relative)?;
             let vfs = caller.data().context.virtual_file_system;
-            let statistics = task::block_on(vfs.get_link_statistics(&absolute_path)).map_err(vfs_error)?;
+            let statistics = task::block_on(vfs.get_link_statistics_for_task(task_id, &absolute_path)).map_err(vfs_error)?;
             if statistics.kind == xila::file_system::Kind::Directory {
                 return Err(Error::Isdir.into());
             }
