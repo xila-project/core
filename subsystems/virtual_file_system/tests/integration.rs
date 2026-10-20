@@ -6,7 +6,7 @@ use task::TaskIdentifier;
 
 use drivers_native::host_file_system::{HostFileSystem, HostFileSystemOptions};
 use file_system::{
-    AccessFlags, AttributeFlags, Attributes, CreateFlags, FileSystemOperations, Flags,
+    AccessFlags, AttributeFlags, Attributes, Context, CreateFlags, FileSystemOperations, Flags,
     MemoryDevice, Path, Position, StateFlags,
 };
 #[cfg(target_os = "linux")]
@@ -586,16 +586,21 @@ async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
     original.write(b"hello").await.unwrap();
     original.close(vfs).await.unwrap();
 
-    let mut collision = File::open(
-        vfs,
-        task,
-        "/links/.xila-link-stage-0",
-        Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
-    )
-    .await
-    .unwrap();
-    collision.write(b"unrelated").await.unwrap();
-    collision.close(vfs).await.unwrap();
+    for attempt in 0..8 {
+        let path = alloc::format!("/links/.xila-link-stage-{attempt}");
+        let mut collision = File::open(
+            vfs,
+            task,
+            Path::from_str(&path),
+            Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
+        )
+        .await
+        .unwrap();
+        if attempt == 0 {
+            collision.write(b"unrelated").await.unwrap();
+        }
+        collision.close(vfs).await.unwrap();
+    }
 
     vfs.create_symlink(
         task,
@@ -634,6 +639,76 @@ async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
     );
     assert_eq!(&collision_contents, b"unrelated");
     collision.close(vfs).await.unwrap();
+
+    vfs.create_directory(task, &Path::from_str("/links/directory"))
+        .await
+        .unwrap();
+    vfs.create_symlink(
+        task,
+        Path::from_str("directory"),
+        Path::from_str("/links/directory-link"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        vfs.get_link_statistics(&Path::from_str("/links/directory-link"))
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::SymbolicLink
+    );
+    assert_eq!(
+        vfs.get_statistics(&Path::from_str("/links/directory-link"))
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::Directory
+    );
+    let directory = vfs
+        .open_directory(task, &Path::from_str("/links/directory-link"))
+        .await
+        .unwrap();
+    directory.close(vfs).await.unwrap();
+
+    vfs.create_named_pipe(&Path::from_str("/links/pipe"), 32, task)
+        .await
+        .unwrap();
+    vfs.create_symlink(
+        task,
+        Path::from_str("pipe"),
+        Path::from_str("/links/pipe-link"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        vfs.get_statistics(&Path::from_str("/links/pipe-link"))
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::Pipe
+    );
+
+    vfs.mount_block_device(
+        task,
+        &Path::from_str("/links/block-device"),
+        MemoryDevice::<512>::new(512),
+    )
+    .await
+    .unwrap();
+    vfs.create_symlink(
+        task,
+        Path::from_str("block-device"),
+        Path::from_str("/links/device-link"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        vfs.get_statistics(&Path::from_str("/links/device-link"))
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::BlockDevice
+    );
 
     for path in ["/links/absolute", "/links/relative", "/links/chain"] {
         let mut file = File::open(vfs, task, path, AccessFlags::Read.into())
@@ -786,4 +861,59 @@ async fn symlink_targets_can_cross_filesystem_mounts() {
     assert_eq!(link.read(&mut contents).await.unwrap(), contents.len());
     assert_eq!(&contents, b"mounted");
     link.close(vfs).await.unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn hostfs_absolute_link_uses_vfs_root_without_escaping_host_capability() {
+    use std::{
+        fs,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    static NEXT_ROOT: AtomicUsize = AtomicUsize::new(0);
+    let root = std::env::temp_dir().join(format!(
+        "xila-vfs-symlink-hostfs-{}-{}",
+        std::process::id(),
+        NEXT_ROOT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let host_root = root.join("host");
+    fs::create_dir_all(&host_root).unwrap();
+    fs::create_dir_all(root.join("target-directory")).unwrap();
+
+    let direct_filesystem =
+        HostFileSystem::open(&host_root, HostFileSystemOptions::default()).unwrap();
+    let (task, vfs) = initialize().await;
+    vfs.create_directory(task, &Path::from_str("/target-directory"))
+        .await
+        .unwrap();
+    vfs.mount_file_system(
+        HostFileSystem::open(&host_root, HostFileSystemOptions::default()).unwrap(),
+        Path::from_str("/host"),
+        task,
+    )
+    .await
+    .unwrap();
+    vfs.create_symlink(
+        task,
+        Path::from_str("/target-directory"),
+        Path::from_str("/host/dirlink"),
+    )
+    .await
+    .unwrap();
+
+    let directory = vfs
+        .open_directory(task, &Path::from_str("/host/dirlink"))
+        .await
+        .unwrap();
+    directory.close(vfs).await.unwrap();
+
+    let mut direct_context = Context::new_empty();
+    assert!(
+        direct_filesystem
+            .lookup_directory(&mut direct_context, Path::from_str("/dirlink"))
+            .is_err()
+    );
+    vfs.unmount(Path::from_str("/host"), true).await.unwrap();
+    let _ = fs::remove_dir_all(root);
 }

@@ -85,6 +85,35 @@ fn resolve_guest_path(directory: &PathOwned, path: &str) -> Result<PathOwned, Er
         .ok_or(Error::Inval)
 }
 
+fn check_guest_symlink_target(
+    directory: &PathOwned,
+    link: &PathOwned,
+    target: &str,
+) -> Result<(), Error> {
+    if target.starts_with('/') {
+        let _ = resolve_guest_path(directory, target)?;
+        return Ok(());
+    }
+
+    let link_parent = link.go_parent().ok_or(Error::Inval)?;
+    let relative_parent = link_parent
+        .strip_prefix_absolute(directory.as_ref())
+        .ok_or(Error::Notcapable)?;
+    let mut depth = relative_parent
+        .get_components()
+        .filter(|component| matches!(component, xila::file_system::Component::Normal(_)))
+        .count();
+    for component in target.split('/') {
+        match component {
+            "" | "." => {}
+            ".." if depth == 0 => return Err(Error::Notcapable),
+            ".." => depth -= 1,
+            _ => depth += 1,
+        }
+    }
+    Ok(())
+}
+
 define_wasi_module! {
     module: "wasi_snapshot_preview1";
 
@@ -109,7 +138,13 @@ define_wasi_module! {
             let target = core::str::from_utf8(&target).map_err(|_| Error::Ilseq)?;
             let link = core::str::from_utf8(&link).map_err(|_| Error::Ilseq)?;
             let link = resolve_guest_path(&directory, link)?;
-            task::block_on(caller.data().context.virtual_file_system.create_symlink(task_id, Path::from_str(target), &link)).map_err(vfs_error)?;
+            check_guest_symlink_target(&directory, &link, target)?;
+            if target.starts_with('/') {
+                let target = resolve_guest_path(&directory, target)?;
+                task::block_on(caller.data().context.virtual_file_system.create_symlink(task_id, Path::from_str(target.as_str()), &link)).map_err(vfs_error)?;
+            } else {
+                task::block_on(caller.data().context.virtual_file_system.create_symlink(task_id, Path::from_str(target), &link)).map_err(vfs_error)?;
+            }
             Ok(())
         })
     }
@@ -205,7 +240,7 @@ define_wasi_module! {
 
 #[cfg(test)]
 mod tests {
-    use super::{Error, resolve_guest_path};
+    use super::{Error, check_guest_symlink_target, resolve_guest_path};
     use xila::file_system::PathOwned;
 
     #[test]
@@ -226,5 +261,23 @@ mod tests {
             resolve_guest_path(&root, "nested/../../outside"),
             Err(Error::Notcapable)
         ));
+    }
+
+    #[test]
+    fn symlink_targets_are_confined_to_the_preopen() {
+        let root = PathOwned::try_from("/sandbox").unwrap();
+        let link = resolve_guest_path(&root, "nested/link").unwrap();
+        assert_eq!(
+            check_guest_symlink_target(&root, &link, "../../outside"),
+            Err(Error::Notcapable)
+        );
+        assert_eq!(
+            check_guest_symlink_target(&root, &link, "../inside"),
+            Ok(())
+        );
+        assert_eq!(
+            resolve_guest_path(&root, "/outside").unwrap().as_str(),
+            "/sandbox/outside"
+        );
     }
 }

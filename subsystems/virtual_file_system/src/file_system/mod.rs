@@ -829,7 +829,16 @@ impl VirtualFileSystem {
             let mut published = false;
             let mut last_error = Error::AlreadyExists;
             for attempt in 0..64 {
-                let stage_name = alloc::format!(".xila-link-stage-{attempt}");
+                // The first candidates stay deterministic for simple
+                // collision handling. Time-qualified candidates make stale
+                // names left by interrupted boots unlikely to exhaust the
+                // bounded retry set, without deleting an entry we did not
+                // create.
+                let stage_name = if attempt < 8 {
+                    alloc::format!(".xila-link-stage-{attempt}")
+                } else {
+                    alloc::format!(".xila-link-stage-{}-{}", time.as_u64(), attempt - 8)
+                };
                 let stage_path = stage_parent
                     .to_owned()
                     .join(Path::from_str(&stage_name))
