@@ -712,7 +712,7 @@ jobs:
         if: matrix.runner == 'cargo-test'
         run: |
           /usr/bin/time -v -o benchmark-results/test-execution-cargo-test.txt \
-            cargo test --workspace
+            cargo test --workspace --tests
           cat benchmark-results/test-execution-cargo-test.txt
 
       - name: Benchmark | nextest execution
@@ -723,6 +723,8 @@ jobs:
           cat benchmark-results/test-execution-nextest.txt
 
       - name: Benchmark | Doctest execution
+        # Unit/integration execution above excludes doctests, as nextest does.
+        # Charge each candidate for this common doctest phase exactly once.
         run: |
           /usr/bin/time -v -o "benchmark-results/doctests-${{ matrix.runner }}.txt" \
             cargo test --workspace --doc --timings
