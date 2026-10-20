@@ -337,7 +337,7 @@ pub fn write_evaluation(output_dir: &Path, seed: u64) -> io::Result<Vec<Candidat
     }
     let archives = build_candidate_archives(&fixtures(seed)?)?;
     for archive in &archives {
-        fs::write(output_dir.join(archive.format.filename()), &archive.bytes)?;
+        write_output_file(&output_dir, archive.format.filename(), &archive.bytes)?;
     }
     let mut csv = String::from(
         "format,archive_bytes,manifest_bytes,name_bytes,header_bytes,padding_bytes,compression_frame_bytes,stored_payload_bytes,compressed_files,uncompressed_files\n",
@@ -357,7 +357,7 @@ pub fn write_evaluation(output_dir: &Path, seed: u64) -> io::Result<Vec<Candidat
             archive.uncompressed_files
         ));
     }
-    fs::write(output_dir.join("summary.csv"), csv)?;
+    write_output_file(&output_dir, "summary.csv", csv.as_bytes())?;
     let mut json = String::from("[\n");
     for (index, archive) in archives.iter().enumerate() {
         if index != 0 {
@@ -368,16 +368,40 @@ pub fn write_evaluation(output_dir: &Path, seed: u64) -> io::Result<Vec<Candidat
         archive.bytes.hash(&mut hasher);
         let probe = probe_candidate(archive, 127)?;
         json.push_str(&format!(
-            "  {{\"format\":\"{}\",\"archive_bytes\":{},\"manifest_bytes\":{},\"name_bytes\":{},\"header_bytes\":{},\"padding_bytes\":{},\"compression_frame_bytes\":{},\"stored_payload_bytes\":{},\"read_buffer_ceiling\":{},\"entries_read\":{},\"archive_hash\":\"{:016x}\",\"tool_versions\":{{\"package_format_eval\":\"{}\",\"tar\":\"0.4.46\",\"hadris_cpio\":\"2.5.0\",\"lz4_flex\":\"0.12.2\"}},\"hardware_measurements\":null}}",
+            "  {{\"format\":\"{}\",\"archive_bytes\":{},\"manifest_bytes\":{},\"name_bytes\":{},\"header_bytes\":{},\"padding_bytes\":{},\"compression_frame_bytes\":{},\"stored_payload_bytes\":{},\"max_source_read_bytes\":{},\"configured_chunk_bytes\":{},\"parser_peak_memory_bytes\":null,\"entries_read\":{},\"archive_hash\":\"{:016x}\",\"tool_versions\":{{\"package_format_eval\":\"{}\",\"tar\":\"0.4.46\",\"hadris_cpio\":\"2.5.0\",\"lz4_flex\":\"0.12.2\"}},\"hardware_measurements\":null}}",
             archive.format.name(), archive.bytes.len(), archive.manifest_bytes, archive.name_bytes,
             archive.header_bytes, archive.padding_bytes, archive.compression_frame_bytes,
-            archive.stored_payload_bytes, probe.peak_user_buffer, probe.entry_count, hasher.finish(),
+            archive.stored_payload_bytes, probe.max_source_read_bytes, probe.configured_chunk_bytes,
+            probe.entry_count, hasher.finish(),
             env!("CARGO_PKG_VERSION")
         ));
     }
     json.push_str("\n]\n");
-    fs::write(output_dir.join("summary.json"), json)?;
+    write_output_file(&output_dir, "summary.json", json.as_bytes())?;
     Ok(archives)
+}
+
+fn write_output_file(output_dir: &Path, filename: &str, contents: &[u8]) -> io::Result<()> {
+    let destination = output_dir.join(filename);
+    match fs::symlink_metadata(&destination) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("refusing to overwrite symlink {}", destination.display()),
+            ));
+        }
+        Ok(metadata) if !metadata.is_file() => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "evaluation output is not a regular file: {}",
+                    destination.display()
+                ),
+            ));
+        }
+        _ => {}
+    }
+    fs::write(destination, contents)
 }
 
 fn align(value: usize, alignment: usize) -> Option<usize> {

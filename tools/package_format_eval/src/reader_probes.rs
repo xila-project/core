@@ -5,8 +5,8 @@ use std::io::{self, Cursor, Read};
 pub struct ProbeReport {
     pub entry_count: usize,
     pub first_path: String,
-    pub max_read_request: usize,
-    pub peak_user_buffer: usize,
+    pub max_source_read_bytes: usize,
+    pub configured_chunk_bytes: usize,
 }
 
 struct ShortReader<'a> {
@@ -51,8 +51,8 @@ pub fn probe_candidate(archive: &CandidateArchive, chunk: usize) -> io::Result<P
     Ok(ProbeReport {
         entry_count,
         first_path,
-        max_read_request: reader.max_read,
-        peak_user_buffer: chunk,
+        max_source_read_bytes: reader.max_read,
+        configured_chunk_bytes: chunk,
     })
 }
 

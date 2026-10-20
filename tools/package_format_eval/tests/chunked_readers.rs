@@ -8,8 +8,8 @@ fn archive_parsers_consume_arbitrary_short_reads_with_bounded_buffers() {
             .unwrap_or_else(|error| panic!("{}: {error}", archive.format.name()));
         assert_eq!(report.entry_count, 107);
         assert_eq!(report.first_path, ".xila/manifest");
-        assert!(report.max_read_request <= 127);
-        assert!(report.peak_user_buffer <= 127);
+        assert!(report.max_source_read_bytes <= 127);
+        assert_eq!(report.configured_chunk_bytes, 127);
     }
 }
 

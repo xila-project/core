@@ -91,7 +91,8 @@ fn evaluate_command_writes_candidate_archives_and_csv_beneath_output() {
         assert!(output.join(filename).is_file(), "missing {filename}");
     }
     let summary = std::fs::read_to_string(output.join("summary.json")).unwrap();
-    assert!(summary.contains("\"read_buffer_ceiling\""));
+    assert!(summary.contains("\"max_source_read_bytes\""));
+    assert!(summary.contains("\"parser_peak_memory_bytes\":null"));
     assert!(summary.contains("\"archive_hash\""));
     assert!(summary.contains("\"tool_versions\""));
     assert!(
@@ -100,4 +101,24 @@ fn evaluate_command_writes_candidate_archives_and_csv_beneath_output() {
             .starts_with(b"XPK1")
     );
     std::fs::remove_dir_all(output).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn evaluate_refuses_symlink_outputs_that_escape_the_output_directory() {
+    use std::os::unix::fs::symlink;
+
+    let root = std::env::temp_dir().join(format!("xila-archive-symlink-{}", std::process::id()));
+    let output = root.join("out");
+    let outside = root.join("outside.txt");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&output).unwrap();
+    std::fs::write(&outside, b"leave unchanged").unwrap();
+    symlink(&outside, output.join("summary.csv")).unwrap();
+
+    let result = package_format_eval::write_evaluation(&output, 402);
+
+    assert!(result.is_err());
+    assert_eq!(std::fs::read(&outside).unwrap(), b"leave unchanged");
+    std::fs::remove_dir_all(root).unwrap();
 }
