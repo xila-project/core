@@ -178,7 +178,9 @@ where
     while let Some(argument) = arguments.next() {
         if argument == "--" {
             if shell {
-                return Err(format!("shell does not accept an executable or arguments\n{USAGE}"));
+                return Err(format!(
+                    "shell does not accept an executable or arguments\n{USAGE}"
+                ));
             }
             app = arguments.next();
             app_arguments.extend(arguments);
@@ -410,6 +412,11 @@ async fn run_runtime(
                 CharacterDevice,
                 drivers_shared::devices::RandomDevice
             ),
+            (
+                &"/devices/hasher",
+                CharacterDevice,
+                drivers_shared::devices::HashDevice
+            ),
             (&"/devices/null", CharacterDevice, drivers_core::NullDevice),
         ]
     )
@@ -590,7 +597,10 @@ mod tests {
         assert!(config.arguments.is_empty());
         assert_eq!(config.mounts.len(), 1);
         assert!(config.mounts[0].read_only);
-        assert_eq!(config.environment, vec![("MODE".into(), "development".into())]);
+        assert_eq!(
+            config.environment,
+            vec![("MODE".into(), "development".into())]
+        );
     }
 
     #[test]
