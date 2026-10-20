@@ -2,6 +2,7 @@ use crate::error::{Error, Result};
 pub(crate) use alloc::{
     borrow::ToOwned,
     ffi::CString,
+    format,
     string::{String, ToString},
     vec::Vec,
 };
@@ -29,6 +30,7 @@ pub struct FileManager {
     path_text_area: *mut lvgl::lv_obj_t,
     go_button: *mut lvgl::lv_obj_t,
     file_list: *mut lvgl::lv_obj_t,
+    item_count_label: *mut lvgl::lv_obj_t,
     current_path: PathOwned,
     files: Vec<FileItem>,
     running: bool,
@@ -60,6 +62,7 @@ impl FileManager {
                 path_text_area: null_mut(),
                 go_button: null_mut(),
                 file_list: null_mut(),
+                item_count_label: null_mut(),
                 current_path: PathOwned::root(),
                 files: Vec::new(),
                 running: true,
@@ -77,12 +80,19 @@ impl FileManager {
                 );
                 lvgl::lv_obj_set_style_pad_all(
                     manager.window.as_object_mutable(),
-                    0,
+                    14,
+                    lvgl::LV_STATE_DEFAULT,
+                );
+                lvgl::lv_obj_set_style_pad_row(
+                    manager.window.as_object_mutable(),
+                    10,
                     lvgl::LV_STATE_DEFAULT,
                 );
             }
 
+            manager.create_heading()?;
             manager.create_toolbar().await?;
+            manager.create_list_heading()?;
             manager.create_file_list().await?;
             manager.load_directory().await?;
 
@@ -90,6 +100,86 @@ impl FileManager {
         });
 
         Ok(manager)
+    }
+
+    fn create_heading(&mut self) -> Result<()> {
+        unsafe {
+            let heading = lvgl::lv_obj_create(self.window.as_object_mutable());
+            if heading.is_null() {
+                return Err(Error::FailedToCreateObject);
+            }
+
+            lvgl::lv_obj_set_width(heading, lvgl::lv_pct(100));
+            lvgl::lv_obj_set_height(heading, lvgl::LV_SIZE_CONTENT);
+            lvgl::lv_obj_set_layout(heading, lvgl::lv_layout_t_LV_LAYOUT_FLEX);
+            lvgl::lv_obj_set_flex_flow(heading, lvgl::lv_flex_flow_t_LV_FLEX_FLOW_COLUMN);
+            lvgl::lv_obj_set_style_pad_all(heading, 0, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_style_border_width(heading, 0, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_style_bg_opa(heading, lvgl::LV_OPA_TRANSP, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_style_pad_row(heading, 2, lvgl::LV_STATE_DEFAULT);
+
+            let title = lvgl::lv_label_create(heading);
+            lvgl::lv_label_set_text(title, translate!(c"Files").as_ptr());
+            lvgl::lv_obj_set_style_text_font(
+                title,
+                xila::graphics::fonts::get_font_large(),
+                lvgl::LV_STATE_DEFAULT,
+            );
+
+            let subtitle = lvgl::lv_label_create(heading);
+            lvgl::lv_label_set_text(
+                subtitle,
+                translate!(c"Browse and manage your files").as_ptr(),
+            );
+        }
+        Ok(())
+    }
+
+    fn create_list_heading(&mut self) -> Result<()> {
+        unsafe {
+            let row = lvgl::lv_obj_create(self.window.as_object_mutable());
+            if row.is_null() {
+                return Err(Error::FailedToCreateObject);
+            }
+
+            lvgl::lv_obj_set_width(row, lvgl::lv_pct(100));
+            lvgl::lv_obj_set_height(row, lvgl::LV_SIZE_CONTENT);
+            lvgl::lv_obj_set_layout(row, lvgl::lv_layout_t_LV_LAYOUT_FLEX);
+            lvgl::lv_obj_set_flex_flow(row, lvgl::lv_flex_flow_t_LV_FLEX_FLOW_ROW);
+            lvgl::lv_obj_set_flex_align(
+                row,
+                lvgl::lv_flex_align_t_LV_FLEX_ALIGN_SPACE_BETWEEN,
+                lvgl::lv_flex_align_t_LV_FLEX_ALIGN_CENTER,
+                lvgl::lv_flex_align_t_LV_FLEX_ALIGN_CENTER,
+            );
+            lvgl::lv_obj_set_style_pad_all(row, 0, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_style_border_width(row, 0, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_style_bg_opa(row, lvgl::LV_OPA_TRANSP, lvgl::LV_STATE_DEFAULT);
+
+            let title = lvgl::lv_label_create(row);
+            lvgl::lv_label_set_text(title, translate!(c"Contents").as_ptr());
+
+            self.item_count_label = lvgl::lv_label_create(row);
+            if self.item_count_label.is_null() {
+                return Err(Error::FailedToCreateObject);
+            }
+            self.update_item_count();
+        }
+        Ok(())
+    }
+
+    fn update_item_count(&self) {
+        unsafe {
+            if !self.item_count_label.is_null() {
+                let text = if self.files.len() == 1 {
+                    translate!("1 item").to_owned()
+                } else {
+                    format!(translate!("{} items"), self.files.len())
+                };
+                let text = CString::new(text).unwrap();
+                lvgl::lv_label_set_text(self.item_count_label, text.as_ptr());
+            }
+        }
     }
 
     pub async fn handle_events(&mut self) -> bool {
@@ -153,6 +243,10 @@ impl FileManager {
             lvgl::lv_obj_set_style_radius(self.toolbar, 0, lvgl::LV_STATE_DEFAULT);
             lvgl::lv_obj_set_layout(self.toolbar, lvgl::lv_layout_t_LV_LAYOUT_FLEX);
             lvgl::lv_obj_set_flex_flow(self.toolbar, lvgl::lv_flex_flow_t_LV_FLEX_FLOW_ROW);
+            lvgl::lv_obj_set_style_pad_all(self.toolbar, 0, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_style_pad_column(self.toolbar, 6, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_style_border_width(self.toolbar, 0, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_style_bg_opa(self.toolbar, lvgl::LV_OPA_TRANSP, lvgl::LV_STATE_DEFAULT);
             lvgl::lv_obj_set_flex_align(
                 self.toolbar,
                 lvgl::lv_flex_align_t_LV_FLEX_ALIGN_START,
@@ -212,6 +306,7 @@ impl FileManager {
             }
 
             lvgl::lv_obj_set_flex_grow(self.path_text_area, 1); // Take remaining space
+            lvgl::lv_obj_set_height(self.path_text_area, 42);
 
             // Configure text area properties
             lvgl::lv_textarea_set_one_line(self.path_text_area, true);
@@ -249,6 +344,7 @@ impl FileManager {
 
             // Ensure proper scrolling behavior
             lvgl::lv_obj_set_style_pad_all(self.file_list, 0, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_style_pad_row(self.file_list, 4, lvgl::LV_STATE_DEFAULT);
         }
 
         Ok(())
@@ -299,6 +395,7 @@ impl FileManager {
         for i in 0..self.files.len() {
             self.create_file_item(i).await?;
         }
+        self.update_item_count();
 
         Ok(())
     }
@@ -323,6 +420,9 @@ impl FileManager {
                 return Err(Error::FailedToCreateObject);
             }
 
+            lvgl::lv_obj_set_height(button, 48);
+            lvgl::lv_obj_set_style_radius(button, 10, lvgl::LV_STATE_DEFAULT);
+
             // Store the file index in the button's user data for identification
             lvgl::lv_obj_set_user_data(button, index as *mut core::ffi::c_void);
         }
@@ -336,6 +436,7 @@ impl FileManager {
             lvgl::lv_obj_clean(self.file_list);
         }
         self.files.clear();
+        self.update_item_count();
     }
 
     fn update_path_label(&self) {
