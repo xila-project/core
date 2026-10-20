@@ -4,9 +4,10 @@ use std::{ptr::null_mut, thread::sleep};
 use wasm::{
     self, Color, EVENT_CLOSE_REQUESTED, EventCode, FlexFlow, Object, ObjectFlag,
     buttonmatrix_create, buttonmatrix_get_selected_button, buttonmatrix_set_map, label_create,
-    label_set_text, object_add_flag, object_create, object_set_flex_flow, object_set_flex_grow,
-    object_set_height, object_set_width, percentage, size_content, window_create, window_pop_event,
-    window_set_icon,
+    label_set_text, object_add_flag, object_create, object_set_flex_align, object_set_flex_flow,
+    object_set_flex_grow, object_set_height, object_set_padding, object_set_style_text_align,
+    object_set_text_size, object_set_width, percentage, size_content, window_create,
+    window_pop_event, window_set_icon, FlexAlign, TextAlign, PART_MAIN,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -139,6 +140,7 @@ pub struct Interface {
     window: *mut Object,
     _display: *mut Object,
     display_label: *mut Object,
+    mode_label: *mut Object,
     button_matrix: *mut Object,
     current_expression: String,
     show_result: bool,
@@ -149,7 +151,7 @@ impl Interface {
     pub fn new() -> wasm::Result<Self> {
         let window = unsafe { Self::create_window() }?;
 
-        let (display, display_label) = unsafe { Self::create_display(window) }?;
+        let (display, display_label, mode_label) = unsafe { Self::create_display(window) }?;
 
         let button_matrix = unsafe { Self::create_button_matrix(window)? };
 
@@ -157,6 +159,7 @@ impl Interface {
             window,
             _display: display,
             display_label,
+            mode_label,
             button_matrix,
             current_expression: String::new(),
             show_result: false,
@@ -180,29 +183,47 @@ impl Interface {
             )?;
 
             object_set_flex_flow(window, FlexFlow::Column)?;
+            object_set_padding(window, 8)?;
 
             Ok(window)
         }
     }
 
-    unsafe fn create_display(window: *mut Object) -> wasm::Result<(*mut Object, *mut Object)> {
+    unsafe fn create_display(
+        window: *mut Object,
+    ) -> wasm::Result<(*mut Object, *mut Object, *mut Object)> {
         unsafe {
-            // Create display container using generic object create
             let display = object_create(window)?;
-            // Note: Skip styling for now due to color type issues
+            object_set_flex_flow(display, FlexFlow::Column)?;
+            object_set_padding(display, 12)?;
+            object_set_flex_align(
+                display,
+                FlexAlign::End,
+                FlexAlign::Center,
+                FlexAlign::Center,
+            )?;
 
-            // Create display label
+            // Keep the expression first: the guest UI contract exposes it as
+            // the first child of the display container.
             let display_label = label_create(display)?;
-            object_set_height(display, size_content())?; // Set height to content size
+            object_set_width(display_label, percentage(100)?)?;
+            object_set_text_size(display_label, 30)?;
+            object_set_style_text_align(display_label, TextAlign::Right, PART_MAIN)?;
             label_set_text(display_label, c"0".as_ptr() as *mut _)?;
 
-            // Note: Skip text styling for now
+            let mode_label = label_create(display)?;
+            object_set_width(mode_label, percentage(100)?)?;
+            object_set_text_size(mode_label, 12)?;
+            object_set_style_text_align(mode_label, TextAlign::Right, PART_MAIN)?;
+            label_set_text(mode_label, translate!(c"RAD").as_ptr() as *mut _)?;
+
+            object_set_height(display, size_content())?;
 
             let width: i32 = percentage(100)?;
 
             object_set_width(display, width)?;
 
-            Ok((display, display_label))
+            Ok((display, display_label, mode_label))
         }
     }
 
@@ -244,16 +265,16 @@ impl Interface {
                 self.current_expression.clone()
             };
 
-            // Add angle mode indicator
+            // Keep the angle mode separate from the expression so the result
+            // remains prominent and the mode stays easy to scan.
             let mode_indicator = if self.is_radian_mode {
-                translate!(" [RAD]")
+                translate!(c"RAD")
             } else {
-                translate!(" [DEG]")
+                translate!(c"DEG")
             };
-            let full_text = format!("{}{}", display_text, mode_indicator);
-
-            let text_with_null = format!("{}\0", full_text);
+            let text_with_null = format!("{}\0", display_text);
             label_set_text(self.display_label, text_with_null.as_ptr() as *mut _)?;
+            label_set_text(self.mode_label, mode_indicator.as_ptr() as *mut _)?;
         }
 
         Ok(())
