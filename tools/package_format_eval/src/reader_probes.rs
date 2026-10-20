@@ -30,6 +30,14 @@ impl Read for ShortReader<'_> {
 }
 
 pub fn probe_candidate(archive: &CandidateArchive, chunk: usize) -> io::Result<ProbeReport> {
+    probe_candidate_for_path(archive, chunk, None)
+}
+
+pub fn probe_candidate_for_path(
+    archive: &CandidateArchive,
+    chunk: usize,
+    selected_path: Option<&str>,
+) -> io::Result<ProbeReport> {
     if chunk == 0 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -44,9 +52,9 @@ pub fn probe_candidate(archive: &CandidateArchive, chunk: usize) -> io::Result<P
         max_read: 0,
     };
     let (entry_count, first_path) = match archive.format {
-        ArchiveFormat::CustomXpk => parse_custom(&mut reader, chunk)?,
-        ArchiveFormat::CpioNewc => parse_cpio(&mut reader, chunk)?,
-        ArchiveFormat::Ustar => parse_tar(&mut reader, chunk)?,
+        ArchiveFormat::CustomXpk => parse_custom(&mut reader, chunk, selected_path)?,
+        ArchiveFormat::CpioNewc => parse_cpio(&mut reader, chunk, selected_path)?,
+        ArchiveFormat::Ustar => parse_tar(&mut reader, chunk, selected_path)?,
     };
     Ok(ProbeReport {
         entry_count,
@@ -70,7 +78,11 @@ fn skip_payload(reader: &mut impl Read, mut length: u64, chunk: usize) -> io::Re
     Ok(())
 }
 
-fn parse_custom(reader: &mut impl Read, chunk: usize) -> io::Result<(usize, String)> {
+fn parse_custom(
+    reader: &mut impl Read,
+    chunk: usize,
+    selected_path: Option<&str>,
+) -> io::Result<(usize, String)> {
     let mut header = [0; 12];
     read_exact_short(reader, &mut header)?;
     if &header[..4] != b"XPK1" {
@@ -83,7 +95,7 @@ fn parse_custom(reader: &mut impl Read, chunk: usize) -> io::Result<(usize, Stri
     }
     skip_payload(reader, manifest_len, chunk)?;
     let first = ".xila/manifest".to_owned();
-    for _ in 0..count {
+    for index in 0..count {
         let mut record = [0; 10];
         read_exact_short(reader, &mut record)?;
         let name_len = u16::from_le_bytes(record[..2].try_into().unwrap()) as usize;
@@ -96,11 +108,18 @@ fn parse_custom(reader: &mut impl Read, chunk: usize) -> io::Result<(usize, Stri
         let path = std::str::from_utf8(&name).map_err(|_| invalid("non-UTF8 path"))?;
         validate_path(path)?;
         skip_payload(reader, data_len, chunk)?;
+        if selected_path == Some(path) {
+            return Ok((index + 2, first));
+        }
     }
     Ok((count + 1, first))
 }
 
-fn parse_cpio(reader: &mut impl Read, chunk: usize) -> io::Result<(usize, String)> {
+fn parse_cpio(
+    reader: &mut impl Read,
+    chunk: usize,
+    selected_path: Option<&str>,
+) -> io::Result<(usize, String)> {
     let mut count = 0;
     let mut first = String::new();
     loop {
@@ -139,11 +158,18 @@ fn parse_cpio(reader: &mut impl Read, chunk: usize) -> io::Result<(usize, String
         let payload_pad = (4 - (file_size as usize % 4)) % 4;
         skip_payload(reader, payload_pad as u64, chunk)?;
         count += 1;
+        if selected_path == Some(path) {
+            return Ok((count, first));
+        }
     }
     Ok((count, first))
 }
 
-fn parse_tar(reader: &mut impl Read, chunk: usize) -> io::Result<(usize, String)> {
+fn parse_tar(
+    reader: &mut impl Read,
+    chunk: usize,
+    selected_path: Option<&str>,
+) -> io::Result<(usize, String)> {
     let mut archive = tar::Archive::new(reader);
     let entries = archive.entries()?;
     let mut count = 0;
@@ -164,6 +190,9 @@ fn parse_tar(reader: &mut impl Read, chunk: usize) -> io::Result<(usize, String)
         }
         while entry.read(&mut buffer)? != 0 {}
         count += 1;
+        if selected_path == Some(path.as_str()) {
+            break;
+        }
     }
     Ok((count, first))
 }

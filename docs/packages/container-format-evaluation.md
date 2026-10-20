@@ -31,6 +31,24 @@ Each breakdown sums exactly to the artifact size. These numbers compare prototyp
 
 The probes wrap each artifact in a disk-like source with arbitrary short reads (including one-byte reads), then read through bounded chunks. The host `tar` crate's `Archive<R: Read>`/entry `Read` API works with this setup. The newc and custom probes use sequential bounded reads, but they are evaluation probes—not qualified production parsers. The newc writer uses `hadris-cpio`'s in-memory `FileTree`; that does not prove a streaming packer. The current no-default-features host check passes, but the evaluation crate is std/host-oriented and this is **not** an embedded no_std build.
 
+### Host peak live heap requests (not total RAM)
+
+The separate allocator-instrumented integration test measures live allocation **requested bytes** during the parser call. The archive backing bytes and corpus are created before measurement. The parser's 512-byte payload scratch allocation is included; metadata/path allocations and allocations made internally by the `tar` crate are also counted. Results for the deterministic seed-402 corpus, Rust 1.99.1 debug test build:
+
+| Format | 512-byte chunks: scan all entries | 512-byte chunks: stop after `bin/application.wasm` | 1 KiB chunks: scan all | 4 KiB chunks: scan all |
+|---|---:|---:|---:|---:|
+| CPIO newc probe | 746 B | 547 B | 1,258 B | 4,330 B |
+| `tar` crate ustar probe | 1,027 B | 578 B | 1,539 B | 4,611 B |
+| Custom XPK probe | 745 B | 546 B | 1,257 B | 4,329 B |
+
+Reproduce (keep one test thread so unrelated test allocations cannot overlap the measurement):
+
+```sh
+CARGO_TARGET_DIR=target/package-format-eval cargo test --manifest-path tools/package_format_eval/Cargo.toml --test ram_usage -- --nocapture --test-threads=1
+```
+
+These figures are **not total RAM**: they exclude stack frames, statically/caller-reserved structures, filesystem/VFS state, allocator metadata/fragmentation, and the extraction destination's own state. They count bytes requested by live heap allocations, not RSS or reserved heap capacity. The 512-byte scratch `Vec` is included for each operation; a production design can provide it from a caller-owned fixed buffer instead, which would move those 512 bytes from heap to its owner rather than eliminate them. The selected-file case scans/skips earlier entries (including the manifest), reads the target payload, then stops; it drains output rather than writing to a real filesystem, so destination/VFS buffering is not included. This is a host measurement of these specific prototypes, not a no_std target measurement or proof of minimum possible parser memory.
+
 No MCU-class linker/toolchain or hardware measurements were run. Parser/decoder flash delta, stack, peak RAM, allocation count, native extraction throughput/median/range, and polling-VFS integration are **unavailable**, not zero. No controlled three-run extraction benchmark is claimed; this harness measures deterministic artifact sizes and bounded source read results only. `summary.json` records archive hashes, dependency versions, actual maximum bytes returned by the capped source, configured chunk size, and `parser_peak_memory_bytes: null` / `hardware_measurements: null` to represent unavailable memory/hardware measurements. These are not estimates of all parser-internal requests or allocations. Hashes are reproducibility checks, not cryptographic integrity/authentication.
 
 ## Known gaps and recommendation
