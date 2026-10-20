@@ -445,6 +445,31 @@ jobs:
       - name: Run | Test
         run: cargo test --workspace --timings
 
+      # Keep all command/feature combinations, but reuse this runner's Cargo
+      # fingerprints, generated fonts, bindgen output and native C objects.
+      - name: Check | Audio
+        if: ${{ !cancelled() }}
+        run: |
+          cargo +${XILA_RUST_TOOLCHAIN} test -p audio -p synth
+          cargo +${XILA_RUST_TOOLCHAIN} clippy -p audio -p drivers_native --features drivers_native/audio --all-targets -- -D warnings
+          cargo +${XILA_RUST_TOOLCHAIN} test -p drivers_native --features audio --lib devices::audio::tests
+
+      - name: Check | Documentation (Host)
+        if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+        run: RUSTDOCFLAGS="--deny warnings" cargo make doc-host
+
+      - name: Check | Seed image generation and native import
+        if: ${{ !cancelled() }}
+        run: cargo test -p fs_image -p authentication -p native_example
+
+      - name: Check | Browser seed streaming and disk manager
+        if: ${{ !cancelled() }}
+        run: node --test drivers/wasm/tests/seed.test.mjs examples/wasm/tests/disk_manager.test.mjs
+
+      - name: Build | Example (Native)
+        if: ${{ !cancelled() }}
+        run: cargo make build -p native_example
+
       - name: Upload | Cargo timings (Host)
         if: always()
         uses: actions/upload-artifact@v7
@@ -501,47 +526,21 @@ jobs:
 
   host-audio-docs:
     name: Host checks (Audio, docs, build)
-    needs: [changes, format]
+    # Preserve the branch-protection status without a second Rust/container job.
+    needs: [changes, host-test]
     if: >-
-      ${{ !cancelled() && (needs.format.result == 'success' || needs.format.result == 'skipped') &&
-          (needs.changes.result != 'success' || needs.changes.outputs.host == 'true') }}
+      ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.host == 'true') }}
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/xila-project/development-environment:main
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    timeout-minutes: 30
+    timeout-minutes: 5
     steps:
-      - name: Setup | Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Setup
-        uses: ./.github/actions/setup
-        with:
-          cache-key: host-audio-docs
-
-      - name: Setup | Generate fonts
-        run: cargo make generate-fonts
-
-      - name: Check | Audio
+      - name: Check | Required host workload result
+        env:
+          HOST_RESULT: ${{ needs.host-test.result }}
         run: |
-          cargo +${XILA_RUST_TOOLCHAIN} test -p audio -p synth
-          cargo +${XILA_RUST_TOOLCHAIN} clippy -p audio -p drivers_native --features drivers_native/audio --all-targets -- -D warnings
-          cargo +${XILA_RUST_TOOLCHAIN} test -p drivers_native --features audio --lib devices::audio::tests
-
-      - name: Check | Documentation (Host)
-        if: github.event_name != 'pull_request'
-        run: RUSTDOCFLAGS="--deny warnings" cargo make doc-host
-
-      - name: Check | Seed image generation and native import
-        run: cargo test -p fs_image -p authentication -p native_example
-
-      - name: Check | Browser seed streaming and disk manager
-        run: node --test drivers/wasm/tests/seed.test.mjs examples/wasm/tests/disk_manager.test.mjs
-
-      - name: Build | Example (Native)
-        run: cargo make build -p native_example
+          if [[ "$HOST_RESULT" != success ]]; then
+            echo "::error::Host tests/audio/docs/build finished with result: $HOST_RESULT"
+            exit 1
+          fi
 
   guest:
     name: Guest checks

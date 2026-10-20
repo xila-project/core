@@ -12,6 +12,14 @@ Tracking: [#480](https://github.com/xila-project/core/issues/480).
   schedule by this change.
 - Required check names remain `Guest checks`, `Format checks`, `Host checks
   (Clippy)`, `Host checks (Tests)`, and `Host checks (Audio, docs, build)`.
+- Host workspace tests and audio/docs/native validation share one Cargo target
+  directory on one runner. Every previous command and feature combination stays;
+  independent validations continue after a preceding test failure. The audio/docs
+  required status is a small result gate which rejects failed/skipped/missing host
+  work. This avoids a second container/setup, font-generator build, bindgen/C
+  rebuild and dependency archive. Trade-off: the two statuses complete together,
+  and coverage waits for the combined host workload. Check runner-minutes and
+  critical-path latency together before retaining this consolidation.
 - A skipped path-selection ancestor must not disable extended validation. Extended
   jobs explicitly require successful direct tests and use `!cancelled()` to
   override GitHub's implicit status gate. A failed direct test still blocks them.

@@ -2,6 +2,9 @@
 
 import pathlib
 import re
+import os
+import subprocess
+import textwrap
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -82,6 +85,35 @@ class WorkflowPolicy(unittest.TestCase):
         text = (ROOT / ".github/actions/setup/action.yml").read_text()
         self.assertIn("uses: ./.github/actions/cache-tools", text)
         self.assertLess(text.index("uses: ./.github/actions/cache-tools"), text.index("id: rust-cache"))
+
+    def test_host_workloads_share_one_target_directory_and_setup(self):
+        worker = job("check.yml", "host-test")
+        gate = job("check.yml", "host-audio-docs")
+        for command in [
+            "cargo test --workspace --timings",
+            "test -p audio -p synth",
+            "test -p drivers_native --features audio --lib devices::audio::tests",
+            "cargo test -p fs_image -p authentication -p native_example",
+            "cargo make doc-host",
+            "cargo make build -p native_example",
+            "node --test drivers/wasm/tests/seed.test.mjs examples/wasm/tests/disk_manager.test.mjs",
+        ]:
+            self.assertIn(command, worker)
+            self.assertNotIn(command, gate)
+        self.assertIn("needs: [changes, host-test]", gate)
+        self.assertIn("needs.host-test.result", gate)
+        self.assertIn("!cancelled()", gate)
+        self.assertNotIn("uses: ./.github/actions/setup", gate)
+        # Independent validations still execute after a preceding test failure.
+        self.assertEqual(worker.count("if: ${{ !cancelled()"), 5)
+
+    def test_host_audio_status_gate_rejects_failed_skipped_or_missing_worker(self):
+        gate = job("check.yml", "host-audio-docs")
+        script = textwrap.dedent(gate.split("        run: |\n")[1])
+        for result in ["success", "failure", "skipped", "cancelled", ""]:
+            with self.subTest(result=result):
+                completed = subprocess.run(["bash", "-e", "-c", script], env={**os.environ, "HOST_RESULT": result}, capture_output=True)
+                self.assertEqual(completed.returncode, 0 if result == "success" else 1)
 
 
 if __name__ == "__main__":
