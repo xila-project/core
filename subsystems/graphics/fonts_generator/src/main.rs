@@ -74,12 +74,25 @@ pub fn generate_font<'a>(
         output_path.as_ref().to_str().unwrap(),
     ]);
 
-    let command = Command::new("lv_font_conv").args(arguments).spawn().map_err(|err| {
-        format!(
-            "Failed to execute lv_font_conv command. Is lv_font_conv installed and in your PATH? Error: {}",
-            err
-        )
-    })?
+    let font_converter = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../node_modules/lv_font_conv/lv_font_conv.js");
+    if !font_converter.is_file() {
+        return Err(format!(
+            "Font converter not found at {}. Install workspace dependencies with `npm ci`.",
+            font_converter.display()
+        ));
+    }
+
+    let command = Command::new("node")
+        .arg(font_converter)
+        .args(arguments)
+        .spawn()
+        .map_err(|err| {
+            format!(
+                "Failed to execute lv_font_conv through Node.js. Is Node.js installed? Error: {}",
+                err
+            )
+        })?
     .wait()
     .map_err(|err| {
         format!(
