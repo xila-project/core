@@ -2,6 +2,8 @@ use serde::Serialize;
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
+mod reader_probes;
+pub use reader_probes::{ProbeReport, probe_candidate};
 
 const BLOCK_SIZE: usize = 4096;
 const MANIFEST_PATH: &str = ".xila/manifest";
