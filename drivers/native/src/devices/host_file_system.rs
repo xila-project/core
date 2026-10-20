@@ -229,11 +229,10 @@ impl HostFileSystem {
     fn metadata(&self, path: &Path) -> Result<cap_std::fs::Metadata> {
         let path = Self::relative_path(path)?;
         let metadata = self.root()?.symlink_metadata(&path).map_err(map_io_error)?;
-        if metadata.file_type().is_symlink() {
-            return Err(Error::UnsupportedOperation);
-        }
         if !metadata.is_file() && !metadata.is_dir() {
-            return Err(Error::UnsupportedOperation);
+            if !metadata.file_type().is_symlink() {
+                return Err(Error::UnsupportedOperation);
+            }
         }
         Ok(metadata)
     }
@@ -241,7 +240,9 @@ impl HostFileSystem {
     fn populate_attributes(&self, metadata: &cap_std::fs::Metadata, attributes: &mut Attributes) {
         let requested = attributes.get_mask();
         let mut result = Attributes::new();
-        let kind = if metadata.is_file() {
+        let kind = if metadata.file_type().is_symlink() {
+            Some(Kind::SymbolicLink)
+        } else if metadata.is_file() {
             Some(Kind::File)
         } else if metadata.is_dir() {
             Some(Kind::Directory)
@@ -390,6 +391,56 @@ impl FileSystemOperations for HostFileSystem {
         AttributeFlags::Size
     }
 
+    fn create_symlink(&self, target: &Path, link: &Path) -> Result<()> {
+        self.writable()?;
+        if !target.is_valid() || target.is_empty() || target.get_length() > 4096 {
+            return Err(Error::InvalidSymbolicLink);
+        }
+        let link = Self::relative_path(link)?;
+        let target = if target.is_absolute() {
+            // Host absolute symlinks name the host root. Store a relative path
+            // from the link's parent instead, preserving Xila-root semantics.
+            let parent_depth = link.parent().map_or(0, |parent| {
+                parent
+                    .components()
+                    .filter(|component| matches!(component, Component::Normal(_)))
+                    .count()
+            });
+            let mut relative_target = PathBuf::new();
+            for _ in 0..parent_depth {
+                relative_target.push("..");
+            }
+            for component in StdPath::new(target.as_str()).components() {
+                if let Component::Normal(component) = component {
+                    relative_target.push(component);
+                }
+            }
+            relative_target
+        } else {
+            StdPath::new(target.as_str()).to_path_buf()
+        };
+        self.root()?.symlink(target, &link).map_err(map_io_error)
+    }
+
+    fn read_symlink(&self, link: &Path, buffer: &mut [u8]) -> Result<usize> {
+        let link = Self::relative_path(link)?;
+        let target = self.root()?.read_link(&link).map_err(map_io_error)?;
+        if target.is_absolute() {
+            // An absolute target in a pre-existing host tree belongs to the
+            // host namespace and cannot safely be exposed as an Xila target.
+            return Err(Error::InvalidSymbolicLink);
+        }
+        let target = target
+            .to_str()
+            .ok_or(Error::InvalidSymbolicLink)?
+            .as_bytes();
+        if target.len() > buffer.len() {
+            return Err(Error::NameTooLong);
+        }
+        buffer[..target.len()].copy_from_slice(target);
+        Ok(target.len())
+    }
+
     fn lookup_directory(&self, context: &mut Context, path: &Path) -> Result<()> {
         let relative = Self::relative_path(path)?;
         let root = self.root()?;
@@ -491,10 +542,10 @@ impl FileSystemOperations for HostFileSystem {
         let path = Self::relative_path(path)?;
         let root = self.root()?;
         let metadata = root.symlink_metadata(&path).map_err(map_io_error)?;
-        if metadata.file_type().is_symlink() || (!metadata.is_file() && !metadata.is_dir()) {
+        if !metadata.file_type().is_symlink() && !metadata.is_file() && !metadata.is_dir() {
             return Err(Error::UnsupportedOperation);
         }
-        if metadata.is_dir() {
+        if metadata.is_dir() && !metadata.file_type().is_symlink() {
             root.remove_dir(&path).map_err(map_io_error)
         } else {
             root.remove_file(&path).map_err(map_io_error)
@@ -507,7 +558,7 @@ impl FileSystemOperations for HostFileSystem {
         let destination = Self::relative_path(destination)?;
         let root = self.root()?;
         let metadata = root.symlink_metadata(&source).map_err(map_io_error)?;
-        if metadata.file_type().is_symlink() || (!metadata.is_file() && !metadata.is_dir()) {
+        if !metadata.file_type().is_symlink() && !metadata.is_file() && !metadata.is_dir() {
             return Err(Error::UnsupportedOperation);
         }
         root.rename(&source, &root, &destination)
@@ -711,16 +762,25 @@ impl DirectoryOperations for HostFileSystem {
                 Err(_) => continue,
             };
             let kind = entry.file_type().map_err(map_io_error)?;
-            let file_type = if kind.is_file() {
+            let file_type = if kind.is_symlink() {
+                Kind::SymbolicLink
+            } else if kind.is_file() {
                 Kind::File
             } else if kind.is_dir() {
                 Kind::Directory
             } else {
                 continue;
             };
-            let metadata = entry.metadata().map_err(map_io_error)?;
-            let inode = stable_inode(&metadata).unwrap_or(position);
-            return Ok(Some(Entry::new(inode, name, file_type, metadata.len())));
+            // DirEntry::metadata follows the target, which would hide dangling
+            // links and make listing an escaping link fail. We do not expose a
+            // fabricated target size for links.
+            let (inode, size) = if kind.is_symlink() {
+                (position, 0)
+            } else {
+                let metadata = entry.metadata().map_err(map_io_error)?;
+                (stable_inode(&metadata).unwrap_or(position), metadata.len())
+            };
+            return Ok(Some(Entry::new(inode, name, file_type, size)));
         }
     }
 

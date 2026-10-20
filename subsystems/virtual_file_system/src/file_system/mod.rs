@@ -16,6 +16,9 @@ use task::TaskIdentifier;
 use users::{GroupIdentifier, UserIdentifier};
 use utilities::*;
 
+/// Maximum bytes stored in a symbolic-link target.
+const MAX_SYMLINK_TARGET_LENGTH: usize = 4096;
+
 pub fn initialize(
     task_manager: &'static task::Manager,
     users_manager: &'static users::Manager,
@@ -733,6 +736,80 @@ impl VirtualFileSystem {
         Self::set_attributes(file_system.file_system, relative_path, &attributes).await?;
 
         Ok(())
+    }
+
+    /// Create a symbolic link at `link` whose target is interpreted in the
+    /// caller's virtual namespace. The target may be dangling or cross mounts.
+    pub async fn create_symlink(
+        &self,
+        task: TaskIdentifier,
+        target: &Path,
+        link: &Path,
+    ) -> Result<()> {
+        if !target.is_valid()
+            || target.is_empty()
+            || target.get_length() > MAX_SYMLINK_TARGET_LENGTH
+            || !link.is_valid()
+            || !link.is_absolute()
+            || link.is_root()
+        {
+            return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
+        }
+
+        let file_systems = self.file_systems.read().await;
+        let (file_system, relative_link, _) =
+            Self::get_file_system_from_path(&file_systems, &link)?;
+        let (_, user, _) = self.get_time_user_group(task).await?;
+        self.check_permissions(
+            file_system.file_system,
+            relative_link.go_parent().ok_or(Error::InvalidPath)?,
+            Permission::Write | Permission::Execute,
+            user,
+        )
+        .await?;
+        poll(|| {
+            Ok(file_system
+                .file_system
+                .create_symlink(target, relative_link)?)
+        })
+        .await?;
+        Ok(())
+    }
+
+    /// Read a symbolic link target without following it into caller-owned,
+    /// bounded storage. Returns the number of bytes written.
+    pub async fn read_symlink(
+        &self,
+        task: TaskIdentifier,
+        link: &Path,
+        buffer: &mut [u8],
+    ) -> Result<usize> {
+        if !link.is_valid() || !link.is_absolute() || link.is_root() {
+            return Err(Error::InvalidPath);
+        }
+
+        let file_systems = self.file_systems.read().await;
+        let (file_system, relative_link, _) =
+            Self::get_file_system_from_path(&file_systems, &link)?;
+        let (_, user, _) = self.get_time_user_group(task).await?;
+        self.check_permissions(
+            file_system.file_system,
+            relative_link.go_parent().ok_or(Error::InvalidPath)?,
+            Permission::Execute,
+            user,
+        )
+        .await?;
+        let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
+        Self::get_attributes(file_system.file_system, relative_link, &mut attributes).await?;
+        if attributes.get_kind() != Some(&Kind::SymbolicLink) {
+            return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
+        }
+        poll(|| {
+            Ok(file_system
+                .file_system
+                .read_symlink(relative_link, buffer)?)
+        })
+        .await
     }
 
     pub async fn rename(

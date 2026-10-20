@@ -3,6 +3,19 @@ use crate::{
 };
 
 pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOperations {
+    /// Create a symbolic link without resolving its target. Backends that do not
+    /// support native links or a durable Xila link representation may keep the
+    /// default implementation.
+    fn create_symlink(&self, _target: &Path, _link: &Path) -> Result<()> {
+        Err(crate::Error::UnsupportedOperation)
+    }
+
+    /// Copy the stored target of a symbolic link into a caller-owned buffer.
+    /// This operation must inspect the final directory entry without following it.
+    fn read_symlink(&self, _link: &Path, _buffer: &mut [u8]) -> Result<usize> {
+        Err(crate::Error::UnsupportedOperation)
+    }
+
     /// Return the fields this backend can accept through `set_attributes`.
     ///
     /// This is a capability hint for VFS-managed default metadata during file
