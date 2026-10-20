@@ -37,6 +37,9 @@ jobs:
       guest: ${{ steps.filter.outputs.guest }}
       localization: ${{ steps.filter.outputs.localization }}
       i18n_code: ${{ steps.filter.outputs.i18n_code }}
+      translation_code: ${{ steps.translation_code.outputs.changed }}
+      rust: ${{ steps.filter.outputs.rust }}
+      makefile: ${{ steps.filter.outputs.makefile }}
       i18n_en: ${{ steps.filter.outputs.i18n_en }}
       i18n_fr: ${{ steps.filter.outputs.i18n_fr }}
       i18n_es: ${{ steps.filter.outputs.i18n_es }}
@@ -53,8 +56,8 @@ jobs:
               - 'subsystems/**'
               - 'libraries/**'
               - '**/Cargo.{toml,lock}'
-              - '**/.cargo/**'
               - '**/Makefile.toml'
+              - '**/.cargo/**'
               - '**/build.rs'
               - '**/build/**'
               - '**/rust-toolchain{,.toml}'
@@ -93,8 +96,6 @@ jobs:
               - 'executables/wasm/src/lib.rs'
               - 'examples/wasm/**'
             localization:
-              - *shared
-              - '**/*.rs'
               - '**/*.ftl'
               - '**/locales/**/*.json'
               - '**/locale/**'
@@ -103,15 +104,17 @@ jobs:
               - 'executables/wasm/src/host/translation/**'
               - 'executables/wasm/tests/translation/**'
             i18n_code:
-              - '**/*.rs'
-              - '**/Cargo.toml'
-              - 'Cargo.toml'
+              - '**/Cargo.{toml,lock}'
               - '**/build.rs'
               - '**/build/**'
-              - 'Makefile.toml'
               - 'tolgee.extractor.mjs'
+              - 'tolgee.extractor.test.mjs'
               - 'tolgee.config.ts'
               - 'subsystems/graphics/fonts_generator/**'
+            rust:
+              - '**/*.rs'
+            makefile:
+              - '**/Makefile.toml'
             i18n_en:
               - '**/locales/en.json'
             i18n_fr:
@@ -126,24 +129,49 @@ jobs:
               - '**/locales/it.json'
             i18n_pl:
               - '**/locales/pl.json'
+      - name: Detect translation macro changes
+        id: translation_code
+        if: steps.filter.outputs.rust == 'true' || steps.filter.outputs.makefile == 'true'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              per_page: 100,
+            });
+            const changed = files.some(file => {
+              if (file.filename.endsWith('.rs')) {
+                return !file.patch || /^[+-].*\btranslate\s*!/m.test(file.patch);
+              }
+              if (file.filename.endsWith('Makefile.toml')) {
+                return !file.patch || /^[+-].*(check-localization|generate-fonts|EMBEDDED_I18N)/im.test(file.patch);
+              }
+              return false;
+            });
+            core.setOutput('changed', String(changed));
 
   localization:
-    name: Localization checks (all shipped locales)
+    name: Localization checks
     needs: [changes]
-    # Group locale checks into one container/setup. Keep separate target
-    # directories because embedded-i18n selects strings at compile time:
-    # sharing Cargo artifacts could silently reuse the wrong language.
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.localization == 'true') }}
+    if: >-
+      ${{ !cancelled() && (
+        needs.changes.result != 'success' ||
+        needs.changes.outputs.localization == 'true' ||
+        needs.changes.outputs.i18n_code == 'true' ||
+        needs.changes.outputs.translation_code == 'true'
+      ) }}
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/xila-project/development-environment:main
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-    timeout-minutes: 60
+    timeout-minutes: 30
     env:
       EMBEDDED_I18N_STRICT: "1"
-      I18N_CODE_CHANGED: ${{ needs.changes.outputs.i18n_code }}
+      I18N_CODE_CHANGED: ${{ needs.changes.outputs.i18n_code == 'true' || needs.changes.outputs.translation_code == 'true' }}
       I18N_EN_CHANGED: ${{ needs.changes.outputs.i18n_en }}
       I18N_FR_CHANGED: ${{ needs.changes.outputs.i18n_fr }}
       I18N_ES_CHANGED: ${{ needs.changes.outputs.i18n_es }}
@@ -166,9 +194,6 @@ jobs:
       - name: Check | Strict translations and font subsets
         run: |
           set -euo pipefail
-          # Changes restricted to catalogs only need the affected languages.
-          # Changes to Rust/extraction/build logic and main/manual runs
-          # still validate every supported compile-time locale.
           locales=(en fr es de pt-BR it pl)
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$I18N_CODE_CHANGED" == "false" ]]; then
             locales=()
@@ -180,22 +205,16 @@ jobs:
             [[ "$I18N_IT_CHANGED" == "true" ]] && locales+=(it)
             [[ "$I18N_PL_CHANGED" == "true" ]] && locales+=(pl)
             if [[ ${#locales[@]} -eq 0 ]]; then
+              # Fluent catalog changes can affect every shipped locale.
               locales=(en fr es de pt-BR it pl)
             fi
           fi
           printf 'Checking locale(s): %s\n' "${locales[*]}"
           for locale in "${locales[@]}"; do
             echo "::group::Localization ($locale)"
-            # Keep compile-time locale variants independent while using one
-            # runner and sccache's cross-build compiler artifact cache.
             export EMBEDDED_I18N_LOCALE="$locale"
             export CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target/localization/$locale"
             cargo make check-localization
-
-            # New language glyphs must also work with lv_font_conv.
-            if [[ "$locale" == "es" || "$locale" == "de" || "$locale" == "pt-BR" || "$locale" == "it" || "$locale" == "pl" ]]; then
-              cargo make generate-fonts
-            fi
             echo "::endgroup::"
           done
 

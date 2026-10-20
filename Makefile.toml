@@ -263,7 +263,7 @@ cargo run --package fs_image -- target/seed/native/seed.img 16777216 --bundle na
 [tasks.prepare-wasm-image]
 script = '''
 set -eu
-cargo build -p calculator -p clock -p pixel_painter -p text_editor -p synth --target wasm32-wasip1 --release
+cargo build -p calculator -p weather -p clock -p pixel_painter -p text_editor -p synth --target wasm32-wasip1 --release
 mkdir -p target/seed/wasm
 rm -f target/seed/wasm/seed.img
 cargo run --package fs_image -- target/seed/wasm/seed.img 16777216 --bundle wasm --applications-dir target/wasm32-wasip1/release
