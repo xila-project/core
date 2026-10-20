@@ -6,7 +6,7 @@ reference image (`cargo make prepare-native-image` or `prepare-wasm-image`) and
 open **Synth** from the application drawer, or run:
 
 ```text
-/binaries/wasm /binaries/synth
+/applications/executables/wasm /applications/executables/synth
 ```
 
 Hold a note to play; release it or move the pointer away to release the voice.

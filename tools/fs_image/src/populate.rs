@@ -20,7 +20,13 @@ pub fn validate(root: &Directory) -> Result<()> {
 }
 
 fn attributes(path: &str, kind: Kind) -> Attributes {
-    let permissions = if kind == Kind::Directory || path.starts_with("/binaries/") {
+    let permissions = if path.starts_with("/applications/executables/")
+        || path.starts_with("/applications/libraries/")
+        || path.starts_with("/system/executables/")
+        || path.starts_with("/system/libraries/")
+    {
+        0o555
+    } else if kind == Kind::Directory {
         0o755
     } else {
         0o644
@@ -34,16 +40,15 @@ fn attributes(path: &str, kind: Kind) -> Attributes {
         .set_mask(AttributeFlags::all().difference(AttributeFlags::Size | AttributeFlags::Links));
     if matches!(
         path,
-        "/configuration/shared/clock"
-            | "/configuration/shared/pixel_painter"
-            | "/configuration/shared/text_editor"
+        "/system/accounts" | "/system/accounts/users" | "/system/accounts/groups"
     ) {
-        result = result
-            .set_user(users::UserIdentifier::new(1000))
-            .set_group(users::GroupIdentifier::new(1000));
-    }
-    if matches!(path, "/system/users" | "/system/groups") {
         result = result.set_permissions(Permissions::from_octal(0o700).unwrap());
+    }
+    if path.starts_with("/data/applications/") {
+        result = result
+            .set_user(users::UserIdentifier::ROOT)
+            .set_group(users::GroupIdentifier::ROOT)
+            .set_permissions(Permissions::from_octal(0o700).unwrap());
     }
     result
 }

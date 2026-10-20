@@ -31,17 +31,30 @@ pub fn prepare(profile: &str, applications: &Path) -> Result<Staging, Box<dyn Er
         }
     };
     for directory in [
-        "system/users",
-        "system/groups",
-        "configuration/shared/shortcuts",
-        "configuration/shared/clock",
-        "configuration/shared/pixel_painter",
-        "configuration/shared/text_editor",
+        "system/accounts/users",
+        "system/accounts/groups",
+        "system/executables",
+        "system/libraries",
+        "system/services",
+        "configuration/system",
+        "configuration/applications",
+        "configuration/shared/applications/shortcuts",
+        "devices/audio",
+        "devices/compute",
+        "devices/graphics",
+        "devices/input",
         "devices/network",
-        "users",
+        "devices/random",
+        "devices/standard_io",
+        "devices/storage",
+        "devices/time",
+        "applications/executables",
+        "applications/libraries",
+        "data/system/logs",
+        "data/applications",
         "data/shared",
-        "binaries",
-        "temporary/logs",
+        "temporary/cache",
+        "temporary/sessions",
     ] {
         fs::create_dir_all(staging.0.join(directory))?;
     }
@@ -54,13 +67,17 @@ pub fn prepare(profile: &str, applications: &Path) -> Result<Staging, Box<dyn Er
         if !fs::symlink_metadata(&source)?.is_file() {
             return Err("guest binary must be a regular file".into());
         }
-        fs::copy(source, staging.0.join(format!("binaries/{name}")))?;
+        fs::copy(
+            source,
+            staging.0.join(format!("applications/executables/{name}")),
+        )?;
+        fs::create_dir_all(staging.0.join(format!("data/applications/{name}")))?;
     }
     for name in guests.iter().chain(application_metadata::NATIVE) {
         fs::write(
-            staging
-                .0
-                .join(format!("configuration/shared/shortcuts/{name}.json")),
+            staging.0.join(format!(
+                "configuration/shared/applications/shortcuts/{name}.json"
+            )),
             application_metadata::shortcut(name).ok_or("unknown application")?,
         )?;
     }

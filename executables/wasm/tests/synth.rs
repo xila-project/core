@@ -72,7 +72,7 @@ async fn real_synth_guest_recovers_from_silent_mode_plays_releases_and_closes() 
         context.task_manager,
         context.virtual_file_system,
         binary,
-        "/binaries/synth",
+        "/applications/executables/synth",
     )
     .await
     .unwrap();
@@ -80,14 +80,14 @@ async fn real_synth_guest_recovers_from_silent_mode_plays_releases_and_closes() 
         context,
         context.virtual_file_system,
         task,
-        &[("/binaries/wasm", wasm::WasmExecutable)]
+        &[("/applications/executables/wasm", wasm::WasmExecutable)]
     )
     .await
     .unwrap();
     let handle = xila::executable::execute(
         context,
-        "/binaries/wasm",
-        vec!["/binaries/synth".into()],
+        "/applications/executables/wasm",
+        vec!["/applications/executables/synth".into()],
         standard,
         None,
     )

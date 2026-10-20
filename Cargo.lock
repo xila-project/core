@@ -233,6 +233,7 @@ name = "application_metadata"
 version = "0.1.0"
 dependencies = [
  "embedded-i18n",
+ "task",
 ]
 
 [[package]]
@@ -1620,6 +1621,7 @@ checksum = "0b5343afd4a8365a643ac588dab4cf234a190c7f6c88c9f6dd6ffe00837661b7"
 name = "executable"
 version = "0.1.0"
 dependencies = [
+ "application_metadata",
  "drivers_core",
  "drivers_native",
  "drivers_shared",
@@ -4778,6 +4780,7 @@ name = "virtual_file_system"
 version = "0.1.0"
 dependencies = [
  "abi_definitions",
+ "application_metadata",
  "drivers_core",
  "drivers_native",
  "drivers_shared",
@@ -4824,6 +4827,7 @@ name = "wasm"
 version = "0.1.0"
 dependencies = [
  "abi_definitions",
+ "application_metadata",
  "audio",
  "cbindgen",
  "command_line_shell",

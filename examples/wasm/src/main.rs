@@ -176,23 +176,18 @@ async fn main(task_manager: &'static xila::task::Manager) {
     // - - Mount the devices
 
     // - - Create the default system hierarchy
-    let _ = virtual_file_system::create_default_hierarchy(virtual_file_system, task).await;
+    virtual_file_system::create_default_hierarchy(virtual_file_system, task)
+        .await
+        .expect("Failed to create the default filesystem hierarchy");
+    virtual_file_system::clear_temporary(virtual_file_system, task)
+        .await
+        .expect("Failed to clear temporary storage at boot");
     graphics::appearance::restore_appearance(graphics_manager, virtual_file_system, task).await;
-    let _ = virtual_file_system
-        .create_directory(task, &"/devices/cpu")
-        .await;
 
     // - - Mount the devices
     virtual_file_system::clean_devices(virtual_file_system, task)
         .await
         .unwrap();
-    virtual_file_system::ignore_already_exists_error(
-        virtual_file_system
-            .create_directory(task, &"/devices/audio")
-            .await,
-    )
-    .unwrap();
-
     let audio_button = web_sys::window()
         .and_then(|window| window.document())
         .and_then(|document| document.get_element_by_id("audio-enable"))
@@ -239,48 +234,52 @@ async fn main(task_manager: &'static xila::task::Manager) {
         task,
         &[
             (
-                &"/devices/standard_in",
+                &"/devices/standard_io/input",
                 CharacterDevice,
                 drivers_core::NullDevice
             ),
             (
-                &"/devices/standard_out",
+                &"/devices/standard_io/output",
                 CharacterDevice,
                 drivers_core::NullDevice
             ),
             (
-                &"/devices/standard_error",
+                &"/devices/standard_io/error",
                 CharacterDevice,
                 drivers_core::NullDevice
             ),
             (
-                &"/devices/time",
+                &"/devices/time/clock",
                 CharacterDevice,
                 drivers_wasm::devices::TimeDevice
             ),
             (
-                &"/devices/cpu/informations",
+                &"/devices/compute/informations",
                 CharacterDevice,
                 drivers_wasm::devices::CpuInformationsDevice
             ),
             (
-                &"/devices/random",
+                &"/devices/random/source",
                 CharacterDevice,
                 drivers_shared::devices::RandomDevice
             ),
-            (&"/devices/null", CharacterDevice, drivers_core::NullDevice),
             (
-                &"/devices/http_client",
+                &"/devices/standard_io/null",
+                CharacterDevice,
+                drivers_core::NullDevice
+            ),
+            (
+                &"/devices/network/http_client",
                 CharacterDevice,
                 drivers_wasm::devices::HttpClientDevice
             ),
             (
-                &"/devices/https_client",
+                &"/devices/network/https_client",
                 CharacterDevice,
                 drivers_wasm::devices::HttpClientDevice
             ),
             (
-                &"/devices/hasher",
+                &"/devices/compute/hasher",
                 CharacterDevice,
                 drivers_shared::devices::HashDevice
             ),
@@ -306,21 +305,27 @@ async fn main(task_manager: &'static xila::task::Manager) {
         virtual_file_system,
         task,
         &[
-            (&"/binaries/wasm", wasm::WasmExecutable),
+            (&"/applications/executables/wasm", wasm::WasmExecutable),
             (
-                &"/binaries/graphical_shell",
+                &"/applications/executables/graphical_shell",
                 graphical_shell::ShellExecutable
             ),
             (
-                &"/binaries/command_line_shell",
+                &"/applications/executables/command_line_shell",
                 command_line_shell::ShellExecutable
             ),
-            (&"/binaries/settings", settings::SettingsExecutable),
             (
-                &"/binaries/file_manager",
+                &"/applications/executables/settings",
+                settings::SettingsExecutable
+            ),
+            (
+                &"/applications/executables/file_manager",
                 file_manager::FileManagerExecutable
             ),
-            (&"/binaries/terminal", terminal::TerminalExecutable),
+            (
+                &"/applications/executables/terminal",
+                terminal::TerminalExecutable
+            ),
         ]
     )
     .await
@@ -329,9 +334,9 @@ async fn main(task_manager: &'static xila::task::Manager) {
     // - Execute the shell
     // - - Open the standard input, output and error
     let standard = Standard::open(
-        &"/devices/standard_in",
-        &"/devices/standard_out",
-        &"/devices/standard_error",
+        &"/devices/standard_io/input",
+        &"/devices/standard_io/output",
+        &"/devices/standard_io/error",
         task,
         virtual_file_system,
         executable_context,
@@ -459,7 +464,7 @@ async fn main(task_manager: &'static xila::task::Manager) {
     // - - Execute the shell
     let _ = executable::execute(
         executable_context,
-        "/binaries/graphical_shell",
+        "/applications/executables/graphical_shell",
         arguments,
         standard,
         None,

@@ -30,10 +30,9 @@ downloading a seed, copying applications or running their installers. Mount erro
 never authorize erasing a disk. Publishing a newer image does not upgrade existing
 installations; choose a new disk to try a fresh bundle while retaining the old one.
 
-Clock's settings directory is provisioned at `/configuration/shared/clock` and
-owned by the seed's administrator account (UID 1000) on a new installation. Its saved preferences and
-alarm follow the OPFS persistence limits below. Other accounts need write access
-to this directory to save settings. Clock alerts require the application to stay
+Clock's settings directory is provisioned per user at
+`/users/<user-id>/applications/clock/configuration`. Its saved preferences and
+alarm follow the OPFS persistence limits below. Clock alerts require the application to stay
 open; browser background-tab throttling can delay them.
 
 On a fresh disk, log in as **administrator** with an empty password; otherwise
@@ -42,23 +41,23 @@ in the dock. Select
 **Calculator**, **Clock**, **Pixel Painter**, **Text Editor** or **Synth**. Text Editor uses a temporary on-disk working copy and edits UTF-8-safe 4 KiB pages. They can also be launched from Xila's terminal:
 
 ```text
-/binaries/wasm /binaries/calculator
-/binaries/wasm /binaries/clock
-/binaries/wasm /binaries/pixel_painter
-/binaries/wasm /binaries/text_editor
-/binaries/wasm /binaries/synth
+/applications/executables/wasm /applications/executables/calculator
+/applications/executables/wasm /applications/executables/clock
+/applications/executables/wasm /applications/executables/pixel_painter
+/applications/executables/wasm /applications/executables/text_editor
+/applications/executables/wasm /applications/executables/synth
 ```
 
-The example mounts the Wasmi-backed runtime at `/binaries/wasm`, with the same
+The example mounts the Wasmi-backed runtime at `/applications/executables/wasm`, with the same
 graphics bindings as the native example. For other guests that are already
 present in Xila's virtual filesystem:
 
 ```text
-/binaries/wasm /path/to/guest.wasm
+/applications/executables/wasm /path/to/guest.wasm
 ```
 
 WASI Preview 1 command guests should export `_start: () -> ()`. Use
-`/binaries/wasm --install /path/to/guest.wasm` to call `__install: () -> ()`
+`/applications/executables/wasm --install /path/to/guest.wasm` to call `__install: () -> ()`
 instead. Graphical guests must use compatible Xila graphics bindings; see the
 [runtime documentation](../../executables/wasm/README.md) for supported APIs and
 limits.
@@ -98,7 +97,7 @@ does not display. Informational messages, warnings, and errors remain visible.
 
 Verified in headless Chromium 154 with a Trunk development build using Rust
 stable. Temporary startup probes loaded guest files into the example's VFS and
-launched them through the mounted `/binaries/wasm` executable:
+launched them through the mounted `/applications/executables/wasm` executable:
 
 - A minimal guest executed a host call, exhausted and replenished its fuel,
   resumed after WASI `sched_yield`, and handled success and nonzero `proc_exit`.

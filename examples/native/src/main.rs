@@ -184,21 +184,23 @@ async fn main(task_manager: &'static xila::task::Manager) {
     // - - Mount the devices
 
     // - - Create the default system hierarchy
-    let _ = virtual_file_system::create_default_hierarchy(virtual_file_system, task).await;
-    let _ = virtual_file_system
-        .create_directory(task, &"/devices/cpu")
-        .await;
+    virtual_file_system::create_default_hierarchy(virtual_file_system, task)
+        .await
+        .expect("Failed to create the default filesystem hierarchy");
+    virtual_file_system::clear_temporary(virtual_file_system, task)
+        .await
+        .expect("Failed to clear temporary storage at boot");
 
     #[cfg(unix)]
     if graphics_manager.is_some() {
         virtual_file_system
-            .create_directory(task, &"/devices/debug")
+            .create_directory(task, &"/devices/graphics/debug")
             .await
             .expect("Failed to create debug device directory");
         virtual_file_system
             .mount_character_device(
                 task,
-                "/devices/debug/transport",
+                "/devices/graphics/debug/transport",
                 drivers_native::window_screen::DebugTransportDevice,
             )
             .await
@@ -214,9 +216,6 @@ async fn main(task_manager: &'static xila::task::Manager) {
         let audio_system = unsafe { core::pin::Pin::new_unchecked(audio_system) };
         match drivers_native::audio::new(audio_system, 1) {
             Ok(runner) => {
-                let _ = virtual_file_system
-                    .create_directory(task, &"/devices/audio")
-                    .await;
                 virtual_file_system
                     .mount_character_device(
                         task,
@@ -262,40 +261,52 @@ async fn main(task_manager: &'static xila::task::Manager) {
         task,
         &[
             (
-                &"/devices/standard_in",
+                &"/devices/standard_io/input",
                 CharacterDevice,
                 drivers_std::console::StandardInDevice
             ),
             (
-                &"/devices/standard_out",
+                &"/devices/standard_io/output",
                 CharacterDevice,
                 drivers_std::console::StandardOutDevice
             ),
             (
-                &"/devices/standard_error",
+                &"/devices/standard_io/error",
                 CharacterDevice,
                 drivers_std::console::StandardErrorDevice
             ),
             (
-                &"/devices/time",
+                &"/devices/time/clock",
                 CharacterDevice,
                 drivers_std::devices::TimeDevice
             ),
             (
-                &"/devices/cpu/informations",
+                &"/devices/compute/informations",
                 CharacterDevice,
                 drivers_std::devices::CpuInformationsDevice
             ),
             (
-                &"/devices/random",
+                &"/devices/random/source",
                 CharacterDevice,
                 drivers_shared::devices::RandomDevice
             ),
-            (&"/devices/null", CharacterDevice, drivers_core::NullDevice),
-            (&"/devices/http_client", CharacterDevice, *http_client),
-            (&"/devices/https_client", CharacterDevice, *https_client),
             (
-                &"/devices/hasher",
+                &"/devices/standard_io/null",
+                CharacterDevice,
+                drivers_core::NullDevice
+            ),
+            (
+                &"/devices/network/http_client",
+                CharacterDevice,
+                *http_client
+            ),
+            (
+                &"/devices/network/https_client",
+                CharacterDevice,
+                *https_client
+            ),
+            (
+                &"/devices/compute/hasher",
                 CharacterDevice,
                 drivers_shared::devices::HashDevice
             ),
@@ -356,22 +367,31 @@ async fn main(task_manager: &'static xila::task::Manager) {
         task,
         &[
             (
-                &"/binaries/graphical_shell",
+                &"/applications/executables/graphical_shell",
                 graphical_shell::ShellExecutable
             ),
             (
-                &"/binaries/file_manager",
+                &"/applications/executables/file_manager",
                 file_manager::FileManagerExecutable
             ),
             (
-                &"/binaries/command_line_shell",
+                &"/applications/executables/command_line_shell",
                 command_line_shell::ShellExecutable
             ),
-            (&"/binaries/terminal", terminal::TerminalExecutable),
-            (&"/binaries/settings", settings::SettingsExecutable),
+            (
+                &"/applications/executables/terminal",
+                terminal::TerminalExecutable
+            ),
+            (
+                &"/applications/executables/settings",
+                settings::SettingsExecutable
+            ),
             #[cfg(unix)]
-            (&"/binaries/debug", debug_application::DebugExecutable),
-            (&"/binaries/wasm", wasm::WasmExecutable),
+            (
+                &"/applications/executables/debug",
+                debug_application::DebugExecutable
+            ),
+            (&"/applications/executables/wasm", wasm::WasmExecutable),
         ]
     )
     .await
@@ -411,9 +431,9 @@ async fn main(task_manager: &'static xila::task::Manager) {
         && config.display_driver == cli::DisplayDriver::Headless
     {
         let debug_standard = Standard::open(
-            &"/devices/null",
-            &"/devices/null",
-            &"/devices/null",
+            &"/devices/standard_io/null",
+            &"/devices/standard_io/null",
+            &"/devices/standard_io/null",
             task,
             virtual_file_system,
             executable_context,
@@ -422,7 +442,7 @@ async fn main(task_manager: &'static xila::task::Manager) {
         .expect("Failed to open standard files for the headless Debug app");
         executable::execute(
             executable_context,
-            &"/binaries/debug",
+            &"/applications/executables/debug",
             vec!["--background".into()],
             debug_standard,
             None,
@@ -432,9 +452,9 @@ async fn main(task_manager: &'static xila::task::Manager) {
     }
 
     let standard = Standard::open(
-        &"/devices/standard_in",
-        &"/devices/standard_out",
-        &"/devices/standard_error",
+        &"/devices/standard_io/input",
+        &"/devices/standard_io/output",
+        &"/devices/standard_io/error",
         task,
         virtual_file_system,
         executable_context,
@@ -444,8 +464,8 @@ async fn main(task_manager: &'static xila::task::Manager) {
 
     // - - Execute the shell
     let shell_path = match config.interface {
-        cli::InterfaceMode::Graphical => "/binaries/graphical_shell",
-        cli::InterfaceMode::Terminal => "/binaries/command_line_shell",
+        cli::InterfaceMode::Graphical => "/applications/executables/graphical_shell",
+        cli::InterfaceMode::Terminal => "/applications/executables/command_line_shell",
     };
     let shell = executable::execute(executable_context, shell_path, vec![], standard, None)
         .await

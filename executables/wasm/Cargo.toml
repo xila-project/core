@@ -5,6 +5,7 @@ edition = "2024"
 build = "build/main.rs"
 
 [dependencies]
+application_metadata = { workspace = true }
 wasmi = { version = "2.0.0", default-features = false, features = [
   "validate",
   "memory64",

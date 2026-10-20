@@ -70,10 +70,14 @@ async fn guest_opens_pages_edits_and_saves_large_file() {
     standard.context = context;
     let task = context.task_manager.get_current_task_identifier().await;
     let vfs = context.virtual_file_system;
-    vfs.create_directory(task, &"/configuration/shared/text_editor")
-        .await
-        .unwrap();
-    let path = "/configuration/shared/text_editor/document.txt";
+    vfs.ensure_user_application_directories(
+        task,
+        xila::users::UserIdentifier::ROOT,
+        "text_editor",
+    )
+    .await
+    .unwrap();
+    let path = "/users/0/applications/text_editor/data/document.txt";
     let original = "a".repeat(9000);
     let mut source = File::open(
         vfs,
@@ -100,7 +104,7 @@ async fn guest_opens_pages_edits_and_saves_large_file() {
         context.task_manager,
         vfs,
         binary,
-        "/binaries/text_editor",
+        "/applications/executables/text_editor",
     )
     .await
     .unwrap();
@@ -108,14 +112,14 @@ async fn guest_opens_pages_edits_and_saves_large_file() {
         context,
         vfs,
         task,
-        &[("/binaries/wasm", wasm::WasmExecutable)]
+        &[("/applications/executables/wasm", wasm::WasmExecutable)]
     )
     .await
     .unwrap();
     let handle = xila::executable::execute(
         context,
-        "/binaries/wasm",
-        vec!["/binaries/text_editor".into()],
+        "/applications/executables/wasm",
+        vec!["/applications/executables/text_editor".into()],
         standard,
         None,
     )
@@ -162,7 +166,7 @@ async fn guest_opens_pages_edits_and_saves_large_file() {
     let exit = handle.join().await;
     assert_eq!(exit, 0);
     let directory =
-        SynchronousDirectory::open(vfs, task, "/configuration/shared/text_editor").unwrap();
+        SynchronousDirectory::open(vfs, task, "/users/0/applications/text_editor/data").unwrap();
     let names: Vec<_> = directory.map(|entry| entry.name).collect();
     assert!(names.iter().any(|name| name == "document.txt"));
     assert!(

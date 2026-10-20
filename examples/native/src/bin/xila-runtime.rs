@@ -69,7 +69,7 @@ struct Config {
     arguments: Vec<String>,
 }
 
-const SHELL_EXECUTABLE: &str = "/binaries/command_line_shell";
+const SHELL_EXECUTABLE: &str = "/applications/executables/command_line_shell";
 
 const USAGE: &str = concat!(
     "Usage:\n",
@@ -353,6 +353,9 @@ async fn run_runtime(
     virtual_file_system::create_default_hierarchy(vfs, task)
         .await
         .map_err(|error| format!("cannot create Xila hierarchy: {error:?}"))?;
+    virtual_file_system::clear_temporary(vfs, task)
+        .await
+        .map_err(|error| format!("cannot clear temporary storage: {error:?}"))?;
 
     // Host mount paths are explicit capabilities; the process environment is never copied.
     for mount in &config.mounts {
@@ -388,36 +391,40 @@ async fn run_runtime(
         task,
         &[
             (
-                &"/devices/standard_in",
+                &"/devices/standard_io/input",
                 CharacterDevice,
                 drivers_std::console::StandardInDevice
             ),
             (
-                &"/devices/standard_out",
+                &"/devices/standard_io/output",
                 CharacterDevice,
                 drivers_std::console::StandardOutDevice
             ),
             (
-                &"/devices/standard_error",
+                &"/devices/standard_io/error",
                 CharacterDevice,
                 drivers_std::console::StandardErrorDevice
             ),
             (
-                &"/devices/time",
+                &"/devices/time/clock",
                 CharacterDevice,
                 drivers_std::devices::TimeDevice
             ),
             (
-                &"/devices/random",
+                &"/devices/random/source",
                 CharacterDevice,
                 drivers_shared::devices::RandomDevice
             ),
             (
-                &"/devices/hasher",
+                &"/devices/compute/hasher",
                 CharacterDevice,
                 drivers_shared::devices::HashDevice
             ),
-            (&"/devices/null", CharacterDevice, drivers_core::NullDevice),
+            (
+                &"/devices/standard_io/null",
+                CharacterDevice,
+                drivers_core::NullDevice
+            ),
         ]
     )
     .await
@@ -436,7 +443,7 @@ async fn run_runtime(
         vfs,
         task,
         &[
-            (&"/binaries/wasm", wasm::WasmExecutable),
+            (&"/applications/executables/wasm", wasm::WasmExecutable),
             (&SHELL_EXECUTABLE, command_line_shell::ShellExecutable),
         ]
     )
@@ -473,9 +480,9 @@ async fn run_runtime(
     }
 
     let standard = Standard::open(
-        &"/devices/standard_in",
-        &"/devices/standard_out",
-        &"/devices/standard_error",
+        &"/devices/standard_io/input",
+        &"/devices/standard_io/output",
+        &"/devices/standard_io/error",
         task,
         vfs,
         context,
@@ -483,7 +490,7 @@ async fn run_runtime(
     .await
     .map_err(|error| format!("cannot open host standard streams: {error:?}"))?;
     let mut executable_arguments = config.arguments;
-    if config.executable == "/binaries/wasm" && executable_arguments.len() > 1 {
+    if config.executable == "/applications/executables/wasm" && executable_arguments.len() > 1 {
         executable_arguments.insert(1, "--".to_string());
     }
     let executable_path = PathOwned::new(config.executable.clone())
@@ -550,7 +557,7 @@ mod tests {
             "MODE=production",
             "--network=none",
             "--",
-            "/binaries/wasm",
+            "/applications/executables/wasm",
             "/input/main.wasm",
             "a",
             "b",
@@ -567,7 +574,7 @@ mod tests {
             vec![(String::from("MODE"), String::from("production"))]
         );
         assert!(!config.shell);
-        assert_eq!(config.executable, "/binaries/wasm");
+        assert_eq!(config.executable, "/applications/executables/wasm");
         assert_eq!(
             config.arguments,
             vec![
@@ -605,7 +612,7 @@ mod tests {
 
     #[test]
     fn shell_rejects_extra_arguments_and_user_impersonation() {
-        assert!(parse_args(["shell", "--", "/binaries/wasm"]).is_err());
+        assert!(parse_args(["shell", "--", "/applications/executables/wasm"]).is_err());
         assert!(parse_args(["shell", "--env", "User=administrator"]).is_err());
         assert!(parse_args(["shell", "--network=host"]).is_err());
     }
@@ -623,9 +630,14 @@ mod tests {
                 .contains("absolute")
         );
         assert!(
-            parse_args(["run", "--network=tuntap", "--", "/binaries/wasm"])
-                .unwrap_err()
-                .contains("only --network=none")
+            parse_args([
+                "run",
+                "--network=tuntap",
+                "--",
+                "/applications/executables/wasm"
+            ])
+            .unwrap_err()
+            .contains("only --network=none")
         );
         assert!(
             parse_args([
@@ -633,7 +645,7 @@ mod tests {
                 "--mount",
                 "host=/tmp,xila=/x,ro,rw",
                 "--",
-                "/binaries/wasm"
+                "/applications/executables/wasm"
             ])
             .is_err()
         );
@@ -647,7 +659,7 @@ mod tests {
                 "--mount",
                 "host=/tmp,xila=/x,uid=65536",
                 "--",
-                "/binaries/wasm"
+                "/applications/executables/wasm"
             ])
             .is_err()
         );
@@ -657,10 +669,19 @@ mod tests {
                 "--mount",
                 "host=/tmp,xila=/x,file_mode=0999",
                 "--",
-                "/binaries/wasm"
+                "/applications/executables/wasm"
             ])
             .is_err()
         );
-        assert!(parse_args(["run", "--env", "NO_EQUALS", "--", "/binaries/wasm"]).is_err());
+        assert!(
+            parse_args([
+                "run",
+                "--env",
+                "NO_EQUALS",
+                "--",
+                "/applications/executables/wasm"
+            ])
+            .is_err()
+        );
     }
 }

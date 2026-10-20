@@ -9,9 +9,9 @@ mod storage;
 #[unsafe(no_mangle)]
 pub extern "C" fn __install() {
     let result = (|| -> std::io::Result<()> {
-        std::fs::create_dir_all("/configuration/shared/shortcuts")?;
+        std::fs::create_dir_all("/configuration/shared/applications/shortcuts")?;
         std::fs::write(
-            "/configuration/shared/shortcuts/text_editor.json",
+            "/configuration/shared/applications/shortcuts/text_editor.json",
             application_metadata::shortcut("text_editor").unwrap(),
         )
     })();

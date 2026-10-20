@@ -140,6 +140,59 @@ async fn test_task_owner_inheritance() {
 }
 
 #[test(task_path = crate)]
+async fn spawn_inherits_application_identity_and_launch_replaces_it_before_poll() {
+    let manager = initialize();
+    let parent = manager.get_current_task_identifier().await;
+    let inherited = ApplicationIdentifier::new(7).unwrap();
+    let launched = ApplicationIdentifier::new(19).unwrap();
+    manager
+        .set_application_identifier(parent, Some(inherited))
+        .await
+        .unwrap();
+
+    let spawner = manager.get_spawner(parent).await.unwrap();
+    manager
+        .spawn(parent, "Inherited", Some(spawner), async move |task| {
+            assert_eq!(
+                get_instance()
+                    .get_application_identifier(task)
+                    .await
+                    .unwrap(),
+                Some(inherited)
+            );
+        })
+        .await
+        .unwrap()
+        .0
+        .join()
+        .await;
+
+    manager
+        .spawn_with_application_identifier(
+            parent,
+            "Application launch",
+            Some(spawner),
+            Some(launched),
+            async move |task| {
+                assert_eq!(
+                    get_instance()
+                        .get_application_identifier(task)
+                        .await
+                        .unwrap(),
+                    Some(launched)
+                );
+            },
+        )
+        .await
+        .unwrap()
+        .0
+        .join()
+        .await;
+
+    assert_eq!(core::mem::size_of::<ApplicationIdentifier>(), 2);
+}
+
+#[test(task_path = crate)]
 async fn test_environment_variables() {
     let manager = initialize();
 

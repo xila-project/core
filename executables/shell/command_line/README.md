@@ -21,7 +21,7 @@ long-running-command > /temporary/result & echo foreground
 
 A zero exit status means success. Built-in failures return 1, unknown commands return 127, and malformed source passed to `shell -c` returns 2. External executable statuses are preserved within 0–255. A pipeline returns its last stage's status and waits for every stage. `true` and `false` provide status 0 and 1. `$?` expands to the preceding foreground status; successfully launching a background list sets it to zero.
 
-Foreground built-ins can change the shell's current directory and environment. Pipeline stages and background lists run in child tasks with inherited environments and isolated shell state. Background input is `/devices/null`; output and error inherit the shell's streams unless redirected and may interleave with foreground output. Completed background tasks are reaped as new jobs start. Shell exit waits for outstanding jobs; job listing, cancellation and foreground/background switching are separate work.
+Foreground built-ins can change the shell's current directory and environment. Pipeline stages and background lists run in child tasks with inherited environments and isolated shell state. Background input is `/devices/standard_io/null`; output and error inherit the shell's streams unless redirected and may interleave with foreground output. Completed background tasks are reaped as new jobs start. Shell exit waits for outstanding jobs; job listing, cancellation and foreground/background switching are separate work.
 
 ## Arguments and expansion
 

@@ -15,37 +15,53 @@ impl Path {
     pub const ROOT: &'static Path = Self::from_str("/");
     pub const EMPTY: &'static Path = Self::from_str("");
 
-    /// Contains the OS core, including the kernel, init system, and critical drivers.
-    /// Prevents modification by regular users.
+    /// Operating-system code and account records.
     pub const SYSTEM: &'static Path = Self::from_str("/system");
+    pub const SYSTEM_ACCOUNTS: &'static Path = Self::from_str("/system/accounts");
+    pub const SYSTEM_ACCOUNT_USERS: &'static Path = Self::from_str("/system/accounts/users");
+    pub const SYSTEM_ACCOUNT_GROUPS: &'static Path = Self::from_str("/system/accounts/groups");
+    pub const SYSTEM_EXECUTABLES: &'static Path = Self::from_str("/system/executables");
+    pub const SYSTEM_LIBRARIES: &'static Path = Self::from_str("/system/libraries");
+    pub const SYSTEM_SERVICES: &'static Path = Self::from_str("/system/services");
 
-    /// Stores system-wide settings in a structured format (e.g., JSON, TOML).
+    /// Runtime device endpoints grouped by function.
     pub const DEVICES: &'static Path = Self::from_str("/devices");
     pub const NETWORK_DEVICES: &'static Path = Self::from_str("/devices/network");
+    pub const AUDIO_DEVICES: &'static Path = Self::from_str("/devices/audio");
+    pub const COMPUTE_DEVICES: &'static Path = Self::from_str("/devices/compute");
+    pub const GRAPHICS_DEVICES: &'static Path = Self::from_str("/devices/graphics");
+    pub const INPUT_DEVICES: &'static Path = Self::from_str("/devices/input");
+    pub const RANDOM_DEVICES: &'static Path = Self::from_str("/devices/random");
+    pub const STANDARD_IO_DEVICES: &'static Path = Self::from_str("/devices/standard_io");
+    pub const STORAGE_DEVICES: &'static Path = Self::from_str("/devices/storage");
+    pub const TIME_DEVICES: &'static Path = Self::from_str("/devices/time");
 
-    /// Hardware devices, symlinks for human-friendly names.
+    /// System and application configuration.
     pub const CONFIGURATION: &'static Path = Self::from_str("/configuration");
-
-    /// Contains the shared configurations between applications.
+    pub const SYSTEM_CONFIGURATION: &'static Path = Self::from_str("/configuration/system");
+    pub const APPLICATION_CONFIGURATION: &'static Path =
+        Self::from_str("/configuration/applications");
     pub const SHARED_CONFIGURATION: &'static Path = Self::from_str("/configuration/shared");
 
-    /// Binaries data.
-    pub const DATA: &'static Path = Self::from_str("/data");
+    /// Installed application code.
+    pub const APPLICATIONS: &'static Path = Self::from_str("/applications");
+    pub const APPLICATION_EXECUTABLES: &'static Path = Self::from_str("/applications/executables");
+    pub const APPLICATION_LIBRARIES: &'static Path = Self::from_str("/applications/libraries");
 
-    /// Shared data between binaries.
+    /// Mutable persistent state.
+    pub const DATA: &'static Path = Self::from_str("/data");
+    pub const SYSTEM_DATA: &'static Path = Self::from_str("/data/system");
+    pub const SYSTEM_LOGS: &'static Path = Self::from_str("/data/system/logs");
+    pub const APPLICATION_DATA: &'static Path = Self::from_str("/data/applications");
     pub const SHARED_DATA: &'static Path = Self::from_str("/data/shared");
 
-    /// Contains the system's binaries, including the shell and other executables.
-    pub const BINARIES: &'static Path = Self::from_str("/binaries");
-
-    /// Contains the user's data, including documents, downloads, and other files.
+    /// User homes.
     pub const USERS: &'static Path = Self::from_str("/users");
 
-    /// Contains temporary files, including logs and caches.
+    /// Scratch storage cleared at boot.
     pub const TEMPORARY: &'static Path = Self::from_str("/temporary");
-
-    /// Contains logs, including system logs and application logs.
-    pub const LOGS: &'static Path = Self::from_str("/temporary/logs");
+    pub const TEMPORARY_CACHE: &'static Path = Self::from_str("/temporary/cache");
+    pub const TEMPORARY_SESSIONS: &'static Path = Self::from_str("/temporary/sessions");
 
     /// # Safety
     /// The caller must ensure that the string is a valid path string.

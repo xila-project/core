@@ -164,7 +164,7 @@ pub fn https_get(url: &str) -> Result<Vec<u8>, String> {
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)
-        .open("/devices/https_client")
+        .open("/devices/network/https_client")
         .map_err(|_e| String::from("failed to open https device"))?;
 
     file.write_all(&request_buffer[..request_length])

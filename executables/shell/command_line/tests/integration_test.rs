@@ -18,7 +18,7 @@ async fn main() {
         virtual_file_system,
         task,
         &[(
-            &"/binaries/command_line_shell",
+            &"/applications/executables/command_line_shell",
             command_line_shell::ShellExecutable
         ),]
     )
@@ -27,7 +27,7 @@ async fn main() {
 
     let result = executable::execute(
         context,
-        "/binaries/command_line_shell",
+        "/applications/executables/command_line_shell",
         vec![],
         standard,
         None,
@@ -85,7 +85,7 @@ async fn boolean_command_status_and_interactive_continuation() {
         filesystem,
         task,
         &[(
-            &"/binaries/command_line_shell",
+            &"/applications/executables/command_line_shell",
             command_line_shell::ShellExecutable
         )]
     )
@@ -116,7 +116,10 @@ async fn boolean_command_status_and_interactive_continuation() {
     let mut shell = command_line_shell::Shell::new(child_standard).await;
     assert_eq!(
         shell
-            .main(vec!["/binaries/command_line_shell".into(), "false".into()])
+            .main(vec![
+                "/applications/executables/command_line_shell".into(),
+                "false".into()
+            ])
             .await
             .unwrap_err()
             .get(),

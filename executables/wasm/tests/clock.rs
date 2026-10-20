@@ -88,7 +88,7 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
         context.task_manager,
         context.virtual_file_system,
         binary,
-        "/binaries/clock",
+        "/applications/executables/clock",
     )
     .await
     .unwrap();
@@ -96,30 +96,14 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
         context,
         context.virtual_file_system,
         task,
-        &[("/binaries/wasm", wasm::WasmExecutable)]
+        &[("/applications/executables/wasm", wasm::WasmExecutable)]
     )
     .await
     .unwrap();
-    // Match native boot: an ordinary login user owns the application settings
-    // directory, while the configuration parent stays protected.
+    // Launch as a login user; the launcher provisions their private app settings.
     let administrator = context
         .users_manager
         .get_user_identifier("administrator")
-        .await
-        .unwrap();
-    context
-        .virtual_file_system
-        .create_directory(task, &"/configuration/shared/clock")
-        .await
-        .unwrap();
-    context
-        .virtual_file_system
-        .set_ownership(
-            task,
-            "/configuration/shared/clock",
-            Some(administrator),
-            Some(xila::users::GroupIdentifier::new(1000)),
-        )
         .await
         .unwrap();
     context
@@ -129,8 +113,8 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
         .unwrap();
     let handle = xila::executable::execute(
         context,
-        "/binaries/wasm",
-        vec!["/binaries/clock".into()],
+        "/applications/executables/wasm",
+        vec!["/applications/executables/clock".into()],
         standard.duplicate().await.unwrap(),
         None,
     )
@@ -168,7 +152,7 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
     xila::virtual_file_system::File::read_from_path(
         context.virtual_file_system,
         task,
-        "/configuration/shared/clock/settings.1",
+        "/users/1000/applications/clock/configuration/settings.1",
         &mut saved,
     )
     .await
@@ -178,8 +162,8 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
     close_and_join(manager, handle).await;
     let reopened = xila::executable::execute(
         context,
-        "/binaries/wasm",
-        vec!["/binaries/clock".into()],
+        "/applications/executables/wasm",
+        vec!["/applications/executables/clock".into()],
         standard,
         None,
     )

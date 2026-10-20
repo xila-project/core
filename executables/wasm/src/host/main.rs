@@ -226,6 +226,46 @@ async fn main_inner(
         instruction_limit,
     } = arguments;
 
+    let task = context.task_manager.get_current_task_identifier().await;
+    context
+        .task_manager
+        .set_application_identifier(
+            task,
+            application_metadata::application_identifier_for_path(path),
+        )
+        .await?;
+    if let Some(application_name) = application_metadata::application_name_for_path(path) {
+        let user = context.task_manager.get_user(task).await?;
+        context
+            .virtual_file_system
+            .ensure_user_application_directories(task, user, application_name)
+            .await?;
+        let application_directory =
+            xila::virtual_file_system::user_application_directory(user, application_name);
+        let configuration = application_directory
+            .clone()
+            .append("configuration")
+            .ok_or(Error::InvalidPath)?;
+        let data = application_directory
+            .clone()
+            .append("data")
+            .ok_or(Error::InvalidPath)?;
+        let cache = application_directory
+            .append("cache")
+            .ok_or(Error::InvalidPath)?;
+        context
+            .task_manager
+            .set_environment_variables(
+                task,
+                &[
+                    ("XILA_APPLICATION_CONFIGURATION", configuration.as_str()),
+                    ("XILA_APPLICATION_DATA", data.as_str()),
+                    ("XILA_APPLICATION_CACHE", cache.as_str()),
+                ],
+            )
+            .await?;
+    }
+
     let mut configuration = Config::default();
     configuration.consume_fuel(true);
     // Wasmi 2.0.0 cannot resume fuel exhaustion during lazy callee translation
@@ -239,7 +279,6 @@ async fn main_inner(
 
     let module = Module::new(&engine, &buffer)?;
 
-    let task = context.task_manager.get_current_task_identifier().await;
     let (_standard_in, standard_out, standard_error) = standard.split();
     let root_dir = xila::virtual_file_system::SynchronousDirectory::open(
         context.virtual_file_system,

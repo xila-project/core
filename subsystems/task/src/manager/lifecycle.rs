@@ -1,6 +1,7 @@
 // Lifecycle module - handles task spawning, execution, and lifecycle management
 
 use super::*;
+use crate::ApplicationIdentifier;
 use alloc::boxed::Box;
 use core::{
     future::{Future, poll_fn},
@@ -21,6 +22,7 @@ impl Manager {
         name: &str,
         function: FunctionType,
         spawner: Option<usize>,
+        application_identifier: Option<Option<ApplicationIdentifier>>,
     ) -> Result<(JoinHandle<R>, TaskIdentifier)>
     where
         FunctionType: FnOnce(TaskIdentifier) -> FutureType + 'static,
@@ -30,6 +32,12 @@ impl Manager {
             .register(parent_task_identifier, name)
             .await
             .expect("Failed to get new task identifier");
+
+        if let Some(application_identifier) = application_identifier {
+            manager
+                .set_application_identifier(identifier, application_identifier)
+                .await?;
+        }
 
         let pool = Box::new(TaskPool::<_, 1>::new());
         let pool = Box::leak(pool);
@@ -111,7 +119,32 @@ impl Manager {
         ReturnType: 'static,
     {
         // Call the helper function with all our parameters
-        Self::create_and_run_task(self, parent_task, name, function, spawner).await
+        Self::create_and_run_task(self, parent_task, name, function, spawner, None).await
+    }
+
+    /// Spawn a task with an explicit application identity (including `None` to clear inheritance).
+    pub async fn spawn_with_application_identifier<FunctionType, FutureType, ReturnType>(
+        &'static self,
+        parent_task: TaskIdentifier,
+        name: &str,
+        spawner: Option<usize>,
+        application_identifier: Option<ApplicationIdentifier>,
+        function: FunctionType,
+    ) -> Result<(JoinHandle<ReturnType>, TaskIdentifier)>
+    where
+        FunctionType: FnOnce(TaskIdentifier) -> FutureType + 'static,
+        FutureType: Future<Output = ReturnType> + 'static,
+        ReturnType: 'static,
+    {
+        Self::create_and_run_task(
+            self,
+            parent_task,
+            name,
+            function,
+            spawner,
+            Some(application_identifier),
+        )
+        .await
     }
 
     /// Set the internal identifier of a task.
@@ -187,6 +220,7 @@ impl Manager {
                 parent: root,
                 user: users::UserIdentifier::ROOT,
                 group: users::GroupIdentifier::ROOT,
+                application_identifier: None,
                 environment_variables: alloc::vec::Vec::new(),
                 signals: crate::signal::SignalAccumulator::new(),
                 spawner_identifier: 0,

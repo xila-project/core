@@ -51,7 +51,7 @@ pub async fn initialize_seeded(context: &Context<'_>) -> Result<()> {
     let group_id = GroupIdentifier::new(1000);
     let user_id = UserIdentifier::new(1000);
     let mut buffer = Vec::new();
-    if exists(context, "/system/groups/administrator").await? {
+    if exists(context, "/system/accounts/groups/administrator").await? {
         let group = crate::read_group_file(context, &mut buffer, "administrator").await?;
         if group.get_identifier() != group_id || group.get_name() != "administrator" {
             return Err(invalid());
@@ -63,8 +63,8 @@ pub async fn initialize_seeded(context: &Context<'_>) -> Result<()> {
         let group = crate::Group::new(1000, "administrator".into(), Vec::new());
         atomic_write(
             context,
-            "/system/.seed-group.tmp",
-            "/system/groups/administrator",
+            "/system/accounts/.seed-group.tmp",
+            "/system/accounts/groups/administrator",
             miniserde::json::to_string(&group).as_bytes(),
         )
         .await?;
@@ -74,7 +74,7 @@ pub async fn initialize_seeded(context: &Context<'_>) -> Result<()> {
             .await
             .map_err(Error::FailedToAddGroup)?;
     }
-    if exists(context, "/system/users/administrator").await? {
+    if exists(context, "/system/accounts/users/administrator").await? {
         let user = crate::read_user_file(context, &mut buffer, "administrator").await?;
         if user.get_identifier() != user_id
             || user.get_primary_group() != group_id
@@ -91,8 +91,8 @@ pub async fn initialize_seeded(context: &Context<'_>) -> Result<()> {
         let user = crate::User::new(1000, "administrator".into(), 1000, hash, salt);
         atomic_write(
             context,
-            "/system/.seed-user.tmp",
-            "/system/users/administrator",
+            "/system/accounts/.seed-user.tmp",
+            "/system/accounts/users/administrator",
             miniserde::json::to_string(&user).as_bytes(),
         )
         .await?;

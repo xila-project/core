@@ -24,7 +24,7 @@ use exported_file_system::Flags;
 pub use file::*;
 pub use file_system::*;
 pub use hierarchy::*;
-pub use home::user_home;
+pub use home::{user_application_directory, user_home};
 pub use item::*;
 pub use synchronous_directory::*;
 pub use synchronous_file::*;

@@ -13,13 +13,13 @@ impl TerminalExecutable {
         task: TaskIdentifier,
     ) -> Result<Self, String> {
         let _ = virtual_file_system
-            .create_directory(task, &"/configuration/shared/shortcuts")
+            .create_directory(task, &"/configuration/shared/applications/shortcuts")
             .await;
 
         File::write_to_path(
             virtual_file_system,
             task,
-            "/configuration/shared/shortcuts/terminal.json",
+            "/configuration/shared/applications/shortcuts/terminal.json",
             application_metadata::shortcut("terminal")
                 .unwrap()
                 .as_bytes(),

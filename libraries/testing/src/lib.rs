@@ -91,14 +91,10 @@ pub async fn initialize(graphics_enabled: bool, network_enabled: bool) -> Standa
         .await
         .unwrap();
 
-    let _ = virtual_file_system
-        .create_directory(task, &"/devices/cpu")
-        .await;
-
     virtual_file_system
         .mount_static(
             task,
-            &"/devices/random",
+            &"/devices/random/source",
             ItemStatic::CharacterDevice(&RandomDevice),
         )
         .await
@@ -150,33 +146,37 @@ pub async fn initialize(graphics_enabled: bool, network_enabled: bool) -> Standa
         task,
         &[
             (
-                &"/devices/standard_in",
+                &"/devices/standard_io/input",
                 CharacterDevice,
                 drivers_std::console::StandardInDevice
             ),
             (
-                &"/devices/standard_out",
+                &"/devices/standard_io/output",
                 CharacterDevice,
                 drivers_std::console::StandardOutDevice
             ),
             (
-                &"/devices/standard_error",
+                &"/devices/standard_io/error",
                 CharacterDevice,
                 drivers_std::console::StandardErrorDevice
             ),
             (
-                &"/devices/time",
+                &"/devices/time/clock",
                 CharacterDevice,
                 drivers_std::devices::TimeDevice
             ),
             (
-                &"/devices/cpu/informations",
+                &"/devices/compute/informations",
                 CharacterDevice,
                 drivers_std::devices::CpuInformationsDevice
             ),
-            (&"/devices/null", CharacterDevice, drivers_core::NullDevice),
             (
-                &"/devices/hasher",
+                &"/devices/standard_io/null",
+                CharacterDevice,
+                drivers_core::NullDevice
+            ),
+            (
+                &"/devices/compute/hasher",
                 CharacterDevice,
                 drivers_shared::devices::HashDevice
             ),
@@ -202,8 +202,16 @@ pub async fn initialize(graphics_enabled: bool, network_enabled: bool) -> Standa
             virtual_file_system,
             task,
             &[
-                (&"/devices/http_client", CharacterDevice, *http_client),
-                (&"/devices/https_client", CharacterDevice, *https_client),
+                (
+                    &"/devices/network/http_client",
+                    CharacterDevice,
+                    *http_client
+                ),
+                (
+                    &"/devices/network/https_client",
+                    CharacterDevice,
+                    *https_client
+                ),
             ]
         )
         .await
@@ -256,9 +264,9 @@ pub async fn initialize(graphics_enabled: bool, network_enabled: bool) -> Standa
         .unwrap();
 
     Standard::open(
-        &"/devices/standard_in",
-        &"/devices/standard_out",
-        &"/devices/standard_error",
+        &"/devices/standard_io/input",
+        &"/devices/standard_io/output",
+        &"/devices/standard_io/error",
         task,
         virtual_file_system,
         executable_context,
