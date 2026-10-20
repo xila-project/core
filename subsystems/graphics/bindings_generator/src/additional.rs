@@ -7,6 +7,14 @@ pub fn get() -> TokenStream {
             pub fn keyboard_create(parent: *mut lv_obj_t) -> *mut lv_obj_t;
             pub fn keyboard_set_textarea(keyboard: *mut lv_obj_t, textarea: *mut lv_obj_t);
             pub fn object_set_padding(object: *mut lv_obj_t, padding: i32);
+            /// Selects one of the generated Xila fonts by its pixel size.
+            pub fn object_set_text_size(object: *mut lv_obj_t, size: u8);
+            /// Creates the enabled LVGL switch widget.
+            pub fn switch_create(parent: *mut lv_obj_t) -> *mut lv_obj_t;
+            /// Creates an enabled LVGL list widget.
+            pub fn list_create(parent: *mut lv_obj_t) -> *mut lv_obj_t;
+            /// Adds a text row to a list and returns its label object.
+            pub fn list_add_text(list: *mut lv_obj_t, text: *const core::ffi::c_char) -> *mut lv_obj_t;
             /// Host-owned indexed canvas. Dimensions and uploads are bounded by the host.
             pub fn indexed_canvas_create(parent: *mut lv_obj_t, width: u16, height: u16) -> *mut lv_obj_t;
 

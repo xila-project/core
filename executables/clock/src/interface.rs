@@ -1,4 +1,4 @@
-use clock::{Alarm, AlarmAlert, Settings, Stopwatch, Timer, storage::Store};
+use clock::{Alarm, AlarmAlert, MAX_LAPS, Settings, Stopwatch, Timer, storage::Store};
 use embedded_i18n::translate;
 use std::{
     ffi::{CStr, CString},
@@ -13,18 +13,14 @@ const SETTINGS_DIRECTORY: &str = "/configuration/shared/clock";
 #[derive(Clone, Copy)]
 enum Action {
     Format,
-    AlarmHour(i8),
-    AlarmMinute(i8),
     AlarmSave,
     AlarmDisable,
     AlarmDelete,
     StopwatchToggle,
     Lap,
     StopwatchReset,
-    TimerAdjust(i32),
     TimerStart,
     TimerToggle,
-    TimerRestart,
     TimerCancel,
     Snooze,
     Dismiss,
@@ -40,6 +36,15 @@ struct Interface {
     labels: [*mut Object; 8],
     rendered: [String; 8],
     weekdays: [*mut Object; 7],
+    alarm_hour_roller: *mut Object,
+    alarm_minute_roller: *mut Object,
+    alarm_enabled_switch: *mut Object,
+    timer_hour_roller: *mut Object,
+    timer_minute_roller: *mut Object,
+    timer_second_roller: *mut Object,
+    timer_arc: *mut Object,
+    laps_list: *mut Object,
+    lap_rows: [*mut Object; MAX_LAPS],
     settings: Settings,
     store: Option<Store>,
     persistence_error: bool,
@@ -97,6 +102,27 @@ pub fn run() -> wasm::Result<()> {
                 dirty = true;
             }
             dirty |= code == EventCode::ValueChanged as u32;
+            if code == EventCode::ValueChanged as u32 {
+                unsafe {
+                    if target == ui.alarm_hour_roller {
+                        ui.alarm_hour = roller_get_selected(ui.alarm_hour_roller)? as u8;
+                    } else if target == ui.alarm_minute_roller {
+                        ui.alarm_minute = roller_get_selected(ui.alarm_minute_roller)? as u8;
+                    } else if target == ui.timer_hour_roller {
+                        ui.timer.cancel();
+                        ui.timer_started = false;
+                        ui.set_timer_part(0, roller_get_selected(ui.timer_hour_roller)?);
+                    } else if target == ui.timer_minute_roller {
+                        ui.timer.cancel();
+                        ui.timer_started = false;
+                        ui.set_timer_part(1, roller_get_selected(ui.timer_minute_roller)?);
+                    } else if target == ui.timer_second_roller {
+                        ui.timer.cancel();
+                        ui.timer_started = false;
+                        ui.set_timer_part(2, roller_get_selected(ui.timer_second_roller)?);
+                    }
+                }
+            }
         }
         let visible_stopwatch =
             unsafe { tabview_get_tab_active(ui.tabs)? } == 2 && ui.watch.is_running();
@@ -168,6 +194,15 @@ impl Interface {
                 labels: [null_mut(); 8],
                 rendered: core::array::from_fn(|_| String::new()),
                 weekdays: [null_mut(); 7],
+                alarm_hour_roller: null_mut(),
+                alarm_minute_roller: null_mut(),
+                alarm_enabled_switch: null_mut(),
+                timer_hour_roller: null_mut(),
+                timer_minute_roller: null_mut(),
+                timer_second_roller: null_mut(),
+                timer_arc: null_mut(),
+                laps_list: null_mut(),
+                lap_rows: [null_mut(); MAX_LAPS],
                 settings,
                 store,
                 persistence_error,
@@ -193,21 +228,52 @@ impl Interface {
             ui.tabs = tabs;
             let clock_tab = ui.tab(translate!(c"Clock"))?;
             let clock_card = ui.card(clock_tab)?;
+            object_set_flex_align(
+                clock_card,
+                FlexAlign::Center,
+                FlexAlign::Center,
+                FlexAlign::Center,
+            )?;
             ui.label(clock_card, translate!("Current time"))?;
             ui.labels[1] = ui.label(clock_card, "")?;
+            object_set_text_size(ui.labels[1], 28)?;
+            object_set_style_text_align(ui.labels[1], TextAlign::Center, PART_MAIN)?;
             ui.labels[2] = ui.label(clock_card, "")?;
+            object_set_text_size(ui.labels[2], 18)?;
+            object_set_style_text_align(ui.labels[2], TextAlign::Center, PART_MAIN)?;
             ui.label(clock_card, translate!("UTC / host clock"))?;
             let clock_actions = ui.row(clock_card)?;
+            object_set_flex_align(
+                clock_actions,
+                FlexAlign::Center,
+                FlexAlign::Center,
+                FlexAlign::Center,
+            )?;
             ui.button(clock_actions, translate!(c"12 / 24 hour"), Action::Format)?;
 
+            let hours = numeric_options(23);
+            let minutes = numeric_options(59);
             let alarm_tab = ui.tab(translate!(c"Alarm"))?;
             let alarm_card = ui.card(alarm_tab)?;
             ui.label(alarm_card, translate!("Alarm time"))?;
             let alarm_row = ui.row(alarm_card)?;
-            ui.button(alarm_row, translate!(c"Hour -"), Action::AlarmHour(-1))?;
-            ui.button(alarm_row, translate!(c"Hour +"), Action::AlarmHour(1))?;
-            ui.button(alarm_row, translate!(c"Minute -"), Action::AlarmMinute(-1))?;
-            ui.button(alarm_row, translate!(c"Minute +"), Action::AlarmMinute(1))?;
+            object_set_flex_align(
+                alarm_row,
+                FlexAlign::Center,
+                FlexAlign::Center,
+                FlexAlign::Center,
+            )?;
+            ui.alarm_hour_roller = ui.roller(alarm_row, &hours, u32::from(ui.alarm_hour), 88)?;
+            let separator = ui.compact_label(alarm_row, ":")?;
+            object_set_text_size(separator, 28)?;
+            ui.alarm_minute_roller =
+                ui.roller(alarm_row, &minutes, u32::from(ui.alarm_minute), 88)?;
+            let alarm_enable_row = ui.row(alarm_card)?;
+            ui.compact_label(alarm_enable_row, translate!("Alarm enabled: "))?;
+            ui.alarm_enabled_switch = switch_create(alarm_enable_row)?;
+            if settings.alarm.is_some_and(|alarm| alarm.enabled()) {
+                object_add_state(ui.alarm_enabled_switch, STATE_CHECKED)?;
+            }
             ui.labels[3] = ui.label(alarm_card, "")?;
             ui.label(
                 alarm_card,
@@ -235,19 +301,28 @@ impl Interface {
                 ui.weekdays[index] = checkbox;
             }
             let alarm_actions = ui.row(alarm_card)?;
-            ui.button(
-                alarm_actions,
-                translate!(c"Save and enable"),
-                Action::AlarmSave,
-            )?;
+            ui.button(alarm_actions, translate!(c"Save alarm"), Action::AlarmSave)?;
             ui.button(alarm_actions, translate!(c"Disable"), Action::AlarmDisable)?;
             ui.button(alarm_actions, translate!(c"Delete"), Action::AlarmDelete)?;
 
             let watch_tab = ui.tab(translate!(c"Stopwatch"))?;
             let watch_card = ui.card(watch_tab)?;
-            ui.label(watch_card, translate!("Stopwatch"))?;
+            object_set_flex_align(
+                watch_card,
+                FlexAlign::Center,
+                FlexAlign::Center,
+                FlexAlign::Center,
+            )?;
             ui.labels[4] = ui.label(watch_card, "")?;
+            object_set_text_size(ui.labels[4], 28)?;
+            object_set_style_text_align(ui.labels[4], TextAlign::Center, PART_MAIN)?;
             let watch_actions = ui.row(watch_card)?;
+            object_set_flex_align(
+                watch_actions,
+                FlexAlign::Center,
+                FlexAlign::Center,
+                FlexAlign::Center,
+            )?;
             ui.button(
                 watch_actions,
                 translate!(c"Start / pause"),
@@ -256,42 +331,69 @@ impl Interface {
             ui.button(watch_actions, translate!(c"Lap"), Action::Lap)?;
             ui.button(watch_actions, translate!(c"Reset"), Action::StopwatchReset)?;
             ui.labels[5] = ui.label(watch_card, "")?;
+            ui.laps_list = list_create(watch_card)?;
+            object_set_width(ui.laps_list, percentage(100)?)?;
+            object_set_height(ui.laps_list, 180)?;
+            let empty = CString::new("").expect("empty string contains no NUL");
+            for row in &mut ui.lap_rows {
+                *row = list_add_text(ui.laps_list, empty.as_ptr())?;
+                object_add_flag(*row, ObjectFlag::Hidden)?;
+            }
 
             let timer_tab = ui.tab(translate!(c"Timer"))?;
             let timer_card = ui.card(timer_tab)?;
-            ui.label(timer_card, translate!("Timer"))?;
+            object_set_flex_align(
+                timer_card,
+                FlexAlign::Center,
+                FlexAlign::Center,
+                FlexAlign::Center,
+            )?;
             ui.labels[6] = ui.label(timer_card, "")?;
-            object_set_height(ui.labels[6], 72)?;
+            object_set_text_size(ui.labels[6], 28)?;
+            object_set_style_text_align(ui.labels[6], TextAlign::Center, PART_MAIN)?;
+            let arc_row = ui.row(timer_card)?;
+            object_set_flex_align(
+                arc_row,
+                FlexAlign::Center,
+                FlexAlign::Center,
+                FlexAlign::Center,
+            )?;
+            ui.timer_arc = arc_create(arc_row)?;
+            object_set_width(ui.timer_arc, 180)?;
+            object_set_height(ui.timer_arc, 180)?;
+            arc_set_range(ui.timer_arc, 0, 1000)?;
+            arc_set_bg_angles(ui.timer_arc, 0, 360)?;
+            arc_set_rotation(ui.timer_arc, 270)?;
+            arc_set_mode(ui.timer_arc, ArcMode::Normal)?;
+            arc_set_value(ui.timer_arc, 1000)?;
             ui.labels[7] = ui.label(timer_card, "")?;
-            let duration_row = ui.row(timer_card)?;
-            ui.button(
-                duration_row,
-                translate!(c"Minute -"),
-                Action::TimerAdjust(-60),
+            let timer_row = ui.row(timer_card)?;
+            object_set_flex_align(
+                timer_row,
+                FlexAlign::Center,
+                FlexAlign::Center,
+                FlexAlign::Center,
             )?;
-            ui.button(
-                duration_row,
-                translate!(c"Minute +"),
-                Action::TimerAdjust(60),
-            )?;
-            ui.button(
-                duration_row,
-                translate!(c"Second -"),
-                Action::TimerAdjust(-1),
-            )?;
-            ui.button(
-                duration_row,
-                translate!(c"Second +"),
-                Action::TimerAdjust(1),
-            )?;
+            ui.timer_hour_roller = ui.roller(timer_row, &hours, 0, 68)?;
+            let timer_hour_suffix = ui.compact_label(timer_row, ":")?;
+            object_set_text_size(timer_hour_suffix, 18)?;
+            ui.timer_minute_roller = ui.roller(timer_row, &minutes, 5, 68)?;
+            let timer_minute_suffix = ui.compact_label(timer_row, ":")?;
+            object_set_text_size(timer_minute_suffix, 18)?;
+            ui.timer_second_roller = ui.roller(timer_row, &minutes, 0, 68)?;
             let timer_actions = ui.row(timer_card)?;
+            object_set_flex_align(
+                timer_actions,
+                FlexAlign::Center,
+                FlexAlign::Center,
+                FlexAlign::Center,
+            )?;
             ui.button(timer_actions, translate!(c"Start"), Action::TimerStart)?;
             ui.button(
                 timer_actions,
                 translate!(c"Pause / resume"),
                 Action::TimerToggle,
             )?;
-            ui.button(timer_actions, translate!(c"Restart"), Action::TimerRestart)?;
             ui.button(timer_actions, translate!(c"Cancel"), Action::TimerCancel)?;
             Ok(ui)
         }
@@ -303,6 +405,29 @@ impl Interface {
             object_set_width(label, percentage(100)?)?;
             Self::text(label, text)?;
             Ok(label)
+        }
+    }
+    unsafe fn compact_label(&self, parent: *mut Object, text: &str) -> wasm::Result<*mut Object> {
+        unsafe {
+            let label = label_create(parent)?;
+            Self::text(label, text)?;
+            Ok(label)
+        }
+    }
+    unsafe fn roller(
+        &self,
+        parent: *mut Object,
+        options: &CStr,
+        selected: u32,
+        width: i32,
+    ) -> wasm::Result<*mut Object> {
+        unsafe {
+            let roller = roller_create(parent)?;
+            roller_set_options(roller, options.as_ptr(), RollerMode::Normal)?;
+            roller_set_visible_row_count(roller, 3)?;
+            roller_set_selected(roller, selected, AnimEnable::Off)?;
+            object_set_width(roller, width)?;
+            Ok(roller)
         }
     }
     unsafe fn card(&self, parent: *mut Object) -> wasm::Result<*mut Object> {
@@ -361,6 +486,17 @@ impl Interface {
             Ok(button)
         }
     }
+    unsafe fn set_timer_part(&mut self, part: u8, value: u32) {
+        let hour = self.timer_seconds / 3600;
+        let minute = self.timer_seconds / 60 % 60;
+        let second = self.timer_seconds % 60;
+        let (hour, minute, second) = match part {
+            0 => (value.min(23), minute, second),
+            1 => (hour, value.min(59), second),
+            _ => (hour, minute, value.min(59)),
+        };
+        self.timer_seconds = hour * 3600 + minute * 60 + second;
+    }
     fn persist(&mut self) {
         if let Some(store) = &mut self.store {
             self.persistence_error = match store.save(&self.settings) {
@@ -390,14 +526,6 @@ impl Interface {
                     self.settings.twelve_hour = !self.settings.twelve_hour;
                     self.persist();
                 }
-                Action::AlarmHour(delta) => {
-                    self.alarm_hour =
-                        (i16::from(self.alarm_hour) + i16::from(delta)).rem_euclid(24) as u8
-                }
-                Action::AlarmMinute(delta) => {
-                    self.alarm_minute =
-                        (i16::from(self.alarm_minute) + i16::from(delta)).rem_euclid(60) as u8
-                }
                 Action::AlarmSave => {
                     if let Some(wall) = wall {
                         let mut days = 0;
@@ -408,13 +536,16 @@ impl Interface {
                         }
                         let mut alarm =
                             Alarm::new(self.alarm_hour, self.alarm_minute, days).unwrap();
-                        alarm.arm(wall);
+                        if object_get_state(self.alarm_enabled_switch)? & STATE_CHECKED != 0 {
+                            alarm.arm(wall);
+                        }
                         self.settings.alarm = Some(alarm);
                         self.alarm_alert.dismiss();
                         self.persist();
                     }
                 }
                 Action::AlarmDisable | Action::AlarmDelete => {
+                    object_remove_state(self.alarm_enabled_switch, STATE_CHECKED)?;
                     if let Some(alarm) = self.settings.alarm.as_mut() {
                         alarm.disable();
                     }
@@ -432,14 +563,30 @@ impl Interface {
                     }
                 }
                 Action::Lap => {
+                    let count = self.watch.laps().len();
                     self.watch.lap(now);
+                    if self.watch.laps().len() > count
+                        && let Some(lap) = self.watch.laps().last()
+                    {
+                        let row = format!(
+                            "{}   {}",
+                            self.watch.laps().len(),
+                            format_duration(*lap, true)
+                        );
+                        let index = self.watch.laps().len() - 1;
+                        Self::text(self.lap_rows[index], &row)?;
+                        object_remove_flag(self.lap_rows[index], ObjectFlag::Hidden)?;
+                    }
                 }
-                Action::StopwatchReset => self.watch.reset(),
-                Action::TimerAdjust(delta) => {
-                    self.timer_seconds =
-                        (i64::from(self.timer_seconds) + i64::from(delta)).clamp(1, 86400) as u32
+                Action::StopwatchReset => {
+                    self.watch.reset();
+                    for row in self.lap_rows {
+                        Self::text(row, "")?;
+                        object_add_flag(row, ObjectFlag::Hidden)?;
+                    }
                 }
                 Action::TimerStart => {
+                    self.timer_seconds = self.timer_seconds.clamp(1, 86_399);
                     self.timer.start(u64::from(self.timer_seconds) * 1000, now);
                     self.timer_started = true;
                 }
@@ -448,11 +595,6 @@ impl Interface {
                         self.timer.pause(now);
                     } else if self.timer_started {
                         self.timer.resume(now);
-                    }
-                }
-                Action::TimerRestart => {
-                    if self.timer_started {
-                        self.timer.restart(now);
                     }
                 }
                 Action::TimerCancel => {
@@ -545,19 +687,18 @@ impl Interface {
         } else {
             String::new()
         };
-        let mut laps = String::new();
-        if active == 2 {
+        let laps = if active == 2 && !self.watch.laps().is_empty() {
             use core::fmt::Write;
-            let count = self.watch.laps().len();
-            if count != 0 {
-                // Compiled locale forms; selection does not allocate.
-                let _ = embedded_i18n::translate_plural_write!(&mut laps, "Recorded laps", count);
-                laps.push('\n');
-            }
-            for (index, lap) in self.watch.laps().iter().enumerate() {
-                let _ = writeln!(laps, "{}: {}", index + 1, format_duration(*lap, true));
-            }
-        }
+            let mut plural_text = String::new();
+            let _ = embedded_i18n::translate_plural_write!(
+                &mut plural_text,
+                "Recorded laps",
+                self.watch.laps().len()
+            );
+            plural_text
+        } else {
+            String::new()
+        };
         let (timer, timer_duration) = if active == 3 {
             let duration = u64::from(self.timer_seconds) * 1000;
             let remaining = if self.timer_started {
@@ -576,6 +717,20 @@ impl Interface {
         } else {
             (String::new(), String::new())
         };
+        if active == 3 {
+            let duration = u64::from(self.timer_seconds) * 1000;
+            let remaining = if self.timer_started {
+                self.timer.remaining(now)
+            } else {
+                duration
+            };
+            let progress = if duration == 0 {
+                0
+            } else {
+                (remaining.saturating_mul(1000) / duration).min(1000) as i32
+            };
+            unsafe { arc_set_value(self.timer_arc, progress)? };
+        }
         for (index, text) in [
             alert,
             clock,
@@ -604,6 +759,18 @@ impl Interface {
         }
         Ok(())
     }
+}
+
+fn numeric_options(maximum: u8) -> CString {
+    let mut options = String::new();
+    for value in 0..=maximum {
+        if value != 0 {
+            options.push('\n');
+        }
+        use core::fmt::Write;
+        let _ = write!(options, "{value:02}");
+    }
+    CString::new(options).expect("numeric roller options contain no NUL")
 }
 
 fn format_duration(milliseconds: u64, tenths: bool) -> String {

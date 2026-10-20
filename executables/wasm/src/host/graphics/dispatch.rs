@@ -64,7 +64,11 @@ pub fn dispatch(
         | Function::TabviewCreate
         | Function::ButtonmatrixCreate
         | Function::TextareaCreate
-        | Function::KeyboardCreate => {
+        | Function::KeyboardCreate
+        | Function::RollerCreate
+        | Function::SwitchCreate
+        | Function::ArcCreate
+        | Function::ListCreate => {
             state.ensure_capacity()?;
             let (pointer, kind, parent) = if function == Function::WindowCreate {
                 let window = xila::task::block_on(manager.create_window())
@@ -91,6 +95,10 @@ pub fn dispatch(
                         Function::ButtonmatrixCreate => {
                             (lvgl::lv_buttonmatrix_create(parent), Kind::ButtonMatrix)
                         }
+                        Function::RollerCreate => (lvgl::lv_roller_create(parent), Kind::Roller),
+                        Function::SwitchCreate => (lvgl::lv_switch_create(parent), Kind::Object),
+                        Function::ArcCreate => (lvgl::lv_arc_create(parent), Kind::Arc),
+                        Function::ListCreate => (lvgl::lv_list_create(parent), Kind::List),
                         _ => unreachable!(),
                     }
                 };
@@ -115,6 +123,110 @@ pub fn dispatch(
         Function::ObjectDelete => {
             unsafe { lvgl::lv_obj_delete(state.object(a, None)?) };
             state.reap_deleted_maps();
+        }
+        Function::RollerSetOptions => {
+            let roller = state.object(a, Some(Kind::Roller))?;
+            let options = read_c_string(memory, b)?;
+            if c > lvgl::lv_roller_mode_t_LV_ROLLER_MODE_INFINITE {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_roller_set_options(roller, options.as_ptr(), c as _) };
+        }
+        Function::RollerSetSelected | Function::RollerSetVisibleRowCount => {
+            let roller = state.object(a, Some(Kind::Roller))?;
+            if function == Function::RollerSetSelected {
+                if c > 1 {
+                    return Err(GraphicsError::InvalidValue);
+                }
+                let selected = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+                unsafe { lvgl::lv_roller_set_selected(roller, selected, c != 0) };
+            } else {
+                let rows = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+                if !(1..=9).contains(&rows) {
+                    return Err(GraphicsError::InvalidValue);
+                }
+                unsafe { lvgl::lv_roller_set_visible_row_count(roller, rows) };
+            }
+        }
+        Function::RollerGetSelected => {
+            let roller = state.object(a, Some(Kind::Roller))?;
+            let selected = unsafe { lvgl::lv_roller_get_selected(roller) };
+            memory
+                .write(GuestPointer::new(call.result), selected)
+                .expect("validated result");
+        }
+        Function::ArcSetRange
+        | Function::ArcSetValue
+        | Function::ArcSetBgAngles
+        | Function::ArcSetRotation
+        | Function::ArcSetMode => {
+            let arc = state.object(a, Some(Kind::Arc))?;
+            unsafe {
+                match function {
+                    Function::ArcSetRange => {
+                        let min = i32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+                        let max = i32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+                        if min >= max || min < 0 || max > 100_000 {
+                            return Err(GraphicsError::InvalidValue);
+                        }
+                        lvgl::lv_arc_set_range(arc, min, max);
+                    }
+                    Function::ArcSetValue => {
+                        let value = i32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+                        lvgl::lv_arc_set_value(arc, value);
+                    }
+                    Function::ArcSetBgAngles => {
+                        let start = i32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+                        let end = i32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+                        if !(0..=360).contains(&start) || !(0..=360).contains(&end) {
+                            return Err(GraphicsError::InvalidValue);
+                        }
+                        lvgl::lv_arc_set_bg_angles(arc, start, end);
+                    }
+                    Function::ArcSetRotation => {
+                        let rotation = i32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+                        if !(0..=360).contains(&rotation) {
+                            return Err(GraphicsError::InvalidValue);
+                        }
+                        lvgl::lv_arc_set_rotation(arc, rotation);
+                    }
+                    Function::ArcSetMode => {
+                        if b > lvgl::lv_arc_mode_t_LV_ARC_MODE_REVERSE {
+                            return Err(GraphicsError::InvalidValue);
+                        }
+                        lvgl::lv_arc_set_mode(arc, b as _);
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+        Function::ListAddText => {
+            state.ensure_capacity()?;
+            let list = state.object(a, Some(Kind::List))?;
+            let text = read_c_string(memory, b)?;
+            let label = unsafe { lvgl::lv_list_add_text(list, text.as_ptr()) };
+            let handle = state.insert(label, Kind::Label, Some(a))?;
+            memory
+                .write(GuestPointer::new(call.result), handle)
+                .expect("validated result");
+        }
+        Function::ObjectSetTextSize => {
+            let object = state.object(a, None)?;
+            let font = match b {
+                10 => xila::graphics::fonts::get_font_small(),
+                14 => xila::graphics::fonts::get_font_medium(),
+                18 => xila::graphics::fonts::get_font_large(),
+                28 => xila::graphics::fonts::get_font_extra_large(),
+                _ => return Err(GraphicsError::InvalidValue),
+            };
+            unsafe { lvgl::lv_obj_set_style_text_font(object, font, 0) };
+        }
+        Function::ObjectSetStyleTextAlign => {
+            let object = state.object(a, None)?;
+            if b > lvgl::lv_text_align_t_LV_TEXT_ALIGN_RIGHT || c != 0 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_obj_set_style_text_align(object, b as _, 0) };
         }
         Function::WindowSetIcon => {
             let pointer = state.object(a, Some(Kind::Window))?;
@@ -328,7 +440,9 @@ pub fn dispatch(
         | Function::ObjectSetFlexGrow
         | Function::ObjectSetHeight
         | Function::ObjectSetWidth
+        | Function::ObjectSetFlexAlign
         | Function::ObjectAddState
+        | Function::ObjectRemoveState
         | Function::ObjectAddFlag
         | Function::ObjectRemoveFlag => {
             let pointer = state.object(a, None)?;
@@ -346,12 +460,39 @@ pub fn dispatch(
                     ),
                     Function::ObjectSetHeight => lvgl::lv_obj_set_height(pointer, b as i32),
                     Function::ObjectSetWidth => lvgl::lv_obj_set_width(pointer, b as i32),
+                    Function::ObjectSetFlexAlign => {
+                        let main_place =
+                            u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+                        let cross_place =
+                            u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+                        let track_place = u32::try_from(call.arguments[3])
+                            .map_err(|_| GraphicsError::InvalidValue)?;
+                        if main_place > lvgl::lv_flex_align_t_LV_FLEX_ALIGN_SPACE_BETWEEN
+                            || cross_place > lvgl::lv_flex_align_t_LV_FLEX_ALIGN_SPACE_BETWEEN
+                            || track_place > lvgl::lv_flex_align_t_LV_FLEX_ALIGN_SPACE_BETWEEN
+                        {
+                            return Err(GraphicsError::InvalidValue);
+                        }
+                        lvgl::lv_obj_set_flex_align(
+                            pointer,
+                            main_place as _,
+                            cross_place as _,
+                            track_place as _,
+                        );
+                    }
                     Function::ObjectAddState => {
                         let state = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
                         if state & !lvgl::lv_state_t_LV_STATE_ANY != 0 {
                             return Err(GraphicsError::InvalidValue);
                         }
                         lvgl::lv_obj_add_state(pointer, state);
+                    }
+                    Function::ObjectRemoveState => {
+                        let state = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+                        if state & !lvgl::lv_state_t_LV_STATE_ANY != 0 {
+                            return Err(GraphicsError::InvalidValue);
+                        }
+                        lvgl::lv_obj_remove_state(pointer, state);
                     }
                     Function::ObjectRemoveFlag => lvgl::lv_obj_remove_flag(
                         pointer,

@@ -43,6 +43,9 @@ pub(crate) enum Kind {
     IndexedCanvas,
     Textarea,
     Keyboard,
+    Roller,
+    Arc,
+    List,
 }
 
 struct Entry {

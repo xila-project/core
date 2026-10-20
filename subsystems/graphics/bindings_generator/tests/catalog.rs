@@ -155,6 +155,10 @@ fn actual_lvgl_catalog_matches_discovered_numbering() {
         "keyboard_create",
         "keyboard_set_textarea",
         "object_set_padding",
+        "object_set_text_size",
+        "switch_create",
+        "list_create",
+        "list_add_text",
     ];
     signatures.retain(|signature| !extensions.contains(&signature.ident.to_string().as_str()));
     signatures.sort_by_key(|s| s.ident.to_string().to_lowercase());

@@ -44,5 +44,6 @@
   "UTC / host clock. City time zones are not available yet.": "UTC / czas systemowy. Strefy czasowe miast nie są jeszcze dostępne.",
   "Wed": "Śr",
   "Recorded laps.few": "Zapisano {count} okrążenia",
-  "Recorded laps.many": "Zapisano {count} okrążeń"
+  "Recorded laps.many": "Zapisano {count} okrążeń",
+  "Save alarm": "Zapisz alarm"
 }

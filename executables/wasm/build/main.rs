@@ -63,7 +63,24 @@ fn generate() {
         ("object_set_height", &["*mut lv_obj_t", "i32"], "None", None),
         ("object_set_width", &["*mut lv_obj_t", "i32"], "None", None),
         (
+            "object_set_flex_align",
+            &[
+                "*mut lv_obj_t",
+                "lv_flex_align_t",
+                "lv_flex_align_t",
+                "lv_flex_align_t",
+            ],
+            "None",
+            None,
+        ),
+        (
             "object_add_state",
+            &["*mut lv_obj_t", "lv_state_t"],
+            "None",
+            None,
+        ),
+        (
+            "object_remove_state",
             &["*mut lv_obj_t", "lv_state_t"],
             "None",
             None,
@@ -146,6 +163,72 @@ fn generate() {
             "U32",
             Some("u32"),
         ),
+        (
+            "roller_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "roller_set_options",
+            &[
+                "*mut lv_obj_t",
+                "*const core::ffi::c_char",
+                "lv_roller_mode_t",
+            ],
+            "None",
+            None,
+        ),
+        (
+            "roller_set_selected",
+            &["*mut lv_obj_t", "u32", "lv_anim_enable_t"],
+            "None",
+            None,
+        ),
+        (
+            "roller_get_selected",
+            &["*const lv_obj_t"],
+            "U32",
+            Some("u32"),
+        ),
+        (
+            "roller_set_visible_row_count",
+            &["*mut lv_obj_t", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "arc_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "arc_set_range",
+            &["*mut lv_obj_t", "i32", "i32"],
+            "None",
+            None,
+        ),
+        ("arc_set_value", &["*mut lv_obj_t", "i32"], "None", None),
+        (
+            "arc_set_bg_angles",
+            &["*mut lv_obj_t", "lv_value_precise_t", "lv_value_precise_t"],
+            "None",
+            None,
+        ),
+        ("arc_set_rotation", &["*mut lv_obj_t", "i32"], "None", None),
+        (
+            "arc_set_mode",
+            &["*mut lv_obj_t", "lv_arc_mode_t"],
+            "None",
+            None,
+        ),
+        (
+            "object_set_style_text_align",
+            &["*mut lv_obj_t", "lv_text_align_t", "lv_style_selector_t"],
+            "None",
+            None,
+        ),
     ];
     let extra: &[Adapter<'_>] = &[
         (
@@ -153,6 +236,30 @@ fn generate() {
             &["*mut lv_obj_t", "i32"],
             "None",
             None,
+        ),
+        (
+            "object_set_text_size",
+            &["*mut lv_obj_t", "u8"],
+            "None",
+            None,
+        ),
+        (
+            "switch_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "list_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "list_add_text",
+            &["*mut lv_obj_t", "*const core::ffi::c_char"],
+            "Word",
+            Some("*mut lv_obj_t"),
         ),
         (
             "indexed_canvas_create",

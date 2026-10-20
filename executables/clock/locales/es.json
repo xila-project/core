@@ -42,5 +42,6 @@
   "Timer finished! ": "¡Temporizador finalizado! ",
   "Tue": "Mar",
   "UTC / host clock. City time zones are not available yet.": "UTC / hora del sistema. Las zonas horarias de ciudades aún no están disponibles.",
-  "Wed": "Mié"
+  "Wed": "Mié",
+  "Save alarm": "Guardar alarma"
 }

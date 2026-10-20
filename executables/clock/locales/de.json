@@ -42,5 +42,6 @@
   "Timer finished! ": "Timer abgelaufen! ",
   "Tue": "Di",
   "UTC / host clock. City time zones are not available yet.": "UTC / Systemzeit. Zeitzonen für Städte sind noch nicht verfügbar.",
-  "Wed": "Mi"
+  "Wed": "Mi",
+  "Save alarm": "Wecker speichern"
 }
