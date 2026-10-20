@@ -68,6 +68,17 @@ fn fixture_paths_are_unique_relative_and_cover_required_categories() {
     assert!(
         corpus
             .iter()
+            .any(|fixture| { fixture.path.ends_with("large.txt") && fixture.data.len() >= 16_384 })
+    );
+    assert!(
+        corpus
+            .iter()
             .any(|fixture| fixture.path.ends_with("boundary.txt") && fixture.path.len() >= 200)
     );
+    let boundary = corpus
+        .iter()
+        .find(|fixture| fixture.path.ends_with("boundary.txt"))
+        .unwrap();
+    assert!(boundary.path.rsplit('/').next().unwrap().len() <= 100);
+    assert!(boundary.path.rsplit_once('/').unwrap().0.len() <= 155);
 }
