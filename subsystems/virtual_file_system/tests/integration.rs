@@ -631,6 +631,10 @@ async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
             .kind,
         file_system::Kind::File
     );
+    assert!(matches!(
+        vfs.get_statistics(Path::from_str("/links/absolute/")).await,
+        Err(VfsError::NotADirectory)
+    ));
 
     let mut target = [0; 64];
     let length = vfs

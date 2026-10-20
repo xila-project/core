@@ -109,6 +109,46 @@ impl VirtualFileSystem {
         user: UserIdentifier,
         task: TaskIdentifier,
     ) -> Result<ResolvedPath<'a>> {
+        let require_directory = path.as_str().len() > 1 && path.as_str().ends_with('/');
+        let resolved = self
+            .resolve_path_inner(
+                file_systems,
+                path,
+                follow_final || require_directory,
+                allow_missing_final,
+                user,
+                task,
+            )
+            .await?;
+        if require_directory {
+            let (file_system, relative_path, _) =
+                Self::get_file_system_from_path(file_systems, &resolved)?;
+            let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
+            match Self::get_attributes(file_system.file_system, relative_path, &mut attributes)
+                .await
+            {
+                Ok(()) => {}
+                Err(Error::FileSystem(file_system::Error::NotFound)) if allow_missing_final => {
+                    return Ok(resolved);
+                }
+                Err(error) => return Err(error),
+            }
+            if attributes.get_kind() != Some(&Kind::Directory) {
+                return Err(Error::NotADirectory);
+            }
+        }
+        Ok(resolved)
+    }
+
+    async fn resolve_path_inner<'a>(
+        &self,
+        file_systems: &FileSystemsArray,
+        path: &'a Path,
+        follow_final: bool,
+        allow_missing_final: bool,
+        user: UserIdentifier,
+        task: TaskIdentifier,
+    ) -> Result<ResolvedPath<'a>> {
         const MAX_PATH_LENGTH: usize = 4096;
         if !path.is_valid() || !path.is_absolute() || path.get_length() > MAX_PATH_LENGTH {
             return Err(Error::InvalidPath);

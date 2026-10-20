@@ -339,6 +339,9 @@ impl VirtualFileSystem {
             )
             .await?;
         } else if open.contains(CreateFlags::Create) {
+            if requested_path.as_str().len() > 1 && requested_path.as_str().ends_with('/') {
+                return Err(Error::NotADirectory);
+            }
             // Authorize before mutating the filesystem, including failed redirections.
             self.check_permissions(
                 file_system.file_system,
@@ -668,7 +671,7 @@ impl VirtualFileSystem {
     }
 
     pub async fn remove(&self, task: TaskIdentifier, path: impl AsRef<Path>) -> Result<()> {
-        let file_systems = self.file_systems.read().await; // Get the file systems
+        let file_systems = self.file_systems.write().await; // Serialize path resolution with removal.
         let (_, user, _) = self.get_time_user_group(task).await?;
         let resolved_path = self
             .resolve_path(&file_systems, path.as_ref(), false, false, user, task)
@@ -710,7 +713,7 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         path: &impl AsRef<Path>,
     ) -> Result<()> {
-        let file_systems = self.file_systems.read().await; // Get the file systems
+        let file_systems = self.file_systems.write().await; // Serialize path resolution with creation.
         let (time, user, group) = self.get_time_user_group(task).await?;
         let resolved_path = self
             .resolve_path(&file_systems, path.as_ref(), false, true, user, task)
@@ -774,6 +777,7 @@ impl VirtualFileSystem {
             || !link.is_valid()
             || !link.is_absolute()
             || link.is_root()
+            || link.as_str().ends_with('/')
         {
             return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
         }
@@ -999,7 +1003,7 @@ impl VirtualFileSystem {
         old_path: &impl AsRef<Path>,
         new_path: &impl AsRef<Path>,
     ) -> Result<()> {
-        let file_systems = self.file_systems.read().await; // Get the file systems
+        let file_systems = self.file_systems.write().await; // Serialize source/destination resolution with rename.
         let (_, user, _) = self.get_time_user_group(task).await?;
         let old_path = self
             .resolve_path(&file_systems, old_path.as_ref(), false, false, user, task)
