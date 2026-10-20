@@ -10,21 +10,18 @@ use wasm::*;
 
 const SETTINGS_DIRECTORY: &str = "/configuration/shared/clock";
 
-const fn color(red: u8, green: u8, blue: u8) -> Color {
-    Color { red, green, blue }
-}
-
 #[derive(Clone, Copy)]
 enum Action {
     Format,
-    AlarmTimeChanged,
+    AlarmHour(i8),
+    AlarmMinute(i8),
     AlarmSave,
     AlarmDisable,
     AlarmDelete,
     StopwatchToggle,
     Lap,
     StopwatchReset,
-    TimerDurationChanged,
+    TimerAdjust(i32),
     TimerStart,
     TimerToggle,
     TimerRestart,
@@ -43,15 +40,10 @@ struct Interface {
     labels: [*mut Object; 8],
     rendered: [String; 8],
     weekdays: [*mut Object; 7],
-    alarm_hour_input: *mut Object,
-    alarm_minute_input: *mut Object,
-    timer_minute_input: *mut Object,
-    timer_second_input: *mut Object,
-    timer_arc: *mut Object,
-    timer_started: bool,
     settings: Settings,
     store: Option<Store>,
     persistence_error: bool,
+    timer_started: bool,
     watch: Stopwatch,
     timer: Timer,
     timer_seconds: u32,
@@ -92,7 +84,7 @@ pub fn run() -> wasm::Result<()> {
             if code == EventCode::All as u32 {
                 break;
             }
-            if (code == EventCode::Clicked as u32 || code == EventCode::ValueChanged as u32)
+            if code == EventCode::Clicked as u32
                 && let Some((_, action)) = ui
                     .controls
                     .iter()
@@ -157,7 +149,6 @@ impl Interface {
     ) -> wasm::Result<Self> {
         unsafe {
             object_set_flex_flow(window, FlexFlow::Column)?;
-            Self::surface(window, color(0, 0, 0), color(0, 0, 0), 0, 0)?;
             window_set_icon(
                 window,
                 c"Cl".as_ptr(),
@@ -177,15 +168,10 @@ impl Interface {
                 labels: [null_mut(); 8],
                 rendered: core::array::from_fn(|_| String::new()),
                 weekdays: [null_mut(); 7],
-                alarm_hour_input: null_mut(),
-                alarm_minute_input: null_mut(),
-                timer_minute_input: null_mut(),
-                timer_second_input: null_mut(),
-                timer_arc: null_mut(),
-                timer_started: false,
                 settings,
                 store,
                 persistence_error,
+                timer_started: false,
                 watch: Stopwatch::default(),
                 timer: Timer::default(),
                 timer_seconds: 300,
@@ -204,19 +190,12 @@ impl Interface {
             let tabs = tabview_create(window)?;
             object_set_width(tabs, percentage(100)?)?;
             object_set_flex_grow(tabs, 1)?;
-            Self::surface(tabs, color(0, 0, 0), color(0, 0, 0), 0, 0)?;
             ui.tabs = tabs;
             let clock_tab = ui.tab(translate!(c"Clock"))?;
             let clock_card = ui.card(clock_tab)?;
             ui.label(clock_card, translate!("Current time"))?;
             ui.labels[1] = ui.label(clock_card, "")?;
-            object_set_height(ui.labels[1], 112)?;
-            object_set_style_transform_scale_x(ui.labels[1], 768, PART_MAIN)?;
-            object_set_style_transform_scale_y(ui.labels[1], 768, PART_MAIN)?;
-            object_set_style_text_align(ui.labels[1], TextAlign::Center, PART_MAIN)?;
-            object_set_style_text_color(ui.labels[1], color(255, 255, 255), PART_MAIN)?;
             ui.labels[2] = ui.label(clock_card, "")?;
-            object_set_style_text_color(ui.labels[2], color(142, 142, 147), PART_MAIN)?;
             ui.label(clock_card, translate!("UTC / host clock"))?;
             let clock_actions = ui.row(clock_card)?;
             ui.button(clock_actions, translate!(c"12 / 24 hour"), Action::Format)?;
@@ -225,14 +204,11 @@ impl Interface {
             let alarm_card = ui.card(alarm_tab)?;
             ui.label(alarm_card, translate!("Alarm time"))?;
             let alarm_row = ui.row(alarm_card)?;
-            ui.alarm_hour_input = ui.spinbox(alarm_row, 0, 23, 2, ui.alarm_hour as i32)?;
-            ui.inline_label(alarm_row, ":")?;
-            ui.alarm_minute_input = ui.spinbox(alarm_row, 0, 59, 2, ui.alarm_minute as i32)?;
-            ui.controls
-                .push((ui.alarm_hour_input, Action::AlarmTimeChanged));
-            ui.controls
-                .push((ui.alarm_minute_input, Action::AlarmTimeChanged));
-            ui.labels[3] = ui.label(alarm_card, translate!("No saved alarm"))?;
+            ui.button(alarm_row, translate!(c"Hour -"), Action::AlarmHour(-1))?;
+            ui.button(alarm_row, translate!(c"Hour +"), Action::AlarmHour(1))?;
+            ui.button(alarm_row, translate!(c"Minute -"), Action::AlarmMinute(-1))?;
+            ui.button(alarm_row, translate!(c"Minute +"), Action::AlarmMinute(1))?;
+            ui.labels[3] = ui.label(alarm_card, "")?;
             ui.label(
                 alarm_card,
                 translate!("Repeat on selected days; none means once. All times are UTC."),
@@ -271,10 +247,6 @@ impl Interface {
             let watch_card = ui.card(watch_tab)?;
             ui.label(watch_card, translate!("Stopwatch"))?;
             ui.labels[4] = ui.label(watch_card, "")?;
-            object_set_height(ui.labels[4], 72)?;
-            object_set_style_transform_scale_x(ui.labels[4], 640, PART_MAIN)?;
-            object_set_style_transform_scale_y(ui.labels[4], 640, PART_MAIN)?;
-            object_set_style_text_align(ui.labels[4], TextAlign::Center, PART_MAIN)?;
             let watch_actions = ui.row(watch_card)?;
             ui.button(
                 watch_actions,
@@ -288,38 +260,30 @@ impl Interface {
             let timer_tab = ui.tab(translate!(c"Timer"))?;
             let timer_card = ui.card(timer_tab)?;
             ui.label(timer_card, translate!("Timer"))?;
-            let timer_content = ui.row(timer_card)?;
-            let timer_dial = object_create(timer_content)?;
-            object_set_width(timer_dial, 180)?;
-            object_set_height(timer_dial, 180)?;
-            ui.timer_arc = arc_create(timer_dial)?;
-            object_set_width(ui.timer_arc, 180)?;
-            object_set_height(ui.timer_arc, 180)?;
-            object_align(ui.timer_arc, Align::Center, 0, 0)?;
-            arc_set_range(ui.timer_arc, 0, 100)?;
-            arc_set_value(ui.timer_arc, 100)?;
-            arc_set_rotation(ui.timer_arc, 135)?;
-            object_remove_flag(ui.timer_arc, ObjectFlag::Clickable)?;
-            object_set_style_arc_color(ui.timer_arc, color(52, 58, 69), PART_MAIN)?;
-            object_set_style_arc_width(ui.timer_arc, 12, PART_MAIN)?;
-            object_set_style_arc_color(ui.timer_arc, color(59, 130, 246), PART_INDICATOR)?;
-            object_set_style_arc_width(ui.timer_arc, 12, PART_INDICATOR)?;
-            ui.labels[6] = ui.inline_label(timer_dial, "")?;
-            object_set_width(ui.labels[6], 140)?;
-            object_align(ui.labels[6], Align::Center, 0, 0)?;
-            object_set_style_transform_scale_x(ui.labels[6], 512, PART_MAIN)?;
-            object_set_style_transform_scale_y(ui.labels[6], 512, PART_MAIN)?;
-            object_set_style_text_align(ui.labels[6], TextAlign::Center, PART_MAIN)?;
-            ui.labels[7] = ui.label(timer_card, translate!("Duration"))?;
+            ui.labels[6] = ui.label(timer_card, "")?;
+            object_set_height(ui.labels[6], 72)?;
+            ui.labels[7] = ui.label(timer_card, "")?;
             let duration_row = ui.row(timer_card)?;
-            ui.timer_minute_input = ui.spinbox(duration_row, 0, 1440, 4, 5)?;
-            ui.inline_label(duration_row, translate!("min"))?;
-            ui.timer_second_input = ui.spinbox(duration_row, 0, 59, 2, 0)?;
-            ui.inline_label(duration_row, translate!("sec"))?;
-            ui.controls
-                .push((ui.timer_minute_input, Action::TimerDurationChanged));
-            ui.controls
-                .push((ui.timer_second_input, Action::TimerDurationChanged));
+            ui.button(
+                duration_row,
+                translate!(c"Minute -"),
+                Action::TimerAdjust(-60),
+            )?;
+            ui.button(
+                duration_row,
+                translate!(c"Minute +"),
+                Action::TimerAdjust(60),
+            )?;
+            ui.button(
+                duration_row,
+                translate!(c"Second -"),
+                Action::TimerAdjust(-1),
+            )?;
+            ui.button(
+                duration_row,
+                translate!(c"Second +"),
+                Action::TimerAdjust(1),
+            )?;
             let timer_actions = ui.row(timer_card)?;
             ui.button(timer_actions, translate!(c"Start"), Action::TimerStart)?;
             ui.button(
@@ -337,15 +301,6 @@ impl Interface {
         unsafe {
             let label = label_create(parent)?;
             object_set_width(label, percentage(100)?)?;
-            object_set_style_text_color(label, color(224, 227, 234), PART_MAIN)?;
-            Self::text(label, text)?;
-            Ok(label)
-        }
-    }
-    unsafe fn inline_label(&self, parent: *mut Object, text: &str) -> wasm::Result<*mut Object> {
-        unsafe {
-            let label = label_create(parent)?;
-            object_set_style_text_color(label, color(224, 227, 234), PART_MAIN)?;
             Self::text(label, text)?;
             Ok(label)
         }
@@ -356,61 +311,9 @@ impl Interface {
             object_set_width(card, percentage(100)?)?;
             object_set_height(card, size_content())?;
             object_set_flex_flow(card, FlexFlow::Column)?;
-            object_set_flex_align(
-                card,
-                FlexAlign::Center,
-                FlexAlign::Center,
-                FlexAlign::Center,
-            )?;
-            Self::surface(card, color(28, 28, 30), color(58, 58, 60), 16, 18)?;
+            object_set_padding(card, 14)?;
             Ok(card)
         }
-    }
-    unsafe fn surface(
-        object: *mut Object,
-        background: Color,
-        border: Color,
-        radius: i32,
-        padding: i32,
-    ) -> wasm::Result<()> {
-        unsafe {
-            object_set_style_bg_color(object, background, PART_MAIN)?;
-            object_set_style_bg_opa(object, 255, PART_MAIN)?;
-            object_set_style_border_color(object, border, PART_MAIN)?;
-            object_set_style_border_width(object, i32::from(radius > 0), PART_MAIN)?;
-            object_set_style_radius(object, radius, PART_MAIN)?;
-            object_set_style_pad_left(object, padding, PART_MAIN)?;
-            object_set_style_pad_right(object, padding, PART_MAIN)?;
-            object_set_style_pad_top(object, padding, PART_MAIN)?;
-            object_set_style_pad_bottom(object, padding, PART_MAIN)?;
-            object_set_style_pad_row(object, 14, PART_MAIN)?;
-            Ok(())
-        }
-    }
-    unsafe fn spinbox(
-        &self,
-        parent: *mut Object,
-        min: i32,
-        max: i32,
-        digits: u32,
-        value: i32,
-    ) -> wasm::Result<*mut Object> {
-        unsafe {
-            let input = spinbox_create(parent)?;
-            spinbox_set_digit_format(input, digits, 0)?;
-            spinbox_set_range(input, min, max)?;
-            spinbox_set_rollover(input, true)?;
-            spinbox_set_step(input, 1)?;
-            spinbox_set_value(input, value)?;
-            object_set_width(input, 110)?;
-            object_set_height(input, 44)?;
-            object_add_flag(input, ObjectFlag::EventBubble)?;
-            Ok(input)
-        }
-    }
-    unsafe fn text(label: *mut Object, text: &str) -> wasm::Result<()> {
-        let text = CString::new(text).map_err(|_| -1)?;
-        unsafe { label_set_text(label, text.as_ptr()) }
     }
     unsafe fn set_hidden(object: *mut Object, hidden: bool) -> wasm::Result<()> {
         unsafe {
@@ -421,13 +324,17 @@ impl Interface {
             }
         }
     }
+    unsafe fn text(label: *mut Object, text: &str) -> wasm::Result<()> {
+        let text = CString::new(text).map_err(|_| -1)?;
+        unsafe { label_set_text(label, text.as_ptr()) }
+    }
     unsafe fn row(&self, parent: *mut Object) -> wasm::Result<*mut Object> {
         unsafe {
             let row = object_create(parent)?;
             object_set_width(row, percentage(100)?)?;
             object_set_height(row, size_content())?;
             object_set_flex_flow(row, FlexFlow::RowWrap)?;
-            object_set_flex_align(row, FlexAlign::Center, FlexAlign::Center, FlexAlign::Center)?;
+            object_set_padding(row, 6)?;
             Ok(row)
         }
     }
@@ -446,12 +353,6 @@ impl Interface {
     ) -> wasm::Result<*mut Object> {
         unsafe {
             let button = button_create(parent)?;
-            object_set_style_bg_color(button, color(255, 159, 10), PART_MAIN)?;
-            object_set_style_bg_opa(button, 255, PART_MAIN)?;
-            object_set_style_border_width(button, 0, PART_MAIN)?;
-            object_set_style_radius(button, 10, PART_MAIN)?;
-            object_set_style_pad_left(button, 16, PART_MAIN)?;
-            object_set_style_pad_right(button, 16, PART_MAIN)?;
             let label = label_create(button)?;
             label_set_text(label, text.as_ptr())?;
             // Window events identify the control rather than its child label.
@@ -489,10 +390,13 @@ impl Interface {
                     self.settings.twelve_hour = !self.settings.twelve_hour;
                     self.persist();
                 }
-                Action::AlarmTimeChanged => {
-                    self.alarm_hour = spinbox_get_value(self.alarm_hour_input)?.clamp(0, 23) as u8;
+                Action::AlarmHour(delta) => {
+                    self.alarm_hour =
+                        (i16::from(self.alarm_hour) + i16::from(delta)).rem_euclid(24) as u8
+                }
+                Action::AlarmMinute(delta) => {
                     self.alarm_minute =
-                        spinbox_get_value(self.alarm_minute_input)?.clamp(0, 59) as u8;
+                        (i16::from(self.alarm_minute) + i16::from(delta)).rem_euclid(60) as u8
                 }
                 Action::AlarmSave => {
                     if let Some(wall) = wall {
@@ -531,10 +435,9 @@ impl Interface {
                     self.watch.lap(now);
                 }
                 Action::StopwatchReset => self.watch.reset(),
-                Action::TimerDurationChanged => {
-                    let minutes = spinbox_get_value(self.timer_minute_input)?.clamp(0, 1440);
-                    let seconds = spinbox_get_value(self.timer_second_input)?.clamp(0, 59);
-                    self.timer_seconds = (minutes * 60 + seconds).clamp(1, 86400) as u32;
+                Action::TimerAdjust(delta) => {
+                    self.timer_seconds =
+                        (i64::from(self.timer_seconds) + i64::from(delta)).clamp(1, 86400) as u32
                 }
                 Action::TimerStart => {
                     self.timer.start(u64::from(self.timer_seconds) * 1000, now);
@@ -609,6 +512,10 @@ impl Interface {
         );
         let mut alarm = String::new();
         if active == 1 {
+            alarm.push_str(&format!(
+                "{:02}:{:02} UTC\n",
+                self.alarm_hour, self.alarm_minute
+            ));
             if let Some(saved) = self.settings.alarm {
                 if saved.enabled() {
                     alarm.push_str(translate!("Alarm enabled: "));
@@ -632,10 +539,6 @@ impl Interface {
                 alarm.push('\n');
                 alarm.push_str(translate!("Alarm snoozed"));
             }
-            alarm.push_str(&format!(
-                "\n{:02}:{:02} UTC",
-                self.alarm_hour, self.alarm_minute
-            ));
         }
         let watch = if active == 2 {
             format_duration(self.watch.elapsed(now), true)
@@ -662,14 +565,6 @@ impl Interface {
             } else {
                 duration
             };
-            let progress = if self.timer_started && self.timer_seconds != 0 {
-                (remaining.div_ceil(1000) * 100 / u64::from(self.timer_seconds)).min(100) as i32
-            } else {
-                100
-            };
-            unsafe {
-                arc_set_value(self.timer_arc, progress)?;
-            }
             (
                 format_duration(remaining.div_ceil(1000) * 1000, false),
                 format!(
