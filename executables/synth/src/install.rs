@@ -1,6 +1,6 @@
 use std::fs;
 
-pub const SHORTCUT_PATH: &str = "/configuration/shared/shortcuts/synth.json";
+pub const SHORTCUT_PATH: &str = "/configuration/shared/applications/shortcuts/synth.json";
 
 #[unsafe(no_mangle)]
 pub extern "C" fn __install() {

@@ -72,7 +72,7 @@ async fn real_synth_guest_recovers_from_silent_mode_plays_releases_and_closes() 
         context.task_manager,
         context.virtual_file_system,
         binary,
-        "/binaries/synth",
+        "/applications/executables/synth",
     )
     .await
     .unwrap();
@@ -80,14 +80,14 @@ async fn real_synth_guest_recovers_from_silent_mode_plays_releases_and_closes() 
         context,
         context.virtual_file_system,
         task,
-        &[("/binaries/wasm", wasm::WasmExecutable)]
+        &[("/applications/executables/wasm", wasm::WasmExecutable)]
     )
     .await
     .unwrap();
     let handle = xila::executable::execute(
         context,
-        "/binaries/wasm",
-        vec!["/binaries/synth".into()],
+        "/applications/executables/wasm",
+        vec!["/applications/executables/synth".into()],
         standard,
         None,
     )
@@ -102,13 +102,8 @@ async fn real_synth_guest_recovers_from_silent_mode_plays_releases_and_closes() 
     let system: &'static audio::AudioSystem =
         Box::leak(Box::new(audio::AudioSystem::new().unwrap()));
     // SAFETY: this leaked system never moves and outlives all device streams.
-    let system = unsafe { core::pin::Pin::new_unchecked(&*system) };
+    let system = unsafe { core::pin::Pin::new_unchecked(system) };
     let mut output = system.open_output().unwrap();
-    context
-        .virtual_file_system
-        .create_directory(task, &"/devices/audio")
-        .await
-        .unwrap();
     context
         .virtual_file_system
         .mount_character_device(

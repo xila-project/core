@@ -11,8 +11,8 @@ use super::{CommandContext, UserCommand};
 
 fn select_client_device_path(url: &Url<'_>) -> Option<&'static str> {
     match url.scheme {
-        "http" => Some("/devices/http_client"),
-        "https" => Some("/devices/https_client"),
+        "http" => Some("/devices/network/http_client"),
+        "https" => Some("/devices/network/https_client"),
         _ => None,
     }
 }
@@ -294,7 +294,7 @@ mod tests {
         let url = Url::parse("https://example.com").unwrap();
         assert_eq!(
             select_client_device_path(&url),
-            Some("/devices/https_client")
+            Some("/devices/network/https_client")
         );
     }
 
@@ -303,7 +303,7 @@ mod tests {
         let url = Url::parse("http://example.com").unwrap();
         assert_eq!(
             select_client_device_path(&url),
-            Some("/devices/http_client")
+            Some("/devices/network/http_client")
         );
     }
 }

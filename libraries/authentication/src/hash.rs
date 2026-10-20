@@ -9,7 +9,7 @@
 //!
 //! - **SHA-512 Hashing**: Uses the SHA-512 cryptographic hash function
 //! - **Random Salt Generation**: Each password gets a unique 16-byte salt
-//! - **Salt Source**: Uses the system's `/devices/random` device for entropy
+//! - **Salt Source**: Uses `/devices/random/source` for entropy
 //! - **No Plain Text Storage**: Passwords are only stored as hash+salt combinations
 
 use alloc::{
@@ -89,7 +89,7 @@ pub async fn hash_password(
     let mut file = File::open(
         virtual_file_system,
         task,
-        "/devices/hasher",
+        "/devices/compute/hasher",
         AccessFlags::READ_WRITE.into(),
     )
     .await

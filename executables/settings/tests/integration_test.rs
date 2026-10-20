@@ -20,16 +20,22 @@ async fn main() {
         context,
         &context.virtual_file_system,
         task,
-        &[(&"/binaries/settings", SettingsExecutable),]
+        &[(&"/applications/executables/settings", SettingsExecutable),]
     )
     .await
     .unwrap();
 
-    let result = executable::execute(context, "/binaries/settings", vec![], standard, None)
-        .await
-        .unwrap()
-        .join()
-        .await;
+    let result = executable::execute(
+        context,
+        "/applications/executables/settings",
+        vec![],
+        standard,
+        None,
+    )
+    .await
+    .unwrap()
+    .join()
+    .await;
 
     assert!(result == 0);
 }

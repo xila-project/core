@@ -33,6 +33,9 @@ RUN rustup component add rustfmt --toolchain ${RUST_VERSION} \
     && rustup target add wasm32-wasip1
 
 WORKDIR /src
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts
+
 COPY . .
 
 # Keep seed generation aligned with Makefile.toml's native reference image:

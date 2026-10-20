@@ -1,7 +1,7 @@
 # Pixel Painter
 
 A Wasm drawing app for Xila, built for `wasm32-wasip1` and launched through
-`/binaries/wasm /binaries/pixel_painter`. It uses the checked guest graphics ABI
+`/applications/executables/wasm /applications/executables/pixel_painter`. It uses the checked guest graphics ABI
 and WASI file I/O, and is bundled in the native and browser demonstrations.
 
 Draw with a mouse or touch. The palette buttons are white (W, eraser), ink (K),
@@ -12,8 +12,8 @@ resizing or rotating the display preserves the drawing.
 
 Save/Open uses the absolute path in the text field. Focusing it opens an on-screen
 keyboard; its accept/cancel key hides it. The default is
-`/configuration/shared/pixel_painter/drawing.xpnt`, provisioned for the default
-administrator in both demos. Enter a path inside an existing writable SD mount
+`/users/<user-id>/applications/pixel_painter/data/drawing.xpnt`, provisioned by
+the launcher for each user. Enter a path inside an existing writable SD mount
 to use removable storage; no particular SD mount path is assumed. Filesystem
 availability and permissions determine whether a save is possible.
 

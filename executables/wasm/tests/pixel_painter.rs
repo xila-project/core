@@ -64,15 +64,19 @@ async fn real_painter_guest_draws_saves_opens_and_preserves_work_on_errors() {
     standard.context = context;
     let task = context.task_manager.get_current_task_identifier().await;
     let vfs = context.virtual_file_system;
-    vfs.create_directory(task, &"/configuration/shared/pixel_painter")
-        .await
-        .unwrap();
+    vfs.ensure_user_application_directories(
+        task,
+        xila::users::UserIdentifier::ROOT,
+        "pixel_painter",
+    )
+    .await
+    .unwrap();
     let binary = xila::executable::build_crate("pixel_painter").unwrap();
     drivers_std::loader::load_to_virtual_file_system(
         context.task_manager,
         vfs,
         binary,
-        "/binaries/pixel_painter",
+        "/applications/executables/pixel_painter",
     )
     .await
     .unwrap();
@@ -80,14 +84,14 @@ async fn real_painter_guest_draws_saves_opens_and_preserves_work_on_errors() {
         context,
         vfs,
         task,
-        &[("/binaries/wasm", wasm::WasmExecutable)]
+        &[("/applications/executables/wasm", wasm::WasmExecutable)]
     )
     .await
     .unwrap();
     let handle = xila::executable::execute(
         context,
-        "/binaries/wasm",
-        vec!["/binaries/pixel_painter".into()],
+        "/applications/executables/wasm",
+        vec!["/applications/executables/pixel_painter".into()],
         standard,
         None,
     )
@@ -128,7 +132,7 @@ async fn real_painter_guest_draws_saves_opens_and_preserves_work_on_errors() {
     xila::task::sleep(Duration::from_millis(50)).await;
     action(manager, 2).await;
     status(manager, "Saved").await;
-    let path = "/configuration/shared/pixel_painter/drawing.xpnt";
+    let path = "/users/0/applications/pixel_painter/data/drawing.xpnt";
     let mut saved = Vec::new();
     File::read_from_path(vfs, task, path, &mut saved)
         .await

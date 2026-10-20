@@ -19,6 +19,12 @@ embassy-time = { workspace = true, features = ["std"] }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 embassy-time = { workspace = true, features = ["wasm"] }
 
+[target.'cfg(target_os = "wasi")'.dependencies]
+embassy-executor = { workspace = true, default-features = false, features = [
+  "platform-spin",
+  "executor-thread",
+] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = { version = "0.2", optional = true }
 

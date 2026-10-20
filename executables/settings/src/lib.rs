@@ -39,13 +39,13 @@ impl SettingsExecutable {
         task: TaskIdentifier,
     ) -> core::result::Result<Self, String> {
         let _ = virtual_file_system
-            .create_directory(task, &"/configuration/shared/shortcuts")
+            .create_directory(task, &"/configuration/shared/applications/shortcuts")
             .await;
 
         File::write_to_path(
             virtual_file_system,
             task,
-            "/configuration/shared/shortcuts/settings.json",
+            "/configuration/shared/applications/shortcuts/settings.json",
             get_shortcut().as_bytes(),
         )
         .await

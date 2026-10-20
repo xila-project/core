@@ -94,7 +94,7 @@ impl Shell {
         standard.standard_in = File::open(
             self.context.virtual_file_system,
             self.task,
-            "/devices/null",
+            "/devices/standard_io/null",
             AccessFlags::Read.into(),
         )
         .await

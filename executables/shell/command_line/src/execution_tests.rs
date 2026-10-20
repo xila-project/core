@@ -10,7 +10,7 @@ async fn shell() -> Shell {
     standard.standard_in = File::open(
         context.virtual_file_system,
         task,
-        "/devices/null",
+        "/devices/standard_io/null",
         AccessFlags::Read.into(),
     )
     .await
@@ -198,7 +198,10 @@ async fn bounded_pipelines_stream_large_output_and_close_early_consumers() {
         context,
         virtual_file_system,
         task,
-        &[(&"/binaries/read-one", ReadOne), (&"/binaries/fail", Fail)]
+        &[
+            (&"/applications/executables/read-one", ReadOne),
+            (&"/applications/executables/fail", Fail)
+        ]
     )
     .await
     .unwrap();
@@ -213,14 +216,16 @@ async fn bounded_pipelines_stream_large_output_and_close_early_consumers() {
     assert_eq!(contents(&shell, "/count").await.trim(), "3001");
     assert_eq!(
         shell
-            .execute_line(&format!("echo '{payload}'|/binaries/read-one"))
+            .execute_line(&format!(
+                "echo '{payload}'|/applications/executables/read-one"
+            ))
             .await
             .unwrap(),
         0
     );
     assert_eq!(
         shell
-            .execute_line("/binaries/fail && echo wrong || echo correct")
+            .execute_line("/applications/executables/fail && echo wrong || echo correct")
             .await
             .unwrap(),
         0
@@ -230,8 +235,20 @@ async fn bounded_pipelines_stream_large_output_and_close_early_consumers() {
             .await
             .ends_with("correct\n")
     );
-    assert_eq!(shell.execute_line("true|/binaries/fail").await.unwrap(), 7);
-    assert_eq!(shell.execute_line("/binaries/fail|true").await.unwrap(), 0);
+    assert_eq!(
+        shell
+            .execute_line("true|/applications/executables/fail")
+            .await
+            .unwrap(),
+        7
+    );
+    assert_eq!(
+        shell
+            .execute_line("/applications/executables/fail|true")
+            .await
+            .unwrap(),
+        0
+    );
 }
 
 #[xila::task::test(task_path = xila::task)]
@@ -278,13 +295,15 @@ async fn background_jobs_release_the_prompt_and_have_independent_input() {
         context,
         virtual_file_system,
         task,
-        &[(&"/binaries/delayed", Delayed)]
+        &[(&"/applications/executables/delayed", Delayed)]
     )
     .await
     .unwrap();
     assert_eq!(
         shell
-            .execute_line("/binaries/delayed >/background & echo foreground>/foreground")
+            .execute_line(
+                "/applications/executables/delayed >/background & echo foreground>/foreground"
+            )
             .await
             .unwrap(),
         0

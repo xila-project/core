@@ -9,7 +9,7 @@ Weather demo app for Xila WASM runtime.
 
 ## Runtime path
 
-Uses internal HTTPS device mounted at `/devices/https_client`.
+Uses internal HTTPS device mounted at `/devices/network/https_client`.
 
 ## UX behavior
 

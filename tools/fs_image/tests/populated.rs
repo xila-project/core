@@ -14,8 +14,12 @@ impl Fixture {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
-        fs::create_dir_all(path.join("root/binaries")).unwrap();
-        fs::write(path.join("root/binaries/example"), vec![42; 18000]).unwrap();
+        fs::create_dir_all(path.join("root/applications/executables")).unwrap();
+        fs::write(
+            path.join("root/applications/executables/example"),
+            vec![42; 18000],
+        )
+        .unwrap();
         Self(path)
     }
     fn build(&self, name: &str) -> std::process::Output {
@@ -63,7 +67,11 @@ fn rejects_symlinks_without_leaving_an_image() {
 #[test]
 fn out_of_space_removes_incomplete_output() {
     let f = Fixture::new();
-    fs::write(f.0.join("root/binaries/huge"), vec![1; 5 * 1024 * 1024]).unwrap();
+    fs::write(
+        f.0.join("root/applications/executables/huge"),
+        vec![1; 5 * 1024 * 1024],
+    )
+    .unwrap();
     assert!(!f.build("full.img").status.success());
     assert!(!f.0.join("full.img").exists());
 }
@@ -167,11 +175,11 @@ fn unsupported_entries_and_non_utf8_names_are_rejected() {
     fs::remove_file(invalid).unwrap();
     assert!(f.build("before.img").status.success());
     fs::set_permissions(
-        f.0.join("root/binaries/example"),
+        f.0.join("root/applications/executables/example"),
         fs::Permissions::from_mode(0o444),
     )
     .unwrap();
-    fs::File::open(f.0.join("root/binaries/example"))
+    fs::File::open(f.0.join("root/applications/executables/example"))
         .unwrap()
         .set_modified(std::time::SystemTime::UNIX_EPOCH)
         .unwrap();

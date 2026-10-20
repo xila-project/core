@@ -106,7 +106,7 @@ async fn saved_accounts_fixture() -> Result<(), String> {
     virtual_file_system::create_default_hierarchy(&vfs, task)
         .await
         .map_err(|e| e.to_string())?;
-    for directory in ["/system/groups", "/system/users"] {
+    for directory in ["/system/accounts/groups", "/system/accounts/users"] {
         vfs.create_directory(task, &directory)
             .await
             .map_err(|e| e.to_string())?;
@@ -114,8 +114,8 @@ async fn saved_accounts_fixture() -> Result<(), String> {
     let group = br#"{"identifier":1000,"name":"administrator","users":[42]}"#;
     let user = br#"{"identifier":42,"name":"bob","primary_group":1000,"hash":"saved-hash","salt":"saved-salt"}"#;
     for (path, bytes) in [
-        ("/system/groups/administrator", group.as_slice()),
-        ("/system/users/bob", user.as_slice()),
+        ("/system/accounts/groups/administrator", group.as_slice()),
+        ("/system/accounts/users/bob", user.as_slice()),
     ] {
         virtual_file_system::File::write_to_path(&vfs, task, &path, bytes)
             .await
@@ -141,7 +141,7 @@ async fn saved_accounts_fixture() -> Result<(), String> {
     virtual_file_system::File::read_from_path(
         &vfs,
         task,
-        &"/system/groups/administrator",
+        &"/system/accounts/groups/administrator",
         &mut bytes,
     )
     .await

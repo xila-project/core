@@ -104,7 +104,7 @@ impl AboutTab {
         if File::read_from_path(
             virtual_file_system,
             task,
-            "/devices/cpu/informations",
+            "/devices/compute/informations",
             &mut buffer,
         )
         .await

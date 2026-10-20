@@ -130,7 +130,7 @@ jobs:
               --mount host=/mnt/xila/input,xila=/input,ro \
               --mount host=/mnt/xila/output,xila=/output,rw \
               --mount host=/mnt/xila/fixtures,xila=/fixtures,ro \
-              -- /binaries/wasm /fixtures/runtime-smoke.wasm "$1"
+              -- /applications/executables/wasm /fixtures/runtime-smoke.wasm "$1"
           };
           run_guest create;
           test "$(cat "$fixture/runtime-output/result.txt")" = 'writable output';
@@ -145,7 +145,7 @@ jobs:
             --mount host=/mnt/xila/input,xila=/input,ro \
             --mount host=/mnt/xila/output,xila=/output,rw \
             --mount host=/mnt/xila/fixtures,xila=/fixtures,ro \
-            -- /binaries/wasm /fixtures/runtime-smoke.wasm wait;
+            -- /applications/executables/wasm /fixtures/runtime-smoke.wasm wait;
           sleep 1;
           docker stop --time 5 xila-runtime-signal-test;
           signal_status="$(docker inspect --format '{{.State.ExitCode}}' xila-runtime-signal-test)";

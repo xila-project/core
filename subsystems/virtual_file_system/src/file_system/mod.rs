@@ -230,6 +230,7 @@ impl VirtualFileSystem {
             Permission::Read,
             Permission::Execute,
             user,
+            task,
         )
         .await?;
 
@@ -314,6 +315,7 @@ impl VirtualFileSystem {
                 mode.into_permission(),
                 Permission::Execute,
                 user,
+                task,
             )
             .await?;
         } else if open.contains(CreateFlags::Create) {
@@ -323,6 +325,7 @@ impl VirtualFileSystem {
                 relative_path.go_parent().ok_or(Error::InvalidPath)?,
                 Permission::Write | Permission::Execute,
                 user,
+                task,
             )
             .await?;
             poll(|| Ok(file_system.file_system.create_file(relative_path)?)).await?;
@@ -463,6 +466,7 @@ impl VirtualFileSystem {
             relative_path.go_parent().ok_or(Error::InvalidPath)?,
             Permission::Write,
             user,
+            task,
         )
         .await?;
 
@@ -656,6 +660,7 @@ impl VirtualFileSystem {
             relative_path.go_parent().ok_or(Error::InvalidPath)?,
             Permission::Write,
             user,
+            task,
         )
         .await?;
 
@@ -695,6 +700,7 @@ impl VirtualFileSystem {
             relative_path.go_parent().ok_or(Error::InvalidPath)?,
             Permission::Write,
             user,
+            task,
         )
         .await?;
 
@@ -758,6 +764,7 @@ impl VirtualFileSystem {
                 parent_path,
                 Permission::Write,
                 user,
+                task,
             )
             .await?;
         }
@@ -773,9 +780,29 @@ impl VirtualFileSystem {
     }
 
     pub async fn get_statistics(&self, path: &impl AsRef<Path>) -> Result<Statistics> {
+        let task = self.task_manager.get_current_task_identifier().await;
+        self.get_statistics_for_task(task, path).await
+    }
+
+    /// Read path metadata for an explicit task, including from synchronous adapters
+    /// whose polling context does not carry an Embassy task waker.
+    pub async fn get_statistics_for_task(
+        &self,
+        task: TaskIdentifier,
+        path: &impl AsRef<Path>,
+    ) -> Result<Statistics> {
         let file_systems = self.file_systems.read().await;
 
         let (file_system, relative_path, _) = Self::get_file_system_from_path(&file_systems, path)?; // Get the file system identifier and the relative path
+
+        let user = self.task_manager.get_user(task).await?;
+        if user != users::UserIdentifier::ROOT {
+            let application = self.task_manager.get_application_identifier(task).await?;
+            if !utilities::application_access_allowed(relative_path, application, Permission::Read)
+            {
+                return Err(Error::PermissionDenied);
+            }
+        }
 
         let mut attributes = Attributes::new().set_mask(AttributeFlags::all());
 

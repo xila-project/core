@@ -23,26 +23,28 @@ async fn fixture() -> Context<'static> {
     virtual_file_system::create_default_hierarchy(vfs, task)
         .await
         .unwrap();
-    for path in ["/system/users", "/system/groups"] {
-        vfs.create_directory(task, &path).await.unwrap();
-    }
     vfs.mount_static(
         task,
-        &"/devices/random",
+        &"/devices/random/source",
         ItemStatic::CharacterDevice(&drivers_shared::devices::RandomDevice),
     )
     .await
     .unwrap();
     vfs.mount_static(
         task,
-        &"/devices/hasher",
+        &"/devices/compute/hasher",
         ItemStatic::CharacterDevice(&drivers_shared::devices::HashDevice),
     )
     .await
     .unwrap();
-    File::write_to_path(vfs, task, "/system/.seed-pending", b"xila-seed-v1\n")
-        .await
-        .unwrap();
+    File::write_to_path(
+        vfs,
+        task,
+        "/system/accounts/.seed-pending",
+        b"xila-seed-v1\n",
+    )
+    .await
+    .unwrap();
     Context {
         virtual_file_system: vfs,
         task_manager,
@@ -84,7 +86,7 @@ async fn first_install_and_restarts_preserve_existing_credentials() {
         File::write_to_path(
             boot.virtual_file_system,
             boot.task,
-            "/system/.seed-pending",
+            "/system/accounts/.seed-pending",
             b"xila-seed-v1\n",
         )
         .await
@@ -108,7 +110,7 @@ async fn first_install_and_restarts_preserve_existing_credentials() {
         assert!(
             reboot
                 .virtual_file_system
-                .get_statistics(&"/system/.seed-pending")
+                .get_statistics(&"/system/accounts/.seed-pending")
                 .await
                 .is_err()
         );
@@ -133,7 +135,7 @@ async fn invalid_pending_state_and_conflicting_accounts_are_preserved() {
     File::write_to_path(
         context.virtual_file_system,
         context.task,
-        "/system/.seed-pending",
+        "/system/accounts/.seed-pending",
         b"wrong-version",
     )
     .await
@@ -142,7 +144,7 @@ async fn invalid_pending_state_and_conflicting_accounts_are_preserved() {
     File::write_to_path(
         context.virtual_file_system,
         context.task,
-        "/system/.seed-pending",
+        "/system/accounts/.seed-pending",
         b"xila-seed-v1\n",
     )
     .await

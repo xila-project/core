@@ -25,7 +25,7 @@
 //! - Users are stored in `/System/Users/` directory
 //! - Groups are stored in `/System/Groups/` directory
 //! - Each user/group has their own JSON file containing their data
-//! - Random salt generation uses `/devices/random` device
+//! - Random salt generation uses `/devices/random/source`
 
 #![no_std]
 
@@ -50,13 +50,13 @@ use virtual_file_system::VirtualFileSystem;
 const READ_CHUNK_SIZE: usize = 32;
 
 /// Path to the users directory in the filesystem
-const USERS_FOLDER_PATH: &str = "/system/users";
+const USERS_FOLDER_PATH: &str = "/system/accounts/users";
 
 /// Path to the groups directory in the filesystem
-const GROUP_FOLDER_PATH: &str = "/system/groups";
+const GROUP_FOLDER_PATH: &str = "/system/accounts/groups";
 
 /// Path to the random device used for salt generation
-const RANDOM_DEVICE_PATH: &str = "/devices/random";
+const RANDOM_DEVICE_PATH: &str = "/devices/random/source";
 
 /// The dependencies required by authentication operations.
 pub struct Context<'a> {

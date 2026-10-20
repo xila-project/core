@@ -6,7 +6,11 @@ use std::{
 };
 
 pub const PAGE_BYTES: usize = 4096;
-pub const DEFAULT_PATH: &str = "/configuration/shared/text_editor/untitled.txt";
+pub fn default_path() -> Option<String> {
+    std::env::var("XILA_APPLICATION_DATA")
+        .ok()
+        .map(|directory| format!("{directory}/untitled.txt"))
+}
 const IO_BYTES: usize = 4096;
 
 pub struct WorkingCopy {

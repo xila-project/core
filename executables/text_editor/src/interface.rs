@@ -136,7 +136,8 @@ impl Interface {
             textarea_set_max_length(path, 240)?;
             let initial = std::env::args()
                 .nth(1)
-                .unwrap_or_else(|| storage::DEFAULT_PATH.into());
+                .or_else(storage::default_path)
+                .unwrap_or_default();
             let initial = CString::new(initial).map_err(|_| -1)?;
             textarea_set_text(path, initial.as_ptr())?;
             object_set_width(path, percentage(100)?)?;

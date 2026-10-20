@@ -20,18 +20,24 @@ async fn main() {
         virtual_file_system,
         task,
         &[(
-            &"/binaries/file_manager",
+            &"/applications/executables/file_manager",
             file_manager::FileManagerExecutable
         ),]
     )
     .await
     .unwrap();
 
-    let result = executable::execute(context, "/binaries/file_manager", vec![], standard, None)
-        .await
-        .unwrap()
-        .join()
-        .await;
+    let result = executable::execute(
+        context,
+        "/applications/executables/file_manager",
+        vec![],
+        standard,
+        None,
+    )
+    .await
+    .unwrap()
+    .join()
+    .await;
 
     assert!(result == 0);
 }
