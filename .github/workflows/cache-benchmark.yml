@@ -44,7 +44,7 @@ jobs:
       SCCACHE_GHA_RW_MODE: READ_WRITE
       SCCACHE_GHA_VERSION: experiment-${{ inputs.namespace }}-${{ matrix.strategy }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - uses: ./.github/actions/cache-tools
 
@@ -68,6 +68,7 @@ jobs:
         run: echo 'RUSTC_WRAPPER=' >> "$GITHUB_ENV"
 
       - name: Cache | Cargo dependencies or source-keyed workspace
+        id: rust-cache
         if: matrix.strategy != 'sccache'
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
@@ -80,12 +81,18 @@ jobs:
           # Workspace artifacts require a changing source key (#348). Checkout
           # mtimes can still invalidate them: measure, don't assume a no-op.
 
+      - name: Cache | Report archive hit
+        if: matrix.strategy != 'sccache'
+        env:
+          EXACT_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
+        run: 'echo "Rust cache exact hit: $EXACT_HIT"'
+
       - name: Run | Identical host workload
         run: |
           cargo run --locked --package fonts_generator
           cargo test --locked --workspace --timings
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: always()
         with:
           name: cache-timings-${{ matrix.strategy }}
