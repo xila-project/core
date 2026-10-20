@@ -150,7 +150,6 @@ async fn test_named_pipe() {
 async fn forced_unmount_can_remount_the_same_path_with_a_new_filesystem() {
     use std::{
         fs,
-        path::PathBuf,
         sync::atomic::{AtomicUsize, Ordering},
     };
 
@@ -214,7 +213,7 @@ async fn forced_unmount_can_remount_the_same_path_with_a_new_filesystem() {
 
     old_file.close(virtual_file_system).await.unwrap();
     new_file.close(virtual_file_system).await.unwrap();
-    let _ = fs::remove_dir_all(PathBuf::from(root));
+    let _ = fs::remove_dir_all(root);
 }
 
 #[cfg(target_os = "linux")]
@@ -265,9 +264,11 @@ async fn default_hierarchy_creates_canonical_roots_and_is_idempotent() {
     virtual_file_system::create_default_hierarchy(virtual_file_system, task)
         .await
         .unwrap();
-    virtual_file_system::create_default_hierarchy(virtual_file_system, task)
-        .await
-        .unwrap();
+    task::block_on(virtual_file_system::create_default_hierarchy(
+        virtual_file_system,
+        task,
+    ))
+    .unwrap();
 
     for path in [
         "/system/accounts/users",
@@ -301,6 +302,32 @@ async fn default_hierarchy_creates_canonical_roots_and_is_idempotent() {
 
 #[cfg(target_os = "linux")]
 #[test]
+async fn clear_temporary_handles_an_empty_directory_and_repeated_calls() {
+    let (task, vfs) = initialize().await;
+    vfs.create_directory(task, &Path::TEMPORARY).await.unwrap();
+
+    // LittleFS exposes these entries: cleanup must never follow them.
+    let mut directory = virtual_file_system::Directory::open(vfs, task, Path::TEMPORARY)
+        .await
+        .unwrap();
+    assert_eq!(directory.read().await.unwrap().unwrap().name, ".");
+    assert_eq!(directory.read().await.unwrap().unwrap().name, "..");
+    assert!(directory.read().await.unwrap().is_none());
+    directory.close(vfs).await.unwrap();
+
+    for _ in 0..2 {
+        virtual_file_system::clear_temporary(vfs, task)
+            .await
+            .unwrap();
+        assert_eq!(
+            vfs.get_statistics(&Path::TEMPORARY).await.unwrap().kind,
+            file_system::Kind::Directory
+        );
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 async fn clear_temporary_removes_nested_contents_and_preserves_root() {
     let (task, virtual_file_system) = initialize().await;
     virtual_file_system::create_default_hierarchy(virtual_file_system, task)
@@ -320,6 +347,23 @@ async fn clear_temporary_removes_nested_contents_and_preserves_root() {
     .unwrap();
     file.write(b"temporary").await.unwrap();
     file.close(virtual_file_system).await.unwrap();
+
+    for path in [
+        "/temporary/cache/.hidden",
+        "/temporary/top",
+        "/data/system/logs/keep",
+    ] {
+        let mut file = File::open(
+            virtual_file_system,
+            task,
+            path,
+            Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
+        )
+        .await
+        .unwrap();
+        file.write(b"keep").await.unwrap();
+        file.close(virtual_file_system).await.unwrap();
+    }
 
     virtual_file_system::clear_temporary(virtual_file_system, task)
         .await
@@ -347,6 +391,58 @@ async fn clear_temporary_removes_nested_contents_and_preserves_root() {
             .kind,
         file_system::Kind::Directory
     );
+    let mut directory =
+        virtual_file_system::Directory::open(virtual_file_system, task, Path::TEMPORARY)
+            .await
+            .unwrap();
+    while let Some(entry) = directory.read().await.unwrap() {
+        assert!(entry.name == "." || entry.name == "..");
+    }
+    directory.close(virtual_file_system).await.unwrap();
+
+    let mut file = File::open(
+        virtual_file_system,
+        task,
+        "/data/system/logs/keep",
+        AccessFlags::Read.into(),
+    )
+    .await
+    .unwrap();
+    let mut contents = [0; 4];
+    assert_eq!(file.read(&mut contents).await.unwrap(), 4);
+    assert_eq!(&contents, b"keep");
+    file.close(virtual_file_system).await.unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn clear_temporary_removes_deep_and_branching_directories() {
+    let (task, vfs) = initialize().await;
+    vfs.create_directory(task, &Path::TEMPORARY).await.unwrap();
+    let mut path = String::from("/temporary");
+    for _ in 0..32 {
+        path.push_str("/d");
+        vfs.create_directory(task, &Path::from_str(&path))
+            .await
+            .unwrap();
+        let sibling = format!("{path}/sibling");
+        vfs.create_directory(task, &Path::from_str(&sibling))
+            .await
+            .unwrap();
+    }
+
+    virtual_file_system::clear_temporary(vfs, task)
+        .await
+        .unwrap();
+    assert!(
+        vfs.get_statistics(&Path::from_str("/temporary/d"))
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        vfs.get_statistics(&Path::TEMPORARY).await.unwrap().kind,
+        file_system::Kind::Directory
+    );
 }
 
 #[cfg(target_os = "linux")]
@@ -362,10 +458,10 @@ async fn hierarchy_reports_non_directory_conflicts() {
     .await
     .unwrap();
 
-    assert!(matches!(
+    assert_eq!(
         virtual_file_system::create_default_hierarchy(virtual_file_system, task).await,
         Err(virtual_file_system::Error::NotADirectory)
-    ));
+    );
 }
 
 #[cfg(target_os = "linux")]
@@ -421,6 +517,12 @@ async fn global_application_storage_is_private_and_user_app_storage_is_separate(
         .set_application_identifier(task, Some(clock))
         .await
         .unwrap();
+    assert_eq!(
+        task::block_on(vfs.get_statistics_for_task(task, &global_directory))
+            .unwrap()
+            .kind,
+        file_system::Kind::Directory
+    );
     File::open(
         vfs,
         task,
@@ -440,6 +542,10 @@ async fn global_application_storage_is_private_and_user_app_storage_is_separate(
         )
         .await
         .unwrap();
+    assert_eq!(
+        task::block_on(vfs.get_statistics_for_task(task, &global_directory)),
+        Err(virtual_file_system::Error::PermissionDenied)
+    );
     assert!(matches!(
         File::open(
             vfs,

@@ -780,11 +780,21 @@ impl VirtualFileSystem {
     }
 
     pub async fn get_statistics(&self, path: &impl AsRef<Path>) -> Result<Statistics> {
+        let task = self.task_manager.get_current_task_identifier().await;
+        self.get_statistics_for_task(task, path).await
+    }
+
+    /// Read path metadata for an explicit task, including from synchronous adapters
+    /// whose polling context does not carry an Embassy task waker.
+    pub async fn get_statistics_for_task(
+        &self,
+        task: TaskIdentifier,
+        path: &impl AsRef<Path>,
+    ) -> Result<Statistics> {
         let file_systems = self.file_systems.read().await;
 
         let (file_system, relative_path, _) = Self::get_file_system_from_path(&file_systems, path)?; // Get the file system identifier and the relative path
 
-        let task = self.task_manager.get_current_task_identifier().await;
         let user = self.task_manager.get_user(task).await?;
         if user != users::UserIdentifier::ROOT {
             let application = self.task_manager.get_application_identifier(task).await?;

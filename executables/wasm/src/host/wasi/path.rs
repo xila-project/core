@@ -108,7 +108,7 @@ define_wasi_module! {
             let relative = core::str::from_utf8(&path_bytes).map_err(|_| Error::Ilseq)?;
             let absolute_path = resolve_guest_path(&directory, relative)?;
             let vfs = caller.data().context.virtual_file_system;
-            let statistics = task::block_on(vfs.get_statistics(&absolute_path)).map_err(vfs_error)?;
+            let statistics = task::block_on(vfs.get_statistics_for_task(task_id, &absolute_path)).map_err(vfs_error)?;
             if statistics.kind == xila::file_system::Kind::Directory {
                 return Err(Error::Isdir.into());
             }
@@ -151,10 +151,10 @@ define_wasi_module! {
         wrap_function!({
             let mut caller = caller;
             let path_bytes = copy_guest_path(&mut caller, path_ptr, path_len)?;
-            let (_task_id, directory) = base_path(&caller, fd)?;
+            let (task_id, directory) = base_path(&caller, fd)?;
             let relative = core::str::from_utf8(&path_bytes).map_err(|_| Error::Ilseq)?;
             let absolute_path = resolve_guest_path(&directory, relative)?;
-            let stats = task::block_on(caller.data().context.virtual_file_system.get_statistics(&absolute_path)).map_err(vfs_error)?;
+            let stats = task::block_on(caller.data().context.virtual_file_system.get_statistics_for_task(task_id, &absolute_path)).map_err(vfs_error)?;
             let filestat = make_filestat(&stats);
             let memory = get_memory(&caller).ok_or(Error::Fault)?;
             borrow_memory(&memory, &mut caller).write(GuestPointer::new(buf_ptr), filestat).ok_or(Error::Fault)?;

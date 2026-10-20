@@ -107,6 +107,11 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
         .await
         .unwrap();
     context
+        .virtual_file_system
+        .ensure_user_home(task, administrator)
+        .await
+        .unwrap();
+    context
         .task_manager
         .set_user(task, administrator)
         .await
@@ -152,7 +157,11 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
     xila::virtual_file_system::File::read_from_path(
         context.virtual_file_system,
         task,
-        "/users/1000/applications/clock/configuration/settings.1",
+        format!(
+            "/users/{}/applications/clock/configuration/settings.1",
+            administrator.as_u16()
+        )
+        .as_str(),
         &mut saved,
     )
     .await

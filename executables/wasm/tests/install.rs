@@ -137,6 +137,11 @@ async fn install_selects_install_export_and_never_falls_back_to_main() {
         assert!(context.graphics_manager.is_none());
         context
             .virtual_file_system
+            .create_directory(task, &"/configuration/shared/applications")
+            .await
+            .unwrap();
+        context
+            .virtual_file_system
             .create_directory(task, &"/configuration/shared/applications/shortcuts")
             .await
             .unwrap();
