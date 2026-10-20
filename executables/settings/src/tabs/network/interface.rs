@@ -51,6 +51,11 @@ impl InterfacePanel {
                 let hardware_address = Self::get_mac_address(file).await?;
 
                 lvgl::lv_obj_set_size(list, lvgl::lv_pct(100), lvgl::lv_pct(100));
+                lvgl::lv_obj_set_style_pad_all(list, 8, lvgl::LV_STATE_DEFAULT);
+                xila::graphics::theme::set_surface(
+                    list,
+                    xila::graphics::theme::Surface::Card,
+                );
 
                 write!(
                     format_buffer,
@@ -136,6 +141,8 @@ impl InterfacePanel {
 
             lvgl::lv_obj_set_size(container, lvgl::lv_pct(100), lvgl::lv_pct(100));
             lvgl::lv_obj_set_flex_flow(container, lvgl::lv_flex_flow_t_LV_FLEX_FLOW_COLUMN);
+            lvgl::lv_obj_set_style_pad_all(container, 16, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_style_pad_row(container, 8, lvgl::LV_STATE_DEFAULT);
             lvgl::lv_obj_set_flex_align(
                 container,
                 lvgl::lv_flex_align_t_LV_FLEX_ALIGN_START,
@@ -152,6 +159,7 @@ impl InterfacePanel {
             let radio_group = lvgl::lv_obj_create(container);
             lvgl::lv_obj_set_size(radio_group, lvgl::LV_SIZE_CONTENT, lvgl::LV_SIZE_CONTENT);
             lvgl::lv_obj_set_flex_flow(radio_group, lvgl::lv_flex_flow_t_LV_FLEX_FLOW_ROW);
+            lvgl::lv_obj_set_style_pad_column(radio_group, 8, lvgl::LV_STATE_DEFAULT);
 
             // Radio: None
             let radio_none = lvgl::lv_radiobox_create(radio_group);

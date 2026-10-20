@@ -1,5 +1,5 @@
 use crate::error::Result;
-use xila::graphics::{Event, lvgl};
+use xila::graphics::{self, Event, lvgl};
 use xila::internationalization::translate;
 
 pub struct GeneralTab {
@@ -26,14 +26,39 @@ impl GeneralTab {
 
         self.tab_container = tab_container;
 
-        // Create general settings UI here
+        // Keep the overview useful while this tab has no general controls yet.
         unsafe {
-            let info_label = lvgl::lv_label_create(tab_container);
+            lvgl::lv_obj_set_flex_flow(
+                tab_container,
+                lvgl::lv_flex_flow_t_LV_FLEX_FLOW_COLUMN,
+            );
+            lvgl::lv_obj_set_style_pad_all(tab_container, 18, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_style_pad_row(tab_container, 12, lvgl::LV_STATE_DEFAULT);
+
+            let card = lvgl::lv_obj_create(tab_container);
+            if card.is_null() {
+                return Err(crate::error::Error::FailedToCreateUiElement);
+            }
+            lvgl::lv_obj_set_width(card, lvgl::lv_pct(100));
+            lvgl::lv_obj_set_height(card, lvgl::LV_SIZE_CONTENT);
+            lvgl::lv_obj_set_flex_flow(card, lvgl::lv_flex_flow_t_LV_FLEX_FLOW_COLUMN);
+            lvgl::lv_obj_set_style_pad_all(card, 18, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_style_pad_row(card, 8, lvgl::LV_STATE_DEFAULT);
+            graphics::theme::set_surface(card, graphics::theme::Surface::Card);
+
+            let title = lvgl::lv_label_create(card);
+            lvgl::lv_label_set_text(title, translate!(c"General").as_ptr());
+
+            let info_label = lvgl::lv_label_create(card);
             lvgl::lv_label_set_text(
                 info_label,
                 translate!(c"General settings will be implemented here.").as_ptr(),
             );
-            lvgl::lv_obj_align(info_label, lvgl::lv_align_t_LV_ALIGN_CENTER, 0, 0);
+            lvgl::lv_label_set_long_mode(
+                info_label,
+                lvgl::lv_label_long_mode_t_LV_LABEL_LONG_MODE_WRAP,
+            );
+            lvgl::lv_obj_set_width(info_label, lvgl::lv_pct(100));
         }
 
         Ok(tab_container)

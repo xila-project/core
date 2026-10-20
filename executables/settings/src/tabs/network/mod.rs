@@ -131,6 +131,8 @@ impl NetworkTab {
                 self.tab_container,
                 lvgl::lv_flex_flow_t_LV_FLEX_FLOW_COLUMN,
             );
+            lvgl::lv_obj_set_style_pad_all(self.tab_container, 16, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_style_pad_row(self.tab_container, 10, lvgl::LV_STATE_DEFAULT);
         }
 
         // Create interface list
@@ -144,6 +146,11 @@ impl NetworkTab {
             // File list properties - use flex grow to fill remaining space
             lvgl::lv_obj_set_width(self.interfaces_list, lvgl::lv_pct(100));
             lvgl::lv_obj_set_flex_grow(self.interfaces_list, 1); // Take remaining vertical space
+            lvgl::lv_obj_set_style_pad_all(self.interfaces_list, 8, lvgl::LV_STATE_DEFAULT);
+            xila::graphics::theme::set_surface(
+                self.interfaces_list,
+                xila::graphics::theme::Surface::Card,
+            );
         }
 
         self.update_interfaces().await?;
