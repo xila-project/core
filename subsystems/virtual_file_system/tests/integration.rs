@@ -586,6 +586,17 @@ async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
     original.write(b"hello").await.unwrap();
     original.close(vfs).await.unwrap();
 
+    let mut collision = File::open(
+        vfs,
+        task,
+        "/links/.xila-link-stage-0",
+        Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
+    )
+    .await
+    .unwrap();
+    collision.write(b"unrelated").await.unwrap();
+    collision.close(vfs).await.unwrap();
+
     vfs.create_symlink(
         task,
         Path::from_str("/links/original"),
@@ -607,6 +618,22 @@ async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
     )
     .await
     .unwrap();
+
+    let mut collision = File::open(
+        vfs,
+        task,
+        "/links/.xila-link-stage-0",
+        AccessFlags::Read.into(),
+    )
+    .await
+    .unwrap();
+    let mut collision_contents = [0; 9];
+    assert_eq!(
+        collision.read(&mut collision_contents).await.unwrap(),
+        collision_contents.len()
+    );
+    assert_eq!(&collision_contents, b"unrelated");
+    collision.close(vfs).await.unwrap();
 
     for path in ["/links/absolute", "/links/relative", "/links/chain"] {
         let mut file = File::open(vfs, task, path, AccessFlags::Read.into())

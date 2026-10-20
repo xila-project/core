@@ -1025,6 +1025,62 @@ mod tests {
     }
 
     #[test]
+    fn symlink_metadata_payload_and_directory_entry_are_no_follow() {
+        let root = temp_root();
+        fs::write(root.join("target"), b"payload").unwrap();
+        let filesystem = HostFileSystem::open(&root, HostFileSystemOptions::default()).unwrap();
+        filesystem
+            .create_symlink(Path::new("target"), Path::new("/link"))
+            .unwrap();
+
+        let mut attributes =
+            Attributes::new().set_mask(AttributeFlags::Kind | AttributeFlags::Size);
+        FileSystemOperations::get_attributes(&filesystem, Path::new("/link"), &mut attributes)
+            .unwrap();
+        assert_eq!(attributes.get_kind(), Some(&Kind::SymbolicLink));
+        assert_eq!(attributes.get_size(), Some(&("target".len() as Size)));
+
+        let mut target = [0; 16];
+        let length = filesystem
+            .read_symlink(Path::new("/link"), &mut target)
+            .unwrap();
+        assert_eq!(&target[..length], b"target");
+
+        let mut directory = Context::new_empty();
+        filesystem
+            .lookup_directory(&mut directory, Path::ROOT)
+            .unwrap();
+        let entry = loop {
+            let Some(entry) = DirectoryOperations::read(&filesystem, &mut directory).unwrap()
+            else {
+                panic!("link missing from host directory listing");
+            };
+            if entry.name == "link" {
+                break entry;
+            }
+        };
+        assert_eq!(entry.kind, Kind::SymbolicLink);
+        assert_eq!(entry.size, "target".len() as Size);
+        DirectoryOperations::close(&filesystem, &mut directory).unwrap();
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_host_absolute_symlink_targets() {
+        let root = temp_root();
+        std::os::unix::fs::symlink("/etc/passwd", root.join("host-absolute")).unwrap();
+        let filesystem = HostFileSystem::open(&root, HostFileSystemOptions::default()).unwrap();
+        let mut target = [0; 64];
+        assert!(
+            filesystem
+                .read_symlink(Path::new("/host-absolute"), &mut target)
+                .is_err()
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn satisfies_generic_filesystem_metadata_contract() {
         let root = temp_root();
         let filesystem = HostFileSystem::open(&root, HostFileSystemOptions::default()).unwrap();
