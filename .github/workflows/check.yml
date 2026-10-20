@@ -39,6 +39,7 @@ jobs:
       i18n_code: ${{ steps.filter.outputs.i18n_code }}
       translation_code: ${{ steps.translation_code.outputs.changed }}
       rust: ${{ steps.filter.outputs.rust }}
+      makefile: ${{ steps.filter.outputs.makefile }}
       i18n_en: ${{ steps.filter.outputs.i18n_en }}
       i18n_fr: ${{ steps.filter.outputs.i18n_fr }}
       i18n_es: ${{ steps.filter.outputs.i18n_es }}
@@ -55,8 +56,8 @@ jobs:
               - 'subsystems/**'
               - 'libraries/**'
               - '**/Cargo.{toml,lock}'
-              - '**/.cargo/**'
               - '**/Makefile.toml'
+              - '**/.cargo/**'
               - '**/build.rs'
               - '**/build/**'
               - '**/rust-toolchain{,.toml}'
@@ -106,13 +107,14 @@ jobs:
               - '**/Cargo.{toml,lock}'
               - '**/build.rs'
               - '**/build/**'
-              - '**/Makefile.toml'
               - 'tolgee.extractor.mjs'
               - 'tolgee.extractor.test.mjs'
               - 'tolgee.config.ts'
               - 'subsystems/graphics/fonts_generator/**'
             rust:
               - '**/*.rs'
+            makefile:
+              - '**/Makefile.toml'
             i18n_en:
               - '**/locales/en.json'
             i18n_fr:
@@ -129,7 +131,7 @@ jobs:
               - '**/locales/pl.json'
       - name: Detect translation macro changes
         id: translation_code
-        if: steps.filter.outputs.rust == 'true'
+        if: steps.filter.outputs.rust == 'true' || steps.filter.outputs.makefile == 'true'
         uses: actions/github-script@v8
         with:
           script: |
@@ -139,10 +141,15 @@ jobs:
               pull_number: context.issue.number,
               per_page: 100,
             });
-            const rustFiles = files.filter(file => file.filename.endsWith('.rs'));
-            const changed = rustFiles.some(file =>
-              !file.patch || /^[+-].*\btranslate\s*!/m.test(file.patch)
-            );
+            const changed = files.some(file => {
+              if (file.filename.endsWith('.rs')) {
+                return !file.patch || /^[+-].*\btranslate\s*!/m.test(file.patch);
+              }
+              if (file.filename.endsWith('Makefile.toml')) {
+                return !file.patch || /^[+-].*(check-localization|generate-fonts|EMBEDDED_I18N)/im.test(file.patch);
+              }
+              return false;
+            });
             core.setOutput('changed', String(changed));
 
   localization:
