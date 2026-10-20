@@ -3,6 +3,10 @@
 import pathlib
 import re
 import unittest
+import os
+import subprocess
+import tempfile
+import textwrap
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -25,6 +29,11 @@ class WorkflowPolicy(unittest.TestCase):
         text = (ROOT / ".github/workflows/container.yml").read_text()
         self.assertRegex(text, r"concurrency:\n  group: .*github.workflow.*github.ref")
         self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' }}", text)
+
+    def test_ci_measurement_tools_are_not_runtime_image_inputs(self):
+        self.assertIn("tools/ci", (ROOT / ".dockerignore").read_text().splitlines())
+        workflow = (ROOT / ".github/workflows/container.yml").read_text()
+        self.assertEqual(workflow.count("      - '!tools/ci/**'"), 2)
 
     def test_all_host_tools_sources_select_host_checks(self):
         filters = job("check.yml", "changes")
@@ -89,6 +98,23 @@ class WorkflowPolicy(unittest.TestCase):
         text = (ROOT / ".github/actions/setup/action.yml").read_text()
         self.assertIn("uses: ./.github/actions/cache-tools", text)
         self.assertLess(text.index("uses: ./.github/actions/cache-tools"), text.index("id: rust-cache"))
+
+    def test_optional_compression_install_failure_does_not_skip_validation(self):
+        action = (ROOT / ".github/actions/cache-tools/action.yml").read_text()
+        script = textwrap.dedent(action.split("      run: |\n")[1])
+        with tempfile.TemporaryDirectory() as directory:
+            apt = pathlib.Path(directory) / "apt-get"
+            apt.write_text("#!/bin/sh\nexit 1\n")
+            apt.chmod(0o755)
+            result = subprocess.run(["/bin/bash", "-e", "-c", script], env={**os.environ, "PATH": directory}, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("::warning::", result.stdout)
+
+    def test_nextest_comparison_does_not_charge_cargo_for_doctests_twice(self):
+        text = job("check.yml", "nextest-benchmark")
+        execution = text.split("      - name: Benchmark | cargo test execution\n")[1].split("      - name:")[0]
+        self.assertIn("cargo test --workspace --tests", execution)
+        self.assertIn("cargo test --workspace --doc --timings", text)
 
 
 if __name__ == "__main__":

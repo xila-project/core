@@ -8,7 +8,10 @@ runs:
         # The current development image has GNU tar but omits zstd. Keep this
         # fallback until zstd is shipped in the image; then it is a cheap probe.
         if ! command -v zstd > /dev/null; then
-          apt-get update -qq
-          apt-get install -y --no-install-recommends zstd
+          if ! (apt-get update -qq && apt-get install -y --no-install-recommends zstd); then
+            echo '::warning::Unable to install optional zstd; Actions will fall back to gzip.'
+          fi
         fi
-        zstd --version
+        if command -v zstd > /dev/null; then
+          zstd --version
+        fi

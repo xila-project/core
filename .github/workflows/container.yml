@@ -26,6 +26,7 @@ on:
       - 'libraries/**'
       - 'executables/**'
       - 'tools/**'
+      - '!tools/ci/**'
   pull_request:
     paths:
       - 'Dockerfile.runtime'
@@ -49,6 +50,7 @@ on:
       - 'libraries/**'
       - 'executables/**'
       - 'tools/**'
+      - '!tools/ci/**'
   workflow_dispatch:
 
 permissions:
