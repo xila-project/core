@@ -6,7 +6,7 @@ use task::TaskIdentifier;
 
 use drivers_native::host_file_system::{HostFileSystem, HostFileSystemOptions};
 use file_system::{
-    AccessFlags, AttributeFlags, Attributes, CreateFlags, FileSystemOperations, Flags,
+    AccessFlags, AttributeFlags, Attributes, Context, CreateFlags, FileSystemOperations, Flags,
     MemoryDevice, Path, Position, StateFlags,
 };
 #[cfg(target_os = "linux")]
@@ -565,3 +565,420 @@ mod polling;
 #[cfg(target_os = "linux")]
 #[path = "support/device_polling.rs"]
 mod device_polling;
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
+    use virtual_file_system::Error as VfsError;
+
+    let (task, vfs) = initialize().await;
+    vfs.create_directory(task, &Path::from_str("/links"))
+        .await
+        .unwrap();
+    let mut original = File::open(
+        vfs,
+        task,
+        "/links/original",
+        Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
+    )
+    .await
+    .unwrap();
+    original.write(b"hello").await.unwrap();
+    original.close(vfs).await.unwrap();
+
+    for attempt in 0..8 {
+        let path = alloc::format!("/links/.xila-link-stage-{attempt}");
+        let mut collision = File::open(
+            vfs,
+            task,
+            Path::from_str(&path),
+            Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
+        )
+        .await
+        .unwrap();
+        if attempt == 0 {
+            collision.write(b"unrelated").await.unwrap();
+        }
+        collision.close(vfs).await.unwrap();
+    }
+
+    vfs.create_symlink(
+        task,
+        Path::from_str("/links/original"),
+        Path::from_str("/links/absolute"),
+    )
+    .await
+    .unwrap();
+    vfs.create_symlink(
+        task,
+        Path::from_str("original"),
+        Path::from_str("/links/relative"),
+    )
+    .await
+    .unwrap();
+    vfs.create_symlink(
+        task,
+        Path::from_str("relative"),
+        Path::from_str("/links/chain"),
+    )
+    .await
+    .unwrap();
+
+    let mut collision = File::open(
+        vfs,
+        task,
+        "/links/.xila-link-stage-0",
+        AccessFlags::Read.into(),
+    )
+    .await
+    .unwrap();
+    let mut collision_contents = [0; 9];
+    assert_eq!(
+        collision.read(&mut collision_contents).await.unwrap(),
+        collision_contents.len()
+    );
+    assert_eq!(&collision_contents, b"unrelated");
+    collision.close(vfs).await.unwrap();
+
+    vfs.create_directory(task, &Path::from_str("/links/directory"))
+        .await
+        .unwrap();
+    vfs.create_symlink(
+        task,
+        Path::from_str("directory"),
+        Path::from_str("/links/directory-link"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        vfs.get_link_statistics(&Path::from_str("/links/directory-link"))
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::SymbolicLink
+    );
+    assert_eq!(
+        vfs.get_statistics(&Path::from_str("/links/directory-link"))
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::Directory
+    );
+    let directory = vfs
+        .open_directory(task, &Path::from_str("/links/directory-link"))
+        .await
+        .unwrap();
+    directory.close(vfs).await.unwrap();
+
+    vfs.create_named_pipe(&Path::from_str("/links/pipe"), 32, task)
+        .await
+        .unwrap();
+    vfs.create_symlink(
+        task,
+        Path::from_str("pipe"),
+        Path::from_str("/links/pipe-link"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        vfs.get_statistics(&Path::from_str("/links/pipe-link"))
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::Pipe
+    );
+
+    vfs.mount_block_device(
+        task,
+        &Path::from_str("/links/block-device"),
+        MemoryDevice::<512>::new(512),
+    )
+    .await
+    .unwrap();
+    vfs.create_symlink(
+        task,
+        Path::from_str("block-device"),
+        Path::from_str("/links/device-link"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        vfs.get_statistics(&Path::from_str("/links/device-link"))
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::BlockDevice
+    );
+
+    for path in ["/links/absolute", "/links/relative", "/links/chain"] {
+        let mut file = File::open(vfs, task, path, AccessFlags::Read.into())
+            .await
+            .unwrap();
+        let mut contents = [0; 5];
+        assert_eq!(file.read(&mut contents).await.unwrap(), contents.len());
+        assert_eq!(&contents, b"hello");
+        file.close(vfs).await.unwrap();
+    }
+
+    let link_stats = vfs
+        .get_link_statistics(&Path::from_str("/links/absolute"))
+        .await
+        .unwrap();
+    assert_eq!(link_stats.kind, file_system::Kind::SymbolicLink);
+    assert_eq!(link_stats.size, "/links/original".len() as u64);
+    assert_eq!(
+        vfs.get_statistics(&Path::from_str("/links/absolute"))
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::File
+    );
+    let trailing_slash_stats = vfs
+        .get_statistics(&Path::from_str("/links/absolute/"))
+        .await;
+    assert!(matches!(trailing_slash_stats, Err(VfsError::NotADirectory)));
+
+    // A trailing slash requires a directory, but must not make entry
+    // operations follow a final symlink and mutate its target.
+    vfs.create_directory(task, &Path::from_str("/links/empty-directory"))
+        .await
+        .unwrap();
+    vfs.create_symlink(
+        task,
+        Path::from_str("/links/empty-directory"),
+        Path::from_str("/links/trailing-directory-link"),
+    )
+    .await
+    .unwrap();
+    let mut source = File::open(
+        vfs,
+        task,
+        "/links/source",
+        Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
+    )
+    .await
+    .unwrap();
+    source.write(b"source").await.unwrap();
+    source.close(vfs).await.unwrap();
+    assert!(
+        vfs.remove(task, Path::from_str("/links/trailing-directory-link/"))
+            .await
+            .is_err()
+    );
+    assert!(
+        vfs.rename(
+            task,
+            &Path::from_str("/links/trailing-directory-link/"),
+            &Path::from_str("/links/destination"),
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        vfs.rename(
+            task,
+            &Path::from_str("/links/source"),
+            &Path::from_str("/links/trailing-directory-link/"),
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(
+        vfs.get_link_statistics(&Path::from_str("/links/trailing-directory-link"))
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::SymbolicLink
+    );
+    assert_eq!(
+        vfs.get_statistics(&Path::from_str("/links/empty-directory"))
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::Directory
+    );
+    assert!(
+        vfs.get_statistics(&Path::from_str("/links/source"))
+            .await
+            .is_ok()
+    );
+
+    let mut target = [0; 64];
+    let length = vfs
+        .read_symlink(task, Path::from_str("/links/absolute"), &mut target)
+        .await
+        .unwrap();
+    assert_eq!(&target[..length], b"/links/original");
+
+    vfs.create_symlink(
+        task,
+        Path::from_str("/missing-target"),
+        Path::from_str("/links/dangling"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        vfs.get_link_statistics(&Path::from_str("/links/dangling"))
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::SymbolicLink
+    );
+    assert!(
+        vfs.get_statistics(&Path::from_str("/links/dangling"))
+            .await
+            .is_err()
+    );
+
+    vfs.create_symlink(
+        task,
+        Path::from_str("loop-b"),
+        Path::from_str("/links/loop-a"),
+    )
+    .await
+    .unwrap();
+    vfs.create_symlink(
+        task,
+        Path::from_str("loop-a"),
+        Path::from_str("/links/loop-b"),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        File::open(vfs, task, "/links/loop-a", AccessFlags::Read.into()).await,
+        Err(VfsError::FileSystem(
+            file_system::Error::InvalidSymbolicLink
+        ))
+    ));
+
+    assert!(matches!(
+        File::open(
+            vfs,
+            task,
+            "/links/absolute",
+            Flags::new(AccessFlags::Read, Some(CreateFlags::CREATE_EXCLUSIVE), None)
+        )
+        .await,
+        Err(VfsError::AlreadyExists)
+    ));
+
+    vfs.rename(
+        task,
+        &Path::from_str("/links/relative"),
+        &Path::from_str("/links/renamed"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        vfs.get_link_statistics(&Path::from_str("/links/renamed"))
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::SymbolicLink
+    );
+    vfs.remove(task, Path::from_str("/links/renamed"))
+        .await
+        .unwrap();
+    assert_eq!(
+        vfs.get_statistics(&Path::from_str("/links/original"))
+            .await
+            .unwrap()
+            .size,
+        5
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn symlink_targets_can_cross_filesystem_mounts() {
+    let (task, vfs) = initialize().await;
+    let device = MemoryDevice::<512>::new_static(256 * 512);
+    little_fs::FileSystem::format(device, 256).unwrap();
+    vfs.mount_file_system(
+        little_fs::FileSystem::new(device, 256).unwrap(),
+        Path::from_str("/other"),
+        task,
+    )
+    .await
+    .unwrap();
+    let mut target = File::open(
+        vfs,
+        task,
+        "/other/target",
+        Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
+    )
+    .await
+    .unwrap();
+    target.write(b"mounted").await.unwrap();
+    target.close(vfs).await.unwrap();
+
+    vfs.create_symlink(
+        task,
+        Path::from_str("/other/target"),
+        Path::from_str("/cross-mount"),
+    )
+    .await
+    .unwrap();
+    let mut link = File::open(vfs, task, "/cross-mount", AccessFlags::Read.into())
+        .await
+        .unwrap();
+    let mut contents = [0; 7];
+    assert_eq!(link.read(&mut contents).await.unwrap(), contents.len());
+    assert_eq!(&contents, b"mounted");
+    link.close(vfs).await.unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn hostfs_absolute_link_uses_vfs_root_without_escaping_host_capability() {
+    use std::{
+        fs,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    static NEXT_ROOT: AtomicUsize = AtomicUsize::new(0);
+    let root = std::env::temp_dir().join(format!(
+        "xila-vfs-symlink-hostfs-{}-{}",
+        std::process::id(),
+        NEXT_ROOT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let host_root = root.join("host");
+    fs::create_dir_all(&host_root).unwrap();
+    fs::create_dir_all(root.join("target-directory")).unwrap();
+
+    let direct_filesystem =
+        HostFileSystem::open(&host_root, HostFileSystemOptions::default()).unwrap();
+    let (task, vfs) = initialize().await;
+    vfs.create_directory(task, &Path::from_str("/target-directory"))
+        .await
+        .unwrap();
+    vfs.mount_file_system(
+        HostFileSystem::open(&host_root, HostFileSystemOptions::default()).unwrap(),
+        Path::from_str("/host"),
+        task,
+    )
+    .await
+    .unwrap();
+    vfs.create_symlink(
+        task,
+        Path::from_str("/target-directory"),
+        Path::from_str("/host/dirlink"),
+    )
+    .await
+    .unwrap();
+
+    let directory = vfs
+        .open_directory(task, &Path::from_str("/host/dirlink"))
+        .await
+        .unwrap();
+    directory.close(vfs).await.unwrap();
+
+    let mut direct_context = Context::new_empty();
+    assert!(
+        direct_filesystem
+            .lookup_directory(&mut direct_context, Path::from_str("/dirlink"))
+            .is_err()
+    );
+    vfs.unmount(Path::from_str("/host"), true).await.unwrap();
+    let _ = fs::remove_dir_all(root);
+}

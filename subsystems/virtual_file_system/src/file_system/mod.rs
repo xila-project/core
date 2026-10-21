@@ -8,13 +8,16 @@ use alloc::{boxed::Box, collections::BTreeMap};
 use core::ptr;
 use exported_file_system::{BlockDevice, CharacterDevice, CreateFlags, Permission, Permissions};
 use file_system::{
-    AccessFlags, AttributeFlags, Attributes, Context, FileSystemOperations, Flags, Kind, Path,
-    StateFlags, Statistics,
+    AccessFlags, AttributeFlags, Attributes, BaseOperations, Context, FileSystemOperations, Flags,
+    Kind, Path, StateFlags, Statistics,
 };
 use synchronization::{blocking_mutex::raw::CriticalSectionRawMutex, rwlock::RwLock};
 use task::TaskIdentifier;
 use users::{GroupIdentifier, UserIdentifier};
 use utilities::*;
+
+/// Maximum bytes stored in a symbolic-link target.
+const MAX_SYMLINK_TARGET_LENGTH: usize = 4096;
 
 pub fn initialize(
     task_manager: &'static task::Manager,
@@ -218,11 +221,15 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         path: &impl AsRef<Path>,
     ) -> Result<Directory<'a>> {
-        let path = path.as_ref();
+        let requested_path = path.as_ref();
 
         let mut file_systems = self.file_systems.write().await; // Get the file systems
 
         let (time, user, _) = self.get_time_user_group(task).await?;
+        let resolved_path = self
+            .resolve_path(&file_systems, requested_path, true, false, user, task)
+            .await?;
+        let path: &Path = &resolved_path;
 
         self.check_permissions_with_parent(
             &file_systems,
@@ -282,7 +289,7 @@ impl VirtualFileSystem {
         flags: Flags,
         task: TaskIdentifier,
     ) -> Result<File<'a>> {
-        let path = path.as_ref();
+        let requested_path = path.as_ref();
 
         let mut file_systems = self.file_systems.write().await; // Get the file systems
 
@@ -294,6 +301,19 @@ impl VirtualFileSystem {
         {
             return Err(Error::InvalidOpen);
         }
+        let exclusive_create =
+            open.contains(CreateFlags::Create) && open.contains(CreateFlags::Exclusive);
+        let resolved_path = self
+            .resolve_path(
+                &file_systems,
+                requested_path,
+                !exclusive_create,
+                open.contains(CreateFlags::Create),
+                user,
+                task,
+            )
+            .await?;
+        let path: &Path = &resolved_path;
         let (file_system, relative_path, _) =
             Self::get_file_system_from_path(&file_systems, &path)?;
         let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
@@ -319,6 +339,9 @@ impl VirtualFileSystem {
             )
             .await?;
         } else if open.contains(CreateFlags::Create) {
+            if requested_path.as_str().len() > 1 && requested_path.as_str().ends_with('/') {
+                return Err(Error::NotADirectory);
+            }
             // Authorize before mutating the filesystem, including failed redirections.
             self.check_permissions(
                 file_system.file_system,
@@ -648,17 +671,19 @@ impl VirtualFileSystem {
     }
 
     pub async fn remove(&self, task: TaskIdentifier, path: impl AsRef<Path>) -> Result<()> {
-        let file_systems = self.file_systems.read().await; // Get the file systems
-
+        let file_systems = self.file_systems.write().await; // Serialize path resolution with removal.
+        let (_, user, _) = self.get_time_user_group(task).await?;
+        let resolved_path = self
+            .resolve_path(&file_systems, path.as_ref(), false, false, user, task)
+            .await?;
+        let path: &Path = &resolved_path;
         let (file_system, relative_path, _) =
             Self::get_file_system_from_path(&file_systems, &path)?; // Get the file system identifier and the relative path
-
-        let (_, user, _) = self.get_time_user_group(task).await?;
 
         self.check_permissions(
             file_system.file_system,
             relative_path.go_parent().ok_or(Error::InvalidPath)?,
-            Permission::Write,
+            Permission::Write | Permission::Execute,
             user,
             task,
         )
@@ -688,17 +713,20 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         path: &impl AsRef<Path>,
     ) -> Result<()> {
-        let file_systems = self.file_systems.read().await; // Get the file systems
-
-        let (file_system, relative_path, _) = Self::get_file_system_from_path(&file_systems, path)?; // Get the file system identifier and the relative path
-
+        let file_systems = self.file_systems.write().await; // Serialize path resolution with creation.
         let (time, user, group) = self.get_time_user_group(task).await?;
+        let resolved_path = self
+            .resolve_path(&file_systems, path.as_ref(), false, true, user, task)
+            .await?;
+        let path: &Path = &resolved_path;
+        let (file_system, relative_path, _) =
+            Self::get_file_system_from_path(&file_systems, &path)?;
 
         // Get the parent directory attributes
         self.check_permissions(
             file_system.file_system,
             relative_path.go_parent().ok_or(Error::InvalidPath)?,
-            Permission::Write,
+            Permission::Write | Permission::Execute,
             user,
             task,
         )
@@ -735,25 +763,275 @@ impl VirtualFileSystem {
         Ok(())
     }
 
+    /// Create a symbolic link at `link` whose target is interpreted in the
+    /// caller's virtual namespace. The target may be dangling or cross mounts.
+    pub async fn create_symlink(
+        &self,
+        task: TaskIdentifier,
+        target: &Path,
+        link: &Path,
+    ) -> Result<()> {
+        if !target.is_valid()
+            || target.is_empty()
+            || target.get_length() > MAX_SYMLINK_TARGET_LENGTH
+            || !link.is_valid()
+            || !link.is_absolute()
+            || link.is_root()
+            || link.as_str().ends_with('/')
+        {
+            return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
+        }
+
+        let (_, user, _) = self.get_time_user_group(task).await?;
+        // Serialize staging and publication against other VFS namespace
+        // mutations, so temporary entries are never opened through the VFS.
+        let file_systems = self.file_systems.write().await;
+        let resolved_link = self
+            .resolve_path(&file_systems, link, false, true, user, task)
+            .await?;
+        let link: &Path = &resolved_link;
+        let (file_system, relative_link, _) =
+            Self::get_file_system_from_path(&file_systems, &link)?;
+        self.check_permissions(
+            file_system.file_system,
+            relative_link.go_parent().ok_or(Error::InvalidPath)?,
+            Permission::Write | Permission::Execute,
+            user,
+            task,
+        )
+        .await?;
+
+        if file_system
+            .file_system
+            .persistent_attributes()
+            .contains(AttributeFlags::Kind)
+        {
+            let mut existing = Attributes::new().set_mask(AttributeFlags::Kind);
+            match Self::get_attributes(file_system.file_system, relative_link, &mut existing).await
+            {
+                Ok(()) => return Err(Error::AlreadyExists),
+                Err(Error::FileSystem(file_system::Error::NotFound)) => {}
+                Err(error) => return Err(error),
+            }
+
+            let stage_parent = relative_link.go_parent().ok_or(Error::InvalidPath)?;
+            let (time, _, _) = self.get_time_user_group(task).await?;
+            let attributes = Attributes::new()
+                .set_kind(Kind::SymbolicLink)
+                .set_user(user)
+                .set_group(self.task_manager.get_group(task).await?)
+                .set_permissions(Permissions::ALL_FULL)
+                .set_creation(time)
+                .set_modification(time)
+                .set_access(time)
+                .set_status(time);
+
+            let mut published = false;
+            let mut last_error = Error::AlreadyExists;
+            for attempt in 0..64 {
+                // The first candidates stay deterministic for simple
+                // collision handling. Time-qualified candidates make stale
+                // names left by interrupted boots unlikely to exhaust the
+                // bounded retry set, without deleting an entry we did not
+                // create.
+                let stage_name = if attempt < 8 {
+                    alloc::format!(".xila-link-stage-{attempt}")
+                } else {
+                    alloc::format!(".xila-link-stage-{}-{}", time.as_u64(), attempt - 8)
+                };
+                let stage_path = stage_parent
+                    .to_owned()
+                    .join(Path::from_str(&stage_name))
+                    .ok_or(Error::InvalidPath)?;
+                match poll(|| Ok(file_system.file_system.create_file(&stage_path)?)).await {
+                    Ok(()) => {}
+                    Err(Error::FileSystem(file_system::Error::AlreadyExists)) => continue,
+                    Err(error) => return Err(error),
+                }
+
+                let result = async {
+                    let mut context = Context::new_empty();
+                    poll(|| {
+                        Ok(file_system.file_system.lookup_file(
+                            &mut context,
+                            &stage_path,
+                            Flags::from(AccessFlags::Write),
+                        )?)
+                    })
+                    .await?;
+                    let write = file_system.file_system.write_sync(
+                        &mut context,
+                        target.as_str().as_bytes(),
+                        0,
+                    );
+                    let flush = file_system.file_system.flush_sync(&mut context);
+                    let close = BaseOperations::close(file_system.file_system, &mut context);
+                    let written = write?;
+                    flush?;
+                    close?;
+                    if written != target.get_length() {
+                        return Err(Error::FileSystem(file_system::Error::InputOutput));
+                    }
+
+                    Self::set_attributes(file_system.file_system, &stage_path, &attributes).await?;
+                    poll(|| Ok(file_system.file_system.rename(&stage_path, relative_link)?)).await
+                }
+                .await;
+
+                match result {
+                    Ok(()) => {
+                        published = true;
+                        break;
+                    }
+                    Err(error) => {
+                        last_error = error;
+                        let _ = poll(|| Ok(file_system.file_system.remove(&stage_path)?)).await;
+                        break;
+                    }
+                }
+            }
+            if !published {
+                return Err(last_error);
+            }
+        } else {
+            // Native symlink support is an adapter detail for filesystems such
+            // as HostFS that cannot persist Xila Kind metadata on ordinary files.
+            let native_target_owned = if target.is_absolute() {
+                let parent = link.go_parent().ok_or(Error::InvalidPath)?;
+                let parent_depth = parent
+                    .get_components()
+                    .filter(|component| matches!(component, file_system::Component::Normal(_)))
+                    .count();
+                let mut relative = alloc::string::String::with_capacity(
+                    parent_depth.saturating_mul(3) + target.get_length(),
+                );
+                for _ in 0..parent_depth {
+                    relative.push_str("../");
+                }
+                let target_text = target.as_str().trim_start_matches('/');
+                if target_text.is_empty() && relative.is_empty() {
+                    relative.push('.');
+                } else {
+                    relative.push_str(target_text);
+                }
+                Some(relative)
+            } else {
+                None
+            };
+            let native_target = native_target_owned
+                .as_deref()
+                .map(Path::from_str)
+                .unwrap_or(target);
+            poll(|| {
+                Ok(file_system
+                    .file_system
+                    .create_symlink(native_target, relative_link)?)
+            })
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Read a symbolic link target without following it into caller-owned,
+    /// bounded storage. Returns the number of bytes written.
+    pub async fn read_symlink(
+        &self,
+        task: TaskIdentifier,
+        link: &Path,
+        buffer: &mut [u8],
+    ) -> Result<usize> {
+        if !link.is_valid() || !link.is_absolute() || link.is_root() {
+            return Err(Error::InvalidPath);
+        }
+
+        let (_, user, _) = self.get_time_user_group(task).await?;
+        let file_systems = self.file_systems.read().await;
+        let resolved_link = self
+            .resolve_path(&file_systems, link, false, false, user, task)
+            .await?;
+        let link: &Path = &resolved_link;
+        let (file_system, relative_link, _) =
+            Self::get_file_system_from_path(&file_systems, &link)?;
+        self.check_permissions(
+            file_system.file_system,
+            relative_link.go_parent().ok_or(Error::InvalidPath)?,
+            Permission::Execute,
+            user,
+            task,
+        )
+        .await?;
+        let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
+        Self::get_attributes(file_system.file_system, relative_link, &mut attributes).await?;
+        if attributes.get_kind() != Some(&Kind::SymbolicLink) {
+            return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
+        }
+        let size = {
+            let mut size = Attributes::new().set_mask(AttributeFlags::Size);
+            Self::get_attributes(file_system.file_system, relative_link, &mut size).await?;
+            *size.get_size().ok_or(Error::MissingAttribute)? as usize
+        };
+        if size > MAX_SYMLINK_TARGET_LENGTH || size > buffer.len() {
+            return Err(Error::FileSystem(file_system::Error::NameTooLong));
+        }
+        match poll(|| {
+            Ok(file_system
+                .file_system
+                .read_symlink(relative_link, buffer)?)
+        })
+        .await
+        {
+            Ok(read) => Ok(read),
+            Err(Error::FileSystem(file_system::Error::UnsupportedOperation)) => {
+                let mut context = Context::new_empty();
+                poll(|| {
+                    Ok(file_system.file_system.lookup_file(
+                        &mut context,
+                        relative_link,
+                        Flags::from(AccessFlags::Read),
+                    )?)
+                })
+                .await?;
+                let read = file_system
+                    .file_system
+                    .read_sync(&mut context, &mut buffer[..size], 0);
+                let close = BaseOperations::close(file_system.file_system, &mut context);
+                let read = read?;
+                close?;
+                if read != size {
+                    return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
+                }
+                Ok(read)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     pub async fn rename(
         &self,
         task: TaskIdentifier,
         old_path: &impl AsRef<Path>,
         new_path: &impl AsRef<Path>,
     ) -> Result<()> {
-        let file_systems = self.file_systems.read().await; // Get the file systems
+        let file_systems = self.file_systems.write().await; // Serialize source/destination resolution with rename.
+        let (_, user, _) = self.get_time_user_group(task).await?;
+        let old_path = self
+            .resolve_path(&file_systems, old_path.as_ref(), false, false, user, task)
+            .await?;
+        let new_path = self
+            .resolve_path(&file_systems, new_path.as_ref(), false, true, user, task)
+            .await?;
+        let old_path: &Path = &old_path;
+        let new_path: &Path = &new_path;
 
         let (old_file_system, old_relative_path, _) =
-            Self::get_file_system_from_path(&file_systems, old_path)?; // Get the file system identifier and the relative path
+            Self::get_file_system_from_path(&file_systems, &old_path)?; // Get the file system identifier and the relative path
 
         let (new_file_system, new_relative_path, _) =
-            Self::get_file_system_from_path(&file_systems, new_path)?; // Get the file system identifier and the relative path
+            Self::get_file_system_from_path(&file_systems, &new_path)?; // Get the file system identifier and the relative path
 
         if !ptr::eq(old_file_system, new_file_system) {
             return Err(Error::InvalidPath);
         }
-
-        let (_, user, _) = self.get_time_user_group(task).await?;
 
         for parent_path in [
             old_relative_path.go_parent().ok_or(Error::InvalidPath)?,
@@ -762,7 +1040,7 @@ impl VirtualFileSystem {
             self.check_permissions(
                 old_file_system.file_system,
                 parent_path,
-                Permission::Write,
+                Permission::Write | Permission::Execute,
                 user,
                 task,
             )
@@ -791,9 +1069,46 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         path: &impl AsRef<Path>,
     ) -> Result<Statistics> {
-        let file_systems = self.file_systems.read().await;
+        self.get_statistics_for_task_with_follow(task, path, true)
+            .await
+    }
 
-        let (file_system, relative_path, _) = Self::get_file_system_from_path(&file_systems, path)?; // Get the file system identifier and the relative path
+    /// Read metadata for the directory entry itself without following its final link.
+    pub async fn get_link_statistics_for_task(
+        &self,
+        task: TaskIdentifier,
+        path: &impl AsRef<Path>,
+    ) -> Result<Statistics> {
+        self.get_statistics_for_task_with_follow(task, path, false)
+            .await
+    }
+
+    /// Return metadata for the directory entry itself without following a final symbolic link.
+    pub async fn get_link_statistics(&self, path: &impl AsRef<Path>) -> Result<Statistics> {
+        let task = self.task_manager.get_current_task_identifier().await;
+        self.get_link_statistics_for_task(task, path).await
+    }
+
+    async fn get_statistics_for_task_with_follow(
+        &self,
+        task: TaskIdentifier,
+        path: &impl AsRef<Path>,
+        follow_final: bool,
+    ) -> Result<Statistics> {
+        let file_systems = self.file_systems.read().await;
+        let (_, user, _) = self.get_time_user_group(task).await?;
+        let resolved_path = self
+            .resolve_path(
+                &file_systems,
+                path.as_ref(),
+                follow_final,
+                false,
+                user,
+                task,
+            )
+            .await?;
+        let (file_system, relative_path, _) =
+            Self::get_file_system_from_path(&file_systems, &resolved_path)?;
 
         let user = self.task_manager.get_user(task).await?;
         if user != users::UserIdentifier::ROOT {
@@ -805,9 +1120,7 @@ impl VirtualFileSystem {
         }
 
         let mut attributes = Attributes::new().set_mask(AttributeFlags::all());
-
         Self::get_attributes(file_system.file_system, relative_path, &mut attributes).await?;
-
         Statistics::from_attributes(&attributes).ok_or(Error::MissingAttribute)
     }
 
@@ -950,10 +1263,13 @@ impl VirtualFileSystem {
     ) -> Result<()> {
         let path = path.as_ref();
         let file_systems = self.file_systems.read().await; // Get the file systems 
-
+        let (_, current_user, _) = self.get_time_user_group(task).await?;
+        let resolved = self
+            .resolve_path(&file_systems, path, true, false, current_user, task)
+            .await?;
+        let path: &Path = &resolved;
         let (file_system, relative_path, _) =
             Self::get_file_system_from_path(&file_systems, &path)?; // Get the file system identifier and the relative path
-        let (_, current_user, _) = self.get_time_user_group(task).await?;
         Self::check_owner(file_system.file_system, relative_path, current_user).await?;
 
         let mut attributes = Attributes::new();
@@ -974,11 +1290,13 @@ impl VirtualFileSystem {
     ) -> Result<()> {
         let path = path.as_ref();
         let file_systems = self.file_systems.read().await; // Get the file systems
-
+        let (_, current_user, _) = self.get_time_user_group(task).await?;
+        let resolved = self
+            .resolve_path(&file_systems, path, true, false, current_user, task)
+            .await?;
+        let path: &Path = &resolved;
         let (file_system, relative_path, _) =
             Self::get_file_system_from_path(&file_systems, &path)?; // Get the file system identifier and the relative path
-
-        let (_, current_user, _) = self.get_time_user_group(task).await?;
         Self::check_owner(file_system.file_system, relative_path, current_user).await?;
 
         let attributes = Attributes::new().set_permissions(permissions);

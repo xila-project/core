@@ -229,10 +229,7 @@ impl HostFileSystem {
     fn metadata(&self, path: &Path) -> Result<cap_std::fs::Metadata> {
         let path = Self::relative_path(path)?;
         let metadata = self.root()?.symlink_metadata(&path).map_err(map_io_error)?;
-        if metadata.file_type().is_symlink() {
-            return Err(Error::UnsupportedOperation);
-        }
-        if !metadata.is_file() && !metadata.is_dir() {
+        if !metadata.is_file() && !metadata.is_dir() && !metadata.file_type().is_symlink() {
             return Err(Error::UnsupportedOperation);
         }
         Ok(metadata)
@@ -241,7 +238,9 @@ impl HostFileSystem {
     fn populate_attributes(&self, metadata: &cap_std::fs::Metadata, attributes: &mut Attributes) {
         let requested = attributes.get_mask();
         let mut result = Attributes::new();
-        let kind = if metadata.is_file() {
+        let kind = if metadata.file_type().is_symlink() {
+            Some(Kind::SymbolicLink)
+        } else if metadata.is_file() {
             Some(Kind::File)
         } else if metadata.is_dir() {
             Some(Kind::Directory)
@@ -254,7 +253,9 @@ impl HostFileSystem {
         {
             result = result.set_kind(kind);
         }
-        if requested.contains(AttributeFlags::Size) && metadata.is_file() {
+        if requested.contains(AttributeFlags::Size)
+            && (metadata.is_file() || metadata.file_type().is_symlink())
+        {
             result = result.set_size(metadata.len());
         }
         if requested.contains(AttributeFlags::Inode)
@@ -390,6 +391,41 @@ impl FileSystemOperations for HostFileSystem {
         AttributeFlags::Size
     }
 
+    fn create_symlink(&self, target: &Path, link: &Path) -> Result<()> {
+        self.writable()?;
+        if !target.is_valid() || target.is_empty() || target.get_length() > 4096 {
+            return Err(Error::InvalidSymbolicLink);
+        }
+        let link = Self::relative_path(link)?;
+        if target.is_absolute() {
+            // The VFS converts absolute Xila targets into relative namespace
+            // paths before calling this native adapter. An unadapted absolute
+            // target is ambiguous with a host-absolute link and is rejected.
+            return Err(Error::UnsupportedOperation);
+        }
+        let target = StdPath::new(target.as_str()).to_path_buf();
+        self.root()?.symlink(target, &link).map_err(map_io_error)
+    }
+
+    fn read_symlink(&self, link: &Path, buffer: &mut [u8]) -> Result<usize> {
+        let link = Self::relative_path(link)?;
+        let target = self.root()?.read_link(&link).map_err(map_io_error)?;
+        if target.is_absolute() {
+            // An absolute target in a pre-existing host tree belongs to the
+            // host namespace and cannot safely be exposed as an Xila target.
+            return Err(Error::InvalidSymbolicLink);
+        }
+        let target = target
+            .to_str()
+            .ok_or(Error::InvalidSymbolicLink)?
+            .as_bytes();
+        if target.len() > buffer.len() {
+            return Err(Error::NameTooLong);
+        }
+        buffer[..target.len()].copy_from_slice(target);
+        Ok(target.len())
+    }
+
     fn lookup_directory(&self, context: &mut Context, path: &Path) -> Result<()> {
         let relative = Self::relative_path(path)?;
         let root = self.root()?;
@@ -491,10 +527,10 @@ impl FileSystemOperations for HostFileSystem {
         let path = Self::relative_path(path)?;
         let root = self.root()?;
         let metadata = root.symlink_metadata(&path).map_err(map_io_error)?;
-        if metadata.file_type().is_symlink() || (!metadata.is_file() && !metadata.is_dir()) {
+        if !metadata.file_type().is_symlink() && !metadata.is_file() && !metadata.is_dir() {
             return Err(Error::UnsupportedOperation);
         }
-        if metadata.is_dir() {
+        if metadata.is_dir() && !metadata.file_type().is_symlink() {
             root.remove_dir(&path).map_err(map_io_error)
         } else {
             root.remove_file(&path).map_err(map_io_error)
@@ -507,7 +543,7 @@ impl FileSystemOperations for HostFileSystem {
         let destination = Self::relative_path(destination)?;
         let root = self.root()?;
         let metadata = root.symlink_metadata(&source).map_err(map_io_error)?;
-        if metadata.file_type().is_symlink() || (!metadata.is_file() && !metadata.is_dir()) {
+        if !metadata.file_type().is_symlink() && !metadata.is_file() && !metadata.is_dir() {
             return Err(Error::UnsupportedOperation);
         }
         root.rename(&source, &root, &destination)
@@ -695,15 +731,24 @@ impl AttributeOperations for HostFileSystem {
 impl DirectoryOperations for HostFileSystem {
     fn read(&self, context: &mut Context) -> Result<Option<Entry>> {
         loop {
-            let (entry, position) = {
+            let (entry, position, symlink_metadata) = {
                 let handle = context
                     .get_private_data_mutable_of_type::<DirectoryHandle>()
                     .ok_or(Error::InvalidContext)?;
                 let entry = handle.entries.next().transpose().map_err(map_io_error)?;
-                if entry.is_some() {
+                let mut symlink_metadata = None;
+                if let Some(entry) = entry.as_ref() {
                     handle.position += 1;
+                    if entry.file_type().map_err(map_io_error)?.is_symlink() {
+                        symlink_metadata = Some(
+                            handle
+                                .directory
+                                .symlink_metadata(entry.file_name())
+                                .map_err(map_io_error)?,
+                        );
+                    }
                 }
-                (entry, handle.position)
+                (entry, handle.position, symlink_metadata)
             };
             let Some(entry) = entry else { return Ok(None) };
             let name = match entry.file_name().into_string() {
@@ -711,16 +756,23 @@ impl DirectoryOperations for HostFileSystem {
                 Err(_) => continue,
             };
             let kind = entry.file_type().map_err(map_io_error)?;
-            let file_type = if kind.is_file() {
+            let file_type = if kind.is_symlink() {
+                Kind::SymbolicLink
+            } else if kind.is_file() {
                 Kind::File
             } else if kind.is_dir() {
                 Kind::Directory
             } else {
                 continue;
             };
-            let metadata = entry.metadata().map_err(map_io_error)?;
-            let inode = stable_inode(&metadata).unwrap_or(position);
-            return Ok(Some(Entry::new(inode, name, file_type, metadata.len())));
+            let (inode, size) = if kind.is_symlink() {
+                let metadata = symlink_metadata.ok_or(Error::InternalError)?;
+                (position, metadata.len())
+            } else {
+                let metadata = entry.metadata().map_err(map_io_error)?;
+                (stable_inode(&metadata).unwrap_or(position), metadata.len())
+            };
+            return Ok(Some(Entry::new(inode, name, file_type, size)));
         }
     }
 
@@ -967,6 +1019,62 @@ mod tests {
         assert_eq!(attrs.get_user(), Some(&users::UserIdentifier::new(42)));
         assert_eq!(attrs.get_group(), Some(&users::GroupIdentifier::new(43)));
         assert_eq!(attrs.get_permissions(), Some(&Permissions::FILE_DEFAULT));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn symlink_metadata_payload_and_directory_entry_are_no_follow() {
+        let root = temp_root();
+        fs::write(root.join("target"), b"payload").unwrap();
+        let filesystem = HostFileSystem::open(&root, HostFileSystemOptions::default()).unwrap();
+        filesystem
+            .create_symlink(Path::new("target"), Path::new("/link"))
+            .unwrap();
+
+        let mut attributes =
+            Attributes::new().set_mask(AttributeFlags::Kind | AttributeFlags::Size);
+        FileSystemOperations::get_attributes(&filesystem, Path::new("/link"), &mut attributes)
+            .unwrap();
+        assert_eq!(attributes.get_kind(), Some(&Kind::SymbolicLink));
+        assert_eq!(attributes.get_size(), Some(&("target".len() as Size)));
+
+        let mut target = [0; 16];
+        let length = filesystem
+            .read_symlink(Path::new("/link"), &mut target)
+            .unwrap();
+        assert_eq!(&target[..length], b"target");
+
+        let mut directory = Context::new_empty();
+        filesystem
+            .lookup_directory(&mut directory, Path::ROOT)
+            .unwrap();
+        let entry = loop {
+            let Some(entry) = DirectoryOperations::read(&filesystem, &mut directory).unwrap()
+            else {
+                panic!("link missing from host directory listing");
+            };
+            if entry.name == "link" {
+                break entry;
+            }
+        };
+        assert_eq!(entry.kind, Kind::SymbolicLink);
+        assert_eq!(entry.size, "target".len() as Size);
+        DirectoryOperations::close(&filesystem, &mut directory).unwrap();
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_host_absolute_symlink_targets() {
+        let root = temp_root();
+        std::os::unix::fs::symlink("/etc/passwd", root.join("host-absolute")).unwrap();
+        let filesystem = HostFileSystem::open(&root, HostFileSystemOptions::default()).unwrap();
+        let mut target = [0; 64];
+        assert!(
+            filesystem
+                .read_symlink(Path::new("/host-absolute"), &mut target)
+                .is_err()
+        );
         let _ = fs::remove_dir_all(root);
     }
 

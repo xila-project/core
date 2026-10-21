@@ -3,6 +3,19 @@ use crate::{
 };
 
 pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOperations {
+    /// Create a symbolic link without resolving its target. Backends that do not
+    /// support native links or a durable Xila link representation may keep the
+    /// default implementation.
+    fn create_symlink(&self, _target: &Path, _link: &Path) -> Result<()> {
+        Err(crate::Error::UnsupportedOperation)
+    }
+
+    /// Copy the stored target of a symbolic link into a caller-owned buffer.
+    /// This operation must inspect the final directory entry without following it.
+    fn read_symlink(&self, _link: &Path, _buffer: &mut [u8]) -> Result<usize> {
+        Err(crate::Error::UnsupportedOperation)
+    }
+
     /// Return the fields this backend can accept through `set_attributes`.
     ///
     /// This is a capability hint for VFS-managed default metadata during file
@@ -11,6 +24,15 @@ pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOper
     /// implementations default to the historical all-fields behavior.
     fn writable_attributes(&self) -> crate::AttributeFlags {
         crate::AttributeFlags::all()
+    }
+
+    /// Return the fields that are stored durably by this filesystem.
+    ///
+    /// The VFS uses this to select representations that rely on metadata
+    /// surviving an unmount and remount. A writable field is not necessarily
+    /// persistent (for example, a synthesized host attribute).
+    fn persistent_attributes(&self) -> crate::AttributeFlags {
+        crate::AttributeFlags::empty()
     }
 
     fn lookup_directory(&self, context: &mut Context, path: &Path) -> Result<()>;

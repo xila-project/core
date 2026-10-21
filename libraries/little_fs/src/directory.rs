@@ -1,12 +1,12 @@
 use core::{ffi::CStr, mem::MaybeUninit};
 
 use crate::{attributes::InternalAttributes, error::convert_result, littlefs};
-use alloc::{boxed::Box, ffi::CString, string::ToString};
-use file_system::{Attributes, Entry, Error, Kind, Path, Result, Size};
+use alloc::{borrow::ToOwned, boxed::Box, ffi::CString, string::ToString};
+use file_system::{Attributes, Entry, Error, Kind, Path, PathOwned, Result, Size};
 
-#[repr(transparent)]
 pub struct Directory {
     directory: littlefs::lfs_dir_t,
+    path: PathOwned,
 }
 
 unsafe impl Send for Directory {}
@@ -35,10 +35,12 @@ impl Directory {
     }
 
     pub fn lookup(file_system: &mut littlefs::lfs_t, path: &Path) -> Result<Box<Self>> {
+        let path_owned = path.to_owned();
         let path = CString::new(path.as_str()).unwrap();
 
         let directory = Self {
             directory: littlefs::lfs_dir_t::default(),
+            path: path_owned,
         };
         let mut directory = Box::new(directory);
 
@@ -124,7 +126,29 @@ impl Directory {
         let r#type = if informations.type_ == littlefs::lfs_type_LFS_TYPE_DIR as u8 {
             Kind::Directory
         } else {
-            Kind::File
+            let entry_path = self
+                .path
+                .clone()
+                .join(Path::from_str(&name))
+                .ok_or(Error::InvalidPath)?;
+            let entry_path =
+                CString::new(entry_path.as_str()).map_err(|_| Error::InvalidParameter)?;
+            let mut stored_attributes =
+                unsafe { InternalAttributes::new_uninitialized().assume_init() };
+            let result = unsafe {
+                littlefs::lfs_getattr(
+                    file_system,
+                    entry_path.as_ptr(),
+                    InternalAttributes::IDENTIFIER,
+                    &mut stored_attributes as *mut _ as *mut _,
+                    size_of::<InternalAttributes>() as u32,
+                )
+            };
+            match convert_result(result) {
+                Ok(_) if stored_attributes.kind == Kind::SymbolicLink => Kind::SymbolicLink,
+                Ok(_) | Err(Error::NoAttribute) => Kind::File,
+                Err(error) => return Err(error),
+            }
         };
 
         let entry = Entry::new(0, name, r#type, informations.size as _);

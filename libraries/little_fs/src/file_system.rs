@@ -159,6 +159,10 @@ impl FileSystemOperations for FileSystem {
         InternalAttributes::PERSISTED_ATTRIBUTE_FLAGS
     }
 
+    fn persistent_attributes(&self) -> file_system::AttributeFlags {
+        InternalAttributes::PERSISTED_ATTRIBUTE_FLAGS
+    }
+
     fn rename(&self, source: &Path, destination: &Path) -> Result<()> {
         self.operation(|file_system| {
             let source = CString::new(source.as_str()).map_err(|_| Error::InvalidParameter)?;
@@ -240,7 +244,9 @@ impl FileSystemOperations for FileSystem {
 
             internal_attributes.update_attributes(attributes)?;
 
-            if requested.contains(AttributeFlags::Size) && internal_attributes.kind == Kind::File {
+            if requested.contains(AttributeFlags::Size)
+                && matches!(internal_attributes.kind, Kind::File | Kind::SymbolicLink)
+            {
                 let mut info = littlefs::lfs_info::default();
 
                 convert_result(unsafe {
@@ -717,5 +723,75 @@ mod tests {
         );
         assert_eq!(&actual, expected);
         BaseOperations::close(&file_system, &mut context).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod symlink_tests {
+    use super::*;
+    use file_system::{AccessFlags, DirectoryOperations, Path};
+
+    const CACHE_SIZE: usize = 256;
+
+    #[test]
+    fn persisted_link_kind_size_and_directory_entry_survive_remount() {
+        let device = file_system::MemoryDevice::<512>::new_static(2048 * 512);
+        FileSystem::format(device, CACHE_SIZE).unwrap();
+        let filesystem = FileSystem::new(device, CACHE_SIZE).unwrap();
+        let link = Path::from_str("/link");
+        FileSystemOperations::create_file(&filesystem, link).unwrap();
+
+        let target = b"../data/target";
+        let mut context = Context::new_empty();
+        FileSystemOperations::lookup_file(
+            &filesystem,
+            &mut context,
+            link,
+            Flags::from(AccessFlags::Write),
+        )
+        .unwrap();
+        assert_eq!(
+            BaseOperations::write_sync(&filesystem, &mut context, target, 0).unwrap(),
+            target.len()
+        );
+        AttributeOperations::set_attributes(
+            &filesystem,
+            &mut context,
+            &Attributes::new().set_kind(Kind::SymbolicLink),
+        )
+        .unwrap();
+        BaseOperations::flush_sync(&filesystem, &mut context).unwrap();
+        BaseOperations::close(&filesystem, &mut context).unwrap();
+
+        let mut attributes =
+            Attributes::new().set_mask(AttributeFlags::Kind | AttributeFlags::Size);
+        FileSystemOperations::get_attributes(&filesystem, link, &mut attributes).unwrap();
+        assert_eq!(attributes.get_kind(), Some(&Kind::SymbolicLink));
+        assert_eq!(attributes.get_size(), Some(&(target.len() as Size)));
+
+        let mut directory = Context::new_empty();
+        filesystem
+            .lookup_directory(&mut directory, Path::ROOT)
+            .unwrap();
+        let mut found = None;
+        while let Some(entry) = DirectoryOperations::read(&filesystem, &mut directory).unwrap() {
+            if entry.name == "link" {
+                found = Some(entry);
+                break;
+            }
+        }
+        let found = found.unwrap();
+        assert_eq!(found.kind, Kind::SymbolicLink);
+        assert_eq!(found.size, target.len() as Size);
+        DirectoryOperations::close(&filesystem, &mut directory).unwrap();
+
+        MountOperations::unmount(&filesystem).unwrap();
+        drop(filesystem);
+        let filesystem = FileSystem::new(device, CACHE_SIZE).unwrap();
+        let mut attributes =
+            Attributes::new().set_mask(AttributeFlags::Kind | AttributeFlags::Size);
+        FileSystemOperations::get_attributes(&filesystem, link, &mut attributes).unwrap();
+        assert_eq!(attributes.get_kind(), Some(&Kind::SymbolicLink));
+        assert_eq!(attributes.get_size(), Some(&(target.len() as Size)));
     }
 }
