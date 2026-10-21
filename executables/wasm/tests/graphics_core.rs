@@ -35,6 +35,121 @@ fn handle(memory: &GuestMemory<'_>) -> WasmUsize {
 }
 
 #[xila::task::test(task_path = xila::task)]
+async fn object_position_calls_round_trip_through_the_guest_memory_abi() {
+    let _standard = testing::initialize(false, false).await;
+    let manager = support::manager().await;
+    let mut bytes = [0; 64];
+    let mut memory = GuestMemory::new(&mut bytes);
+    let mut state = GraphicsState::new(Some(manager));
+    call(&mut state, &mut memory, Function::WindowCreate, &[], 1).unwrap();
+    let window = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectCreate,
+        &[window],
+        1,
+    )
+    .unwrap();
+    let object = handle(&memory);
+    let window_pointer = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
+
+    #[cfg(feature = "memory_64")]
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ObjectSetPos,
+            &[object, 1u64 << 40, 0],
+            0,
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetPos,
+        &[object, (-17i32) as WasmUsize, 23],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectUpdateLayout,
+        &[object],
+        0,
+    )
+    .unwrap();
+    {
+        let _lock = manager.synchronous_lock();
+        let native = unsafe { lvgl::lv_obj_get_child(window_pointer, 0) };
+        assert_eq!(unsafe { lvgl::lv_obj_get_x(native) }, -17);
+    }
+    call(&mut state, &mut memory, Function::ObjectGetX, &[object], 1).unwrap();
+    assert_eq!(memory.read(GuestPointer::<i32>::new(1)), Some(-17));
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetSize,
+        &[object, 123, 45],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectUpdateLayout,
+        &[object],
+        0,
+    )
+    .unwrap();
+    for (function, expected) in [
+        (Function::ObjectGetWidth, 123),
+        (Function::ObjectGetHeight, 45),
+    ] {
+        call(&mut state, &mut memory, function, &[object], 1).unwrap();
+        assert_eq!(memory.read(GuestPointer::<i32>::new(1)), Some(expected));
+    }
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetFlexAlign,
+        &[object, 0, 2, 5],
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ObjectSetFlexAlign,
+            &[object, 6, 0, 0],
+            0,
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetLayout,
+        &[object, 1],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectUpdateLayout,
+        &[object],
+        0,
+    )
+    .unwrap();
+    drop(state);
+    assert_eq!(manager.get_window_count().await.unwrap(), 0);
+}
+
+#[xila::task::test(task_path = xila::task)]
 async fn checked_graphics_core_owns_objects_maps_and_events() {
     let _standard = testing::initialize(false, false).await;
     let manager = support::manager().await;
