@@ -746,7 +746,7 @@ async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
     vfs.create_symlink(
         task,
         Path::from_str("/links/empty-directory"),
-        Path::from_str("/links/directory-link"),
+        Path::from_str("/links/trailing-directory-link"),
     )
     .await
     .unwrap();
@@ -761,14 +761,14 @@ async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
     source.write(b"source").await.unwrap();
     source.close(vfs).await.unwrap();
     assert!(
-        vfs.remove(task, Path::from_str("/links/directory-link/"))
+        vfs.remove(task, Path::from_str("/links/trailing-directory-link/"))
             .await
             .is_err()
     );
     assert!(
         vfs.rename(
             task,
-            &Path::from_str("/links/directory-link/"),
+            &Path::from_str("/links/trailing-directory-link/"),
             &Path::from_str("/links/destination"),
         )
         .await
@@ -778,13 +778,13 @@ async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
         vfs.rename(
             task,
             &Path::from_str("/links/source"),
-            &Path::from_str("/links/directory-link/"),
+            &Path::from_str("/links/trailing-directory-link/"),
         )
         .await
         .is_err()
     );
     assert_eq!(
-        vfs.get_link_statistics(&Path::from_str("/links/directory-link"))
+        vfs.get_link_statistics(&Path::from_str("/links/trailing-directory-link"))
             .await
             .unwrap()
             .kind,
