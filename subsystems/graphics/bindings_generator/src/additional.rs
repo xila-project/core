@@ -32,6 +32,12 @@ pub fn get() -> TokenStream {
             pub fn spinner_set_animation(object: *mut lv_obj_t, duration_ms: u32, sweep_degrees: u32);
             pub fn spinner_get_animation_duration(object: *const lv_obj_t) -> u32;
             pub fn spinner_get_arc_sweep(object: *const lv_obj_t) -> u32;
+            /// Copies a selected option into a checked guest output span.
+            pub fn dropdown_get_selected_string(object: *mut lv_obj_t, output: *mut i8, capacity: u32) -> i32;
+            pub fn roller_get_selected_string(object: *mut lv_obj_t, output: *mut i8, capacity: u32) -> i32;
+            /// Boolean results are widened to guest u32 values.
+            pub fn dropdown_get_highlight(object: *mut lv_obj_t) -> u32;
+            pub fn dropdown_is_open_state(object: *mut lv_obj_t) -> u32;
             /// Host-owned indexed canvas. Dimensions and uploads are bounded by the host.
             pub fn indexed_canvas_create(parent: *mut lv_obj_t, width: u16, height: u16) -> *mut lv_obj_t;
 

@@ -534,6 +534,187 @@ async fn range_controls_expose_checked_values_modes_and_orientation() {
 }
 
 #[xila::task::test(task_path = xila::task)]
+async fn dropdown_and_roller_copy_bounded_options_and_report_selected_text() {
+    let _standard = testing::initialize(false, false).await;
+    let manager = support::manager().await;
+    let mut bytes = [0; 512];
+    let mut memory = GuestMemory::new(&mut bytes);
+    let mut state = GraphicsState::new(Some(manager));
+    call(&mut state, &mut memory, Function::WindowCreate, &[], 1).unwrap();
+    let window = handle(&memory);
+
+    call(
+        &mut state,
+        &mut memory,
+        Function::DropdownCreate,
+        &[window],
+        1,
+    )
+    .unwrap();
+    let dropdown = handle(&memory);
+    memory
+        .bytes_mut(GuestSlice::new(64, 17))
+        .unwrap()
+        .copy_from_slice(b"Alpha\nBeta\nGamma\0");
+    call(
+        &mut state,
+        &mut memory,
+        Function::DropdownSetOptions,
+        &[dropdown, 64],
+        0,
+    )
+    .unwrap();
+    memory
+        .bytes_mut(GuestSlice::new(64, 17))
+        .unwrap()
+        .fill(b'X');
+    call(
+        &mut state,
+        &mut memory,
+        Function::DropdownSetSelected,
+        &[dropdown, 1],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::DropdownSetSelectedHighlight,
+        &[dropdown, 1],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::DropdownGetHighlight,
+        &[dropdown],
+        1,
+    )
+    .unwrap();
+    assert_eq!(memory.read(GuestPointer::<u32>::new(1)), Some(1));
+    call(
+        &mut state,
+        &mut memory,
+        Function::DropdownGetOptionCount,
+        &[dropdown],
+        1,
+    )
+    .unwrap();
+    assert_eq!(memory.read(GuestPointer::<u32>::new(1)), Some(3));
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::DropdownGetSelectedString,
+            &[dropdown, 1, 32],
+            1,
+        ),
+        Err(GraphicsError::InvalidMemory)
+    );
+    call(
+        &mut state,
+        &mut memory,
+        Function::DropdownGetSelectedString,
+        &[dropdown, 200, 32],
+        1,
+    )
+    .unwrap();
+    assert_eq!(memory.read(GuestPointer::<i32>::new(1)), Some(4));
+    assert_eq!(memory.bytes(GuestSlice::new(200, 5)).unwrap(), b"Beta\0");
+    call(
+        &mut state,
+        &mut memory,
+        Function::DropdownOpen,
+        &[dropdown],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::DropdownIsOpenState,
+        &[dropdown],
+        1,
+    )
+    .unwrap();
+    assert_eq!(memory.read(GuestPointer::<u32>::new(1)), Some(1));
+    call(
+        &mut state,
+        &mut memory,
+        Function::DropdownClose,
+        &[dropdown],
+        0,
+    )
+    .unwrap();
+
+    call(
+        &mut state,
+        &mut memory,
+        Function::RollerCreate,
+        &[window],
+        1,
+    )
+    .unwrap();
+    let roller = handle(&memory);
+    memory
+        .bytes_mut(GuestSlice::new(100, 10))
+        .unwrap()
+        .copy_from_slice(b"Sun\nMoon\0\0");
+    call(
+        &mut state,
+        &mut memory,
+        Function::RollerSetOptions,
+        &[roller, 100, 1],
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::RollerSetOptions,
+            &[roller, 100, 2],
+            0,
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    memory
+        .bytes_mut(GuestSlice::new(100, 10))
+        .unwrap()
+        .fill(b'Y');
+    call(
+        &mut state,
+        &mut memory,
+        Function::RollerSetSelected,
+        &[roller, 1, 0],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::RollerSetVisibleRowCount,
+        &[roller, 5],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::RollerGetSelectedString,
+        &[roller, 220, 32],
+        1,
+    )
+    .unwrap();
+    assert_eq!(memory.read(GuestPointer::<i32>::new(1)), Some(4));
+    assert_eq!(memory.bytes(GuestSlice::new(220, 5)).unwrap(), b"Moon\0");
+
+    drop(state);
+    assert_eq!(manager.get_window_count().await.unwrap(), 0);
+}
+
+#[xila::task::test(task_path = xila::task)]
 async fn checked_graphics_core_owns_objects_maps_and_events() {
     let _standard = testing::initialize(false, false).await;
     let manager = support::manager().await;

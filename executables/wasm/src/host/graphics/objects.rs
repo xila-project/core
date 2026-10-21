@@ -1,7 +1,9 @@
 use super::canvas::{IndexedCanvas, MAX_CANVAS_PIXELS};
 use super::{
     error::{GraphicsError, Result},
-    marshal::{ButtonMap, GridTracks},
+    marshal::{
+        ButtonMap, GridTracks, MAX_WIDGET_OPTIONS_BYTES_PER_VM, updated_widget_options_usage,
+    },
 };
 use crate::host::translation::WasmUsize;
 use alloc::{rc::Rc, vec::Vec};
@@ -49,6 +51,8 @@ pub(crate) enum Kind {
     Slider,
     Switch,
     Spinner,
+    Dropdown,
+    Roller,
 }
 
 struct Entry {
@@ -57,12 +61,14 @@ struct Entry {
     map: Option<ButtonMap>,
     canvas: Option<Vec<IndexedCanvas>>,
     grid: Option<GridTracks>,
+    option_bytes: u16,
 }
 
 pub struct GraphicsState {
     pub(crate) manager: Option<&'static Manager>,
     entries: Vec<Entry>,
     grid_tracks: usize,
+    widget_options_bytes: usize,
 }
 
 impl GraphicsState {
@@ -71,6 +77,7 @@ impl GraphicsState {
             manager,
             entries: Vec::new(),
             grid_tracks: 0,
+            widget_options_bytes: 0,
         }
     }
 
@@ -87,14 +94,19 @@ impl GraphicsState {
     /// down an object, so release retained buffers here, not in the callback.
     pub(crate) fn reap_deleted_maps(&mut self) {
         let mut deleted_grid_tracks = 0;
+        let mut deleted_option_bytes = 0;
         for entry in &mut self.entries {
             if entry.notification.live.get().is_null() {
                 entry.map = None;
                 entry.canvas = None;
                 deleted_grid_tracks += entry.grid.take().map_or(0, |grid| grid.track_count());
+                deleted_option_bytes += core::mem::replace(&mut entry.option_bytes, 0) as usize;
             }
         }
         self.grid_tracks = self.grid_tracks.saturating_sub(deleted_grid_tracks);
+        self.widget_options_bytes = self
+            .widget_options_bytes
+            .saturating_sub(deleted_option_bytes);
     }
 
     fn entry(&self, handle: WasmUsize) -> Result<&Entry> {
@@ -193,6 +205,7 @@ impl GraphicsState {
             map: None,
             canvas: None,
             grid: None,
+            option_bytes: 0,
         });
         Ok(self.entries.len() as WasmUsize)
     }
@@ -233,6 +246,47 @@ impl GraphicsState {
         }
         entry.grid = Some(tracks);
         self.grid_tracks = used;
+        Ok(())
+    }
+
+    pub(crate) fn validate_widget_options_size(
+        &self,
+        handle: WasmUsize,
+        new_bytes: usize,
+    ) -> Result<()> {
+        if new_bytes > MAX_WIDGET_OPTIONS_BYTES_PER_VM {
+            return Err(GraphicsError::ResourceLimit);
+        }
+        let entry = self.entry(handle)?;
+        updated_widget_options_usage(
+            self.widget_options_bytes,
+            entry.option_bytes as usize,
+            new_bytes,
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn commit_widget_options_size(
+        &mut self,
+        handle: WasmUsize,
+        new_bytes: usize,
+    ) -> Result<()> {
+        if new_bytes > MAX_WIDGET_OPTIONS_BYTES_PER_VM {
+            return Err(GraphicsError::ResourceLimit);
+        }
+        let index = usize::try_from(handle)
+            .ok()
+            .and_then(|id| id.checked_sub(1))
+            .ok_or(GraphicsError::InvalidHandle)?;
+        let entry = self
+            .entries
+            .get_mut(index)
+            .ok_or(GraphicsError::InvalidHandle)?;
+        let previous = entry.option_bytes as usize;
+        let charge = previous.max(new_bytes);
+        let used = updated_widget_options_usage(self.widget_options_bytes, previous, new_bytes)?;
+        entry.option_bytes = charge as u16;
+        self.widget_options_bytes = used;
         Ok(())
     }
 

@@ -176,6 +176,10 @@ fn actual_lvgl_catalog_matches_discovered_numbering() {
         "spinner_set_animation",
         "spinner_get_animation_duration",
         "spinner_get_arc_sweep",
+        "dropdown_get_selected_string",
+        "roller_get_selected_string",
+        "dropdown_get_highlight",
+        "dropdown_is_open_state",
     ];
     signatures.retain(|signature| !extensions.contains(&signature.ident.to_string().as_str()));
     signatures.sort_by_key(|s| s.ident.to_string().to_lowercase());
