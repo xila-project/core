@@ -38,6 +38,9 @@ fn extension_id(name: &str) -> Option<u16> {
         "roller_get_selected_string" => 0xf01c,
         "dropdown_get_highlight" => 0xf01d,
         "dropdown_is_open_state" => 0xf01e,
+        "calendar_set_today" => 0xf01f,
+        "calendar_set_highlights" => 0xf020,
+        "calendar_get_shown_date" => 0xf021,
         _ => return None,
     })
 }

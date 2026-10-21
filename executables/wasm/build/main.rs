@@ -309,6 +309,47 @@ fn generate() {
             "None",
             None,
         ),
+        (
+            "calendar_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "calendar_set_month_shown",
+            &["*mut lv_obj_t", "u32", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "spinbox_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "spinbox_set_range",
+            &["*mut lv_obj_t", "i32", "i32"],
+            "None",
+            None,
+        ),
+        ("spinbox_set_value", &["*mut lv_obj_t", "i32"], "None", None),
+        ("spinbox_get_value", &["*mut lv_obj_t"], "I32", Some("i32")),
+        ("spinbox_set_step", &["*mut lv_obj_t", "u32"], "None", None),
+        (
+            "spinbox_set_digit_format",
+            &["*mut lv_obj_t", "u32", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "spinbox_set_rollover",
+            &["*mut lv_obj_t", "bool"],
+            "None",
+            None,
+        ),
+        ("spinbox_increment", &["*mut lv_obj_t"], "None", None),
+        ("spinbox_decrement", &["*mut lv_obj_t"], "None", None),
     ];
     let extra: &[Adapter<'_>] = &[
         (
@@ -541,6 +582,24 @@ fn generate() {
             "U32",
             Some("u32"),
         ),
+        (
+            "calendar_set_today",
+            &["*mut lv_obj_t", "u32", "u32", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "calendar_set_highlights",
+            &["*mut lv_obj_t", "*const u8", "usize"],
+            "None",
+            None,
+        ),
+        (
+            "calendar_get_shown_date",
+            &["*mut lv_obj_t", "*mut u8"],
+            "None",
+            None,
+        ),
     ];
     let supported_names: Vec<_> = supported
         .iter()
@@ -557,6 +616,15 @@ fn generate() {
         AdapterRule::automatic("object_get_width", AutoObjectScalar::GetI32),
         AdapterRule::automatic("object_get_height", AutoObjectScalar::GetI32),
         AdapterRule::custom("object_set_grid_dsc_array", "dispatch_grid_tracks"),
+        AdapterRule::custom("calendar_set_today", "dispatch_calendar_set_today"),
+        AdapterRule::custom(
+            "calendar_set_highlights",
+            "dispatch_calendar_set_highlights",
+        ),
+        AdapterRule::custom(
+            "calendar_get_shown_date",
+            "dispatch_calendar_get_shown_date",
+        ),
     ];
     let registry = GraphicsRegistry::new(&catalog, &supported_names, &adapter_rules)
         .unwrap_or_else(|error| panic!("invalid graphics registry: {error}"));

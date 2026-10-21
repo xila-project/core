@@ -132,15 +132,21 @@ theme surfaces and host font roles, labels (creation/text), button matrices
 (creation/map/selection), range/value/mode/orientation for Arc/Bar/Slider,
 Switch orientation/state, Spinner animation parameters/duration/sweep, Dropdown
 and Roller with bounded copied options, selection and selected-text queries, and
-percentage conversion. Most other widget-specific query/configuration APIs and
-advanced style properties remain unsupported.
+percentage conversion. Calendar supports validated today/shown dates, bounded
+copied highlights, and shown-date output. Spinbox supports bounded range/value/
+step/digit-format operations, rollover, increment, and decrement. Most other
+widget-specific query/configuration APIs and advanced style properties remain
+unsupported.
 
 - 256 issued object handles per execution, including subsequently deleted ones.
 - 64 map entries including the sentinel; 1024 bytes per NUL-terminated string.
 - 8192 retained map-string bytes per widget, including the native sentinel.
 - 1024 option-string bytes/64 entries per Dropdown or Roller, with an 8192-byte
-  per-VM retained high-water budget; Roller infinite mode has a 512-byte input
-  cap to bound LVGL's repeated internal option storage.
+  per-VM retained high-water budget shared with Calendar's copied highlight
+  dates; Calendar accepts at most 32 dates. Roller infinite mode has a 512-byte
+  input cap to bound LVGL's repeated internal option storage.
+- Spinbox values are limited to ±1,000,000, step to 1..=1,000,000, and digit
+  count to 1..=10. Calendar dates use Gregorian validation.
 - Null and empty-string guest map sentinels both become LVGL's empty-string
   terminator. Row separators are preserved.
 

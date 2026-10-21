@@ -191,6 +191,233 @@ async fn led_handles_expose_bounded_brightness_and_toggle_operations() {
 }
 
 #[xila::task::test(task_path = xila::task)]
+async fn calendar_copies_highlights_and_validates_dates() {
+    let _standard = testing::initialize(false, false).await;
+    let manager = support::manager().await;
+    let mut bytes = [0; 128];
+    let mut memory = GuestMemory::new(&mut bytes);
+    let mut state = GraphicsState::new(Some(manager));
+    call(&mut state, &mut memory, Function::WindowCreate, &[], 1).unwrap();
+    let window = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::CalendarCreate,
+        &[window],
+        1,
+    )
+    .unwrap();
+    let calendar = handle(&memory);
+
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::CalendarSetToday,
+            &[calendar, 2024, 2, 29],
+            0,
+        ),
+        Ok(())
+    );
+    call(
+        &mut state,
+        &mut memory,
+        Function::CalendarSetMonthShown,
+        &[calendar, 2024, 2],
+        0,
+    )
+    .unwrap();
+
+    // CalendarDate is encoded as the guest ABI's 4-byte {u16,u8,u8} record.
+    for (offset, date) in [
+        (32 as WasmUsize, (2024u16, 2u8, 5u8)),
+        (36 as WasmUsize, (2024, 2, 29)),
+    ] {
+        memory
+            .write(GuestPointer::<u16>::new(offset), date.0)
+            .unwrap();
+        memory
+            .write(GuestPointer::<u8>::new(offset + 2), date.1)
+            .unwrap();
+        memory
+            .write(GuestPointer::<u8>::new(offset + 3), date.2)
+            .unwrap();
+    }
+    call(
+        &mut state,
+        &mut memory,
+        Function::CalendarSetHighlights,
+        &[calendar, 32, 2],
+        0,
+    )
+    .unwrap();
+    memory.write(GuestPointer::<u16>::new(32), 2031).unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::CalendarGetShownDate,
+        &[calendar, 48],
+        0,
+    )
+    .unwrap();
+    assert_eq!(memory.read(GuestPointer::<u16>::new(48)), Some(2024));
+    assert_eq!(memory.read(GuestPointer::<u8>::new(50)), Some(2));
+    assert_eq!(memory.read(GuestPointer::<u8>::new(51)), Some(1));
+
+    let native_window = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
+    {
+        let _lock = manager.synchronous_lock();
+        let native_calendar = unsafe { lvgl::lv_obj_get_child(native_window, 0) };
+        assert_eq!(
+            unsafe { lvgl::lv_calendar_get_highlighted_dates_num(native_calendar) },
+            2
+        );
+        let highlighted = unsafe { lvgl::lv_calendar_get_highlighted_dates(native_calendar) };
+        assert_eq!(unsafe { (*highlighted).year }, 2024);
+        assert_eq!(unsafe { (*highlighted).day }, 5);
+    }
+
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::CalendarSetToday,
+            &[calendar, 2025, 2, 29],
+            0,
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::CalendarSetToday,
+            &[window, 2024, 2, 29],
+            0,
+        ),
+        Err(GraphicsError::InvalidHandle)
+    );
+}
+
+#[xila::task::test(task_path = xila::task)]
+async fn spinbox_checks_range_and_digit_format() {
+    let _standard = testing::initialize(false, false).await;
+    let manager = support::manager().await;
+    let mut bytes = [0; 64];
+    let mut memory = GuestMemory::new(&mut bytes);
+    let mut state = GraphicsState::new(Some(manager));
+    call(&mut state, &mut memory, Function::WindowCreate, &[], 1).unwrap();
+    let window = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::SpinboxCreate,
+        &[window],
+        1,
+    )
+    .unwrap();
+    let spinbox = handle(&memory);
+
+    call(
+        &mut state,
+        &mut memory,
+        Function::SpinboxSetRange,
+        &[spinbox, (-500i32) as WasmUsize, 500],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::SpinboxSetDigitFormat,
+        &[spinbox, 6, 2],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::SpinboxSetStep,
+        &[spinbox, 10],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::SpinboxSetValue,
+        &[spinbox, (-120i32) as WasmUsize],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::SpinboxIncrement,
+        &[spinbox],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::SpinboxGetValue,
+        &[spinbox],
+        8,
+    )
+    .unwrap();
+    assert_eq!(memory.read(GuestPointer::<i32>::new(8)), Some(-110));
+    call(
+        &mut state,
+        &mut memory,
+        Function::SpinboxDecrement,
+        &[spinbox],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::SpinboxGetValue,
+        &[spinbox],
+        8,
+    )
+    .unwrap();
+    assert_eq!(memory.read(GuestPointer::<i32>::new(8)), Some(-120));
+
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::SpinboxSetRange,
+            &[spinbox, 20, 10],
+            0,
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::SpinboxSetDigitFormat,
+            &[spinbox, 11, 2],
+            0,
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::SpinboxSetValue,
+            &[window, 1],
+            0,
+        ),
+        Err(GraphicsError::InvalidHandle)
+    );
+}
+
+#[xila::task::test(task_path = xila::task)]
 async fn grid_layout_copies_bounded_track_arrays_from_guest_memory() {
     let _standard = testing::initialize(false, false).await;
     let manager = support::manager().await;

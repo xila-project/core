@@ -8,6 +8,7 @@ use super::{
     objects::Kind,
 };
 use crate::host::translation::{GuestMemory, GuestPointer, GuestSlice, WasmUsize};
+use alloc::vec::Vec;
 use core::{ffi::CStr, ptr::NonNull};
 use xila::graphics::{Color, Window, lvgl};
 
@@ -39,6 +40,105 @@ pub(super) fn dispatch_grid_tracks(
         lvgl::LV_GRID_CONTENT as i32,
     )?;
     state.set_grid_tracks(object, tracks)
+}
+
+fn valid_calendar_date(year: u32, month: u32, day: u32) -> bool {
+    if year == 0 || year > u16::MAX as u32 || !(1..=12).contains(&month) {
+        return false;
+    }
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days_in_month = match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    (1..=days_in_month).contains(&day)
+}
+
+pub(super) fn dispatch_calendar_set_today(
+    state: &mut GraphicsState,
+    _memory: &GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [calendar, year, month, day, ..] = call.arguments;
+    let year = u32::try_from(year).map_err(|_| GraphicsError::InvalidValue)?;
+    let month = u32::try_from(month).map_err(|_| GraphicsError::InvalidValue)?;
+    let day = u32::try_from(day).map_err(|_| GraphicsError::InvalidValue)?;
+    if !valid_calendar_date(year, month, day) {
+        return Err(GraphicsError::InvalidValue);
+    }
+    let calendar = state.object(calendar, Some(Kind::Calendar))?;
+    unsafe { lvgl::lv_calendar_set_today_date(calendar, year, month, day) };
+    Ok(())
+}
+
+pub(super) fn dispatch_calendar_set_highlights(
+    state: &mut GraphicsState,
+    memory: &GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [handle, pointer, count, ..] = call.arguments;
+    let count = usize::try_from(count).map_err(|_| GraphicsError::InvalidValue)?;
+    if count > 32 {
+        return Err(GraphicsError::ResourceLimit);
+    }
+    let byte_count = count.checked_mul(4).ok_or(GraphicsError::InvalidMemory)?;
+    let byte_count = WasmUsize::try_from(byte_count).map_err(|_| GraphicsError::InvalidMemory)?;
+    memory
+        .validate_slice(GuestSlice::<u8>::new(pointer, byte_count))
+        .ok_or(GraphicsError::InvalidMemory)?;
+    let mut dates = Vec::with_capacity(count);
+    for index in 0..count {
+        let offset = pointer
+            .checked_add(WasmUsize::try_from(index * 4).map_err(|_| GraphicsError::InvalidMemory)?)
+            .ok_or(GraphicsError::InvalidMemory)?;
+        let year = memory
+            .read(GuestPointer::<u16>::new(offset))
+            .ok_or(GraphicsError::InvalidMemory)?;
+        let month = memory
+            .read(GuestPointer::<u8>::new(offset + 2))
+            .ok_or(GraphicsError::InvalidMemory)?;
+        let day = memory
+            .read(GuestPointer::<u8>::new(offset + 3))
+            .ok_or(GraphicsError::InvalidMemory)?;
+        if !valid_calendar_date(u32::from(year), u32::from(month), u32::from(day)) {
+            return Err(GraphicsError::InvalidValue);
+        }
+        dates.push(lvgl::lv_calendar_date_t { year, month, day });
+    }
+    let calendar = state.object(handle, Some(Kind::Calendar))?;
+    let (dates_pointer, old_dates) = state.replace_calendar_highlights(handle, dates)?;
+    unsafe { lvgl::lv_calendar_set_highlighted_dates(calendar, dates_pointer, count) };
+    drop(old_dates);
+    Ok(())
+}
+
+pub(super) fn dispatch_calendar_get_shown_date(
+    state: &mut GraphicsState,
+    memory: &mut GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [handle, output, ..] = call.arguments;
+    memory
+        .validate_slice(GuestSlice::<u8>::new(output, 4))
+        .ok_or(GraphicsError::InvalidMemory)?;
+    let calendar = state.object(handle, Some(Kind::Calendar))?;
+    let date = unsafe { lvgl::lv_calendar_get_showed_date(calendar) };
+    if date.is_null() {
+        return Err(GraphicsError::NativeFailure);
+    }
+    let date = unsafe { *date };
+    memory
+        .write(GuestPointer::<u16>::new(output), date.year)
+        .expect("validated calendar date output");
+    memory
+        .write(GuestPointer::<u8>::new(output + 2), date.month)
+        .expect("validated calendar date output");
+    memory
+        .write(GuestPointer::<u8>::new(output + 3), date.day)
+        .expect("validated calendar date output");
+    Ok(())
 }
 
 fn copy_selected_option(
@@ -263,6 +363,73 @@ pub fn dispatch(
                 lvgl::lv_obj_set_style_min_height(object, min_height, selector);
                 lvgl::lv_obj_set_style_max_height(object, max_height, selector);
             }
+        }
+        Function::CalendarSetMonthShown => {
+            let calendar = state.object(a, Some(Kind::Calendar))?;
+            let year = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let month = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            if year == 0 || year > u16::MAX as u32 || !(1..=12).contains(&month) {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_calendar_set_month_shown(calendar, year, month) };
+        }
+        Function::SpinboxSetRange => {
+            let spinbox = state.object(a, Some(Kind::Spinbox))?;
+            let minimum = signed_word(b)?;
+            let maximum = signed_word(c)?;
+            if minimum >= maximum || minimum < -MAX_RANGE_VALUE || maximum > MAX_RANGE_VALUE {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_spinbox_set_range(spinbox, minimum, maximum) };
+        }
+        Function::SpinboxSetValue => {
+            let spinbox = state.object(a, Some(Kind::Spinbox))?;
+            let value = signed_word(b)?;
+            let minimum = unsafe { lvgl::lv_spinbox_get_min_value(spinbox) };
+            let maximum = unsafe { lvgl::lv_spinbox_get_max_value(spinbox) };
+            if !(minimum..=maximum).contains(&value) {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_spinbox_set_value(spinbox, value) };
+        }
+        Function::SpinboxGetValue => {
+            let spinbox = state.object(a, Some(Kind::Spinbox))?;
+            let value = unsafe { lvgl::lv_spinbox_get_value(spinbox) };
+            memory
+                .write(GuestPointer::<i32>::new(call.result), value)
+                .expect("validated result");
+        }
+        Function::SpinboxSetStep => {
+            let spinbox = state.object(a, Some(Kind::Spinbox))?;
+            let step = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            if step == 0 || step > MAX_RANGE_VALUE as u32 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_spinbox_set_step(spinbox, step) };
+        }
+        Function::SpinboxSetDigitFormat => {
+            let spinbox = state.object(a, Some(Kind::Spinbox))?;
+            let digits = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let separator = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            if !(1..=10).contains(&digits) || separator >= digits {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_spinbox_set_digit_format(spinbox, digits, separator) };
+        }
+        Function::SpinboxSetRollover => {
+            let spinbox = state.object(a, Some(Kind::Spinbox))?;
+            if b > 1 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_spinbox_set_rollover(spinbox, b != 0) };
+        }
+        Function::SpinboxIncrement => {
+            let spinbox = state.object(a, Some(Kind::Spinbox))?;
+            unsafe { lvgl::lv_spinbox_increment(spinbox) };
+        }
+        Function::SpinboxDecrement => {
+            let spinbox = state.object(a, Some(Kind::Spinbox))?;
+            unsafe { lvgl::lv_spinbox_decrement(spinbox) };
         }
         Function::RangeSetRange => {
             let object = state.object(a, None)?;
@@ -632,7 +799,9 @@ pub fn dispatch(
         | Function::SpinnerCreate
         | Function::DropdownCreate
         | Function::RollerCreate
-        | Function::LedCreate => {
+        | Function::LedCreate
+        | Function::CalendarCreate
+        | Function::SpinboxCreate => {
             state.ensure_capacity()?;
             let (pointer, kind, parent) = if function == Function::WindowCreate {
                 let window = xila::task::block_on(manager.create_window())
@@ -669,6 +838,10 @@ pub fn dispatch(
                         }
                         Function::RollerCreate => (lvgl::lv_roller_create(parent), Kind::Roller),
                         Function::LedCreate => (lvgl::lv_led_create(parent), Kind::Led),
+                        Function::CalendarCreate => {
+                            (lvgl::lv_calendar_create(parent), Kind::Calendar)
+                        }
+                        Function::SpinboxCreate => (lvgl::lv_spinbox_create(parent), Kind::Spinbox),
                         _ => unreachable!(),
                     }
                 };
