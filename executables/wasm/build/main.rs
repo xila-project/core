@@ -231,6 +231,84 @@ fn generate() {
             "None",
             None,
         ),
+        (
+            "dropdown_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "dropdown_set_options",
+            &["*mut lv_obj_t", "*const core::ffi::c_char"],
+            "None",
+            None,
+        ),
+        (
+            "dropdown_set_selected",
+            &["*mut lv_obj_t", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "dropdown_get_selected",
+            &["*const lv_obj_t"],
+            "U32",
+            Some("u32"),
+        ),
+        (
+            "dropdown_get_option_count",
+            &["*const lv_obj_t"],
+            "U32",
+            Some("u32"),
+        ),
+        (
+            "dropdown_set_selected_highlight",
+            &["*mut lv_obj_t", "bool"],
+            "None",
+            None,
+        ),
+        ("dropdown_open", &["*mut lv_obj_t"], "None", None),
+        ("dropdown_close", &["*mut lv_obj_t"], "None", None),
+        (
+            "roller_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "roller_set_options",
+            &[
+                "*mut lv_obj_t",
+                "*const core::ffi::c_char",
+                "lv_roller_mode_t",
+            ],
+            "None",
+            None,
+        ),
+        (
+            "roller_set_selected",
+            &["*mut lv_obj_t", "u32", "lv_anim_enable_t"],
+            "None",
+            None,
+        ),
+        (
+            "roller_get_selected",
+            &["*const lv_obj_t"],
+            "U32",
+            Some("u32"),
+        ),
+        (
+            "roller_get_option_count",
+            &["*const lv_obj_t"],
+            "U32",
+            Some("u32"),
+        ),
+        (
+            "roller_set_visible_row_count",
+            &["*mut lv_obj_t", "u32"],
+            "None",
+            None,
+        ),
     ];
     let extra: &[Adapter<'_>] = &[
         (
@@ -426,6 +504,30 @@ fn generate() {
         (
             "spinner_get_arc_sweep",
             &["*const lv_obj_t"],
+            "U32",
+            Some("u32"),
+        ),
+        (
+            "dropdown_get_selected_string",
+            &["*mut lv_obj_t", "*mut i8", "u32"],
+            "I32",
+            Some("i32"),
+        ),
+        (
+            "roller_get_selected_string",
+            &["*mut lv_obj_t", "*mut i8", "u32"],
+            "I32",
+            Some("i32"),
+        ),
+        (
+            "dropdown_get_highlight",
+            &["*mut lv_obj_t"],
+            "U32",
+            Some("u32"),
+        ),
+        (
+            "dropdown_is_open_state",
+            &["*mut lv_obj_t"],
             "U32",
             Some("u32"),
         ),

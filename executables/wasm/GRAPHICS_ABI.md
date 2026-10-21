@@ -7,8 +7,8 @@ This document tracks the guest-facing LVGL ABI, not the browser display backend.
 | Surface | Current state |
 | --- | --- |
 | Enabled LVGL widget families | 28 surveyed in `subsystems/graphics/include/lv_conf.h` |
-| Guest Rust wrappers emitted | Filtered to the 74 currently host-supported calls |
-| Host-dispatched calls | 74 after Grid/Flex, local style/font, and range-control additions; unsupported IDs return `GraphicsError::Unsupported` |
+| Guest Rust wrappers emitted | Filtered to the 92 currently host-supported calls |
+| Host-dispatched calls | 92 after Grid/Flex, local style/font, range, and selection-widget additions; unsupported IDs return `GraphicsError::Unsupported` |
 | Widget families with usable constructors | Button, Buttonmatrix, Checkbox, Label, Tabview, Textarea, Keyboard; Xila Window/Object/IndexedCanvas are extra abstractions |
 | ABI IDs | Legacy calls are alphabetically numbered from discovered signatures; Xila extensions use append-only IDs starting at `0xf000` (Grid `grid_fr` is `0xf006`) |
 | Object registry | Per-VM `Vec<Entry>`, 256 lifetime-issued IDs, tombstones; full scans occur during reaping, reverse lookup and canvas accounting |
@@ -38,7 +38,8 @@ The existing adapter already copies guest strings, button maps and indexed-canva
 | Switch | Constructor, orientation; generic checked state | toggle convenience/query and value-event tests |
 | Spinner | Constructor, animation parameters, duration/sweep queries | lifecycle/event tests |
 | LED | Not implemented | bounded brightness/color/state controls |
-| Dropdown, Roller, Spinbox, Calendar | Not implemented | bounded options/date data, selection/edit queries and events |
+| Dropdown, Roller | Constructors, bounded copied options, selection/count/highlight/open state and selected text | per-widget event integration and additional navigation/query operations |
+| Spinbox, Calendar | Not implemented | bounded numeric editing/date data, state queries and events |
 | List, Table, Menu, Tileview, Msgbox | Not implemented | bounded child/item/cell handles, navigation and cleanup |
 | Chart, Line | Not implemented | bounded series/point storage, ranges and invalidation |
 | Canvas, Image, Imagebutton, Animimg | IndexedCanvas Xila helper only; LVGL families not adapted | host-owned image/frame resources and explicit quotas/lifetimes |
@@ -50,6 +51,8 @@ This matrix distinguishes enabled LVGL code from practical guest usability. Cons
 Host adapters support position, size, x/y/width/height queries, object alignment, layout update, flex alignment, and selecting only LVGL's built-in default/flex/grid layout IDs. Grid track arrays are copied, sentinel-checked, limited to 31 tracks per axis and 512 retained descriptors per VM, then kept alive until layout replacement or native deletion completes. Grid cell positions/spans and alignment selectors are validated. The `grid_fr` helper encodes fractional tracks through append-only Xila ID `0xf006` rather than adding `lv_grid_` to the alphabetically numbered legacy LVGL catalog. Signed coordinates and dimensions are checked for valid memory32/memory64 encodings before LVGL calls; geometry remains handle-based and returns scalars rather than native structs or pointers.
 
 The current style slice adds RGB888 local background/text/border colors, background opacity, border side/width, radius, text alignment, min/max dimensions, semantic theme surfaces and six host-owned font IDs. Style part/state selectors are restricted to known LVGL values. No guest-native style or font pointer is accepted. The range-control slice adds bounded range/value/mode/orientation operations for Arc/Bar/Slider, Switch orientation/state operations, and Spinner animation configuration.
+
+Dropdown/Roller receive newline-separated guest options synchronously; LVGL's dynamic APIs copy them, so guest pointers are not retained. Inputs are capped at 1,024 bytes and 64 options per object, with an 8,192-byte per-VM high-water budget (conservative on replacements because LVGL setters return no allocation status). Infinite Roller mode is limited to 512 input bytes to bound LVGL's repeated option buffer.
 
 ## Reviewable PR roadmap
 

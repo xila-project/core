@@ -34,6 +34,10 @@ fn extension_id(name: &str) -> Option<u16> {
         "spinner_set_animation" => 0xf018,
         "spinner_get_animation_duration" => 0xf019,
         "spinner_get_arc_sweep" => 0xf01a,
+        "dropdown_get_selected_string" => 0xf01b,
+        "roller_get_selected_string" => 0xf01c,
+        "dropdown_get_highlight" => 0xf01d,
+        "dropdown_is_open_state" => 0xf01e,
         _ => return None,
     })
 }

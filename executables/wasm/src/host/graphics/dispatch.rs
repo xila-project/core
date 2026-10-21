@@ -1,11 +1,14 @@
 use super::{
     Function, GraphicsState, ResultKind,
     error::{GraphicsError, Result},
-    marshal::{ButtonMap, read_c_string, read_textarea_string},
+    marshal::{
+        ButtonMap, MAX_STRING_BYTES, MAX_WIDGET_OPTIONS_BYTES, read_c_string, read_textarea_string,
+        read_widget_options,
+    },
     objects::Kind,
 };
 use crate::host::translation::{GuestMemory, GuestPointer, GuestSlice, WasmUsize};
-use core::ptr::NonNull;
+use core::{ffi::CStr, ptr::NonNull};
 use xila::graphics::{Color, Window, lvgl};
 
 pub(super) fn signed_word(value: WasmUsize) -> Result<i32> {
@@ -17,6 +20,49 @@ const MAX_RANGE_VALUE: i32 = 1_000_000;
     } else {
         Err(GraphicsError::InvalidValue)
     }
+}
+
+fn copy_selected_option(
+    memory: &mut GuestMemory<'_>,
+    options: *const core::ffi::c_char,
+    selected: u32,
+    output: WasmUsize,
+    capacity: WasmUsize,
+    result: WasmUsize,
+) -> Result<i32> {
+    if options.is_null() {
+        return Err(GraphicsError::NativeFailure);
+    }
+    let options = unsafe { CStr::from_ptr(options) }.to_bytes();
+    if options.len() >= MAX_WIDGET_OPTIONS_BYTES {
+        return Err(GraphicsError::ResourceLimit);
+    }
+    let option = options
+        .split(|byte| *byte == b'\n')
+        .nth(selected as usize)
+        .ok_or(GraphicsError::InvalidValue)?;
+    let required = option.len() + 1;
+    if required > MAX_STRING_BYTES {
+        return Err(GraphicsError::ResourceLimit);
+    }
+    if usize::try_from(capacity).map_err(|_| GraphicsError::InvalidValue)? < required {
+        return Err(GraphicsError::InvalidValue);
+    }
+    let output_end = output
+        .checked_add(required as WasmUsize)
+        .ok_or(GraphicsError::InvalidMemory)?;
+    let result_end = result
+        .checked_add(core::mem::size_of::<i32>() as WasmUsize)
+        .ok_or(GraphicsError::InvalidMemory)?;
+    if output < result_end && result < output_end {
+        return Err(GraphicsError::InvalidMemory);
+    }
+    let destination = memory
+        .bytes_mut(GuestSlice::new(output, required as WasmUsize))
+        .ok_or(GraphicsError::InvalidMemory)?;
+    destination[..option.len()].copy_from_slice(option);
+    destination[option.len()] = 0;
+    i32::try_from(option.len()).map_err(|_| GraphicsError::ResourceLimit)
 }
 
 pub struct GraphicsCall {
@@ -320,6 +366,163 @@ pub fn dispatch(
                 .write(GuestPointer::<u32>::new(call.result), sweep)
                 .expect("validated result");
         }
+        Function::DropdownSetOptions => {
+            let dropdown = state.object(a, Some(Kind::Dropdown))?;
+            let options = read_widget_options(memory, b)?;
+            let retained_bytes = options.to_bytes_with_nul().len();
+            state.validate_widget_options_size(a, retained_bytes)?;
+            // LVGL's dynamic setter copies options into its own allocation.
+            unsafe { lvgl::lv_dropdown_set_options(dropdown, options.as_ptr()) };
+            state.commit_widget_options_size(a, retained_bytes)?;
+        }
+        Function::DropdownSetSelected => {
+            let dropdown = state.object(a, Some(Kind::Dropdown))?;
+            let selected = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let count = unsafe { lvgl::lv_dropdown_get_option_count(dropdown) };
+            if selected >= count {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_dropdown_set_selected(dropdown, selected) };
+        }
+        Function::DropdownGetSelected | Function::DropdownGetOptionCount => {
+            let dropdown = state.object(a, Some(Kind::Dropdown))?;
+            let value = unsafe {
+                if function == Function::DropdownGetSelected {
+                    lvgl::lv_dropdown_get_selected(dropdown)
+                } else {
+                    lvgl::lv_dropdown_get_option_count(dropdown)
+                }
+            };
+            memory
+                .write(GuestPointer::<u32>::new(call.result), value)
+                .expect("validated result");
+        }
+        Function::DropdownSetSelectedHighlight => {
+            let dropdown = state.object(a, Some(Kind::Dropdown))?;
+            if b > 1 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_dropdown_set_selected_highlight(dropdown, b != 0) };
+        }
+        Function::DropdownOpen | Function::DropdownClose => {
+            let dropdown = state.object(a, Some(Kind::Dropdown))?;
+            unsafe {
+                if function == Function::DropdownOpen {
+                    lvgl::lv_dropdown_open(dropdown);
+                } else {
+                    lvgl::lv_dropdown_close(dropdown);
+                }
+            }
+        }
+        Function::DropdownGetSelectedString => {
+            let dropdown = state.object(a, Some(Kind::Dropdown))?;
+            let selected = unsafe { lvgl::lv_dropdown_get_selected(dropdown) };
+            let options = unsafe { lvgl::lv_dropdown_get_options(dropdown) };
+            let capacity = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            if capacity as usize > MAX_STRING_BYTES {
+                return Err(GraphicsError::ResourceLimit);
+            }
+            let length = copy_selected_option(
+                memory,
+                options,
+                selected,
+                b,
+                capacity as WasmUsize,
+                call.result,
+            )?;
+            memory
+                .write(GuestPointer::<i32>::new(call.result), length)
+                .expect("validated result");
+        }
+        Function::DropdownGetHighlight | Function::DropdownIsOpenState => {
+            let dropdown = state.object(a, Some(Kind::Dropdown))?;
+            let value = unsafe {
+                if function == Function::DropdownGetHighlight {
+                    lvgl::lv_dropdown_get_selected_highlight(dropdown)
+                } else {
+                    lvgl::lv_dropdown_is_open(dropdown)
+                }
+            } as u32;
+            memory
+                .write(GuestPointer::<u32>::new(call.result), value)
+                .expect("validated result");
+        }
+        Function::RollerSetOptions => {
+            let roller = state.object(a, Some(Kind::Roller))?;
+            let options = read_widget_options(memory, b)?;
+            if c > 1 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            let bytes = options.to_bytes_with_nul().len();
+            if c == lvgl::lv_roller_mode_t_LV_ROLLER_MODE_INFINITE as WasmUsize
+                && bytes > super::marshal::MAX_ROLLER_INFINITE_OPTIONS_BYTES
+            {
+                return Err(GraphicsError::ResourceLimit);
+            }
+            let retained_bytes = bytes
+                .checked_mul(
+                    if c == lvgl::lv_roller_mode_t_LV_ROLLER_MODE_INFINITE as WasmUsize {
+                        15
+                    } else {
+                        1
+                    },
+                )
+                .ok_or(GraphicsError::ResourceLimit)?;
+            state.validate_widget_options_size(a, retained_bytes)?;
+            // LVGL copies the option string, including in infinite mode.
+            unsafe { lvgl::lv_roller_set_options(roller, options.as_ptr(), c as _) };
+            state.commit_widget_options_size(a, retained_bytes)?;
+        }
+        Function::RollerSetSelected => {
+            let roller = state.object(a, Some(Kind::Roller))?;
+            let selected = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let animated = call.arguments[2];
+            if animated > 1 || selected >= unsafe { lvgl::lv_roller_get_option_count(roller) } {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_roller_set_selected(roller, selected, animated != 0) };
+        }
+        Function::RollerGetSelected | Function::RollerGetOptionCount => {
+            let roller = state.object(a, Some(Kind::Roller))?;
+            let value = unsafe {
+                if function == Function::RollerGetSelected {
+                    lvgl::lv_roller_get_selected(roller)
+                } else {
+                    lvgl::lv_roller_get_option_count(roller)
+                }
+            };
+            memory
+                .write(GuestPointer::<u32>::new(call.result), value)
+                .expect("validated result");
+        }
+        Function::RollerSetVisibleRowCount => {
+            let roller = state.object(a, Some(Kind::Roller))?;
+            let rows = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            if !(1..=32).contains(&rows) {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_roller_set_visible_row_count(roller, rows) };
+        }
+        Function::RollerGetSelectedString => {
+            let roller = state.object(a, Some(Kind::Roller))?;
+            let selected = unsafe { lvgl::lv_roller_get_selected(roller) };
+            let options = unsafe { lvgl::lv_roller_get_options(roller) };
+            let capacity = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            if capacity as usize > MAX_STRING_BYTES {
+                return Err(GraphicsError::ResourceLimit);
+            }
+            let length = copy_selected_option(
+                memory,
+                options,
+                selected,
+                b,
+                capacity as WasmUsize,
+                call.result,
+            )?;
+            memory
+                .write(GuestPointer::<i32>::new(call.result), length)
+                .expect("validated result");
+        }
         Function::ObjectSetFlexAlign => {
             let object = state.object(a, None)?;
             let main = b;
@@ -418,7 +621,9 @@ pub fn dispatch(
         | Function::BarCreate
         | Function::SliderCreate
         | Function::SwitchCreate
-        | Function::SpinnerCreate => {
+        | Function::SpinnerCreate
+        | Function::DropdownCreate
+        | Function::RollerCreate => {
             state.ensure_capacity()?;
             let (pointer, kind, parent) = if function == Function::WindowCreate {
                 let window = xila::task::block_on(manager.create_window())
@@ -450,6 +655,10 @@ pub fn dispatch(
                         Function::SliderCreate => (lvgl::lv_slider_create(parent), Kind::Slider),
                         Function::SwitchCreate => (lvgl::lv_switch_create(parent), Kind::Switch),
                         Function::SpinnerCreate => (lvgl::lv_spinner_create(parent), Kind::Spinner),
+                        Function::DropdownCreate => {
+                            (lvgl::lv_dropdown_create(parent), Kind::Dropdown)
+                        }
+                        Function::RollerCreate => (lvgl::lv_roller_create(parent), Kind::Roller),
                         _ => unreachable!(),
                     }
                 };
