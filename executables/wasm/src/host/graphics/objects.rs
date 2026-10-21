@@ -44,6 +44,11 @@ pub(crate) enum Kind {
     IndexedCanvas,
     Textarea,
     Keyboard,
+    Arc,
+    Bar,
+    Slider,
+    Switch,
+    Spinner,
 }
 
 struct Entry {
@@ -117,6 +122,10 @@ impl GraphicsState {
             return Err(GraphicsError::InvalidHandle);
         }
         Ok(entry.notification.live.get())
+    }
+
+    pub(crate) fn kind(&self, handle: WasmUsize) -> Result<Kind> {
+        Ok(self.entry(handle)?.kind)
     }
 
     pub(crate) fn handle_for(&self, pointer: *mut lvgl::lv_obj_t) -> WasmUsize {
