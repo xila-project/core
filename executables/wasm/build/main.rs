@@ -213,6 +213,24 @@ fn generate() {
             "U32",
             Some("u32"),
         ),
+        (
+            "arc_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "slider_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "object_remove_state",
+            &["*mut lv_obj_t", "lv_state_t"],
+            "None",
+            None,
+        ),
     ];
     let extra: &[Adapter<'_>] = &[
         (
@@ -348,6 +366,68 @@ fn generate() {
             &["*mut lv_obj_t", "i32", "i32", "i32", "i32", "u32"],
             "None",
             None,
+        ),
+        (
+            "bar_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "switch_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "spinner_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "range_set_range",
+            &["*mut lv_obj_t", "i32", "i32"],
+            "None",
+            None,
+        ),
+        (
+            "range_set_value",
+            &["*mut lv_obj_t", "i32", "bool"],
+            "None",
+            None,
+        ),
+        ("range_get_value", &["*const lv_obj_t"], "I32", Some("i32")),
+        (
+            "range_get_start_value",
+            &["*const lv_obj_t"],
+            "I32",
+            Some("i32"),
+        ),
+        ("range_set_mode", &["*mut lv_obj_t", "u32"], "None", None),
+        (
+            "range_set_orientation",
+            &["*mut lv_obj_t", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "spinner_set_animation",
+            &["*mut lv_obj_t", "u32", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "spinner_get_animation_duration",
+            &["*const lv_obj_t"],
+            "U32",
+            Some("u32"),
+        ),
+        (
+            "spinner_get_arc_sweep",
+            &["*const lv_obj_t"],
+            "U32",
+            Some("u32"),
         ),
     ];
     let supported_names: Vec<_> = supported

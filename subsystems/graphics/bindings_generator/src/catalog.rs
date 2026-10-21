@@ -22,6 +22,18 @@ fn extension_id(name: &str) -> Option<u16> {
         "object_set_font" => 0xf00c,
         "object_set_surface" => 0xf00d,
         "object_set_min_max_size" => 0xf00e,
+        "bar_create" => 0xf00f,
+        "switch_create" => 0xf010,
+        "spinner_create" => 0xf011,
+        "range_set_range" => 0xf012,
+        "range_set_value" => 0xf013,
+        "range_get_value" => 0xf014,
+        "range_get_start_value" => 0xf015,
+        "range_set_mode" => 0xf016,
+        "range_set_orientation" => 0xf017,
+        "spinner_set_animation" => 0xf018,
+        "spinner_get_animation_duration" => 0xf019,
+        "spinner_get_arc_sweep" => 0xf01a,
         _ => return None,
     })
 }
