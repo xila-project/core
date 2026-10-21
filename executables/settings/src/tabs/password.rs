@@ -187,6 +187,8 @@ impl PasswordTab {
 
         unsafe {
             lvgl::lv_obj_set_flex_flow(tab_container, lvgl::lv_flex_flow_t_LV_FLEX_FLOW_COLUMN);
+            lvgl::lv_obj_set_style_pad_all(tab_container, 18, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_style_pad_row(tab_container, 10, lvgl::LV_STATE_DEFAULT);
             lvgl::lv_obj_set_flex_align(
                 tab_container,
                 lvgl::lv_flex_align_t_LV_FLEX_ALIGN_START,
@@ -209,48 +211,60 @@ impl PasswordTab {
             change_password_button,
             password_status_label,
         ) = unsafe {
+            let form = lvgl::lv_obj_create(tab_container);
+            if form.is_null() {
+                return Err(crate::error::Error::FailedToCreateUiElement);
+            }
+            lvgl::lv_obj_set_width(form, lvgl::lv_pct(100));
+            lvgl::lv_obj_set_height(form, lvgl::LV_SIZE_CONTENT);
+            lvgl::lv_obj_set_flex_flow(form, lvgl::lv_flex_flow_t_LV_FLEX_FLOW_COLUMN);
+            lvgl::lv_obj_set_style_pad_all(form, 16, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_style_pad_row(form, 8, lvgl::LV_STATE_DEFAULT);
+            xila::graphics::theme::set_surface(form, xila::graphics::theme::Surface::Card);
+
             // Current password
-            let current_password_label = lvgl::lv_label_create(tab_container);
+            let current_password_label = lvgl::lv_label_create(form);
             lvgl::lv_label_set_text(
                 current_password_label,
                 translate!(c"Current Password").as_ptr(),
             );
 
-            let current_password_text_area = lvgl::lv_textarea_create(tab_container);
+            let current_password_text_area = lvgl::lv_textarea_create(form);
             lvgl::lv_textarea_set_password_mode(current_password_text_area, true);
             lvgl::lv_textarea_set_one_line(current_password_text_area, true);
             lvgl::lv_obj_set_width(current_password_text_area, lvgl::lv_pct(100));
 
             // New password
-            let new_password_label = lvgl::lv_label_create(tab_container);
+            let new_password_label = lvgl::lv_label_create(form);
             lvgl::lv_label_set_text(new_password_label, translate!(c"New Password").as_ptr());
 
-            let new_password_text_area = lvgl::lv_textarea_create(tab_container);
+            let new_password_text_area = lvgl::lv_textarea_create(form);
             lvgl::lv_textarea_set_password_mode(new_password_text_area, true);
             lvgl::lv_textarea_set_one_line(new_password_text_area, true);
             lvgl::lv_obj_set_width(new_password_text_area, lvgl::lv_pct(100));
 
             // Confirm password
-            let confirm_password_label = lvgl::lv_label_create(tab_container);
+            let confirm_password_label = lvgl::lv_label_create(form);
             lvgl::lv_label_set_text(
                 confirm_password_label,
                 translate!(c"Confirm Password").as_ptr(),
             );
 
-            let confirm_password_text_area = lvgl::lv_textarea_create(tab_container);
+            let confirm_password_text_area = lvgl::lv_textarea_create(form);
             lvgl::lv_textarea_set_password_mode(confirm_password_text_area, true);
             lvgl::lv_textarea_set_one_line(confirm_password_text_area, true);
             lvgl::lv_obj_set_width(confirm_password_text_area, lvgl::lv_pct(100));
 
             // Change password button
-            let change_password_button = lvgl::lv_button_create(tab_container);
+            let change_password_button = lvgl::lv_button_create(form);
+            lvgl::lv_obj_set_width(change_password_button, lvgl::lv_pct(100));
 
             let button_label = lvgl::lv_label_create(change_password_button);
             lvgl::lv_label_set_text(button_label, translate!(c"Change Password").as_ptr());
             lvgl::lv_obj_center(button_label);
 
             // Status label
-            let password_status_label = lvgl::lv_label_create(tab_container);
+            let password_status_label = lvgl::lv_label_create(form);
             lvgl::lv_label_set_text(password_status_label, c"".as_ptr());
 
             (

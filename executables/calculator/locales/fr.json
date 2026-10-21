@@ -4,6 +4,7 @@
   "Calculation error": "Erreur de calcul",
   "Calculation overflow": "Depassement de capacite du calcul",
   "Clear": "Effacer",
+  "DEG": "DEG",
   "Division by zero": "Division par zero",
   "Error: {}": "Erreur: {}",
   "Expression nested too deeply": "Expression imbriquee trop profondement",

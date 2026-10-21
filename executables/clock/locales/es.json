@@ -1,11 +1,15 @@
 {
   "12 / 24 hour": "Formato de 12/24 horas",
   "Alarm": "Alarma",
+  "Alarm enabled: ": "Alarma activada: ",
+  "Alarm snoozed": "Alarma pospuesta",
   "Alarm snoozed. ": "Alarma pospuesta. ",
   "Alarm! ": "¡Alarma! ",
+  "Alarm time": "Hora de la alarma",
   "Alerts are visible while Clock is running.": "Las alertas se muestran mientras el reloj está en ejecución.",
   "Cancel": "Cancelar",
   "Clock": "Reloj",
+  "Current time": "Hora actual",
   "Delete": "Eliminar",
   "Disable": "Desactivar",
   "Disabled": "Desactivada",
@@ -20,6 +24,7 @@
   "Minute -": "Minuto -",
   "Minute +": "Minuto +",
   "Mon": "Lun",
+  "Next: ": "Próxima: ",
   "No saved alarm": "No hay ninguna alarma guardada",
   "Pause / resume": "Pausar / reanudar",
   "Recorded laps.one": "{count} vuelta registrada",
@@ -41,6 +46,8 @@
   "Timer": "Temporizador",
   "Timer finished! ": "¡Temporizador finalizado! ",
   "Tue": "Mar",
+  "UTC / host clock": "UTC / reloj del sistema",
   "UTC / host clock. City time zones are not available yet.": "UTC / hora del sistema. Las zonas horarias de ciudades aún no están disponibles.",
-  "Wed": "Mié"
+  "Wed": "Mié",
+  "Save alarm": "Guardar alarma"
 }

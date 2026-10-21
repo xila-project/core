@@ -27,6 +27,38 @@ fn guest_state_constants_follow_lvgl_exports() {
 }
 
 #[test]
+fn shadcn_and_slider_helpers_use_stable_append_only_ids() {
+    let catalog = CallCatalog::parse(lvgl_rust_sys::_bindgen_raw_src()).unwrap();
+    for (name, id) in [
+        ("object_set_theme_variant", 0xf00c),
+        ("object_set_theme_error", 0xf00d),
+    ] {
+        let call = catalog
+            .calls()
+            .iter()
+            .find(|call| call.name == name)
+            .unwrap();
+        assert_eq!(call.id, id);
+    }
+    for name in [
+        "slider_create",
+        "slider_set_range",
+        "slider_set_value",
+        "slider_get_value",
+    ] {
+        let call = catalog
+            .calls()
+            .iter()
+            .find(|call| call.name == name)
+            .unwrap();
+        assert!(
+            call.id < 0xf000,
+            "native LVGL function {name} must retain its legacy ID"
+        );
+    }
+}
+
+#[test]
 fn ordered_calls_keep_unsupported_signatures_in_the_abi() {
     let catalog = CallCatalog::parse(
         r#"
@@ -155,6 +187,14 @@ fn actual_lvgl_catalog_matches_discovered_numbering() {
         "keyboard_create",
         "keyboard_set_textarea",
         "object_set_padding",
+        "object_set_text_size",
+        "switch_create",
+        "list_create",
+        "list_add_text",
+        "object_set_background_rgb",
+        "object_set_text_rgb",
+        "object_set_theme_variant",
+        "object_set_theme_error",
     ];
     signatures.retain(|signature| !extensions.contains(&signature.ident.to_string().as_str()));
     signatures.sort_by_key(|s| s.ident.to_string().to_lowercase());

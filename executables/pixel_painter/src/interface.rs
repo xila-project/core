@@ -13,6 +13,7 @@ struct Interface {
     window: *mut Object,
     canvas: *mut Object,
     palette: *mut Object,
+    color_label: *mut Object,
     actions: *mut Object,
     path: *mut Object,
     keyboard: *mut Object,
@@ -23,8 +24,7 @@ struct Interface {
     revision: u64,
     confirm_open: Option<u64>,
     confirm_close: Option<u64>,
-    // LVGL keeps maps alive on the host; the guest maps also live for the UI's lifetime.
-    _palette_map: [*const i8; 9],
+    // Keep static widget maps alive for LVGL's lifetime.
     _action_map: [*const i8; 9],
 }
 
@@ -77,9 +77,10 @@ pub fn run() -> wasm::Result<()> {
                     ui.drawing.end_stroke();
                 }
             } else if code == EventCode::Clicked as u32 && target == ui.palette {
-                let color = unsafe { buttonmatrix_get_selected_button(ui.palette)? };
-                if color < 8 {
-                    ui.color = color as u8;
+                if width > 0 && (0..width).contains(&x) {
+                    ui.color = ((i64::from(x) * PALETTE.len() as i64) / i64::from(width))
+                        .min(PALETTE.len() as i64 - 1) as u8;
+                    ui.update_color_label()?;
                 }
             } else if code == EventCode::Clicked as u32 && target == ui.actions {
                 let action = unsafe { buttonmatrix_get_selected_button(ui.actions)? };
@@ -102,6 +103,9 @@ pub fn run() -> wasm::Result<()> {
                     5 => ui.brush = 3,
                     6 => ui.brush = 5,
                     _ => (),
+                }
+                if (4..=6).contains(&action) {
+                    ui.update_color_label()?;
                 }
             } else if code == EventCode::Focused as u32 && target == ui.path {
                 unsafe {
@@ -138,24 +142,25 @@ impl Interface {
             )?;
             object_set_flex_flow(window, FlexFlow::Column)?;
             object_set_padding(window, 4)?;
-            let palette = buttonmatrix_create(window)?;
+            let color_label = label_create(window)?;
+            object_set_width(color_label, percentage(100)?)?;
+            object_set_text_size(color_label, 16)?;
+            label_set_text(color_label, c"#202124  ·  1 px".as_ptr())?;
+            let palette = indexed_canvas_create(window, PALETTE.len() as u16, 1)?;
             object_set_width(palette, percentage(100)?)?;
-            object_set_height(palette, 36)?;
-            let palette_map = [
-                c"W".as_ptr(),
-                c"K".as_ptr(),
-                c"R".as_ptr(),
-                c"B".as_ptr(),
-                c"G".as_ptr(),
-                c"Y".as_ptr(),
-                c"V".as_ptr(),
-                c"Br".as_ptr(),
-                c"".as_ptr(),
-            ];
-            buttonmatrix_set_map(palette, palette_map.as_ptr())?;
+            object_set_height(palette, 28)?;
+            object_add_flag(palette, ObjectFlag::Clickable)?;
+            let swatches = [0u8, 1, 2, 3, 4, 5, 6, 7];
+            indexed_canvas_set_pixels(
+                palette,
+                swatches.as_ptr(),
+                swatches.len(),
+                PALETTE.as_ptr(),
+                PALETTE.len(),
+            )?;
             let actions = buttonmatrix_create(window)?;
             object_set_width(actions, percentage(100)?)?;
-            object_set_height(actions, 68)?;
+            object_set_height(actions, 58)?;
             let action_map = [
                 translate!(c"Undo").as_ptr(),
                 translate!(c"Clear").as_ptr(),
@@ -182,6 +187,7 @@ impl Interface {
             let canvas = indexed_canvas_create(window, WIDTH as u16, HEIGHT as u16)?;
             object_set_width(canvas, percentage(100)?)?;
             object_set_flex_grow(canvas, 1)?;
+            object_add_flag(canvas, ObjectFlag::Clickable)?;
             let status = label_create(window)?;
             object_set_width(status, percentage(100)?)?;
             let keyboard = keyboard_create(window)?;
@@ -194,6 +200,7 @@ impl Interface {
                 window,
                 canvas,
                 palette,
+                color_label,
                 actions,
                 path,
                 keyboard,
@@ -204,9 +211,9 @@ impl Interface {
                 revision: 0,
                 confirm_open: None,
                 confirm_close: None,
-                _palette_map: palette_map,
                 _action_map: action_map,
             };
+            ui.update_color_label()?;
             ui.status(translate!("Ready - white erases"))?;
             ui.upload()?;
             Ok(ui)
@@ -216,6 +223,15 @@ impl Interface {
     fn status(&self, text: &str) -> wasm::Result<()> {
         let text = CString::new(text).map_err(|_| -1)?;
         unsafe { label_set_text(self.status, text.as_ptr().cast_mut()) }
+    }
+
+    fn update_color_label(&self) -> wasm::Result<()> {
+        let text = CString::new(format!(
+            "#{:06X}  ·  {} px",
+            PALETTE[self.color as usize], self.brush
+        ))
+        .map_err(|_| -1)?;
+        unsafe { label_set_text(self.color_label, text.as_ptr()) }
     }
 
     fn upload(&self) -> wasm::Result<()> {

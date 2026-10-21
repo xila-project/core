@@ -1,4 +1,9 @@
 {
+  "Browse and manage your files": "Browse and manage your files",
+  "Contents": "Contents",
   "Error handling file manager event: {:?}": "Error handling file manager event: {:?}",
-  "Invalid path entered: {}": "Invalid path entered: {}"
+  "Files": "Files",
+  "Invalid path entered: {}": "Invalid path entered: {}",
+  "1 item": "1 item",
+  "{} items": "{} items"
 }

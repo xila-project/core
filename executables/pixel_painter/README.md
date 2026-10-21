@@ -4,10 +4,10 @@ A Wasm drawing app for Xila, built for `wasm32-wasip1` and launched through
 `/applications/executables/wasm /applications/executables/pixel_painter`. It uses the checked guest graphics ABI
 and WASI file I/O, and is bundled in the native and browser demonstrations.
 
-Draw with a mouse or touch. The palette buttons are white (W, eraser), ink (K),
-red (R), blue (B), green (G), yellow (Y), violet (V), and brown (Br). Choose a
-1, 3, or 5 pixel square brush. Undo restores the previous stroke or Clear action.
-The 160×100 logical picture scales to the available canvas with letterboxing;
+Draw with a mouse or touch. Choose a color from the full-width swatch strip; the
+selected color and brush diameter appear above it. White erases. Choose a 1, 3,
+or 5 pixel square brush. Undo restores the previous stroke or Clear action. The
+160×100 logical picture scales to the available canvas with letterboxing;
 resizing or rotating the display preserves the drawing.
 
 Save/Open uses the absolute path in the text field. Focusing it opens an on-screen

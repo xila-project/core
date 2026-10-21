@@ -39,8 +39,10 @@ impl AboutTab {
             return Err(crate::error::Error::FailedToCreateUiElement);
         }
 
-        // Create list
+        // Give the device details a clear inset from the tab strip and a single
+        // surface, matching the grouped controls used by the other tabs.
         unsafe {
+            lvgl::lv_obj_set_style_pad_all(self.container, 16, lvgl::LV_STATE_DEFAULT);
             self.list = lvgl::lv_list_create(self.container);
 
             if self.list.is_null() {
@@ -49,7 +51,8 @@ impl AboutTab {
 
             // List properties - fill container
             lvgl::lv_obj_set_size(self.list, lvgl::lv_pct(100), lvgl::lv_pct(100));
-            lvgl::lv_obj_set_style_pad_all(self.list, 0, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_style_pad_all(self.list, 8, lvgl::LV_STATE_DEFAULT);
+            xila::graphics::theme::set_surface(self.list, xila::graphics::theme::Surface::Card);
         }
 
         // Populate items - convert CStr to String

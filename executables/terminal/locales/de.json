@@ -6,5 +6,7 @@
   "Failed to mount device: {}": "Gerät konnte nicht eingebunden werden: {}",
   "Graphics: {}": "Grafik: {}",
   "Resource busy": "Ressource belegt",
+  "Terminal session": "Terminalsitzung",
+  "Type a command and press Enter": "Befehl eingeben und Enter drücken",
   "UTF-8: {}": "UTF-8: {}"
 }

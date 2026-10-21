@@ -1,7 +1,7 @@
 use alloc::string::ToString;
 pub(crate) use core::ffi::CStr;
 use xila::authentication;
-use xila::graphics::{self, EventKind, OwnedWindow, lvgl};
+use xila::graphics::{self, EventKind, OwnedWindow, lvgl, theme};
 use xila::internationalization::translate;
 use xila::users::UserIdentifier;
 
@@ -28,6 +28,16 @@ impl Login {
 
             unsafe {
                 lvgl::lv_obj_set_flex_flow(window.as_object_mutable(), lvgl::LV_FLEX_COLUMN);
+                lvgl::lv_obj_set_style_pad_all(
+                    window.as_object_mutable(),
+                    24,
+                    lvgl::LV_STATE_DEFAULT,
+                );
+                lvgl::lv_obj_set_style_pad_row(
+                    window.as_object_mutable(),
+                    16,
+                    lvgl::LV_STATE_DEFAULT,
+                );
                 lvgl::lv_obj_set_flex_align(
                     window.as_object_mutable(),
                     lvgl::lv_flex_align_t_LV_FLEX_ALIGN_CENTER,
@@ -36,22 +46,63 @@ impl Login {
                 );
             }
 
+            let form = unsafe {
+                let form = lvgl::lv_obj_create(window.as_object_mutable());
+
+                if form.is_null() {
+                    return Err(Error::FailedToCreateObject);
+                }
+
+                lvgl::lv_obj_set_width(form, lvgl::lv_pct(85));
+                lvgl::lv_obj_set_height(form, lvgl::LV_SIZE_CONTENT);
+                lvgl::lv_obj_set_flex_flow(form, lvgl::lv_flex_flow_t_LV_FLEX_FLOW_COLUMN);
+                lvgl::lv_obj_set_style_pad_all(form, 24, lvgl::LV_STATE_DEFAULT);
+                lvgl::lv_obj_set_style_pad_row(form, 12, lvgl::LV_STATE_DEFAULT);
+                theme::set_surface(form, theme::Surface::Card);
+
+                form
+            };
+
+            unsafe {
+                let title = lvgl::lv_label_create(form);
+                if title.is_null() {
+                    return Err(Error::FailedToCreateObject);
+                }
+
+                lvgl::lv_label_set_text(title, c"Xila".as_ptr());
+                lvgl::lv_obj_set_style_text_font(
+                    title,
+                    graphics::fonts::get_font_large(),
+                    lvgl::LV_STATE_DEFAULT,
+                );
+                lvgl::lv_obj_set_width(title, lvgl::lv_pct(100));
+            }
+
             let user_name_text_area = unsafe {
                 // - Create a text area for the user name
-                let user_name_text_area = lvgl::lv_textarea_create(window.as_object_mutable());
+                let user_name_text_area = lvgl::lv_textarea_create(form);
+
+                if user_name_text_area.is_null() {
+                    return Err(Error::FailedToCreateObject);
+                }
 
                 lvgl::lv_textarea_set_placeholder_text(
                     user_name_text_area,
                     translate!(c"User name").as_ptr(),
                 );
                 lvgl::lv_textarea_set_one_line(user_name_text_area, true);
+                lvgl::lv_obj_set_width(user_name_text_area, lvgl::lv_pct(100));
 
                 user_name_text_area
             };
 
             let password_text_area = unsafe {
                 // - Create a text area for the password
-                let password_text_area = lvgl::lv_textarea_create(window.as_mut());
+                let password_text_area = lvgl::lv_textarea_create(form);
+
+                if password_text_area.is_null() {
+                    return Err(Error::FailedToCreateObject);
+                }
 
                 lvgl::lv_textarea_set_placeholder_text(
                     password_text_area,
@@ -59,24 +110,44 @@ impl Login {
                 );
                 lvgl::lv_textarea_set_one_line(password_text_area, true);
                 lvgl::lv_textarea_set_password_mode(password_text_area, true);
+                lvgl::lv_obj_set_width(password_text_area, lvgl::lv_pct(100));
 
                 password_text_area
             };
 
             let error_label = unsafe {
                 // - Create a label for the error
-                let error_label = lvgl::lv_label_create(window.as_mut());
+                let error_label = lvgl::lv_label_create(form);
+
+                if error_label.is_null() {
+                    return Err(Error::FailedToCreateObject);
+                }
 
                 lvgl::lv_label_set_text(error_label, c"".as_ptr());
+                lvgl::lv_label_set_long_mode(
+                    error_label,
+                    lvgl::lv_label_long_mode_t_LV_LABEL_LONG_MODE_WRAP,
+                );
+                lvgl::lv_obj_set_width(error_label, lvgl::lv_pct(100));
 
                 error_label
             };
 
             let button = unsafe {
                 // - Create a button
-                let button = lvgl::lv_button_create(window.as_mut());
+                let button = lvgl::lv_button_create(form);
+
+                if button.is_null() {
+                    return Err(Error::FailedToCreateObject);
+                }
+
+                lvgl::lv_obj_set_width(button, lvgl::lv_pct(100));
 
                 let label = lvgl::lv_label_create(button);
+
+                if label.is_null() {
+                    return Err(Error::FailedToCreateObject);
+                }
 
                 lvgl::lv_label_set_text(label, translate!(c"Login").as_ptr());
 

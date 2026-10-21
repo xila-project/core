@@ -13,6 +13,14 @@ fn extension_id(name: &str) -> Option<u16> {
         "keyboard_create" => 0xf003,
         "keyboard_set_textarea" => 0xf004,
         "object_set_padding" => 0xf005,
+        "object_set_text_size" => 0xf006,
+        "switch_create" => 0xf007,
+        "list_create" => 0xf008,
+        "list_add_text" => 0xf009,
+        "object_set_background_rgb" => 0xf00a,
+        "object_set_text_rgb" => 0xf00b,
+        "object_set_theme_variant" => 0xf00c,
+        "object_set_theme_error" => 0xf00d,
         _ => return None,
     })
 }

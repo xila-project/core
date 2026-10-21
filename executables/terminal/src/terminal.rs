@@ -43,11 +43,14 @@ impl Terminal {
                     window.as_object_mutable(),
                     lvgl::lv_flex_flow_t_LV_FLEX_FLOW_COLUMN,
                 );
-                // Edge-to-edge window chrome: the shared window class already
-                // flattens border and radius, only the container padding remains.
                 lvgl::lv_obj_set_style_pad_all(
                     window.as_object_mutable(),
-                    0,
+                    14,
+                    lvgl::LV_STATE_DEFAULT,
+                );
+                lvgl::lv_obj_set_style_pad_row(
+                    window.as_object_mutable(),
+                    10,
                     lvgl::LV_STATE_DEFAULT,
                 );
             }
@@ -58,12 +61,8 @@ impl Terminal {
                 lvgl::lv_obj_set_width(container, lvgl::lv_pct(100));
                 lvgl::lv_obj_set_flex_grow(container, 1);
                 lvgl::lv_obj_set_flex_flow(container, lvgl::lv_flex_flow_t_LV_FLEX_FLOW_COLUMN);
-                // Flat container chrome: keep the theme gap (space_md) between
-                // the display and the input, but drop the card padding, border
-                // and radius around the output.
-                lvgl::lv_obj_set_style_pad_all(container, 0, lvgl::LV_STATE_DEFAULT);
-                lvgl::lv_obj_set_style_border_width(container, 0, lvgl::LV_STATE_DEFAULT);
-                lvgl::lv_obj_set_style_radius(container, 0, lvgl::LV_STATE_DEFAULT);
+                lvgl::lv_obj_set_style_pad_all(container, 12, lvgl::LV_STATE_DEFAULT);
+                lvgl::lv_obj_set_style_pad_row(container, 8, lvgl::LV_STATE_DEFAULT);
                 lvgl::lv_obj_set_scroll_snap_y(
                     container,
                     lvgl::lv_scroll_snap_t_LV_SCROLL_SNAP_END,
@@ -71,6 +70,23 @@ impl Terminal {
 
                 container
             };
+
+            unsafe {
+                let heading = lvgl::lv_label_create(window.as_object_mutable());
+
+                if heading.is_null() {
+                    return Err(crate::error::Error::FailedToCreateObject);
+                }
+
+                lvgl::lv_label_set_text(heading, translate!(c"Terminal session").as_ptr());
+                lvgl::lv_obj_set_width(heading, lvgl::lv_pct(100));
+                lvgl::lv_obj_set_style_text_font(
+                    heading,
+                    get_font_monospace_medium(),
+                    lvgl::LV_STATE_DEFAULT,
+                );
+                lvgl::lv_obj_move_to_index(heading, 0);
+            }
 
             let mut buffer = String::with_capacity(80 * 24);
             buffer.push('\0'); // Initialize with null terminator for LVGL
@@ -102,7 +118,7 @@ impl Terminal {
 
                 lvgl::lv_textarea_set_placeholder_text(
                     input,
-                    translate!(c"Enter your command ...").as_ptr(),
+                    translate!(c"Type a command and press Enter").as_ptr(),
                 );
                 lvgl::lv_obj_set_width(input, lvgl::lv_pct(100));
                 lvgl::lv_textarea_set_one_line(input, true);

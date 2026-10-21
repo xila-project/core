@@ -564,6 +564,16 @@ pub enum SliderMode {
     Range = 2,
 }
 
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThemeVariant {
+    Default = 0,
+    Secondary = 1,
+    Outline = 2,
+    Ghost = 3,
+    Destructive = 4,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BarOrientation {

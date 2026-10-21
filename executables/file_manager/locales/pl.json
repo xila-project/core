@@ -1,4 +1,9 @@
 {
+  "Browse and manage your files": "Przeglądaj pliki i zarządzaj nimi",
+  "Contents": "Zawartość",
   "Error handling file manager event: {:?}": "Błąd obsługi zdarzenia menedżera plików: {:?}",
-  "Invalid path entered: {}": "Wprowadzono nieprawidłową ścieżkę: {}"
+  "Files": "Pliki",
+  "Invalid path entered: {}": "Wprowadzono nieprawidłową ścieżkę: {}",
+  "1 item": "1 element",
+  "{} items": "{} elementy"
 }

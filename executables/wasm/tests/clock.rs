@@ -36,13 +36,79 @@ unsafe fn find_label(root: *mut lvgl::lv_obj_t, text: &str, contains: bool) -> *
     }
 }
 
+unsafe fn collect_labels(root: *mut lvgl::lv_obj_t, labels: &mut Vec<String>) {
+    unsafe {
+        if lvgl::lv_obj_has_class(root, &lvgl::lv_label_class) {
+            labels.push(
+                CStr::from_ptr(lvgl::lv_label_get_text(root))
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
+        for index in 0..lvgl::lv_obj_get_child_count(root) {
+            collect_labels(lvgl::lv_obj_get_child(root, index as i32), labels);
+        }
+    }
+}
+
+unsafe fn find_class(
+    root: *mut lvgl::lv_obj_t,
+    class: *const lvgl::lv_obj_class_t,
+) -> *mut lvgl::lv_obj_t {
+    unsafe {
+        if lvgl::lv_obj_has_class(root, class) {
+            return root;
+        }
+        for index in 0..lvgl::lv_obj_get_child_count(root) {
+            let found = find_class(lvgl::lv_obj_get_child(root, index as i32), class);
+            if !found.is_null() {
+                return found;
+            }
+        }
+        core::ptr::null_mut()
+    }
+}
+
+unsafe fn find_class_ordinal(
+    root: *mut lvgl::lv_obj_t,
+    class: *const lvgl::lv_obj_class_t,
+    ordinal: usize,
+    found: &mut usize,
+) -> *mut lvgl::lv_obj_t {
+    unsafe {
+        if lvgl::lv_obj_has_class(root, class) {
+            if *found == ordinal {
+                return root;
+            }
+            *found += 1;
+        }
+        for index in 0..lvgl::lv_obj_get_child_count(root) {
+            let object = find_class_ordinal(
+                lvgl::lv_obj_get_child(root, index as i32),
+                class,
+                ordinal,
+                found,
+            );
+            if !object.is_null() {
+                return object;
+            }
+        }
+        core::ptr::null_mut()
+    }
+}
+
 async fn wait_label(manager: &Manager, text: &str, contains: bool) {
+    let mut observed = Vec::new();
     for _ in 0..1000 {
         if manager.get_window_count().await.unwrap() != 0 {
             let root = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
             let found = {
                 let _lock = manager.synchronous_lock();
-                unsafe { !find_label(root, text, contains).is_null() }
+                observed.clear();
+                unsafe {
+                    collect_labels(root, &mut observed);
+                    !find_label(root, text, contains).is_null()
+                }
             };
             if found {
                 return;
@@ -50,7 +116,7 @@ async fn wait_label(manager: &Manager, text: &str, contains: bool) {
         }
         xila::task::sleep(Duration::from_millis(10)).await;
     }
-    panic!("Clock did not display {text:?}");
+    panic!("Clock did not display {text:?}; labels: {observed:?}");
 }
 
 async fn click(manager: &Manager, tab: Option<i32>, text: &str) {
@@ -58,7 +124,8 @@ async fn click(manager: &Manager, tab: Option<i32>, text: &str) {
     let _lock = manager.synchronous_lock();
     unsafe {
         let parent = if let Some(index) = tab {
-            let tabs = lvgl::lv_obj_get_child(root, 2);
+            let tabs = find_class(root, &lvgl::lv_tabview_class);
+            assert!(!tabs.is_null(), "Clock should contain a tab view");
             assert_eq!(lvgl::lv_tabview_get_tab_count(tabs), 4);
             lvgl::lv_tabview_set_active(tabs, index as u32, false);
             lvgl::lv_obj_get_child(lvgl::lv_tabview_get_content(tabs), index)
@@ -73,6 +140,47 @@ async fn click(manager: &Manager, tab: Option<i32>, text: &str) {
             lvgl::lv_event_code_t_LV_EVENT_CLICKED,
             core::ptr::null_mut(),
         );
+    }
+}
+
+async fn select_roller(manager: &Manager, tab: i32, ordinal: usize, value: u32) {
+    let root = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
+    let _lock = manager.synchronous_lock();
+    unsafe {
+        let tabs = find_class(root, &lvgl::lv_tabview_class);
+        assert!(!tabs.is_null(), "Clock should contain a tab view");
+        lvgl::lv_tabview_set_active(tabs, tab as u32, false);
+        let content = lvgl::lv_tabview_get_content(tabs);
+        let parent = lvgl::lv_obj_get_child(content, tab);
+        let mut found = 0;
+        let roller = find_class_ordinal(parent, &lvgl::lv_roller_class, ordinal, &mut found);
+        assert!(
+            !roller.is_null(),
+            "Clock should contain the requested roller"
+        );
+        lvgl::lv_roller_set_selected(roller, value, false);
+        lvgl::lv_obj_send_event(
+            roller,
+            lvgl::lv_event_code_t_LV_EVENT_VALUE_CHANGED,
+            core::ptr::null_mut(),
+        );
+    }
+}
+
+async fn enable_alarm(manager: &Manager) {
+    let root = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
+    let _lock = manager.synchronous_lock();
+    unsafe {
+        let tabs = find_class(root, &lvgl::lv_tabview_class);
+        assert!(!tabs.is_null(), "Clock should contain a tab view");
+        let alarm_tab = lvgl::lv_obj_get_child(lvgl::lv_tabview_get_content(tabs), 1);
+        let mut found = 0;
+        let switch = find_class_ordinal(alarm_tab, &lvgl::lv_switch_class, 0, &mut found);
+        assert!(
+            !switch.is_null(),
+            "Clock should contain an alarm enable switch"
+        );
+        lvgl::lv_obj_add_state(switch, lvgl::lv_state_t_LV_STATE_CHECKED);
     }
 }
 
@@ -129,13 +237,12 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
     click(manager, Some(2), "Start / pause").await;
     xila::task::sleep(Duration::from_millis(300)).await;
     click(manager, Some(2), "Lap").await;
-    wait_label(manager, "1: ", true).await;
+    wait_label(manager, "1   00:00", true).await;
     click(manager, Some(2), "Start / pause").await;
 
-    // Select a one-second countdown using the actual touch controls.
-    for _ in 0..5 {
-        click(manager, Some(3), "Minute -").await;
-    }
+    // The timer now uses hour/minute/second rollers instead of +/- buttons.
+    select_roller(manager, 3, 1, 0).await;
+    select_roller(manager, 3, 2, 1).await;
     click(manager, Some(3), "Start").await;
     wait_label(manager, "Timer finished!", true).await;
     click(manager, None, "Dismiss").await;
@@ -148,11 +255,16 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
         / 3600
         % 24;
     let alarm_hour = (current_hour + 12) % 24;
-    for _ in 0..(alarm_hour + 24 - 7) % 24 {
-        click(manager, Some(1), "Hour +").await;
-    }
-    click(manager, Some(1), "Save and enable").await;
-    wait_label(manager, &format!("{alarm_hour:02}:00 UTC\nEnabled:"), true).await;
+    select_roller(manager, 1, 0, alarm_hour as u32).await;
+    select_roller(manager, 1, 1, 0).await;
+    enable_alarm(manager).await;
+    click(manager, Some(1), "Save alarm").await;
+    wait_label(
+        manager,
+        &format!("{alarm_hour:02}:00 UTC\nAlarm enabled:"),
+        true,
+    )
+    .await;
     let mut saved = Vec::new();
     xila::virtual_file_system::File::read_from_path(
         context.virtual_file_system,
@@ -180,11 +292,12 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
     .unwrap();
     wait_label(manager, "Cancel", true).await;
     // No save action: the new guest must load the existing enabled alarm.
-    click(manager, Some(1), "Hour +").await;
+    select_roller(manager, 1, 0, ((alarm_hour + 1) % 24) as u32).await;
+    select_roller(manager, 1, 1, 0).await;
     wait_label(
         manager,
         &format!(
-            "{:02}:00 UTC\nEnabled: {alarm_hour:02}:00 UTC",
+            "{:02}:00 UTC\nAlarm enabled: {alarm_hour:02}:00 UTC",
             (alarm_hour + 1) % 24
         ),
         true,

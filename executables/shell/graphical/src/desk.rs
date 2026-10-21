@@ -172,6 +172,16 @@ impl Desk {
                 }
 
                 lvgl::lv_obj_set_flex_flow(drawer, lvgl::lv_flex_flow_t_LV_FLEX_FLOW_ROW_WRAP);
+                lvgl::lv_obj_set_flex_align(
+                    drawer,
+                    lvgl::lv_flex_align_t_LV_FLEX_ALIGN_CENTER,
+                    lvgl::lv_flex_align_t_LV_FLEX_ALIGN_CENTER,
+                    lvgl::lv_flex_align_t_LV_FLEX_ALIGN_CENTER,
+                );
+                lvgl::lv_obj_set_style_pad_all(drawer, 24, lvgl::LV_STATE_DEFAULT);
+                lvgl::lv_obj_set_style_pad_row(drawer, 20, lvgl::LV_STATE_DEFAULT);
+                lvgl::lv_obj_set_style_pad_column(drawer, 20, lvgl::LV_STATE_DEFAULT);
+                theme::set_surface(drawer, theme::Surface::Muted);
 
                 drawer
             };
@@ -189,6 +199,8 @@ impl Desk {
                 lvgl::lv_obj_set_align(dock, lvgl::lv_align_t_LV_ALIGN_BOTTOM_MID);
                 lvgl::lv_obj_set_size(dock, lvgl::LV_SIZE_CONTENT, lvgl::LV_SIZE_CONTENT);
                 lvgl::lv_obj_set_flex_flow(dock, lvgl::lv_flex_flow_t_LV_FLEX_FLOW_ROW);
+                lvgl::lv_obj_set_style_pad_all(dock, 10, lvgl::LV_STATE_DEFAULT);
+                lvgl::lv_obj_set_style_pad_column(dock, 8, lvgl::LV_STATE_DEFAULT);
                 // Floating dock bar: the theme container style supplies the card
                 // padding, radius, border and icon gap; only the surface is set.
                 // Center items so the smaller main button aligns with the icons.
@@ -245,23 +257,36 @@ impl Desk {
         let icon = unsafe {
             let container = lvgl::lv_obj_create(drawer);
 
-            lvgl::lv_obj_set_size(container, lvgl::LV_SIZE_CONTENT, lvgl::LV_SIZE_CONTENT);
-            lvgl::lv_obj_set_style_bg_opa(container, lvgl::LV_OPA_0, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_size(container, 112, 108);
             lvgl::lv_obj_set_flex_flow(container, lvgl::lv_flex_flow_t_LV_FLEX_FLOW_COLUMN);
+            lvgl::lv_obj_set_style_pad_all(container, 10, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_style_pad_row(container, 8, lvgl::LV_STATE_DEFAULT);
             lvgl::lv_obj_set_flex_align(
                 container,
                 lvgl::lv_flex_align_t_LV_FLEX_ALIGN_SPACE_EVENLY,
                 lvgl::lv_flex_align_t_LV_FLEX_ALIGN_CENTER,
                 lvgl::lv_flex_align_t_LV_FLEX_ALIGN_CENTER,
             );
+            theme::set_surface(container, theme::Surface::Card);
 
             let icon = create_icon(container, icon_color, icon_string, Self::DRAWER_ICON_SIZE)?;
 
             let label = lvgl::lv_label_create(container);
 
+            if label.is_null() {
+                return Err(Error::FailedToCreateObject);
+            }
+
             let name = CString::new(name).map_err(Error::NullCharacterInString)?;
 
             lvgl::lv_label_set_text(label, name.as_ptr());
+            lvgl::lv_label_set_long_mode(label, lvgl::lv_label_long_mode_t_LV_LABEL_LONG_MODE_WRAP);
+            lvgl::lv_obj_set_width(label, lvgl::lv_pct(100));
+            lvgl::lv_obj_set_style_text_align(
+                label,
+                lvgl::lv_text_align_t_LV_TEXT_ALIGN_CENTER,
+                lvgl::LV_STATE_DEFAULT,
+            );
 
             icon
         };

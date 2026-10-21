@@ -1,4 +1,9 @@
 {
+  "Browse and manage your files": "Sfoglia e gestisci i tuoi file",
+  "Contents": "Contenuti",
   "Error handling file manager event: {:?}": "Errore durante la gestione dell'evento del file manager: {:?}",
-  "Invalid path entered: {}": "Percorso inserito non valido: {}"
+  "Files": "File",
+  "Invalid path entered: {}": "Percorso inserito non valido: {}",
+  "1 item": "1 elemento",
+  "{} items": "{} elementi"
 }
