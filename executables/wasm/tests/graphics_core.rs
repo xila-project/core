@@ -150,6 +150,47 @@ async fn object_position_calls_round_trip_through_the_guest_memory_abi() {
 }
 
 #[xila::task::test(task_path = xila::task)]
+async fn led_handles_expose_bounded_brightness_and_toggle_operations() {
+    let _standard = testing::initialize(false, false).await;
+    let manager = support::manager().await;
+    let mut bytes = [0; 64];
+    let mut memory = GuestMemory::new(&mut bytes);
+    let mut state = GraphicsState::new(Some(manager));
+    call(&mut state, &mut memory, Function::WindowCreate, &[], 1).unwrap();
+    let window = handle(&memory);
+    call(&mut state, &mut memory, Function::LedCreate, &[window], 1).unwrap();
+    let led = handle(&memory);
+
+    call(
+        &mut state,
+        &mut memory,
+        Function::LedSetBrightness,
+        &[led, 73],
+        0,
+    )
+    .unwrap();
+    let native_window = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
+    {
+        let _lock = manager.synchronous_lock();
+        let native_led = unsafe { lvgl::lv_obj_get_child(native_window, 0) };
+        assert_eq!(unsafe { lvgl::lv_led_get_brightness(native_led) }, 73);
+    }
+
+    call(&mut state, &mut memory, Function::LedOff, &[led], 0).unwrap();
+    call(&mut state, &mut memory, Function::LedOn, &[led], 0).unwrap();
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::LedSetBrightness,
+            &[window, 1],
+            0
+        ),
+        Err(GraphicsError::InvalidHandle)
+    );
+}
+
+#[xila::task::test(task_path = xila::task)]
 async fn grid_layout_copies_bounded_track_arrays_from_guest_memory() {
     let _standard = testing::initialize(false, false).await;
     let manager = support::manager().await;

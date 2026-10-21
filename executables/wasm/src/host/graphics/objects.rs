@@ -53,6 +53,7 @@ pub(crate) enum Kind {
     Spinner,
     Dropdown,
     Roller,
+    Led,
 }
 
 struct Entry {

@@ -7,8 +7,8 @@ This document tracks the guest-facing LVGL ABI, not the browser display backend.
 | Surface | Current state |
 | --- | --- |
 | Enabled LVGL widget families | 28 surveyed in `subsystems/graphics/include/lv_conf.h` |
-| Guest Rust wrappers emitted | Filtered to the 92 currently host-supported calls |
-| Host-dispatched calls | 92 after Grid/Flex, local style/font, range, and selection-widget additions; unsupported IDs return `GraphicsError::Unsupported` |
+| Guest Rust wrappers emitted | Filtered to the 97 currently host-supported calls |
+| Host-dispatched calls | 97 after Grid/Flex, local style/font, range, selection-widget, and LED additions; unsupported IDs return `GraphicsError::Unsupported` |
 | Widget families with usable constructors | Button, Buttonmatrix, Checkbox, Label, Tabview, Textarea, Keyboard; Xila Window/Object/IndexedCanvas are extra abstractions |
 | ABI IDs | Legacy calls are alphabetically numbered from discovered signatures; Xila extensions use append-only IDs starting at `0xf000` (Grid `grid_fr` is `0xf006`) |
 | Object registry | Per-VM `Vec<Entry>`, 256 lifetime-issued IDs, tombstones; full scans occur during reaping, reverse lookup and canvas accounting |
@@ -39,6 +39,7 @@ The existing adapter already copies guest strings, button maps and indexed-canva
 | Spinner | Constructor, animation parameters, duration/sweep queries | lifecycle/event tests |
 | LED | Not implemented | bounded brightness/color/state controls |
 | Dropdown, Roller | Constructors, bounded copied options, selection/count/highlight/open state and selected text | per-widget event integration and additional navigation/query operations |
+| LED | Constructor, bounded brightness setter, on/off/toggle operations | color property and guest brightness query |
 | Spinbox, Calendar | Not implemented | bounded numeric editing/date data, state queries and events |
 | List, Table, Menu, Tileview, Msgbox | Not implemented | bounded child/item/cell handles, navigation and cleanup |
 | Chart, Line | Not implemented | bounded series/point storage, ranges and invalidation |
