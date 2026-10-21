@@ -124,7 +124,7 @@ impl VirtualFileSystem {
                 .resolve_path_inner(
                     file_systems,
                     &normalized,
-                    true,
+                    follow_final,
                     allow_missing_final,
                     user,
                     task,

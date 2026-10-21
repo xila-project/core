@@ -738,6 +738,71 @@ async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
         .await;
     assert!(matches!(trailing_slash_stats, Err(VfsError::NotADirectory)));
 
+    // A trailing slash requires a directory, but must not make entry
+    // operations follow a final symlink and mutate its target.
+    vfs.create_directory(task, &Path::from_str("/links/empty-directory"))
+        .await
+        .unwrap();
+    vfs.create_symlink(
+        task,
+        Path::from_str("/links/empty-directory"),
+        Path::from_str("/links/directory-link"),
+    )
+    .await
+    .unwrap();
+    let mut source = File::open(
+        vfs,
+        task,
+        "/links/source",
+        Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
+    )
+    .await
+    .unwrap();
+    source.write(b"source").await.unwrap();
+    source.close(vfs).await.unwrap();
+    assert!(
+        vfs.remove(task, Path::from_str("/links/directory-link/"))
+            .await
+            .is_err()
+    );
+    assert!(
+        vfs.rename(
+            task,
+            &Path::from_str("/links/directory-link/"),
+            &Path::from_str("/links/destination"),
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        vfs.rename(
+            task,
+            &Path::from_str("/links/source"),
+            &Path::from_str("/links/directory-link/"),
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(
+        vfs.get_link_statistics(&Path::from_str("/links/directory-link"))
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::SymbolicLink
+    );
+    assert_eq!(
+        vfs.get_statistics(&Path::from_str("/links/empty-directory"))
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::Directory
+    );
+    assert!(
+        vfs.get_statistics(&Path::from_str("/links/source"))
+            .await
+            .is_ok()
+    );
+
     let mut target = [0; 64];
     let length = vfs
         .read_symlink(task, Path::from_str("/links/absolute"), &mut target)

@@ -229,10 +229,8 @@ impl HostFileSystem {
     fn metadata(&self, path: &Path) -> Result<cap_std::fs::Metadata> {
         let path = Self::relative_path(path)?;
         let metadata = self.root()?.symlink_metadata(&path).map_err(map_io_error)?;
-        if !metadata.is_file() && !metadata.is_dir() {
-            if !metadata.file_type().is_symlink() {
-                return Err(Error::UnsupportedOperation);
-            }
+        if !metadata.is_file() && !metadata.is_dir() && !metadata.file_type().is_symlink() {
+            return Err(Error::UnsupportedOperation);
         }
         Ok(metadata)
     }
