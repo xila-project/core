@@ -7,23 +7,43 @@ This document tracks the guest-facing LVGL ABI, not the browser display backend.
 | Surface | Current state |
 | --- | --- |
 | Enabled LVGL widget families | 28 surveyed in `subsystems/graphics/include/lv_conf.h` |
-| Guest Rust wrappers emitted | Filtered to the 47 currently host-supported calls |
-| Host-dispatched calls | 47; unsupported IDs return `GraphicsError::Unsupported` |
+| Guest Rust wrappers emitted | Filtered to the 51 currently host-supported calls |
+| Host-dispatched calls | 51 after Grid/Flex additions; unsupported IDs return `GraphicsError::Unsupported` |
 | Widget families with usable constructors | Button, Buttonmatrix, Checkbox, Label, Tabview, Textarea, Keyboard; Xila Window/Object/IndexedCanvas are extra abstractions |
-| ABI IDs | Legacy calls are alphabetically numbered from discovered signatures; Xila extensions use `0xf000+` |
+| ABI IDs | Legacy calls are alphabetically numbered from discovered signatures; Xila extensions use append-only IDs starting at `0xf000` (Grid `grid_fr` is `0xf006`) |
 | Object registry | Per-VM `Vec<Entry>`, 256 lifetime-issued IDs, tombstones; full scans occur during reaping, reverse lookup and canvas accounting |
 | Per-object adapter allocation | One `Rc<Notification>` plus LVGL callback registration; optional map/canvas resource slots exist on every `Entry` |
 | Events | Native queue initial capacity 10 is not a hard bound; key is recorded natively but not returned by the current guest pop calls |
 | Images | LV_USE_IMAGE is enabled, but surveyed LVGL FS adapters and optional PNG/JPEG/GIF decoders are disabled; an image constructor alone would not provide VFS-backed loading |
 | Fonts/theme | Existing host semantic theme surfaces and ROM-backed font functions exist; guests do not yet receive safe semantic font IDs |
 
-The build-time `GraphicsRegistry` filters guest Rust/C wrappers and generates host `Function` metadata from the same selected-name set. It emits `graphics_abi_inventory.json` into Cargo's `OUT_DIR`; this is a build artifact, not linked runtime metadata. The inventory classifies discovered calls, signatures, IDs, adapters, ownership and unsupported reasons. Initial registry testing over the full catalog found 1,074 discovered calls, with 92 supported and 982 excluded. Generated scalar geometry dispatch requires explicit object-handle and signed-scalar policies; no guest word is forwarded as a native pointer. The `xila_graphics_call` transport and legacy IDs remain unchanged. ABI capability/version negotiation is still outstanding.
+The build-time `GraphicsRegistry` filters guest Rust/C wrappers and generates host `Function` metadata from the same selected-name set. It emits `graphics_abi_inventory.json` into Cargo's `OUT_DIR`; this is a build artifact, not linked runtime metadata. The inventory classifies discovered calls, signatures, IDs, adapters, ownership and unsupported reasons. Initial registry testing over the full catalog found 1,074 discovered calls, with 92 supported and 982 excluded. Generated scalar geometry dispatch requires explicit object-handle and signed-scalar policies; no guest word is forwarded as a native pointer. Grid descriptors use a named custom adapter. The `xila_graphics_call` transport and legacy IDs remain unchanged. ABI capability/version negotiation is still outstanding.
 
 The existing adapter already copies guest strings, button maps and indexed-canvas data into host-owned storage, validates guest memory spans, and gates LVGL work under the graphics-manager lock. These are invariants to preserve, not evidence that all widget/resource paths are complete.
 
+### Enabled widget coverage
+
+| LVGL family | Current host coverage | Remaining vertical slice |
+| --- | --- | --- |
+| Button | Constructor only | label/child behavior, state and click/value events |
+| Buttonmatrix | Constructor, copied map, selected index | button control/width/text queries and selected event |
+| Checkbox | Constructor, text | checked state/query and value event |
+| Label | Constructor, copied text | long mode, alignment, wrap/selection and text queries |
+| Tabview | Constructor, add tab, active-index query | active-tab setter, tab handles and change events |
+| Textarea | Constructor, copied text, one-line/max-length, text output | placeholder, cursor/selection, editing options/events |
+| Keyboard | Constructor, textarea attachment | mode, button map/state and key event payload |
+| Arc, Bar, Slider, Switch | Not implemented | constructors, range/value/mode/orientation, value events |
+| Spinner, LED | Not implemented | state/value and bounded style/color controls |
+| Dropdown, Roller, Spinbox, Calendar | Not implemented | bounded options/date data, selection/edit queries and events |
+| List, Table, Menu, Tileview, Msgbox | Not implemented | bounded child/item/cell handles, navigation and cleanup |
+| Chart, Line | Not implemented | bounded series/point storage, ranges and invalidation |
+| Canvas, Image, Imagebutton, Animimg | IndexedCanvas Xila helper only; LVGL families not adapted | host-owned image/frame resources and explicit quotas/lifetimes |
+
+This matrix distinguishes enabled LVGL code from practical guest usability. Constructor-only support does not satisfy the #483 acceptance criteria.
+
 ## Changes in this tranche
 
-Host adapters now support position, size, x/y/width/height queries, object alignment, layout update, flex alignment, and selecting only LVGL's built-in default/flex/grid layout IDs. Signed coordinates and dimensions are checked for valid memory32/memory64 encodings before LVGL calls; alignment and flex enum values are validated. Geometry remains handle-based and returns scalars rather than native structs or pointers.
+Host adapters support position, size, x/y/width/height queries, object alignment, layout update, flex alignment, and selecting only LVGL's built-in default/flex/grid layout IDs. Grid track arrays are copied, sentinel-checked, limited to 31 tracks per axis and 512 retained descriptors per VM, then kept alive until layout replacement or native deletion completes. Grid cell positions/spans and alignment selectors are validated. The `grid_fr` helper encodes fractional tracks through an append-only Xila call ID rather than adding `lv_grid_` to the alphabetically numbered legacy LVGL catalog. Signed coordinates and dimensions are checked for valid memory32/memory64 encodings before LVGL calls; geometry remains handle-based and returns scalars rather than native structs or pointers.
 
 ## Reviewable PR roadmap
 

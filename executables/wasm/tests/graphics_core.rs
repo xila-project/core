@@ -150,6 +150,154 @@ async fn object_position_calls_round_trip_through_the_guest_memory_abi() {
 }
 
 #[xila::task::test(task_path = xila::task)]
+async fn grid_layout_copies_bounded_track_arrays_from_guest_memory() {
+    let _standard = testing::initialize(false, false).await;
+    let manager = support::manager().await;
+    let mut bytes = [0; 512];
+    let mut memory = GuestMemory::new(&mut bytes);
+    let mut state = GraphicsState::new(Some(manager));
+    call(&mut state, &mut memory, Function::WindowCreate, &[], 1).unwrap();
+    let window = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectCreate,
+        &[window],
+        1,
+    )
+    .unwrap();
+    let grid = handle(&memory);
+    call(&mut state, &mut memory, Function::ObjectCreate, &[grid], 1).unwrap();
+    let child = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetPadding,
+        &[grid, 0],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetPadding,
+        &[child, 0],
+        0,
+    )
+    .unwrap();
+
+    call(&mut state, &mut memory, Function::GridFr, &[2], 1).unwrap();
+    assert_eq!(
+        memory.read(GuestPointer::<i32>::new(1)),
+        Some(unsafe { lvgl::lv_grid_fr(2) })
+    );
+    assert_eq!(
+        call(&mut state, &mut memory, Function::GridFr, &[100], 1),
+        Err(GraphicsError::InvalidValue)
+    );
+
+    for (offset, value) in [
+        (200, 60),
+        (204, lvgl::LV_GRID_TEMPLATE_LAST as i32),
+        (220, 30),
+        (224, lvgl::LV_GRID_TEMPLATE_LAST as i32),
+    ] {
+        memory.write(GuestPointer::new(offset), value).unwrap();
+    }
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetGridDscArray,
+        &[grid, 200, 220],
+        0,
+    )
+    .unwrap();
+    memory.write(GuestPointer::new(200), 10i32).unwrap();
+    memory.write(GuestPointer::new(220), 10i32).unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetLayout,
+        &[grid, 2],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetGridAlign,
+        &[grid, 3, 1],
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ObjectSetGridAlign,
+            &[grid, 7, 0],
+            0,
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetSize,
+        &[grid, 200, 100],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetGridCell,
+        &[child, 3, 0, 1, 3, 0, 1],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectUpdateLayout,
+        &[grid],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectGetWidth,
+        &[child],
+        1,
+    )
+    .unwrap();
+    assert_eq!(memory.read(GuestPointer::<i32>::new(1)), Some(60));
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectGetHeight,
+        &[child],
+        1,
+    )
+    .unwrap();
+    assert_eq!(memory.read(GuestPointer::<i32>::new(1)), Some(30));
+
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ObjectSetGridDscArray,
+            &[grid, 0, 220],
+            0,
+        ),
+        Err(GraphicsError::InvalidMemory)
+    );
+    drop(state);
+    assert_eq!(manager.get_window_count().await.unwrap(), 0);
+}
+
+#[xila::task::test(task_path = xila::task)]
 async fn checked_graphics_core_owns_objects_maps_and_events() {
     let _standard = testing::initialize(false, false).await;
     let manager = support::manager().await;

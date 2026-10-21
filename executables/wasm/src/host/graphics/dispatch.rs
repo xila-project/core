@@ -100,6 +100,72 @@ pub fn dispatch(
             }
             unsafe { lvgl::lv_obj_set_layout(object, b as _) };
         }
+        Function::GridFr => {
+            let weight = u8::try_from(a).map_err(|_| GraphicsError::InvalidValue)?;
+            if !(0..=99).contains(&weight) {
+                return Err(GraphicsError::InvalidValue);
+            }
+            let descriptor = unsafe { lvgl::lv_grid_fr(weight) };
+            memory
+                .write(GuestPointer::<i32>::new(call.result), descriptor)
+                .expect("validated result");
+        }
+        Function::ObjectSetGridDscArray => {
+            state.object(a, None)?;
+            let tracks = super::marshal::GridTracks::decode(
+                memory,
+                b,
+                c,
+                lvgl::LV_GRID_TEMPLATE_LAST as i32,
+                lvgl::LV_GRID_CONTENT as i32,
+            )?;
+            state.set_grid_tracks(a, tracks)?;
+        }
+        Function::ObjectSetGridAlign => {
+            let object = state.object(a, None)?;
+            let column = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let row = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            if column > lvgl::lv_grid_align_t_LV_GRID_ALIGN_SPACE_BETWEEN
+                || row > lvgl::lv_grid_align_t_LV_GRID_ALIGN_SPACE_BETWEEN
+            {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_obj_set_grid_align(object, column, row) };
+        }
+        Function::ObjectSetGridCell => {
+            let object = state.object(a, None)?;
+            let column_align = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let column = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            let column_span =
+                u32::try_from(call.arguments[3]).map_err(|_| GraphicsError::InvalidValue)?;
+            let row_align =
+                u32::try_from(call.arguments[4]).map_err(|_| GraphicsError::InvalidValue)?;
+            let row = u32::try_from(call.arguments[5]).map_err(|_| GraphicsError::InvalidValue)?;
+            let row_span =
+                u32::try_from(call.arguments[6]).map_err(|_| GraphicsError::InvalidValue)?;
+            if column_align > lvgl::lv_grid_align_t_LV_GRID_ALIGN_SPACE_BETWEEN
+                || row_align > lvgl::lv_grid_align_t_LV_GRID_ALIGN_SPACE_BETWEEN
+                || column >= (super::marshal::MAX_GRID_TRACKS_PER_AXIS - 1) as u32
+                || row >= (super::marshal::MAX_GRID_TRACKS_PER_AXIS - 1) as u32
+                || column_span == 0
+                || column_span > (super::marshal::MAX_GRID_TRACKS_PER_AXIS - 1) as u32
+                || row_span == 0
+                || row_span > (super::marshal::MAX_GRID_TRACKS_PER_AXIS - 1) as u32
+            {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe {
+                lvgl::lv_obj_set_grid_cell(
+                    object,
+                    column_align,
+                    column as i32,
+                    column_span as i32,
+                    row_align,
+                    row as i32,
+                    row_span as i32,
+                )
+            };
+        }
         Function::WindowCreate
         | Function::ObjectCreate
         | Function::LabelCreate

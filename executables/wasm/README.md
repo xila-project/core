@@ -126,7 +126,8 @@ execution still requires APIs beyond the Calculator subset listed below.
 This first milestone supports windows (creation, icon, event pop), object
 creation/deletion, position/size and scalar geometry queries, alignment,
 layout update, built-in default/flex/grid layout selection, flex flow/alignment/
-grow, width/height, flags, labels (creation/text), button matrices
+grow, width/height, flags, validated Grid tracks/placement/alignment, labels
+(creation/text), button matrices
 (creation/map/selection), and percentage conversion. Grid descriptor arrays,
 styles/fonts, and widget-specific query/configuration APIs remain unsupported.
 
@@ -166,8 +167,8 @@ the generator currently emits more guest wrappers than the host implements;
 unsupported calls return status 4 and should not be treated as available APIs.
 
 Static audit of the current LVGL configuration: 28 surveyed widget families
-are enabled, while the guest generator emits 727 LVGL/Xila wrappers and the
-host supports 47 calls (including Xila helpers). Seven enabled widget families
+are enabled, while the guest generator emits 1,050 LVGL/Xila wrappers and the
+host supports 51 calls (including Xila helpers). Seven enabled widget families
 have creation adapters, but several remain partial. This is not a runtime or
 performance benchmark. The next ABI tranches are a shared host/guest support
 manifest and inventory, semantic style/font APIs, then the BTreeMap handle

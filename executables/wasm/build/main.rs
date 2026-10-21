@@ -103,6 +103,33 @@ fn generate() {
         ),
         ("object_set_layout", &["*mut lv_obj_t", "u32"], "None", None),
         (
+            "object_set_grid_dsc_array",
+            &["*mut lv_obj_t", "*const i32", "*const i32"],
+            "None",
+            None,
+        ),
+        (
+            "object_set_grid_align",
+            &["*mut lv_obj_t", "lv_grid_align_t", "lv_grid_align_t"],
+            "None",
+            None,
+        ),
+        (
+            "object_set_grid_cell",
+            &[
+                "*mut lv_obj_t",
+                "lv_grid_align_t",
+                "i32",
+                "i32",
+                "lv_grid_align_t",
+                "i32",
+                "i32",
+            ],
+            "None",
+            None,
+        ),
+        ("grid_fr", &["u8"], "I32", Some("i32")),
+        (
             "object_add_state",
             &["*mut lv_obj_t", "lv_state_t"],
             "None",

@@ -7,6 +7,8 @@ pub fn get() -> TokenStream {
             pub fn keyboard_create(parent: *mut lv_obj_t) -> *mut lv_obj_t;
             pub fn keyboard_set_textarea(keyboard: *mut lv_obj_t, textarea: *mut lv_obj_t);
             pub fn object_set_padding(object: *mut lv_obj_t, padding: i32);
+            /// Encodes a bounded fractional Grid track weight for a guest descriptor array.
+            pub fn grid_fr(weight: u8) -> i32;
             /// Host-owned indexed canvas. Dimensions and uploads are bounded by the host.
             pub fn indexed_canvas_create(parent: *mut lv_obj_t, width: u16, height: u16) -> *mut lv_obj_t;
 
