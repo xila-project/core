@@ -24,6 +24,23 @@ pub(super) fn signed_word(value: WasmUsize) -> Result<i32> {
     }
 }
 
+pub(super) fn dispatch_grid_tracks(
+    state: &mut GraphicsState,
+    memory: &GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [object, columns, rows, ..] = call.arguments;
+    state.object(object, None)?;
+    let tracks = super::marshal::GridTracks::decode(
+        memory,
+        columns,
+        rows,
+        lvgl::LV_GRID_TEMPLATE_LAST as i32,
+        lvgl::LV_GRID_CONTENT as i32,
+    )?;
+    state.set_grid_tracks(object, tracks)
+}
+
 fn copy_selected_option(
     memory: &mut GuestMemory<'_>,
     options: *const core::ffi::c_char,
@@ -554,17 +571,6 @@ pub fn dispatch(
                 .write(GuestPointer::<i32>::new(call.result), descriptor)
                 .expect("validated result");
         }
-        Function::ObjectSetGridDscArray => {
-            state.object(a, None)?;
-            let tracks = super::marshal::GridTracks::decode(
-                memory,
-                b,
-                c,
-                lvgl::LV_GRID_TEMPLATE_LAST as i32,
-                lvgl::LV_GRID_CONTENT as i32,
-            )?;
-            state.set_grid_tracks(a, tracks)?;
-        }
         Function::ObjectSetGridAlign => {
             let object = state.object(a, None)?;
             let column = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
@@ -625,7 +631,8 @@ pub fn dispatch(
         | Function::SwitchCreate
         | Function::SpinnerCreate
         | Function::DropdownCreate
-        | Function::RollerCreate => {
+        | Function::RollerCreate
+        | Function::LedCreate => {
             state.ensure_capacity()?;
             let (pointer, kind, parent) = if function == Function::WindowCreate {
                 let window = xila::task::block_on(manager.create_window())
@@ -661,6 +668,7 @@ pub fn dispatch(
                             (lvgl::lv_dropdown_create(parent), Kind::Dropdown)
                         }
                         Function::RollerCreate => (lvgl::lv_roller_create(parent), Kind::Roller),
+                        Function::LedCreate => (lvgl::lv_led_create(parent), Kind::Led),
                         _ => unreachable!(),
                     }
                 };
@@ -670,6 +678,21 @@ pub fn dispatch(
             memory
                 .write(GuestPointer::new(call.result), handle)
                 .expect("validated result");
+        }
+        Function::LedSetBrightness | Function::LedOn | Function::LedOff | Function::LedToggle => {
+            let led = state.object(a, Some(Kind::Led))?;
+            unsafe {
+                match function {
+                    Function::LedSetBrightness => lvgl::lv_led_set_brightness(
+                        led,
+                        u8::try_from(b).map_err(|_| GraphicsError::InvalidValue)?,
+                    ),
+                    Function::LedOn => lvgl::lv_led_on(led),
+                    Function::LedOff => lvgl::lv_led_off(led),
+                    Function::LedToggle => lvgl::lv_led_toggle(led),
+                    _ => unreachable!(),
+                }
+            }
         }
         Function::TabviewAddTab => {
             state.ensure_capacity()?;

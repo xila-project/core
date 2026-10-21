@@ -464,6 +464,16 @@ fn generate() {
             Some("*mut lv_obj_t"),
         ),
         (
+            "led_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        ("led_set_brightness", &["*mut lv_obj_t", "u8"], "None", None),
+        ("led_on", &["*mut lv_obj_t"], "None", None),
+        ("led_off", &["*mut lv_obj_t"], "None", None),
+        ("led_toggle", &["*mut lv_obj_t"], "None", None),
+        (
             "range_set_range",
             &["*mut lv_obj_t", "i32", "i32"],
             "None",
@@ -546,6 +556,7 @@ fn generate() {
         AdapterRule::automatic("object_get_y", AutoObjectScalar::GetI32),
         AdapterRule::automatic("object_get_width", AutoObjectScalar::GetI32),
         AdapterRule::automatic("object_get_height", AutoObjectScalar::GetI32),
+        AdapterRule::custom("object_set_grid_dsc_array", "dispatch_grid_tracks"),
     ];
     let registry = GraphicsRegistry::new(&catalog, &supported_names, &adapter_rules)
         .unwrap_or_else(|error| panic!("invalid graphics registry: {error}"));
@@ -621,9 +632,16 @@ fn generate() {
                     }
                 });
             }
-            AdapterPolicy::Custom(_) | AdapterPolicy::Manual => {
-                continue;
+            AdapterPolicy::Custom(handler) => {
+                let handler = format_ident!("{handler}");
+                dispatch_arms.push(quote! {
+                    Function::#variant => {
+                        dispatch::#handler(state, memory, call)?;
+                        Ok(true)
+                    }
+                });
             }
+            AdapterPolicy::Manual => continue,
         }
     }
     let code = quote! {
