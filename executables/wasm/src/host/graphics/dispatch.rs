@@ -8,6 +8,15 @@ use crate::host::translation::{GuestMemory, GuestPointer, GuestSlice, WasmUsize}
 use core::ptr::NonNull;
 use xila::graphics::{Color, Window, lvgl};
 
+fn signed_word(value: WasmUsize) -> Result<i32> {
+    let narrowed = value as u32 as i32;
+    if narrowed as WasmUsize == value {
+        Ok(narrowed)
+    } else {
+        Err(GraphicsError::InvalidValue)
+    }
+}
+
 pub struct GraphicsCall {
     pub function: i32,
     pub arguments: [WasmUsize; 7],
@@ -55,6 +64,71 @@ pub fn dispatch(
                 lvgl::lv_obj_set_style_pad_row(object, padding, 0);
                 lvgl::lv_obj_set_style_pad_column(object, padding, 0);
             }
+        }
+        Function::ObjectSetPos => {
+            let object = state.object(a, None)?;
+            let x = signed_word(b)?;
+            let y = signed_word(c)?;
+            unsafe { lvgl::lv_obj_set_pos(object, x, y) };
+        }
+        Function::ObjectGetX => {
+            let object = state.object(a, None)?;
+            let x = unsafe { lvgl::lv_obj_get_x(object) };
+            memory
+                .write(GuestPointer::<i32>::new(call.result), x)
+                .expect("validated result");
+        }
+        Function::ObjectGetY | Function::ObjectGetWidth | Function::ObjectGetHeight => {
+            let object = state.object(a, None)?;
+            let value = unsafe {
+                match function {
+                    Function::ObjectGetY => lvgl::lv_obj_get_y(object),
+                    Function::ObjectGetWidth => lvgl::lv_obj_get_width(object),
+                    Function::ObjectGetHeight => lvgl::lv_obj_get_height(object),
+                    _ => unreachable!(),
+                }
+            };
+            memory
+                .write(GuestPointer::<i32>::new(call.result), value)
+                .expect("validated result");
+        }
+        Function::ObjectSetSize => {
+            let object = state.object(a, None)?;
+            let width = signed_word(b)?;
+            let height = signed_word(c)?;
+            unsafe { lvgl::lv_obj_set_size(object, width, height) };
+        }
+        Function::ObjectAlign => {
+            let object = state.object(a, None)?;
+            if b > lvgl::lv_align_t_LV_ALIGN_OUT_RIGHT_BOTTOM as WasmUsize {
+                return Err(GraphicsError::InvalidValue);
+            }
+            let x = signed_word(c)?;
+            let y = signed_word(call.arguments[3])?;
+            unsafe { lvgl::lv_obj_align(object, b as _, x, y) };
+        }
+        Function::ObjectUpdateLayout => {
+            let object = state.object(a, None)?;
+            unsafe { lvgl::lv_obj_update_layout(object) };
+        }
+        Function::ObjectSetFlexAlign => {
+            let object = state.object(a, None)?;
+            let main = b;
+            let cross = c;
+            let track = call.arguments[3];
+            if [main, cross, track].iter().any(|&align| {
+                align > lvgl::lv_flex_align_t_LV_FLEX_ALIGN_SPACE_BETWEEN as WasmUsize
+            }) {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_obj_set_flex_align(object, main as _, cross as _, track as _) };
+        }
+        Function::ObjectSetLayout => {
+            let object = state.object(a, None)?;
+            if !matches!(b, 0 | 1 | 2) {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_obj_set_layout(object, b as _) };
         }
         Function::WindowCreate
         | Function::ObjectCreate
@@ -344,8 +418,8 @@ pub fn dispatch(
                         pointer,
                         u8::try_from(b).map_err(|_| GraphicsError::InvalidValue)?,
                     ),
-                    Function::ObjectSetHeight => lvgl::lv_obj_set_height(pointer, b as i32),
-                    Function::ObjectSetWidth => lvgl::lv_obj_set_width(pointer, b as i32),
+                    Function::ObjectSetHeight => lvgl::lv_obj_set_height(pointer, signed_word(b)?),
+                    Function::ObjectSetWidth => lvgl::lv_obj_set_width(pointer, signed_word(b)?),
                     Function::ObjectAddState => {
                         let state = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
                         if state & !lvgl::lv_state_t_LV_STATE_ANY != 0 {
