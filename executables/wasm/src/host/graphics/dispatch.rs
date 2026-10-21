@@ -8,7 +8,7 @@ use crate::host::translation::{GuestMemory, GuestPointer, GuestSlice, WasmUsize}
 use core::ptr::NonNull;
 use xila::graphics::{Color, Window, lvgl};
 
-fn signed_word(value: WasmUsize) -> Result<i32> {
+pub(super) fn signed_word(value: WasmUsize) -> Result<i32> {
     let narrowed = value as u32 as i32;
     if narrowed as WasmUsize == value {
         Ok(narrowed)
@@ -51,6 +51,9 @@ pub fn dispatch(
     }
     let _lock = manager.synchronous_lock();
     state.reap_deleted_maps();
+    if super::dispatch_generated(state, memory, &call, function)? {
+        return Ok(());
+    }
     let [a, b, c, ..] = call.arguments;
     match function {
         Function::ObjectSetPadding => {
@@ -64,39 +67,6 @@ pub fn dispatch(
                 lvgl::lv_obj_set_style_pad_row(object, padding, 0);
                 lvgl::lv_obj_set_style_pad_column(object, padding, 0);
             }
-        }
-        Function::ObjectSetPos => {
-            let object = state.object(a, None)?;
-            let x = signed_word(b)?;
-            let y = signed_word(c)?;
-            unsafe { lvgl::lv_obj_set_pos(object, x, y) };
-        }
-        Function::ObjectGetX => {
-            let object = state.object(a, None)?;
-            let x = unsafe { lvgl::lv_obj_get_x(object) };
-            memory
-                .write(GuestPointer::<i32>::new(call.result), x)
-                .expect("validated result");
-        }
-        Function::ObjectGetY | Function::ObjectGetWidth | Function::ObjectGetHeight => {
-            let object = state.object(a, None)?;
-            let value = unsafe {
-                match function {
-                    Function::ObjectGetY => lvgl::lv_obj_get_y(object),
-                    Function::ObjectGetWidth => lvgl::lv_obj_get_width(object),
-                    Function::ObjectGetHeight => lvgl::lv_obj_get_height(object),
-                    _ => unreachable!(),
-                }
-            };
-            memory
-                .write(GuestPointer::<i32>::new(call.result), value)
-                .expect("validated result");
-        }
-        Function::ObjectSetSize => {
-            let object = state.object(a, None)?;
-            let width = signed_word(b)?;
-            let height = signed_word(c)?;
-            unsafe { lvgl::lv_obj_set_size(object, width, height) };
         }
         Function::ObjectAlign => {
             let object = state.object(a, None)?;
@@ -400,8 +370,6 @@ pub fn dispatch(
         }
         Function::ObjectSetFlexFlow
         | Function::ObjectSetFlexGrow
-        | Function::ObjectSetHeight
-        | Function::ObjectSetWidth
         | Function::ObjectAddState
         | Function::ObjectAddFlag
         | Function::ObjectRemoveFlag => {
@@ -418,8 +386,6 @@ pub fn dispatch(
                         pointer,
                         u8::try_from(b).map_err(|_| GraphicsError::InvalidValue)?,
                     ),
-                    Function::ObjectSetHeight => lvgl::lv_obj_set_height(pointer, signed_word(b)?),
-                    Function::ObjectSetWidth => lvgl::lv_obj_set_width(pointer, signed_word(b)?),
                     Function::ObjectAddState => {
                         let state = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
                         if state & !lvgl::lv_state_t_LV_STATE_ANY != 0 {
@@ -439,6 +405,7 @@ pub fn dispatch(
                 }
             }
         }
+        _ => return Err(GraphicsError::Unsupported),
     }
     Ok(())
 }

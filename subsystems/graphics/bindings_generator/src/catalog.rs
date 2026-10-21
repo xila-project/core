@@ -20,6 +20,12 @@ fn extension_id(name: &str) -> Option<u16> {
 #[derive(Debug)]
 pub struct GeneratorError(String);
 
+impl GeneratorError {
+    pub(crate) fn new(message: impl Into<String>) -> Self {
+        Self(message.into())
+    }
+}
+
 impl fmt::Display for GeneratorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
@@ -199,6 +205,26 @@ impl CallCatalog {
 
     pub fn calls(&self) -> &[Call] {
         &self.calls
+    }
+
+    /// Select a registry subset by normalized call name without changing catalog IDs.
+    pub fn select(&self, names: &[&str]) -> Result<Vec<&Call>, GeneratorError> {
+        let mut selected = Vec::with_capacity(names.len());
+        let mut unique = BTreeSet::new();
+        for name in names {
+            if !unique.insert(*name) {
+                return Err(GeneratorError(format!("duplicate supported call {name}")));
+            }
+            let call = self
+                .calls
+                .iter()
+                .find(|call| call.name == *name)
+                .ok_or_else(|| {
+                    GeneratorError(format!("supported call {name} is not in the LVGL catalog"))
+                })?;
+            selected.push(call);
+        }
+        Ok(selected)
     }
 
     pub fn signatures(&self) -> Vec<Signature> {

@@ -231,3 +231,45 @@ fn adapters_reject_changed_pointer_or_result_encodings() {
     );
     assert!(call.validate_signature(&[], None).is_err());
 }
+
+#[test]
+fn catalog_selection_keeps_original_ids_and_rejects_unknown_or_duplicate_names() {
+    let catalog = CallCatalog::parse(
+        r#"unsafe extern "C" {
+            fn lv_obj_set_width(obj: *mut lv_obj_t, width: i32);
+            fn lv_obj_get_width(obj: *const lv_obj_t) -> i32;
+            fn lv_label_set_text(obj: *mut lv_obj_t, text: *const i8);
+        }"#,
+    )
+    .unwrap();
+    let width_id = catalog
+        .calls()
+        .iter()
+        .find(|call| call.name == "object_set_width")
+        .unwrap()
+        .id;
+    let selected = catalog
+        .select(&["object_get_width", "object_set_width"])
+        .unwrap();
+    assert_eq!(
+        selected
+            .iter()
+            .map(|call| call.name.as_str())
+            .collect::<Vec<_>>(),
+        ["object_get_width", "object_set_width"]
+    );
+    assert_eq!(
+        selected
+            .iter()
+            .find(|call| call.name == "object_set_width")
+            .unwrap()
+            .id,
+        width_id
+    );
+    assert!(catalog.select(&["not_in_the_catalog"]).is_err());
+    assert!(
+        catalog
+            .select(&["object_set_width", "object_set_width"])
+            .is_err()
+    );
+}

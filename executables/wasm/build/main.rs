@@ -11,9 +11,6 @@ fn main() {
         println!("cargo:rerun-if-changed=build/utilities");
         println!("cargo:rerun-if-changed=src/guest/graphics/prelude.rs");
         println!("cargo:rerun-if-changed=src/graphics_event.rs");
-        guest::generate(&std::path::PathBuf::from(
-            std::env::var_os("OUT_DIR").unwrap(),
-        ));
     }
     #[cfg(feature = "graphics")]
     generate();
@@ -21,6 +18,9 @@ fn main() {
 
 #[cfg(feature = "graphics")]
 fn generate() {
+    use graphics_bindgen::registry::{
+        AdapterPolicy, AdapterRule, AutoObjectScalar, GraphicsRegistry,
+    };
     use quote::{format_ident, quote};
     let catalog = graphics_bindgen::CallCatalog::parse(lvgl_rust_sys::_bindgen_raw_src())
         .expect("invalid LVGL graphics ABI");
@@ -275,17 +275,43 @@ fn generate() {
             None,
         ),
     ];
+    let supported_names: Vec<_> = supported
+        .iter()
+        .chain(extra)
+        .map(|(name, ..)| *name)
+        .collect();
+    let adapter_rules = [
+        AdapterRule::automatic("object_set_width", AutoObjectScalar::SetI32),
+        AdapterRule::automatic("object_set_height", AutoObjectScalar::SetI32),
+        AdapterRule::automatic("object_set_pos", AutoObjectScalar::SetPairI32),
+        AdapterRule::automatic("object_set_size", AutoObjectScalar::SetPairI32),
+        AdapterRule::automatic("object_get_x", AutoObjectScalar::GetI32),
+        AdapterRule::automatic("object_get_y", AutoObjectScalar::GetI32),
+        AdapterRule::automatic("object_get_width", AutoObjectScalar::GetI32),
+        AdapterRule::automatic("object_get_height", AutoObjectScalar::GetI32),
+    ];
+    let registry = GraphicsRegistry::new(&catalog, &supported_names, &adapter_rules)
+        .unwrap_or_else(|error| panic!("invalid graphics registry: {error}"));
+    let output_path = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    std::fs::write(
+        output_path.join("graphics_abi_inventory.json"),
+        registry.inventory_json(&catalog),
+    )
+    .expect("failed to write graphics ABI inventory");
+    #[cfg(feature = "guest")]
+    guest::generate(&output_path, &registry);
+
     let mut variants = Vec::new();
     let mut lookup = Vec::new();
     let mut counts = Vec::new();
     let mut results = Vec::new();
-    for &(name, arguments, result, output) in supported.iter().chain(extra) {
-        let call = catalog
-            .calls()
+    for call in registry.calls() {
+        let (_, arguments, result, output) = supported
             .iter()
-            .find(|call| call.name == name)
-            .unwrap_or_else(|| panic!("required LVGL call {name} missing"));
-        call.validate_signature(arguments, output)
+            .chain(extra)
+            .find(|entry| entry.0 == call.name)
+            .unwrap_or_else(|| panic!("registry call {} has no ABI declaration", call.name));
+        call.validate_signature(arguments, *output)
             .unwrap_or_else(|error| panic!("{error}"));
         let count = arguments.len() as i32;
         let variant = graphics_bindgen::enumeration::get_variant_identifier(&call.signature.ident);
@@ -296,6 +322,53 @@ fn generate() {
         counts.push(quote!(Self::#variant => #count));
         results.push(quote!(Self::#variant => ResultKind::#result));
     }
+    let mut dispatch_arms = Vec::new();
+    for call in registry.calls() {
+        let Some(policy) = registry.adapter_for(&call.name) else {
+            continue;
+        };
+        let variant = graphics_bindgen::enumeration::get_variant_identifier(&call.signature.ident);
+        let native = &call.signature.ident;
+        match policy {
+            AdapterPolicy::AutoObjectScalar(AutoObjectScalar::SetI32) => {
+                dispatch_arms.push(quote! {
+                    Function::#variant => {
+                        let object = state.object(call.arguments[0], None)?;
+                        let value = dispatch::signed_word(call.arguments[1])?;
+                        unsafe { xila::graphics::lvgl::#native(object, value) };
+                        Ok(true)
+                    }
+                });
+            }
+            AdapterPolicy::AutoObjectScalar(AutoObjectScalar::SetPairI32) => {
+                dispatch_arms.push(quote! {
+                    Function::#variant => {
+                        let object = state.object(call.arguments[0], None)?;
+                        let first = dispatch::signed_word(call.arguments[1])?;
+                        let second = dispatch::signed_word(call.arguments[2])?;
+                        unsafe { xila::graphics::lvgl::#native(object, first, second) };
+                        Ok(true)
+                    }
+                });
+            }
+            AdapterPolicy::AutoObjectScalar(AutoObjectScalar::GetI32) => {
+                dispatch_arms.push(quote! {
+                    Function::#variant => {
+                        let object = state.object(call.arguments[0], None)?;
+                        let value = unsafe { xila::graphics::lvgl::#native(object) };
+                        memory.write(
+                            crate::host::translation::GuestPointer::<i32>::new(call.result),
+                            value,
+                        ).expect("validated result");
+                        Ok(true)
+                    }
+                });
+            }
+            AdapterPolicy::Custom(_) | AdapterPolicy::Manual => {
+                continue;
+            }
+        }
+    }
     let code = quote! {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         #[repr(i32)]
@@ -305,6 +378,17 @@ fn generate() {
             pub fn from_id(id: i32) -> Option<Self> { match id { #(#lookup,)* _ => None } }
             pub(crate) fn argument_count(self) -> i32 { match self { #(#counts,)* } }
             pub(crate) fn result_kind(self) -> ResultKind { match self { #(#results,)* } }
+        }
+        pub(crate) fn dispatch_generated(
+            state: &mut GraphicsState,
+            memory: &mut crate::host::translation::GuestMemory<'_>,
+            call: &dispatch::GraphicsCall,
+            function: Function,
+        ) -> crate::host::graphics::error::Result<bool> {
+            match function {
+                #(#dispatch_arms,)*
+                _ => Ok(false),
+            }
         }
     };
     std::fs::write(

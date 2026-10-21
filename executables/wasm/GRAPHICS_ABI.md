@@ -7,8 +7,8 @@ This document tracks the guest-facing LVGL ABI, not the browser display backend.
 | Surface | Current state |
 | --- | --- |
 | Enabled LVGL widget families | 28 surveyed in `subsystems/graphics/include/lv_conf.h` |
-| Guest Rust wrappers emitted | 727 in the current generated build artifact |
-| Host-dispatched calls | 47 after the geometry/layout additions in this change (37 before them); unsupported IDs return `GraphicsError::Unsupported` |
+| Guest Rust wrappers emitted | Filtered to the 47 currently host-supported calls |
+| Host-dispatched calls | 47; unsupported IDs return `GraphicsError::Unsupported` |
 | Widget families with usable constructors | Button, Buttonmatrix, Checkbox, Label, Tabview, Textarea, Keyboard; Xila Window/Object/IndexedCanvas are extra abstractions |
 | ABI IDs | Legacy calls are alphabetically numbered from discovered signatures; Xila extensions use `0xf000+` |
 | Object registry | Per-VM `Vec<Entry>`, 256 lifetime-issued IDs, tombstones; full scans occur during reaping, reverse lookup and canvas accounting |
@@ -17,7 +17,7 @@ This document tracks the guest-facing LVGL ABI, not the browser display backend.
 | Images | LV_USE_IMAGE is enabled, but surveyed LVGL FS adapters and optional PNG/JPEG/GIF decoders are disabled; an image constructor alone would not provide VFS-backed loading |
 | Fonts/theme | Existing host semantic theme surfaces and ROM-backed font functions exist; guests do not yet receive safe semantic font IDs |
 
-The inventory method is static: LVGL signatures are parsed from the pinned `lvgl_rust_sys` bindings; wrappers are generated from the discovered signatures, while the host's explicit allowlist builds `Function` and dispatch. The current 727/47 disparity is a confirmed mismatch: many guest-callable wrappers reach the host and return Unsupported. Full per-symbol reason and ownership inventory generation remains Task 1 of #483.
+The build-time `GraphicsRegistry` filters guest Rust/C wrappers and generates host `Function` metadata from the same selected-name set. It emits `graphics_abi_inventory.json` into Cargo's `OUT_DIR`; this is a build artifact, not linked runtime metadata. The inventory classifies discovered calls, signatures, IDs, adapters, ownership and unsupported reasons. Initial registry testing over the full catalog found 1,074 discovered calls, with 92 supported and 982 excluded. Generated scalar geometry dispatch requires explicit object-handle and signed-scalar policies; no guest word is forwarded as a native pointer. The `xila_graphics_call` transport and legacy IDs remain unchanged. ABI capability/version negotiation is still outstanding.
 
 The existing adapter already copies guest strings, button maps and indexed-canvas data into host-owned storage, validates guest memory spans, and gates LVGL work under the graphics-manager lock. These are invariants to preserve, not evidence that all widget/resource paths are complete.
 
