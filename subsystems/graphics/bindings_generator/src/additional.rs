@@ -38,6 +38,10 @@ pub fn get() -> TokenStream {
             /// Boolean results are widened to guest u32 values.
             pub fn dropdown_get_highlight(object: *mut lv_obj_t) -> u32;
             pub fn dropdown_is_open_state(object: *mut lv_obj_t) -> u32;
+            /// Validated Calendar operations; date arrays and output records use packed guest ABI bytes.
+            pub fn calendar_set_today(calendar: *mut lv_obj_t, year: u32, month: u32, day: u32);
+            pub fn calendar_set_highlights(calendar: *mut lv_obj_t, dates: *const u8, count: usize);
+            pub fn calendar_get_shown_date(calendar: *mut lv_obj_t, output: *mut u8);
             /// Host-owned indexed canvas. Dimensions and uploads are bounded by the host.
             pub fn indexed_canvas_create(parent: *mut lv_obj_t, width: u16, height: u16) -> *mut lv_obj_t;
 

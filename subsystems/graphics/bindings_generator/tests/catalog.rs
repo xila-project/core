@@ -180,6 +180,9 @@ fn actual_lvgl_catalog_matches_discovered_numbering() {
         "roller_get_selected_string",
         "dropdown_get_highlight",
         "dropdown_is_open_state",
+        "calendar_set_today",
+        "calendar_set_highlights",
+        "calendar_get_shown_date",
     ];
     signatures.retain(|signature| !extensions.contains(&signature.ident.to_string().as_str()));
     signatures.sort_by_key(|s| s.ident.to_string().to_lowercase());

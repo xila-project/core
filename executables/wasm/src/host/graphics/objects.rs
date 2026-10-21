@@ -54,6 +54,8 @@ pub(crate) enum Kind {
     Dropdown,
     Roller,
     Led,
+    Calendar,
+    Spinbox,
 }
 
 struct Entry {
@@ -63,6 +65,8 @@ struct Entry {
     canvas: Option<Vec<IndexedCanvas>>,
     grid: Option<GridTracks>,
     option_bytes: u16,
+    calendar_highlights: Option<Vec<lvgl::lv_calendar_date_t>>,
+    calendar_highlight_bytes: u16,
 }
 
 pub struct GraphicsState {
@@ -102,6 +106,9 @@ impl GraphicsState {
                 entry.canvas = None;
                 deleted_grid_tracks += entry.grid.take().map_or(0, |grid| grid.track_count());
                 deleted_option_bytes += core::mem::replace(&mut entry.option_bytes, 0) as usize;
+                entry.calendar_highlights = None;
+                deleted_option_bytes +=
+                    core::mem::replace(&mut entry.calendar_highlight_bytes, 0) as usize;
             }
         }
         self.grid_tracks = self.grid_tracks.saturating_sub(deleted_grid_tracks);
@@ -207,6 +214,8 @@ impl GraphicsState {
             canvas: None,
             grid: None,
             option_bytes: 0,
+            calendar_highlights: None,
+            calendar_highlight_bytes: 0,
         });
         Ok(self.entries.len() as WasmUsize)
     }
@@ -289,6 +298,49 @@ impl GraphicsState {
         entry.option_bytes = charge as u16;
         self.widget_options_bytes = used;
         Ok(())
+    }
+
+    pub(crate) fn replace_calendar_highlights(
+        &mut self,
+        handle: WasmUsize,
+        mut dates: Vec<lvgl::lv_calendar_date_t>,
+    ) -> Result<(
+        *mut lvgl::lv_calendar_date_t,
+        Option<Vec<lvgl::lv_calendar_date_t>>,
+    )> {
+        let new_bytes = dates
+            .len()
+            .checked_mul(core::mem::size_of::<lvgl::lv_calendar_date_t>())
+            .ok_or(GraphicsError::ResourceLimit)?;
+        if new_bytes > MAX_WIDGET_OPTIONS_BYTES_PER_VM {
+            return Err(GraphicsError::ResourceLimit);
+        }
+        let index = usize::try_from(handle)
+            .ok()
+            .and_then(|id| id.checked_sub(1))
+            .ok_or(GraphicsError::InvalidHandle)?;
+        let entry = self
+            .entries
+            .get(index)
+            .ok_or(GraphicsError::InvalidHandle)?;
+        if entry.notification.live.get().is_null() || entry.kind != Kind::Calendar {
+            return Err(GraphicsError::InvalidHandle);
+        }
+        let previous = usize::from(entry.calendar_highlight_bytes);
+        let charge = previous.max(new_bytes);
+        let used = updated_widget_options_usage(self.widget_options_bytes, previous, new_bytes)?;
+        let pointer = if dates.is_empty() {
+            core::ptr::null_mut()
+        } else {
+            dates.as_mut_ptr()
+        };
+        let entry = &mut self.entries[index];
+        let replacement = if dates.is_empty() { None } else { Some(dates) };
+        let old = core::mem::replace(&mut entry.calendar_highlights, replacement);
+        entry.calendar_highlight_bytes =
+            u16::try_from(charge).map_err(|_| GraphicsError::ResourceLimit)?;
+        self.widget_options_bytes = used;
+        Ok((pointer, old))
     }
 
     pub(crate) fn install_canvas(
