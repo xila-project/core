@@ -14,6 +14,14 @@ fn extension_id(name: &str) -> Option<u16> {
         "keyboard_set_textarea" => 0xf004,
         "object_set_padding" => 0xf005,
         "grid_fr" => 0xf006,
+        "object_set_background" => 0xf007,
+        "object_set_text_color" => 0xf008,
+        "object_set_border" => 0xf009,
+        "object_set_radius" => 0xf00a,
+        "object_set_text_align" => 0xf00b,
+        "object_set_font" => 0xf00c,
+        "object_set_surface" => 0xf00d,
+        "object_set_min_max_size" => 0xf00e,
         _ => return None,
     })
 }

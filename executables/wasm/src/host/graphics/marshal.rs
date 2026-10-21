@@ -13,6 +13,22 @@ pub const MAX_MAP_ENTRIES: usize = 64;
 pub const MAX_MAP_BYTES: usize = 8192;
 /// Includes the LVGL sentinel for each axis; each axis may have at most 31 tracks.
 pub const MAX_GRID_TRACKS_PER_AXIS: usize = 32;
+const VALID_STYLE_STATES: u32 = 0xF3FD;
+
+/// Restrict style selectors to known LVGL parts and state bits.
+pub fn validate_style_selector(selector: u32) -> Result<()> {
+    let part = selector & !0xffff;
+    let state = selector & 0xffff;
+    if matches!(
+        part,
+        0 | 0x1_0000 | 0x2_0000 | 0x3_0000 | 0x4_0000 | 0x5_0000 | 0x6_0000 | 0xf_0000
+    ) && state & !VALID_STYLE_STATES == 0
+    {
+        Ok(())
+    } else {
+        Err(GraphicsError::InvalidValue)
+    }
+}
 
 /// Stable host-owned LVGL grid descriptors. LVGL retains both pointers until
 /// the grid layout is replaced or its object is deleted.

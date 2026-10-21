@@ -81,6 +81,122 @@ pub fn dispatch(
             let object = state.object(a, None)?;
             unsafe { lvgl::lv_obj_update_layout(object) };
         }
+        Function::ObjectSetBackground => {
+            let object = state.object(a, None)?;
+            let rgb = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let opacity = u8::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            let selector =
+                u32::try_from(call.arguments[3]).map_err(|_| GraphicsError::InvalidValue)?;
+            super::marshal::validate_style_selector(selector)?;
+            if rgb > 0x00ff_ffff {
+                return Err(GraphicsError::InvalidValue);
+            }
+            let color = unsafe { lvgl::lv_color_hex(rgb) };
+            unsafe {
+                lvgl::lv_obj_set_style_bg_color(object, color, selector);
+                lvgl::lv_obj_set_style_bg_opa(object, opacity, selector);
+            }
+        }
+        Function::ObjectSetTextColor => {
+            let object = state.object(a, None)?;
+            let rgb = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let selector = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            super::marshal::validate_style_selector(selector)?;
+            if rgb > 0x00ff_ffff {
+                return Err(GraphicsError::InvalidValue);
+            }
+            let color = unsafe { lvgl::lv_color_hex(rgb) };
+            unsafe { lvgl::lv_obj_set_style_text_color(object, color, selector) };
+        }
+        Function::ObjectSetBorder => {
+            let object = state.object(a, None)?;
+            let rgb = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let width = signed_word(c)?;
+            let side = u32::try_from(call.arguments[3]).map_err(|_| GraphicsError::InvalidValue)?;
+            let selector =
+                u32::try_from(call.arguments[4]).map_err(|_| GraphicsError::InvalidValue)?;
+            super::marshal::validate_style_selector(selector)?;
+            if rgb > 0x00ff_ffff || !(0..=64).contains(&width) || side & !0x1f != 0 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            let color = unsafe { lvgl::lv_color_hex(rgb) };
+            unsafe {
+                lvgl::lv_obj_set_style_border_color(object, color, selector);
+                lvgl::lv_obj_set_style_border_width(object, width, selector);
+                lvgl::lv_obj_set_style_border_side(object, side, selector);
+            }
+        }
+        Function::ObjectSetRadius => {
+            let object = state.object(a, None)?;
+            let radius = signed_word(b)?;
+            let selector = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            super::marshal::validate_style_selector(selector)?;
+            if !(0..=1024).contains(&radius) {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_obj_set_style_radius(object, radius, selector) };
+        }
+        Function::ObjectSetTextAlign => {
+            let object = state.object(a, None)?;
+            let align = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let selector = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            super::marshal::validate_style_selector(selector)?;
+            if align > lvgl::lv_text_align_t_LV_TEXT_ALIGN_RIGHT {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_obj_set_style_text_align(object, align, selector) };
+        }
+        Function::ObjectSetFont => {
+            let object = state.object(a, None)?;
+            let font = match b {
+                0 => xila::graphics::fonts::get_font_small(),
+                1 => xila::graphics::fonts::get_font_medium(),
+                2 => xila::graphics::fonts::get_font_large(),
+                3 => xila::graphics::fonts::get_font_extra_large(),
+                4 => xila::graphics::fonts::get_font_monospace_small(),
+                5 => xila::graphics::fonts::get_font_monospace_medium(),
+                _ => return Err(GraphicsError::InvalidValue),
+            };
+            let selector = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            super::marshal::validate_style_selector(selector)?;
+            unsafe { lvgl::lv_obj_set_style_text_font(object, font, selector) };
+        }
+        Function::ObjectSetSurface => {
+            let object = state.object(a, None)?;
+            let surface = match b {
+                0 => xila::graphics::theme::Surface::Background,
+                1 => xila::graphics::theme::Surface::Card,
+                2 => xila::graphics::theme::Surface::Popover,
+                3 => xila::graphics::theme::Surface::Muted,
+                _ => return Err(GraphicsError::InvalidValue),
+            };
+            unsafe { xila::graphics::theme::set_surface(object, surface) };
+        }
+        Function::ObjectSetMinMaxSize => {
+            let object = state.object(a, None)?;
+            let min_width = signed_word(b)?;
+            let max_width = signed_word(c)?;
+            let min_height = signed_word(call.arguments[3])?;
+            let max_height = signed_word(call.arguments[4])?;
+            let selector =
+                u32::try_from(call.arguments[5]).map_err(|_| GraphicsError::InvalidValue)?;
+            super::marshal::validate_style_selector(selector)?;
+            if !(0..=16_384).contains(&min_width)
+                || !(0..=16_384).contains(&max_width)
+                || !(0..=16_384).contains(&min_height)
+                || !(0..=16_384).contains(&max_height)
+                || min_width > max_width
+                || min_height > max_height
+            {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe {
+                lvgl::lv_obj_set_style_min_width(object, min_width, selector);
+                lvgl::lv_obj_set_style_max_width(object, max_width, selector);
+                lvgl::lv_obj_set_style_min_height(object, min_height, selector);
+                lvgl::lv_obj_set_style_max_height(object, max_height, selector);
+            }
+        }
         Function::ObjectSetFlexAlign => {
             let object = state.object(a, None)?;
             let main = b;

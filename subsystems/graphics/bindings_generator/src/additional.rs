@@ -9,6 +9,16 @@ pub fn get() -> TokenStream {
             pub fn object_set_padding(object: *mut lv_obj_t, padding: i32);
             /// Encodes a bounded fractional Grid track weight for a guest descriptor array.
             pub fn grid_fr(weight: u8) -> i32;
+            /// Validated local styling without exposing native style or color pointers.
+            pub fn object_set_background(object: *mut lv_obj_t, rgb: u32, opacity: u8, selector: u32);
+            pub fn object_set_text_color(object: *mut lv_obj_t, rgb: u32, selector: u32);
+            pub fn object_set_border(object: *mut lv_obj_t, rgb: u32, width: i32, side: u32, selector: u32);
+            pub fn object_set_radius(object: *mut lv_obj_t, radius: i32, selector: u32);
+            pub fn object_set_text_align(object: *mut lv_obj_t, align: u32, selector: u32);
+            /// Font and semantic surface IDs are host-defined, not native pointers.
+            pub fn object_set_font(object: *mut lv_obj_t, font: u32, selector: u32);
+            pub fn object_set_surface(object: *mut lv_obj_t, surface: u32);
+            pub fn object_set_min_max_size(object: *mut lv_obj_t, min_width: i32, max_width: i32, min_height: i32, max_height: i32, selector: u32);
             /// Host-owned indexed canvas. Dimensions and uploads are bounded by the host.
             pub fn indexed_canvas_create(parent: *mut lv_obj_t, width: u16, height: u16) -> *mut lv_obj_t;
 

@@ -298,6 +298,65 @@ async fn grid_layout_copies_bounded_track_arrays_from_guest_memory() {
 }
 
 #[xila::task::test(task_path = xila::task)]
+async fn style_and_font_calls_use_validated_host_tokens() {
+    let _standard = testing::initialize(false, false).await;
+    let manager = support::manager().await;
+    let mut bytes = [0; 64];
+    let mut memory = GuestMemory::new(&mut bytes);
+    let mut state = GraphicsState::new(Some(manager));
+    call(&mut state, &mut memory, Function::WindowCreate, &[], 1).unwrap();
+    let window = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectCreate,
+        &[window],
+        1,
+    )
+    .unwrap();
+    let object = handle(&memory);
+
+    for (function, arguments) in [
+        (
+            Function::ObjectSetBackground,
+            vec![object, 0x123456, 255, 0x80],
+        ),
+        (Function::ObjectSetTextColor, vec![object, 0xfedcba, 0]),
+        (Function::ObjectSetBorder, vec![object, 0x334455, 2, 15, 0]),
+        (Function::ObjectSetRadius, vec![object, 8, 0]),
+        (Function::ObjectSetTextAlign, vec![object, 2, 0]),
+        (Function::ObjectSetFont, vec![object, 2, 0]),
+        (Function::ObjectSetSurface, vec![object, 1]),
+        (
+            Function::ObjectSetMinMaxSize,
+            vec![object, 20, 200, 10, 120, 0],
+        ),
+    ] {
+        call(&mut state, &mut memory, function, &arguments, 0).unwrap();
+    }
+
+    for (function, arguments) in [
+        (
+            Function::ObjectSetBackground,
+            vec![object, 0x01000000, 255, 0],
+        ),
+        (Function::ObjectSetFont, vec![object, 6, 0]),
+        (Function::ObjectSetSurface, vec![object, 4]),
+        (
+            Function::ObjectSetMinMaxSize,
+            vec![object, 21, 20, 10, 120, 0],
+        ),
+    ] {
+        assert_eq!(
+            call(&mut state, &mut memory, function, &arguments, 0),
+            Err(GraphicsError::InvalidValue)
+        );
+    }
+    drop(state);
+    assert_eq!(manager.get_window_count().await.unwrap(), 0);
+}
+
+#[xila::task::test(task_path = xila::task)]
 async fn checked_graphics_core_owns_objects_maps_and_events() {
     let _standard = testing::initialize(false, false).await;
     let manager = support::manager().await;
