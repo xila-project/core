@@ -74,9 +74,25 @@ impl Controller {
         self.transition(State::Finalizing, State::Stopped)
     }
 
-    pub fn fail(&self) {
-        if self.is_shutdown_requested() {
-            self.0.store(STATE_FAILED, Ordering::Release);
+    /// Only an active shutdown may fail; a completed transition is immutable.
+    pub fn fail(&self) -> Result<(), State> {
+        loop {
+            let current = self.state();
+            if !matches!(
+                current,
+                State::Requested | State::Stopping | State::Finalizing
+            ) {
+                return Err(current);
+            }
+            match self.0.compare_exchange(
+                current as u8,
+                STATE_FAILED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return Ok(()),
+                Err(_) => continue,
+            }
         }
     }
 
@@ -112,12 +128,39 @@ mod tests {
     #[test]
     fn failure_does_not_reset_request() {
         let state = Controller::new();
-        state.fail();
-        assert_eq!(state.state(), State::Running);
+        assert_eq!(state.fail(), Err(State::Running));
         state.request_shutdown().unwrap();
-        state.fail();
+        assert_eq!(state.fail(), Ok(()));
         assert_eq!(state.state(), State::Failed);
         assert_eq!(state.request_shutdown(), Err(State::Failed));
+    }
+
+    #[test]
+    fn completed_state_cannot_fail_or_restart() {
+        let state = Controller::new();
+        state.request_shutdown().unwrap();
+        state.begin_shutdown().unwrap();
+        state.begin_finalize().unwrap();
+        state.complete().unwrap();
+        assert_eq!(state.fail(), Err(State::Stopped));
+        assert_eq!(state.state(), State::Stopped);
+    }
+
+    #[test]
+    fn concurrent_requests_have_exactly_one_winner() {
+        extern crate std;
+        use std::{sync::Arc, thread, vec::Vec};
+        let state = Arc::new(Controller::new());
+        let mut threads = Vec::new();
+        for _ in 0..8 {
+            let state = state.clone();
+            threads.push(thread::spawn(move || state.request_shutdown().is_ok()));
+        }
+        assert_eq!(
+            threads.into_iter().filter(|thread| thread.join().unwrap()).count(),
+            1
+        );
+        assert_eq!(state.state(), State::Requested);
     }
 
     #[test]
