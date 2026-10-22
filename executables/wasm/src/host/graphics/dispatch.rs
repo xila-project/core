@@ -141,6 +141,117 @@ pub(super) fn dispatch_calendar_get_shown_date(
     Ok(())
 }
 
+pub(super) fn dispatch_chart_add_series(
+    state: &mut GraphicsState,
+    memory: &mut GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [handle, rgb, ..] = call.arguments;
+    if state.chart_series_count(handle)? >= 8 {
+        return Err(GraphicsError::ResourceLimit);
+    }
+    let chart = state.object(handle, Some(Kind::Chart))?;
+    let rgb = u32::try_from(rgb).map_err(|_| GraphicsError::InvalidValue)?;
+    let color = unsafe { lvgl::lv_color_hex(rgb) };
+    let series = unsafe {
+        lvgl::lv_chart_add_series(chart, color, lvgl::lv_chart_axis_t_LV_CHART_AXIS_PRIMARY_Y)
+    };
+    let series = NonNull::new(series).ok_or(GraphicsError::NativeFailure)?;
+    let slot = state.add_chart_series(handle, series)?;
+    memory
+        .write(GuestPointer::<u32>::new(call.result), slot)
+        .expect("validated result");
+    Ok(())
+}
+
+pub(super) fn dispatch_chart_set_values(
+    state: &mut GraphicsState,
+    memory: &GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [handle, slot, pointer, count, ..] = call.arguments;
+    let count = usize::try_from(count).map_err(|_| GraphicsError::InvalidValue)?;
+    if count == 0 || count > 128 {
+        return Err(GraphicsError::ResourceLimit);
+    }
+    let chart = state.object(handle, Some(Kind::Chart))?;
+    let point_count = unsafe { lvgl::lv_chart_get_point_count(chart) } as usize;
+    if count > point_count {
+        return Err(GraphicsError::InvalidValue);
+    }
+    let series = state.chart_series(handle, slot)?;
+    let values = memory
+        .values::<i32>(GuestSlice::new(
+            pointer,
+            WasmUsize::try_from(count).map_err(|_| GraphicsError::InvalidMemory)?,
+        ))
+        .ok_or(GraphicsError::InvalidMemory)?
+        .collect::<Vec<_>>();
+    unsafe {
+        lvgl::lv_chart_set_series_values(chart, series.as_ptr(), values.as_ptr(), values.len())
+    };
+    Ok(())
+}
+
+pub(super) fn dispatch_chart_get_value(
+    state: &mut GraphicsState,
+    memory: &mut GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [handle, slot, index, ..] = call.arguments;
+    let chart = state.object(handle, Some(Kind::Chart))?;
+    let point_count = unsafe { lvgl::lv_chart_get_point_count(chart) };
+    let index = u32::try_from(index).map_err(|_| GraphicsError::InvalidValue)?;
+    if index >= point_count {
+        return Err(GraphicsError::InvalidValue);
+    }
+    let series = state.chart_series(handle, slot)?;
+    let values = unsafe { lvgl::lv_chart_get_series_y_array(chart, series.as_ptr()) };
+    if values.is_null() {
+        return Err(GraphicsError::NativeFailure);
+    }
+    let value = unsafe { *values.add(index as usize) };
+    memory
+        .write(GuestPointer::<i32>::new(call.result), value)
+        .expect("validated result");
+    Ok(())
+}
+
+pub(super) fn dispatch_line_set_points(
+    state: &mut GraphicsState,
+    memory: &GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [handle, pointer, count, ..] = call.arguments;
+    let count = usize::try_from(count).map_err(|_| GraphicsError::InvalidValue)?;
+    if count > 128 {
+        return Err(GraphicsError::ResourceLimit);
+    }
+    let byte_count = count.checked_mul(8).ok_or(GraphicsError::InvalidMemory)?;
+    let byte_count = WasmUsize::try_from(byte_count).map_err(|_| GraphicsError::InvalidMemory)?;
+    memory
+        .validate_slice(GuestSlice::<u8>::new(pointer, byte_count))
+        .ok_or(GraphicsError::InvalidMemory)?;
+    let mut points = Vec::with_capacity(count);
+    for index in 0..count {
+        let offset = pointer
+            .checked_add(WasmUsize::try_from(index * 8).map_err(|_| GraphicsError::InvalidMemory)?)
+            .ok_or(GraphicsError::InvalidMemory)?;
+        let x = memory
+            .read(GuestPointer::<i32>::new(offset))
+            .ok_or(GraphicsError::InvalidMemory)?;
+        let y = memory
+            .read(GuestPointer::<i32>::new(offset + 4))
+            .ok_or(GraphicsError::InvalidMemory)?;
+        points.push(lvgl::lv_point_precise_t { x, y });
+    }
+    let line = state.object(handle, Some(Kind::Line))?;
+    let (points_pointer, old_points) = state.replace_line_points(handle, points)?;
+    unsafe { lvgl::lv_line_set_points(line, points_pointer, count as u32) };
+    drop(old_points);
+    Ok(())
+}
+
 fn copy_selected_option(
     memory: &mut GuestMemory<'_>,
     options: *const core::ffi::c_char,
@@ -372,6 +483,43 @@ pub fn dispatch(
                 return Err(GraphicsError::InvalidValue);
             }
             unsafe { lvgl::lv_calendar_set_month_shown(calendar, year, month) };
+        }
+        Function::ChartSetType => {
+            let chart = state.object(a, Some(Kind::Chart))?;
+            let chart_type = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            if chart_type > lvgl::lv_chart_type_t_LV_CHART_TYPE_SCATTER {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_chart_set_type(chart, chart_type) };
+        }
+        Function::ChartSetPointCount => {
+            let chart = state.object(a, Some(Kind::Chart))?;
+            let point_count = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            if !(1..=128).contains(&point_count) {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_chart_set_point_count(chart, point_count) };
+        }
+        Function::ChartSetAxisRange => {
+            let chart = state.object(a, Some(Kind::Chart))?;
+            let axis = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let minimum = signed_word(c)?;
+            let maximum = signed_word(call.arguments[3])?;
+            if !matches!(axis, 0 | 1 | 2 | 4)
+                || minimum >= maximum
+                || minimum < -MAX_RANGE_VALUE
+                || maximum > MAX_RANGE_VALUE
+            {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_chart_set_axis_range(chart, axis, minimum, maximum) };
+        }
+        Function::LineSetYInvert => {
+            let line = state.object(a, Some(Kind::Line))?;
+            if b > 1 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_line_set_y_invert(line, b != 0) };
         }
         Function::SpinboxSetRange => {
             let spinbox = state.object(a, Some(Kind::Spinbox))?;
@@ -801,7 +949,9 @@ pub fn dispatch(
         | Function::RollerCreate
         | Function::LedCreate
         | Function::CalendarCreate
-        | Function::SpinboxCreate => {
+        | Function::SpinboxCreate
+        | Function::ChartCreate
+        | Function::LineCreate => {
             state.ensure_capacity()?;
             let (pointer, kind, parent) = if function == Function::WindowCreate {
                 let window = xila::task::block_on(manager.create_window())
@@ -842,6 +992,8 @@ pub fn dispatch(
                             (lvgl::lv_calendar_create(parent), Kind::Calendar)
                         }
                         Function::SpinboxCreate => (lvgl::lv_spinbox_create(parent), Kind::Spinbox),
+                        Function::ChartCreate => (lvgl::lv_chart_create(parent), Kind::Chart),
+                        Function::LineCreate => (lvgl::lv_line_create(parent), Kind::Line),
                         _ => unreachable!(),
                     }
                 };

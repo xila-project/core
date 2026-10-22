@@ -183,6 +183,9 @@ fn actual_lvgl_catalog_matches_discovered_numbering() {
         "calendar_set_today",
         "calendar_set_highlights",
         "calendar_get_shown_date",
+        "chart_add_series_slot",
+        "chart_set_values",
+        "chart_get_value",
     ];
     signatures.retain(|signature| !extensions.contains(&signature.ident.to_string().as_str()));
     signatures.sort_by_key(|s| s.ident.to_string().to_lowercase());

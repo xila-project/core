@@ -42,6 +42,10 @@ pub fn get() -> TokenStream {
             pub fn calendar_set_today(calendar: *mut lv_obj_t, year: u32, month: u32, day: u32);
             pub fn calendar_set_highlights(calendar: *mut lv_obj_t, dates: *const u8, count: usize);
             pub fn calendar_get_shown_date(calendar: *mut lv_obj_t, output: *mut u8);
+            /// Chart series stay host-selected by slot; these helpers never expose LVGL series pointers.
+            pub fn chart_add_series_slot(chart: *mut lv_obj_t, rgb: u32) -> u32;
+            pub fn chart_set_values(chart: *mut lv_obj_t, series_slot: u32, values: *const i32, count: usize);
+            pub fn chart_get_value(chart: *mut lv_obj_t, series_slot: u32, index: u32) -> i32;
             /// Host-owned indexed canvas. Dimensions and uploads are bounded by the host.
             pub fn indexed_canvas_create(parent: *mut lv_obj_t, width: u16, height: u16) -> *mut lv_obj_t;
 

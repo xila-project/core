@@ -41,6 +41,9 @@ fn extension_id(name: &str) -> Option<u16> {
         "calendar_set_today" => 0xf01f,
         "calendar_set_highlights" => 0xf020,
         "calendar_get_shown_date" => 0xf021,
+        "chart_add_series_slot" => 0xf022,
+        "chart_set_values" => 0xf023,
+        "chart_get_value" => 0xf024,
         _ => return None,
     })
 }

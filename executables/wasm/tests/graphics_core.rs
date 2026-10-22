@@ -263,6 +263,36 @@ async fn calendar_copies_highlights_and_validates_dates() {
     assert_eq!(memory.read(GuestPointer::<u16>::new(48)), Some(2024));
     assert_eq!(memory.read(GuestPointer::<u8>::new(50)), Some(2));
     assert_eq!(memory.read(GuestPointer::<u8>::new(51)), Some(1));
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::CalendarSetHighlights,
+            &[calendar, 125, 1],
+            0,
+        ),
+        Err(GraphicsError::InvalidMemory)
+    );
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::CalendarSetHighlights,
+            &[calendar, 0, 33],
+            0,
+        ),
+        Err(GraphicsError::ResourceLimit)
+    );
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::CalendarGetShownDate,
+            &[calendar, 126],
+            0,
+        ),
+        Err(GraphicsError::InvalidMemory)
+    );
 
     let native_window = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
     {
@@ -415,6 +445,253 @@ async fn spinbox_checks_range_and_digit_format() {
         ),
         Err(GraphicsError::InvalidHandle)
     );
+}
+
+#[xila::task::test(task_path = xila::task)]
+async fn chart_uses_host_series_tokens_and_bounds_values() {
+    let _standard = testing::initialize(false, false).await;
+    let manager = support::manager().await;
+    let mut bytes = [0; 1024];
+    let mut memory = GuestMemory::new(&mut bytes);
+    let mut state = GraphicsState::new(Some(manager));
+    call(&mut state, &mut memory, Function::WindowCreate, &[], 1).unwrap();
+    let window = handle(&memory);
+    call(&mut state, &mut memory, Function::ChartCreate, &[window], 1).unwrap();
+    let chart = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::ChartSetType,
+        &[chart, lvgl::lv_chart_type_t_LV_CHART_TYPE_LINE as WasmUsize],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ChartSetPointCount,
+        &[chart, 3],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ChartSetAxisRange,
+        &[
+            chart,
+            lvgl::lv_chart_axis_t_LV_CHART_AXIS_PRIMARY_Y as WasmUsize,
+            (-100i32) as WasmUsize,
+            100,
+        ],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ChartAddSeriesSlot,
+        &[chart, 0x123456],
+        4,
+    )
+    .unwrap();
+    let series = memory.read(GuestPointer::<u32>::new(4)).unwrap();
+    assert_eq!(series, 0);
+
+    for (index, value) in [-7i32, 15, 23].into_iter().enumerate() {
+        memory
+            .write(GuestPointer::<i32>::new(32 + index as WasmUsize * 4), value)
+            .unwrap();
+    }
+    call(
+        &mut state,
+        &mut memory,
+        Function::ChartSetValues,
+        &[chart, series as WasmUsize, 32, 3],
+        0,
+    )
+    .unwrap();
+    memory.write(GuestPointer::<i32>::new(32), 999).unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ChartGetValue,
+        &[chart, series as WasmUsize, 0],
+        8,
+    )
+    .unwrap();
+    assert_eq!(memory.read(GuestPointer::<i32>::new(8)), Some(-7));
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ChartSetValues,
+            &[chart, 8, 32, 1],
+            0,
+        ),
+        Err(GraphicsError::InvalidHandle)
+    );
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ChartSetValues,
+            &[chart, series as WasmUsize, 1022, 1],
+            0,
+        ),
+        Err(GraphicsError::InvalidMemory)
+    );
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ChartSetValues,
+            &[chart, series as WasmUsize, 32, 129],
+            0,
+        ),
+        Err(GraphicsError::ResourceLimit)
+    );
+}
+
+#[xila::task::test(task_path = xila::task)]
+async fn line_copies_bounded_points_and_releases_on_delete() {
+    let _standard = testing::initialize(false, false).await;
+    let manager = support::manager().await;
+    let mut bytes = [0; 8192];
+    let mut memory = GuestMemory::new(&mut bytes);
+    let mut state = GraphicsState::new(Some(manager));
+    call(&mut state, &mut memory, Function::WindowCreate, &[], 1).unwrap();
+    let window = handle(&memory);
+    call(&mut state, &mut memory, Function::LineCreate, &[window], 1).unwrap();
+    let first_line = handle(&memory);
+
+    for (index, value) in [10i32, 20, 30, 40].into_iter().enumerate() {
+        memory
+            .write(GuestPointer::<i32>::new(64 + index as WasmUsize * 4), value)
+            .unwrap();
+    }
+    call(
+        &mut state,
+        &mut memory,
+        Function::LineSetPoints,
+        &[first_line, 64, 2],
+        0,
+    )
+    .unwrap();
+    memory.write(GuestPointer::<i32>::new(64), 777).unwrap();
+    let native_window = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
+    {
+        let _lock = manager.synchronous_lock();
+        let native_line = unsafe { lvgl::lv_obj_get_child(native_window, 0) };
+        assert_eq!(unsafe { lvgl::lv_line_get_point_count(native_line) }, 2);
+        let native_points = unsafe { lvgl::lv_line_get_points(native_line) };
+        assert_eq!(unsafe { (*native_points).x }, 10);
+        assert_eq!(unsafe { (*native_points).y }, 20);
+    }
+    call(
+        &mut state,
+        &mut memory,
+        Function::LineSetYInvert,
+        &[first_line, 1],
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::LineSetYInvert,
+            &[window, 1],
+            0,
+        ),
+        Err(GraphicsError::InvalidHandle)
+    );
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::LineSetPoints,
+            &[first_line, 8190, 1],
+            0,
+        ),
+        Err(GraphicsError::InvalidMemory)
+    );
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::LineSetPoints,
+            &[first_line, 64, 129],
+            0,
+        ),
+        Err(GraphicsError::ResourceLimit)
+    );
+
+    for index in 0..128u32 {
+        memory
+            .write(
+                GuestPointer::<i32>::new(64 + index as WasmUsize * 8),
+                index as i32,
+            )
+            .unwrap();
+        memory
+            .write(
+                GuestPointer::<i32>::new(68 + index as WasmUsize * 8),
+                -(index as i32),
+            )
+            .unwrap();
+    }
+    call(
+        &mut state,
+        &mut memory,
+        Function::LineSetPoints,
+        &[first_line, 64, 128],
+        0,
+    )
+    .unwrap();
+    let mut lines = [first_line; 8];
+    for line in lines.iter_mut().skip(1) {
+        call(&mut state, &mut memory, Function::LineCreate, &[window], 1).unwrap();
+        *line = handle(&memory);
+    }
+    for line in lines.iter().skip(1) {
+        call(
+            &mut state,
+            &mut memory,
+            Function::LineSetPoints,
+            &[*line, 64, 128],
+            0,
+        )
+        .unwrap();
+    }
+    call(&mut state, &mut memory, Function::LineCreate, &[window], 1).unwrap();
+    let ninth_line = handle(&memory);
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::LineSetPoints,
+            &[ninth_line, 64, 128],
+            0,
+        ),
+        Err(GraphicsError::ResourceLimit)
+    );
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectDelete,
+        &[first_line],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::LineSetPoints,
+        &[ninth_line, 64, 128],
+        0,
+    )
+    .unwrap();
 }
 
 #[xila::task::test(task_path = xila::task)]
