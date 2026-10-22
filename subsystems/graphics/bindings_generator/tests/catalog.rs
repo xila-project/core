@@ -190,6 +190,10 @@ fn actual_lvgl_catalog_matches_discovered_numbering() {
         "list_add_text",
         "list_add_text_button",
         "list_set_button_text",
+        "object_set_theme_variant",
+        "object_set_theme_error",
+        "badge_create",
+        "card_create",
     ];
     signatures.retain(|signature| !extensions.contains(&signature.ident.to_string().as_str()));
     signatures.sort_by_key(|s| s.ident.to_string().to_lowercase());

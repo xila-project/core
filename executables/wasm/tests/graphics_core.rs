@@ -983,6 +983,153 @@ async fn tileview_navigation_rejects_foreign_tiles() {
 }
 
 #[xila::task::test(task_path = xila::task)]
+async fn theme_selectors_reject_unknown_ids() {
+    let _standard = testing::initialize(false, false).await;
+    let manager = support::manager().await;
+    let mut bytes = [0; 64];
+    let mut memory = GuestMemory::new(&mut bytes);
+    let mut state = GraphicsState::new(Some(manager));
+    call(&mut state, &mut memory, Function::WindowCreate, &[], 1).unwrap();
+    let window = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::ButtonCreate,
+        &[window],
+        1,
+    )
+    .unwrap();
+    let button = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::TextareaCreate,
+        &[window],
+        1,
+    )
+    .unwrap();
+    let input = handle(&memory);
+
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetThemeVariant,
+        &[button, 2],
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ObjectSetThemeVariant,
+            &[button, 5],
+            0,
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ObjectSetSurface,
+            &[button, 4],
+            0,
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetThemeError,
+        &[input, 1],
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ObjectSetThemeError,
+            &[input, 2],
+            0,
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ObjectSetThemeError,
+            &[button, 1],
+            0,
+        ),
+        Err(GraphicsError::InvalidHandle)
+    );
+}
+
+#[xila::task::test(task_path = xila::task)]
+async fn badge_card_and_input_use_shared_theme_roles() {
+    let _standard = testing::initialize(false, false).await;
+    let manager = support::manager().await;
+    let mut bytes = [0; 128];
+    let mut memory = GuestMemory::new(&mut bytes);
+    let mut state = GraphicsState::new(Some(manager));
+    for (index, byte) in b"Notice\0".iter().enumerate() {
+        memory
+            .write(GuestPointer::<u8>::new(32 + index as WasmUsize), *byte)
+            .unwrap();
+    }
+    call(&mut state, &mut memory, Function::WindowCreate, &[], 1).unwrap();
+    let window = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::BadgeCreate,
+        &[window, 32, 4],
+        1,
+    )
+    .unwrap();
+    let badge = handle(&memory);
+    call(&mut state, &mut memory, Function::CardCreate, &[window], 1).unwrap();
+    let card = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::TextareaCreate,
+        &[window],
+        1,
+    )
+    .unwrap();
+    let input = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectSetThemeError,
+        &[input, 1],
+        0,
+    )
+    .unwrap();
+
+    let native_window = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
+    {
+        let _lock = manager.synchronous_lock();
+        let display = unsafe { lvgl::lv_display_get_default() };
+        let palette = unsafe { *lvgl::lv_theme_shadcn_get_palette(display) };
+        let native_badge = unsafe { lvgl::lv_obj_get_child(native_window, 0) };
+        let native_card = unsafe { lvgl::lv_obj_get_child(native_window, 1) };
+        let native_input = unsafe { lvgl::lv_obj_get_child(native_window, 2) };
+        let badge_background = unsafe { lvgl::lv_obj_get_style_bg_color(native_badge, 0) };
+        let card_background = unsafe { lvgl::lv_obj_get_style_bg_color(native_card, 0) };
+        let input_border = unsafe { lvgl::lv_obj_get_style_border_color(native_input, 0) };
+        assert!(unsafe { lvgl::lv_color_eq(badge_background, palette.destructive) });
+        assert!(unsafe { lvgl::lv_color_eq(card_background, palette.card) });
+        assert!(unsafe { lvgl::lv_color_eq(input_border, palette.destructive) });
+    }
+    assert_ne!(badge, card);
+}
+
+#[xila::task::test(task_path = xila::task)]
 async fn grid_layout_copies_bounded_track_arrays_from_guest_memory() {
     let _standard = testing::initialize(false, false).await;
     let manager = support::manager().await;

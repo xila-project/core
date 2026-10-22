@@ -63,6 +63,9 @@ pub(crate) enum Kind {
     ListButton,
     Tileview,
     Tile,
+    Button,
+    Badge,
+    Card,
 }
 
 struct Entry {
