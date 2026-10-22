@@ -433,6 +433,8 @@ pub(super) fn dispatch_badge_create(
     }
     let parent = state.object(parent_handle, None)?;
     let text = read_utf8_c_string(memory, text_pointer)?;
+    let text_bytes = text.len() + 1;
+    state.validate_new_widget_options_size(text_bytes)?;
     let text = CString::new(text.as_bytes()).map_err(|_| GraphicsError::InvalidValue)?;
     state.ensure_capacity()?;
     let badge = unsafe { lvgl::lv_label_create(parent) };
@@ -441,6 +443,7 @@ pub(super) fn dispatch_badge_create(
         lvgl::lv_theme_shadcn_set_variant(badge, variant);
     }
     let handle = state.insert(badge, Kind::Badge, Some(parent_handle))?;
+    state.commit_widget_options_size(handle, text_bytes)?;
     memory
         .write(GuestPointer::new(call.result), handle)
         .expect("validated result");
