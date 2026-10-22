@@ -1,7 +1,7 @@
 use crate::{Error, Result};
 use getargs_derive::GetArgs;
 use xila::{
-    file_system::{AccessFlags, CreateFlags, Kind, Flags, Path},
+    file_system::{AccessFlags, CreateFlags, Flags, Kind, Path},
     virtual_file_system::File,
 };
 
@@ -10,10 +10,7 @@ use super::{CommandContext, UserCommand, directory::resolve_path};
 pub struct CopyCommand;
 
 #[derive(GetArgs)]
-#[command(
-    name = "cp",
-    about = "Copy a file to a destination path or directory."
-)]
+#[command(name = "cp", about = "Copy a file to a destination path or directory.")]
 pub(super) struct CopyArguments<'a> {
     source: &'a str,
     destination: &'a str,
@@ -70,11 +67,7 @@ impl UserCommand for CopyCommand {
             virtual_file_system,
             task,
             &destination,
-            Flags::new(
-                AccessFlags::Write,
-                Some(CreateFlags::CREATE_TRUNCATE),
-                None,
-            ),
+            Flags::new(AccessFlags::Write, Some(CreateFlags::CREATE_TRUNCATE), None),
         )
         .await
         .map_err(Error::FailedToOpenFile)?;
