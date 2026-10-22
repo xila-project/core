@@ -32,11 +32,15 @@ pub enum State {
 pub struct Controller(AtomicU8);
 
 impl Default for Controller {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Controller {
-    pub const fn new() -> Self { Self(AtomicU8::new(STATE_RUNNING)) }
+    pub const fn new() -> Self {
+        Self(AtomicU8::new(STATE_RUNNING))
+    }
 
     pub fn state(&self) -> State {
         match self.0.load(Ordering::Acquire) {
@@ -77,7 +81,8 @@ impl Controller {
     }
 
     fn transition(&self, from: State, to: State) -> Result<(), State> {
-        self.0.compare_exchange(from as u8, to as u8, Ordering::AcqRel, Ordering::Acquire)
+        self.0
+            .compare_exchange(from as u8, to as u8, Ordering::AcqRel, Ordering::Acquire)
             .map(|_| ())
             .map_err(|_| self.state())
     }
