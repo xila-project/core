@@ -140,6 +140,8 @@ unsupported. Chart supports bounded series slots and copied values; Line accepts
 bounded points copied into host-owned memory because LVGL retains the point
 array pointer. List supports copied text sections/buttons with safe child
 handles, and Tileview supports bounded tile creation and active-tile navigation.
+List text is UTF-8 validated and copied before native calls; the guest never
+passes icon, tile, or series pointers to LVGL.
 The shadcn-themed slice adds Badge and Card helpers, Button variants, and Input
 error states by calling the shared `lvgl_theme_shadcn` theme APIs.
 

@@ -137,6 +137,13 @@ pub fn read_c_string<'a>(memory: &'a GuestMemory<'_>, offset: WasmUsize) -> Resu
     read_c_string_with_limit(memory, offset, MAX_STRING_BYTES)
 }
 
+/// Reads a bounded, NUL-terminated UTF-8 guest string for LVGL text APIs.
+pub fn read_utf8_c_string<'a>(memory: &'a GuestMemory<'_>, offset: WasmUsize) -> Result<&'a str> {
+    read_c_string(memory, offset)?
+        .to_str()
+        .map_err(|_| GraphicsError::InvalidValue)
+}
+
 pub fn read_textarea_string<'a>(
     memory: &'a GuestMemory<'_>,
     offset: WasmUsize,

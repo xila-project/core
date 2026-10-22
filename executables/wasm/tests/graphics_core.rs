@@ -498,7 +498,7 @@ async fn chart_uses_host_series_tokens_and_bounds_values() {
     let series = memory.read(GuestPointer::<u32>::new(4)).unwrap();
     assert_eq!(series, 0);
 
-    for (index, value) in [-7i32, 15, 23].into_iter().enumerate() {
+    for (index, value) in [-7i32, 15].into_iter().enumerate() {
         memory
             .write(GuestPointer::<i32>::new(32 + index as WasmUsize * 4), value)
             .unwrap();
@@ -507,7 +507,7 @@ async fn chart_uses_host_series_tokens_and_bounds_values() {
         &mut state,
         &mut memory,
         Function::ChartSetValues,
-        &[chart, series as WasmUsize, 32, 3],
+        &[chart, series as WasmUsize, 32, 2],
         0,
     )
     .unwrap();
@@ -521,6 +521,34 @@ async fn chart_uses_host_series_tokens_and_bounds_values() {
     )
     .unwrap();
     assert_eq!(memory.read(GuestPointer::<i32>::new(8)), Some(-7));
+    memory.write(GuestPointer::<i32>::new(32), 21).unwrap();
+    memory.write(GuestPointer::<i32>::new(36), 31).unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ChartSetValues,
+        &[chart, series as WasmUsize, 32, 2],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ChartGetValue,
+        &[chart, series as WasmUsize, 0],
+        8,
+    )
+    .unwrap();
+    assert_eq!(memory.read(GuestPointer::<i32>::new(8)), Some(21));
+    call(
+        &mut state,
+        &mut memory,
+        Function::ChartGetValue,
+        &[chart, series as WasmUsize, 1],
+        8,
+    )
+    .unwrap();
+    assert_eq!(memory.read(GuestPointer::<i32>::new(8)), Some(31));
     assert_eq!(
         call(
             &mut state,
@@ -868,7 +896,7 @@ async fn tileview_navigation_rejects_foreign_tiles() {
         &mut state,
         &mut memory,
         Function::TileviewSetTile,
-        &[view, second, 1],
+        &[view, second, 0],
         0,
     )
     .unwrap();
@@ -895,7 +923,7 @@ async fn tileview_navigation_rejects_foreign_tiles() {
         &mut state,
         &mut memory,
         Function::TileviewSetTile,
-        &[view, first, 1],
+        &[view, first, 0],
         0,
     )
     .unwrap();
