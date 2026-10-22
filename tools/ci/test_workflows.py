@@ -38,7 +38,9 @@ class WorkflowPolicy(unittest.TestCase):
     def test_all_host_tools_sources_select_host_checks(self):
         filters = job("check.yml", "changes")
         host = filters.split("            host:\n")[1].split("            guest:\n")[0]
-        self.assertIn("'tools/**'", host)
+        # Preserve fs_image/profiling and future product tools, but CI-only
+        # Python analysis has its own format-job regression suite.
+        self.assertIn("'tools/!(ci)/**'", host)
 
     def test_abi_jobs_do_not_install_node_dependencies(self):
         for name in ["wasm-translation", "wasm-extended"]:
@@ -115,6 +117,17 @@ class WorkflowPolicy(unittest.TestCase):
         execution = text.split("      - name: Benchmark | cargo test execution\n")[1].split("      - name:")[0]
         self.assertIn("cargo test --workspace --tests", execution)
         self.assertIn("cargo test --workspace --doc --timings", text)
+
+    def test_coverage_upload_remains_required_and_fail_closed(self):
+        text = job("check.yml", "host-coverage")
+        self.assertIn("uses: codecov/codecov-action@v7", text)
+        self.assertIn("fail_ci_if_error: true", text)
+        self.assertNotIn("continue-on-error: true", text)
+
+    def test_cold_localization_can_finish_all_seven_locales(self):
+        text = job("check.yml", "localization")
+        self.assertGreaterEqual(int(re.search(r"timeout-minutes: (\d+)", text)[1]), 40)
+        self.assertIn("locales=(en fr es de pt-BR it pl)", text)
 
 
 if __name__ == "__main__":

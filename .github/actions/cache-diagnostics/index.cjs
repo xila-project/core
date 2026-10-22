@@ -20,9 +20,12 @@ if (process.env.STATE_report !== "true") {
       // report_errors.py emits ONLY fixed category names and integer counts.
       const counts = JSON.parse(result.stdout);
       console.log(`CI_SCCACHE_ERRORS ${JSON.stringify(counts)}`);
+      if (process.env.SCCACHE_GHA_RW_MODE === "READ_WRITE" && counts.read_only > 0) {
+        console.log("::warning::sccache reported read-only writes despite READ_WRITE; inspect startup capability-probe categories.");
+      }
       fs.appendFileSync(
         process.env.GITHUB_STEP_SUMMARY,
-        `\n### sccache write diagnostics\n\n\`\`\`json\n${JSON.stringify(counts, null, 2)}\n\`\`\`\n\nCounts are diagnostic log events, not necessarily unique requests. Read-only PR errors are expected.\n`,
+        `\n### sccache write diagnostics\n\n\`\`\`json\n${JSON.stringify(counts, null, 2)}\n\`\`\`\n\nCounts are diagnostic log events, not necessarily unique requests. startup_* counts identify storage capability probe failures. Read-only PR errors are expected.\n`,
       );
     } else {
       // Do not echo stderr or raw log content, even on parser failures.

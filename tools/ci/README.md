@@ -23,6 +23,9 @@ Tracking: [#480](https://github.com/xila-project/core/issues/480).
 - CI measurement/policy scripts are excluded from the runtime Docker context and
   runtime path filters. They are not Cargo workspace members or runtime inputs;
   changing a metrics script must not invalidate `COPY . .` and rebuild the OS.
+  Their Python tests run in Format; product tools (`fs_image`, profiling and future
+  non-`ci` tools) still select host checks. Workflow/action/Cargo configuration
+  changes continue selecting the broader Rust validation graph.
 
 ## Reproduce measurements
 
@@ -59,8 +62,10 @@ logs write failures below WARN. Its post step publishes **only fixed error
 category counts**, then removes the raw file. Never upload the raw file, HTTP
 headers, signed URLs or environment dumps. Read-only PR write errors are expected;
 they are not evidence of a main write failure. Category counts are log events,
-not necessarily distinct compiler requests. An `other` count requires further
-private investigation; do not guess the cause.
+not necessarily distinct compiler requests. `startup_*` categories identify the
+backend capability probe that can put a nominally READ_WRITE sccache backend into
+read-only mode. An `other` count requires further private investigation; do not
+guess the cause.
 
 ## Historical baseline, captured 2026-10-20
 
@@ -82,6 +87,7 @@ cold/warm cache candidates):
 | --- | --- | --- | ---: |
 | [First fixes 39503077630](https://github.com/xila-project/core/actions/runs/39503077630) | existing gzip dependency caches | success | 8.100 / 25.367 |
 | [zstd bootstrap 39504766790](https://github.com/xila-project/core/actions/runs/39504766790) | all Rust archive misses after compression-version change | success | 13.500 / 33.617 |
+| [main after #481 39821789352](https://github.com/xila-project/core/actions/runs/39821789352) | warmed caches; localization canceled by superseding main push | cancelled (coverage/Miri succeeded) | 30.333 / 67.600 |
 
 The zstd bootstrap run emitted 429 Cargo compile lines in Host tests and 518 in the
 separate audio/docs/build job; respective runner times were 413s and 574s. These totals
@@ -95,10 +101,11 @@ PRs. No main write-cause conclusion follows from these PR counters.
 The development image at digest `3d9738f5f02afd9147be66b2c84908a56b24da68138ba03ca88885c973f11f09`
 has GNU tar but no `zstd`. Historical logs show `tar ... -z`: the cache toolkit
 silently falls back to gzip, spending most of the 90–135-second saves compressing
-before uploading. The shared cache-tools action now installs Debian's signed
-`zstd` package only if absent, before cache setup. Prefer shipping it in the
-development image eventually. Installing it changes the cache compression/version;
-expect a one-time cold cache, not an immediate hit on old gzip archives.
+before uploading. The shared cache-tools action originally installed Debian's
+signed `zstd` package only if absent, before cache setup. Development-environment
+PR #1 now ships and validates zstd in amd64/arm64 images, so the normal path is a
+cheap presence check. Installing it changes the cache compression/version; expect
+a one-time cold cache, not an immediate hit on old gzip archives.
 If package installation is unavailable, warn and retain the toolkit's gzip
 fallback rather than skipping actual validation because an optional optimization
 failed. Image inclusion removes this extra network setup entirely.
@@ -129,9 +136,22 @@ network, larger artifacts and cache warming must be included in Actions comparis
 | Required Clippy gate | 3 | 0 / 0 | — | — |
 
 Historical main sccache failures: host tests 1,278, audio/docs 1,594, guest 1,425,
-localization 2,400. Existing logs do **not** contain their error categories.
-Upstream [sccache#2821](https://github.com/mozilla/sccache/issues/2821) demonstrates
-lost HTTP 429 writes, but this is a hypothesis for Xila, not an established cause.
+localization 2,400. Those older logs do **not** contain error categories. The first
+post-#481 main/manual sample [39821789352](https://github.com/xila-project/core/actions/runs/39821789352)
+has categorized evidence: 4,298 HTTP-429/rate-limited write log events and 51
+409/AlreadyExists events across its jobs. There were no cache read errors or
+timeouts. This confirms **write throttling is a real Xila cause**; already-exists
+is the expected duplicate-key race. The sample's localization was canceled by a
+newer main push, so it is not a successful full-workflow benchmark.
+
+Upstream [sccache#2821](https://github.com/mozilla/sccache/issues/2821) traces this
+to sccache v0.18.0 GHAC storage installing no retry layer for temporary HTTP429
+errors. It remains open as of 2026-10-22; v0.18.0 is the latest release and no
+upstream fix is available. A separate report's proposed exponential retry layer
+recovered most 429s but did not honor `Retry-After` (observed asks 1–21 seconds).
+We do not vendor/patch sccache or increase cache writers without a justified,
+measured maintenance/security case. Serializing this workflow's cache experiments
+avoids cross-candidate contention; normal Check jobs remain parallel.
 The repository cache usage API reported 12,257,374,257 bytes / 331 entries during
 this audit. The storage-limit endpoint returned HTTP 402 (payment-method
 requirement), so neither the effective limit nor billing-related write rejection
@@ -151,7 +171,28 @@ candidate to bound compute and quota costs:
    [rust-cache#348](https://github.com/Swatinem/rust-cache/issues/348). Checkout and
    generated-input mtimes may still defeat freshness; measure it.
 
-After the workflow is available on main:
+On main, completed four-candidate cold study [39504796318 attempt 1](https://github.com/xila-project/core/actions/runs/39504796318/attempts/1)
+used identical source and fixed image, serial jobs, fresh namespace `480-a930fc10`:
+
+| Candidate | Cold job seconds | Rust archive | sccache outcome |
+| --- | ---: | --- | --- |
+| dependencies only | 442 | 1.304 GB saved (17.3s save) | disabled |
+| combined | 502 | 1.304 GB saved (25.9s save) | 770 writes, 248 rate-limited, 166 AlreadyExists |
+| sccache only | 651 | none | 472 writes, 632 rate-limited, 36 AlreadyExists |
+| workspace + sccache | 474 | save failed: cache-key reservation collision | 1,551 write errors; invalid for warm comparison |
+
+The rerun is not a complete warm matrix: only `combined` restored an exact
+1.304-GB archive (23.3s restore, `Cache up-to-date`, 55 Cargo compile lines,
+396s job); dependencies and workspace were cold again. The sccache-only result did
+not establish a comparable warm archive. Do not compare the aggregate rerun's
+30.233 runner-minutes with its cold 34.483 as a strategy result. This does
+establish that one exact combined warm restore produced far fewer Cargo compile
+lines, but the job still took 396s and transfer consumed 23.3s. It does not justify
+changing cache defaults: cold dependency-only was fastest, and only one warm
+combined candidate restored. A future study should first address workspace save
+collisions and compare a repeated exact dependency-only cache.
+
+The `workflow_dispatch` experiment is on main and can reproduce additional runs:
 
 ```sh
 gh workflow run cache-benchmark.yml --ref YOUR_BRANCH \

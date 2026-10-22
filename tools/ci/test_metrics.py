@@ -86,6 +86,16 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(report, {"rate_limited": 1, "authorization": 1, "already_exists": 1, "read_only": 1, "quota": 1, "other": 1})
         self.assertNotIn("secret", str(report))
 
+    def test_startup_probe_failure_is_distinct_from_read_only_write_events(self):
+        report = metrics.error_categories("\n".join([
+            "storage write check failed: rate limited status429 token=secret",
+            "Error executing cache write: Cannot write to read-only storage",
+        ]))
+        self.assertEqual(report, {"startup_rate_limited": 1, "read_only": 1})
+
+    def test_quota_rejection_is_not_misclassified_as_generic_authorization(self):
+        self.assertEqual(metrics.error_categories("storage write check failed: PermissionDenied status403 quota exceeded"), {"startup_quota": 1})
+
     def test_github_escaped_color_and_new_action_end_markers(self):
         log = "\n".join([
             "test\tUNKNOWN STEP\t2026-10-20T00:00:00Z ^[[1m^[[92m   Compiling^[[0m lvgl_rust_sys v0.1.0",
@@ -96,6 +106,21 @@ class MetricsTests(unittest.TestCase):
         result = metrics.log_metrics(log)["test"]
         self.assertEqual(result["cargo_compiling"], 1)
         self.assertEqual(result["cache_transfers"], [{"operation": "save", "seconds": 3, "bytes": 100}])
+
+    def test_standalone_cache_steps_end_at_bom_prefixed_next_step(self):
+        log = "\n".join([
+            "test\tPost Cache\t2026-10-20T00:00:01Z ... Saving cache ...",
+            "test\tPost Cache\t2026-10-20T00:00:02Z Sent 100 of 100 (100.0%)",
+            "test\tPost Checkout\t\ufeff2026-10-20T00:00:04Z Post job cleanup.",
+        ])
+        self.assertEqual(metrics.log_metrics(log)["test"]["cache_transfers"], [{"operation": "save", "seconds": 3, "bytes": 100}])
+
+    def test_archive_key_match_distinguishes_exact_and_fallback_restore(self):
+        for restored, expected in [("expected", True), ("older", False)]:
+            log = "\n".join([
+                f'test\tCache\t2026-10-20T00:00:00Z Restored from cache key "{restored}" full match: {str(expected).lower()}.',
+            ])
+            self.assertIs(metrics.log_metrics(log)["test"]["rust_cache_exact_hit"], expected)
 
     def test_failed_and_running_jobs_are_not_successful_comparisons(self):
         for conclusion in ["failure", "cancelled", None]:

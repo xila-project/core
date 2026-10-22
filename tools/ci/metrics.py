@@ -47,24 +47,25 @@ def error_categories(text):
     """Allowlist counts only. Never return any part of an arbitrary log line."""
     counts = Counter()
     for line in text.splitlines():
-        if "error executing cache write" not in line.lower():
+        startup = "storage write check failed:" in line.lower()
+        if not startup and "error executing cache write" not in line.lower():
             continue
         line = line.lower()
         if "read-only" in line or "read only" in line:
             category = "read_only"
-        elif re.search(r"\b429\b|too many requests|ratelimit", line):
+        elif re.search(r"\b429\b|too many requests|rate[ _-]?limit", line):
             category = "rate_limited"
         elif re.search(r"\b409\b|alreadyexists|already exists", line):
             category = "already_exists"
-        elif re.search(r"\b401\b|\b403\b|unauthorized|forbidden|permissiondenied", line):
-            category = "authorization"
         elif "quota" in line or "storage limit" in line or "payment" in line:
             category = "quota"
+        elif re.search(r"\b401\b|\b403\b|unauthorized|forbidden|permissiondenied", line):
+            category = "authorization"
         elif "timeout" in line or "timed out" in line:
             category = "timeout"
         else:
             category = "other"
-        counts[category] += 1
+        counts[("startup_" if startup else "") + category] += 1
     return dict(counts)
 
 
@@ -81,17 +82,33 @@ def log_metrics(log):
     jobs = {}
     transfers = {}
     ansi = re.compile(r"(?:\x1b|\^\[)\[[0-9;]*m")
+
+    def finish_transfer(name, end):
+        transfer = transfers.pop(name)
+        jobs[name]["cache_transfers"].append({"operation": transfer["operation"],
+            "seconds": round(seconds(transfer["start"], end), 3), "bytes": transfer.get("bytes"),
+            **({"failed": True} if transfer.get("failed") else {}),
+            **({"miss": True} if transfer.get("miss") else {})})
+
     for raw in log.splitlines():
         parts = raw.split("\t", 2)
         if len(parts) != 3:
             continue
-        name, _, line = parts
+        name, step, line = parts
+        line = line.lstrip("\ufeff")
         match = re.match(r"(\d{4}-\S+) (.*)", line)
         if not match:
             continue
         time, line = match.groups()
         line = ansi.sub("", line)
+        if name in transfers and step != transfers[name]["step"] and step != "UNKNOWN STEP":
+            finish_transfer(name, time)
         row = jobs.setdefault(name, {"cargo_compiling": 0, "cargo_checking": 0, "cache_transfers": []})
+        restore_match = re.search(r'Restored from cache key ".*" full match: (true|false)\.', line)
+        if restore_match:
+            row["rust_cache_exact_hit"] = restore_match[1] == "true"
+        if line == "Cache up-to-date.":
+            row["rust_cache_exact_hit"] = True
         exact_hit = re.fullmatch(r"Rust cache exact hit: (true|false)", line)
         if exact_hit:
             row["rust_cache_exact_hit"] = exact_hit[1] == "true"
@@ -108,15 +125,17 @@ def log_metrics(log):
         if "CI_SCCACHE_ERRORS " in line:
             try:
                 data = json.loads(line.split("CI_SCCACHE_ERRORS ", 1)[1])
+                allowed = {"read_only", "rate_limited", "already_exists", "authorization", "quota", "timeout", "other"}
+                allowed |= {"startup_" + key for key in allowed}
                 row["sccache_write_error_categories"] = {key: value for key, value in data.items()
-                    if key in {"read_only", "rate_limited", "already_exists", "authorization", "quota", "timeout", "other"}
+                    if key in allowed
                     and isinstance(value, int)}
             except (ValueError, AttributeError):
                 pass
         if "... Restoring cache ..." in line:
-            transfers[name] = {"operation": "restore", "start": time}
+            transfers[name] = {"operation": "restore", "start": time, "step": step}
         elif "... Saving cache ..." in line:
-            transfers[name] = {"operation": "save", "start": time}
+            transfers[name] = {"operation": "save", "start": time, "step": step}
         transfer = transfers.get(name)
         if transfer:
             size = re.search(r"(?:Received|Sent) \d+ of (\d+)", line)
@@ -127,11 +146,11 @@ def log_metrics(log):
                 transfer["bytes"] = int(size[1])
             if "Failed to save:" in line:
                 transfer["failed"] = True
+            if "No cache found." in line:
+                row["rust_cache_exact_hit"] = False
+                transfer["miss"] = True
             if "Cache restored successfully" in line or "Cache saved successfully" in line or line.startswith("##[end-action"):
-                row["cache_transfers"].append({"operation": transfer["operation"],
-                    "seconds": round(seconds(transfer["start"], time), 3), "bytes": transfer.get("bytes"),
-                    **({"failed": True} if transfer.get("failed") else {})})
-                del transfers[name]
+                finish_transfer(name, time)
     return jobs
 
 

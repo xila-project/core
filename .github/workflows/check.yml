@@ -82,7 +82,7 @@ jobs:
               - 'tools/ci/**'
             host:
               - *shared
-              - 'tools/**'
+              - 'tools/!(ci)/**'
               - 'src/**'
               - 'drivers/**'
               - 'executables/**'
@@ -169,7 +169,9 @@ jobs:
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-    timeout-minutes: 30
+    # A measured cold run hit 30 min during Italian and never reached Polish.
+    # Give all seven locales time to finish and seed the cache; never drop tests.
+    timeout-minutes: 45
     env:
       EMBEDDED_I18N_STRICT: "1"
       I18N_CODE_CHANGED: ${{ needs.changes.outputs.i18n_code == 'true' || needs.changes.outputs.translation_code == 'true' }}
