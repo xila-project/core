@@ -5,7 +5,6 @@ browser runtime:
 
 ```sh
 cargo make prepare-wasm-image
-cargo make generate-fonts
 cargo check -p wasm_example --target wasm32-unknown-unknown
 cd examples/wasm
 RUSTUP_TOOLCHAIN=stable trunk serve

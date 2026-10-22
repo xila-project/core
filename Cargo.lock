@@ -1746,13 +1746,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
-name = "fonts_generator"
-version = "0.1.0"
-dependencies = [
- "embedded-i18n",
-]
-
-[[package]]
 name = "foreign-types"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2086,6 +2079,7 @@ version = "0.1.0"
 dependencies = [
  "abi_declarations",
  "abi_definitions",
+ "cc",
  "cstr_core",
  "drivers_core",
  "drivers_native",
@@ -2574,7 +2568,7 @@ dependencies = [
 [[package]]
 name = "lvgl_rust_sys"
 version = "0.1.0"
-source = "git+https://github.com/Xila-Project/lvgl_rust_sys.git?rev=7863539e594192ef06b7859b24f9aa65364b5c80#7863539e594192ef06b7859b24f9aa65364b5c80"
+source = "git+https://github.com/Xila-Project/lvgl_rust_sys.git?rev=25fe6a7e9baebb176f656929992e71386eaa47bf#25fe6a7e9baebb176f656929992e71386eaa47bf"
 dependencies = [
  "bindgen 0.72.1",
  "cc",
@@ -4371,7 +4365,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.5",
  "windows-sys 0.61.2",

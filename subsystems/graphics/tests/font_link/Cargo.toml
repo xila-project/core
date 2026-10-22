@@ -1,0 +1,14 @@
+[package]
+name = "graphics-font-link-test"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+graphics = { path = "../..", default-features = false, features = [
+  "rendering_rgb565",
+] }
+lvgl_rust_sys = { git = "https://github.com/Xila-Project/lvgl_rust_sys.git", rev = "25fe6a7e9baebb176f656929992e71386eaa47bf", default-features = false, features = [
+  "build-lvgl",
+] }
+
+[workspace]

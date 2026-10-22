@@ -86,7 +86,6 @@ For the browser example, inside the shell:
 
 ```bash
 cargo build -p calculator -p text_editor --target wasm32-wasip1 --release
-cargo make generate-fonts
 (cd examples/wasm && RUSTUP_TOOLCHAIN="$XILA_NIGHTLY_TOOLCHAIN" trunk serve)
 ```
 
