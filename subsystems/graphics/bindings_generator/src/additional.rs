@@ -46,6 +46,11 @@ pub fn get() -> TokenStream {
             pub fn chart_add_series_slot(chart: *mut lv_obj_t, rgb: u32) -> u32;
             pub fn chart_set_values(chart: *mut lv_obj_t, series_slot: u32, values: *const i32, count: usize);
             pub fn chart_get_value(chart: *mut lv_obj_t, series_slot: u32, index: u32) -> i32;
+            /// List helpers use checked object handles and copied UTF-8 strings.
+            pub fn list_create(parent: *mut lv_obj_t) -> *mut lv_obj_t;
+            pub fn list_add_text(list: *mut lv_obj_t, text: *const core::ffi::c_char) -> *mut lv_obj_t;
+            pub fn list_add_text_button(list: *mut lv_obj_t, text: *const core::ffi::c_char) -> *mut lv_obj_t;
+            pub fn list_set_button_text(list: *mut lv_obj_t, button: *mut lv_obj_t, text: *const core::ffi::c_char);
             /// Host-owned indexed canvas. Dimensions and uploads are bounded by the host.
             pub fn indexed_canvas_create(parent: *mut lv_obj_t, width: u16, height: u16) -> *mut lv_obj_t;
 

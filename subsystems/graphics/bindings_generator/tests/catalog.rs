@@ -186,6 +186,10 @@ fn actual_lvgl_catalog_matches_discovered_numbering() {
         "chart_add_series_slot",
         "chart_set_values",
         "chart_get_value",
+        "list_create",
+        "list_add_text",
+        "list_add_text_button",
+        "list_set_button_text",
     ];
     signatures.retain(|signature| !extensions.contains(&signature.ident.to_string().as_str()));
     signatures.sort_by_key(|s| s.ident.to_string().to_lowercase());

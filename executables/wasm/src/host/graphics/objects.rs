@@ -58,11 +58,18 @@ pub(crate) enum Kind {
     Spinbox,
     Chart,
     Line,
+    List,
+    ListText,
+    ListButton,
+    Tileview,
+    Tile,
 }
 
 struct Entry {
     notification: Rc<Notification>,
     kind: Kind,
+    parent: Option<WasmUsize>,
+    tile_position: Option<(u8, u8)>,
     map: Option<ButtonMap>,
     canvas: Option<Vec<IndexedCanvas>>,
     grid: Option<GridTracks>,
@@ -156,6 +163,56 @@ impl GraphicsState {
         Ok(self.entry(handle)?.kind)
     }
 
+    pub(crate) fn is_child_of(
+        &self,
+        child: WasmUsize,
+        parent: WasmUsize,
+        kind: Kind,
+    ) -> Result<bool> {
+        let entry = self.entry(child)?;
+        if entry.kind != kind {
+            return Err(GraphicsError::InvalidHandle);
+        }
+        Ok(entry.parent == Some(parent))
+    }
+
+    pub(crate) fn tile_position_in_use(
+        &self,
+        view: WasmUsize,
+        column: u8,
+        row: u8,
+    ) -> Result<bool> {
+        if self.entry(view)?.kind != Kind::Tileview {
+            return Err(GraphicsError::InvalidHandle);
+        }
+        Ok(self.entries.iter().any(|entry| {
+            !entry.notification.live.get().is_null()
+                && entry.kind == Kind::Tile
+                && entry.parent == Some(view)
+                && entry.tile_position == Some((column, row))
+        }))
+    }
+
+    pub(crate) fn set_tile_position(
+        &mut self,
+        tile_handle: WasmUsize,
+        position: (u8, u8),
+    ) -> Result<()> {
+        let index = usize::try_from(tile_handle)
+            .ok()
+            .and_then(|id| id.checked_sub(1))
+            .ok_or(GraphicsError::InvalidHandle)?;
+        let tile = self
+            .entries
+            .get_mut(index)
+            .ok_or(GraphicsError::InvalidHandle)?;
+        if tile.notification.live.get().is_null() || tile.kind != Kind::Tile {
+            return Err(GraphicsError::InvalidHandle);
+        }
+        tile.tile_position = Some(position);
+        Ok(())
+    }
+
     pub(crate) fn handle_for(&self, pointer: *mut lvgl::lv_obj_t) -> WasmUsize {
         if pointer.is_null() {
             return 0;
@@ -218,6 +275,8 @@ impl GraphicsState {
         self.entries.push(Entry {
             notification,
             kind,
+            parent,
+            tile_position: None,
             map: None,
             canvas: None,
             grid: None,
@@ -284,6 +343,14 @@ impl GraphicsState {
             entry.option_bytes as usize,
             new_bytes,
         )?;
+        Ok(())
+    }
+
+    pub(crate) fn validate_new_widget_options_size(&self, new_bytes: usize) -> Result<()> {
+        if new_bytes > MAX_WIDGET_OPTIONS_BYTES_PER_VM {
+            return Err(GraphicsError::ResourceLimit);
+        }
+        updated_widget_options_usage(self.widget_options_bytes, 0, new_bytes)?;
         Ok(())
     }
 

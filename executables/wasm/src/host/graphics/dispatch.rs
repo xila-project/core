@@ -8,7 +8,7 @@ use super::{
     objects::Kind,
 };
 use crate::host::translation::{GuestMemory, GuestPointer, GuestSlice, WasmUsize};
-use alloc::vec::Vec;
+use alloc::{ffi::CString, vec::Vec};
 use core::{ffi::CStr, ptr::NonNull};
 use xila::graphics::{Color, Window, lvgl};
 
@@ -249,6 +249,138 @@ pub(super) fn dispatch_line_set_points(
     let (points_pointer, old_points) = state.replace_line_points(handle, points)?;
     unsafe { lvgl::lv_line_set_points(line, points_pointer, count as u32) };
     drop(old_points);
+    Ok(())
+}
+
+pub(super) fn dispatch_list_add_text(
+    state: &mut GraphicsState,
+    memory: &mut GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [list_handle, text_pointer, ..] = call.arguments;
+    let list = state.object(list_handle, Some(Kind::List))?;
+    if unsafe { lvgl::lv_obj_get_child_count(list) } >= 64 {
+        return Err(GraphicsError::ResourceLimit);
+    }
+    let text = read_c_string(memory, text_pointer)?;
+    let text_bytes = text.to_bytes_with_nul().len();
+    state.validate_new_widget_options_size(text_bytes)?;
+    let text = CString::new(text.to_bytes()).map_err(|_| GraphicsError::InvalidValue)?;
+    state.ensure_capacity()?;
+    let pointer = unsafe { lvgl::lv_list_add_text(list, text.as_ptr()) };
+    let handle = state.insert(pointer, Kind::ListText, Some(list_handle))?;
+    state.commit_widget_options_size(handle, text_bytes)?;
+    memory
+        .write(GuestPointer::new(call.result), handle)
+        .expect("validated result");
+    Ok(())
+}
+
+pub(super) fn dispatch_list_add_text_button(
+    state: &mut GraphicsState,
+    memory: &mut GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [list_handle, text_pointer, ..] = call.arguments;
+    let list = state.object(list_handle, Some(Kind::List))?;
+    if unsafe { lvgl::lv_obj_get_child_count(list) } >= 64 {
+        return Err(GraphicsError::ResourceLimit);
+    }
+    let text = read_c_string(memory, text_pointer)?;
+    let text_bytes = text.to_bytes_with_nul().len();
+    state.validate_new_widget_options_size(text_bytes)?;
+    let text = CString::new(text.to_bytes()).map_err(|_| GraphicsError::InvalidValue)?;
+    state.ensure_capacity()?;
+    let pointer = unsafe { lvgl::lv_list_add_button(list, core::ptr::null(), text.as_ptr()) };
+    let handle = state.insert(pointer, Kind::ListButton, Some(list_handle))?;
+    state.commit_widget_options_size(handle, text_bytes)?;
+    memory
+        .write(GuestPointer::new(call.result), handle)
+        .expect("validated result");
+    Ok(())
+}
+
+pub(super) fn dispatch_list_set_button_text(
+    state: &mut GraphicsState,
+    memory: &GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [list_handle, button_handle, text_pointer, ..] = call.arguments;
+    let list = state.object(list_handle, Some(Kind::List))?;
+    let button = state.object(button_handle, Some(Kind::ListButton))?;
+    if unsafe { lvgl::lv_obj_get_parent(button) } != list {
+        return Err(GraphicsError::InvalidHandle);
+    }
+    let text = read_c_string(memory, text_pointer)?;
+    let text_bytes = text.to_bytes_with_nul().len();
+    state.validate_widget_options_size(button_handle, text_bytes)?;
+    let text = CString::new(text.to_bytes()).map_err(|_| GraphicsError::InvalidValue)?;
+    unsafe { lvgl::lv_list_set_button_text(list, button, text.as_ptr()) };
+    state.commit_widget_options_size(button_handle, text_bytes)
+}
+
+pub(super) fn dispatch_tileview_add_tile(
+    state: &mut GraphicsState,
+    memory: &mut GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [view_handle, column, row, directions, ..] = call.arguments;
+    let view = state.object(view_handle, Some(Kind::Tileview))?;
+    let column = u8::try_from(column).map_err(|_| GraphicsError::InvalidValue)?;
+    let row = u8::try_from(row).map_err(|_| GraphicsError::InvalidValue)?;
+    let directions = u32::try_from(directions).map_err(|_| GraphicsError::InvalidValue)?;
+    if directions & !lvgl::lv_dir_t_LV_DIR_ALL != 0 {
+        return Err(GraphicsError::InvalidValue);
+    }
+    if unsafe { lvgl::lv_obj_get_child_count(view) } >= 32 {
+        return Err(GraphicsError::ResourceLimit);
+    }
+    if state.tile_position_in_use(view_handle, column, row)? {
+        return Err(GraphicsError::InvalidValue);
+    }
+    state.ensure_capacity()?;
+    let pointer = unsafe { lvgl::lv_tileview_add_tile(view, column, row, directions) };
+    let handle = state.insert(pointer, Kind::Tile, Some(view_handle))?;
+    state.set_tile_position(handle, (column, row))?;
+    memory
+        .write(GuestPointer::new(call.result), handle)
+        .expect("validated result");
+    Ok(())
+}
+
+pub(super) fn dispatch_tileview_set_tile(
+    state: &mut GraphicsState,
+    _memory: &GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [view_handle, tile_handle, animated, ..] = call.arguments;
+    if animated > 1 {
+        return Err(GraphicsError::InvalidValue);
+    }
+    if !state.is_child_of(tile_handle, view_handle, Kind::Tile)? {
+        return Err(GraphicsError::InvalidHandle);
+    }
+    let view = state.object(view_handle, Some(Kind::Tileview))?;
+    let tile = state.object(tile_handle, Some(Kind::Tile))?;
+    unsafe { lvgl::lv_tileview_set_tile(view, tile, animated != 0) };
+    Ok(())
+}
+
+pub(super) fn dispatch_tileview_get_tile_active(
+    state: &mut GraphicsState,
+    memory: &mut GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [view_handle, ..] = call.arguments;
+    let view = state.object(view_handle, Some(Kind::Tileview))?;
+    let active = unsafe { lvgl::lv_tileview_get_tile_active(view) };
+    let handle = state.handle_for(active);
+    if !active.is_null() && handle == 0 {
+        return Err(GraphicsError::InvalidHandle);
+    }
+    memory
+        .write(GuestPointer::new(call.result), handle)
+        .expect("validated result");
     Ok(())
 }
 
@@ -951,7 +1083,9 @@ pub fn dispatch(
         | Function::CalendarCreate
         | Function::SpinboxCreate
         | Function::ChartCreate
-        | Function::LineCreate => {
+        | Function::LineCreate
+        | Function::ListCreate
+        | Function::TileviewCreate => {
             state.ensure_capacity()?;
             let (pointer, kind, parent) = if function == Function::WindowCreate {
                 let window = xila::task::block_on(manager.create_window())
@@ -994,6 +1128,10 @@ pub fn dispatch(
                         Function::SpinboxCreate => (lvgl::lv_spinbox_create(parent), Kind::Spinbox),
                         Function::ChartCreate => (lvgl::lv_chart_create(parent), Kind::Chart),
                         Function::LineCreate => (lvgl::lv_line_create(parent), Kind::Line),
+                        Function::ListCreate => (lvgl::lv_list_create(parent), Kind::List),
+                        Function::TileviewCreate => {
+                            (lvgl::lv_tileview_create(parent), Kind::Tileview)
+                        }
                         _ => unreachable!(),
                     }
                 };
