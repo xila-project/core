@@ -48,3 +48,57 @@ impl DirectBaseOperations for PowerControlDevice {
 
 impl MountOperations for PowerControlDevice {}
 impl CharacterDevice for PowerControlDevice {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ioctl_requests_shutdown_once_and_reads_state() {
+        static CONTROLLER: Controller = Controller::new();
+        let device = PowerControlDevice::new(&CONTROLLER);
+        let mut cx = Context::from_waker(core::task::Waker::noop());
+        let mut empty = ();
+        let requested = device.control(
+            &mut cx,
+            REQUEST_SHUTDOWN::IDENTIFIER,
+            AnyByLayout::from(&()),
+            AnyByLayout::from_mutable(&mut empty),
+        );
+        assert!(matches!(requested, Poll::Ready(Ok(()))));
+        assert_eq!(CONTROLLER.state(), lifecycle::State::Requested);
+
+        let mut phase = 255_u8;
+        let status = device.control(
+            &mut cx,
+            GET_SHUTDOWN_STATE::IDENTIFIER,
+            AnyByLayout::from(&()),
+            AnyByLayout::from_mutable(&mut phase),
+        );
+        assert!(matches!(status, Poll::Ready(Ok(()))));
+        assert_eq!(phase, lifecycle::STATE_REQUESTED);
+
+        let duplicate = device.control(
+            &mut cx,
+            REQUEST_SHUTDOWN::IDENTIFIER,
+            AnyByLayout::from(&()),
+            AnyByLayout::from_mutable(&mut empty),
+        );
+        assert!(matches!(
+            duplicate,
+            Poll::Ready(Err(Error::RessourceBusy))
+        ));
+    }
+
+    #[test]
+    fn arbitrary_bytes_cannot_request_shutdown() {
+        static CONTROLLER: Controller = Controller::new();
+        let device = PowerControlDevice::new(&CONTROLLER);
+        let mut cx = Context::from_waker(core::task::Waker::noop());
+        assert!(matches!(
+            device.write(&mut cx, b"shutdown", 0),
+            Poll::Ready(Err(Error::UnsupportedOperation))
+        ));
+        assert_eq!(CONTROLLER.state(), lifecycle::State::Running);
+    }
+}
