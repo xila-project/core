@@ -559,6 +559,11 @@ async fn utility_commands_compose_with_streaming_and_redirection() {
         contents(&shell, "/tree-output").await,
         "/utility-tree\n|-- file\n"
     );
+    assert_eq!(shell.execute_line("mkdir /utility-tree/sub; echo found > /utility-tree/sub/target.txt; find /utility-tree --name target.txt --type f > /find-output").await.unwrap(), 0);
+    assert_eq!(
+        contents(&shell, "/find-output").await,
+        "/utility-tree/sub/target.txt\n"
+    );
     assert_eq!(
         shell
             .context
