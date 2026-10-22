@@ -140,6 +140,8 @@ unsupported. Chart supports bounded series slots and copied values; Line accepts
 bounded points copied into host-owned memory because LVGL retains the point
 array pointer. List supports copied text sections/buttons with safe child
 handles, and Tileview supports bounded tile creation and active-tile navigation.
+The shadcn-themed slice adds Badge and Card helpers, Button variants, and Input
+error states by calling the shared `lvgl_theme_shadcn` theme APIs.
 
 - 256 issued object handles per execution, including subsequently deleted ones.
 - 64 map entries including the sentinel; 1024 bytes per NUL-terminated string.
@@ -153,6 +155,8 @@ handles, and Tileview supports bounded tile creation and active-tile navigation.
 - Chart allows up to 8 series and 128 values per series; Line allows up to 128
   points. List allows 64 child items and Tileview 32 live tiles per view; tile
   coordinates must be unique within a view.
+- Theme variants are 0..=4, surfaces are 0..=3, and error flags are boolean;
+  palette updates remain owned by the existing display theme integration.
 - Null and empty-string guest map sentinels both become LVGL's empty-string
   terminator. Row separators are preserved.
 

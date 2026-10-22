@@ -51,6 +51,11 @@ pub fn get() -> TokenStream {
             pub fn list_add_text(list: *mut lv_obj_t, text: *const core::ffi::c_char) -> *mut lv_obj_t;
             pub fn list_add_text_button(list: *mut lv_obj_t, text: *const core::ffi::c_char) -> *mut lv_obj_t;
             pub fn list_set_button_text(list: *mut lv_obj_t, button: *mut lv_obj_t, text: *const core::ffi::c_char);
+            /// Semantic shadcn styling delegates to the shared LVGL theme.
+            pub fn object_set_theme_variant(object: *mut lv_obj_t, variant: u32);
+            pub fn object_set_theme_error(object: *mut lv_obj_t, error: bool);
+            pub fn badge_create(parent: *mut lv_obj_t, text: *const core::ffi::c_char, variant: u32) -> *mut lv_obj_t;
+            pub fn card_create(parent: *mut lv_obj_t) -> *mut lv_obj_t;
             /// Host-owned indexed canvas. Dimensions and uploads are bounded by the host.
             pub fn indexed_canvas_create(parent: *mut lv_obj_t, width: u16, height: u16) -> *mut lv_obj_t;
 

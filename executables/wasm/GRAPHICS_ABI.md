@@ -7,8 +7,8 @@ This document tracks the guest-facing LVGL ABI, not the browser display backend.
 | Surface | Current state |
 | --- | --- |
 | Enabled LVGL widget families | 28 surveyed in `subsystems/graphics/include/lv_conf.h` |
-| Guest Rust wrappers emitted | Filtered to the 129 currently host-supported calls |
-| Host-dispatched calls | 129 after Grid/Flex, local style/font, range, selection, LED, Calendar, Spinbox, Chart, Line, List, and Tileview additions; unsupported IDs return `GraphicsError::Unsupported` |
+| Guest Rust wrappers emitted | Filtered to the 133 currently host-supported calls |
+| Host-dispatched calls | 133 after Grid/Flex, local style/font, range, selection, LED, Calendar, Spinbox, Chart, Line, List, Tileview, and shadcn theme additions; unsupported IDs return `GraphicsError::Unsupported` |
 | Widget families with usable constructors | Button, Buttonmatrix, Checkbox, Label, Tabview, Textarea, Keyboard, Calendar, Spinbox, Chart, Line; Xila Window/Object/IndexedCanvas are extra abstractions |
 | ABI IDs | Legacy calls are alphabetically numbered from discovered signatures; Xila extensions use append-only IDs starting at `0xf000` (Grid `grid_fr` is `0xf006`) |
 | Object registry | Per-VM `Vec<Entry>`, 256 lifetime-issued IDs, tombstones; full scans occur during reaping, reverse lookup and canvas accounting |
@@ -17,7 +17,7 @@ This document tracks the guest-facing LVGL ABI, not the browser display backend.
 | Images | LV_USE_IMAGE is enabled, but surveyed LVGL FS adapters and optional PNG/JPEG/GIF decoders are disabled; an image constructor alone would not provide VFS-backed loading |
 | Fonts/theme | Guests can select six host ROM-backed semantic font roles and four theme surfaces; broad property/theme coverage is still incomplete |
 
-The build-time `GraphicsRegistry` filters guest Rust/C wrappers and generates host `Function` metadata from the same selected-name set. It emits `graphics_abi_inventory.json` into Cargo's `OUT_DIR`; this is a build artifact, not linked runtime metadata. The current inventory contains 1,084 discovered calls, with 129 guest-callable/host-dispatched and 955 excluded. It records signatures, IDs, adapter classes, ownership and unsupported reasons. Generated scalar geometry dispatch requires explicit object-handle and signed-scalar policies; no guest word is forwarded as a native pointer. Grid descriptors, Calendar records, Chart series slots, Line points, List strings, and Tileview navigation use named custom adapters. The `xila_graphics_call` transport and legacy IDs remain unchanged. ABI capability/version negotiation is still outstanding.
+The build-time `GraphicsRegistry` filters guest Rust/C wrappers and generates host `Function` metadata from the same selected-name set. It emits `graphics_abi_inventory.json` into Cargo's `OUT_DIR`; this is a build artifact, not linked runtime metadata. The current inventory contains 1,088 discovered calls, with 133 guest-callable/host-dispatched and 955 excluded. It records signatures, IDs, adapter classes, ownership and unsupported reasons. Generated scalar geometry dispatch requires explicit object-handle and signed-scalar policies; no guest word is forwarded as a native pointer. Grid descriptors, Calendar records, Chart series slots, Line points, List strings, Tileview navigation, and shadcn theme selectors use named custom adapters. The `xila_graphics_call` transport and legacy IDs remain unchanged. ABI capability/version negotiation is still outstanding.
 
 The existing adapter already copies guest strings, button maps and indexed-canvas data into host-owned storage, validates guest memory spans, and gates LVGL work under the graphics-manager lock. These are invariants to preserve, not evidence that all widget/resource paths are complete.
 
@@ -47,6 +47,7 @@ The existing adapter already copies guest strings, button maps and indexed-canva
 | Tileview | Constructor, bounded tile creation, active-tile navigation/query | selection events and active row/column query |
 | Table, Menu, Msgbox | Not implemented | bounded cell/item handles, navigation and cleanup |
 | Canvas, Image, Imagebutton, Animimg | IndexedCanvas Xila helper only; LVGL families not adapted | host-owned image/frame resources and explicit quotas/lifetimes |
+| shadcn primitives | Badge label, Card surface, Button variants, input error state via `lvgl_theme_shadcn` | additional themed composition helpers and palette selection through guest ABI |
 
 This matrix distinguishes enabled LVGL code from practical guest usability. Constructor-only support does not satisfy the #483 acceptance criteria.
 

@@ -48,6 +48,10 @@ fn extension_id(name: &str) -> Option<u16> {
         "list_add_text" => 0xf026,
         "list_add_text_button" => 0xf027,
         "list_set_button_text" => 0xf028,
+        "object_set_theme_variant" => 0xf029,
+        "object_set_theme_error" => 0xf02a,
+        "badge_create" => 0xf02b,
+        "card_create" => 0xf02c,
         _ => return None,
     })
 }

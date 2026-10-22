@@ -382,6 +382,87 @@ pub(super) fn dispatch_tileview_get_tile_active(
     Ok(())
 }
 
+pub(super) fn dispatch_theme_variant(
+    state: &mut GraphicsState,
+    _memory: &GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [handle, variant, ..] = call.arguments;
+    let variant = u32::try_from(variant).map_err(|_| GraphicsError::InvalidValue)?;
+    if variant > lvgl::lv_theme_shadcn_variant_t_LV_THEME_SHADCN_VARIANT_DESTRUCTIVE {
+        return Err(GraphicsError::InvalidValue);
+    }
+    if !matches!(state.kind(handle)?, Kind::Button | Kind::Badge) {
+        return Err(GraphicsError::InvalidHandle);
+    }
+    let object = state.object(handle, None)?;
+    unsafe { lvgl::lv_theme_shadcn_set_variant(object, variant) };
+    Ok(())
+}
+
+pub(super) fn dispatch_theme_error(
+    state: &mut GraphicsState,
+    _memory: &GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [handle, error, ..] = call.arguments;
+    if error > 1 {
+        return Err(GraphicsError::InvalidValue);
+    }
+    if !matches!(
+        state.kind(handle)?,
+        Kind::Textarea | Kind::Spinbox | Kind::Dropdown | Kind::Roller
+    ) {
+        return Err(GraphicsError::InvalidHandle);
+    }
+    let object = state.object(handle, None)?;
+    unsafe { lvgl::lv_theme_shadcn_set_error(object, error != 0) };
+    Ok(())
+}
+
+pub(super) fn dispatch_badge_create(
+    state: &mut GraphicsState,
+    memory: &mut GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [parent_handle, text_pointer, variant, ..] = call.arguments;
+    let variant = u32::try_from(variant).map_err(|_| GraphicsError::InvalidValue)?;
+    if variant > lvgl::lv_theme_shadcn_variant_t_LV_THEME_SHADCN_VARIANT_DESTRUCTIVE {
+        return Err(GraphicsError::InvalidValue);
+    }
+    let parent = state.object(parent_handle, None)?;
+    let text = read_c_string(memory, text_pointer)?;
+    let text = CString::new(text.to_bytes()).map_err(|_| GraphicsError::InvalidValue)?;
+    state.ensure_capacity()?;
+    let badge = unsafe { lvgl::lv_label_create(parent) };
+    unsafe {
+        lvgl::lv_label_set_text(badge, text.as_ptr());
+        lvgl::lv_theme_shadcn_set_variant(badge, variant);
+    }
+    let handle = state.insert(badge, Kind::Badge, Some(parent_handle))?;
+    memory
+        .write(GuestPointer::new(call.result), handle)
+        .expect("validated result");
+    Ok(())
+}
+
+pub(super) fn dispatch_card_create(
+    state: &mut GraphicsState,
+    memory: &mut GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [parent_handle, ..] = call.arguments;
+    let parent = state.object(parent_handle, None)?;
+    state.ensure_capacity()?;
+    let card = unsafe { lvgl::lv_obj_create(parent) };
+    unsafe { xila::graphics::theme::set_surface(card, xila::graphics::theme::Surface::Card) };
+    let handle = state.insert(card, Kind::Card, Some(parent_handle))?;
+    memory
+        .write(GuestPointer::new(call.result), handle)
+        .expect("validated result");
+    Ok(())
+}
+
 fn copy_selected_option(
     memory: &mut GuestMemory<'_>,
     options: *const core::ffi::c_char,
@@ -1102,7 +1183,7 @@ pub fn dispatch(
                             (lvgl::lv_keyboard_create(parent), Kind::Keyboard)
                         }
                         Function::LabelCreate => (lvgl::lv_label_create(parent), Kind::Label),
-                        Function::ButtonCreate => (lvgl::lv_button_create(parent), Kind::Object),
+                        Function::ButtonCreate => (lvgl::lv_button_create(parent), Kind::Button),
                         Function::CheckboxCreate => {
                             (lvgl::lv_checkbox_create(parent), Kind::Checkbox)
                         }

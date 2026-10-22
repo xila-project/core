@@ -708,6 +708,30 @@ fn generate() {
             "None",
             None,
         ),
+        (
+            "object_set_theme_variant",
+            &["*mut lv_obj_t", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "object_set_theme_error",
+            &["*mut lv_obj_t", "bool"],
+            "None",
+            None,
+        ),
+        (
+            "badge_create",
+            &["*mut lv_obj_t", "*const core::ffi::c_char", "u32"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "card_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
     ];
     let supported_names: Vec<_> = supported
         .iter()
@@ -746,6 +770,10 @@ fn generate() {
             "tileview_get_tile_active",
             "dispatch_tileview_get_tile_active",
         ),
+        AdapterRule::custom("object_set_theme_variant", "dispatch_theme_variant"),
+        AdapterRule::custom("object_set_theme_error", "dispatch_theme_error"),
+        AdapterRule::custom("badge_create", "dispatch_badge_create"),
+        AdapterRule::custom("card_create", "dispatch_card_create"),
     ];
     let registry = GraphicsRegistry::new(&catalog, &supported_names, &adapter_rules)
         .unwrap_or_else(|error| panic!("invalid graphics registry: {error}"));
