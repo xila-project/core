@@ -1,5 +1,5 @@
 mod null;
+pub mod power;
 
 pub use null::*;
-pub mod power;
 pub use power::PowerControlDevice;
