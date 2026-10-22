@@ -104,3 +104,98 @@ fn generated_inventory_distinguishes_supported_and_unsupported_discovered_calls(
     assert!(inventory.contains("\"guest_wrapper\":false"));
     assert!(inventory.contains("No host adapter registered"));
 }
+
+#[test]
+fn actual_widget_registry_exposes_only_guest_safe_helpers_and_names_custom_adapters() {
+    let catalog = CallCatalog::parse(lvgl_rust_sys::_bindgen_raw_src()).unwrap();
+    let supported = [
+        "calendar_set_today",
+        "calendar_set_highlights",
+        "calendar_get_shown_date",
+        "chart_create",
+        "chart_set_type",
+        "chart_set_point_count",
+        "chart_set_axis_range",
+        "chart_add_series_slot",
+        "chart_set_values",
+        "chart_get_value",
+        "line_create",
+        "line_set_points",
+        "line_set_y_invert",
+        "list_create",
+        "list_add_text",
+        "list_add_text_button",
+        "list_set_button_text",
+        "tileview_create",
+        "tileview_add_tile",
+        "tileview_set_tile",
+        "tileview_get_tile_active",
+        "object_set_theme_variant",
+        "object_set_theme_error",
+        "badge_create",
+        "card_create",
+    ];
+    let rules = [
+        AdapterRule::custom("calendar_set_today", "dispatch_calendar_set_today"),
+        AdapterRule::custom(
+            "calendar_set_highlights",
+            "dispatch_calendar_set_highlights",
+        ),
+        AdapterRule::custom(
+            "calendar_get_shown_date",
+            "dispatch_calendar_get_shown_date",
+        ),
+        AdapterRule::custom("chart_add_series_slot", "dispatch_chart_add_series"),
+        AdapterRule::custom("chart_set_values", "dispatch_chart_set_values"),
+        AdapterRule::custom("chart_get_value", "dispatch_chart_get_value"),
+        AdapterRule::custom("line_set_points", "dispatch_line_set_points"),
+        AdapterRule::custom("list_add_text", "dispatch_list_add_text"),
+        AdapterRule::custom("list_add_text_button", "dispatch_list_add_text_button"),
+        AdapterRule::custom("list_set_button_text", "dispatch_list_set_button_text"),
+        AdapterRule::custom("tileview_add_tile", "dispatch_tileview_add_tile"),
+        AdapterRule::custom("tileview_set_tile", "dispatch_tileview_set_tile"),
+        AdapterRule::custom(
+            "tileview_get_tile_active",
+            "dispatch_tileview_get_tile_active",
+        ),
+        AdapterRule::custom("object_set_theme_variant", "dispatch_theme_variant"),
+        AdapterRule::custom("object_set_theme_error", "dispatch_theme_error"),
+        AdapterRule::custom("badge_create", "dispatch_badge_create"),
+        AdapterRule::custom("card_create", "dispatch_card_create"),
+    ];
+    let registry = GraphicsRegistry::new(&catalog, &supported, &rules).unwrap();
+    let inventory = registry.inventory_json(&catalog);
+
+    for name in supported {
+        let marker = format!("\"name\":\"{name}\"");
+        let entry = inventory
+            .split(&marker)
+            .nth(1)
+            .unwrap_or_else(|| panic!("inventory missing {name}"))
+            .split('}')
+            .next()
+            .unwrap();
+        assert!(
+            entry.contains("\"guest_wrapper\":true"),
+            "{name} not callable"
+        );
+    }
+    assert_eq!(
+        registry.adapter_for("chart_add_series_slot"),
+        Some(AdapterPolicy::Custom("dispatch_chart_add_series"))
+    );
+    assert_eq!(
+        registry.adapter_for("line_set_points"),
+        Some(AdapterPolicy::Custom("dispatch_line_set_points"))
+    );
+    assert_eq!(registry.adapter_for("chart_add_series"), None);
+    let raw_series = inventory
+        .split("{\"name\":\"chart_add_series\"")
+        .nth(1)
+        .unwrap()
+        .split('}')
+        .next()
+        .unwrap();
+    assert!(raw_series.contains("\"guest_wrapper\":false"));
+    assert!(raw_series.contains("No host adapter registered"));
+}

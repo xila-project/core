@@ -32,6 +32,30 @@ pub fn get() -> TokenStream {
             pub fn spinner_set_animation(object: *mut lv_obj_t, duration_ms: u32, sweep_degrees: u32);
             pub fn spinner_get_animation_duration(object: *const lv_obj_t) -> u32;
             pub fn spinner_get_arc_sweep(object: *const lv_obj_t) -> u32;
+            /// Copies a selected option into a checked guest output span.
+            pub fn dropdown_get_selected_string(object: *mut lv_obj_t, output: *mut i8, capacity: u32) -> i32;
+            pub fn roller_get_selected_string(object: *mut lv_obj_t, output: *mut i8, capacity: u32) -> i32;
+            /// Boolean results are widened to guest u32 values.
+            pub fn dropdown_get_highlight(object: *mut lv_obj_t) -> u32;
+            pub fn dropdown_is_open_state(object: *mut lv_obj_t) -> u32;
+            /// Validated Calendar operations; date arrays and output records use packed guest ABI bytes.
+            pub fn calendar_set_today(calendar: *mut lv_obj_t, year: u32, month: u32, day: u32);
+            pub fn calendar_set_highlights(calendar: *mut lv_obj_t, dates: *const u8, count: usize);
+            pub fn calendar_get_shown_date(calendar: *mut lv_obj_t, output: *mut u8);
+            /// Chart series stay host-selected by slot; these helpers never expose LVGL series pointers.
+            pub fn chart_add_series_slot(chart: *mut lv_obj_t, rgb: u32) -> u32;
+            pub fn chart_set_values(chart: *mut lv_obj_t, series_slot: u32, values: *const i32, count: usize);
+            pub fn chart_get_value(chart: *mut lv_obj_t, series_slot: u32, index: u32) -> i32;
+            /// List helpers use checked object handles and copied UTF-8 strings.
+            pub fn list_create(parent: *mut lv_obj_t) -> *mut lv_obj_t;
+            pub fn list_add_text(list: *mut lv_obj_t, text: *const core::ffi::c_char) -> *mut lv_obj_t;
+            pub fn list_add_text_button(list: *mut lv_obj_t, text: *const core::ffi::c_char) -> *mut lv_obj_t;
+            pub fn list_set_button_text(list: *mut lv_obj_t, button: *mut lv_obj_t, text: *const core::ffi::c_char);
+            /// Semantic shadcn styling delegates to the shared LVGL theme.
+            pub fn object_set_theme_variant(object: *mut lv_obj_t, variant: u32);
+            pub fn object_set_theme_error(object: *mut lv_obj_t, error: bool);
+            pub fn badge_create(parent: *mut lv_obj_t, text: *const core::ffi::c_char, variant: u32) -> *mut lv_obj_t;
+            pub fn card_create(parent: *mut lv_obj_t) -> *mut lv_obj_t;
             /// Host-owned indexed canvas. Dimensions and uploads are bounded by the host.
             pub fn indexed_canvas_create(parent: *mut lv_obj_t, width: u16, height: u16) -> *mut lv_obj_t;
 

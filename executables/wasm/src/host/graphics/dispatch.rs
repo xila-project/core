@@ -1,22 +1,513 @@
 use super::{
     Function, GraphicsState, ResultKind,
     error::{GraphicsError, Result},
-    marshal::{ButtonMap, read_c_string, read_textarea_string},
+    marshal::{
+        ButtonMap, MAX_STRING_BYTES, MAX_WIDGET_OPTIONS_BYTES, read_c_string, read_textarea_string,
+        read_utf8_c_string, read_widget_options,
+    },
     objects::Kind,
 };
 use crate::host::translation::{GuestMemory, GuestPointer, GuestSlice, WasmUsize};
-use core::ptr::NonNull;
+use alloc::{ffi::CString, vec::Vec};
+use core::{ffi::CStr, ptr::NonNull};
 use xila::graphics::{Color, Window, lvgl};
 
-pub(super) fn signed_word(value: WasmUsize) -> Result<i32> {
 const MAX_RANGE_VALUE: i32 = 1_000_000;
 
+pub(super) fn signed_word(value: WasmUsize) -> Result<i32> {
     let narrowed = value as u32 as i32;
     if narrowed as WasmUsize == value {
         Ok(narrowed)
     } else {
         Err(GraphicsError::InvalidValue)
     }
+}
+
+pub(super) fn dispatch_grid_tracks(
+    state: &mut GraphicsState,
+    memory: &GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [object, columns, rows, ..] = call.arguments;
+    state.object(object, None)?;
+    let tracks = super::marshal::GridTracks::decode(
+        memory,
+        columns,
+        rows,
+        lvgl::LV_GRID_TEMPLATE_LAST as i32,
+        lvgl::LV_GRID_CONTENT as i32,
+    )?;
+    state.set_grid_tracks(object, tracks)
+}
+
+fn valid_calendar_date(year: u32, month: u32, day: u32) -> bool {
+    if year == 0 || year > u16::MAX as u32 || !(1..=12).contains(&month) {
+        return false;
+    }
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days_in_month = match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    (1..=days_in_month).contains(&day)
+}
+
+pub(super) fn dispatch_calendar_set_today(
+    state: &mut GraphicsState,
+    _memory: &GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [calendar, year, month, day, ..] = call.arguments;
+    let year = u32::try_from(year).map_err(|_| GraphicsError::InvalidValue)?;
+    let month = u32::try_from(month).map_err(|_| GraphicsError::InvalidValue)?;
+    let day = u32::try_from(day).map_err(|_| GraphicsError::InvalidValue)?;
+    if !valid_calendar_date(year, month, day) {
+        return Err(GraphicsError::InvalidValue);
+    }
+    let calendar = state.object(calendar, Some(Kind::Calendar))?;
+    unsafe { lvgl::lv_calendar_set_today_date(calendar, year, month, day) };
+    Ok(())
+}
+
+pub(super) fn dispatch_calendar_set_highlights(
+    state: &mut GraphicsState,
+    memory: &GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [handle, pointer, count, ..] = call.arguments;
+    let count = usize::try_from(count).map_err(|_| GraphicsError::InvalidValue)?;
+    if count > 32 {
+        return Err(GraphicsError::ResourceLimit);
+    }
+    let byte_count = count.checked_mul(4).ok_or(GraphicsError::InvalidMemory)?;
+    let byte_count = WasmUsize::try_from(byte_count).map_err(|_| GraphicsError::InvalidMemory)?;
+    memory
+        .validate_slice(GuestSlice::<u8>::new(pointer, byte_count))
+        .ok_or(GraphicsError::InvalidMemory)?;
+    let mut dates = Vec::with_capacity(count);
+    for index in 0..count {
+        let offset = pointer
+            .checked_add(WasmUsize::try_from(index * 4).map_err(|_| GraphicsError::InvalidMemory)?)
+            .ok_or(GraphicsError::InvalidMemory)?;
+        let year = memory
+            .read(GuestPointer::<u16>::new(offset))
+            .ok_or(GraphicsError::InvalidMemory)?;
+        let month = memory
+            .read(GuestPointer::<u8>::new(offset + 2))
+            .ok_or(GraphicsError::InvalidMemory)?;
+        let day = memory
+            .read(GuestPointer::<u8>::new(offset + 3))
+            .ok_or(GraphicsError::InvalidMemory)?;
+        if !valid_calendar_date(u32::from(year), u32::from(month), u32::from(day)) {
+            return Err(GraphicsError::InvalidValue);
+        }
+        dates.push(lvgl::lv_calendar_date_t { year, month, day });
+    }
+    let calendar = state.object(handle, Some(Kind::Calendar))?;
+    let (dates_pointer, old_dates) = state.replace_calendar_highlights(handle, dates)?;
+    unsafe { lvgl::lv_calendar_set_highlighted_dates(calendar, dates_pointer, count) };
+    drop(old_dates);
+    Ok(())
+}
+
+pub(super) fn dispatch_calendar_get_shown_date(
+    state: &mut GraphicsState,
+    memory: &mut GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [handle, output, ..] = call.arguments;
+    memory
+        .validate_slice(GuestSlice::<u8>::new(output, 4))
+        .ok_or(GraphicsError::InvalidMemory)?;
+    let calendar = state.object(handle, Some(Kind::Calendar))?;
+    let date = unsafe { lvgl::lv_calendar_get_showed_date(calendar) };
+    if date.is_null() {
+        return Err(GraphicsError::NativeFailure);
+    }
+    let date = unsafe { *date };
+    memory
+        .write(GuestPointer::<u16>::new(output), date.year)
+        .expect("validated calendar date output");
+    memory
+        .write(GuestPointer::<u8>::new(output + 2), date.month)
+        .expect("validated calendar date output");
+    memory
+        .write(GuestPointer::<u8>::new(output + 3), date.day)
+        .expect("validated calendar date output");
+    Ok(())
+}
+
+pub(super) fn dispatch_chart_add_series(
+    state: &mut GraphicsState,
+    memory: &mut GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [handle, rgb, ..] = call.arguments;
+    if state.chart_series_count(handle)? >= 8 {
+        return Err(GraphicsError::ResourceLimit);
+    }
+    let chart = state.object(handle, Some(Kind::Chart))?;
+    let rgb = u32::try_from(rgb).map_err(|_| GraphicsError::InvalidValue)?;
+    let color = unsafe { lvgl::lv_color_hex(rgb) };
+    let series = unsafe {
+        lvgl::lv_chart_add_series(chart, color, lvgl::lv_chart_axis_t_LV_CHART_AXIS_PRIMARY_Y)
+    };
+    let series = NonNull::new(series).ok_or(GraphicsError::NativeFailure)?;
+    let slot = state.add_chart_series(handle, series)?;
+    memory
+        .write(GuestPointer::<u32>::new(call.result), slot)
+        .expect("validated result");
+    Ok(())
+}
+
+pub(super) fn dispatch_chart_set_values(
+    state: &mut GraphicsState,
+    memory: &GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [handle, slot, pointer, count, ..] = call.arguments;
+    let count = usize::try_from(count).map_err(|_| GraphicsError::InvalidValue)?;
+    if count == 0 || count > 128 {
+        return Err(GraphicsError::ResourceLimit);
+    }
+    let chart = state.object(handle, Some(Kind::Chart))?;
+    let point_count = unsafe { lvgl::lv_chart_get_point_count(chart) } as usize;
+    if count > point_count {
+        return Err(GraphicsError::InvalidValue);
+    }
+    let series = state.chart_series(handle, slot)?;
+    let values = memory
+        .values::<i32>(GuestSlice::new(
+            pointer,
+            WasmUsize::try_from(count).map_err(|_| GraphicsError::InvalidMemory)?,
+        ))
+        .ok_or(GraphicsError::InvalidMemory)?
+        .collect::<Vec<_>>();
+    for (index, value) in values.iter().enumerate() {
+        let index = u32::try_from(index).map_err(|_| GraphicsError::InvalidValue)?;
+        unsafe { lvgl::lv_chart_set_series_value_by_id(chart, series.as_ptr(), index, *value) };
+    }
+    Ok(())
+}
+
+pub(super) fn dispatch_chart_get_value(
+    state: &mut GraphicsState,
+    memory: &mut GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [handle, slot, index, ..] = call.arguments;
+    let chart = state.object(handle, Some(Kind::Chart))?;
+    let point_count = unsafe { lvgl::lv_chart_get_point_count(chart) };
+    let index = u32::try_from(index).map_err(|_| GraphicsError::InvalidValue)?;
+    if index >= point_count {
+        return Err(GraphicsError::InvalidValue);
+    }
+    let series = state.chart_series(handle, slot)?;
+    let values = unsafe { lvgl::lv_chart_get_series_y_array(chart, series.as_ptr()) };
+    if values.is_null() {
+        return Err(GraphicsError::NativeFailure);
+    }
+    let value = unsafe { *values.add(index as usize) };
+    memory
+        .write(GuestPointer::<i32>::new(call.result), value)
+        .expect("validated result");
+    Ok(())
+}
+
+pub(super) fn dispatch_line_set_points(
+    state: &mut GraphicsState,
+    memory: &GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [handle, pointer, count, ..] = call.arguments;
+    let count = usize::try_from(count).map_err(|_| GraphicsError::InvalidValue)?;
+    if count > 128 {
+        return Err(GraphicsError::ResourceLimit);
+    }
+    let byte_count = count.checked_mul(8).ok_or(GraphicsError::InvalidMemory)?;
+    let byte_count = WasmUsize::try_from(byte_count).map_err(|_| GraphicsError::InvalidMemory)?;
+    memory
+        .validate_slice(GuestSlice::<u8>::new(pointer, byte_count))
+        .ok_or(GraphicsError::InvalidMemory)?;
+    let mut points = Vec::with_capacity(count);
+    for index in 0..count {
+        let offset = pointer
+            .checked_add(WasmUsize::try_from(index * 8).map_err(|_| GraphicsError::InvalidMemory)?)
+            .ok_or(GraphicsError::InvalidMemory)?;
+        let x = memory
+            .read(GuestPointer::<i32>::new(offset))
+            .ok_or(GraphicsError::InvalidMemory)?;
+        let y = memory
+            .read(GuestPointer::<i32>::new(offset + 4))
+            .ok_or(GraphicsError::InvalidMemory)?;
+        points.push(lvgl::lv_point_precise_t { x, y });
+    }
+    let line = state.object(handle, Some(Kind::Line))?;
+    let (points_pointer, old_points) = state.replace_line_points(handle, points)?;
+    unsafe { lvgl::lv_line_set_points(line, points_pointer, count as u32) };
+    drop(old_points);
+    Ok(())
+}
+
+pub(super) fn dispatch_list_add_text(
+    state: &mut GraphicsState,
+    memory: &mut GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [list_handle, text_pointer, ..] = call.arguments;
+    let list = state.object(list_handle, Some(Kind::List))?;
+    if unsafe { lvgl::lv_obj_get_child_count(list) } >= 64 {
+        return Err(GraphicsError::ResourceLimit);
+    }
+    let text = read_utf8_c_string(memory, text_pointer)?;
+    let text_bytes = text.len() + 1;
+    state.validate_new_widget_options_size(text_bytes)?;
+    let text = CString::new(text.as_bytes()).map_err(|_| GraphicsError::InvalidValue)?;
+    state.ensure_capacity()?;
+    let pointer = unsafe { lvgl::lv_list_add_text(list, text.as_ptr()) };
+    let handle = state.insert(pointer, Kind::ListText, Some(list_handle))?;
+    state.commit_widget_options_size(handle, text_bytes)?;
+    memory
+        .write(GuestPointer::new(call.result), handle)
+        .expect("validated result");
+    Ok(())
+}
+
+pub(super) fn dispatch_list_add_text_button(
+    state: &mut GraphicsState,
+    memory: &mut GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [list_handle, text_pointer, ..] = call.arguments;
+    let list = state.object(list_handle, Some(Kind::List))?;
+    if unsafe { lvgl::lv_obj_get_child_count(list) } >= 64 {
+        return Err(GraphicsError::ResourceLimit);
+    }
+    let text = read_utf8_c_string(memory, text_pointer)?;
+    let text_bytes = text.len() + 1;
+    state.validate_new_widget_options_size(text_bytes)?;
+    let text = CString::new(text.as_bytes()).map_err(|_| GraphicsError::InvalidValue)?;
+    state.ensure_capacity()?;
+    let pointer = unsafe { lvgl::lv_list_add_button(list, core::ptr::null(), text.as_ptr()) };
+    let handle = state.insert(pointer, Kind::ListButton, Some(list_handle))?;
+    state.commit_widget_options_size(handle, text_bytes)?;
+    memory
+        .write(GuestPointer::new(call.result), handle)
+        .expect("validated result");
+    Ok(())
+}
+
+pub(super) fn dispatch_list_set_button_text(
+    state: &mut GraphicsState,
+    memory: &GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [list_handle, button_handle, text_pointer, ..] = call.arguments;
+    let list = state.object(list_handle, Some(Kind::List))?;
+    let button = state.object(button_handle, Some(Kind::ListButton))?;
+    if unsafe { lvgl::lv_obj_get_parent(button) } != list {
+        return Err(GraphicsError::InvalidHandle);
+    }
+    let text = read_utf8_c_string(memory, text_pointer)?;
+    let text_bytes = text.len() + 1;
+    state.validate_widget_options_size(button_handle, text_bytes)?;
+    let text = CString::new(text.as_bytes()).map_err(|_| GraphicsError::InvalidValue)?;
+    unsafe { lvgl::lv_list_set_button_text(list, button, text.as_ptr()) };
+    state.commit_widget_options_size(button_handle, text_bytes)
+}
+
+pub(super) fn dispatch_tileview_add_tile(
+    state: &mut GraphicsState,
+    memory: &mut GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [view_handle, column, row, directions, ..] = call.arguments;
+    let view = state.object(view_handle, Some(Kind::Tileview))?;
+    let column = u8::try_from(column).map_err(|_| GraphicsError::InvalidValue)?;
+    let row = u8::try_from(row).map_err(|_| GraphicsError::InvalidValue)?;
+    let directions = u32::try_from(directions).map_err(|_| GraphicsError::InvalidValue)?;
+    if directions & !lvgl::lv_dir_t_LV_DIR_ALL != 0 {
+        return Err(GraphicsError::InvalidValue);
+    }
+    if unsafe { lvgl::lv_obj_get_child_count(view) } >= 32 {
+        return Err(GraphicsError::ResourceLimit);
+    }
+    if state.tile_position_in_use(view_handle, column, row)? {
+        return Err(GraphicsError::InvalidValue);
+    }
+    state.ensure_capacity()?;
+    let pointer = unsafe { lvgl::lv_tileview_add_tile(view, column, row, directions) };
+    let handle = state.insert(pointer, Kind::Tile, Some(view_handle))?;
+    state.set_tile_position(handle, (column, row))?;
+    memory
+        .write(GuestPointer::new(call.result), handle)
+        .expect("validated result");
+    Ok(())
+}
+
+pub(super) fn dispatch_tileview_set_tile(
+    state: &mut GraphicsState,
+    _memory: &GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [view_handle, tile_handle, animated, ..] = call.arguments;
+    if animated > 1 {
+        return Err(GraphicsError::InvalidValue);
+    }
+    if !state.is_child_of(tile_handle, view_handle, Kind::Tile)? {
+        return Err(GraphicsError::InvalidHandle);
+    }
+    let view = state.object(view_handle, Some(Kind::Tileview))?;
+    let tile = state.object(tile_handle, Some(Kind::Tile))?;
+    unsafe { lvgl::lv_tileview_set_tile(view, tile, animated != 0) };
+    Ok(())
+}
+
+pub(super) fn dispatch_tileview_get_tile_active(
+    state: &mut GraphicsState,
+    memory: &mut GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [view_handle, ..] = call.arguments;
+    let view = state.object(view_handle, Some(Kind::Tileview))?;
+    let active = unsafe { lvgl::lv_tileview_get_tile_active(view) };
+    let handle = state.handle_for(active);
+    if !active.is_null() && handle == 0 {
+        return Err(GraphicsError::InvalidHandle);
+    }
+    memory
+        .write(GuestPointer::new(call.result), handle)
+        .expect("validated result");
+    Ok(())
+}
+
+pub(super) fn dispatch_theme_variant(
+    state: &mut GraphicsState,
+    _memory: &GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [handle, variant, ..] = call.arguments;
+    let variant = u32::try_from(variant).map_err(|_| GraphicsError::InvalidValue)?;
+    if variant > lvgl::lv_theme_shadcn_variant_t_LV_THEME_SHADCN_VARIANT_DESTRUCTIVE {
+        return Err(GraphicsError::InvalidValue);
+    }
+    if !matches!(state.kind(handle)?, Kind::Button | Kind::Badge) {
+        return Err(GraphicsError::InvalidHandle);
+    }
+    let object = state.object(handle, None)?;
+    unsafe { lvgl::lv_theme_shadcn_set_variant(object, variant) };
+    Ok(())
+}
+
+pub(super) fn dispatch_theme_error(
+    state: &mut GraphicsState,
+    _memory: &GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [handle, error, ..] = call.arguments;
+    if error > 1 {
+        return Err(GraphicsError::InvalidValue);
+    }
+    if !matches!(
+        state.kind(handle)?,
+        Kind::Textarea | Kind::Spinbox | Kind::Dropdown | Kind::Roller
+    ) {
+        return Err(GraphicsError::InvalidHandle);
+    }
+    let object = state.object(handle, None)?;
+    unsafe { lvgl::lv_theme_shadcn_set_error(object, error != 0) };
+    Ok(())
+}
+
+pub(super) fn dispatch_badge_create(
+    state: &mut GraphicsState,
+    memory: &mut GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [parent_handle, text_pointer, variant, ..] = call.arguments;
+    let variant = u32::try_from(variant).map_err(|_| GraphicsError::InvalidValue)?;
+    if variant > lvgl::lv_theme_shadcn_variant_t_LV_THEME_SHADCN_VARIANT_DESTRUCTIVE {
+        return Err(GraphicsError::InvalidValue);
+    }
+    let parent = state.object(parent_handle, None)?;
+    let text = read_utf8_c_string(memory, text_pointer)?;
+    let text_bytes = text.len() + 1;
+    state.validate_new_widget_options_size(text_bytes)?;
+    let text = CString::new(text.as_bytes()).map_err(|_| GraphicsError::InvalidValue)?;
+    state.ensure_capacity()?;
+    let badge = unsafe { lvgl::lv_label_create(parent) };
+    unsafe {
+        lvgl::lv_label_set_text(badge, text.as_ptr());
+        lvgl::lv_theme_shadcn_set_variant(badge, variant);
+    }
+    let handle = state.insert(badge, Kind::Badge, Some(parent_handle))?;
+    state.commit_widget_options_size(handle, text_bytes)?;
+    memory
+        .write(GuestPointer::new(call.result), handle)
+        .expect("validated result");
+    Ok(())
+}
+
+pub(super) fn dispatch_card_create(
+    state: &mut GraphicsState,
+    memory: &mut GuestMemory<'_>,
+    call: &GraphicsCall,
+) -> Result<()> {
+    let [parent_handle, ..] = call.arguments;
+    let parent = state.object(parent_handle, None)?;
+    state.ensure_capacity()?;
+    let card = unsafe { lvgl::lv_obj_create(parent) };
+    unsafe { xila::graphics::theme::set_surface(card, xila::graphics::theme::Surface::Card) };
+    let handle = state.insert(card, Kind::Card, Some(parent_handle))?;
+    memory
+        .write(GuestPointer::new(call.result), handle)
+        .expect("validated result");
+    Ok(())
+}
+
+fn copy_selected_option(
+    memory: &mut GuestMemory<'_>,
+    options: *const core::ffi::c_char,
+    selected: u32,
+    output: WasmUsize,
+    capacity: WasmUsize,
+    result: WasmUsize,
+) -> Result<i32> {
+    if options.is_null() {
+        return Err(GraphicsError::NativeFailure);
+    }
+    let options = unsafe { CStr::from_ptr(options) }.to_bytes();
+    if options.len() >= MAX_WIDGET_OPTIONS_BYTES {
+        return Err(GraphicsError::ResourceLimit);
+    }
+    let option = options
+        .split(|byte| *byte == b'\n')
+        .nth(selected as usize)
+        .ok_or(GraphicsError::InvalidValue)?;
+    let required = option.len() + 1;
+    if required > MAX_STRING_BYTES {
+        return Err(GraphicsError::ResourceLimit);
+    }
+    if usize::try_from(capacity).map_err(|_| GraphicsError::InvalidValue)? < required {
+        return Err(GraphicsError::InvalidValue);
+    }
+    let output_end = output
+        .checked_add(required as WasmUsize)
+        .ok_or(GraphicsError::InvalidMemory)?;
+    let result_end = result
+        .checked_add(core::mem::size_of::<i32>() as WasmUsize)
+        .ok_or(GraphicsError::InvalidMemory)?;
+    if output < result_end && result < output_end {
+        return Err(GraphicsError::InvalidMemory);
+    }
+    let destination = memory
+        .bytes_mut(GuestSlice::new(output, required as WasmUsize))
+        .ok_or(GraphicsError::InvalidMemory)?;
+    destination[..option.len()].copy_from_slice(option);
+    destination[option.len()] = 0;
+    i32::try_from(option.len()).map_err(|_| GraphicsError::ResourceLimit)
 }
 
 pub struct GraphicsCall {
@@ -199,6 +690,110 @@ pub fn dispatch(
                 lvgl::lv_obj_set_style_max_height(object, max_height, selector);
             }
         }
+        Function::CalendarSetMonthShown => {
+            let calendar = state.object(a, Some(Kind::Calendar))?;
+            let year = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let month = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            if year == 0 || year > u16::MAX as u32 || !(1..=12).contains(&month) {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_calendar_set_month_shown(calendar, year, month) };
+        }
+        Function::ChartSetType => {
+            let chart = state.object(a, Some(Kind::Chart))?;
+            let chart_type = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            if chart_type > lvgl::lv_chart_type_t_LV_CHART_TYPE_SCATTER {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_chart_set_type(chart, chart_type) };
+        }
+        Function::ChartSetPointCount => {
+            let chart = state.object(a, Some(Kind::Chart))?;
+            let point_count = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            if !(1..=128).contains(&point_count) {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_chart_set_point_count(chart, point_count) };
+        }
+        Function::ChartSetAxisRange => {
+            let chart = state.object(a, Some(Kind::Chart))?;
+            let axis = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let minimum = signed_word(c)?;
+            let maximum = signed_word(call.arguments[3])?;
+            if !matches!(axis, 0 | 1 | 2 | 4)
+                || minimum >= maximum
+                || minimum < -MAX_RANGE_VALUE
+                || maximum > MAX_RANGE_VALUE
+            {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_chart_set_axis_range(chart, axis, minimum, maximum) };
+        }
+        Function::LineSetYInvert => {
+            let line = state.object(a, Some(Kind::Line))?;
+            if b > 1 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_line_set_y_invert(line, b != 0) };
+        }
+        Function::SpinboxSetRange => {
+            let spinbox = state.object(a, Some(Kind::Spinbox))?;
+            let minimum = signed_word(b)?;
+            let maximum = signed_word(c)?;
+            if minimum >= maximum || minimum < -MAX_RANGE_VALUE || maximum > MAX_RANGE_VALUE {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_spinbox_set_range(spinbox, minimum, maximum) };
+        }
+        Function::SpinboxSetValue => {
+            let spinbox = state.object(a, Some(Kind::Spinbox))?;
+            let value = signed_word(b)?;
+            let minimum = unsafe { lvgl::lv_spinbox_get_min_value(spinbox) };
+            let maximum = unsafe { lvgl::lv_spinbox_get_max_value(spinbox) };
+            if !(minimum..=maximum).contains(&value) {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_spinbox_set_value(spinbox, value) };
+        }
+        Function::SpinboxGetValue => {
+            let spinbox = state.object(a, Some(Kind::Spinbox))?;
+            let value = unsafe { lvgl::lv_spinbox_get_value(spinbox) };
+            memory
+                .write(GuestPointer::<i32>::new(call.result), value)
+                .expect("validated result");
+        }
+        Function::SpinboxSetStep => {
+            let spinbox = state.object(a, Some(Kind::Spinbox))?;
+            let step = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            if step == 0 || step > MAX_RANGE_VALUE as u32 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_spinbox_set_step(spinbox, step) };
+        }
+        Function::SpinboxSetDigitFormat => {
+            let spinbox = state.object(a, Some(Kind::Spinbox))?;
+            let digits = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let separator = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            if !(1..=10).contains(&digits) || separator >= digits {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_spinbox_set_digit_format(spinbox, digits, separator) };
+        }
+        Function::SpinboxSetRollover => {
+            let spinbox = state.object(a, Some(Kind::Spinbox))?;
+            if b > 1 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_spinbox_set_rollover(spinbox, b != 0) };
+        }
+        Function::SpinboxIncrement => {
+            let spinbox = state.object(a, Some(Kind::Spinbox))?;
+            unsafe { lvgl::lv_spinbox_increment(spinbox) };
+        }
+        Function::SpinboxDecrement => {
+            let spinbox = state.object(a, Some(Kind::Spinbox))?;
+            unsafe { lvgl::lv_spinbox_decrement(spinbox) };
+        }
         Function::RangeSetRange => {
             let object = state.object(a, None)?;
             let minimum = signed_word(b)?;
@@ -320,6 +915,163 @@ pub fn dispatch(
                 .write(GuestPointer::<u32>::new(call.result), sweep)
                 .expect("validated result");
         }
+        Function::DropdownSetOptions => {
+            let dropdown = state.object(a, Some(Kind::Dropdown))?;
+            let options = read_widget_options(memory, b)?;
+            let retained_bytes = options.to_bytes_with_nul().len();
+            state.validate_widget_options_size(a, retained_bytes)?;
+            // LVGL's dynamic setter copies options into its own allocation.
+            unsafe { lvgl::lv_dropdown_set_options(dropdown, options.as_ptr()) };
+            state.commit_widget_options_size(a, retained_bytes)?;
+        }
+        Function::DropdownSetSelected => {
+            let dropdown = state.object(a, Some(Kind::Dropdown))?;
+            let selected = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let count = unsafe { lvgl::lv_dropdown_get_option_count(dropdown) };
+            if selected >= count {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_dropdown_set_selected(dropdown, selected) };
+        }
+        Function::DropdownGetSelected | Function::DropdownGetOptionCount => {
+            let dropdown = state.object(a, Some(Kind::Dropdown))?;
+            let value = unsafe {
+                if function == Function::DropdownGetSelected {
+                    lvgl::lv_dropdown_get_selected(dropdown)
+                } else {
+                    lvgl::lv_dropdown_get_option_count(dropdown)
+                }
+            };
+            memory
+                .write(GuestPointer::<u32>::new(call.result), value)
+                .expect("validated result");
+        }
+        Function::DropdownSetSelectedHighlight => {
+            let dropdown = state.object(a, Some(Kind::Dropdown))?;
+            if b > 1 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_dropdown_set_selected_highlight(dropdown, b != 0) };
+        }
+        Function::DropdownOpen | Function::DropdownClose => {
+            let dropdown = state.object(a, Some(Kind::Dropdown))?;
+            unsafe {
+                if function == Function::DropdownOpen {
+                    lvgl::lv_dropdown_open(dropdown);
+                } else {
+                    lvgl::lv_dropdown_close(dropdown);
+                }
+            }
+        }
+        Function::DropdownGetSelectedString => {
+            let dropdown = state.object(a, Some(Kind::Dropdown))?;
+            let selected = unsafe { lvgl::lv_dropdown_get_selected(dropdown) };
+            let options = unsafe { lvgl::lv_dropdown_get_options(dropdown) };
+            let capacity = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            if capacity as usize > MAX_STRING_BYTES {
+                return Err(GraphicsError::ResourceLimit);
+            }
+            let length = copy_selected_option(
+                memory,
+                options,
+                selected,
+                b,
+                capacity as WasmUsize,
+                call.result,
+            )?;
+            memory
+                .write(GuestPointer::<i32>::new(call.result), length)
+                .expect("validated result");
+        }
+        Function::DropdownGetHighlight | Function::DropdownIsOpenState => {
+            let dropdown = state.object(a, Some(Kind::Dropdown))?;
+            let value = unsafe {
+                if function == Function::DropdownGetHighlight {
+                    lvgl::lv_dropdown_get_selected_highlight(dropdown)
+                } else {
+                    lvgl::lv_dropdown_is_open(dropdown)
+                }
+            } as u32;
+            memory
+                .write(GuestPointer::<u32>::new(call.result), value)
+                .expect("validated result");
+        }
+        Function::RollerSetOptions => {
+            let roller = state.object(a, Some(Kind::Roller))?;
+            let options = read_widget_options(memory, b)?;
+            if c > 1 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            let bytes = options.to_bytes_with_nul().len();
+            if c == lvgl::lv_roller_mode_t_LV_ROLLER_MODE_INFINITE as WasmUsize
+                && bytes > super::marshal::MAX_ROLLER_INFINITE_OPTIONS_BYTES
+            {
+                return Err(GraphicsError::ResourceLimit);
+            }
+            let retained_bytes = bytes
+                .checked_mul(
+                    if c == lvgl::lv_roller_mode_t_LV_ROLLER_MODE_INFINITE as WasmUsize {
+                        15
+                    } else {
+                        1
+                    },
+                )
+                .ok_or(GraphicsError::ResourceLimit)?;
+            state.validate_widget_options_size(a, retained_bytes)?;
+            // LVGL copies the option string, including in infinite mode.
+            unsafe { lvgl::lv_roller_set_options(roller, options.as_ptr(), c as _) };
+            state.commit_widget_options_size(a, retained_bytes)?;
+        }
+        Function::RollerSetSelected => {
+            let roller = state.object(a, Some(Kind::Roller))?;
+            let selected = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let animated = call.arguments[2];
+            if animated > 1 || selected >= unsafe { lvgl::lv_roller_get_option_count(roller) } {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_roller_set_selected(roller, selected, animated != 0) };
+        }
+        Function::RollerGetSelected | Function::RollerGetOptionCount => {
+            let roller = state.object(a, Some(Kind::Roller))?;
+            let value = unsafe {
+                if function == Function::RollerGetSelected {
+                    lvgl::lv_roller_get_selected(roller)
+                } else {
+                    lvgl::lv_roller_get_option_count(roller)
+                }
+            };
+            memory
+                .write(GuestPointer::<u32>::new(call.result), value)
+                .expect("validated result");
+        }
+        Function::RollerSetVisibleRowCount => {
+            let roller = state.object(a, Some(Kind::Roller))?;
+            let rows = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            if !(1..=32).contains(&rows) {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_roller_set_visible_row_count(roller, rows) };
+        }
+        Function::RollerGetSelectedString => {
+            let roller = state.object(a, Some(Kind::Roller))?;
+            let selected = unsafe { lvgl::lv_roller_get_selected(roller) };
+            let options = unsafe { lvgl::lv_roller_get_options(roller) };
+            let capacity = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            if capacity as usize > MAX_STRING_BYTES {
+                return Err(GraphicsError::ResourceLimit);
+            }
+            let length = copy_selected_option(
+                memory,
+                options,
+                selected,
+                b,
+                capacity as WasmUsize,
+                call.result,
+            )?;
+            memory
+                .write(GuestPointer::<i32>::new(call.result), length)
+                .expect("validated result");
+        }
         Function::ObjectSetFlexAlign => {
             let object = state.object(a, None)?;
             let main = b;
@@ -348,17 +1100,6 @@ pub fn dispatch(
             memory
                 .write(GuestPointer::<i32>::new(call.result), descriptor)
                 .expect("validated result");
-        }
-        Function::ObjectSetGridDscArray => {
-            state.object(a, None)?;
-            let tracks = super::marshal::GridTracks::decode(
-                memory,
-                b,
-                c,
-                lvgl::LV_GRID_TEMPLATE_LAST as i32,
-                lvgl::LV_GRID_CONTENT as i32,
-            )?;
-            state.set_grid_tracks(a, tracks)?;
         }
         Function::ObjectSetGridAlign => {
             let object = state.object(a, None)?;
@@ -418,7 +1159,16 @@ pub fn dispatch(
         | Function::BarCreate
         | Function::SliderCreate
         | Function::SwitchCreate
-        | Function::SpinnerCreate => {
+        | Function::SpinnerCreate
+        | Function::DropdownCreate
+        | Function::RollerCreate
+        | Function::LedCreate
+        | Function::CalendarCreate
+        | Function::SpinboxCreate
+        | Function::ChartCreate
+        | Function::LineCreate
+        | Function::ListCreate
+        | Function::TileviewCreate => {
             state.ensure_capacity()?;
             let (pointer, kind, parent) = if function == Function::WindowCreate {
                 let window = xila::task::block_on(manager.create_window())
@@ -437,7 +1187,7 @@ pub fn dispatch(
                             (lvgl::lv_keyboard_create(parent), Kind::Keyboard)
                         }
                         Function::LabelCreate => (lvgl::lv_label_create(parent), Kind::Label),
-                        Function::ButtonCreate => (lvgl::lv_button_create(parent), Kind::Object),
+                        Function::ButtonCreate => (lvgl::lv_button_create(parent), Kind::Button),
                         Function::CheckboxCreate => {
                             (lvgl::lv_checkbox_create(parent), Kind::Checkbox)
                         }
@@ -450,6 +1200,21 @@ pub fn dispatch(
                         Function::SliderCreate => (lvgl::lv_slider_create(parent), Kind::Slider),
                         Function::SwitchCreate => (lvgl::lv_switch_create(parent), Kind::Switch),
                         Function::SpinnerCreate => (lvgl::lv_spinner_create(parent), Kind::Spinner),
+                        Function::DropdownCreate => {
+                            (lvgl::lv_dropdown_create(parent), Kind::Dropdown)
+                        }
+                        Function::RollerCreate => (lvgl::lv_roller_create(parent), Kind::Roller),
+                        Function::LedCreate => (lvgl::lv_led_create(parent), Kind::Led),
+                        Function::CalendarCreate => {
+                            (lvgl::lv_calendar_create(parent), Kind::Calendar)
+                        }
+                        Function::SpinboxCreate => (lvgl::lv_spinbox_create(parent), Kind::Spinbox),
+                        Function::ChartCreate => (lvgl::lv_chart_create(parent), Kind::Chart),
+                        Function::LineCreate => (lvgl::lv_line_create(parent), Kind::Line),
+                        Function::ListCreate => (lvgl::lv_list_create(parent), Kind::List),
+                        Function::TileviewCreate => {
+                            (lvgl::lv_tileview_create(parent), Kind::Tileview)
+                        }
                         _ => unreachable!(),
                     }
                 };
@@ -459,6 +1224,21 @@ pub fn dispatch(
             memory
                 .write(GuestPointer::new(call.result), handle)
                 .expect("validated result");
+        }
+        Function::LedSetBrightness | Function::LedOn | Function::LedOff | Function::LedToggle => {
+            let led = state.object(a, Some(Kind::Led))?;
+            unsafe {
+                match function {
+                    Function::LedSetBrightness => lvgl::lv_led_set_brightness(
+                        led,
+                        u8::try_from(b).map_err(|_| GraphicsError::InvalidValue)?,
+                    ),
+                    Function::LedOn => lvgl::lv_led_on(led),
+                    Function::LedOff => lvgl::lv_led_off(led),
+                    Function::LedToggle => lvgl::lv_led_toggle(led),
+                    _ => unreachable!(),
+                }
+            }
         }
         Function::TabviewAddTab => {
             state.ensure_capacity()?;

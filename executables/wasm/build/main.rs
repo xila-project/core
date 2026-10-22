@@ -231,6 +231,191 @@ fn generate() {
             "None",
             None,
         ),
+        (
+            "dropdown_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "dropdown_set_options",
+            &["*mut lv_obj_t", "*const core::ffi::c_char"],
+            "None",
+            None,
+        ),
+        (
+            "dropdown_set_selected",
+            &["*mut lv_obj_t", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "dropdown_get_selected",
+            &["*const lv_obj_t"],
+            "U32",
+            Some("u32"),
+        ),
+        (
+            "dropdown_get_option_count",
+            &["*const lv_obj_t"],
+            "U32",
+            Some("u32"),
+        ),
+        (
+            "dropdown_set_selected_highlight",
+            &["*mut lv_obj_t", "bool"],
+            "None",
+            None,
+        ),
+        ("dropdown_open", &["*mut lv_obj_t"], "None", None),
+        ("dropdown_close", &["*mut lv_obj_t"], "None", None),
+        (
+            "roller_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "roller_set_options",
+            &[
+                "*mut lv_obj_t",
+                "*const core::ffi::c_char",
+                "lv_roller_mode_t",
+            ],
+            "None",
+            None,
+        ),
+        (
+            "roller_set_selected",
+            &["*mut lv_obj_t", "u32", "lv_anim_enable_t"],
+            "None",
+            None,
+        ),
+        (
+            "roller_get_selected",
+            &["*const lv_obj_t"],
+            "U32",
+            Some("u32"),
+        ),
+        (
+            "roller_get_option_count",
+            &["*const lv_obj_t"],
+            "U32",
+            Some("u32"),
+        ),
+        (
+            "roller_set_visible_row_count",
+            &["*mut lv_obj_t", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "calendar_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "calendar_set_month_shown",
+            &["*mut lv_obj_t", "u32", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "spinbox_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "spinbox_set_range",
+            &["*mut lv_obj_t", "i32", "i32"],
+            "None",
+            None,
+        ),
+        ("spinbox_set_value", &["*mut lv_obj_t", "i32"], "None", None),
+        ("spinbox_get_value", &["*mut lv_obj_t"], "I32", Some("i32")),
+        ("spinbox_set_step", &["*mut lv_obj_t", "u32"], "None", None),
+        (
+            "spinbox_set_digit_format",
+            &["*mut lv_obj_t", "u32", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "spinbox_set_rollover",
+            &["*mut lv_obj_t", "bool"],
+            "None",
+            None,
+        ),
+        ("spinbox_increment", &["*mut lv_obj_t"], "None", None),
+        ("spinbox_decrement", &["*mut lv_obj_t"], "None", None),
+        (
+            "chart_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "chart_set_type",
+            &["*mut lv_obj_t", "lv_chart_type_t"],
+            "None",
+            None,
+        ),
+        (
+            "chart_set_point_count",
+            &["*mut lv_obj_t", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "chart_set_axis_range",
+            &["*mut lv_obj_t", "lv_chart_axis_t", "i32", "i32"],
+            "None",
+            None,
+        ),
+        (
+            "line_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "line_set_points",
+            &["*mut lv_obj_t", "*const lv_point_precise_t", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "line_set_y_invert",
+            &["*mut lv_obj_t", "bool"],
+            "None",
+            None,
+        ),
+        (
+            "tileview_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "tileview_add_tile",
+            &["*mut lv_obj_t", "u8", "u8", "lv_dir_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "tileview_set_tile",
+            &["*mut lv_obj_t", "*mut lv_obj_t", "lv_anim_enable_t"],
+            "None",
+            None,
+        ),
+        (
+            "tileview_get_tile_active",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
     ];
     let extra: &[Adapter<'_>] = &[
         (
@@ -386,6 +571,16 @@ fn generate() {
             Some("*mut lv_obj_t"),
         ),
         (
+            "led_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        ("led_set_brightness", &["*mut lv_obj_t", "u8"], "None", None),
+        ("led_on", &["*mut lv_obj_t"], "None", None),
+        ("led_off", &["*mut lv_obj_t"], "None", None),
+        ("led_toggle", &["*mut lv_obj_t"], "None", None),
+        (
             "range_set_range",
             &["*mut lv_obj_t", "i32", "i32"],
             "None",
@@ -429,6 +624,114 @@ fn generate() {
             "U32",
             Some("u32"),
         ),
+        (
+            "dropdown_get_selected_string",
+            &["*mut lv_obj_t", "*mut i8", "u32"],
+            "I32",
+            Some("i32"),
+        ),
+        (
+            "roller_get_selected_string",
+            &["*mut lv_obj_t", "*mut i8", "u32"],
+            "I32",
+            Some("i32"),
+        ),
+        (
+            "dropdown_get_highlight",
+            &["*mut lv_obj_t"],
+            "U32",
+            Some("u32"),
+        ),
+        (
+            "dropdown_is_open_state",
+            &["*mut lv_obj_t"],
+            "U32",
+            Some("u32"),
+        ),
+        (
+            "calendar_set_today",
+            &["*mut lv_obj_t", "u32", "u32", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "calendar_set_highlights",
+            &["*mut lv_obj_t", "*const u8", "usize"],
+            "None",
+            None,
+        ),
+        (
+            "calendar_get_shown_date",
+            &["*mut lv_obj_t", "*mut u8"],
+            "None",
+            None,
+        ),
+        (
+            "chart_add_series_slot",
+            &["*mut lv_obj_t", "u32"],
+            "U32",
+            Some("u32"),
+        ),
+        (
+            "chart_set_values",
+            &["*mut lv_obj_t", "u32", "*const i32", "usize"],
+            "None",
+            None,
+        ),
+        (
+            "chart_get_value",
+            &["*mut lv_obj_t", "u32", "u32"],
+            "I32",
+            Some("i32"),
+        ),
+        (
+            "list_add_text_button",
+            &["*mut lv_obj_t", "*const core::ffi::c_char"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "list_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "list_add_text",
+            &["*mut lv_obj_t", "*const core::ffi::c_char"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "list_set_button_text",
+            &["*mut lv_obj_t", "*mut lv_obj_t", "*const core::ffi::c_char"],
+            "None",
+            None,
+        ),
+        (
+            "object_set_theme_variant",
+            &["*mut lv_obj_t", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "object_set_theme_error",
+            &["*mut lv_obj_t", "bool"],
+            "None",
+            None,
+        ),
+        (
+            "badge_create",
+            &["*mut lv_obj_t", "*const core::ffi::c_char", "u32"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "card_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
     ];
     let supported_names: Vec<_> = supported
         .iter()
@@ -444,6 +747,33 @@ fn generate() {
         AdapterRule::automatic("object_get_y", AutoObjectScalar::GetI32),
         AdapterRule::automatic("object_get_width", AutoObjectScalar::GetI32),
         AdapterRule::automatic("object_get_height", AutoObjectScalar::GetI32),
+        AdapterRule::custom("object_set_grid_dsc_array", "dispatch_grid_tracks"),
+        AdapterRule::custom("calendar_set_today", "dispatch_calendar_set_today"),
+        AdapterRule::custom(
+            "calendar_set_highlights",
+            "dispatch_calendar_set_highlights",
+        ),
+        AdapterRule::custom(
+            "calendar_get_shown_date",
+            "dispatch_calendar_get_shown_date",
+        ),
+        AdapterRule::custom("chart_add_series_slot", "dispatch_chart_add_series"),
+        AdapterRule::custom("chart_set_values", "dispatch_chart_set_values"),
+        AdapterRule::custom("chart_get_value", "dispatch_chart_get_value"),
+        AdapterRule::custom("line_set_points", "dispatch_line_set_points"),
+        AdapterRule::custom("list_add_text", "dispatch_list_add_text"),
+        AdapterRule::custom("list_add_text_button", "dispatch_list_add_text_button"),
+        AdapterRule::custom("list_set_button_text", "dispatch_list_set_button_text"),
+        AdapterRule::custom("tileview_add_tile", "dispatch_tileview_add_tile"),
+        AdapterRule::custom("tileview_set_tile", "dispatch_tileview_set_tile"),
+        AdapterRule::custom(
+            "tileview_get_tile_active",
+            "dispatch_tileview_get_tile_active",
+        ),
+        AdapterRule::custom("object_set_theme_variant", "dispatch_theme_variant"),
+        AdapterRule::custom("object_set_theme_error", "dispatch_theme_error"),
+        AdapterRule::custom("badge_create", "dispatch_badge_create"),
+        AdapterRule::custom("card_create", "dispatch_card_create"),
     ];
     let registry = GraphicsRegistry::new(&catalog, &supported_names, &adapter_rules)
         .unwrap_or_else(|error| panic!("invalid graphics registry: {error}"));
@@ -519,9 +849,16 @@ fn generate() {
                     }
                 });
             }
-            AdapterPolicy::Custom(_) | AdapterPolicy::Manual => {
-                continue;
+            AdapterPolicy::Custom(handler) => {
+                let handler = format_ident!("{handler}");
+                dispatch_arms.push(quote! {
+                    Function::#variant => {
+                        dispatch::#handler(state, memory, call)?;
+                        Ok(true)
+                    }
+                });
             }
+            AdapterPolicy::Manual => continue,
         }
     }
     let code = quote! {
