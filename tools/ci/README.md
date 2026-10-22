@@ -88,6 +88,17 @@ cold/warm cache candidates):
 | [First fixes 39503077630](https://github.com/xila-project/core/actions/runs/39503077630) | existing gzip dependency caches | success | 8.100 / 25.367 |
 | [zstd bootstrap 39504766790](https://github.com/xila-project/core/actions/runs/39504766790) | all Rust archive misses after compression-version change | success | 13.500 / 33.617 |
 | [main after #481 39821789352](https://github.com/xila-project/core/actions/runs/39821789352) | warmed caches; localization ended at the old 30-minute budget during pt-BR | cancelled (coverage/Miri succeeded) | 30.333 / 67.600 |
+| [#501 PR Check 39839507325](https://github.com/xila-project/core/actions/runs/39839507325) | warmed dependencies; PR path filter correctly skipped localization/Miri/coverage | success | 11.483 / 34.367 |
+| [#501 PR Runtime container 39839507243](https://github.com/xila-project/core/actions/runs/39839507243) | current development image | success | 17.383 / 16.650 |
+| [#501 manual full Check 39839648927](https://github.com/xila-project/core/actions/runs/39839648927) | all seven locales plus coverage/Miri | success | 35.033 / 92.850 |
+
+The #501 PR Check+OCI sample totals 51.017 runner-minutes and 17.383 end-to-end
+wall minutes (workflows overlap), above the issue's ordinary-PR hypothesis. It
+includes a newer product revision and was not a same-commit cache A/B with the
+old sample; do not claim a regression or improvement from this alone. It does
+show the target has not yet been demonstrated. The manual Check run is more
+complete than the old main baseline that skipped coverage/Miri, so its 92.850
+runner-minutes are not a like-for-like performance comparison.
 
 The zstd bootstrap run emitted 429 Cargo compile lines in Host tests and 518 in the
 separate audio/docs/build job; respective runner times were 413s and 574s. These totals
