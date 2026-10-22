@@ -12,7 +12,10 @@ use crate::{Error, Result};
 pub struct ShutdownCommand;
 
 #[derive(GetArgs)]
-#[command(name = "shutdown", about = "Stop Xila gracefully, without powering off the host computer.")]
+#[command(
+    name = "shutdown",
+    about = "Stop Xila gracefully, without powering off the host computer."
+)]
 pub(super) struct ShutdownArguments {}
 
 impl UserCommand for ShutdownCommand {
@@ -36,8 +39,14 @@ impl UserCommand for ShutdownCommand {
         )
         .await
         .map_err(Error::FailedToOpenFile)?;
-        device.control(REQUEST_SHUTDOWN, &()).await.map_err(Error::FailedToOpenFile)?;
-        device.close(exec.virtual_file_system).await.map_err(Error::FailedToOpenFile)?;
+        device
+            .control(REQUEST_SHUTDOWN, &())
+            .await
+            .map_err(Error::FailedToOpenFile)?;
+        device
+            .close(exec.virtual_file_system)
+            .await
+            .map_err(Error::FailedToOpenFile)?;
         context.stop();
         Ok(())
     }
