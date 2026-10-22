@@ -2574,7 +2574,7 @@ dependencies = [
 [[package]]
 name = "lvgl_rust_sys"
 version = "0.1.0"
-source = "git+https://github.com/Xila-Project/lvgl_rust_sys.git?rev=fea1e05fc215e4f9263da97c8837210a0f72bd31#fea1e05fc215e4f9263da97c8837210a0f72bd31"
+source = "git+https://github.com/Xila-Project/lvgl_rust_sys.git?rev=7863539e594192ef06b7859b24f9aa65364b5c80#7863539e594192ef06b7859b24f9aa65364b5c80"
 dependencies = [
  "bindgen 0.72.1",
  "cc",
