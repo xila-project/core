@@ -156,6 +156,14 @@ fn actual_lvgl_catalog_matches_discovered_numbering() {
         "keyboard_set_textarea",
         "object_set_padding",
         "grid_fr",
+        "object_set_background",
+        "object_set_text_color",
+        "object_set_border",
+        "object_set_radius",
+        "object_set_text_align",
+        "object_set_font",
+        "object_set_surface",
+        "object_set_min_max_size",
     ];
     signatures.retain(|signature| !extensions.contains(&signature.ident.to_string().as_str()));
     signatures.sort_by_key(|s| s.ident.to_string().to_lowercase());

@@ -1,10 +1,25 @@
 use super::{
     error::GraphicsError,
-    marshal::{ButtonMap, GridTracks, read_c_string, read_textarea_string},
+    marshal::{
+        ButtonMap, GridTracks, read_c_string, read_textarea_string, validate_style_selector,
+    },
 };
 use crate::host::translation::{GuestMemory, GuestPointer, GuestValue, WasmUsize};
 use alloc::{vec, vec::Vec};
 use core::ffi::CStr;
+
+#[test]
+fn style_selectors_allow_known_parts_and_states_only() {
+    for selector in [0, 0x1_0000, 0x2_0000 | 0x80, 0x6_0000 | 0xF3FD] {
+        assert_eq!(validate_style_selector(selector), Ok(()));
+    }
+    for selector in [0x7_0000, 0x1_0000 | 0x2, 0x10_0000] {
+        assert_eq!(
+            validate_style_selector(selector),
+            Err(GraphicsError::InvalidValue)
+        );
+    }
+}
 
 #[test]
 fn grid_track_arrays_are_bounded_terminated_and_copied() {
