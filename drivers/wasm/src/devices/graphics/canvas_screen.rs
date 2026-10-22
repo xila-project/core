@@ -56,6 +56,8 @@ impl Inner {
     unsafe fn rgba_to_bgra_simd(rgba: &[u8], bgra: &mut [u8]) {
         use core::arch::wasm32::*;
 
+        assert_eq!(rgba.len(), bgra.len());
+        assert_eq!(rgba.len() % 4, 0, "pixel data must be RGBA-sized");
         let len = rgba.len();
         let mut i = 0;
         while i + 16 <= len {
@@ -69,8 +71,11 @@ impl Inner {
             i += 16;
         }
 
-        // handle remainder
-        bgra[i..len].copy_from_slice(&rgba[i..len]);
+        // XRGB8888 on little-endian WASM stores pixels as B,G,R,X.
+        // Canvas ImageData expects R,G,B,A. Swap the remaining complete pixels.
+        for (src, dst) in rgba[i..].chunks_exact(4).zip(bgra[i..].chunks_exact_mut(4)) {
+            dst.copy_from_slice(&[src[2], src[1], src[0], src[3]]);
+        }
     }
 
     fn draw_buffer(&mut self, buffer: &[RenderingColor]) -> Result<(), String> {
@@ -222,3 +227,41 @@ impl DirectBaseOperations for CanvasScreenDevice {
 impl MountOperations for CanvasScreenDevice {}
 
 impl DirectCharacterDevice for CanvasScreenDevice {}
+
+#[cfg(test)]
+mod color_conversion_tests {
+    use alloc::{vec, vec::Vec};
+    use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    fn scalar_swap(source: &[u8]) -> Vec<u8> {
+        source
+            .chunks_exact(4)
+            .flat_map(|pixel| [pixel[2], pixel[1], pixel[0], pixel[3]])
+            .collect()
+    }
+
+    #[wasm_bindgen_test]
+    fn simd_matches_scalar_for_short_and_unaligned_rectangles() {
+        for pixels in 0..=17 {
+            let source: Vec<u8> = (0..pixels * 4)
+                .map(|index| (index * 37 + 11) as u8)
+                .collect();
+            let mut destination = vec![0; source.len()];
+            unsafe { super::Inner::rgba_to_bgra_simd(&source, &mut destination) };
+            assert_eq!(destination, scalar_swap(&source), "pixels={pixels}");
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn preserves_green_and_alpha_while_swapping_red_and_blue() {
+        let source = [10, 20, 30, 40, 255, 128, 0, 77, 0, 255, 255, 255];
+        let mut destination = [0; 12];
+        unsafe { super::Inner::rgba_to_bgra_simd(&source, &mut destination) };
+        assert_eq!(
+            destination,
+            [30, 20, 10, 40, 0, 128, 255, 77, 255, 255, 0, 255]
+        );
+    }
+}
