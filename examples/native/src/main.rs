@@ -236,11 +236,19 @@ async fn main(task_manager: &'static xila::task::Manager) {
     };
 
     virtual_file_system
-        .mount_character_device(task, "/devices/power/control", drivers_core::PowerControlDevice::new(&lifecycle::SYSTEM))
+        .mount_character_device(
+            task,
+            "/devices/power/control",
+            drivers_core::PowerControlDevice::new(&lifecycle::SYSTEM),
+        )
         .await
         .expect("Failed to mount power control");
     virtual_file_system
-        .set_permissions(task, &"/devices/power/control", xila::file_system::Permissions::USER_READ_WRITE)
+        .set_permissions(
+            task,
+            &"/devices/power/control",
+            xila::file_system::Permissions::USER_READ_WRITE,
+        )
         .await
         .expect("Failed to restrict power control to root");
 
