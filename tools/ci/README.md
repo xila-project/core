@@ -96,6 +96,27 @@ warm-cache performance claim. Its ABI-only job took 63s, setup 6s; its 1316/1663
 host-test/audio sccache write events classified as **read-only**, as intended on
 PRs. No main write-cause conclusion follows from these PR counters.
 
+### Rejected host-job consolidation
+
+Draft PR [#482](https://github.com/xila-project/core/pull/482) moved unchanged
+audio, seed/import, browser tests, native build and docs commands into the host
+tests runner so they could share one target directory. All required statuses and
+commands were preserved, with a gate retaining the audio/docs status. The test
+suite and actionlint passed, but live runner data did not justify merging it:
+
+| Sample | Host tests runner | Audio/docs runner/gate | Host aggregate | Check wall / runner |
+| --- | ---: | ---: | ---: | ---: |
+| Separate jobs, [39504766790](https://github.com/xila-project/core/actions/runs/39504766790) | 413s | 574s | 987s | 13.5 / 33.617 min |
+| Consolidated, [39505269835](https://github.com/xila-project/core/actions/runs/39505269835) | 1042s | 4s | 1046s | 21.1 / 35.083 min |
+
+These are non-equivalent cold/cache samples, not a controlled causal comparison.
+Cargo compile lines across tests+audio fell from 947 to 658, but observed host runner
+time increased 59s and Check runner time 1.466min; wall time was 7.6min longer. The
+serial host worker also delayed the coverage dependency. The claimed artifact
+reuse did not compensate in this sample, so #482 was closed without merge. Prefer
+parallelism unless a better workload-aligned consolidation shows lower total
+runner-minutes **and** acceptable latency.
+
 ### Verified archive-compression waste
 
 The development image at digest `3d9738f5f02afd9147be66b2c84908a56b24da68138ba03ca88885c973f11f09`
@@ -138,7 +159,7 @@ network, larger artifacts and cache warming must be included in Actions comparis
 Historical main sccache failures: host tests 1,278, audio/docs 1,594, guest 1,425,
 localization 2,400. Those older logs do **not** contain error categories. The first
 post-#481 main/manual sample [39821789352](https://github.com/xila-project/core/actions/runs/39821789352)
-has categorized evidence: 4,298 HTTP-429/rate-limited write log events and 51
+has categorized evidence: 4,298 rate-limit-classified write log events and 51
 409/AlreadyExists events across its jobs. There were no cache read errors or
 timeouts. This confirms **write throttling is a real Xila cause**; already-exists
 is the expected duplicate-key race. The sample's localization was canceled by a
@@ -152,6 +173,10 @@ recovered most 429s but did not honor `Retry-After` (observed asks 1–21 second
 We do not vendor/patch sccache or increase cache writers without a justified,
 measured maintenance/security case. Serializing this workflow's cache experiments
 avoids cross-candidate contention; normal Check jobs remain parallel.
+The sanitized `rate_limited` bucket combines log text matching explicit `429`,
+`Too Many Requests`, or generic `rate limit` wording. Since raw log lines are
+intentionally deleted and never uploaded, the historical 4,298 is a count of
+rate-limit-classified events, **not an exact count of numeric HTTP429 statuses**.
 The repository cache usage API reported 12,257,374,257 bytes / 331 entries during
 this audit. The storage-limit endpoint returned HTTP 402 (payment-method
 requirement), so neither the effective limit nor billing-related write rejection
@@ -171,10 +196,13 @@ candidate to bound compute and quota costs:
    [rust-cache#348](https://github.com/Swatinem/rust-cache/issues/348). Checkout and
    generated-input mtimes may still defeat freshness; measure it.
 
-On main, completed four-candidate cold study [39504796318 attempt 1](https://github.com/xila-project/core/actions/runs/39504796318/attempts/1)
-used identical source and fixed image, serial jobs, fresh namespace `480-a930fc10`:
+On main, completed four-candidate **Rust archive cold-miss** study
+[39504796318 attempt 1](https://github.com/xila-project/core/actions/runs/39504796318/attempts/1)
+used identical source/fixed image, serial jobs, namespace `480-a930fc10`. This is
+not a fully cold compiler-cache benchmark: sccache recorded hundreds of C/C++
+hits even on first attempts, so keep backend hit/miss counts distinct:
 
-| Candidate | Cold job seconds | Rust archive | sccache outcome |
+| Candidate | Job seconds | Rust archive | sccache outcome |
 | --- | ---: | --- | --- |
 | dependencies only | 442 | 1.304 GB saved (17.3s save) | disabled |
 | combined | 502 | 1.304 GB saved (25.9s save) | 770 writes, 248 rate-limited, 166 AlreadyExists |
@@ -186,8 +214,10 @@ The rerun is not a complete warm matrix: only `combined` restored its exact
 were cold again. Do not compare aggregate rerun runner-minutes across the mixed
 cold/warm candidates.
 
-A second **single-candidate** main study provides a comparable exact cold/warm
-pair for combined caching, same source/image/strategy/namespace:
+A second **single-candidate** main study provides a comparable Rust-archive
+miss/hit pair for combined caching, same source/image/strategy/namespace. It is
+not a fully cold/warm compiler-cache pair; sccache reported 654 C/C++ hits even
+on its first attempt:
 
 | Attempt | Rust archive | Cargo `Compiling` lines | sccache Rust/C++ hits | sccache 429/409 errors | Job seconds |
 | --- | --- | ---: | ---: | ---: | ---: |

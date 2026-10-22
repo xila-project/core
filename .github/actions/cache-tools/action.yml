@@ -5,8 +5,8 @@ runs:
   steps:
     - shell: bash
       run: |
-        # The current development image has GNU tar but omits zstd. Keep this
-        # fallback until zstd is shipped in the image; then it is a cheap probe.
+        # The current image ships zstd. Keep this optional fallback for older
+        # mutable image tags; cache optimization must not block validation.
         if ! command -v zstd > /dev/null; then
           if ! (apt-get update -qq && apt-get install -y --no-install-recommends zstd); then
             echo '::warning::Unable to install optional zstd; Actions will fall back to gzip.'
