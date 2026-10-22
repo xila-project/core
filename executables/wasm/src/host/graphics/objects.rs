@@ -6,7 +6,7 @@ use super::{
     },
 };
 use crate::host::translation::WasmUsize;
-use alloc::{rc::Rc, vec::Vec};
+use alloc::{boxed::Box, rc::Rc, vec::Vec};
 use core::{cell::Cell, ptr::NonNull};
 use xila::graphics::{Manager, Window, lvgl};
 
@@ -71,18 +71,31 @@ pub(crate) enum Kind {
 struct Entry {
     notification: Rc<Notification>,
     kind: Kind,
-    parent: Option<WasmUsize>,
     tile_position: Option<(u8, u8)>,
     map: Option<ButtonMap>,
     canvas: Option<Vec<IndexedCanvas>>,
     grid: Option<GridTracks>,
     option_bytes: u16,
-    calendar_highlights: Option<Vec<lvgl::lv_calendar_date_t>>,
-    calendar_highlight_bytes: u16,
-    chart_series: Option<Vec<NonNull<lvgl::lv_chart_series_t>>>,
-    line_points: Option<Vec<lvgl::lv_point_precise_t>>,
-    line_point_bytes: u16,
+    widget: Option<Box<WidgetResource>>,
 }
+
+enum WidgetResource {
+    Calendar {
+        highlights: Option<Vec<lvgl::lv_calendar_date_t>>,
+        charged_bytes: u16,
+    },
+    Chart {
+        series: [Option<NonNull<lvgl::lv_chart_series_t>>; 8],
+        series_count: u8,
+    },
+    Line {
+        points: Option<Vec<lvgl::lv_point_precise_t>>,
+        charged_bytes: u16,
+    },
+}
+
+#[cfg(test)]
+const _: () = assert!(core::mem::size_of::<Entry>() <= 192);
 
 pub struct GraphicsState {
     pub(crate) manager: Option<&'static Manager>,
@@ -121,12 +134,13 @@ impl GraphicsState {
                 entry.canvas = None;
                 deleted_grid_tracks += entry.grid.take().map_or(0, |grid| grid.track_count());
                 deleted_option_bytes += core::mem::replace(&mut entry.option_bytes, 0) as usize;
-                entry.calendar_highlights = None;
-                deleted_option_bytes +=
-                    core::mem::replace(&mut entry.calendar_highlight_bytes, 0) as usize;
-                entry.chart_series = None;
-                entry.line_points = None;
-                deleted_option_bytes += core::mem::replace(&mut entry.line_point_bytes, 0) as usize;
+                if let Some(resource) = entry.widget.take() {
+                    deleted_option_bytes += match *resource {
+                        WidgetResource::Calendar { charged_bytes, .. }
+                        | WidgetResource::Line { charged_bytes, .. } => usize::from(charged_bytes),
+                        WidgetResource::Chart { .. } => 0,
+                    };
+                }
             }
         }
         self.grid_tracks = self.grid_tracks.saturating_sub(deleted_grid_tracks);
@@ -172,11 +186,9 @@ impl GraphicsState {
         parent: WasmUsize,
         kind: Kind,
     ) -> Result<bool> {
-        let entry = self.entry(child)?;
-        if entry.kind != kind {
-            return Err(GraphicsError::InvalidHandle);
-        }
-        Ok(entry.parent == Some(parent))
+        let child_pointer = self.object(child, Some(kind))?;
+        let parent_pointer = self.object(parent, None)?;
+        Ok(unsafe { lvgl::lv_obj_get_parent(child_pointer) } == parent_pointer)
     }
 
     pub(crate) fn tile_position_in_use(
@@ -185,14 +197,12 @@ impl GraphicsState {
         column: u8,
         row: u8,
     ) -> Result<bool> {
-        if self.entry(view)?.kind != Kind::Tileview {
-            return Err(GraphicsError::InvalidHandle);
-        }
+        let view_pointer = self.object(view, Some(Kind::Tileview))?;
         Ok(self.entries.iter().any(|entry| {
             !entry.notification.live.get().is_null()
                 && entry.kind == Kind::Tile
-                && entry.parent == Some(view)
                 && entry.tile_position == Some((column, row))
+                && unsafe { lvgl::lv_obj_get_parent(entry.notification.live.get()) } == view_pointer
         }))
     }
 
@@ -278,17 +288,12 @@ impl GraphicsState {
         self.entries.push(Entry {
             notification,
             kind,
-            parent,
             tile_position: None,
             map: None,
             canvas: None,
             grid: None,
             option_bytes: 0,
-            calendar_highlights: None,
-            calendar_highlight_bytes: 0,
-            chart_series: None,
-            line_points: None,
-            line_point_bytes: 0,
+            widget: None,
         });
         Ok(self.entries.len() as WasmUsize)
     }
@@ -407,7 +412,11 @@ impl GraphicsState {
         if entry.notification.live.get().is_null() || entry.kind != Kind::Calendar {
             return Err(GraphicsError::InvalidHandle);
         }
-        let previous = usize::from(entry.calendar_highlight_bytes);
+        let previous = match entry.widget.as_deref() {
+            None => 0,
+            Some(WidgetResource::Calendar { charged_bytes, .. }) => usize::from(*charged_bytes),
+            Some(_) => return Err(GraphicsError::InvalidHandle),
+        };
         let charge = previous.max(new_bytes);
         let used = updated_widget_options_usage(self.widget_options_bytes, previous, new_bytes)?;
         let pointer = if dates.is_empty() {
@@ -417,9 +426,21 @@ impl GraphicsState {
         };
         let entry = &mut self.entries[index];
         let replacement = if dates.is_empty() { None } else { Some(dates) };
-        let old = core::mem::replace(&mut entry.calendar_highlights, replacement);
-        entry.calendar_highlight_bytes =
-            u16::try_from(charge).map_err(|_| GraphicsError::ResourceLimit)?;
+        let resource = entry.widget.get_or_insert_with(|| {
+            Box::new(WidgetResource::Calendar {
+                highlights: None,
+                charged_bytes: 0,
+            })
+        });
+        let WidgetResource::Calendar {
+            highlights,
+            charged_bytes,
+        } = &mut **resource
+        else {
+            return Err(GraphicsError::InvalidHandle);
+        };
+        let old = core::mem::replace(highlights, replacement);
+        *charged_bytes = u16::try_from(charge).map_err(|_| GraphicsError::ResourceLimit)?;
         self.widget_options_bytes = used;
         Ok((pointer, old))
     }
@@ -429,7 +450,11 @@ impl GraphicsState {
         if entry.kind != Kind::Chart {
             return Err(GraphicsError::InvalidHandle);
         }
-        Ok(entry.chart_series.as_ref().map_or(0, Vec::len))
+        match entry.widget.as_deref() {
+            None => Ok(0),
+            Some(WidgetResource::Chart { series_count, .. }) => Ok(usize::from(*series_count)),
+            Some(_) => Err(GraphicsError::InvalidHandle),
+        }
     }
 
     pub(crate) fn add_chart_series(
@@ -451,13 +476,26 @@ impl GraphicsState {
         if entry.kind != Kind::Chart {
             return Err(GraphicsError::InvalidHandle);
         }
-        let series = entry.chart_series.get_or_insert_with(Vec::new);
-        if series.len() >= 8 {
+        let resource = entry.widget.get_or_insert_with(|| {
+            Box::new(WidgetResource::Chart {
+                series: [None; 8],
+                series_count: 0,
+            })
+        });
+        let WidgetResource::Chart {
+            series,
+            series_count,
+        } = &mut **resource
+        else {
+            return Err(GraphicsError::InvalidHandle);
+        };
+        let slot = usize::from(*series_count);
+        if slot >= series.len() {
             return Err(GraphicsError::ResourceLimit);
         }
-        let slot = u32::try_from(series.len()).map_err(|_| GraphicsError::ResourceLimit)?;
-        series.push(series_pointer);
-        Ok(slot)
+        series[slot] = Some(series_pointer);
+        *series_count += 1;
+        u32::try_from(slot).map_err(|_| GraphicsError::ResourceLimit)
     }
 
     pub(crate) fn chart_series(
@@ -470,12 +508,14 @@ impl GraphicsState {
             return Err(GraphicsError::InvalidHandle);
         }
         let index = usize::try_from(slot).map_err(|_| GraphicsError::InvalidHandle)?;
-        entry
-            .chart_series
-            .as_ref()
-            .and_then(|series| series.get(index))
-            .copied()
-            .ok_or(GraphicsError::InvalidHandle)
+        match entry.widget.as_deref() {
+            Some(WidgetResource::Chart { series, .. }) => series
+                .get(index)
+                .copied()
+                .flatten()
+                .ok_or(GraphicsError::InvalidHandle),
+            _ => Err(GraphicsError::InvalidHandle),
+        }
     }
 
     pub(crate) fn replace_line_points(
@@ -504,7 +544,11 @@ impl GraphicsState {
         if entry.notification.live.get().is_null() || entry.kind != Kind::Line {
             return Err(GraphicsError::InvalidHandle);
         }
-        let previous = usize::from(entry.line_point_bytes);
+        let previous = match entry.widget.as_deref() {
+            None => 0,
+            Some(WidgetResource::Line { charged_bytes, .. }) => usize::from(*charged_bytes),
+            Some(_) => return Err(GraphicsError::InvalidHandle),
+        };
         let charge = previous.max(new_bytes);
         let used = updated_widget_options_usage(self.widget_options_bytes, previous, new_bytes)?;
         let pointer = if points.is_empty() {
@@ -519,8 +563,21 @@ impl GraphicsState {
         } else {
             Some(points)
         };
-        let old = core::mem::replace(&mut entry.line_points, replacement);
-        entry.line_point_bytes = charge;
+        let resource = entry.widget.get_or_insert_with(|| {
+            Box::new(WidgetResource::Line {
+                points: None,
+                charged_bytes: 0,
+            })
+        });
+        let WidgetResource::Line {
+            points,
+            charged_bytes,
+        } = &mut **resource
+        else {
+            return Err(GraphicsError::InvalidHandle);
+        };
+        let old = core::mem::replace(points, replacement);
+        *charged_bytes = charge;
         self.widget_options_bytes = used;
         Ok((pointer, old))
     }
