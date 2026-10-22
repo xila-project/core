@@ -129,6 +129,16 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertGreaterEqual(int(re.search(r"timeout-minutes: (\d+)", text)[1]), 40)
         self.assertIn("locales=(en fr es de pt-BR it pl)", text)
 
+    def test_localization_path_filters_cover_catalog_code_translation_and_each_locale(self):
+        changes = job("check.yml", "changes")
+        localization = changes.split("            localization:\n")[1].split("            i18n_code:\n")[0]
+        for pattern in ["**/*.ftl", "**/locales/**/*.json", "**/locale/**", "**/i18n/**", "**/localization/**", "executables/wasm/src/host/translation/**", "executables/wasm/tests/translation/**"]:
+            self.assertIn(pattern, localization)
+        for locale in ["en", "fr", "es", "de", "pt-BR", "it", "pl"]:
+            key = "pt_br" if locale == "pt-BR" else locale
+            self.assertIn(f"i18n_{key}:\n              - '**/locales/{locale}.json'", changes)
+        self.assertIn("EMBEDDED_I18N_STRICT: \"1\"", job("check.yml", "localization"))
+
 
 if __name__ == "__main__":
     unittest.main()
