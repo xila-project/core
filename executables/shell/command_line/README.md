@@ -67,6 +67,7 @@ sleep 2
 sleep 250ms
 chmod 0640 notes.txt
 tree -L 2 /configuration
+find /configuration --name settings.toml --type f
 realpath ../notes.txt /configuration
 cp notes.txt /temporary/notes-copy.txt
 help chmod
@@ -90,6 +91,17 @@ filesystem order. `-L N` limits levels below the selected directory; `-L 0`
 prints only that directory. Default and maximum depth are 32, with paths bounded
 to 1024 bytes. Traversal stops and reports filesystem or output errors. It keeps
 one directory handle per active level rather than collecting sibling entries.
+
+`find [PATH]` prints matching paths, starting at `PATH` or the current directory.
+It includes the starting path when it matches, searches hidden entries, and
+skips `.` and `..`. `-n NAME` or `--name NAME` matches an exact entry name;
+`-t TYPE` or `--type TYPE` filters by `f` (file), `d` (directory), `c`
+(character device), `b` (block device), `p` (pipe), `s` (socket), or `l`
+(symbolic link). `-d N` or `--max-depth N` limits levels below the starting
+path; the default and maximum are 32. Paths are bounded to 1024 bytes. Missing
+or inaccessible paths and errors while reading a directory stop the command
+with an error. Traversal streams results and retains at most one directory
+handle per active level.
 
 `mv SOURCE DESTINATION` renames a file or directory to the exact destination
 path. Relative paths use the current directory. Both paths must belong to the

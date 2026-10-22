@@ -10,6 +10,7 @@ mod echo;
 mod environment_variables;
 mod execute;
 mod exit;
+mod find;
 mod grep;
 mod head;
 mod help;
@@ -53,6 +54,7 @@ use self::{
         SetEnvironmentVariableCommand,
     },
     exit::ExitCommand,
+    find::FindCommand,
     head::HeadCommand,
     ip::IpCommand,
     list::ListCommand,
@@ -133,6 +135,7 @@ pub enum UserCommandKind {
     Copy,
     Link,
     ReadLink,
+    Find,
 }
 
 /// Names and help text shared by command resolution and `help`.
@@ -248,6 +251,7 @@ const BUILTINS: &[(&str, UserCommandKind, &str)] = &[
     ("tail", UserCommandKind::Tail, tail::TailArguments::HELP),
     ("help", UserCommandKind::Help, help::HelpArguments::HELP),
     ("tree", UserCommandKind::Tree, tree::TreeArguments::HELP),
+    ("find", UserCommandKind::Find, find::FindArguments::HELP),
     ("mv", UserCommandKind::Move, mv::MoveArguments::HELP),
     ("cp", UserCommandKind::Copy, cp::CopyArguments::HELP),
     ("sleep", UserCommandKind::Sleep, sleep::SleepArguments::HELP),
@@ -340,6 +344,7 @@ where
         UserCommandKind::Sleep => SleepCommand.execute(context, options, paths).await,
         UserCommandKind::Help => help::HelpCommand.execute(context, options, paths).await,
         UserCommandKind::Tree => TreeCommand.execute(context, options, paths).await,
+        UserCommandKind::Find => FindCommand.execute(context, options, paths).await,
         UserCommandKind::Move => MoveCommand.execute(context, options, paths).await,
         UserCommandKind::Copy => CopyCommand.execute(context, options, paths).await,
         UserCommandKind::Link => ln::LinkCommand.execute(context, options, paths).await,
@@ -426,6 +431,7 @@ mod tests {
                 resolve_user_command("sleep").expect("sleep builtin"),
             ),
             ("tree", UserCommandKind::Tree),
+            ("find", UserCommandKind::Find),
             ("mv", UserCommandKind::Move),
             ("exit", UserCommandKind::Exit),
             ("ping", UserCommandKind::Ping),
