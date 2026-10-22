@@ -65,9 +65,10 @@ default = [
   "dep:synchronization",
   "abi_definitions",
   "dep:network",
-  "dep:lifecycle",
+  "lifecycle",
 ]
 
+lifecycle = ["dep:lifecycle"]
 executable_building = ["executable/building"]
 audio = ["dep:audio"]
 abi_definitions = ["dep:abi_definitions"]
