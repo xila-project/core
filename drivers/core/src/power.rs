@@ -11,7 +11,9 @@ use shared::AnyByLayout;
 pub struct PowerControlDevice(&'static Controller);
 
 impl PowerControlDevice {
-    pub const fn new(controller: &'static Controller) -> Self { Self(controller) }
+    pub const fn new(controller: &'static Controller) -> Self {
+        Self(controller)
+    }
 }
 
 impl DirectBaseOperations for PowerControlDevice {
@@ -30,7 +32,7 @@ impl DirectBaseOperations for PowerControlDevice {
         input: &AnyByLayout,
         output: &mut AnyByLayout,
     ) -> Poll<Result<()>> {
-        Poll::Ready(match command {
+        file_system::ready(|| match command {
             GET_SHUTDOWN_STATE::IDENTIFIER => {
                 *GET_SHUTDOWN_STATE::cast_output(output)? = self.0.state() as u8;
                 Ok(())
