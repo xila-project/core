@@ -122,6 +122,10 @@ class MetricsTests(unittest.TestCase):
             ])
             self.assertIs(metrics.log_metrics(log)["test"]["rust_cache_exact_hit"], expected)
 
+    def test_post_restore_cache_up_to_date_means_exact_archive_hit(self):
+        log = "test\tPost Cache\t2026-10-20T00:00:00Z Cache up-to-date."
+        self.assertIs(metrics.log_metrics(log)["test"]["rust_cache_exact_hit"], True)
+
     def test_failed_and_running_jobs_are_not_successful_comparisons(self):
         for conclusion in ["failure", "cancelled", None]:
             result = metrics.job_metrics([{"name": "test", "conclusion": conclusion, "started_at": None, "completed_at": None, "steps": []}])

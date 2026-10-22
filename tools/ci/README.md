@@ -181,16 +181,29 @@ used identical source and fixed image, serial jobs, fresh namespace `480-a930fc1
 | sccache only | 651 | none | 472 writes, 632 rate-limited, 36 AlreadyExists |
 | workspace + sccache | 474 | save failed: cache-key reservation collision | 1,551 write errors; invalid for warm comparison |
 
-The rerun is not a complete warm matrix: only `combined` restored an exact
-1.304-GB archive (23.3s restore, `Cache up-to-date`, 55 Cargo compile lines,
-396s job); dependencies and workspace were cold again. The sccache-only result did
-not establish a comparable warm archive. Do not compare the aggregate rerun's
-30.233 runner-minutes with its cold 34.483 as a strategy result. This does
-establish that one exact combined warm restore produced far fewer Cargo compile
-lines, but the job still took 396s and transfer consumed 23.3s. It does not justify
-changing cache defaults: cold dependency-only was fastest, and only one warm
-combined candidate restored. A future study should first address workspace save
-collisions and compare a repeated exact dependency-only cache.
+The rerun is not a complete warm matrix: only `combined` restored its exact
+1.304-GB archive (23.3s restore, `Cache up-to-date`); dependencies and workspace
+were cold again. Do not compare aggregate rerun runner-minutes across the mixed
+cold/warm candidates.
+
+A second **single-candidate** main study provides a comparable exact cold/warm
+pair for combined caching, same source/image/strategy/namespace:
+
+| Attempt | Rust archive | Cargo `Compiling` lines | sccache Rust/C++ hits | sccache 429/409 errors | Job seconds |
+| --- | --- | ---: | ---: | ---: | ---: |
+| [Cold, attempt 1](https://github.com/xila-project/core/actions/runs/39834738935/attempts/1) | miss, 1.302 GB saved in 12.95s | 406 | 2 / 654 | 108 / 0 | 467 |
+| [Warm, attempt 2](https://github.com/xila-project/core/actions/runs/39834738935/attempts/2) | exact 1.302 GB restore in 18.58s | 55 | 72 / 693 | 0 / 267 | 453 |
+
+This warm sample reduces Cargo compile lines by86%, but whole job time only14s
+(3%). Restore transfer alone is 18.58s; sccache's 267 duplicate-key 409s are
+expected when the exact Cargo archive already supplied those outputs. It does not
+justify paying dual-cache costs universally. Together with cold dependency-only
+442s versus combined502s and sccache-only651s, the evidence says dependency-only
+was the quickest cold candidate while combined had a modest same-input warm
+benefit. Leave production default unchanged until a representative full-workflow
+Pareto comparison (including all jobs and locale artifacts) demonstrates a net
+runner-minute and latency improvement. The workspace archive collision remains
+unresolved; do not enable workspace caching.
 
 The `workflow_dispatch` experiment is on main and can reproduce additional runs:
 
