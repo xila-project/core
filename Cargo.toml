@@ -193,6 +193,7 @@ members = [
   "executables/text_editor",
   "libraries/authentication",
   "subsystems/network",
+  "subsystems/lifecycle",
   "libraries/debug_protocol",
   "libraries/synchronization",
   "subsystems/task/task_macros",
