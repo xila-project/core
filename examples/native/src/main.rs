@@ -482,9 +482,7 @@ async fn main(task_manager: &'static xila::task::Manager) {
         .unwrap();
     let mut join = core::pin::pin!(shell.join());
     loop {
-        if lifecycle::SYSTEM.is_shutdown_requested() {
-            break;
-        }
+        // The shell must finish before its VFS resources can be released.
         use core::{
             future::{Future, poll_fn},
             task::Poll,
