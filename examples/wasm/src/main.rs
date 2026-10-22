@@ -364,6 +364,15 @@ async fn main(task_manager: &'static xila::task::Manager) {
     // Main-thread OPFS commits are asynchronous. Keep one autosave running and
     // explicitly join it before the final shutdown save.
     let autosave_running: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(true)));
+    virtual_file_system
+        .mount_character_device(task, "/devices/power/control", drivers_core::PowerControlDevice::new(&xila::lifecycle::SYSTEM))
+        .await
+        .expect("Failed to mount power control");
+    virtual_file_system
+        .set_permissions(task, &"/devices/power/control", xila::file_system::Permissions::USER_READ_WRITE)
+        .await
+        .expect("Failed to restrict power control to root");
+
     let (autosave, _) = task_manager
         .spawn(task, "OPFS autosave", None, move |_| async move {
             loop {
@@ -474,14 +483,24 @@ async fn main(task_manager: &'static xila::task::Manager) {
     .join()
     .await;
 
+    if xila::lifecycle::SYSTEM.is_shutdown_requested() {
+        let _ = xila::lifecycle::SYSTEM.begin_shutdown();
+    }
     runtime_running.store(false, Ordering::Release);
     lifecycle.join().await;
     virtual_file_system.uninitialize().await;
+    drive.stop_writes();
+    if xila::lifecycle::SYSTEM.is_shutdown_requested() {
+        let _ = xila::lifecycle::SYSTEM.begin_finalize();
+    }
     drive
         .sync()
         .await
         .expect("Failed to save OPFS disk at shutdown");
     drive.unmount().expect("Failed to release OPFS disk");
+    if xila::lifecycle::SYSTEM.is_shutdown_requested() {
+        let _ = xila::lifecycle::SYSTEM.complete();
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

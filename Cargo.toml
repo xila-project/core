@@ -44,6 +44,7 @@ shared = { workspace = true, optional = true }
 synchronization = { workspace = true, optional = true }
 bootsplash = { workspace = true, optional = true }
 network = { workspace = true, optional = true }
+lifecycle = { workspace = true, optional = true }
 
 [features]
 default = [
@@ -64,6 +65,7 @@ default = [
   "dep:synchronization",
   "abi_definitions",
   "dep:network",
+  "dep:lifecycle",
 ]
 
 executable_building = ["executable/building"]
@@ -99,6 +101,7 @@ shared = { path = "libraries/shared" }
 synchronization = { path = "libraries/synchronization" }
 target = { path = "libraries/target" }
 network = { path = "subsystems/network" }
+lifecycle = { path = "subsystems/lifecycle" }
 debug_protocol = { path = "libraries/debug_protocol" }
 peripherals = { path = "libraries/peripherals" }
 bootsplash = { path = "libraries/bootsplash" }

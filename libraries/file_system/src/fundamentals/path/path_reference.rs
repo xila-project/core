@@ -27,6 +27,7 @@ impl Path {
     /// Runtime device endpoints grouped by function.
     pub const DEVICES: &'static Path = Self::from_str("/devices");
     pub const NETWORK_DEVICES: &'static Path = Self::from_str("/devices/network");
+    pub const POWER_DEVICES: &'static Path = Self::from_str("/devices/power");
     pub const AUDIO_DEVICES: &'static Path = Self::from_str("/devices/audio");
     pub const COMPUTE_DEVICES: &'static Path = Self::from_str("/devices/compute");
     pub const GRAPHICS_DEVICES: &'static Path = Self::from_str("/devices/graphics");
