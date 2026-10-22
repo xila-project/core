@@ -3,7 +3,7 @@ use super::{
     error::{GraphicsError, Result},
     marshal::{
         ButtonMap, MAX_STRING_BYTES, MAX_WIDGET_OPTIONS_BYTES, read_c_string, read_textarea_string,
-        read_widget_options,
+        read_utf8_c_string, read_widget_options,
     },
     objects::Kind,
 };
@@ -187,9 +187,10 @@ pub(super) fn dispatch_chart_set_values(
         ))
         .ok_or(GraphicsError::InvalidMemory)?
         .collect::<Vec<_>>();
-    unsafe {
-        lvgl::lv_chart_set_series_values(chart, series.as_ptr(), values.as_ptr(), values.len())
-    };
+    for (index, value) in values.iter().enumerate() {
+        let index = u32::try_from(index).map_err(|_| GraphicsError::InvalidValue)?;
+        unsafe { lvgl::lv_chart_set_series_value_by_id(chart, series.as_ptr(), index, *value) };
+    }
     Ok(())
 }
 
@@ -262,10 +263,10 @@ pub(super) fn dispatch_list_add_text(
     if unsafe { lvgl::lv_obj_get_child_count(list) } >= 64 {
         return Err(GraphicsError::ResourceLimit);
     }
-    let text = read_c_string(memory, text_pointer)?;
-    let text_bytes = text.to_bytes_with_nul().len();
+    let text = read_utf8_c_string(memory, text_pointer)?;
+    let text_bytes = text.len() + 1;
     state.validate_new_widget_options_size(text_bytes)?;
-    let text = CString::new(text.to_bytes()).map_err(|_| GraphicsError::InvalidValue)?;
+    let text = CString::new(text.as_bytes()).map_err(|_| GraphicsError::InvalidValue)?;
     state.ensure_capacity()?;
     let pointer = unsafe { lvgl::lv_list_add_text(list, text.as_ptr()) };
     let handle = state.insert(pointer, Kind::ListText, Some(list_handle))?;
@@ -286,10 +287,10 @@ pub(super) fn dispatch_list_add_text_button(
     if unsafe { lvgl::lv_obj_get_child_count(list) } >= 64 {
         return Err(GraphicsError::ResourceLimit);
     }
-    let text = read_c_string(memory, text_pointer)?;
-    let text_bytes = text.to_bytes_with_nul().len();
+    let text = read_utf8_c_string(memory, text_pointer)?;
+    let text_bytes = text.len() + 1;
     state.validate_new_widget_options_size(text_bytes)?;
-    let text = CString::new(text.to_bytes()).map_err(|_| GraphicsError::InvalidValue)?;
+    let text = CString::new(text.as_bytes()).map_err(|_| GraphicsError::InvalidValue)?;
     state.ensure_capacity()?;
     let pointer = unsafe { lvgl::lv_list_add_button(list, core::ptr::null(), text.as_ptr()) };
     let handle = state.insert(pointer, Kind::ListButton, Some(list_handle))?;
@@ -311,10 +312,10 @@ pub(super) fn dispatch_list_set_button_text(
     if unsafe { lvgl::lv_obj_get_parent(button) } != list {
         return Err(GraphicsError::InvalidHandle);
     }
-    let text = read_c_string(memory, text_pointer)?;
-    let text_bytes = text.to_bytes_with_nul().len();
+    let text = read_utf8_c_string(memory, text_pointer)?;
+    let text_bytes = text.len() + 1;
     state.validate_widget_options_size(button_handle, text_bytes)?;
-    let text = CString::new(text.to_bytes()).map_err(|_| GraphicsError::InvalidValue)?;
+    let text = CString::new(text.as_bytes()).map_err(|_| GraphicsError::InvalidValue)?;
     unsafe { lvgl::lv_list_set_button_text(list, button, text.as_ptr()) };
     state.commit_widget_options_size(button_handle, text_bytes)
 }
@@ -433,8 +434,8 @@ pub(super) fn dispatch_badge_create(
         return Err(GraphicsError::InvalidValue);
     }
     let parent = state.object(parent_handle, None)?;
-    let text = read_c_string(memory, text_pointer)?;
-    let text = CString::new(text.to_bytes()).map_err(|_| GraphicsError::InvalidValue)?;
+    let text = read_utf8_c_string(memory, text_pointer)?;
+    let text = CString::new(text.as_bytes()).map_err(|_| GraphicsError::InvalidValue)?;
     state.ensure_capacity()?;
     let badge = unsafe { lvgl::lv_label_create(parent) };
     unsafe {

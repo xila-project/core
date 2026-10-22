@@ -1,7 +1,7 @@
 use super::{
     error::GraphicsError,
     marshal::{
-        ButtonMap, GridTracks, read_c_string, read_textarea_string, read_widget_options,
+        ButtonMap, GridTracks, read_c_string, read_textarea_string, read_utf8_c_string, read_widget_options,
         updated_widget_options_usage, validate_style_selector,
     },
 };
@@ -21,6 +21,14 @@ fn widget_option_usage_charges_replacement_high_water_and_caps_vm_budget() {
         updated_widget_options_usage(100, 101, 50),
         Err(GraphicsError::InvalidValue)
     );
+}
+
+#[test]
+fn utf8_c_strings_reject_invalid_sequences_before_native_copying() {
+    let mut bytes = [0; 8];
+    bytes[1..4].copy_from_slice(&[0xc3, 0x28, 0]);
+    let memory = GuestMemory::new(&mut bytes);
+    assert_eq!(read_utf8_c_string(&memory, 1), Err(GraphicsError::InvalidValue));
 }
 
 #[test]
