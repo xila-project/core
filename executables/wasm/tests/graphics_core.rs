@@ -1100,7 +1100,7 @@ async fn theme_selectors_reject_unknown_ids() {
 async fn badge_card_and_input_use_shared_theme_roles() {
     let _standard = testing::initialize(false, false).await;
     let manager = support::manager().await;
-    let mut bytes = [0; 128];
+    let mut bytes = [0; 8192];
     let mut memory = GuestMemory::new(&mut bytes);
     let mut state = GraphicsState::new(Some(manager));
     for (index, byte) in b"Notice\0".iter().enumerate() {
@@ -1155,6 +1155,33 @@ async fn badge_card_and_input_use_shared_theme_roles() {
         assert!(unsafe { lvgl::lv_color_eq(input_border, palette.destructive) });
     }
     assert_ne!(badge, card);
+
+    for index in 256..1279 {
+        memory
+            .write(GuestPointer::<u8>::new(index as WasmUsize), b'x')
+            .unwrap();
+    }
+    memory.write(GuestPointer::<u8>::new(1279), 0).unwrap();
+    for _ in 0..7 {
+        call(
+            &mut state,
+            &mut memory,
+            Function::BadgeCreate,
+            &[window, 256, 0],
+            1,
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::BadgeCreate,
+            &[window, 256, 0],
+            1,
+        ),
+        Err(GraphicsError::ResourceLimit)
+    );
 }
 
 #[xila::task::test(task_path = xila::task)]
