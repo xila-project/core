@@ -1,13 +1,13 @@
 use std::ops::Deref;
 use std::path::Path;
 
-use crate::utilities::context::LvglContext;
 use crate::utilities::enumeration;
 use crate::utilities::file::write_token_stream_to_file;
 use crate::utilities::format::snake_to_upper_camel_case;
 use crate::utilities::function::{get_function_identifier, is_public_input};
 #[cfg(feature = "c_bindings")]
 use cbindgen::{EnumConfig, ExportConfig, FunctionConfig, RenameRule};
+use graphics_bindgen::{Call, registry::GraphicsRegistry};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
 use syn::{FnArg, Ident, ReturnType, Signature, Type};
@@ -229,11 +229,8 @@ fn generate_function(signature: &Signature) -> TokenStream {
     }
 }
 
-fn generate_enumeration(
-    path: impl AsRef<Path>,
-    lvgl_functions: &LvglContext,
-) -> Result<(), String> {
-    let enumeration = enumeration::generate_code(lvgl_functions.get_signatures().to_vec());
+fn generate_enumeration(path: impl AsRef<Path>, calls: &[&Call]) -> Result<(), String> {
+    let enumeration = enumeration::generate_calls(calls);
     let constants = graphics_bindgen::guest_constants::generate(lvgl_rust_sys::_bindgen_raw_src())
         .map_err(|error| error.to_string())?;
     let token_stream = quote! {
@@ -246,12 +243,8 @@ fn generate_enumeration(
     Ok(())
 }
 
-fn generate_functions(path: impl AsRef<Path>, lvgl_functions: &LvglContext) -> Result<(), String> {
-    let generated_functions = lvgl_functions
-        .get_signatures()
-        .iter()
-        .map(generate_function)
-        .collect::<Vec<_>>();
+fn generate_functions(path: impl AsRef<Path>, signatures: &[Signature]) -> Result<(), String> {
+    let generated_functions = signatures.iter().map(generate_function).collect::<Vec<_>>();
 
     let token_stream = quote! {
        use crate::prelude::*;
@@ -267,10 +260,9 @@ fn generate_functions(path: impl AsRef<Path>, lvgl_functions: &LvglContext) -> R
 #[cfg(feature = "c_bindings")]
 fn generate_c_abi_functions(
     path: impl AsRef<Path>,
-    lvgl_functions: &LvglContext,
+    signatures: &[Signature],
 ) -> Result<(), String> {
-    let generated_c_abi_functions = lvgl_functions
-        .get_signatures()
+    let generated_c_abi_functions = signatures
         .iter()
         .map(generate_c_function)
         .collect::<Vec<_>>();
@@ -291,22 +283,22 @@ fn generate_c_abi_functions(
     Ok(())
 }
 
-pub fn generate(output_path: &Path) {
-    let input = lvgl_rust_sys::_bindgen_raw_src();
-    let context = LvglContext::parse(input).expect("Error parsing LVGL ABI");
+pub fn generate(output_path: &Path, registry: &GraphicsRegistry<'_>) {
+    let calls = registry.calls();
+    let signatures: Vec<_> = calls.iter().map(|call| call.signature.clone()).collect();
 
     let enumerations_generated_path = output_path.join("enumeration.generated.rs");
     let functions_generated_path = output_path.join("functions.generated.rs");
 
-    generate_enumeration(&enumerations_generated_path, &context).unwrap();
+    generate_enumeration(&enumerations_generated_path, calls).unwrap();
 
-    generate_functions(&functions_generated_path, &context).unwrap();
+    generate_functions(&functions_generated_path, &signatures).unwrap();
 
     #[cfg(feature = "c_bindings")]
     {
         let c_functions_generated_path = output_path.join("c_functions.generated.rs");
         let c_header_path = output_path.join("xila_graphics.h");
-        generate_c_abi_functions(&c_functions_generated_path, &context).unwrap();
+        generate_c_abi_functions(&c_functions_generated_path, &signatures).unwrap();
 
         let configuration: cbindgen::Config = cbindgen::Config {
             language: cbindgen::Language::C,
