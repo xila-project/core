@@ -301,6 +301,54 @@ fn generate() {
             "None",
             None,
         ),
+        (
+            "object_set_background",
+            &["*mut lv_obj_t", "u32", "u8", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "object_set_text_color",
+            &["*mut lv_obj_t", "u32", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "object_set_border",
+            &["*mut lv_obj_t", "u32", "i32", "u32", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "object_set_radius",
+            &["*mut lv_obj_t", "i32", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "object_set_text_align",
+            &["*mut lv_obj_t", "u32", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "object_set_font",
+            &["*mut lv_obj_t", "u32", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "object_set_surface",
+            &["*mut lv_obj_t", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "object_set_min_max_size",
+            &["*mut lv_obj_t", "i32", "i32", "i32", "i32", "u32"],
+            "None",
+            None,
+        ),
     ];
     let supported_names: Vec<_> = supported
         .iter()
