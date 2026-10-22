@@ -215,6 +215,11 @@ impl DirectCharacterDevice for CanvasScreenDevice {}
 
 #[cfg(test)]
 mod color_conversion_tests {
+    use alloc::{vec, vec::Vec};
+    use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
     fn scalar_swap(source: &[u8]) -> Vec<u8> {
         source
             .chunks_exact(4)
@@ -222,7 +227,7 @@ mod color_conversion_tests {
             .collect()
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn simd_matches_scalar_for_short_and_unaligned_rectangles() {
         for pixels in 0..=17 {
             let source: Vec<u8> = (0..pixels * 4)
@@ -234,11 +239,14 @@ mod color_conversion_tests {
         }
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn preserves_green_and_alpha_while_swapping_red_and_blue() {
         let source = [10, 20, 30, 40, 255, 128, 0, 77, 0, 255, 255, 255];
         let mut destination = [0; 12];
         unsafe { super::Inner::rgba_to_bgra_simd(&source, &mut destination) };
-        assert_eq!(destination, [30, 20, 10, 40, 0, 128, 255, 77, 255, 255, 0, 255]);
+        assert_eq!(
+            destination,
+            [30, 20, 10, 40, 0, 128, 255, 77, 255, 255, 0, 255]
+        );
     }
 }
