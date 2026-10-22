@@ -695,6 +695,294 @@ async fn line_copies_bounded_points_and_releases_on_delete() {
 }
 
 #[xila::task::test(task_path = xila::task)]
+async fn list_items_are_bounded_and_return_child_handles() {
+    let _standard = testing::initialize(false, false).await;
+    let manager = support::manager().await;
+    let mut bytes = [0; 256];
+    let mut memory = GuestMemory::new(&mut bytes);
+    let mut state = GraphicsState::new(Some(manager));
+    call(&mut state, &mut memory, Function::WindowCreate, &[], 1).unwrap();
+    let window = handle(&memory);
+    call(&mut state, &mut memory, Function::ListCreate, &[window], 1).unwrap();
+    let list = handle(&memory);
+    for (offset, text) in [
+        (64, b"Section\0".as_slice()),
+        (80, b"Open\0"),
+        (96, b"Renamed\0"),
+        (112, b"x\0"),
+    ] {
+        for (index, byte) in text.iter().enumerate() {
+            memory
+                .write(GuestPointer::<u8>::new(offset + index as WasmUsize), *byte)
+                .unwrap();
+        }
+    }
+    call(
+        &mut state,
+        &mut memory,
+        Function::ListAddText,
+        &[list, 64],
+        1,
+    )
+    .unwrap();
+    let section = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::ListAddTextButton,
+        &[list, 80],
+        1,
+    )
+    .unwrap();
+    let button = handle(&memory);
+    let native_window = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
+    memory.write(GuestPointer::<u8>::new(64), b'!').unwrap();
+    memory.write(GuestPointer::<u8>::new(80), b'!').unwrap();
+    {
+        let _lock = manager.synchronous_lock();
+        let native_list = unsafe { lvgl::lv_obj_get_child(native_window, 0) };
+        let native_section = unsafe { lvgl::lv_obj_get_child(native_list, 0) };
+        let native_button = unsafe { lvgl::lv_obj_get_child(native_list, 1) };
+        assert_eq!(
+            unsafe { core::ffi::CStr::from_ptr(lvgl::lv_label_get_text(native_section)) }
+                .to_bytes(),
+            b"Section"
+        );
+        assert_eq!(
+            unsafe {
+                core::ffi::CStr::from_ptr(lvgl::lv_list_get_button_text(native_list, native_button))
+            }
+            .to_bytes(),
+            b"Open"
+        );
+    }
+    call(
+        &mut state,
+        &mut memory,
+        Function::ListSetButtonText,
+        &[list, button, 96],
+        0,
+    )
+    .unwrap();
+    {
+        let _lock = manager.synchronous_lock();
+        let native_list = unsafe { lvgl::lv_obj_get_child(native_window, 0) };
+        let native_section = unsafe { lvgl::lv_obj_get_child(native_list, 0) };
+        let native_button = unsafe { lvgl::lv_obj_get_child(native_list, 1) };
+        let section_text = unsafe { lvgl::lv_label_get_text(native_section) };
+        let button_text = unsafe { lvgl::lv_list_get_button_text(native_list, native_button) };
+        assert_eq!(
+            unsafe { core::ffi::CStr::from_ptr(section_text) }.to_bytes(),
+            b"Section"
+        );
+        assert_eq!(
+            unsafe { core::ffi::CStr::from_ptr(button_text) }.to_bytes(),
+            b"Renamed"
+        );
+    }
+    assert_ne!(section, button);
+
+    call(&mut state, &mut memory, Function::ListCreate, &[window], 1).unwrap();
+    let other_list = handle(&memory);
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ListSetButtonText,
+            &[other_list, button, 96],
+            0,
+        ),
+        Err(GraphicsError::InvalidHandle)
+    );
+    memory.write(GuestPointer::<u8>::new(255), b'x').unwrap();
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ListAddTextButton,
+            &[list, 255],
+            1,
+        ),
+        Err(GraphicsError::InvalidMemory)
+    );
+
+    for _ in 0..62 {
+        call(
+            &mut state,
+            &mut memory,
+            Function::ListAddTextButton,
+            &[list, 112],
+            1,
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ListAddTextButton,
+            &[list, 112],
+            1,
+        ),
+        Err(GraphicsError::ResourceLimit)
+    );
+}
+
+#[xila::task::test(task_path = xila::task)]
+async fn tileview_navigation_rejects_foreign_tiles() {
+    let _standard = testing::initialize(false, false).await;
+    let manager = support::manager().await;
+    let mut bytes = [0; 64];
+    let mut memory = GuestMemory::new(&mut bytes);
+    let mut state = GraphicsState::new(Some(manager));
+    call(&mut state, &mut memory, Function::WindowCreate, &[], 1).unwrap();
+    let window = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::TileviewCreate,
+        &[window],
+        1,
+    )
+    .unwrap();
+    let view = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::TileviewAddTile,
+        &[view, 0, 0, lvgl::lv_dir_t_LV_DIR_ALL as WasmUsize],
+        1,
+    )
+    .unwrap();
+    let first = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::TileviewAddTile,
+        &[view, 1, 0, lvgl::lv_dir_t_LV_DIR_LEFT as WasmUsize],
+        1,
+    )
+    .unwrap();
+    let second = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::TileviewSetTile,
+        &[view, second, 1],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::TileviewGetTileActive,
+        &[view],
+        1,
+    )
+    .unwrap();
+    assert_eq!(handle(&memory), second);
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::TileviewAddTile,
+            &[view, 0, 0, 0],
+            1,
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    call(
+        &mut state,
+        &mut memory,
+        Function::TileviewSetTile,
+        &[view, first, 1],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::TileviewGetTileActive,
+        &[view],
+        1,
+    )
+    .unwrap();
+    assert_eq!(handle(&memory), first);
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::TileviewAddTile,
+            &[view, 2, 0, 16],
+            1,
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    let mut last_tile = second;
+    for column in 2..32u32 {
+        call(
+            &mut state,
+            &mut memory,
+            Function::TileviewAddTile,
+            &[view, column as WasmUsize, 0, 0],
+            1,
+        )
+        .unwrap();
+        last_tile = handle(&memory);
+    }
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::TileviewAddTile,
+            &[view, 32, 0, 0],
+            1,
+        ),
+        Err(GraphicsError::ResourceLimit)
+    );
+    call(&mut state, &mut memory, Function::ObjectDelete, &[first], 0).unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::TileviewAddTile,
+        &[view, 0, 0, 0],
+        1,
+    )
+    .unwrap();
+    let _reused_position = handle(&memory);
+    assert_ne!(last_tile, _reused_position);
+
+    call(
+        &mut state,
+        &mut memory,
+        Function::TileviewCreate,
+        &[window],
+        1,
+    )
+    .unwrap();
+    let other_view = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::TileviewAddTile,
+        &[other_view, 0, 0, 0],
+        1,
+    )
+    .unwrap();
+    let foreign = handle(&memory);
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::TileviewSetTile,
+            &[view, foreign, 0],
+            0,
+        ),
+        Err(GraphicsError::InvalidHandle)
+    );
+}
+
+#[xila::task::test(task_path = xila::task)]
 async fn grid_layout_copies_bounded_track_arrays_from_guest_memory() {
     let _standard = testing::initialize(false, false).await;
     let manager = support::manager().await;

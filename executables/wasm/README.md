@@ -138,20 +138,21 @@ step/digit-format operations, rollover, increment, and decrement. Most other
 widget-specific query/configuration APIs and advanced style properties remain
 unsupported. Chart supports bounded series slots and copied values; Line accepts
 bounded points copied into host-owned memory because LVGL retains the point
-array pointer.
+array pointer. List supports copied text sections/buttons with safe child
+handles, and Tileview supports bounded tile creation and active-tile navigation.
 
 - 256 issued object handles per execution, including subsequently deleted ones.
 - 64 map entries including the sentinel; 1024 bytes per NUL-terminated string.
 - 8192 retained map-string bytes per widget, including the native sentinel.
 - 1024 option-string bytes/64 entries per Dropdown or Roller, with an 8192-byte
-  per-VM retained high-water budget shared with Calendar's copied highlight
-  dates; Calendar accepts at most 32 dates. Roller infinite mode has a 512-byte
-  input cap to bound LVGL's repeated internal option storage.
+  per-VM retained high-water budget shared with Calendar highlights, Line points,
+  and List text. Calendar accepts at most 32 dates; Roller infinite mode has a
+  512-byte input cap to bound LVGL's repeated internal option storage.
 - Spinbox values are limited to ±1,000,000, step to 1..=1,000,000, and digit
   count to 1..=10. Calendar dates use Gregorian validation.
 - Chart allows up to 8 series and 128 values per series; Line allows up to 128
-  points. Retained Calendar/Line data shares an 8192-byte per-VM high-water
-  budget with Dropdown/Roller options.
+  points. List allows 64 child items and Tileview 32 live tiles per view; tile
+  coordinates must be unique within a view.
 - Null and empty-string guest map sentinels both become LVGL's empty-string
   terminator. Row separators are preserved.
 

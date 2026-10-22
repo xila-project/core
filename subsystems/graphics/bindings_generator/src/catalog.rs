@@ -44,6 +44,10 @@ fn extension_id(name: &str) -> Option<u16> {
         "chart_add_series_slot" => 0xf022,
         "chart_set_values" => 0xf023,
         "chart_get_value" => 0xf024,
+        "list_create" => 0xf025,
+        "list_add_text" => 0xf026,
+        "list_add_text_button" => 0xf027,
+        "list_set_button_text" => 0xf028,
         _ => return None,
     })
 }

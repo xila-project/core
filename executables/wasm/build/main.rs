@@ -392,6 +392,30 @@ fn generate() {
             "None",
             None,
         ),
+        (
+            "tileview_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "tileview_add_tile",
+            &["*mut lv_obj_t", "u8", "u8", "lv_dir_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "tileview_set_tile",
+            &["*mut lv_obj_t", "*mut lv_obj_t", "lv_anim_enable_t"],
+            "None",
+            None,
+        ),
+        (
+            "tileview_get_tile_active",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
     ];
     let extra: &[Adapter<'_>] = &[
         (
@@ -660,6 +684,30 @@ fn generate() {
             "I32",
             Some("i32"),
         ),
+        (
+            "list_add_text_button",
+            &["*mut lv_obj_t", "*const core::ffi::c_char"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "list_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "list_add_text",
+            &["*mut lv_obj_t", "*const core::ffi::c_char"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "list_set_button_text",
+            &["*mut lv_obj_t", "*mut lv_obj_t", "*const core::ffi::c_char"],
+            "None",
+            None,
+        ),
     ];
     let supported_names: Vec<_> = supported
         .iter()
@@ -689,6 +737,15 @@ fn generate() {
         AdapterRule::custom("chart_set_values", "dispatch_chart_set_values"),
         AdapterRule::custom("chart_get_value", "dispatch_chart_get_value"),
         AdapterRule::custom("line_set_points", "dispatch_line_set_points"),
+        AdapterRule::custom("list_add_text", "dispatch_list_add_text"),
+        AdapterRule::custom("list_add_text_button", "dispatch_list_add_text_button"),
+        AdapterRule::custom("list_set_button_text", "dispatch_list_set_button_text"),
+        AdapterRule::custom("tileview_add_tile", "dispatch_tileview_add_tile"),
+        AdapterRule::custom("tileview_set_tile", "dispatch_tileview_set_tile"),
+        AdapterRule::custom(
+            "tileview_get_tile_active",
+            "dispatch_tileview_get_tile_active",
+        ),
     ];
     let registry = GraphicsRegistry::new(&catalog, &supported_names, &adapter_rules)
         .unwrap_or_else(|error| panic!("invalid graphics registry: {error}"));
