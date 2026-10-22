@@ -365,11 +365,19 @@ async fn main(task_manager: &'static xila::task::Manager) {
     // explicitly join it before the final shutdown save.
     let autosave_running: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(true)));
     virtual_file_system
-        .mount_character_device(task, "/devices/power/control", drivers_core::PowerControlDevice::new(&xila::lifecycle::SYSTEM))
+        .mount_character_device(
+            task,
+            "/devices/power/control",
+            drivers_core::PowerControlDevice::new(&xila::lifecycle::SYSTEM),
+        )
         .await
         .expect("Failed to mount power control");
     virtual_file_system
-        .set_permissions(task, &"/devices/power/control", xila::file_system::Permissions::USER_READ_WRITE)
+        .set_permissions(
+            task,
+            &"/devices/power/control",
+            xila::file_system::Permissions::USER_READ_WRITE,
+        )
         .await
         .expect("Failed to restrict power control to root");
 
