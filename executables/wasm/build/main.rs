@@ -350,6 +350,48 @@ fn generate() {
         ),
         ("spinbox_increment", &["*mut lv_obj_t"], "None", None),
         ("spinbox_decrement", &["*mut lv_obj_t"], "None", None),
+        (
+            "chart_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "chart_set_type",
+            &["*mut lv_obj_t", "lv_chart_type_t"],
+            "None",
+            None,
+        ),
+        (
+            "chart_set_point_count",
+            &["*mut lv_obj_t", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "chart_set_axis_range",
+            &["*mut lv_obj_t", "lv_chart_axis_t", "i32", "i32"],
+            "None",
+            None,
+        ),
+        (
+            "line_create",
+            &["*mut lv_obj_t"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "line_set_points",
+            &["*mut lv_obj_t", "*const lv_point_precise_t", "u32"],
+            "None",
+            None,
+        ),
+        (
+            "line_set_y_invert",
+            &["*mut lv_obj_t", "bool"],
+            "None",
+            None,
+        ),
     ];
     let extra: &[Adapter<'_>] = &[
         (
@@ -600,6 +642,24 @@ fn generate() {
             "None",
             None,
         ),
+        (
+            "chart_add_series_slot",
+            &["*mut lv_obj_t", "u32"],
+            "U32",
+            Some("u32"),
+        ),
+        (
+            "chart_set_values",
+            &["*mut lv_obj_t", "u32", "*const i32", "usize"],
+            "None",
+            None,
+        ),
+        (
+            "chart_get_value",
+            &["*mut lv_obj_t", "u32", "u32"],
+            "I32",
+            Some("i32"),
+        ),
     ];
     let supported_names: Vec<_> = supported
         .iter()
@@ -625,6 +685,10 @@ fn generate() {
             "calendar_get_shown_date",
             "dispatch_calendar_get_shown_date",
         ),
+        AdapterRule::custom("chart_add_series_slot", "dispatch_chart_add_series"),
+        AdapterRule::custom("chart_set_values", "dispatch_chart_set_values"),
+        AdapterRule::custom("chart_get_value", "dispatch_chart_get_value"),
+        AdapterRule::custom("line_set_points", "dispatch_line_set_points"),
     ];
     let registry = GraphicsRegistry::new(&catalog, &supported_names, &adapter_rules)
         .unwrap_or_else(|error| panic!("invalid graphics registry: {error}"));

@@ -136,7 +136,9 @@ percentage conversion. Calendar supports validated today/shown dates, bounded
 copied highlights, and shown-date output. Spinbox supports bounded range/value/
 step/digit-format operations, rollover, increment, and decrement. Most other
 widget-specific query/configuration APIs and advanced style properties remain
-unsupported.
+unsupported. Chart supports bounded series slots and copied values; Line accepts
+bounded points copied into host-owned memory because LVGL retains the point
+array pointer.
 
 - 256 issued object handles per execution, including subsequently deleted ones.
 - 64 map entries including the sentinel; 1024 bytes per NUL-terminated string.
@@ -147,6 +149,9 @@ unsupported.
   input cap to bound LVGL's repeated internal option storage.
 - Spinbox values are limited to ±1,000,000, step to 1..=1,000,000, and digit
   count to 1..=10. Calendar dates use Gregorian validation.
+- Chart allows up to 8 series and 128 values per series; Line allows up to 128
+  points. Retained Calendar/Line data shares an 8192-byte per-VM high-water
+  budget with Dropdown/Roller options.
 - Null and empty-string guest map sentinels both become LVGL's empty-string
   terminator. Row separators are preserved.
 

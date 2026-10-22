@@ -56,6 +56,8 @@ pub(crate) enum Kind {
     Led,
     Calendar,
     Spinbox,
+    Chart,
+    Line,
 }
 
 struct Entry {
@@ -67,6 +69,9 @@ struct Entry {
     option_bytes: u16,
     calendar_highlights: Option<Vec<lvgl::lv_calendar_date_t>>,
     calendar_highlight_bytes: u16,
+    chart_series: Option<Vec<NonNull<lvgl::lv_chart_series_t>>>,
+    line_points: Option<Vec<lvgl::lv_point_precise_t>>,
+    line_point_bytes: u16,
 }
 
 pub struct GraphicsState {
@@ -109,6 +114,9 @@ impl GraphicsState {
                 entry.calendar_highlights = None;
                 deleted_option_bytes +=
                     core::mem::replace(&mut entry.calendar_highlight_bytes, 0) as usize;
+                entry.chart_series = None;
+                entry.line_points = None;
+                deleted_option_bytes += core::mem::replace(&mut entry.line_point_bytes, 0) as usize;
             }
         }
         self.grid_tracks = self.grid_tracks.saturating_sub(deleted_grid_tracks);
@@ -216,6 +224,9 @@ impl GraphicsState {
             option_bytes: 0,
             calendar_highlights: None,
             calendar_highlight_bytes: 0,
+            chart_series: None,
+            line_points: None,
+            line_point_bytes: 0,
         });
         Ok(self.entries.len() as WasmUsize)
     }
@@ -339,6 +350,107 @@ impl GraphicsState {
         let old = core::mem::replace(&mut entry.calendar_highlights, replacement);
         entry.calendar_highlight_bytes =
             u16::try_from(charge).map_err(|_| GraphicsError::ResourceLimit)?;
+        self.widget_options_bytes = used;
+        Ok((pointer, old))
+    }
+
+    pub(crate) fn chart_series_count(&self, handle: WasmUsize) -> Result<usize> {
+        let entry = self.entry(handle)?;
+        if entry.kind != Kind::Chart {
+            return Err(GraphicsError::InvalidHandle);
+        }
+        Ok(entry.chart_series.as_ref().map_or(0, Vec::len))
+    }
+
+    pub(crate) fn add_chart_series(
+        &mut self,
+        handle: WasmUsize,
+        series_pointer: NonNull<lvgl::lv_chart_series_t>,
+    ) -> Result<u32> {
+        let index = usize::try_from(handle)
+            .ok()
+            .and_then(|id| id.checked_sub(1))
+            .ok_or(GraphicsError::InvalidHandle)?;
+        let entry = self
+            .entries
+            .get_mut(index)
+            .ok_or(GraphicsError::InvalidHandle)?;
+        if entry.notification.live.get().is_null() {
+            return Err(GraphicsError::InvalidHandle);
+        }
+        if entry.kind != Kind::Chart {
+            return Err(GraphicsError::InvalidHandle);
+        }
+        let series = entry.chart_series.get_or_insert_with(Vec::new);
+        if series.len() >= 8 {
+            return Err(GraphicsError::ResourceLimit);
+        }
+        let slot = u32::try_from(series.len()).map_err(|_| GraphicsError::ResourceLimit)?;
+        series.push(series_pointer);
+        Ok(slot)
+    }
+
+    pub(crate) fn chart_series(
+        &self,
+        handle: WasmUsize,
+        slot: WasmUsize,
+    ) -> Result<NonNull<lvgl::lv_chart_series_t>> {
+        let entry = self.entry(handle)?;
+        if entry.kind != Kind::Chart {
+            return Err(GraphicsError::InvalidHandle);
+        }
+        let index = usize::try_from(slot).map_err(|_| GraphicsError::InvalidHandle)?;
+        entry
+            .chart_series
+            .as_ref()
+            .and_then(|series| series.get(index))
+            .copied()
+            .ok_or(GraphicsError::InvalidHandle)
+    }
+
+    pub(crate) fn replace_line_points(
+        &mut self,
+        handle: WasmUsize,
+        points: Vec<lvgl::lv_point_precise_t>,
+    ) -> Result<(
+        *const lvgl::lv_point_precise_t,
+        Option<Vec<lvgl::lv_point_precise_t>>,
+    )> {
+        let new_bytes = points
+            .len()
+            .checked_mul(core::mem::size_of::<lvgl::lv_point_precise_t>())
+            .ok_or(GraphicsError::ResourceLimit)?;
+        if new_bytes > MAX_WIDGET_OPTIONS_BYTES_PER_VM {
+            return Err(GraphicsError::ResourceLimit);
+        }
+        let index = usize::try_from(handle)
+            .ok()
+            .and_then(|id| id.checked_sub(1))
+            .ok_or(GraphicsError::InvalidHandle)?;
+        let entry = self
+            .entries
+            .get(index)
+            .ok_or(GraphicsError::InvalidHandle)?;
+        if entry.notification.live.get().is_null() || entry.kind != Kind::Line {
+            return Err(GraphicsError::InvalidHandle);
+        }
+        let previous = usize::from(entry.line_point_bytes);
+        let charge = previous.max(new_bytes);
+        let used = updated_widget_options_usage(self.widget_options_bytes, previous, new_bytes)?;
+        let pointer = if points.is_empty() {
+            core::ptr::null()
+        } else {
+            points.as_ptr()
+        };
+        let charge = u16::try_from(charge).map_err(|_| GraphicsError::ResourceLimit)?;
+        let entry = &mut self.entries[index];
+        let replacement = if points.is_empty() {
+            None
+        } else {
+            Some(points)
+        };
+        let old = core::mem::replace(&mut entry.line_points, replacement);
+        entry.line_point_bytes = charge;
         self.widget_options_bytes = used;
         Ok((pointer, old))
     }
