@@ -65,6 +65,7 @@ sleep 250ms
 chmod 0640 notes.txt
 tree -L 2 /configuration
 realpath ../notes.txt /configuration
+cp notes.txt /temporary/notes-copy.txt
 help chmod
 ```
 
@@ -91,3 +92,8 @@ one directory handle per active level rather than collecting sibling entries.
 path. Relative paths use the current directory. Both paths must belong to the
 same mounted filesystem; the command reports the filesystem's rename error if
 the source or destination cannot be renamed.
+
+`cp SOURCE DESTINATION` streams a file into a new or truncated destination. If
+the destination is an existing directory, the source filename is appended to
+it. Directory sources, recursive copies, and copying a file onto itself are
+unsupported. The copy uses a fixed 512-byte buffer.

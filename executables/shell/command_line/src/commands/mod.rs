@@ -3,6 +3,7 @@ mod change_directory;
 mod chmod;
 mod clear;
 mod concatenate;
+mod cp;
 mod directory;
 mod dns;
 mod echo;
@@ -43,6 +44,7 @@ use self::{
     chmod::ChmodCommand,
     clear::ClearCommand,
     concatenate::ConcatenateCommand,
+    cp::CopyCommand,
     directory::{CreateDirectoryCommand, RemoveDirectoryCommand, RemoveFileCommand},
     dns::DnsResolveCommand,
     echo::EchoCommand,
@@ -128,6 +130,7 @@ pub enum UserCommandKind {
     Help,
     Tree,
     Move,
+    Copy,
     Link,
     ReadLink,
 }
@@ -246,6 +249,7 @@ const BUILTINS: &[(&str, UserCommandKind, &str)] = &[
     ("help", UserCommandKind::Help, help::HelpArguments::HELP),
     ("tree", UserCommandKind::Tree, tree::TreeArguments::HELP),
     ("mv", UserCommandKind::Move, mv::MoveArguments::HELP),
+    ("cp", UserCommandKind::Copy, cp::CopyArguments::HELP),
     ("sleep", UserCommandKind::Sleep, sleep::SleepArguments::HELP),
     ("chmod", UserCommandKind::Chmod, chmod::ChmodArguments::HELP),
     (
@@ -337,6 +341,7 @@ where
         UserCommandKind::Help => help::HelpCommand.execute(context, options, paths).await,
         UserCommandKind::Tree => TreeCommand.execute(context, options, paths).await,
         UserCommandKind::Move => MoveCommand.execute(context, options, paths).await,
+        UserCommandKind::Copy => CopyCommand.execute(context, options, paths).await,
         UserCommandKind::Link => ln::LinkCommand.execute(context, options, paths).await,
         UserCommandKind::ReadLink => ln::ReadLinkCommand.execute(context, options, paths).await,
     };
