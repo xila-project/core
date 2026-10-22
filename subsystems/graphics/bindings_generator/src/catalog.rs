@@ -13,6 +13,7 @@ fn extension_id(name: &str) -> Option<u16> {
         "keyboard_create" => 0xf003,
         "keyboard_set_textarea" => 0xf004,
         "object_set_padding" => 0xf005,
+        "grid_fr" => 0xf006,
         _ => return None,
     })
 }
