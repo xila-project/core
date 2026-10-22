@@ -387,10 +387,18 @@ async fn run_runtime(
             })?;
     }
 
-    vfs.mount_character_device(task, "/devices/power/control", drivers_core::PowerControlDevice::new(&xila::lifecycle::SYSTEM))
+    vfs.mount_character_device(
+        task,
+        "/devices/power/control",
+        drivers_core::PowerControlDevice::new(&xila::lifecycle::SYSTEM),
+    )
         .await
         .map_err(|error| format!("cannot mount power control: {error:?}"))?;
-    vfs.set_permissions(task, &"/devices/power/control", Permissions::USER_READ_WRITE)
+    vfs.set_permissions(
+        task,
+        &"/devices/power/control",
+        Permissions::USER_READ_WRITE,
+    )
         .await
         .map_err(|error| format!("cannot restrict power control: {error:?}"))?;
 
