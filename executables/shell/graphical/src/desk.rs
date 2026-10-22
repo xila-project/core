@@ -333,9 +333,9 @@ impl Desk {
         let shortcut = Shortcut::read(self.context, shortcut_name, &mut buffer).await?;
 
         let standard = Standard::open(
-            &"/devices/null",
-            &"/devices/null",
-            &"/devices/null",
+            &"/devices/standard_io/null",
+            &"/devices/standard_io/null",
+            &"/devices/standard_io/null",
             task,
             self.context.virtual_file_system,
             self.context,

@@ -117,6 +117,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
+name = "alsa"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "812947049edcd670a82cd5c73c3661d2e58468577ba8489de58e1a73c04cbd5d"
+dependencies = [
+ "alsa-sys",
+ "bitflags 2.13.2",
+ "cfg-if",
+ "libc",
+]
+
+[[package]]
+name = "alsa-sys"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad7569085a265dd3f607ebecce7458eaab2132a84393534c95b18dcbc3f31e04"
+dependencies = [
+ "libc",
+ "pkg-config",
+]
+
+[[package]]
+name = "ambient-authority"
+version = "0.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9d4ee0d472d1cd2e28c97dfa124b3d8d992e10eb0a035f33f5d12e3a177ba3b"
+
+[[package]]
 name = "android-activity"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -201,6 +229,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "application_metadata"
+version = "0.1.0"
+dependencies = [
+ "embedded-i18n",
+ "task",
+]
+
+[[package]]
 name = "arboard"
 version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -280,11 +316,18 @@ dependencies = [
 name = "authentication"
 version = "0.1.0"
 dependencies = [
+ "abi_definitions",
+ "application_metadata",
  "device",
+ "drivers_native",
+ "drivers_shared",
+ "drivers_std",
  "embedded-i18n",
  "file_system",
+ "little_fs",
  "miniserde",
  "task",
+ "time",
  "users",
  "virtual_file_system",
 ]
@@ -486,6 +529,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 name = "calculator"
 version = "0.1.0"
 dependencies = [
+ "application_metadata",
  "drivers_core",
  "drivers_native",
  "drivers_shared",
@@ -522,6 +566,36 @@ dependencies = [
  "rustix 0.38.44",
  "wayland-backend",
  "wayland-client",
+]
+
+[[package]]
+name = "cap-primitives"
+version = "4.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b5f74729fd2f44701d1a8eb47e906cdb3ccd9ec0f02baad85a744b791940b18"
+dependencies = [
+ "ambient-authority",
+ "fs-set-times",
+ "io-extras",
+ "io-lifetimes 3.0.1",
+ "ipnet",
+ "maybe-owned",
+ "rustix 1.1.5",
+ "rustix-linux-procfs",
+ "windows-sys 0.61.2",
+ "winx",
+]
+
+[[package]]
+name = "cap-std"
+version = "4.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1ec78e242cfa2cfe276807ac2ecc00315a6c97786977414bcd1c3963b6c91b8"
+dependencies = [
+ "cap-primitives",
+ "io-extras",
+ "io-lifetimes 3.0.1",
+ "rustix 1.1.5",
 ]
 
 [[package]]
@@ -654,6 +728,7 @@ dependencies = [
 name = "clock"
 version = "0.1.0"
 dependencies = [
+ "application_metadata",
  "embedded-i18n",
  "wasm",
 ]
@@ -812,6 +887,50 @@ dependencies = [
  "bitflags 1.3.2",
  "core-foundation",
  "libc",
+]
+
+[[package]]
+name = "coreaudio-rs"
+version = "0.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d5d7dca3ebcf65a035582c9ad4385371a9d9ee6537474d2a278f4e1e475bb58"
+dependencies = [
+ "bitflags 2.13.2",
+ "libc",
+ "objc2-audio-toolbox",
+ "objc2-core-audio",
+ "objc2-core-audio-types",
+ "objc2-core-foundation",
+]
+
+[[package]]
+name = "cpal"
+version = "0.18.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f02e8d0327b42d3e2e4ab2119af397344eb9fc54a34bf0ddeaa1277af8681f1"
+dependencies = [
+ "alsa",
+ "block2 0.6.2",
+ "coreaudio-rs",
+ "dasp_sample",
+ "jni",
+ "js-sys",
+ "libc",
+ "mach2",
+ "ndk",
+ "ndk-context",
+ "num-derive",
+ "num-traits",
+ "objc2 0.6.5",
+ "objc2-audio-toolbox",
+ "objc2-avf-audio",
+ "objc2-core-audio",
+ "objc2-core-audio-types",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+ "web-sys",
+ "windows",
+ "windows-core",
 ]
 
 [[package]]
@@ -991,6 +1110,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "dasp_sample"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c87e182de0887fd5361989c677c4e8f5000cd9491d6d563161a8f3a5519fc7f"
+
+[[package]]
+name = "debug_application"
+version = "0.1.0"
+dependencies = [
+ "debug_protocol",
+ "log 0.1.0",
+ "serde_json",
+ "xila",
+]
+
+[[package]]
+name = "debug_protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "defmt"
 version = "0.3.101"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1128,23 +1270,39 @@ name = "drivers_espressif"
 version = "0.1.0"
 
 [[package]]
+name = "drivers_headless"
+version = "0.1.0"
+dependencies = [
+ "file_system",
+ "graphics",
+ "shared",
+]
+
+[[package]]
 name = "drivers_native"
 version = "0.1.0"
 dependencies = [
  "arboard",
  "audio",
+ "cap-std",
  "critical-section",
+ "debug_protocol",
  "embassy-executor",
  "file_system",
  "graphics",
  "libc",
  "log 0.1.0",
+ "nanoaudio",
+ "nanoaudio-cpal",
  "pixels",
+ "png",
  "rand",
- "sdl2",
+ "rustix 1.1.5",
+ "serde_json",
  "shared",
  "synchronization",
  "task",
+ "users",
  "winit",
 ]
 
@@ -1199,6 +1357,7 @@ name = "drivers_wasm"
 version = "0.1.0"
 dependencies = [
  "abi_definitions",
+ "audio",
  "console_error_panic_hook",
  "console_log",
  "critical-section",
@@ -1211,6 +1370,7 @@ dependencies = [
  "little_fs",
  "log 0.1.0",
  "memory",
+ "nanoaudio-web",
  "shared",
  "synchronization",
  "task",
@@ -1378,18 +1538,18 @@ dependencies = [
 
 [[package]]
 name = "embedded-i18n"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c9771870987c29d3a6de8a07770c82a74d534ffb145e5dc5d3708d3286d245a"
+checksum = "5ce1668d5987e7a5675337485a41b37e5196a4951cb390028f99a3fca96733b7"
 dependencies = [
  "embedded-i18n-macros",
 ]
 
 [[package]]
 name = "embedded-i18n-macros"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6a0c8f5d9069c7417b966e9729924e0391fbc237f26953820ea1cc1d42a9b0e"
+checksum = "1e8b268917f1d9b4a473d8a2ec546088648b0fa849b1a8c6ebff39ab00ec0d6f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1461,6 +1621,7 @@ checksum = "0b5343afd4a8365a643ac588dab4cf234a190c7f6c88c9f6dd6ffe00837661b7"
 name = "executable"
 version = "0.1.0"
 dependencies = [
+ "application_metadata",
  "drivers_core",
  "drivers_native",
  "drivers_shared",
@@ -1514,6 +1675,7 @@ name = "file_manager"
 version = "0.1.0"
 dependencies = [
  "abi_definitions",
+ "application_metadata",
  "drivers_core",
  "drivers_native",
  "drivers_shared",
@@ -1529,6 +1691,7 @@ dependencies = [
 name = "file_system"
 version = "0.1.0"
 dependencies = [
+ "bitflags 2.13.2",
  "drivers_core",
  "drivers_native",
  "drivers_shared",
@@ -1617,14 +1780,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
 
 [[package]]
+name = "fs-set-times"
+version = "0.20.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94e7099f6313ecacbe1256e8ff9d617b75d1bcb16a6fddef94866d225a01a14a"
+dependencies = [
+ "io-lifetimes 2.0.4",
+ "rustix 1.1.5",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "fs_image"
 version = "0.1.0"
 dependencies = [
  "abi_definitions",
+ "application_metadata",
  "critical-section",
  "drivers_std",
  "file_system",
+ "libc",
  "little_fs",
+ "users",
 ]
 
 [[package]]
@@ -1925,6 +2102,7 @@ dependencies = [
  "task",
  "time",
  "users",
+ "virtual_file_system",
 ]
 
 [[package]]
@@ -2097,6 +2275,34 @@ checksum = "e0242819d153cba4b4b05a5a8f2a7e9bbf97b6055b2a002b395c96b5ff3c0222"
 dependencies = [
  "cfg-if",
 ]
+
+[[package]]
+name = "io-extras"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20fd6de4ccfcc187e38bc21cfa543cb5a302cb86a8b114eb7f0bf0dc9f8ac00f"
+dependencies = [
+ "io-lifetimes 3.0.1",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "io-lifetimes"
+version = "2.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06432fb54d3be7964ecd3649233cddf80db2832f47fec34c01f65b3d9d774983"
+
+[[package]]
+name = "io-lifetimes"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f0fb0570afe1fed943c5c3d4102d5358592d8625fda6a0007fdbe65a92fba96"
+
+[[package]]
+name = "ipnet"
+version = "2.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "791930b43c0d5973160d90a8f3894509f2b273430f5c5c73b668636d0287c5c0"
 
 [[package]]
 name = "is_terminal_polyfill"
@@ -2375,6 +2581,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "mach2"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
+
+[[package]]
 name = "managed"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2388,6 +2600,12 @@ checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
 dependencies = [
  "regex-automata",
 ]
+
+[[package]]
+name = "maybe-owned"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4facc753ae494aeb6e3c22f839b158aebd4f9270f55cd3c79906c45476c47ab4"
 
 [[package]]
 name = "memchr"
@@ -2408,6 +2626,7 @@ dependencies = [
 name = "memory"
 version = "0.1.0"
 dependencies = [
+ "bitflags 2.13.2",
  "critical-section",
  "linked_list_allocator",
  "log 0.1.0",
@@ -2511,8 +2730,8 @@ dependencies = [
 
 [[package]]
 name = "nanoaudio"
-version = "0.2.0"
-source = "git+https://github.com/AlixANNERAUD/nanoaudio.git?rev=e1419d7e301f66e8feed5de0ec23c2cf07e44c91#e1419d7e301f66e8feed5de0ec23c2cf07e44c91"
+version = "0.2.2"
+source = "git+https://github.com/AlixANNERAUD/nanoaudio.git?rev=596076c64827fd8bf9e8319addc2f215e0cde8be#596076c64827fd8bf9e8319addc2f215e0cde8be"
 dependencies = [
  "nanoaudio-buffer",
  "nanoaudio-core",
@@ -2522,19 +2741,52 @@ dependencies = [
 [[package]]
 name = "nanoaudio-buffer"
 version = "0.1.0"
-source = "git+https://github.com/AlixANNERAUD/nanoaudio.git?rev=e1419d7e301f66e8feed5de0ec23c2cf07e44c91#e1419d7e301f66e8feed5de0ec23c2cf07e44c91"
+source = "git+https://github.com/AlixANNERAUD/nanoaudio.git?rev=596076c64827fd8bf9e8319addc2f215e0cde8be#596076c64827fd8bf9e8319addc2f215e0cde8be"
 
 [[package]]
 name = "nanoaudio-core"
-version = "0.1.0"
-source = "git+https://github.com/AlixANNERAUD/nanoaudio.git?rev=e1419d7e301f66e8feed5de0ec23c2cf07e44c91#e1419d7e301f66e8feed5de0ec23c2cf07e44c91"
+version = "0.1.1"
+source = "git+https://github.com/AlixANNERAUD/nanoaudio.git?rev=596076c64827fd8bf9e8319addc2f215e0cde8be#596076c64827fd8bf9e8319addc2f215e0cde8be"
+
+[[package]]
+name = "nanoaudio-cpal"
+version = "0.1.1"
+source = "git+https://github.com/AlixANNERAUD/nanoaudio.git?rev=596076c64827fd8bf9e8319addc2f215e0cde8be#596076c64827fd8bf9e8319addc2f215e0cde8be"
+dependencies = [
+ "cpal",
+ "nanoaudio-buffer",
+ "nanoaudio-core",
+ "nanoaudio-dsp",
+]
 
 [[package]]
 name = "nanoaudio-dsp"
-version = "0.1.0"
-source = "git+https://github.com/AlixANNERAUD/nanoaudio.git?rev=e1419d7e301f66e8feed5de0ec23c2cf07e44c91#e1419d7e301f66e8feed5de0ec23c2cf07e44c91"
+version = "0.1.1"
+source = "git+https://github.com/AlixANNERAUD/nanoaudio.git?rev=596076c64827fd8bf9e8319addc2f215e0cde8be#596076c64827fd8bf9e8319addc2f215e0cde8be"
 dependencies = [
  "nanoaudio-core",
+]
+
+[[package]]
+name = "nanoaudio-synth"
+version = "0.1.0"
+source = "git+https://github.com/AlixANNERAUD/nanoaudio.git?rev=596076c64827fd8bf9e8319addc2f215e0cde8be#596076c64827fd8bf9e8319addc2f215e0cde8be"
+dependencies = [
+ "nanoaudio-dsp",
+]
+
+[[package]]
+name = "nanoaudio-web"
+version = "0.1.1"
+source = "git+https://github.com/AlixANNERAUD/nanoaudio.git?rev=596076c64827fd8bf9e8319addc2f215e0cde8be#596076c64827fd8bf9e8319addc2f215e0cde8be"
+dependencies = [
+ "js-sys",
+ "nanoaudio-buffer",
+ "nanoaudio-core",
+ "nanoaudio-dsp",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -2548,8 +2800,11 @@ name = "native_example"
 version = "0.1.0"
 dependencies = [
  "abi_definitions",
+ "audio",
  "command_line_shell",
+ "debug_application",
  "drivers_core",
+ "drivers_headless",
  "drivers_native",
  "drivers_shared",
  "drivers_std",
@@ -2614,6 +2869,7 @@ name = "network"
 version = "0.1.0"
 dependencies = [
  "abi_definitions",
+ "bitflags 2.13.2",
  "drivers_shared",
  "drivers_std",
  "embassy-futures",
@@ -2694,6 +2950,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73f88a1307638156682bada9d7604135552957b7818057dcef22705b4d509495"
 dependencies = [
  "num-traits",
+]
+
+[[package]]
+name = "num-derive"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed3955f1a9c7c0c15e092f9c887db08b1fc683305fdf6eb6684f22555355e202"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2812,6 +3079,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-audio-toolbox"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6948501a91121d6399b79abaa33a8aa4ea7857fe019f341b8c23ad6e81b79b08"
+dependencies = [
+ "bitflags 2.13.2",
+ "libc",
+ "objc2 0.6.5",
+ "objc2-core-audio",
+ "objc2-core-audio-types",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+]
+
+[[package]]
+name = "objc2-avf-audio"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13a380031deed8e99db00065c45937da434ca987c034e13b87e4441f9e4090be"
+dependencies = [
+ "bitflags 2.13.2",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
+]
+
+[[package]]
 name = "objc2-cloud-kit"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2836,6 +3129,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-core-audio"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1eebcea8b0dbff5f7c8504f3107c68fc061a3eb44932051c8cf8a68d969c3b2"
+dependencies = [
+ "dispatch2",
+ "objc2 0.6.5",
+ "objc2-core-audio-types",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+]
+
+[[package]]
+name = "objc2-core-audio-types"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a89f2ec274a0cf4a32642b2991e8b351a404d290da87bb6a9a9d8632490bd1c"
+dependencies = [
+ "bitflags 2.13.2",
+ "objc2 0.6.5",
+]
+
+[[package]]
 name = "objc2-core-data"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2854,7 +3170,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536"
 dependencies = [
  "bitflags 2.13.2",
+ "block2 0.6.2",
  "dispatch2",
+ "libc",
  "objc2 0.6.5",
 ]
 
@@ -2921,6 +3239,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3e0adef53c21f888deb4fa59fc59f7eb17404926ee8a6f59f5df0fd7f9f3272"
 dependencies = [
  "bitflags 2.13.2",
+ "block2 0.6.2",
+ "libc",
  "objc2 0.6.5",
  "objc2-core-foundation",
 ]
@@ -3184,6 +3504,9 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 [[package]]
 name = "peripherals"
 version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
 
 [[package]]
 name = "petgraph"
@@ -3232,6 +3555,7 @@ checksum = "13bee6c73da26345c729282832b60b0363cf3dd9f4bfd81d8551b7a1c889a113"
 name = "pixel_painter"
 version = "0.1.0"
 dependencies = [
+ "application_metadata",
  "embedded-i18n",
  "wasm",
 ]
@@ -3605,6 +3929,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustix-linux-procfs"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2fc84bf7e9aa16c4f2c758f27412dc9841341e16aa682d9c7ac308fe3ee12056"
+dependencies = [
+ "once_cell",
+ "rustix 1.1.5",
+]
+
+[[package]]
 name = "rustversion"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3651,29 +3985,6 @@ dependencies = [
  "memmap2",
  "smithay-client-toolkit",
  "tiny-skia",
-]
-
-[[package]]
-name = "sdl2"
-version = "0.38.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d42407afc6a8ab67e36f92e80b8ba34cbdc55aaeed05249efe9a2e8d0e9feef"
-dependencies = [
- "bitflags 1.3.2",
- "lazy_static",
- "libc",
- "sdl2-sys",
-]
-
-[[package]]
-name = "sdl2-sys"
-version = "0.38.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ff61407fc75d4b0bbc93dc7e4d6c196439965fbef8e4a4f003a36095823eac0"
-dependencies = [
- "cfg-if",
- "libc",
- "version-compare",
 ]
 
 [[package]]
@@ -3752,6 +4063,7 @@ name = "settings"
 version = "0.1.0"
 dependencies = [
  "abi_definitions",
+ "application_metadata",
  "const_format",
  "drivers_core",
  "drivers_native",
@@ -4004,6 +4316,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "synth"
+version = "0.1.0"
+dependencies = [
+ "application_metadata",
+ "audio",
+ "file_system",
+ "nanoaudio",
+ "nanoaudio-synth",
+ "wasm",
+]
+
+[[package]]
 name = "target"
 version = "0.1.0"
 
@@ -4067,6 +4391,7 @@ name = "terminal"
 version = "0.1.0"
 dependencies = [
  "abi_definitions",
+ "application_metadata",
  "command_line_shell",
  "drivers_core",
  "drivers_native",
@@ -4100,6 +4425,15 @@ dependencies = [
  "time",
  "users",
  "virtual_file_system",
+]
+
+[[package]]
+name = "text_editor"
+version = "0.1.0"
+dependencies = [
+ "application_metadata",
+ "embedded-i18n",
+ "wasm",
 ]
 
 [[package]]
@@ -4436,12 +4770,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
-name = "version-compare"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "579a42fc0b8e0c63b76519a339be31bed574929511fa53c1a3acae26eb258f29"
-
-[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4452,6 +4780,7 @@ name = "virtual_file_system"
 version = "0.1.0"
 dependencies = [
  "abi_definitions",
+ "application_metadata",
  "drivers_core",
  "drivers_native",
  "drivers_shared",
@@ -4498,6 +4827,8 @@ name = "wasm"
 version = "0.1.0"
 dependencies = [
  "abi_definitions",
+ "application_metadata",
+ "audio",
  "cbindgen",
  "command_line_shell",
  "drivers_core",
@@ -4654,6 +4985,7 @@ dependencies = [
  "terminal",
  "wasm",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "wasm-bindgen-test",
  "web-sys",
  "xila",
@@ -4855,6 +5187,7 @@ dependencies = [
 name = "weather"
 version = "0.1.0"
 dependencies = [
+ "application_metadata",
  "drivers_core",
  "drivers_native",
  "drivers_shared",
@@ -5382,6 +5715,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "winx"
+version = "0.36.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f3fd376f71958b862e7afb20cfe5a22830e1963462f3a17f49d82a6c1d1f42d"
+dependencies = [
+ "bitflags 2.13.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

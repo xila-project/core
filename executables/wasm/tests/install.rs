@@ -10,7 +10,7 @@ use xila::{
 async fn execute(standard: &Standard<'static>, arguments: Vec<String>) -> isize {
     executable::execute(
         standard.context,
-        "/binaries/wasm",
+        "/applications/executables/wasm",
         arguments,
         standard.duplicate().await.unwrap(),
         None,
@@ -30,11 +30,11 @@ async fn install_selects_install_export_and_never_falls_back_to_main() {
         context,
         context.virtual_file_system,
         task,
-        &[("/binaries/wasm", wasm::WasmExecutable)]
+        &[("/applications/executables/wasm", wasm::WasmExecutable)]
     )
     .await
     .unwrap();
-    let path = "/binaries/install-fixture.wasm";
+    let path = "/applications/executables/install-fixture.wasm";
     let import = r#"(import "wasi_snapshot_preview1" "proc_exit" (func $exit (param i32)))"#;
     let expensive_callee = format!(
         "(func $work {}) (func (export \"_start\") call $work)",
@@ -64,7 +64,7 @@ async fn install_selects_install_export_and_never_falls_back_to_main() {
             r#"(func (export "_start") i32.const 0 call $exit)
              (func (export "__install") i32.const 7 call $exit)"#,
             vec!["--install".into(), path.into()],
-            -1,
+            -7,
         ),
         (
             r#"(func (export "_start") i32.const 0 call $exit)"#,
@@ -102,7 +102,7 @@ async fn install_selects_install_export_and_never_falls_back_to_main() {
     .enumerate()
     {
         let binary = wat::parse_str(format!("(module {import} {exports})")).unwrap();
-        let fixture_path = format!("/binaries/install-fixture-{index}.wasm");
+        let fixture_path = format!("/applications/executables/install-fixture-{index}.wasm");
         let arguments = arguments
             .into_iter()
             .map(|argument: String| {
@@ -137,16 +137,23 @@ async fn install_selects_install_export_and_never_falls_back_to_main() {
         assert!(context.graphics_manager.is_none());
         context
             .virtual_file_system
-            .create_directory(task, &"/configuration/shared/shortcuts")
+            .create_directory(task, &"/configuration/shared/applications")
+            .await
+            .unwrap();
+        context
+            .virtual_file_system
+            .create_directory(task, &"/configuration/shared/applications/shortcuts")
             .await
             .unwrap();
         for (app, name) in [
             ("calculator", "Calculator"),
             ("weather", "Weather"),
             ("clock", "Clock"),
+            ("synth", "Synth"),
+            ("text_editor", "Text Editor"),
         ] {
             let binary = executable::build_crate(app).unwrap();
-            let path = format!("/binaries/{app}");
+            let path = format!("/applications/executables/{app}");
             drivers_std::loader::load_to_virtual_file_system(
                 context.task_manager,
                 context.virtual_file_system,
@@ -155,13 +162,15 @@ async fn install_selects_install_export_and_never_falls_back_to_main() {
             )
             .await
             .unwrap();
-            assert_eq!(
-                execute(&standard, vec!["--install".into(), path.clone()]).await,
-                0,
-                "{app}"
-            );
+            let exit = execute(&standard, vec!["--install".into(), path.clone()]).await;
+            context
+                .virtual_file_system
+                .remove(task, path.as_str())
+                .await
+                .unwrap();
+            assert_eq!(exit, 0, "{app}");
             let mut contents = Vec::new();
-            let shortcut_path = format!("/configuration/shared/shortcuts/{app}.json");
+            let shortcut_path = format!("/configuration/shared/applications/shortcuts/{app}.json");
             File::read_from_path(
                 context.virtual_file_system,
                 task,
@@ -172,7 +181,7 @@ async fn install_selects_install_export_and_never_falls_back_to_main() {
             .unwrap();
             let shortcut = core::str::from_utf8(&contents).unwrap();
             assert!(shortcut.contains(&format!(r#""name": "{name}""#)));
-            assert!(shortcut.contains(r#""command": "/binaries/wasm""#));
+            assert!(shortcut.contains(r#""command": "/applications/executables/wasm""#));
             assert!(shortcut.contains(&format!(r#""arguments": ["{path}"]"#)));
         }
     }

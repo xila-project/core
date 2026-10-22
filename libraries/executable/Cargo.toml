@@ -1,0 +1,29 @@
+[package]
+name = "executable"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+file_system = { workspace = true }
+virtual_file_system = { workspace = true }
+task = { workspace = true }
+users = { workspace = true }
+shared = { workspace = true }
+log = { workspace = true }
+embedded-i18n = { workspace = true }
+application_metadata = { workspace = true }
+graphics = { workspace = true, optional = true }
+network = { workspace = true }
+time = { workspace = true }
+synchronization = { workspace = true }
+
+[dev-dependencies]
+drivers_native = { workspace = true }
+drivers_core = { workspace = true }
+drivers_shared = { workspace = true }
+drivers_std = { workspace = true }
+
+[features]
+default = []
+building = []
+graphics = ["dep:graphics"]

@@ -5,6 +5,7 @@ edition = "2024"
 build = "build/main.rs"
 
 [dependencies]
+application_metadata = { workspace = true }
 wasmi = { version = "2.0.0", default-features = false, features = [
   "validate",
   "memory64",
@@ -41,7 +42,7 @@ graphics = [
 ]
 
 [build-dependencies]
-graphics_bindgen = { path = "../../modules/graphics/bindings_generator", optional = true }
+graphics_bindgen = { path = "../../subsystems/graphics/bindings_generator", optional = true }
 lvgl_rust_sys = { workspace = true, optional = true }
 quote = { workspace = true, optional = true }
 syn = { workspace = true, features = ["full", "extra-traits"], optional = true }
@@ -57,6 +58,7 @@ abi_definitions = { workspace = true }
 command_line_shell = { workspace = true }
 executable = { workspace = true, features = ["building"] }
 testing = { workspace = true }
+audio = { workspace = true }
 wat = "1"
 
 [[test]]

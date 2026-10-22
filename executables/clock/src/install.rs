@@ -1,21 +1,14 @@
 #[unsafe(no_mangle)]
 pub extern "C" fn __install() {
     let result = (|| -> std::io::Result<()> {
-        std::fs::create_dir_all("/configuration/shared/shortcuts")?;
+        std::fs::create_dir_all("/configuration/shared/applications/shortcuts")?;
         std::fs::write(
-            "/configuration/shared/shortcuts/clock.json",
-            r#"{
-    "name": "Clock",
-    "command": "/binaries/wasm",
-    "arguments": ["/binaries/clock"],
-    "terminal": false,
-    "icon_string": "Cl",
-    "icon_color": [59, 130, 246]
-}"#,
+            "/configuration/shared/applications/shortcuts/clock.json",
+            application_metadata::shortcut("clock").unwrap(),
         )
     })();
     if let Err(error) = result {
-        eprintln!("Clock installation failed: {error}");
+        eprintln!("Installation failed: {error}");
         std::process::exit(1);
     }
 }

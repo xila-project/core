@@ -1,0 +1,22 @@
+{
+  "Text Editor": "Text Editor",
+  "Previous": "Previous",
+  "Next": "Next",
+  "New": "New",
+  "Open": "Open",
+  "Save": "Save",
+  "Choose a path, then create or open a text file": "Choose a path, then create or open a text file",
+  "Unsaved changes - close again to discard": "Unsaved changes - close again to discard",
+  "Unsaved changes - choose New or Open again to discard": "Unsaved changes - choose New or Open again to discard",
+  "Enter an absolute file path": "Enter an absolute file path",
+  "Open or create a file first": "Open or create a file first",
+  "Could not create a working copy in this directory": "Could not create a working copy in this directory",
+  "New text file": "New text file",
+  "Opened": "Opened",
+  "Open failed - use a UTF-8 text file and check storage": "Open failed - use a UTF-8 text file and check storage",
+  "Saved": "Saved",
+  "Save failed - working copy kept; check path and storage": "Save failed - working copy kept; check path and storage",
+  "Page text must fit within 4096 UTF-8 bytes": "Page text must fit within 4096 UTF-8 bytes",
+  "Edit failed - close again to discard changes": "Edit failed - close again to discard changes",
+  "Edit failed - reopen the source file": "Edit failed - reopen the source file"
+}

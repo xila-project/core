@@ -3,6 +3,7 @@ mod change_directory;
 mod chmod;
 mod clear;
 mod concatenate;
+mod cp;
 mod directory;
 mod dns;
 mod echo;
@@ -14,6 +15,7 @@ mod head;
 mod help;
 mod ip;
 mod list;
+mod ln;
 mod mv;
 mod ping;
 mod print_working_directory;
@@ -42,6 +44,7 @@ use self::{
     chmod::ChmodCommand,
     clear::ClearCommand,
     concatenate::ConcatenateCommand,
+    cp::CopyCommand,
     directory::{CreateDirectoryCommand, RemoveDirectoryCommand, RemoveFileCommand},
     dns::DnsResolveCommand,
     echo::EchoCommand,
@@ -127,6 +130,9 @@ pub enum UserCommandKind {
     Help,
     Tree,
     Move,
+    Copy,
+    Link,
+    ReadLink,
 }
 
 /// Names and help text shared by command resolution and `help`.
@@ -154,6 +160,16 @@ const BUILTINS: &[(&str, UserCommandKind, &str)] = &[
         "Usage: echo [TEXT]...\nPrint text and expand environment variables.",
     ),
     ("ls", UserCommandKind::List, list::ListArguments::HELP),
+    (
+        "ln",
+        UserCommandKind::Link,
+        "Usage: ln TARGET LINK\nCreate a symbolic link.",
+    ),
+    (
+        "readlink",
+        UserCommandKind::ReadLink,
+        "Usage: readlink LINK\nPrint a symbolic link target.",
+    ),
     ("clear", UserCommandKind::Clear, clear::ClearArguments::HELP),
     (
         "cat",
@@ -233,6 +249,7 @@ const BUILTINS: &[(&str, UserCommandKind, &str)] = &[
     ("help", UserCommandKind::Help, help::HelpArguments::HELP),
     ("tree", UserCommandKind::Tree, tree::TreeArguments::HELP),
     ("mv", UserCommandKind::Move, mv::MoveArguments::HELP),
+    ("cp", UserCommandKind::Copy, cp::CopyArguments::HELP),
     ("sleep", UserCommandKind::Sleep, sleep::SleepArguments::HELP),
     ("chmod", UserCommandKind::Chmod, chmod::ChmodArguments::HELP),
     (
@@ -324,6 +341,9 @@ where
         UserCommandKind::Help => help::HelpCommand.execute(context, options, paths).await,
         UserCommandKind::Tree => TreeCommand.execute(context, options, paths).await,
         UserCommandKind::Move => MoveCommand.execute(context, options, paths).await,
+        UserCommandKind::Copy => CopyCommand.execute(context, options, paths).await,
+        UserCommandKind::Link => ln::LinkCommand.execute(context, options, paths).await,
+        UserCommandKind::ReadLink => ln::ReadLinkCommand.execute(context, options, paths).await,
     };
 
     match result {

@@ -1,0 +1,16 @@
+{
+  "AlreadyInitialized": "Já inicializado",
+  "AlreadySet": "Já definido",
+  "FailedToCreateThread": "Não foi possível criar a thread",
+  "FailedToSpawnThread": "Não foi possível iniciar a thread",
+  "InvalidEnvironmentVariable": "Variável de ambiente inválida",
+  "InvalidSpawnerIdentifier": "Identificador de spawner inválido",
+  "InvalidTaskIdentifier": "Identificador de tarefa inválido",
+  "NoSpawnerAvailable": "Nenhum spawner disponível",
+  "NoThreadForTask": "Nenhuma thread para a tarefa",
+  "NotInitialized": "Não inicializado",
+  "ThreadAlreadyRegistered": "Thread já registrada",
+  "ThreadNotRegistered": "Thread não registrada",
+  "TooManySpawners": "Spawners demais",
+  "TooManyTasks": "Tarefas demais"
+}

@@ -24,7 +24,7 @@ async fn main() {
         task_instance,
         virtual_file_system,
         binary_path,
-        "/binaries/weather.wasm",
+        "/applications/executables/weather.wasm",
     )
     .await
     .unwrap();
@@ -33,15 +33,15 @@ async fn main() {
         context,
         virtual_file_system,
         task,
-        &[("/binaries/wasm", WasmExecutable)]
+        &[("/applications/executables/wasm", WasmExecutable)]
     )
     .await
     .unwrap();
 
     let result = executable::execute(
         context,
-        "/binaries/wasm",
-        vec!["/binaries/weather.wasm".to_string()],
+        "/applications/executables/wasm",
+        vec!["/applications/executables/weather.wasm".to_string()],
         standard,
         None,
     )

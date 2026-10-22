@@ -82,7 +82,7 @@ cargo test -p wasm --features graphics,xila/graphics_rendering_xrgb8888 \
   --test graphics_canvas --test pixel_painter
 ```
 
-- `modules/graphics/bindings_generator` discovers and orders one shared LVGL ABI
+- `subsystems/graphics/bindings_generator` discovers and orders one shared LVGL ABI
   catalog; unsupported calls keep their IDs. Wasmi's supported-call table checks
   full C signatures, not just argument counts. The catalog is compatible with
   guest bindings built from the same LVGL revision/configuration, not a stable
@@ -124,8 +124,13 @@ execution still requires APIs beyond the Calculator subset listed below.
 ### Supported calls and limits
 
 This first milestone supports windows (creation, icon, event pop), object
-creation/deletion, flex flow/grow, width/height, flags, labels (creation/text),
-button matrices (creation/map/selection), and percentage conversion.
+creation/deletion, position/size and scalar geometry queries, alignment,
+layout update, built-in default/flex/grid layout selection, flex flow/alignment/
+grow, width/height, flags, validated Grid tracks/placement/alignment, local
+background/text/border/radius/opacity/text-alignment/min-max styling, semantic
+theme surfaces and host font roles, labels (creation/text), button matrices
+(creation/map/selection), and percentage conversion. Most widget-specific
+query/configuration APIs and advanced style properties remain unsupported.
 
 - 256 issued object handles per execution, including subsequently deleted ones.
 - 64 map entries including the sentinel; 1024 bytes per NUL-terminated string.
@@ -156,6 +161,19 @@ suspension is not supported; WASI command guests should use exported `_start`.
 `--install` selects the guest's `__install: () -> ()` export instead of `_start`.
 A missing or incorrectly typed install export fails without launching main.
 The command-line stack-size option remains unimplemented.
+
+The current graphics ABI audit and staged delivery roadmap are tracked in
+[`GRAPHICS_ABI.md`](GRAPHICS_ABI.md). In particular,
+the generator currently emits more guest wrappers than the host implements;
+unsupported calls return status 4 and should not be treated as available APIs.
+
+Static audit of the current LVGL configuration: 28 surveyed widget families
+are enabled, while the guest generator emits 1,058 LVGL/Xila wrappers and the
+host supports 59 calls (including Xila helpers). Seven enabled widget families
+have creation adapters, but several remain partial. This is not a runtime or
+performance benchmark. The next ABI tranches are a shared host/guest support
+manifest and inventory, semantic style/font APIs, then the BTreeMap handle
+registry and typed bounded events; see issue #483 for scope and acceptance.
 
 The existing stdin fixture passes with a line of input. Running it with closed
 stdin (`/dev/null`) exposes an unrelated `drivers_std::StandardInDevice` bug:

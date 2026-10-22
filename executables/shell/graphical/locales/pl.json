@@ -1,0 +1,23 @@
+{
+  "Authentication failed: {}": "Uwierzytelnianie nie powiodło się: {}",
+  "Failed to add shortcut: {}": "Nie udało się dodać skrótu: {}",
+  "Failed to create object": "Nie udało się utworzyć obiektu",
+  "Failed to deserialize shortcut: {}": "Nie udało się zdeserializować skrótu: {}",
+  "Failed to execute shortcut: {}": "Nie udało się uruchomić skrótu: {}",
+  "Failed to get child": "Nie udało się pobrać elementu podrzędnego",
+  "Failed to get current task identifier: {}": "Nie udało się pobrać identyfikatora bieżącego zadania: {}",
+  "Failed to get shortcut file path": "Nie udało się uzyskać ścieżki pliku skrótu",
+  "Failed to open directory: {}": "Nie udało się otworzyć katalogu: {}",
+  "Failed to open standard file: {}": "Nie udało się otworzyć pliku standardowego: {}",
+  "Failed to read shortcut directory: {}": "Nie udało się odczytać katalogu skrótów: {}",
+  "Failed to read shortcut file: {}": "Nie udało się odczytać pliku skrótu: {}",
+  "Failed to set environment variable: {}": "Nie udało się ustawić zmiennej środowiskowej: {}",
+  "Failed to set task user: {}": "Nie udało się ustawić użytkownika zadania: {}",
+  "Graphics error: {}": "Błąd grafiki: {}",
+  "Invalid UTF-8: {}": "Nieprawidłowe UTF-8: {}",
+  "Login": "Zaloguj się",
+  "Missing arguments": "Brak argumentów",
+  "Null character in string: {}": "Znak zerowy w ciągu: {}",
+  "Password": "Hasło",
+  "User name": "Nazwa użytkownika"
+}

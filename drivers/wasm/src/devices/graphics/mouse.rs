@@ -87,20 +87,32 @@ impl MouseDevice {
 }
 
 impl DirectBaseOperations for MouseDevice {
-    fn read(&self, buffer: &mut [u8], _: Size) -> file_system::Result<usize> {
-        let data: &mut InputData = buffer
-            .try_into()
-            .map_err(|_| file_system::Error::InvalidParameter)?;
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            let data: &mut InputData = buffer
+                .try_into()
+                .map_err(|_| file_system::Error::InvalidParameter)?;
 
-        let inner = block_on(self.0.read());
+            let inner = block_on(self.0.read());
 
-        data.set(inner.position, inner.state);
+            data.set(inner.position, inner.state);
 
-        Ok(0)
+            Ok(0)
+        })
     }
 
-    fn write(&self, _: &[u8], _: Size) -> file_system::Result<usize> {
-        Err(file_system::Error::UnsupportedOperation)
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        _: &[u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
     }
 }
 

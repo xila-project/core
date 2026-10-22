@@ -1,7 +1,7 @@
 use super::canvas::{IndexedCanvas, MAX_CANVAS_PIXELS};
 use super::{
     error::{GraphicsError, Result},
-    marshal::ButtonMap,
+    marshal::{ButtonMap, GridTracks},
 };
 use crate::host::translation::WasmUsize;
 use alloc::{rc::Rc, vec::Vec};
@@ -9,6 +9,7 @@ use core::{cell::Cell, ptr::NonNull};
 use xila::graphics::{Manager, Window, lvgl};
 
 pub const MAX_OBJECTS: usize = 256;
+pub const MAX_GRID_TRACKS_PER_VM: usize = 512;
 
 /// Shared callback data never aliases the registry's mutable entries. LVGL holds
 /// one Rc until DELETE, and the registry holds another until VM teardown.
@@ -50,11 +51,13 @@ struct Entry {
     kind: Kind,
     map: Option<ButtonMap>,
     canvas: Option<Vec<IndexedCanvas>>,
+    grid: Option<GridTracks>,
 }
 
 pub struct GraphicsState {
     pub(crate) manager: Option<&'static Manager>,
     entries: Vec<Entry>,
+    grid_tracks: usize,
 }
 
 impl GraphicsState {
@@ -62,6 +65,7 @@ impl GraphicsState {
         Self {
             manager,
             entries: Vec::new(),
+            grid_tracks: 0,
         }
     }
 
@@ -77,12 +81,15 @@ impl GraphicsState {
     /// DELETE callbacks only invalidate: LVGL can still read maps while tearing
     /// down an object, so release retained buffers here, not in the callback.
     pub(crate) fn reap_deleted_maps(&mut self) {
+        let mut deleted_grid_tracks = 0;
         for entry in &mut self.entries {
             if entry.notification.live.get().is_null() {
                 entry.map = None;
                 entry.canvas = None;
+                deleted_grid_tracks += entry.grid.take().map_or(0, |grid| grid.track_count());
             }
         }
+        self.grid_tracks = self.grid_tracks.saturating_sub(deleted_grid_tracks);
     }
 
     fn entry(&self, handle: WasmUsize) -> Result<&Entry> {
@@ -176,6 +183,7 @@ impl GraphicsState {
             kind,
             map: None,
             canvas: None,
+            grid: None,
         });
         Ok(self.entries.len() as WasmUsize)
     }
@@ -185,6 +193,38 @@ impl GraphicsState {
         let entry = &mut self.entries[handle as usize - 1];
         unsafe { lvgl::lv_buttonmatrix_set_map(entry.notification.live.get(), map.as_ptr()) };
         entry.map = Some(map);
+    }
+
+    pub(crate) fn set_grid_tracks(&mut self, handle: WasmUsize, tracks: GridTracks) -> Result<()> {
+        let index = usize::try_from(handle)
+            .ok()
+            .and_then(|id| id.checked_sub(1))
+            .ok_or(GraphicsError::InvalidHandle)?;
+        let entry = self
+            .entries
+            .get_mut(index)
+            .ok_or(GraphicsError::InvalidHandle)?;
+        let previous = entry.grid.as_ref().map_or(0, GridTracks::track_count);
+        let used = self
+            .grid_tracks
+            .checked_sub(previous)
+            .and_then(|used| used.checked_add(tracks.track_count()))
+            .ok_or(GraphicsError::ResourceLimit)?;
+        if used > MAX_GRID_TRACKS_PER_VM {
+            return Err(GraphicsError::ResourceLimit);
+        }
+        let object = entry.notification.live.get();
+        if object.is_null() {
+            return Err(GraphicsError::InvalidHandle);
+        }
+        // LVGL switches descriptors synchronously; the old host allocation is
+        // dropped only after this call returns.
+        unsafe {
+            lvgl::lv_obj_set_grid_dsc_array(object, tracks.columns_ptr(), tracks.rows_ptr());
+        }
+        entry.grid = Some(tracks);
+        self.grid_tracks = used;
+        Ok(())
     }
 
     pub(crate) fn install_canvas(

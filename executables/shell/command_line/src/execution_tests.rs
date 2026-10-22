@@ -10,7 +10,7 @@ async fn shell() -> Shell {
     standard.standard_in = File::open(
         context.virtual_file_system,
         task,
-        "/devices/null",
+        "/devices/standard_io/null",
         AccessFlags::Read.into(),
     )
     .await
@@ -198,7 +198,10 @@ async fn bounded_pipelines_stream_large_output_and_close_early_consumers() {
         context,
         virtual_file_system,
         task,
-        &[(&"/binaries/read-one", ReadOne), (&"/binaries/fail", Fail)]
+        &[
+            (&"/applications/executables/read-one", ReadOne),
+            (&"/applications/executables/fail", Fail)
+        ]
     )
     .await
     .unwrap();
@@ -213,14 +216,16 @@ async fn bounded_pipelines_stream_large_output_and_close_early_consumers() {
     assert_eq!(contents(&shell, "/count").await.trim(), "3001");
     assert_eq!(
         shell
-            .execute_line(&format!("echo '{payload}'|/binaries/read-one"))
+            .execute_line(&format!(
+                "echo '{payload}'|/applications/executables/read-one"
+            ))
             .await
             .unwrap(),
         0
     );
     assert_eq!(
         shell
-            .execute_line("/binaries/fail && echo wrong || echo correct")
+            .execute_line("/applications/executables/fail && echo wrong || echo correct")
             .await
             .unwrap(),
         0
@@ -230,8 +235,20 @@ async fn bounded_pipelines_stream_large_output_and_close_early_consumers() {
             .await
             .ends_with("correct\n")
     );
-    assert_eq!(shell.execute_line("true|/binaries/fail").await.unwrap(), 7);
-    assert_eq!(shell.execute_line("/binaries/fail|true").await.unwrap(), 0);
+    assert_eq!(
+        shell
+            .execute_line("true|/applications/executables/fail")
+            .await
+            .unwrap(),
+        7
+    );
+    assert_eq!(
+        shell
+            .execute_line("/applications/executables/fail|true")
+            .await
+            .unwrap(),
+        0
+    );
 }
 
 #[xila::task::test(task_path = xila::task)]
@@ -278,13 +295,15 @@ async fn background_jobs_release_the_prompt_and_have_independent_input() {
         context,
         virtual_file_system,
         task,
-        &[(&"/binaries/delayed", Delayed)]
+        &[(&"/applications/executables/delayed", Delayed)]
     )
     .await
     .unwrap();
     assert_eq!(
         shell
-            .execute_line("/binaries/delayed >/background & echo foreground>/foreground")
+            .execute_line(
+                "/applications/executables/delayed >/background & echo foreground>/foreground"
+            )
             .await
             .unwrap(),
         0
@@ -420,14 +439,27 @@ async fn duplicated_regular_streams_share_their_position() {
 
 struct FailingFlush;
 impl xila::file_system::DirectBaseOperations for FailingFlush {
-    fn read(&self, _: &mut [u8], _: xila::file_system::Size) -> xila::file_system::Result<usize> {
-        Ok(0)
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        _: &mut [u8],
+        _: xila::file_system::Size,
+    ) -> core::task::Poll<xila::file_system::Result<usize>> {
+        xila::file_system::ready(|| Ok(0))
     }
-    fn write(&self, bytes: &[u8], _: xila::file_system::Size) -> xila::file_system::Result<usize> {
-        Ok(bytes.len())
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        bytes: &[u8],
+        _: xila::file_system::Size,
+    ) -> core::task::Poll<xila::file_system::Result<usize>> {
+        xila::file_system::ready(|| Ok(bytes.len()))
     }
-    fn flush(&self) -> xila::file_system::Result<()> {
-        Err(xila::file_system::Error::InputOutput)
+    fn flush(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<xila::file_system::Result<()>> {
+        xila::file_system::ready(|| Err(xila::file_system::Error::InputOutput))
     }
 }
 impl xila::file_system::MountOperations for FailingFlush {}
@@ -740,7 +772,21 @@ async fn mv_checks_write_permission_on_both_parent_directories() {
             .unwrap(),
         1
     );
+    // The rejected operation must leave the source in place. Check it as its
+    // owner because the current user cannot traverse this directory.
+    shell
+        .context
+        .task_manager
+        .set_user(shell.task, owner)
+        .await
+        .unwrap();
     assert!(vfs.get_statistics(&"/mv-protected/source").await.is_ok());
+    shell
+        .context
+        .task_manager
+        .set_user(shell.task, other)
+        .await
+        .unwrap();
     assert_eq!(
         shell
             .execute_line("mv /mv-public/source /mv-protected/denied")

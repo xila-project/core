@@ -1,0 +1,23 @@
+{
+  "Authentication failed: {}": "Authentifizierung fehlgeschlagen: {}",
+  "Failed to add shortcut: {}": "Verknüpfung konnte nicht hinzugefügt werden: {}",
+  "Failed to create object": "Objekt konnte nicht erstellt werden",
+  "Failed to deserialize shortcut: {}": "Verknüpfung konnte nicht deserialisiert werden: {}",
+  "Failed to execute shortcut: {}": "Verknüpfung konnte nicht ausgeführt werden: {}",
+  "Failed to get child": "Untergeordnetes Element konnte nicht abgerufen werden",
+  "Failed to get current task identifier: {}": "Kennung der aktuellen Aufgabe konnte nicht abgerufen werden: {}",
+  "Failed to get shortcut file path": "Pfad der Verknüpfungsdatei konnte nicht ermittelt werden",
+  "Failed to open directory: {}": "Verzeichnis konnte nicht geöffnet werden: {}",
+  "Failed to open standard file: {}": "Standarddatei konnte nicht geöffnet werden: {}",
+  "Failed to read shortcut directory: {}": "Verknüpfungsverzeichnis konnte nicht gelesen werden: {}",
+  "Failed to read shortcut file: {}": "Verknüpfungsdatei konnte nicht gelesen werden: {}",
+  "Failed to set environment variable: {}": "Umgebungsvariable konnte nicht gesetzt werden: {}",
+  "Failed to set task user: {}": "Aufgabenbenutzer konnte nicht festgelegt werden: {}",
+  "Graphics error: {}": "Grafikfehler: {}",
+  "Invalid UTF-8: {}": "Ungültiges UTF-8: {}",
+  "Login": "Anmelden",
+  "Missing arguments": "Argumente fehlen",
+  "Null character in string: {}": "Nullzeichen in Zeichenfolge: {}",
+  "Password": "Passwort",
+  "User name": "Benutzername"
+}

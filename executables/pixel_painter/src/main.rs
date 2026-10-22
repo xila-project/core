@@ -9,13 +9,10 @@ mod storage;
 #[unsafe(no_mangle)]
 pub extern "C" fn __install() {
     let result = (|| -> std::io::Result<()> {
-        std::fs::create_dir_all("/configuration/shared/shortcuts")?;
+        std::fs::create_dir_all("/configuration/shared/applications/shortcuts")?;
         std::fs::write(
-            "/configuration/shared/shortcuts/pixel_painter.json",
-            format!(
-                r#"{{"name":"{}","command":"/binaries/wasm","arguments":["/binaries/pixel_painter"],"terminal":false,"icon_string":"Pa","icon_color":[142,36,170]}}"#,
-                embedded_i18n::translate!("Pixel Painter")
-            ),
+            "/configuration/shared/applications/shortcuts/pixel_painter.json",
+            application_metadata::shortcut("pixel_painter").unwrap(),
         )
     })();
     if let Err(error) = result {

@@ -1,0 +1,13 @@
+[package]
+name = "audio"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+file_system = { workspace = true }
+shared = { workspace = true }
+synchronization = { workspace = true }
+nanoaudio = { workspace = true, features = ["buffer", "dsp"] }
+
+[dev-dependencies]
+critical-section = { workspace = true, features = ["std"] }

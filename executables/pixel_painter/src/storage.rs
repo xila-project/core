@@ -5,7 +5,11 @@ use std::{
 };
 
 #[cfg(target_arch = "wasm32")]
-pub const DEFAULT_PATH: &str = "/configuration/shared/pixel_painter/drawing.xpnt";
+pub fn default_path() -> Option<String> {
+    std::env::var("XILA_APPLICATION_DATA")
+        .ok()
+        .map(|directory| format!("{directory}/drawing.xpnt"))
+}
 
 pub fn read(path: &str) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::with_capacity(FILE_SIZE + 1);

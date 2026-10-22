@@ -88,6 +88,12 @@ extern "C" {
     fn release(this: &Reservation);
 }
 
+#[wasm_bindgen(module = "/src/devices/seed.mjs")]
+extern "C" {
+    #[wasm_bindgen(catch, js_name = importSeed)]
+    async fn import_seed(url: &str, data: &Uint8Array) -> Result<JsValue, JsValue>;
+}
+
 struct Lease(Reservation);
 
 impl Drop for Lease {
@@ -246,6 +252,27 @@ impl DriveDevice {
         ))
     }
 
+    /// Import a reference image into an uncommitted cache only for an absent
+    /// or zero-byte disk. The caller must validate/mount it before `sync`.
+    /// Existing disks never fetch a reference image.
+    pub async fn new_seeded(name: &Path, size: usize, seed_url: &str) -> file_system::Result<Self> {
+        let drive = Self::new(name, size).await?;
+        if drive.is_new() {
+            let data = drive.0.inner.try_get()?.data.clone();
+            import_seed(seed_url, &data).await.map_err(map_error)?;
+        }
+        Ok(drive)
+    }
+
+    /// Abandon the cache without committing it and release the disk lease.
+    /// Intended for startup failures before the filesystem becomes usable.
+    /// Unlike `unmount`, this explicitly discards unsaved changes. A running
+    /// save must finish first; this never races an OPFS commit.
+    pub fn discard_unsaved(&self) -> file_system::Result<()> {
+        let _save = self.0.saving.try_lock().map_err(|_| Error::RessourceBusy)?;
+        self.0.inner.unmount()
+    }
+
     /// Whether the disk had no committed image when it was opened. This stays
     /// unchanged after saves so boot code can distinguish initial formatting
     /// from mounting an existing installation, even if its metadata is invalid.
@@ -281,40 +308,54 @@ impl DriveDevice {
 }
 
 impl DirectBaseOperations for DriveDevice {
-    fn read(&self, buffer: &mut [u8], position: Size) -> file_system::Result<usize> {
-        let inner = self.0.inner.try_get()?;
-        let position = u32::try_from(position).map_err(|_| Error::InvalidParameter)?;
-        let size = inner.data.length();
-        if position > size {
-            return Err(Error::InvalidParameter);
-        }
-        let count = buffer.len().min((size - position) as usize);
-        inner
-            .data
-            .subarray(position, position + count as u32)
-            .copy_to(&mut buffer[..count]);
-        Ok(count)
-    }
-
-    fn write(&self, buffer: &[u8], position: Size) -> file_system::Result<usize> {
-        if !self.0.accepting_writes.load(Ordering::Acquire) {
-            return Err(Error::RessourceBusy);
-        }
-        let mut inner = self.0.inner.try_get()?;
-        let position = u32::try_from(position).map_err(|_| Error::InvalidParameter)?;
-        let size = inner.data.length();
-        if position > size {
-            return Err(Error::InvalidParameter);
-        }
-        let count = buffer.len().min((size - position) as usize);
-        if count != 0 {
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        position: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            let inner = self.0.inner.try_get()?;
+            let position = u32::try_from(position).map_err(|_| Error::InvalidParameter)?;
+            let size = inner.data.length();
+            if position > size {
+                return Err(Error::InvalidParameter);
+            }
+            let count = buffer.len().min((size - position) as usize);
             inner
                 .data
                 .subarray(position, position + count as u32)
-                .copy_from(&buffer[..count]);
-            inner.generation = inner.generation.wrapping_add(1);
-        }
-        Ok(count)
+                .copy_to(&mut buffer[..count]);
+            Ok(count)
+        })
+    }
+
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        position: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            if !self.0.accepting_writes.load(Ordering::Acquire) {
+                return Err(Error::RessourceBusy);
+            }
+            let mut inner = self.0.inner.try_get()?;
+            let position = u32::try_from(position).map_err(|_| Error::InvalidParameter)?;
+            let size = inner.data.length();
+            if position > size {
+                return Err(Error::InvalidParameter);
+            }
+            let count = buffer.len().min((size - position) as usize);
+            if count != 0 {
+                inner
+                    .data
+                    .subarray(position, position + count as u32)
+                    .copy_from(&buffer[..count]);
+                inner.generation = inner.generation.wrapping_add(1);
+            }
+            Ok(count)
+        })
     }
 
     fn set_position(&self, current: Size, position: &Position) -> file_system::Result<Size> {
@@ -323,26 +364,34 @@ impl DirectBaseOperations for DriveDevice {
     }
 
     /// Cache-only flush. OPFS durability requires awaiting `sync()`.
-    fn flush(&self) -> file_system::Result<()> {
-        let _inner = self.0.inner.try_get()?;
-        Ok(())
+    fn flush(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<file_system::Result<()>> {
+        file_system::ready(|| {
+            let _inner = self.0.inner.try_get()?;
+            Ok(())
+        })
     }
 
     fn control(
         &self,
+        _cx: &mut core::task::Context<'_>,
         command: ControlCommandIdentifier,
         _: &AnyByLayout,
         output: &mut AnyByLayout,
-    ) -> file_system::Result<()> {
-        let inner = self.0.inner.try_get()?;
-        match command {
-            GET_BLOCK_SIZE::IDENTIFIER => *GET_BLOCK_SIZE::cast_output(output)? = BLOCK_SIZE,
-            GET_BLOCK_COUNT::IDENTIFIER => {
-                *GET_BLOCK_COUNT::cast_output(output)? = inner.data.length() / BLOCK_SIZE;
+    ) -> core::task::Poll<file_system::Result<()>> {
+        file_system::ready(|| {
+            let inner = self.0.inner.try_get()?;
+            match command {
+                GET_BLOCK_SIZE::IDENTIFIER => *GET_BLOCK_SIZE::cast_output(output)? = BLOCK_SIZE,
+                GET_BLOCK_COUNT::IDENTIFIER => {
+                    *GET_BLOCK_COUNT::cast_output(output)? = inner.data.length() / BLOCK_SIZE;
+                }
+                _ => return Err(Error::UnsupportedOperation),
             }
-            _ => return Err(Error::UnsupportedOperation),
-        }
-        Ok(())
+            Ok(())
+        })
     }
 }
 

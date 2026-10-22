@@ -1,0 +1,16 @@
+{
+  "Pixel Painter": "Pixel-Editor",
+  "Undo": "Rückgängig",
+  "Clear": "Löschen",
+  "Save": "Speichern",
+  "Open": "Öffnen",
+  "Ready - white erases": "Bereit - Weiß dient als Radierer",
+  "Unsaved drawing - close again to discard": "Ungespeicherte Zeichnung - zum Verwerfen erneut schließen",
+  "Unsaved drawing - Open again to discard": "Ungespeicherte Zeichnung - zum Verwerfen erneut Öffnen wählen",
+  "Enter an absolute file path": "Absoluten Dateipfad eingeben",
+  "Opened": "Geöffnet",
+  "Saved": "Gespeichert",
+  "Invalid Pixel Painter file - drawing kept": "Ungültige Pixel-Editor-Datei - Zeichnung bleibt erhalten",
+  "Open failed - check path and storage": "Öffnen fehlgeschlagen - Pfad und Speicher prüfen",
+  "Save failed - drawing kept; check path and storage": "Speichern fehlgeschlagen - Zeichnung bleibt erhalten; Pfad und Speicher prüfen"
+}

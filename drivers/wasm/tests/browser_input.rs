@@ -41,7 +41,7 @@ fn key(canvas: &web_sys::EventTarget, key: &str, modifier: &str) -> KeyboardEven
 
 fn read(device: &KeyboardDevice) -> InputData {
     let mut data = InputData::default();
-    device.read(data.as_mut(), 0).unwrap();
+    device.read_sync(data.as_mut(), 0).unwrap();
     data
 }
 
@@ -117,7 +117,7 @@ async fn unchanged_resize_preserves_the_canvas_bitmap() {
     assert_eq!(&pixel.0[..3], &[255, 0, 0]);
     let mut resized = false;
     device
-        .control(
+        .control_sync(
             WAS_RESIZED::IDENTIFIER,
             AnyByLayout::NONE,
             AnyByLayout::from_mutable(&mut resized),
@@ -234,7 +234,7 @@ async fn changed_viewport_updates_resolution_and_requests_redraw() {
     );
     let mut resized = false;
     device
-        .control(
+        .control_sync(
             WAS_RESIZED::IDENTIFIER,
             AnyByLayout::NONE,
             AnyByLayout::from_mutable(&mut resized),
@@ -242,7 +242,7 @@ async fn changed_viewport_updates_resolution_and_requests_redraw() {
         .unwrap();
     assert!(resized);
     device
-        .control(
+        .control_sync(
             WAS_RESIZED::IDENTIFIER,
             AnyByLayout::NONE,
             AnyByLayout::from_mutable(&mut resized),

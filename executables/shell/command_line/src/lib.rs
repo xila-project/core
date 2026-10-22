@@ -217,7 +217,8 @@ impl Shell {
                 .map_err(|_| Error::FailedToGetTaskIdentifier)?,
             Err(_) => loop {
                 match self.authenticate().await {
-                    Ok(user) => break user,
+                    Ok(Some(user)) => break user,
+                    Ok(None) => return Ok(()),
                     Err(error) => self.diagnostic(error).await,
                 }
             },

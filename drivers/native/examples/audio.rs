@@ -1,67 +1,51 @@
-//! Play a quiet 440 Hz tone through the PCM character-device interface.
+//! Play a quiet 440 Hz tone through the shared native audio service.
 
-use audio::{Configuration, PlaybackBuffer, SET_VOLUME, START, SampleFormat};
-use file_system::{ControlCommand, DirectBaseOperations, Error};
-use shared::AnyByLayout;
-use std::time::{Duration, Instant};
+use audio::AudioSystem;
+use std::{
+    pin::Pin,
+    thread,
+    time::{Duration, Instant},
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     const RATE: u32 = 48_000;
-    let configuration = Configuration::new(RATE, 2, SampleFormat::I16);
-    // One setup allocation; the native background callback requires static storage.
-    let buffer = Box::leak(Box::new(PlaybackBuffer::<4096>::new()));
-    let (device, runner) = drivers_native::audio::new(buffer, configuration)?;
-    device.control(
-        SET_VOLUME::IDENTIFIER,
-        AnyByLayout::from(&25u8),
-        AnyByLayout::NONE,
-    )?;
-    device.control(START::IDENTIFIER, AnyByLayout::from(&()), AnyByLayout::NONE)?;
+    const FRAMES: usize = 128;
+    let system = Box::leak(Box::new(AudioSystem::new()?));
+    // SAFETY: the leaked audio service can never move or be freed.
+    let system: Pin<&'static AudioSystem> = unsafe { Pin::new_unchecked(&*system) };
+    let stream = system.open_stream()?;
+    stream.set_volume(25)?;
+    stream.start()?;
+    let runner = drivers_native::audio::new(system, 1)?;
 
-    println!("Playing a two-second 440 Hz tone through native PCM output.");
-    let mut bytes = [0u8; 1024];
+    println!("Playing a two-second 440 Hz tone through the shared native audio service.");
+    let mut bytes = [0u8; FRAMES * 2 * size_of::<f32>()];
     let mut frame = 0u32;
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while frame < RATE * 2 {
-        let count = (RATE * 2 - frame).min(256);
-        for offset in 0..count {
-            let sample: i16 = if ((frame + offset) * 440) % RATE < RATE / 2 {
-                4000
-            } else {
-                -4000
-            };
-            let start = offset as usize * 4;
-            bytes[start..start + 2].copy_from_slice(&sample.to_le_bytes());
-            bytes[start + 2..start + 4].copy_from_slice(&sample.to_le_bytes());
-        }
-        let mut remaining = &bytes[..count as usize * 4];
-        while !remaining.is_empty() {
-            runner.check()?;
-            let written = device.write(remaining, 0)?;
-            remaining = &remaining[written..];
-            if written == 0 {
-                if Instant::now() >= deadline {
-                    return Err("native audio timed out".into());
-                }
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        }
-        frame += count;
-    }
-    loop {
+    let end = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < end {
         runner.check()?;
-        match device.flush() {
-            Ok(()) => break,
-            Err(Error::RessourceBusy) if Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(1));
-            }
-            Err(error) => return Err(error.into()),
+        for offset in 0..FRAMES {
+            let phase = ((frame + offset as u32) * 440) % RATE;
+            let sample: f32 = if phase < RATE / 2 { 0.08 } else { -0.08 };
+            let start = offset * 8;
+            bytes[start..start + 4].copy_from_slice(&sample.to_le_bytes());
+            bytes[start + 4..start + 8].copy_from_slice(&sample.to_le_bytes());
         }
+        let mut remaining = &bytes[..];
+        while !remaining.is_empty() {
+            match stream.write(remaining) {
+                Ok(0) => thread::yield_now(),
+                Ok(written) => remaining = &remaining[written..],
+                Err(file_system::Error::RessourceBusy) => thread::yield_now(),
+                Err(error) => return Err(error.into()),
+            }
+        }
+        frame += FRAMES as u32;
     }
-    // flush reports submission to the callback. Allow one host callback period
-    // before closing; physical device latency can be longer.
-    std::thread::sleep(Duration::from_secs_f64(
-        runner.callback_frames() as f64 / RATE as f64,
-    ));
+    stream.stop()?;
+    println!(
+        "Sink underruns: {:?}",
+        runner.underruns().collect::<Vec<_>>()
+    );
     Ok(())
 }

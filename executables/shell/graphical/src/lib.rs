@@ -107,6 +107,13 @@ impl Shell {
                     let task_manager = &self.context.task_manager;
                     let task = task_manager.get_current_task_identifier().await;
 
+                    graphics::appearance::restore_appearance(
+                        graphics::ffi_manager(),
+                        self.context.virtual_file_system,
+                        task,
+                    )
+                    .await;
+
                     task_manager
                         .set_environment_variable(task, "User", user_name.as_str())
                         .await

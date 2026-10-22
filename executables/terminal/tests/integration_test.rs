@@ -24,22 +24,31 @@ async fn main() {
         task,
         &[
             (
-                &"/binaries/terminal",
+                &"/applications/executables/terminal",
                 TerminalExecutable::new(virtual_file_system, task)
                     .await
                     .unwrap()
             ),
-            (&"/binaries/command_line_shell", ShellExecutable),
+            (
+                &"/applications/executables/command_line_shell",
+                ShellExecutable
+            ),
         ]
     )
     .await
     .unwrap();
 
-    let result = executable::execute(context, "/binaries/terminal", vec![], standard, None)
-        .await
-        .unwrap()
-        .join()
-        .await;
+    let result = executable::execute(
+        context,
+        "/applications/executables/terminal",
+        vec![],
+        standard,
+        None,
+    )
+    .await
+    .unwrap()
+    .join()
+    .await;
 
     assert!(result == 0);
 }

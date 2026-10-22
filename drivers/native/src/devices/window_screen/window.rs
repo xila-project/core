@@ -94,7 +94,7 @@ impl<'a> ApplicationHandler for Window<'a> {
             .unwrap()
         };
 
-        task::block_on(self.inner_window.replace(window, pixels));
+        task::block_on(self.inner_window.replace(window, pixels, self.resolution));
     }
 
     fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, event: WindowEvent) {

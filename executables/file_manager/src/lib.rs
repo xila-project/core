@@ -20,7 +20,7 @@ pub use file_manager::*;
 pub const SHORTCUT: &str = r#"
 {
     "name": "File manager",
-    "command": "/binaries/file_manager",
+    "command": "/applications/executables/file_manager",
     "arguments": [],
     "terminal": false,
     "icon_string": "Fm",
@@ -35,14 +35,16 @@ impl FileManagerExecutable {
         task: TaskIdentifier,
     ) -> core::result::Result<Self, String> {
         let _ = virtual_file_system
-            .create_directory(task, &"/configuration/shared/shortcuts")
+            .create_directory(task, &"/configuration/shared/applications/shortcuts")
             .await;
 
         File::write_to_path(
             virtual_file_system,
             task,
-            "/configuration/shared/shortcuts/file_manager.json",
-            SHORTCUT.as_bytes(),
+            "/configuration/shared/applications/shortcuts/file_manager.json",
+            application_metadata::shortcut("file_manager")
+                .unwrap()
+                .as_bytes(),
         )
         .await
         .map_err(|error| error.to_string())?;

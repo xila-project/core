@@ -1,0 +1,5 @@
+{
+  "Device error: {}": "Error del dispositivo: {}",
+  "Time module already initialized": "El módulo de tiempo ya está inicializado",
+  "Time module not initialized": "El módulo de tiempo no está inicializado"
+}

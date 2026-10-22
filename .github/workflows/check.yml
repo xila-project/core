@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -35,23 +36,33 @@ jobs:
       host: ${{ steps.filter.outputs.host }}
       guest: ${{ steps.filter.outputs.guest }}
       localization: ${{ steps.filter.outputs.localization }}
+      i18n_code: ${{ steps.filter.outputs.i18n_code }}
+      translation_code: ${{ steps.translation_code.outputs.changed }}
+      rust: ${{ steps.filter.outputs.rust }}
+      makefile: ${{ steps.filter.outputs.makefile }}
+      i18n_en: ${{ steps.filter.outputs.i18n_en }}
+      i18n_fr: ${{ steps.filter.outputs.i18n_fr }}
+      i18n_es: ${{ steps.filter.outputs.i18n_es }}
+      i18n_de: ${{ steps.filter.outputs.i18n_de }}
+      i18n_pt_br: ${{ steps.filter.outputs.i18n_pt_br }}
+      i18n_it: ${{ steps.filter.outputs.i18n_it }}
+      i18n_pl: ${{ steps.filter.outputs.i18n_pl }}
     steps:
       - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
             shared: &shared
-              - 'modules/**'
+              - 'subsystems/**'
+              - 'libraries/**'
               - '**/Cargo.{toml,lock}'
-              - '**/.cargo/**'
               - '**/Makefile.toml'
+              - '**/.cargo/**'
               - '**/build.rs'
               - '**/build/**'
               - '**/rust-toolchain{,.toml}'
               - '.github/workflows/**'
               - '.github/actions/**'
-              - 'devbox.{json,lock}'
-              - '.devbox-version'
               - 'development/**'
               - 'package{,-lock}.json'
               - '**/.{gitignore,editorconfig,npmrc}'
@@ -68,9 +79,10 @@ jobs:
             format:
               - *shared
               - '**/*.{rs,toml,json}'
+              - 'tools/ci/**'
             host:
               - *shared
-              - 'tools/profiling/**'
+              - 'tools/**'
               - 'src/**'
               - 'drivers/**'
               - 'executables/**'
@@ -85,8 +97,6 @@ jobs:
               - 'executables/wasm/src/lib.rs'
               - 'examples/wasm/**'
             localization:
-              - *shared
-              - '**/*.rs'
               - '**/*.ftl'
               - '**/locales/**/*.json'
               - '**/locale/**'
@@ -94,30 +104,120 @@ jobs:
               - '**/localization/**'
               - 'executables/wasm/src/host/translation/**'
               - 'executables/wasm/tests/translation/**'
+            i18n_code:
+              - '**/Cargo.{toml,lock}'
+              - '**/build.rs'
+              - '**/build/**'
+              - 'tolgee.extractor.mjs'
+              - 'tolgee.extractor.test.mjs'
+              - 'tolgee.config.ts'
+              - 'subsystems/graphics/fonts_generator/**'
+            rust:
+              - '**/*.rs'
+            makefile:
+              - '**/Makefile.toml'
+            i18n_en:
+              - '**/locales/en.json'
+            i18n_fr:
+              - '**/locales/fr.json'
+            i18n_es:
+              - '**/locales/es.json'
+            i18n_de:
+              - '**/locales/de.json'
+            i18n_pt_br:
+              - '**/locales/pt-BR.json'
+            i18n_it:
+              - '**/locales/it.json'
+            i18n_pl:
+              - '**/locales/pl.json'
+      - name: Detect translation macro changes
+        id: translation_code
+        if: steps.filter.outputs.rust == 'true' || steps.filter.outputs.makefile == 'true'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              per_page: 100,
+            });
+            const changed = files.some(file => {
+              if (file.filename.endsWith('.rs')) {
+                return !file.patch || /^[+-].*\btranslate\s*!/m.test(file.patch);
+              }
+              if (file.filename.endsWith('Makefile.toml')) {
+                return !file.patch || /^[+-].*(check-localization|generate-fonts|EMBEDDED_I18N)/im.test(file.patch);
+              }
+              return false;
+            });
+            core.setOutput('changed', String(changed));
 
   localization:
-    name: Localization checks (${{ matrix.locale }})
+    name: Localization checks
     needs: [changes]
-    # Rust-only changes can introduce translation keys; docs-only PRs skip
-    # these builds. Main/manual runs and filter failures still run both locales.
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.localization == 'true') }}
+    if: >-
+      ${{ !cancelled() && (
+        needs.changes.result != 'success' ||
+        needs.changes.outputs.localization == 'true' ||
+        needs.changes.outputs.i18n_code == 'true' ||
+        needs.changes.outputs.translation_code == 'true'
+      ) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      matrix:
-        locale: [en, fr]
+    container:
+      image: ghcr.io/xila-project/development-environment:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    timeout-minutes: 30
     env:
-      EMBEDDED_I18N_LOCALE: ${{ matrix.locale }}
       EMBEDDED_I18N_STRICT: "1"
+      I18N_CODE_CHANGED: ${{ needs.changes.outputs.i18n_code == 'true' || needs.changes.outputs.translation_code == 'true' }}
+      I18N_EN_CHANGED: ${{ needs.changes.outputs.i18n_en }}
+      I18N_FR_CHANGED: ${{ needs.changes.outputs.i18n_fr }}
+      I18N_ES_CHANGED: ${{ needs.changes.outputs.i18n_es }}
+      I18N_DE_CHANGED: ${{ needs.changes.outputs.i18n_de }}
+      I18N_PT_BR_CHANGED: ${{ needs.changes.outputs.i18n_pt_br }}
+      I18N_IT_CHANGED: ${{ needs.changes.outputs.i18n_it }}
+      I18N_PL_CHANGED: ${{ needs.changes.outputs.i18n_pl }}
     steps:
       - name: Setup | Checkout repository
         uses: actions/checkout@v7
 
       - name: Setup
         uses: ./.github/actions/setup
+        with:
+          cache-key: localization-all
 
-      - name: Check | Strict host and guest translations
-        run: cargo make check-localization
+      - name: Check | Tolgee Rust extractor regression tests
+        run: node --test tolgee.extractor.test.mjs
+
+      - name: Check | Strict translations and font subsets
+        run: |
+          set -euo pipefail
+          locales=(en fr es de pt-BR it pl)
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$I18N_CODE_CHANGED" == "false" ]]; then
+            locales=()
+            [[ "$I18N_EN_CHANGED" == "true" ]] && locales+=(en)
+            [[ "$I18N_FR_CHANGED" == "true" ]] && locales+=(fr)
+            [[ "$I18N_ES_CHANGED" == "true" ]] && locales+=(es)
+            [[ "$I18N_DE_CHANGED" == "true" ]] && locales+=(de)
+            [[ "$I18N_PT_BR_CHANGED" == "true" ]] && locales+=(pt-BR)
+            [[ "$I18N_IT_CHANGED" == "true" ]] && locales+=(it)
+            [[ "$I18N_PL_CHANGED" == "true" ]] && locales+=(pl)
+            if [[ ${#locales[@]} -eq 0 ]]; then
+              # Fluent catalog changes can affect every shipped locale.
+              locales=(en fr es de pt-BR it pl)
+            fi
+          fi
+          printf 'Checking locale(s): %s\n' "${locales[*]}"
+          for locale in "${locales[@]}"; do
+            echo "::group::Localization ($locale)"
+            export EMBEDDED_I18N_LOCALE="$locale"
+            export CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target/localization/$locale"
+            cargo make check-localization
+            echo "::endgroup::"
+          done
 
   # Job-level skips satisfy required checks. PR runs are path-filtered and
   # main/manual runs and filter failures run the full suite; !cancelled()
@@ -127,6 +227,11 @@ jobs:
     needs: [changes]
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.translation == 'true') }}
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/xila-project/development-environment:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 15
     strategy:
       matrix:
@@ -139,25 +244,30 @@ jobs:
         uses: ./.github/actions/setup
         with:
           cache-workspaces: "executables/wasm/tests/translation -> target"
+          cache-key: wasm-translation-${{ matrix.memory }}
+          node-dependencies: "false"
+          lockfile-manifests: executables/wasm/tests/translation/Cargo.toml
 
       # Keep main's plain dependency artifacts compatible with PR test builds.
-      - name: Check | Translation tests
+      # Default cargo test includes the borrowing compile-fail doctests too.
+      - name: Check | Translation tests and borrowing compile-fail doctests
         run: >-
           cargo +${XILA_RUST_TOOLCHAIN} test --locked
-          --manifest-path executables/wasm/tests/translation/Cargo.toml
-          --no-default-features --features ${{ matrix.memory }}
-
-      - name: Check | Borrowing compile-fail doctests
-        run: >-
-          cargo +${XILA_RUST_TOOLCHAIN} test --locked --doc
           --manifest-path executables/wasm/tests/translation/Cargo.toml
           --no-default-features --features ${{ matrix.memory }}
 
   wasm-extended:
     name: WASM ABI coverage and Miri (${{ matrix.memory }})
     needs: [wasm-translation]
-    if: github.event_name != 'pull_request'
+    # changes is intentionally skipped on main; override implicit success()
+    # across that ancestor, but never run after failed translation tests.
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.wasm-translation.result == 'success' }}
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/xila-project/development-environment:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 15
     strategy:
       matrix:
@@ -172,6 +282,9 @@ jobs:
         uses: ./.github/actions/setup
         with:
           cache-workspaces: "executables/wasm/tests/translation -> target/llvm-cov-target"
+          cache-key: wasm-extended-${{ matrix.memory }}
+          node-dependencies: "false"
+          lockfile-manifests: executables/wasm/tests/translation/Cargo.toml
 
       - name: Check | Translation coverage
         run: >-
@@ -208,6 +321,11 @@ jobs:
     needs: [changes]
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.format == 'true') }}
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/xila-project/development-environment:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 10
     steps:
       - name: Setup | Checkout repository
@@ -217,9 +335,13 @@ jobs:
         uses: ./.github/actions/setup
         with:
           profile: minimal
+          cache-key: format
 
       - name: Check | Formatting (TOML)
         run: cargo make --skip-init-end-tasks format-toml --check
+
+      - name: Check | CI policy and measurement regressions
+        run: python3 -m unittest discover -s tools/ci -v
 
       - name: Check | Formatting (Rust)
         run: cargo make --skip-init-end-tasks format-rust -- --check
@@ -227,26 +349,27 @@ jobs:
       - name: Check | Formatting (JSON)
         run: npm exec prettier -- --check "**/*.json"
 
-  host-clippy:
-    name: Host checks (Clippy)
-    needs: [changes, format, localization]
+  host-clippy-work:
+    name: Host checks (Clippy work)
+    needs: [changes, format]
     if: >-
       ${{ !cancelled() && (needs.format.result == 'success' || needs.format.result == 'skipped') &&
           (needs.changes.result != 'success' || needs.changes.outputs.host == 'true') }}
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/xila-project/development-environment:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 20
     steps:
-      - name: Check | Translation coverage gate
-        if: needs.localization.result != 'success' && needs.localization.result != 'skipped'
-        run: |
-          echo "::error::Strict translation coverage did not pass."
-          exit 1
-
       - name: Setup | Checkout repository
         uses: actions/checkout@v7
 
       - name: Setup
         uses: ./.github/actions/setup
+        with:
+          cache-key: host-clippy
 
       - name: Check | Clippy (Host)
         run: cargo make clippy-host
@@ -254,21 +377,45 @@ jobs:
       - name: Check | Clippy (Host - Wasmi)
         run: cargo +${XILA_RUST_TOOLCHAIN} clippy -p wasm --features graphics,xila/graphics_rendering_xrgb8888 --target x86_64-unknown-linux-gnu
 
+  host-clippy:
+    name: Host checks (Clippy)
+    needs: [changes, format, localization, host-clippy-work]
+    if: >-
+      ${{ always() && (needs.changes.result != 'success' || needs.changes.outputs.host == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check | Required host and localization results
+        env:
+          FORMAT_RESULT: ${{ needs.format.result }}
+          LOCALIZATION_RESULT: ${{ needs.localization.result }}
+          CLIPPY_RESULT: ${{ needs.host-clippy-work.result }}
+        run: |
+          for result in "$FORMAT_RESULT" "$LOCALIZATION_RESULT"; do
+            if [[ "$result" != success && "$result" != skipped ]]; then
+              echo "::error::A required CI dependency finished with result: $result"
+              exit 1
+            fi
+          done
+          if [[ "$CLIPPY_RESULT" != success ]]; then
+            echo "::error::Host Clippy was required but finished with result: $CLIPPY_RESULT"
+            exit 1
+          fi
+
   host-test:
     name: Host checks (Tests)
-    needs: [changes, format, localization]
+    needs: [changes, format]
     if: >-
       ${{ !cancelled() && (needs.format.result == 'success' || needs.format.result == 'skipped') &&
           (needs.changes.result != 'success' || needs.changes.outputs.host == 'true') }}
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/xila-project/development-environment:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 30
     steps:
-      - name: Check | Translation coverage gate
-        if: needs.localization.result != 'success' && needs.localization.result != 'skipped'
-        run: |
-          echo "::error::Strict translation coverage did not pass."
-          exit 1
-
       - name: Setup | Checkout repository
         uses: actions/checkout@v7
 
@@ -278,6 +425,10 @@ jobs:
           cache-workspaces: |
             . -> target
             tools/profiling -> target
+          cache-key: host-test
+          lockfile-manifests: |
+            Cargo.toml
+            tools/profiling/Cargo.toml
 
       - name: Check | Profiling runner
         run: |
@@ -286,14 +437,33 @@ jobs:
           cargo test --manifest-path tools/profiling/Cargo.toml
 
       # Run the same plain tests on main and PRs so main saves a reusable cache.
+      # cargo-make's default init task generates the font sources; keep that
+      # setup explicit when invoking Cargo directly for its timing report.
+      - name: Setup | Generate fonts for tests
+        run: cargo make generate-fonts
+
       - name: Run | Test
-        run: cargo make test
+        run: cargo test --workspace --timings
+
+      - name: Upload | Cargo timings (Host)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cargo-timings-host
+          path: target/cargo-timings/
+          if-no-files-found: warn
 
   host-coverage:
     name: Host coverage and profiling checks
     needs: [host-test]
-    if: github.event_name != 'pull_request'
+    # A skipped changes ancestor must not disable main coverage/profiling.
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.host-test.result == 'success' }}
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/xila-project/development-environment:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 30
     env:
       CARGO_LLVM_COV_TARGET_DIR: ${{ github.workspace }}/target/llvm-cov-target
@@ -307,6 +477,7 @@ jobs:
           # Profiling builds into target/, coverage into its llvm-cov-target child.
           # Cache the parent once; the job-specific key isolates it from plain tests.
           cache-workspaces: ". -> target"
+          cache-key: host-coverage
 
       - name: Setup | Generate fonts
         run: cargo make generate-fonts
@@ -330,37 +501,44 @@ jobs:
 
   host-audio-docs:
     name: Host checks (Audio, docs, build)
-    needs: [changes, format, localization]
+    needs: [changes, format]
     if: >-
       ${{ !cancelled() && (needs.format.result == 'success' || needs.format.result == 'skipped') &&
           (needs.changes.result != 'success' || needs.changes.outputs.host == 'true') }}
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/xila-project/development-environment:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 30
     steps:
-      - name: Check | Translation coverage gate
-        if: needs.localization.result != 'success' && needs.localization.result != 'skipped'
-        run: |
-          echo "::error::Strict translation coverage did not pass."
-          exit 1
-
       - name: Setup | Checkout repository
         uses: actions/checkout@v7
 
       - name: Setup
         uses: ./.github/actions/setup
+        with:
+          cache-key: host-audio-docs
 
       - name: Setup | Generate fonts
         run: cargo make generate-fonts
 
       - name: Check | Audio
         run: |
-          cargo +${XILA_RUST_TOOLCHAIN} test -p audio
+          cargo +${XILA_RUST_TOOLCHAIN} test -p audio -p synth
           cargo +${XILA_RUST_TOOLCHAIN} clippy -p audio -p drivers_native --features drivers_native/audio --all-targets -- -D warnings
-          SDL_AUDIODRIVER=dummy cargo +${XILA_RUST_TOOLCHAIN} test -p drivers_native --features audio --lib devices::audio::tests -- --include-ignored
+          cargo +${XILA_RUST_TOOLCHAIN} test -p drivers_native --features audio --lib devices::audio::tests
 
       - name: Check | Documentation (Host)
         if: github.event_name != 'pull_request'
         run: RUSTDOCFLAGS="--deny warnings" cargo make doc-host
+
+      - name: Check | Seed image generation and native import
+        run: cargo test -p fs_image -p authentication -p native_example
+
+      - name: Check | Browser seed streaming and disk manager
+        run: node --test drivers/wasm/tests/seed.test.mjs examples/wasm/tests/disk_manager.test.mjs
 
       - name: Build | Example (Native)
         run: cargo make build -p native_example
@@ -372,6 +550,11 @@ jobs:
       ${{ !cancelled() && (needs.format.result == 'success' || needs.format.result == 'skipped') &&
           (needs.changes.result != 'success' || needs.changes.outputs.guest == 'true') }}
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/xila-project/development-environment:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 20
     steps:
       - name: Setup | Checkout repository
@@ -379,19 +562,27 @@ jobs:
 
       - name: Setup
         uses: ./.github/actions/setup
+        with:
+          cache-key: guest
+
+      - name: Setup | Generate fonts
+        run: cargo make generate-fonts
 
       - name: Check | Clippy (Guest)
-        run: cargo make clippy-guest
+        run: >-
+          cargo clippy --package wasm --no-default-features
+          --features default_guest --target wasm32-unknown-unknown
+          --all-targets --timings -- -D warnings
 
       - name: Check | Portable audio (WASM)
-        run: cargo +${XILA_RUST_TOOLCHAIN} check -p audio --target wasm32-unknown-unknown
+        run: cargo +${XILA_RUST_TOOLCHAIN} check -p audio -p drivers_wasm --features drivers_wasm/audio --target wasm32-unknown-unknown
 
       - name: Check | Documentation (Guest)
         if: github.event_name != 'pull_request'
         run: RUSTDOCFLAGS="--deny warnings" cargo make doc-guest
 
       - name: Build | Bundled applications (WASI)
-        run: cargo +${XILA_RUST_TOOLCHAIN} build -p calculator -p clock -p pixel_painter --target wasm32-wasip1 --release
+        run: cargo make prepare-wasm-image
 
       - name: Check | Clock (WASI)
         run: cargo +${XILA_RUST_TOOLCHAIN} clippy -p clock --all-targets --target wasm32-wasip1 -- -D warnings
@@ -401,7 +592,7 @@ jobs:
 
       - name: Cache | Trunk tools and dist
         if: github.event_name != 'pull_request'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           # Trunk downloads wasm-bindgen/wasm-opt into its ProjectDirs cache
           # (~/.cache/trunk/<tool>-<version>/); a version drift self-heals by
@@ -409,10 +600,140 @@ jobs:
           # rebuilt by `trunk build`, so it is intentionally not cached.
           path: |
             ~/.cache/trunk
-          key: trunk-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'development/toolchains.env') }}
+          key: trunk-tools-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             trunk-tools-
 
       - name: Build | Example (WASM)
         if: github.event_name != 'pull_request'
         run: cd examples/wasm && RUSTUP_TOOLCHAIN="$XILA_NIGHTLY_TOOLCHAIN" trunk build
+
+      - name: Upload | Cargo timings (Guest)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cargo-timings-guest
+          path: target/cargo-timings/
+          if-no-files-found: warn
+
+  profile-benchmark:
+    name: Cargo profile benchmark (${{ matrix.profile }})
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/xila-project/development-environment:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    timeout-minutes: 40
+    strategy:
+      matrix:
+        profile: [default, line-tables-only]
+    steps:
+      - name: Setup | Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup
+        uses: ./.github/actions/setup
+        with:
+          cache-key: profile-benchmark-${{ matrix.profile }}
+
+      - name: Setup | Generate fonts
+        run: cargo make generate-fonts
+
+      - name: Benchmark | Default debug profiles
+        if: matrix.profile == 'default'
+        run: |
+          cargo test --workspace --timings
+          cargo clippy --package wasm --no-default-features --features default_guest \
+            --target wasm32-unknown-unknown --all-targets --timings -- -D warnings
+
+      - name: Benchmark | Reduced debug profiles
+        if: matrix.profile == 'line-tables-only'
+        env:
+          CARGO_PROFILE_DEV_DEBUG: line-tables-only
+          CARGO_PROFILE_TEST_DEBUG: line-tables-only
+        run: |
+          cargo test --workspace --timings
+          cargo clippy --package wasm --no-default-features --features default_guest \
+            --target wasm32-unknown-unknown --all-targets --timings -- -D warnings
+
+      - name: Upload | Cargo profile timings
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cargo-profile-timings-${{ matrix.profile }}
+          path: target/cargo-timings/
+          if-no-files-found: warn
+
+  nextest-benchmark:
+    name: Test runner benchmark (${{ matrix.runner }})
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/xila-project/development-environment:main
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    timeout-minutes: 40
+    strategy:
+      matrix:
+        runner: [cargo-test, nextest]
+    steps:
+      - name: Setup | Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup
+        uses: ./.github/actions/setup
+        with:
+          cache-key: test-runner-${{ matrix.runner }}
+
+      - name: Setup | Generate fonts
+        run: cargo make generate-fonts
+
+      - name: Setup | Install GNU time
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends time
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Setup | Install pinned nextest for benchmark
+        if: matrix.runner == 'nextest'
+        run: cargo binstall --no-confirm cargo-nextest@0.9.148
+
+      - name: Benchmark | Compile test binaries
+        run: |
+          mkdir -p benchmark-results
+          /usr/bin/time -v -o "benchmark-results/compile-${{ matrix.runner }}.txt" \
+            cargo test --workspace --no-run --timings
+          cat "benchmark-results/compile-${{ matrix.runner }}.txt"
+
+      - name: Benchmark | cargo test execution
+        if: matrix.runner == 'cargo-test'
+        run: |
+          /usr/bin/time -v -o benchmark-results/test-execution-cargo-test.txt \
+            cargo test --workspace
+          cat benchmark-results/test-execution-cargo-test.txt
+
+      - name: Benchmark | nextest execution
+        if: matrix.runner == 'nextest'
+        run: |
+          /usr/bin/time -v -o benchmark-results/test-execution-nextest.txt \
+            cargo nextest run --workspace --timings
+          cat benchmark-results/test-execution-nextest.txt
+
+      - name: Benchmark | Doctest execution
+        run: |
+          /usr/bin/time -v -o "benchmark-results/doctests-${{ matrix.runner }}.txt" \
+            cargo test --workspace --doc --timings
+          cat "benchmark-results/doctests-${{ matrix.runner }}.txt"
+
+      - name: Upload | Test runner timings
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cargo-test-runner-timings-${{ matrix.runner }}
+          path: |
+            target/cargo-timings/
+            benchmark-results/
+          if-no-files-found: warn

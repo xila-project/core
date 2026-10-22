@@ -1,4 +1,5 @@
 {
+  "Enter your command ...": "Saisissez votre commande...",
   "Failed to create object": "Échec de la création de l'objet",
   "Failed to execute: {}": "Échec de l'exécution: {}",
   "Failed to get task identifier: {}": "Échec de la récupération de l'identifiant de la tâche: {}",

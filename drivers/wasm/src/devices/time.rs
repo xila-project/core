@@ -53,27 +53,39 @@ impl TimeDevice {
 }
 
 impl DirectBaseOperations for TimeDevice {
-    fn read(&self, buffer: &mut [u8], _: Size) -> Result<usize> {
-        let duration = Self::get_current_time()?;
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        _: Size,
+    ) -> core::task::Poll<Result<usize>> {
+        file_system::ready(|| {
+            let duration = Self::get_current_time()?;
 
-        let duration_bytes = unsafe {
-            core::slice::from_raw_parts(
-                &duration as *const Duration as *const u8,
-                core::mem::size_of::<Duration>(),
-            )
-        };
+            let duration_bytes = unsafe {
+                core::slice::from_raw_parts(
+                    &duration as *const Duration as *const u8,
+                    core::mem::size_of::<Duration>(),
+                )
+            };
 
-        if buffer.len() < duration_bytes.len() {
-            return Err(Error::InvalidParameter);
-        }
+            if buffer.len() < duration_bytes.len() {
+                return Err(Error::InvalidParameter);
+            }
 
-        buffer[..duration_bytes.len()].copy_from_slice(duration_bytes);
+            buffer[..duration_bytes.len()].copy_from_slice(duration_bytes);
 
-        Ok(duration_bytes.len())
+            Ok(duration_bytes.len())
+        })
     }
 
-    fn write(&self, _: &[u8], _: Size) -> Result<usize> {
-        Err(Error::UnsupportedOperation)
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        _: &[u8],
+        _: Size,
+    ) -> core::task::Poll<Result<usize>> {
+        file_system::ready(|| Err(Error::UnsupportedOperation))
     }
 }
 
@@ -90,7 +102,7 @@ mod tests {
         let device = TimeDevice::new();
         let mut buffer = [0u8; core::mem::size_of::<Duration>()];
 
-        let result = device.read(&mut buffer, 0);
+        let result = device.read_sync(&mut buffer, 0);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), core::mem::size_of::<Duration>());
     }
@@ -100,7 +112,7 @@ mod tests {
         let device = TimeDevice::new();
         let buffer = [0u8; 8];
 
-        let result = device.write(&buffer, 0);
+        let result = device.write_sync(&buffer, 0);
         assert!(matches!(result, Err(Error::UnsupportedOperation)));
     }
 }

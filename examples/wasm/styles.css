@@ -1,6 +1,21 @@
 body,
 #sidebar {
   font-family: "Montserrat", Arial, Helvetica, sans-serif;
+  font-weight: 400;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+#sidebar h2,
+#sidebar h3 {
+  font-weight: 600;
+}
+strong,
+b {
+  font-weight: 700;
 }
 a,
 a:visited,
@@ -98,6 +113,20 @@ a:hover {
 }
 .disk-actions button:disabled {
   opacity: 0.48;
+  cursor: default;
+}
+#audio-enable {
+  width: 100%;
+  margin: 8px 0;
+  padding: 10px;
+  border: 0;
+  border-radius: 4px;
+  background: #245b87;
+  color: #fff;
+  cursor: pointer;
+}
+#audio-enable:disabled {
+  opacity: 0.65;
   cursor: default;
 }
 #disk-status {

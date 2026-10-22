@@ -46,15 +46,15 @@ async fn saves_and_reopens_without_erasing_existing_data() {
     let drive = DriveDevice::new(Path::from_str(&name), 4096).await.unwrap();
     assert_eq!(drive.get_block_size(), Ok(512));
     assert_eq!(drive.get_block_count(), Ok(8));
-    assert_eq!(drive.write(b"persistent", 513), Ok(10));
+    assert_eq!(drive.write_sync(b"persistent", 513), Ok(10));
     drive.sync().await.unwrap();
     drop(drive);
 
     let drive = DriveDevice::new(Path::from_str(&name), 4096).await.unwrap();
     let mut buffer = [0; 10];
-    assert_eq!(drive.read(&mut buffer, 513), Ok(10));
+    assert_eq!(drive.read_sync(&mut buffer, 513), Ok(10));
     assert_eq!(&buffer, b"persistent");
-    assert_eq!(drive.read(&mut buffer, 0), Ok(10));
+    assert_eq!(drive.read_sync(&mut buffer, 0), Ok(10));
     assert_eq!(buffer, [0; 10]);
     drop(drive);
     remove(&name).await;
@@ -64,17 +64,17 @@ async fn saves_and_reopens_without_erasing_existing_data() {
 async fn bounds_and_seeking_are_checked() {
     let name = name();
     let drive = DriveDevice::new(Path::from_str(&name), 512).await.unwrap();
-    assert_eq!(drive.write(b"abcd", 510), Ok(2));
+    assert_eq!(drive.write_sync(b"abcd", 510), Ok(2));
     let mut buffer = [0xff; 4];
-    assert_eq!(drive.read(&mut buffer, 510), Ok(2));
+    assert_eq!(drive.read_sync(&mut buffer, 510), Ok(2));
     assert_eq!(buffer, [b'a', b'b', 0xff, 0xff]);
-    assert_eq!(drive.read(&mut buffer, 512), Ok(0));
-    assert_eq!(drive.write(b"x", 512), Ok(0));
+    assert_eq!(drive.read_sync(&mut buffer, 512), Ok(0));
+    assert_eq!(drive.write_sync(b"x", 512), Ok(0));
     assert_eq!(
-        drive.read(&mut buffer, u64::MAX),
+        drive.read_sync(&mut buffer, u64::MAX),
         Err(Error::InvalidParameter)
     );
-    assert_eq!(drive.write(b"x", 513), Err(Error::InvalidParameter));
+    assert_eq!(drive.write_sync(b"x", 513), Err(Error::InvalidParameter));
     assert_eq!(drive.set_position(10, &Position::Current(-5)), Ok(5));
     assert_eq!(drive.set_position(0, &Position::End(-1)), Ok(511));
     assert_eq!(
@@ -110,7 +110,7 @@ async fn invalid_geometry_and_names_are_rejected() {
 async fn opening_with_a_different_size_does_not_truncate_the_disk() {
     let name = name();
     let drive = DriveDevice::new(Path::from_str(&name), 512).await.unwrap();
-    drive.write(b"keep", 0).unwrap();
+    drive.write_sync(b"keep", 0).unwrap();
     drive.sync().await.unwrap();
     drop(drive);
     assert!(matches!(
@@ -119,7 +119,7 @@ async fn opening_with_a_different_size_does_not_truncate_the_disk() {
     ));
     let drive = DriveDevice::new(Path::from_str(&name), 512).await.unwrap();
     let mut buffer = [0; 4];
-    drive.read(&mut buffer, 0).unwrap();
+    drive.read_sync(&mut buffer, 0).unwrap();
     assert_eq!(&buffer, b"keep");
     drop(drive);
     remove(&name).await;
@@ -133,11 +133,11 @@ async fn simultaneous_writers_are_rejected_and_unmount_releases_the_lock() {
         DriveDevice::new(Path::from_str(&name), 512).await,
         Err(Error::RessourceBusy)
     ));
-    drive.write(b"dirty", 0).unwrap();
+    drive.write_sync(b"dirty", 0).unwrap();
     assert_eq!(drive.unmount(), Err(Error::RessourceBusy));
     drive.sync().await.unwrap();
     drive.unmount().unwrap();
-    assert_eq!(drive.read(&mut [0; 1], 0), Err(Error::NotMounted));
+    assert_eq!(drive.read_sync(&mut [0; 1], 0), Err(Error::NotMounted));
     assert_eq!(drive.sync().await, Err(Error::NotMounted));
     let other = DriveDevice::new(Path::from_str(&name), 512).await.unwrap();
     drop(other);
@@ -148,17 +148,17 @@ async fn simultaneous_writers_are_rejected_and_unmount_releases_the_lock() {
 async fn stops_writes_before_sync_and_unmount() {
     let name = name();
     let drive = DriveDevice::new(Path::from_str(&name), 512).await.unwrap();
-    drive.write(b"saved", 0).unwrap();
+    drive.write_sync(b"saved", 0).unwrap();
 
     drive.stop_writes();
 
-    assert_eq!(drive.write(b"lost", 0), Err(Error::RessourceBusy));
+    assert_eq!(drive.write_sync(b"lost", 0), Err(Error::RessourceBusy));
     drive.sync().await.unwrap();
     drive.unmount().unwrap();
 
     let reopened = DriveDevice::new(Path::from_str(&name), 512).await.unwrap();
     let mut contents = [0; 5];
-    reopened.read(&mut contents, 0).unwrap();
+    reopened.read_sync(&mut contents, 0).unwrap();
     assert_eq!(&contents, b"saved");
     reopened.unmount().unwrap();
     remove(&name).await;
@@ -172,7 +172,7 @@ async fn writes_during_a_save_are_saved_by_the_next_sync() {
     };
     let name = name();
     let drive = DriveDevice::new(Path::from_str(&name), 512).await.unwrap();
-    drive.write(b"old", 0).unwrap();
+    drive.write_sync(b"old", 0).unwrap();
     let started = pause_next_save();
     let mut save = std::pin::pin!(drive.sync());
     let mut context = Context::from_waker(Waker::noop());
@@ -182,7 +182,7 @@ async fn writes_during_a_save_are_saved_by_the_next_sync() {
         .unwrap()
         .dyn_into::<js_sys::Function>()
         .unwrap();
-    drive.write(b"new", 0).unwrap();
+    drive.write_sync(b"new", 0).unwrap();
     release.call0(&JsValue::NULL).unwrap();
     save.await.unwrap();
     assert_eq!(drive.unmount(), Err(Error::RessourceBusy));
@@ -190,7 +190,7 @@ async fn writes_during_a_save_are_saved_by_the_next_sync() {
     drive.unmount().unwrap();
     let reopened = DriveDevice::new(Path::from_str(&name), 512).await.unwrap();
     let mut buffer = [0; 3];
-    reopened.read(&mut buffer, 0).unwrap();
+    reopened.read_sync(&mut buffer, 0).unwrap();
     assert_eq!(&buffer, b"new");
     drop(reopened);
     remove(&name).await;
@@ -251,9 +251,9 @@ extern "C" {
 async fn failed_stream_save_preserves_disk_and_retries(stage: &str) {
     let name = name();
     let drive = DriveDevice::new(Path::from_str(&name), 512).await.unwrap();
-    drive.write(b"old", 0).unwrap();
+    drive.write_sync(b"old", 0).unwrap();
     drive.sync().await.unwrap();
-    drive.write(b"new", 0).unwrap();
+    drive.write_sync(b"new", 0).unwrap();
     fail_next_save_stage(stage);
     assert_eq!(drive.sync().await, Err(Error::NoSpaceLeft));
     assert_eq!(drive.unmount(), Err(Error::RessourceBusy));
@@ -294,7 +294,7 @@ async fn failed_stream_save_preserves_disk_and_retries(stage: &str) {
     drop(drive);
     let drive = DriveDevice::new(Path::from_str(&name), 512).await.unwrap();
     let mut buffer = [0; 3];
-    drive.read(&mut buffer, 0).unwrap();
+    drive.read_sync(&mut buffer, 0).unwrap();
     assert_eq!(&buffer, b"new");
     drop(drive);
     remove(&name).await;
@@ -314,9 +314,9 @@ async fn failed_commit_aborts_the_stream_and_preserves_the_disk() {
 async fn failed_save_keeps_the_committed_disk_and_can_be_retried() {
     let name = name();
     let drive = DriveDevice::new(Path::from_str(&name), 512).await.unwrap();
-    drive.write(b"old", 0).unwrap();
+    drive.write_sync(b"old", 0).unwrap();
     drive.sync().await.unwrap();
-    drive.write(b"new", 0).unwrap();
+    drive.write_sync(b"new", 0).unwrap();
     fail_next_save();
     assert_eq!(drive.sync().await, Err(Error::NoSpaceLeft));
     assert_eq!(drive.unmount(), Err(Error::RessourceBusy));
@@ -350,7 +350,7 @@ async fn failed_save_keeps_the_committed_disk_and_can_be_retried() {
     drop(drive);
     let drive = DriveDevice::new(Path::from_str(&name), 512).await.unwrap();
     let mut buffer = [0; 3];
-    drive.read(&mut buffer, 0).unwrap();
+    drive.read_sync(&mut buffer, 0).unwrap();
     assert_eq!(&buffer, b"new");
     drop(drive);
     remove(&name).await;
@@ -364,7 +364,7 @@ async fn cancelled_save_waiters_do_not_allow_an_old_snapshot_to_overwrite_new_da
     };
     let name = name();
     let drive = DriveDevice::new(Path::from_str(&name), 512).await.unwrap();
-    drive.write(b"old", 0).unwrap();
+    drive.write_sync(b"old", 0).unwrap();
     let started = pause_next_save();
     let mut save = Box::pin(drive.sync());
     assert!(
@@ -379,13 +379,13 @@ async fn cancelled_save_waiters_do_not_allow_an_old_snapshot_to_overwrite_new_da
         .unwrap();
     assert_eq!(drive.unmount(), Err(Error::RessourceBusy));
     drop(save);
-    drive.write(b"new", 0).unwrap();
+    drive.write_sync(b"new", 0).unwrap();
     release.call0(&JsValue::NULL).unwrap();
     drive.sync().await.unwrap();
     drop(drive);
     let drive = DriveDevice::new(Path::from_str(&name), 512).await.unwrap();
     let mut buffer = [0; 3];
-    drive.read(&mut buffer, 0).unwrap();
+    drive.read_sync(&mut buffer, 0).unwrap();
     assert_eq!(&buffer, b"new");
     drop(drive);
     remove(&name).await;
@@ -424,7 +424,7 @@ async fn littlefs_file_and_mbr_survive_reopening_the_opfs_disk() {
         )
         .unwrap();
     file_system
-        .write(&mut context, b"saved across reload", 0)
+        .write_sync(&mut context, b"saved across reload", 0)
         .unwrap();
     file_system.close(&mut context).unwrap();
     drop(file_system);
@@ -459,11 +459,46 @@ async fn littlefs_file_and_mbr_survive_reopening_the_opfs_disk() {
         )
         .unwrap();
     let mut buffer = [0; 19];
-    assert_eq!(file_system.read(&mut context, &mut buffer, 0), Ok(19));
+    assert_eq!(file_system.read_sync(&mut context, &mut buffer, 0), Ok(19));
     assert_eq!(&buffer, b"saved across reload");
     file_system.close(&mut context).unwrap();
     drop(file_system);
     drive.sync().await.unwrap();
     drive.unmount().unwrap();
+    remove(&name).await;
+}
+
+#[wasm_bindgen_test]
+async fn existing_disk_never_requires_a_seed_fetch() {
+    let name = name();
+    let drive = DriveDevice::new(Path::from_str(&name), 4096).await.unwrap();
+    drive.write_sync(b"saved", 512).unwrap();
+    drive.sync().await.unwrap();
+    drop(drive);
+    let drive = DriveDevice::new_seeded(
+        Path::from_str(&name),
+        4096,
+        "invalid-protocol://must-not-fetch",
+    )
+    .await
+    .unwrap();
+    let mut bytes = [0; 5];
+    drive.read_sync(&mut bytes, 512).unwrap();
+    assert_eq!(&bytes, b"saved");
+    drop(drive);
+    remove(&name).await;
+}
+
+#[wasm_bindgen_test]
+async fn failed_seed_download_keeps_an_empty_disk_retryable() {
+    let name = name();
+    assert!(
+        DriveDevice::new_seeded(Path::from_str(&name), 4096, "invalid-protocol://offline")
+            .await
+            .is_err()
+    );
+    let drive = DriveDevice::new(Path::from_str(&name), 4096).await.unwrap();
+    assert!(drive.is_new());
+    drop(drive);
     remove(&name).await;
 }

@@ -8,8 +8,6 @@ use std::{
 };
 use wasm::*;
 
-const SETTINGS_DIRECTORY: &str = "/configuration/shared/clock";
-
 #[derive(Clone, Copy)]
 enum Action {
     Format,
@@ -116,13 +114,20 @@ pub fn run() -> wasm::Result<()> {
 impl Interface {
     unsafe fn new() -> wasm::Result<Self> {
         unsafe {
-            let (store, settings, persistence_error) = match Store::load(SETTINGS_DIRECTORY) {
-                Ok((store, settings)) => (Some(store), settings, false),
-                Err(error) => {
-                    eprintln!("Clock settings unavailable: {error}");
-                    (None, Settings::default(), true)
-                }
-            };
+            let (store, settings, persistence_error) =
+                match std::env::var("XILA_APPLICATION_CONFIGURATION") {
+                    Ok(directory) => match Store::load(&directory) {
+                        Ok((store, settings)) => (Some(store), settings, false),
+                        Err(error) => {
+                            eprintln!("Clock settings unavailable: {error}");
+                            (None, Settings::default(), true)
+                        }
+                    },
+                    Err(error) => {
+                        eprintln!("Clock settings directory unavailable: {error}");
+                        (None, Settings::default(), true)
+                    }
+                };
             let window = window_create()?;
             // Ensure a partially constructed window is released on FFI failure.
             match Self::build(window, store, settings, persistence_error) {
@@ -485,8 +490,14 @@ impl Interface {
         };
         let mut laps = String::new();
         if active == 2 {
+            use core::fmt::Write;
+            let count = self.watch.laps().len();
+            if count != 0 {
+                // Compiled locale forms; selection does not allocate.
+                let _ = embedded_i18n::translate_plural_write!(&mut laps, "Recorded laps", count);
+                laps.push('\n');
+            }
             for (index, lap) in self.watch.laps().iter().enumerate() {
-                use core::fmt::Write;
                 let _ = writeln!(laps, "{}: {}", index + 1, format_duration(*lap, true));
             }
         }

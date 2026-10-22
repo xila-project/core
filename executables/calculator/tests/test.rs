@@ -23,7 +23,7 @@ async fn main() {
         task_instance,
         virtual_file_system,
         binary_path,
-        "/binaries/calculator.wasm",
+        "/applications/executables/calculator.wasm",
     )
     .await
     .unwrap();
@@ -32,15 +32,15 @@ async fn main() {
         context,
         virtual_file_system,
         task,
-        &[("/binaries/wasm", WasmExecutable)]
+        &[("/applications/executables/wasm", WasmExecutable)]
     )
     .await
     .unwrap();
 
     let handle = executable::execute(
         context,
-        "/binaries/wasm",
-        vec!["/binaries/calculator.wasm".to_string()],
+        "/applications/executables/wasm",
+        vec!["/applications/executables/calculator.wasm".to_string()],
         standard,
         None,
     )
