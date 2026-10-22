@@ -139,6 +139,18 @@ class WorkflowPolicy(unittest.TestCase):
             self.assertIn(f"i18n_{key}:\n              - '**/locales/{locale}.json'", changes)
         self.assertIn("EMBEDDED_I18N_STRICT: \"1\"", job("check.yml", "localization"))
 
+    def test_localization_build_code_forces_every_locale_on_prs(self):
+        changes = job("check.yml", "changes")
+        i18n_code = changes.split("            i18n_code:\n")[1].split("            rust:\n")[0]
+        for pattern in ["**/Cargo.{toml,lock}", "**/build.rs", "tolgee.extractor.mjs", "subsystems/graphics/fonts_generator/**"]:
+            self.assertIn(pattern, i18n_code)
+        workflow = (ROOT / ".github/workflows/check.yml").read_text()
+        self.assertIn("I18N_CODE_CHANGED: ${{ needs.changes.outputs.i18n_code == 'true' || needs.changes.outputs.translation_code == 'true' }}", workflow)
+        script = job("check.yml", "localization")
+        self.assertIn('locales=(en fr es de pt-BR it pl)', script)
+        self.assertIn('"$I18N_CODE_CHANGED" == "false"', script)
+        self.assertIn("Checking locale(s):", script)
+
 
 if __name__ == "__main__":
     unittest.main()
