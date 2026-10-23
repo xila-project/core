@@ -26,12 +26,6 @@ jobs:
     name: Cache experiment (${{ matrix.strategy }})
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    container:
-      # Fixed image for comparable cold/warm samples; update deliberately.
-      image: ghcr.io/xila-project/development-environment@sha256:3d9738f5f02afd9147be66b2c84908a56b24da68138ba03ca88885c973f11f09
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
     strategy:
       fail-fast: false
       # Isolate candidates from each other's GHAC rate limits and CPU contention.
@@ -46,13 +40,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Setup | Install mise tools
+        uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+
+      - name: Setup | Select pinned Rust toolchain
+        run: echo "RUSTUP_TOOLCHAIN=$(mise env --json | jq -r '.XILA_RUST_TOOLCHAIN')" >> "$GITHUB_ENV"
+
+      - name: Setup | Bootstrap native build dependencies
+        run: mise bootstrap packages apply --manager apt --yes
+
       - uses: ./.github/actions/cache-tools
 
-      - name: Setup | Fixed tools and fonts dependencies
-        run: |
-          source development/toolchains.env
-          echo "RUSTUP_TOOLCHAIN=$XILA_RUST_TOOLCHAIN" >> "$GITHUB_ENV"
-          npm ci
+      - name: Setup | Fonts dependencies
+        run: npm ci
 
       - uses: ./.github/actions/cache-diagnostics
         if: matrix.strategy != 'dependencies'
@@ -63,7 +63,6 @@ jobs:
           version: v0.18.0
 
       - name: Setup | Compiler wrapper
-        # The image sets RUSTC_WRAPPER even without sccache-action.
         if: matrix.strategy == 'dependencies'
         run: echo 'RUSTC_WRAPPER=' >> "$GITHUB_ENV"
 

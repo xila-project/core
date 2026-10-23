@@ -24,17 +24,14 @@ defaults:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/xila-project/development-environment:main
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Setup | Checkout repository
         uses: actions/checkout@v7
 
       - name: Setup
         uses: ./.github/actions/setup
+        with:
+          nightly-toolchain: "true"
 
       - name: Find previous deployment artifacts
         id: previous
@@ -86,8 +83,6 @@ jobs:
             exit 0
           fi
 
-          # The container runs as a different user from the checkout owner.
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch --no-tags --depth=1 origin "$PREVIOUS_SHA"
           declare -A changed_locales=()
           changed_files=0
@@ -144,14 +139,14 @@ jobs:
       - name: Build | Documentation (Host)
         if: steps.scope.outputs.incremental != 'true'
         run: |
-          cargo make doc-host
+          mise run host-docs
           mkdir -p ./pages/host/
           cp -r ./target/x86_64-unknown-linux-gnu/doc/* ./pages/host/
 
       - name: Build | Documentation (Guest)
         if: steps.scope.outputs.incremental != 'true'
         run: |
-          cargo make doc-guest
+          mise run guest-docs
           mkdir -p ./pages/guest/
           cp -r ./target/wasm32-unknown-unknown/doc/* ./pages/guest/
 
@@ -166,7 +161,7 @@ jobs:
           for locale in $LOCALES; do
             echo "::group::WASM demonstration ($locale)"
             export EMBEDDED_I18N_LOCALE="$locale"
-            cargo make prepare-wasm-image
+            mise run prepare-wasm-image
             cargo run -p fs_image -- target/seed/wasm/repeated.img 16777216 --bundle wasm --applications-dir target/wasm32-wasip1/release
             cmp target/seed/wasm/seed.img target/seed/wasm/repeated.img
             rm target/seed/wasm/repeated.img

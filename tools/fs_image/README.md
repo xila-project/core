@@ -35,8 +35,8 @@ while building both guests and images. No passwords or random salts are included
 An explicit pending marker allows runtime account initialization to finish after
 an interruption; existing saved credentials are preserved.
 
-`cargo make prepare-native-image` builds release-wasm guests and writes
-`target/seed/native/seed.img`. `cargo make prepare-wasm-image` builds release
+`mise run prepare-native-image` builds release-wasm guests and writes
+`target/seed/native/seed.img`. `mise run prepare-wasm-image` builds release
 guests and writes `target/seed/wasm/seed.img`. These recipes replace only their
 generated reference outputs, never a live runtime disk. Generated images are
 ignored by Git. CI publishes localized reference images as artifacts, and serves

@@ -48,60 +48,60 @@ documentation and learning guides.
 
 ## Build and check Core
 
-Use the canonical [Xila development environment](https://github.com/Xila-Project/development-environment)
-for local builds and checks. It provides the same pinned tools and packages as
-CI. From a checkout of that repository, run:
+Install [mise](https://mise.jdx.dev/getting-started.html), then install the
+repository-pinned tools and npm dependencies:
 
 ```bash
-cd /path/to/Core
-/path/to/development-environment/scripts/xila-dev pull
-/path/to/development-environment/scripts/xila-dev shell
+mise trust
+mise install
 npm ci
-cargo make check                # Linux host + WASM guest checks
+mise run check                  # Linux host + WASM guest checks
 ```
 
-The image and wrapper require Docker or Podman and internet access on first use.
-The wrapper keeps removable local caches in `.dev-environment/`.
+No development container is required. `mise.toml` pins the Rust toolchain,
+Node.js, Taplo, Trunk, and coverage tools. The Rust toolchain setup includes the
+WASM targets used by the project; `mise run install-nightly` installs the
+additional nightly/Miri toolchain when needed. On Debian/Ubuntu, install native
+build dependencies from the same manifest with `mise bootstrap packages apply
+--manager apt` (mise will request sudo when needed).
 
-Other checks, inside the shell:
+Other checks:
 
 ```bash
-cargo make clippy
-cargo make format-rust -- --check
-cargo make format-toml --check
+mise run clippy
+mise run format-rust -- --check
+mise run format-toml -- --check
 npm exec prettier -- --check "**/*.json"
 ```
 
 For opt-in native PCM playback using nanoaudio, see
 [the audio library](libraries/audio/README.md). Run its tone example with
-`cargo run -p drivers_native --features audio --example audio` inside the shell.
+`mise exec -- cargo run -p drivers_native --features audio --example audio`.
 
-For GUI builds from a **Wayland desktop**, use the wrapper's `--gui` option and
-check rendering, input and window closing. Keep the host GPU drivers. Windows
-requires x86_64 WSL2/WSLg and a GUI smoke test. Native Windows, macOS, ARM Linux
-and NixOS are unvalidated; the current host checks and native event loop depend
-on Linux/Wayland.
+For GUI builds from a **Wayland desktop**, keep the host GPU drivers and check
+rendering, input and window closing. Windows requires x86_64 WSL2/WSLg and a GUI
+smoke test. Native Windows, macOS, ARM Linux and NixOS are unvalidated; the
+current host checks and native event loop depend on Linux/Wayland.
 
-For the browser example, inside the shell:
+For the browser example:
 
 ```bash
-cargo build -p calculator -p text_editor --target wasm32-wasip1 --release
-(cd examples/wasm && RUSTUP_TOOLCHAIN="$XILA_NIGHTLY_TOOLCHAIN" trunk serve)
+mise exec -- cargo build -p calculator -p text_editor --target wasm32-wasip1 --release
+mise run install-nightly
+mise exec -- bash -c 'cd examples/wasm && RUSTUP_TOOLCHAIN="$XILA_NIGHTLY_TOOLCHAIN" trunk serve'
 ```
 
 Use `trunk build` for a build check; open the served URL to test rendering/input.
 
-Tool versions are maintained by the development-environment image and
-`development/toolchains.env`; npm dependencies are pinned by `package-lock.json`.
-CI uses the same image for formatting, host/WASM checks, coverage, Miri and
-deployment. For local coverage/Miri, the image already includes the required
-Rust components. Tool pins do not freeze untracked Cargo lockfiles or moving Git
-dependencies.
+Tool versions are maintained in `mise.toml`; npm dependencies are pinned by
+`package-lock.json`. Local task names are listed by `mise tasks` and run with
+`mise run <task>`. Tool pins do not freeze untracked Cargo lockfiles or moving
+Git dependencies.
 
 ESP-IDF, flashing and serial permissions need separate setup: follow the esp-rs
 [Xtensa](https://docs.esp-rs.org/book/installation/riscv-and-xtensa.html) or
-[RISC-V](https://docs.esp-rs.org/book/installation/riscv.html) guides after leaving
-development container. Host/WASM checks do not prove ESP32, nRF, STM32 or other hardware correctness.
+[RISC-V](https://docs.esp-rs.org/book/installation/riscv.html) guides. Host/WASM
+checks do not prove ESP32, nRF, STM32 or other hardware correctness.
 
 ## Localization
 
@@ -135,11 +135,11 @@ or [heaptrack](https://github.com/KDE/heaptrack) separately when needed. The
 runner never installs tools or changes kernel permissions. Linux CPU recording
 requires access to perf events; a permission error is reported in the run log.
 
-Build before recording, inside the development shell:
+Build before recording, after mise has installed the project tools:
 
 ```bash
-cargo make prepare-native-image
-cargo make build-profiling --features prebuilt-applications
+mise run prepare-native-image
+mise run build-profiling -- --features prebuilt-applications
 cargo run --manifest-path tools/profiling/Cargo.toml -- measure \
   --scenario terminal-idle --output target/profiles/before --runs 3 --duration 30 \
   --applications-dir target/wasm32-wasip1/release-wasm \
@@ -162,7 +162,7 @@ between runs; restore its baseline if the workload writes to it.
 For allocation and task attribution, build with the optional features:
 
 ```bash
-cargo make build-profiling --features profiling,heaptrack
+mise run build-profiling -- --features profiling,heaptrack
 cargo run --manifest-path tools/profiling/Cargo.toml -- cpu \
   --scenario gui-navigation --output target/profiles/cpu --runs 1 --duration 60 \
   --applications-dir target/wasm32-wasip1/release-wasm \

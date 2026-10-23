@@ -3,7 +3,7 @@
 Prepare an independent reference disk, then run the example:
 
 ```sh
-cargo make prepare-native-image
+mise run prepare-native-image
 cargo run -p native_example --bin native_example -- --terminal --no-network \
   --seed-image target/seed/native/seed.img
 ```

@@ -2,6 +2,7 @@
 
 import pathlib
 import re
+import tomllib
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -13,6 +14,79 @@ def job(workflow, name):
 
 
 class WorkflowPolicy(unittest.TestCase):
+    def test_mise_configuration_pins_project_toolchains_and_core_tasks(self):
+        config = tomllib.loads((ROOT / "mise.toml").read_text())
+        self.assertEqual(config["tools"]["rust"]["version"], "1.99.0")
+        self.assertEqual(config["env"]["XILA_NIGHTLY_TOOLCHAIN"], "nightly-2026-10-12")
+        self.assertEqual(config["tools"]["node"], "24.22.0")
+        self.assertEqual(config["tools"]["aqua:cargo-bins/cargo-binstall"], "1.15.7")
+        for task in ["host-check", "guest-check", "localization-check", "prepare-native-image", "prepare-wasm-image"]:
+            with self.subTest(task=task):
+                self.assertIn(task, config["tasks"])
+
+    def test_setup_action_installs_mise_tools_and_can_add_nightly_components(self):
+        setup = (ROOT / ".github/actions/setup/action.yml").read_text()
+        self.assertIn("uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550", setup)
+        self.assertIn("nightly-toolchain:", setup)
+        self.assertIn("mise run install-nightly", setup)
+        self.assertNotIn("source development/toolchains.env", setup)
+
+    def test_mise_bootstraps_runner_system_packages(self):
+        config = tomllib.loads((ROOT / "mise.toml").read_text())
+        packages = config["bootstrap"]["packages"]
+        for package in ["clang", "mold", "pkg-config", "libasound2-dev", "libudev-dev", "libxkbcommon-dev", "libwayland-dev", "libx11-dev", "libxkbcommon-x11-dev"]:
+            with self.subTest(package=package):
+                self.assertEqual(packages[f"apt:{package}"], "latest")
+        setup = (ROOT / ".github/actions/setup/action.yml").read_text()
+        self.assertIn("mise bootstrap packages apply --manager apt --yes", setup)
+        self.assertNotIn("sudo apt-get install", setup)
+
+    def test_check_workflow_uses_mise_without_the_development_container(self):
+        check = (ROOT / ".github/workflows/check.yml").read_text()
+        self.assertNotIn("container:", check)
+        self.assertNotIn("cargo make", check)
+        self.assertIn("'mise.toml'", check)
+        self.assertIn("'tools/mise/**'", check)
+        self.assertNotIn("'**/Makefile.toml'", check)
+        self.assertIn("            mise:", check)
+        self.assertNotIn("            makefile:", check)
+        self.assertIn("mise run install-nightly", (ROOT / ".github/actions/setup/action.yml").read_text())
+
+    def test_deploy_and_cache_benchmark_use_hosted_mise_setup(self):
+        deploy = (ROOT / ".github/workflows/deploy.yml").read_text()
+        benchmark = (ROOT / ".github/workflows/cache-benchmark.yml").read_text()
+        self.assertNotIn("container:", deploy)
+        self.assertNotIn("cargo make", deploy)
+        self.assertIn("mise run host-docs", deploy)
+        self.assertIn("mise run guest-docs", deploy)
+        self.assertIn("mise run prepare-wasm-image", deploy)
+        self.assertIn('nightly-toolchain: "true"', deploy)
+        self.assertNotIn("container:", benchmark)
+        self.assertIn("jdx/mise-action@", benchmark)
+        self.assertIn("mise bootstrap packages apply --manager apt --yes", benchmark)
+        self.assertNotIn("sudo apt-get install", benchmark)
+
+    def test_local_developer_docs_use_mise_and_no_development_container(self):
+        readme = (ROOT / "readme.md").read_text()
+        agents = (ROOT / "AGENTS.md").read_text()
+        for document in [readme, agents]:
+            self.assertNotIn("cargo make", document)
+            self.assertNotIn("development-environment", document)
+            self.assertIn("mise install", document)
+        runtime = (ROOT / ".github/workflows/container.yml").read_text()
+        self.assertIn("'mise.toml'", runtime)
+        self.assertIn("'tools/mise/**'", runtime)
+        self.assertNotIn("'Makefile.toml'", runtime)
+
+    def test_seed_image_tasks_limit_removal_to_generated_seed_images(self):
+        native = (ROOT / "tools/mise/prepare-native-image.sh").read_text()
+        wasm = (ROOT / "tools/mise/prepare-wasm-image.sh").read_text()
+        self.assertIn("rm -f target/seed/native/seed.img", native)
+        self.assertIn("--bundle native", native)
+        self.assertIn("rm -f target/seed/wasm/seed.img", wasm)
+        self.assertIn("--bundle wasm", wasm)
+        self.assertNotRegex(native + wasm, r"rm\s+-rf\s+(?!target/seed)")
+
     def test_extended_checks_override_skipped_ancestors_but_require_success(self):
         for name, dependency in [("host-coverage", "host-test"), ("wasm-extended", "wasm-translation")]:
             with self.subTest(job=name):
@@ -82,6 +156,8 @@ class WorkflowPolicy(unittest.TestCase):
         text = (ROOT / ".github/actions/setup/action.yml").read_text()
         self.assertIn("uses: ./.github/actions/cache-tools", text)
         self.assertLess(text.index("uses: ./.github/actions/cache-tools"), text.index("id: rust-cache"))
+        cache_tools = (ROOT / ".github/actions/cache-tools/action.yml").read_text()
+        self.assertIn("sudo apt-get install", cache_tools)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 name: "Setup"
-description: "Cache and validate tools in the Xila development image"
+description: "Install mise-managed tools, dependencies, and CI caches on hosted runners"
 
 inputs:
   profile:
@@ -22,17 +22,36 @@ inputs:
     description: "Stable Rust cache identity for this workload; separate locale/feature variants."
     required: false
     default: default
+  nightly-toolchain:
+    description: "Install the pinned nightly Rust toolchain and Miri targets."
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
   steps:
-    - name: Setup | Read toolchain pins
+    - name: Setup | Install mise tools
+      uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+
+    - name: Setup | Export toolchain pins
       shell: bash
       run: |
-        source development/toolchains.env
-        echo "XILA_RUST_TOOLCHAIN=$XILA_RUST_TOOLCHAIN" >> "$GITHUB_ENV"
-        echo "XILA_NIGHTLY_TOOLCHAIN=$XILA_NIGHTLY_TOOLCHAIN" >> "$GITHUB_ENV"
-        echo "RUSTUP_TOOLCHAIN=$XILA_RUST_TOOLCHAIN" >> "$GITHUB_ENV"
+        mise_env="$(mise env --json)"
+        stable="$(jq -r '.XILA_RUST_TOOLCHAIN' <<< "$mise_env")"
+        nightly="$(jq -r '.XILA_NIGHTLY_TOOLCHAIN' <<< "$mise_env")"
+        echo "XILA_RUST_TOOLCHAIN=$stable" >> "$GITHUB_ENV"
+        echo "XILA_NIGHTLY_TOOLCHAIN=$nightly" >> "$GITHUB_ENV"
+        echo "RUSTUP_TOOLCHAIN=$stable" >> "$GITHUB_ENV"
+
+    - name: Setup | Install nightly Rust components
+      if: inputs.nightly-toolchain == 'true'
+      shell: bash
+      run: mise run install-nightly
+
+    - name: Setup | Bootstrap native build dependencies
+      if: inputs.profile != 'minimal'
+      shell: bash
+      run: mise bootstrap packages apply --manager apt --yes
 
     - name: Setup | Cache compression
       if: inputs.profile != 'minimal'
