@@ -8,6 +8,8 @@ use crate::host::translation::{GuestMemory, GuestPointer, GuestSlice, WasmUsize}
 use core::ptr::NonNull;
 use xila::graphics::{Color, Window, lvgl};
 
+// The first cast is required when WasmUsize is u64, and intentionally redundant for memory_32.
+#[allow(clippy::unnecessary_cast)]
 pub(super) fn signed_word(value: WasmUsize) -> Result<i32> {
     let narrowed = value as u32 as i32;
     if narrowed as WasmUsize == value {
@@ -211,7 +213,7 @@ pub fn dispatch(
         }
         Function::ObjectSetLayout => {
             let object = state.object(a, None)?;
-            if !matches!(b, 0 | 1 | 2) {
+            if !matches!(b, 0..=2) {
                 return Err(GraphicsError::InvalidValue);
             }
             unsafe { lvgl::lv_obj_set_layout(object, b as _) };
