@@ -14,7 +14,7 @@ Xila is an embedded operating system written in Rust for low-power microcontroll
 
 Shared tasks are defined in `mise.toml`, developer-only tasks and tools in `mise.development.toml`, and CI tasks with task-scoped tools and package setup in `mise.ci.toml`. All task names use `<namespace>:<command>`. CI is the source of truth for target-specific validation.
 
-- The default `development` environment provides local tools; use `MISE_ENV=ci` for CI tasks. Run `mise bootstrap packages apply --manager apt` for local native packages; CI build tasks apply only their required package sets through dependencies, while formatting tasks install no native packages. No development container is required.
+- The default `development` environment provides task-scoped local tools; use `MISE_ENV=ci` for CI tasks. Version pins are centralized in `[vars]` in `mise.toml`; tasks select tool clusters with `extends`. Run tasks to install only their tools, or optionally preinstall all development task tools with `mise install --include-task-tools`. Run `mise bootstrap packages apply --manager apt` for local native packages; CI build tasks apply only their required package sets through dependencies, while formatting tasks install no native packages or build toolset. No development container is required.
 - For localization, set `EMBEDDED_I18N_LOCALE` and `EMBEDDED_I18N_STRICT=1`, run `mise run localization:check`, and test extractor changes with `node --test tolgee.extractor.test.mjs`. Build host, guests, fonts and LittleFS images for the same locale, using separate Cargo target directories per locale. See `docs/localization.md`.
 
 # Architecture & Implementation Guidelines

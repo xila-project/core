@@ -49,13 +49,29 @@ jobs:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5.2.2
       - run: mise run deps:npm
-      - run: mise exec rust@1.99.0 -- rustc --version
+      - id: toolchain
+        run: mise run ci:toolchain
       - uses: jdx/mr-boxington-action@v1
         with:
-          toolchain: "1.99.0"
+          toolchain: ${{ steps.toolchain.outputs.version }}
           github-cache-mode: objects
           cache-generation: v1-ci-host
-      - run: mise run ci:host
+      - name: Lint host workspace
+        run: mise run ci:host-clippy
+      - name: Lint host WASM runtime
+        run: mise run ci:host-wasm-clippy
+      - name: Lint native audio
+        run: mise run ci:host-audio-clippy
+      - name: Test host workspace
+        run: mise run ci:host-tests
+      - name: Test profiling tools
+        run: mise run ci:host-profiling-tests
+      - name: Test font linking
+        run: mise run ci:host-font-tests
+      - name: Test native audio
+        run: mise run ci:host-audio-tests
+      - name: Build native example
+        run: mise run ci:host-build
 
   wasm:
     name: WASM
@@ -69,13 +85,23 @@ jobs:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5.2.2
       - run: mise run deps:npm
-      - run: mise exec rust@1.99.0 -- rustc --version
+      - id: toolchain
+        run: mise run ci:toolchain
       - uses: jdx/mr-boxington-action@v1
         with:
-          toolchain: "1.99.0"
+          toolchain: ${{ steps.toolchain.outputs.version }}
           github-cache-mode: target
           cache-generation: v1-ci-wasm
-      - run: mise run ci:wasm
+      - name: Lint WASM guests
+        run: mise run ci:wasm-clippy
+      - name: Check browser audio
+        run: mise run ci:wasm-audio-check
+      - name: Lint WASI applications
+        run: mise run ci:wasm-apps-clippy
+      - name: Build WASI applications and seed image
+        run: mise run ci:wasm-image
+      - name: Test browser storage
+        run: mise run ci:wasm-browser-tests
 
   abi:
     name: ABI (${{ matrix.memory }})
@@ -84,7 +110,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        memory: ${{ fromJSON(github.event_name == 'pull_request' && '["memory_32"]' || '["memory_32", "memory_64"]') }}
+        memory: [memory_32, memory_64]
     env:
       MISE_ENV: ci
       CI_ABI_MEMORY: ${{ matrix.memory }}
@@ -92,10 +118,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5.2.2
-      - run: mise exec rust@1.99.0 -- rustc --version
+      - id: toolchain
+        run: mise run ci:toolchain
       - uses: jdx/mr-boxington-action@v1
         with:
-          toolchain: "1.99.0"
+          toolchain: ${{ steps.toolchain.outputs.version }}
           github-cache-mode: objects
           cache-generation: v1-ci-abi-${{ matrix.memory }}
       - run: mise run ci:abi
@@ -164,12 +191,13 @@ jobs:
         if: steps.locales.outputs.run-check == 'true'
       - run: mise run deps:npm
         if: steps.locales.outputs.run-check == 'true'
-      - run: mise exec rust@1.99.0 -- rustc --version
+      - id: toolchain
+        run: mise run ci:toolchain
         if: steps.locales.outputs.run-check == 'true'
       - uses: jdx/mr-boxington-action@v1
         if: steps.locales.outputs.run-check == 'true'
         with:
-          toolchain: "1.99.0"
+          toolchain: ${{ steps.toolchain.outputs.version }}
           github-cache-mode: objects
           cache-generation: v1-ci-localization
       - name: Strict localization validation

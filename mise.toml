@@ -1,3 +1,16 @@
+[vars]
+# Version pins only: these declarations never install or activate a tool.
+rust_version = "1.99.0"
+nightly_version = "nightly-2026-10-12"
+node_version = "24.22.0"
+taplo_version = "0.10.0"
+actionlint_version = "1.7.7"
+shellcheck_version = "0.11.0"
+trunk_version = "0.21.14"
+llvm_cov_version = "0.6.21"
+binstall_version = "1.15.7"
+nextest_version = "0.9.148"
+
 [tasks."deps:npm"]
 description = "Install locked npm dependencies"
 run = "npm ci"

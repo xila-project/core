@@ -49,26 +49,32 @@ documentation and learning guides.
 ## Build and check Core
 
 Install [mise](https://mise.jdx.dev/getting-started.html). By default, this
-repository selects the full `development` environment so local development can
-install the project tools and targets in one pass:
+repository selects the `development` tasks. Tools are installed on demand per
+task; optionally preinstall all development task tools in one pass:
 
 ```bash
 mise trust
-mise install # installs the full development environment
+mise install --include-task-tools # optional: preinstall development task tools
 mise bootstrap packages apply --manager apt
 mise run deps:npm
 mise run check:all               # Linux host + WASM guest checks
 ```
 
 No development container is required. `.miserc.toml` selects
-`mise.development.toml` by default; it includes host and WASM targets, formatting,
-browser, coverage, and benchmark tools, plus developer-only `format:*`,
+`mise.development.toml` by default; tasks select host or WASM targets, formatting
+or coverage tools as needed, including developer-only `format:*`,
 `translate:*` and `dev:*` tasks. `mise.toml` holds reusable namespaced tasks
 such as `check:host`, `docs:all`, and `image:wasm`.
 CI selects `mise.ci.toml`, where tools are declared on individual
 tasks so a job installs only the tools its tasks use. On Debian/Ubuntu, native
 packages are provisioned from the selected environment with
 `mise bootstrap packages apply --manager apt` (mise requests sudo when needed).
+Developer Cargo build tasks are wrapped by mbx through Mise's native Rust
+integration. Tools are not activated globally: use `mise run build:cargo -- ...`
+or `mise run run:cargo -- ...` for ad-hoc Cargo commands with this setup.
+CI uses the mbx GitHub Action and its wrapper instead, avoiding a second mbx
+installation in CI. Formatting tasks select only rustfmt, Taplo or Node, with
+no build targets, Clippy, mbx, coverage tools or native-package bootstrap.
 
 Other checks:
 
@@ -76,12 +82,12 @@ Other checks:
 mise run clippy:all
 mise run format:rust -- --check
 mise run format:toml -- --check
-npm exec prettier -- --check "**/*.json"
+MISE_ENV=ci mise run ci:quality-js
 ```
 
 For opt-in native PCM playback using nanoaudio, see
 [the audio library](libraries/audio/README.md). Run its tone example with
-`mise exec -- cargo run -p drivers_native --features audio --example audio`.
+`mise run run:cargo -- -p drivers_native --features audio --example audio`.
 
 For GUI builds from a **Wayland desktop**, keep the host GPU drivers and check
 rendering, input and window closing. Windows requires x86_64 WSL2/WSLg and a GUI
@@ -91,13 +97,14 @@ current host checks and native event loop depend on Linux/Wayland.
 For the browser example:
 
 ```bash
-mise exec -- cargo build -p calculator -p text_editor --target wasm32-wasip1 --release
-mise exec 'rust[targets=wasm32-unknown-unknown]@nightly-2026-10-12' -- bash -c 'cd examples/wasm && trunk serve'
+mise run build:applications
+MISE_ENV=ci mise run pages:demo
 ```
 
-Use `trunk build` for a build check; open the served URL to test rendering/input.
+`pages:demo` builds the browser example with its task-scoped nightly toolchain
+and Trunk. Serve `examples/wasm/dist` separately to test rendering/input.
 
-Tool versions are maintained in the `mise*.toml` files; npm dependencies are pinned by
+Tool versions are centralized in `[vars]` in `mise.toml`; npm dependencies are pinned by
 `package-lock.json`. Local task names are listed by `mise tasks` and run with
 `mise run <task>`. Tool pins do not freeze untracked Cargo lockfiles or moving
 Git dependencies.

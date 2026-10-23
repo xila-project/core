@@ -1,18 +1,43 @@
-[tools]
-rust = { version = "1.99.0", profile = "minimal", components = [
+[task_templates."dev:rust".tools]
+rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "rustfmt",
+], mr_boxington = true }
+"mr-boxington" = "latest"
+
+[task_templates."dev:rust-lint".tools]
+rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
   "clippy",
   "rustfmt",
-  "llvm-tools-preview",
+], mr_boxington = true }
+"mr-boxington" = "latest"
+
+[task_templates."dev:rust-browser".tools]
+rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "rustfmt",
 ], targets = [
   "wasm32-unknown-unknown",
+], mr_boxington = true }
+"mr-boxington" = "latest"
+
+[task_templates."dev:rust-browser-lint".tools]
+rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "clippy",
+  "rustfmt",
+], targets = [
+  "wasm32-unknown-unknown",
+], mr_boxington = true }
+"mr-boxington" = "latest"
+
+[task_templates."dev:rust-wasi".tools]
+rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "rustfmt",
+], targets = [
   "wasm32-wasip1",
-] }
-node = "24.22.0"
-taplo = "0.10.0"
-"aqua:rhysd/actionlint" = "1.7.7"
-"cargo:trunk" = "0.21.14"
-"aqua:taiki-e/cargo-llvm-cov" = "0.6.21"
-"aqua:cargo-bins/cargo-binstall" = "1.15.7"
+], mr_boxington = true }
+"mr-boxington" = "latest"
+
+[task_templates."dev:node".tools]
+node = "{{ vars.node_version }}"
 
 [bootstrap.packages]
 "apt:clang" = "latest"
@@ -27,13 +52,18 @@ taplo = "0.10.0"
 
 [tasks."format:rust"]
 description = "Format Rust sources"
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "rustfmt",
+] }
 run = "cargo fmt --all"
 
 [tasks."format:toml"]
 description = "Format TOML files"
+tools.taplo = "{{ vars.taplo_version }}"
 run = "taplo format"
 
 [tasks."format:json"]
+extends = "dev:node"
 description = "Format JSON files"
 run = "npm exec prettier -- --write \"**/*.json\""
 
@@ -42,33 +72,92 @@ description = "Format Rust, TOML, and JSON"
 depends = ["format:rust", "format:toml", "format:json"]
 
 [tasks."translate:compare"]
+extends = "dev:node"
 description = "Compare translation catalogs"
 run = "npm exec tolgee compare"
 
 [tasks."translate:sync"]
+extends = "dev:node"
 description = "Synchronize translation catalogs"
 run = "npm exec tolgee sync -- --remove-unused"
 
 [tasks."translate:pull"]
+extends = "dev:node"
 description = "Pull translation catalogs"
 run = "npm exec tolgee pull"
 
 [tasks."translate:push"]
+extends = "dev:node"
 description = "Push translation catalogs"
 run = "npm exec tolgee push"
 
 [tasks."lint:all"]
+extends = "dev:rust-lint"
 description = "Run workspace Clippy with all features"
 run = "cargo clippy --all-targets --all-features -- -D warnings"
 
 [tasks."run:cargo"]
+extends = "dev:rust"
 description = "Run a Cargo binary"
 run = "cargo run"
 
 [tasks."coverage:host"]
+extends = "dev:rust"
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "llvm-tools-preview",
+  "rustfmt",
+], mr_boxington = true }
+tools."aqua:taiki-e/cargo-llvm-cov" = "{{ vars.llvm_cov_version }}"
 description = "Run host-only workspace coverage"
 run = "cargo llvm-cov --workspace --coverage-host-only"
 
 [tasks."dev:before-commit"]
 description = "Run formatting, checks, docs, and Clippy"
 depends = ["format:all", "check:all", "docs:all", "clippy:all"]
+
+# These augment the reusable commands in mise.toml without activating tools
+# globally. In particular, running format:* never installs the build toolset.
+[tasks."deps:npm"]
+extends = "dev:node"
+
+[tasks."check:host"]
+extends = "dev:rust"
+
+[tasks."check:guest"]
+extends = "dev:rust-browser"
+
+[tasks."localization:host-check"]
+extends = "dev:rust"
+
+[tasks."localization:guest-check"]
+extends = "dev:rust-wasi"
+
+[tasks."clippy:host"]
+extends = "dev:rust-lint"
+
+[tasks."clippy:guest"]
+extends = "dev:rust-browser-lint"
+
+[tasks."docs:host"]
+extends = "dev:rust"
+
+[tasks."docs:guest"]
+extends = "dev:rust-browser"
+
+[tasks."test:workspace"]
+extends = "dev:rust"
+
+[tasks."build:cargo"]
+extends = "dev:rust"
+
+[tasks."build:profiling"]
+extends = "dev:rust"
+
+[tasks."build:applications"]
+extends = "dev:rust-wasi"
+
+[tasks."image:native"]
+extends = "dev:rust-wasi"
+
+[tasks."image:wasm"]
+extends = "dev:rust-wasi"

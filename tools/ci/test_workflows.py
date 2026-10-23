@@ -1,6 +1,8 @@
 """Focused behavioral policy regressions for the current CI workflows."""
 
 import os
+import functools
+import json
 import pathlib
 import re
 import subprocess
@@ -22,11 +24,107 @@ def job(workflow, name):
     return re.search(rf"^  {re.escape(name)}:\n(.*?)(?=^  [\w-]+:|\Z)", text, re.M | re.S)[1]
 
 
+@functools.lru_cache
+def configured_tasks(environment):
+    """Resolve task inheritance and tools with Mise (scripts render at execution)."""
+    result = subprocess.check_output(
+        ["mise", "tasks", "ls", "--json"], cwd=ROOT, text=True,
+        env=os.environ | {"MISE_ENV": environment},
+    )
+    tasks = {}
+    for task in json.loads(result):
+        task["run"] = "\n".join(task["run"])
+        if not task.get("depends"):
+            task.pop("depends", None)
+        tasks[task["name"]] = task
+    return tasks
+
+
+@functools.lru_cache
+def ci_config():
+    config = tomllib.loads((ROOT / "mise.ci.toml").read_text())
+    resolved = configured_tasks("ci")
+    return config | {"tasks": {name: resolved[name] for name in config["tasks"]}}
+
+
 class WorkflowPolicy(unittest.TestCase):
+    def test_tool_versions_are_central_and_templates_do_not_install_tools_globally(self):
+        shared = tomllib.loads((ROOT / "mise.toml").read_text())
+        self.assertIn("rust_version", shared.get("vars", {}))
+        self.assertIn("nightly_version", shared["vars"])
+        ci = tomllib.loads((ROOT / "mise.ci.toml").read_text())
+        self.assertIn("task_templates", ci)
+        self.assertNotIn("tools", shared)
+        self.assertNotIn("tools", ci)
+        for filename in ["mise.ci.toml", "mise.development.toml"]:
+            text = (ROOT / filename).read_text()
+            for version in shared["vars"].values():
+                self.assertNotIn(f'"{version}"', text, filename)
+        self.assertNotIn("depends", ci["task_templates"]["ci:rust-format"])
+        self.assertNotIn("depends", ci["task_templates"]["ci:node"])
+
+    def test_formatting_resolves_only_its_own_tools_in_both_environments(self):
+        for environment, cases in {
+            "ci": {"ci:format-rust": {"rust"}, "ci:format-toml": {"taplo"}, "ci:quality-js": {"node"}},
+            "development": {"format:rust": {"rust"}, "format:toml": {"taplo"}, "format:json": {"node"}},
+        }.items():
+            for name, expected_tools in cases.items():
+                with self.subTest(environment=environment, task=name):
+                    task = configured_tasks(environment)[name]
+                    self.assertEqual(set(task["tools"]), expected_tools)
+                    self.assertFalse(task.get("depends"))
+                    if "rust" in expected_tools:
+                        self.assertEqual(task["tools"]["rust"]["components"], ["rustfmt"])
+                        self.assertFalse(task["tools"]["rust"].get("targets"))
+        tasks = configured_tasks("ci")
+        self.assertEqual(tasks["ci:abi"]["tools"]["rust"], {"version": "1.99.0", "profile": "minimal"})
+        self.assertEqual(set(tasks["ci:wasm-browser-tests"]["tools"]), {"node"})
+        self.assertNotIn("tools", tomllib.loads((ROOT / "mise.development.toml").read_text()))
+
+    def test_validation_jobs_call_the_same_ordered_leaf_tasks_as_local_wrappers(self):
+        tasks = ci_config()["tasks"]
+        groups = {
+            ("ci.yml", "host"): ["ci:host-clippy", "ci:host-wasm-clippy", "ci:host-audio-clippy", "ci:host-tests", "ci:host-profiling-tests", "ci:host-font-tests", "ci:host-audio-tests", "ci:host-build"],
+            ("ci.yml", "wasm"): ["ci:wasm-clippy", "ci:wasm-audio-check", "ci:wasm-apps-clippy", "ci:wasm-image", "ci:wasm-browser-tests"],
+            ("extended.yml", "profiling"): ["ci:profiling-runtime-tests", "ci:profiling-native-tests"],
+            ("extended.yml", "abi-deep"): ["ci:abi-coverage", "ci:abi-miri", "ci:abi-miri-cross"],
+        }
+        for (workflow, group), leaves in groups.items():
+            with self.subTest(group=group):
+                wrapper = tasks[f"ci:{group}"]["run"]
+                self.assertEqual(re.findall(r"^mise run ([\w:-]+)$", wrapper, re.M), leaves)
+                self.assertNotIn("cargo ", wrapper)
+                steps = re.findall(r"^      - name: .+\n        run: mise run ([\w:-]+)$", job(workflow, group), re.M)
+                self.assertEqual(steps, leaves)
+                for leaf in leaves:
+                    task = tasks[leaf]
+                    self.assertIn("run", task)
+                    if leaf == "ci:wasm-browser-tests":
+                        self.assertIn("node", task["tools"])
+                        self.assertNotIn("depends", task)
+                    else:
+                        self.assertIn("rust", task["tools"])
+                        self.assertIn("depends", task)
+
+                # Exercise the wrapper shell without compiling or installing packages.
+                # A failing leaf must prevent every subsequent leaf from running.
+                with tempfile.TemporaryDirectory() as directory:
+                    directory = pathlib.Path(directory)
+                    mise = directory / "mise"
+                    mise.write_text('#!/bin/sh\nprintf "%s\\n" "$2" >> "$CALLS"\n[ "$2" != "$FAIL_TASK" ]\n')
+                    mise.chmod(0o755)
+                    calls = directory / "calls"
+                    env = os.environ | {"PATH": f"{directory}:{os.environ['PATH']}", "CALLS": str(calls)}
+                    for failure in ["", leaves[1]]:
+                        calls.write_text("")
+                        result = subprocess.run(["bash", "-c", wrapper], env=env | {"FAIL_TASK": failure}, capture_output=True, text=True)
+                        self.assertEqual(result.returncode, 1 if failure else 0, result.stderr)
+                        self.assertEqual(calls.read_text().splitlines(), leaves[:2] if failure else leaves)
+
     def test_task_names_are_namespaced_and_developer_tasks_are_environment_scoped(self):
         shared = tomllib.loads((ROOT / "mise.toml").read_text())["tasks"]
         development = tomllib.loads((ROOT / "mise.development.toml").read_text()).get("tasks", {})
-        ci = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]
+        ci = ci_config()["tasks"]
         for tasks in [shared, development, ci]:
             for name in tasks:
                 self.assertRegex(name, r"^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$", name)
@@ -49,7 +147,7 @@ class WorkflowPolicy(unittest.TestCase):
                 self.assertIn(callee, shared | ci, (workflow.name, callee))
 
     def test_ci_cargo_wrapper_reuses_existing_mbx_only_when_enabled(self):
-        ci = tomllib.loads((ROOT / "mise.ci.toml").read_text())
+        ci = ci_config()
         self.assertIn("cargo", ci.get("wrappers", {}))
         wrapper = ci["wrappers"]["cargo"]
         self.assertEqual(wrapper["command"], "env")
@@ -98,10 +196,19 @@ class WorkflowPolicy(unittest.TestCase):
             "ci.yml": ["host", "wasm", "abi", "localization"],
             "extended.yml": ["coverage", "profiling"],
             "pages.yml": ["build"],
+            "benchmarks.yml": ["profile", "test-runner"],
         }.items():
             for name in names:
-                self.assertIn('toolchain: "1.99.0"', job(workflow, name))
-        self.assertIn("toolchain: nightly-2026-10-12", job("extended.yml", "abi-deep"))
+                text = job(workflow, name)
+                self.assertIn('toolchain: ${{ steps.toolchain.outputs.version }}', text)
+                self.assertIn("run: mise run ci:toolchain", text)
+        self.assertIn("run: mise run ci:toolchain-nightly", job("extended.yml", "abi-deep"))
+        self.assertIn('toolchain: ${{ steps.toolchain.outputs.version }}', job("extended.yml", "abi-deep"))
+        pins = tomllib.loads((ROOT / "mise.toml").read_text())["vars"]
+        for task_name, pin in [("ci:toolchain", "rust_version"), ("ci:toolchain-nightly", "nightly_version")]:
+            task = configured_tasks("ci")[task_name]
+            self.assertEqual(task["tools"]["rust"], {"version": pins[pin], "profile": "minimal"})
+            self.assertIn('echo "version={{ vars.' + pin + ' }}"', task["run"])
 
     def test_quality_does_not_enable_compilation_cache(self):
         quality = job("ci.yml", "quality")
@@ -109,17 +216,22 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertNotIn("mr-boxington-action", quality)
 
     def test_workflow_lint_includes_shellcheck_on_local_and_ci_runs(self):
-        tasks = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]
+        tasks = ci_config()["tasks"]
         self.assertIn("aqua:koalaman/shellcheck", tasks["ci:lint-workflows"]["tools"])
 
     def test_binding_build_tasks_install_rustfmt_even_with_minimal_toolchains(self):
-        tasks = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]
+        tasks = ci_config()["tasks"]
         for name in [
             "ci:host", "ci:wasm", "ci:localization", "ci:coverage", "ci:profiling",
             "ci:benchmark-profile", "ci:benchmark-compile", "ci:benchmark-cargo-test",
             "ci:benchmark-nextest", "ci:benchmark-doctests", "pages:build", "pages:demo",
             "clippy:host", "clippy:guest", "docs:host", "docs:guest",
             "build:applications", "image:native", "image:wasm",
+            "ci:host-clippy", "ci:host-wasm-clippy", "ci:host-audio-clippy",
+            "ci:host-tests", "ci:host-profiling-tests", "ci:host-font-tests",
+            "ci:host-audio-tests", "ci:host-build", "ci:wasm-clippy",
+            "ci:wasm-audio-check", "ci:wasm-apps-clippy", "ci:wasm-image",
+            "ci:profiling-runtime-tests", "ci:profiling-native-tests",
         ]:
             with self.subTest(task=name):
                 rust = tasks[name]["tools"]["rust"]
@@ -153,11 +265,11 @@ class WorkflowPolicy(unittest.TestCase):
             with self.subTest(required_job=name):
                 self.assertIn(f"needs.{name}.result", required)
 
-    def test_primary_abi_matrix_uses_memory32_on_pr_and_both_modes_elsewhere(self):
+    def test_primary_abi_matrix_checks_both_memory_modes_on_every_event(self):
         abi = job("ci.yml", "abi")
         self.assertIn("memory_32", abi)
         self.assertIn("memory_64", abi)
-        self.assertIn("github.event_name == 'pull_request'", abi)
+        self.assertNotIn("github.event_name == 'pull_request'", abi)
         self.assertIn("ci:abi", abi)
 
     def test_localization_job_selects_catalogs_and_runs_all_locales_for_shared_changes(self):
@@ -207,7 +319,8 @@ class WorkflowPolicy(unittest.TestCase):
         for name in ["coverage", "abi-deep", "profiling", "release-gate"]:
             with self.subTest(job=name):
                 self.assertRegex(extended, rf"(?m)^  {re.escape(name)}:")
-        deep_task = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]["ci:abi-deep"]["run"]
+        tasks = ci_config()["tasks"]
+        deep_task = tasks["ci:abi-coverage"]["run"] + tasks["ci:abi-miri-cross"]["run"]
         self.assertIn("fail-under-lines 100", deep_task)
         self.assertIn("fail-under-functions 100", deep_task)
         self.assertIn("i686-unknown-linux-gnu", deep_task)
@@ -251,14 +364,14 @@ class WorkflowPolicy(unittest.TestCase):
                 self.assertNotIn(old, pages)
 
     def test_pages_task_builds_all_locale_images_deterministically(self):
-        task = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]["pages:build"]["run"]
+        task = ci_config()["tasks"]["pages:build"]["run"]
         for locale in ["en", "fr", "es", "de", "pt-BR", "it", "pl"]:
             with self.subTest(locale=locale):
                 self.assertIn(locale, task)
         self.assertIn("--bundle wasm", task)
         self.assertIn("--bundle native", task)
         self.assertIn("cmp ", task)
-        ci_tasks = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]
+        ci_tasks = ci_config()["tasks"]
         self.assertIn("mise run pages:demo", task)
         self.assertIn("trunk build --release", ci_tasks["pages:demo"]["run"])
 
@@ -279,12 +392,12 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertRegex(benchmarks, r"(?m)^  profile:")
         self.assertRegex(benchmarks, r"(?m)^  test-runner:")
         self.assertIn("mise run ci:benchmark-profile", benchmarks)
-        ci_tasks = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]
+        ci_tasks = ci_config()["tasks"]
         self.assertIn("cargo test --workspace --timings", ci_tasks["ci:benchmark-profile"]["run"])
         self.assertIn("cargo nextest run --workspace --timings", ci_tasks["ci:benchmark-nextest"]["run"])
 
     def test_ci_task_groups_and_quality_environment_are_defined(self):
-        config = tomllib.loads((ROOT / "mise.ci.toml").read_text())
+        config = ci_config()
         shared = tomllib.loads((ROOT / "mise.toml").read_text())["tasks"]
         self.assertFalse([name for name in shared if name.startswith("ci:") or name == "pages:build"])
         self.assertNotIn("install-nightly", shared)
@@ -303,7 +416,7 @@ class WorkflowPolicy(unittest.TestCase):
                 self.assertIn(task, config["tasks"])
                 self.assertIn("run", config["tasks"][task])
 
-        ci = tomllib.loads((ROOT / "mise.ci.toml").read_text())
+        ci = ci_config()
         task_tools = {name: task.get("tools", {}) for name, task in ci["tasks"].items()}
         self.assertIn("rustfmt", task_tools["ci:format-rust"]["rust"]["components"])
         self.assertEqual(task_tools["ci:format-toml"]["taplo"], "0.10.0")
@@ -321,7 +434,7 @@ class WorkflowPolicy(unittest.TestCase):
 
     def test_mise_manages_nightly_components_and_toolchain_selection(self):
         ci_text = (ROOT / "mise.ci.toml").read_text()
-        tasks = tomllib.loads(ci_text)["tasks"]
+        tasks = ci_config()["tasks"]
         self.assertNotIn("rustup toolchain install", ci_text)
         self.assertNotIn("XILA_NIGHTLY_TOOLCHAIN", ci_text)
         for name in ["ci:abi-deep"]:
@@ -336,25 +449,25 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertEqual(tasks["pages:demo"]["tools"]["rust"]["version"], "nightly-2026-10-12")
         self.assertIn("wasm32-unknown-unknown", tasks["pages:demo"]["tools"]["rust"]["targets"])
 
-    def test_development_mise_environment_is_the_default_and_includes_all_tool_groups(self):
+    def test_development_mise_environment_is_default_with_task_scoped_mbx(self):
         default = tomllib.loads((ROOT / ".miserc.toml").read_text())
         self.assertEqual(default["env"], ["development"])
         development = tomllib.loads((ROOT / "mise.development.toml").read_text())
-        tools = development["tools"]
-        for tool in ["rust", "node", "taplo", "aqua:rhysd/actionlint", "cargo:trunk", "aqua:taiki-e/cargo-llvm-cov", "aqua:cargo-bins/cargo-binstall"]:
-            with self.subTest(tool=tool):
-                self.assertIn(tool, tools)
-        self.assertEqual(set(tools["rust"]["targets"]), {"wasm32-unknown-unknown", "wasm32-wasip1"})
-        self.assertIn("rustfmt", tools["rust"]["components"])
-        self.assertIn("clippy", tools["rust"]["components"])
+        self.assertNotIn("tools", development)
+        tasks = configured_tasks("development")
+        for name in ["check:host", "check:guest", "clippy:host", "clippy:guest", "build:cargo", "image:wasm"]:
+            with self.subTest(task=name):
+                self.assertTrue(tasks[name]["tools"]["rust"]["mr_boxington"])
+                self.assertIn("mr-boxington", tasks[name]["tools"])
+        self.assertIn("aqua:taiki-e/cargo-llvm-cov", tasks["coverage:host"]["tools"])
 
-    def test_developer_setup_documents_full_default_and_optional_nightly_install(self):
+    def test_developer_setup_documents_optional_task_tool_preinstall(self):
         readme = (ROOT / "readme.md").read_text()
-        self.assertIn("mise install # installs the full development environment", readme)
+        self.assertIn("mise install --include-task-tools", readme)
         self.assertNotIn("mise run install-nightly", readme)
 
     def test_ci_environment_keeps_tools_scoped_to_individual_tasks(self):
-        ci = tomllib.loads((ROOT / "mise.ci.toml").read_text())
+        ci = ci_config()
         self.assertNotIn("tools", ci)
         task_tools = {name: task["tools"] for name, task in ci["tasks"].items() if "tools" in task}
         self.assertIn("taplo", task_tools["ci:format-toml"])
@@ -383,7 +496,7 @@ class WorkflowPolicy(unittest.TestCase):
     def test_ci_native_packages_are_task_scoped_not_applied_by_quality(self):
         workflows = "\n".join(path.read_text() for path in ACTIVE_WORKFLOWS)
         self.assertNotIn("apt-get", workflows)
-        tasks = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]
+        tasks = ci_config()["tasks"]
         for name, environment in {
             "ci:packages-linker": "ci",
             "ci:packages-host": "ci,host",
@@ -402,11 +515,11 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertLess(runner.index("mise run ci:packages-benchmark"), runner.index("/usr/bin/time"))
 
     def test_mise_multiline_ci_tasks_run_with_bash(self):
-        tasks = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]
+        tasks = ci_config()["tasks"]
         for name in ["ci:host", "ci:wasm", "ci:localization", "ci:abi-deep", "ci:profiling", "pages:build"]:
             with self.subTest(task=name):
                 self.assertEqual(tasks[name].get("shell"), "bash -c")
-        ci_tasks = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]
+        ci_tasks = ci_config()["tasks"]
         self.assertEqual(ci_tasks["ci:benchmark-profile"].get("shell"), "bash -c")
 
     def test_github_actions_use_version_tags_instead_of_commit_shas(self):

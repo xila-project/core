@@ -26,10 +26,11 @@ jobs:
       - uses: jdx/mise-action@v5.2.2
       - run: mise run ci:packages-host
       - run: mise run deps:npm
-      - run: mise exec rust@1.99.0 -- rustc --version
+      - id: toolchain
+        run: mise run ci:toolchain
       - uses: jdx/mr-boxington-action@v1
         with:
-          toolchain: "1.99.0"
+          toolchain: ${{ steps.toolchain.outputs.version }}
           github-cache-mode: target
           cache-generation: v1-benchmark-profile-${{ matrix.profile }}
           save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
@@ -64,10 +65,11 @@ jobs:
       - uses: jdx/mise-action@v5.2.2
       - run: mise run ci:packages-benchmark
       - run: mise run deps:npm
-      - run: mise exec rust@1.99.0 -- rustc --version
+      - id: toolchain
+        run: mise run ci:toolchain
       - uses: jdx/mr-boxington-action@v1
         with:
-          toolchain: "1.99.0"
+          toolchain: ${{ steps.toolchain.outputs.version }}
           github-cache-mode: target
           cache-generation: v1-benchmark-test-runner-${{ matrix.runner }}
           save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}

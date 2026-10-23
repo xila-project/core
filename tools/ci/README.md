@@ -45,9 +45,35 @@ No cache timing or benchmark workflow is added by this migration.
 
 ## Local checks
 
+Host, WASM, profiling, and deep ABI jobs call named leaf tasks in separate
+GitHub Actions steps, exposing individual timings and failures. Their local
+wrappers (`ci:host`, `ci:wasm`, `ci:profiling`, `ci:abi-deep`) run exactly the
+same tasks sequentially and stop at the first failure. Each leaf declares its
+own tools and native package dependencies and can also be run independently,
+for example `MISE_ENV=ci mise run ci:host-audio-tests`. Job-level mbx settings
+apply to every leaf and nested task, just as they do to the local wrappers.
+
 `mise.toml` contains reusable tasks. CI orchestration (`ci:*`) and
 Pages builds are defined completely in `mise.ci.toml`,
 alongside their tools and package dependencies; select them with `MISE_ENV=ci`.
+
+Version pins live once in `[vars]` in `mise.toml`; variables do not activate
+tools. Reusable `[task_templates]` tool clusters are selected with `extends`,
+independently of native bootstrap dependencies. Both CI and development keep
+tools task-local: Rust formatting requests only Rust/rustfmt (no targets), TOML
+formatting only Taplo, and JSON formatting only Node. No formatter bootstraps
+native packages. `mise install --include-task-tools` is an optional full local
+preinstall, not a prerequisite for running a single task.
+The compiler-preparation tasks also export the central stable/nightly pin to
+the mbx action's `toolchain` input, so workflow cache keys track the same pin.
+
+Bootstrap clusters cover linker-only, native GUI/audio, and benchmark packages.
+Native audio checks still compile `drivers_native`, whose GUI dependencies are
+unconditional, so they retain the host package cluster. Templates do not
+implicitly attach bootstrap steps. Do not override a template's `tools.rust` assuming its
+components or targets will merge: a task replaces that entire tool entry.
+See [Mise task templates](https://mise.jdx.dev/tasks/templates.html) and
+[bootstrap packages](https://mise.jdx.dev/bootstrap/packages/).
 
 All task names use `<namespace>:<command>`. Developer-only formatting,
 translation, interactive Cargo, coverage and pre-commit tasks live in

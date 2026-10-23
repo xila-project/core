@@ -32,10 +32,11 @@ jobs:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5.2.2
       - run: mise run deps:npm
-      - run: mise exec rust@1.99.0 -- rustc --version
+      - id: toolchain
+        run: mise run ci:toolchain
       - uses: jdx/mr-boxington-action@v1
         with:
-          toolchain: "1.99.0"
+          toolchain: ${{ steps.toolchain.outputs.version }}
           github-cache-mode: objects
           cache-generation: v1-extended-coverage
           save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
@@ -58,14 +59,18 @@ jobs:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5.2.2
       - run: mise run deps:npm
-      - run: mise exec rust@1.99.0 -- rustc --version
+      - id: toolchain
+        run: mise run ci:toolchain
       - uses: jdx/mr-boxington-action@v1
         with:
-          toolchain: "1.99.0"
+          toolchain: ${{ steps.toolchain.outputs.version }}
           github-cache-mode: target
           cache-generation: v1-extended-profiling
           save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
-      - run: mise run ci:profiling
+      - name: Test runtime profiling instrumentation
+        run: mise run ci:profiling-runtime-tests
+      - name: Test native profiling configuration
+        run: mise run ci:profiling-native-tests
 
   abi-deep:
     name: ABI coverage and Miri (${{ matrix.memory }})
@@ -82,14 +87,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5.2.2
-      - run: mise exec rust@nightly-2026-10-12 -- rustc --version
+      - id: toolchain
+        run: mise run ci:toolchain-nightly
       - uses: jdx/mr-boxington-action@v1
         with:
-          toolchain: nightly-2026-10-12
+          toolchain: ${{ steps.toolchain.outputs.version }}
           github-cache-mode: objects
           cache-generation: v1-extended-abi-${{ matrix.memory }}
           save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
-      - run: mise run ci:abi-deep
+      - name: Enforce ABI coverage thresholds
+        run: mise run ci:abi-coverage
+      - name: Test ABI with host Miri
+        run: mise run ci:abi-miri
+      - name: Test ABI with cross-architecture Miri
+        run: mise run ci:abi-miri-cross
 
   release-gate:
     name: Deep validation gate

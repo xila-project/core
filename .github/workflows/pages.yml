@@ -34,10 +34,11 @@ jobs:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       - uses: jdx/mise-action@v5.2.2
       - run: mise run deps:npm
-      - run: mise exec rust@1.99.0 -- rustc --version
+      - id: toolchain
+        run: mise run ci:toolchain
       - uses: jdx/mr-boxington-action@v1
         with:
-          toolchain: "1.99.0"
+          toolchain: ${{ steps.toolchain.outputs.version }}
           github-cache-mode: objects
           cache-generation: v1-pages-all-locales
           save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
