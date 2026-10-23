@@ -24,15 +24,15 @@ jobs:
       MISE_ENV: ci
     steps:
       - uses: actions/checkout@v7
-      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+      - uses: jdx/mise-action@v5.2.2
       - run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang mold pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libx11-dev libxkbcommon-x11-dev
       - run: mise run install-tools
-      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - uses: mozilla-actions/sccache-action@v0.0.9
         with:
           version: v0.18.0
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: Swatinem/rust-cache@v2
         with:
           shared-key: benchmark-profile-${{ matrix.profile }}
           cache-bin: "false"
@@ -64,15 +64,15 @@ jobs:
       MISE_ENV: ci
     steps:
       - uses: actions/checkout@v7
-      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+      - uses: jdx/mise-action@v5.2.2
       - run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang mold pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libx11-dev libxkbcommon-x11-dev
       - run: mise run install-tools
-      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+      - uses: mozilla-actions/sccache-action@v0.0.9
         with:
           version: v0.18.0
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: Swatinem/rust-cache@v2
         with:
           shared-key: benchmark-test-runner-${{ matrix.runner }}
           cache-bin: "false"

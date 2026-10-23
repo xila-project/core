@@ -203,6 +203,13 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertNotIn("libasound2-dev", job("extended.yml", "abi-deep"))
         self.assertIn("libasound2-dev", job("pages.yml", "build"))
 
+    def test_github_actions_use_version_tags_instead_of_commit_shas(self):
+        for workflow in (ROOT / ".github/workflows").glob("*.yml"):
+            for line_number, line in enumerate(workflow.read_text().splitlines(), 1):
+                if "uses:" in line:
+                    with self.subTest(workflow=workflow.name, line=line_number):
+                        self.assertNotRegex(line, r"uses:\s+[^\s]+@[0-9a-f]{40}\b")
+
 
 if __name__ == "__main__":
     unittest.main()
