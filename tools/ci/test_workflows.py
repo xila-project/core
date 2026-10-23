@@ -38,7 +38,7 @@ class WorkflowPolicy(unittest.TestCase):
             with self.subTest(package=package):
                 self.assertEqual(packages[f"apt:{package}"], "latest")
         setup = (ROOT / ".github/actions/setup/action.yml").read_text()
-        self.assertIn("mise bootstrap packages apply --manager apt --yes", setup)
+        self.assertIn("mise bootstrap packages apply --manager apt --update --yes", setup)
         self.assertNotIn("sudo apt-get install", setup)
 
     def test_check_workflow_uses_mise_without_the_development_container(self):
@@ -63,7 +63,7 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn('nightly-toolchain: "true"', deploy)
         self.assertNotIn("container:", benchmark)
         self.assertIn("jdx/mise-action@", benchmark)
-        self.assertIn("mise bootstrap packages apply --manager apt --yes", benchmark)
+        self.assertIn("mise bootstrap packages apply --manager apt --update --yes", benchmark)
         self.assertNotIn("sudo apt-get install", benchmark)
 
     def test_local_developer_docs_use_mise_and_no_development_container(self):

@@ -51,7 +51,7 @@ runs:
     - name: Setup | Bootstrap native build dependencies
       if: inputs.profile != 'minimal'
       shell: bash
-      run: mise bootstrap packages apply --manager apt --yes
+      run: mise bootstrap packages apply --manager apt --update --yes
 
     - name: Setup | Cache compression
       if: inputs.profile != 'minimal'

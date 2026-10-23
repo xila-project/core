@@ -47,7 +47,7 @@ jobs:
         run: echo "RUSTUP_TOOLCHAIN=$(mise env --json | jq -r '.XILA_RUST_TOOLCHAIN')" >> "$GITHUB_ENV"
 
       - name: Setup | Bootstrap native build dependencies
-        run: mise bootstrap packages apply --manager apt --yes
+        run: mise bootstrap packages apply --manager apt --update --yes
 
       - uses: ./.github/actions/cache-tools
 
