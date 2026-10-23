@@ -57,6 +57,7 @@ jobs:
               - 'libraries/**'
               - '**/Cargo.{toml,lock}'
               - 'mise.toml'
+              - 'mise.*.toml'
               - 'tools/mise/**'
               - '**/.cargo/**'
               - '**/build.rs'
@@ -116,6 +117,7 @@ jobs:
               - '**/*.rs'
             mise:
               - 'mise.toml'
+              - 'mise.*.toml'
               - 'tools/mise/**'
             i18n_en:
               - '**/locales/en.json'
@@ -147,7 +149,7 @@ jobs:
               if (file.filename.endsWith('.rs')) {
                 return !file.patch || /^[+-].*\btranslate\s*!/m.test(file.patch);
               }
-              if (file.filename === 'mise.toml' || file.filename.startsWith('tools/mise/')) {
+              if (file.filename.startsWith('mise') && file.filename.endsWith('.toml') || file.filename.startsWith('tools/mise/')) {
                 return !file.patch || /^[+-].*(check-localization|EMBEDDED_I18N)/im.test(file.patch);
               }
               return false;
@@ -183,6 +185,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
+          mise-environment: localization
           cache-key: localization-all
 
       - name: Check | Tolgee Rust extractor regression tests
@@ -234,6 +237,8 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
+          mise-environment: abi
+          bootstrap-packages: "false"
           cache-workspaces: "executables/wasm/tests/translation -> target"
           cache-key: wasm-translation-${{ matrix.memory }}
           node-dependencies: "false"
@@ -267,6 +272,8 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
+          mise-environment: miri
+          bootstrap-packages: "false"
           cache-workspaces: "executables/wasm/tests/translation -> target/llvm-cov-target"
           cache-key: wasm-extended-${{ matrix.memory }}
           node-dependencies: "false"
@@ -316,6 +323,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
+          mise-environment: format
           profile: minimal
           cache-key: format
 
@@ -346,6 +354,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
+          mise-environment: host
           cache-key: host-clippy
 
       - name: Check | Clippy (Host)
@@ -394,6 +403,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
+          mise-environment: host
           cache-workspaces: |
             . -> target
             tools/profiling -> target
@@ -440,6 +450,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
+          mise-environment: host,coverage
           # Profiling builds into target/, coverage into its llvm-cov-target child.
           # Cache the parent once; the job-specific key isolates it from plain tests.
           cache-workspaces: ". -> target"
@@ -477,6 +488,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
+          mise-environment: host
           cache-key: host-audio-docs
 
       - name: Check | Audio
@@ -513,6 +525,8 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
+          mise-environment: ${{ github.event_name == 'pull_request' && 'guest' || 'guest,browser' }}
+          bootstrap-packages: "false"
           cache-key: guest
           nightly-toolchain: ${{ github.event_name != 'pull_request' }}
 
@@ -579,6 +593,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
+          mise-environment: host,guest,host-guest
           cache-key: profile-benchmark-${{ matrix.profile }}
 
       - name: Benchmark | Default debug profiles
@@ -621,6 +636,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
+          mise-environment: host,host-benchmark
           cache-key: test-runner-${{ matrix.runner }}
 
       - name: Setup | Install GNU time

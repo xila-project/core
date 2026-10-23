@@ -26,10 +26,24 @@ inputs:
     description: "Install the pinned nightly Rust toolchain and Miri targets."
     required: false
     default: "false"
+  mise-environment:
+    description: "Comma-separated mise config environment(s) for this job."
+    required: false
+    default: host
+  bootstrap-packages:
+    description: "Apply selected environment's system packages."
+    required: false
+    default: "true"
 
 runs:
   using: "composite"
   steps:
+    - name: Setup | Select mise environment
+      shell: bash
+      env:
+        SELECTED_MISE_ENV: ${{ inputs.mise-environment }}
+      run: echo "MISE_ENV=$SELECTED_MISE_ENV" >> "$GITHUB_ENV"
+
     - name: Setup | Install mise tools
       uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
 
@@ -48,8 +62,8 @@ runs:
       shell: bash
       run: mise run install-nightly
 
-    - name: Setup | Bootstrap native build dependencies
-      if: inputs.profile != 'minimal'
+    - name: Setup | Bootstrap selected system dependencies
+      if: inputs.profile != 'minimal' && inputs.bootstrap-packages == 'true'
       shell: bash
       run: mise bootstrap packages apply --manager apt --update --yes
 

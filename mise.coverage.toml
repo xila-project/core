@@ -1,0 +1,5 @@
+[tools]
+rust = { version = "1.99.0", profile = "minimal", components = [
+  "llvm-tools-preview",
+] }
+"aqua:taiki-e/cargo-llvm-cov" = "0.6.21"

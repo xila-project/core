@@ -16,13 +16,49 @@ def job(workflow, name):
 class WorkflowPolicy(unittest.TestCase):
     def test_mise_configuration_pins_project_toolchains_and_core_tasks(self):
         config = tomllib.loads((ROOT / "mise.toml").read_text())
-        self.assertEqual(config["tools"]["rust"]["version"], "1.99.0")
+        self.assertNotIn("tools", config)
         self.assertEqual(config["env"]["XILA_NIGHTLY_TOOLCHAIN"], "nightly-2026-10-12")
-        self.assertEqual(config["tools"]["node"], "24.22.0")
-        self.assertEqual(config["tools"]["aqua:cargo-bins/cargo-binstall"], "1.15.7")
         for task in ["host-check", "guest-check", "localization-check", "prepare-native-image", "prepare-wasm-image"]:
             with self.subTest(task=task):
                 self.assertIn(task, config["tasks"])
+
+    def test_mise_environments_select_only_job_toolchains_and_packages(self):
+        profiles = {
+            "format": ({"taplo", "node"}, set()),
+            "guest": ({"rust"}, set()),
+            "host": ({"rust", "node"}, {"clang", "mold", "pkg-config", "libasound2-dev", "libudev-dev", "libxkbcommon-dev", "libwayland-dev", "libx11-dev", "libxkbcommon-x11-dev"}),
+            "host-guest": ({"rust"}, set()),
+            "localization": ({"rust", "node"}, {"clang", "mold", "pkg-config", "libasound2-dev", "libudev-dev", "libxkbcommon-dev", "libwayland-dev", "libx11-dev", "libxkbcommon-x11-dev"}),
+            "abi": ({"rust"}, set()),
+            "coverage": ({"aqua:taiki-e/cargo-llvm-cov"}, set()),
+            "browser": ({"cargo:trunk"}, set()),
+            "miri": ({"rust", "aqua:taiki-e/cargo-llvm-cov"}, set()),
+        }
+        for profile, (tools, packages) in profiles.items():
+            config = tomllib.loads((ROOT / f"mise.{profile}.toml").read_text())
+            self.assertTrue(set(config["tools"]) >= tools)
+            if "rust" in config["tools"]:
+                self.assertEqual(config["tools"]["rust"]["version"], "1.99.0")
+            self.assertEqual({name.removeprefix("apt:") for name in config.get("bootstrap", {}).get("packages", {})}, packages)
+
+        combined = tomllib.loads((ROOT / "mise.host-guest.toml").read_text())
+        self.assertEqual(set(combined["tools"]["rust"]["targets"]), {"wasm32-unknown-unknown", "wasm32-wasip1"})
+
+    def test_ci_setup_selects_mise_environment_before_install(self):
+        setup = (ROOT / ".github/actions/setup/action.yml").read_text()
+        self.assertIn("mise-environment:", setup)
+        self.assertIn("SELECTED_MISE_ENV: ${{ inputs.mise-environment }}", setup)
+        self.assertIn('run: echo "MISE_ENV=$SELECTED_MISE_ENV" >> "$GITHUB_ENV"', setup)
+        self.assertLess(setup.index("Select mise environment"), setup.index("Install mise tools"))
+        for name, profile in [("localization", "localization"), ("wasm-translation", "abi"), ("format", "format"), ("host-test", "host"), ("wasm-extended", "miri")]:
+            with self.subTest(job=name):
+                self.assertRegex(job("check.yml", name), rf"mise-environment: {profile}")
+        guest = job("check.yml", "guest")
+        self.assertIn("mise-environment: ${{ github.event_name", guest)
+        self.assertIn("'guest,browser'", guest)
+        for name in ["wasm-translation", "wasm-extended", "guest"]:
+            with self.subTest(no_system_packages=name):
+                self.assertIn('bootstrap-packages: "false"', job("check.yml", name))
 
     def test_setup_action_installs_mise_tools_and_can_add_nightly_components(self):
         setup = (ROOT / ".github/actions/setup/action.yml").read_text()
@@ -32,13 +68,14 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertNotIn("source development/toolchains.env", setup)
 
     def test_mise_bootstraps_runner_system_packages(self):
-        config = tomllib.loads((ROOT / "mise.toml").read_text())
+        config = tomllib.loads((ROOT / "mise.host.toml").read_text())
         packages = config["bootstrap"]["packages"]
         for package in ["clang", "mold", "pkg-config", "libasound2-dev", "libudev-dev", "libxkbcommon-dev", "libwayland-dev", "libx11-dev", "libxkbcommon-x11-dev"]:
             with self.subTest(package=package):
                 self.assertEqual(packages[f"apt:{package}"], "latest")
         setup = (ROOT / ".github/actions/setup/action.yml").read_text()
         self.assertIn("mise bootstrap packages apply --manager apt --update --yes", setup)
+        self.assertIn('run: echo "MISE_ENV=$SELECTED_MISE_ENV" >> "$GITHUB_ENV"', setup)
         self.assertNotIn("sudo apt-get install", setup)
 
     def test_check_workflow_uses_mise_without_the_development_container(self):
@@ -46,6 +83,7 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertNotIn("container:", check)
         self.assertNotIn("cargo make", check)
         self.assertIn("'mise.toml'", check)
+        self.assertIn("'mise.*.toml'", check)
         self.assertIn("'tools/mise/**'", check)
         self.assertNotIn("'**/Makefile.toml'", check)
         self.assertIn("            mise:", check)
@@ -64,6 +102,7 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertNotIn("container:", benchmark)
         self.assertIn("jdx/mise-action@", benchmark)
         self.assertIn("mise bootstrap packages apply --manager apt --update --yes", benchmark)
+        self.assertIn("MISE_ENV: host", benchmark)
         self.assertNotIn("sudo apt-get install", benchmark)
 
     def test_local_developer_docs_use_mise_and_no_development_container(self):

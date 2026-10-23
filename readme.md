@@ -48,22 +48,24 @@ documentation and learning guides.
 
 ## Build and check Core
 
-Install [mise](https://mise.jdx.dev/getting-started.html), then install the
-repository-pinned tools and npm dependencies:
+Install [mise](https://mise.jdx.dev/getting-started.html), then install only
+the tools and native dependencies for the checks you need:
 
 ```bash
+export MISE_ENV=host,guest,host-guest
 mise trust
 mise install
+MISE_ENV=host mise bootstrap packages apply --manager apt
 npm ci
 mise run check                  # Linux host + WASM guest checks
 ```
 
-No development container is required. `mise.toml` pins the Rust toolchain,
-Node.js, Taplo, Trunk, and coverage tools. The Rust toolchain setup includes the
-WASM targets used by the project; `mise run install-nightly` installs the
-additional nightly/Miri toolchain when needed. On Debian/Ubuntu, install native
-build dependencies from the same manifest with `mise bootstrap packages apply
---manager apt` (mise will request sudo when needed).
+No development container is required. `mise.toml` holds common tasks and
+toolchain pins; `mise.<environment>.toml` files select task groups, including
+`format`, `host`, `guest`, `host-guest`, and `miri`. Use `host-guest` alongside
+`host,guest` when both target sets are needed. On Debian/Ubuntu, native packages
+are provisioned from the selected environment with `mise bootstrap packages
+apply --manager apt` (mise requests sudo when needed).
 
 Other checks:
 
@@ -93,7 +95,7 @@ mise exec -- bash -c 'cd examples/wasm && RUSTUP_TOOLCHAIN="$XILA_NIGHTLY_TOOLCH
 
 Use `trunk build` for a build check; open the served URL to test rendering/input.
 
-Tool versions are maintained in `mise.toml`; npm dependencies are pinned by
+Tool versions are maintained in the `mise*.toml` files; npm dependencies are pinned by
 `package-lock.json`. Local task names are listed by `mise tasks` and run with
 `mise run <task>`. Tool pins do not freeze untracked Cargo lockfiles or moving
 Git dependencies.

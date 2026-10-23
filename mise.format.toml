@@ -1,0 +1,4 @@
+[tools]
+rust = { version = "1.99.0", profile = "minimal", components = ["rustfmt"] }
+node = "24.22.0"
+taplo = "0.10.0"
