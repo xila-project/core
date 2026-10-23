@@ -202,6 +202,8 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn("libasound2-dev", job("extended.yml", "coverage"))
         self.assertNotIn("libasound2-dev", job("extended.yml", "abi-deep"))
         self.assertIn("libasound2-dev", job("pages.yml", "build"))
+        self.assertRegex(job("ci.yml", "abi"), r"apt-get install[^\n]*clang mold")
+        self.assertRegex(job("extended.yml", "abi-deep"), r"apt-get install[^\n]*clang mold")
 
     def test_github_actions_use_version_tags_instead_of_commit_shas(self):
         for workflow in (ROOT / ".github/workflows").glob("*.yml"):

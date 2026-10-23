@@ -103,6 +103,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5.2.2
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang mold
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: executables/wasm/tests/translation -> target
