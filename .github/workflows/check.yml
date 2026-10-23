@@ -436,6 +436,11 @@ jobs:
           cargo clippy --manifest-path tools/profiling/Cargo.toml --all-targets -- -D warnings
           cargo test --manifest-path tools/profiling/Cargo.toml
 
+      # This separate workspace must link through graphics alone, without a
+      # direct LVGL dependency masking missing runtime features via unification.
+      - name: Check | Standalone graphics font linking
+        run: cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml
+
       - name: Run | Test
         run: cargo test --workspace --timings
 

@@ -7,7 +7,8 @@ edition = "2024"
 cstr_core = "0.2.6"
 file_system = { workspace = true }
 virtual_file_system = { workspace = true }
-lvgl_rust_sys = { workspace = true, features = ["shadcn-theme"] }
+# Runtime graphics needs the C archive; binding generators remain bindgen-only.
+lvgl_rust_sys = { workspace = true, features = ["build-lvgl", "shadcn-theme"] }
 syn = { workspace = true, features = ["full"] }
 quote = "1.0"
 time = { workspace = true }
