@@ -7,8 +7,5 @@ edition = "2024"
 graphics = { path = "../..", default-features = false, features = [
   "rendering_rgb565",
 ] }
-lvgl_rust_sys = { git = "https://github.com/Xila-Project/lvgl_rust_sys.git", rev = "d9cb512498f02c9aa8b8e63863e982950cb20eeb", default-features = false, features = [
-  "build-lvgl",
-] }
 
 [workspace]
