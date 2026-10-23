@@ -108,7 +108,6 @@ pub unsafe extern "C" fn lv_snprintf(
     _: *const c_char,
     _: *mut c_void,
 ) -> c_int {
-    log::information!("Formatting string (not implemented in this stub)");
     // This function is not implemented in this stub.
     // In a real implementation, you would handle formatted output here.
     0
@@ -125,7 +124,6 @@ pub unsafe extern "C" fn lv_vsnprintf(
     _: *const c_char,
     _: *mut c_void,
 ) -> c_int {
-    log::information!("Formatting string with variable arguments (not implemented in this stub)");
     // This function is not implemented in this stub.
     // In a real implementation, you would handle formatted output here.
     0

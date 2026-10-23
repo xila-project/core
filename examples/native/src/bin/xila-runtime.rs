@@ -320,7 +320,12 @@ async fn run_runtime(
             .len()
     } else {
         std::fs::metadata(&config.seed)
-            .map_err(|error| format!("cannot inspect seed {}: {error}", config.seed.display()))?
+            .map_err(|error| {
+                format!(
+                    "cannot inspect seed {}: {error}; create it with `cargo make prepare-native-image` or pass an existing image with --seed",
+                    config.seed.display()
+                )
+            })?
             .len()
     };
     if let Some(parent) = config

@@ -21,7 +21,19 @@ pub fn prepare_disk(disk: &Path, seed: &Path, size: u64) -> io::Result<bool> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
     }
-    let mut source = fs::File::open(seed)?;
+    let mut source = fs::File::open(seed).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            io::Error::new(
+                error.kind(),
+                format!(
+                    "reference disk image '{}' was not found; create it with `cargo make prepare-native-image` or configure a valid seed image path",
+                    seed.display()
+                ),
+            )
+        } else {
+            error
+        }
+    })?;
     if !source.metadata()?.is_file() || source.metadata()?.len() != size {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
