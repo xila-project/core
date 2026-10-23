@@ -9,7 +9,8 @@
 
 node_modules
 /.dev-environment/
-# Local documentation; never commit it.
-/docs/
+# Local documentation stays untracked except the maintained localization guide.
+/docs/*
+!/docs/localization.md
 
 /tools/profiling/target/

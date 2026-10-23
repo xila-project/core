@@ -8,4 +8,7 @@ graphics = { path = "../..", default-features = false, features = [
   "rendering_rgb565",
 ] }
 
+[dev-dependencies]
+graphics-font-pipeline-test = { path = "../font_pipeline" }
+
 [workspace]
