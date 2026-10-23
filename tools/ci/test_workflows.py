@@ -126,6 +126,12 @@ class WorkflowPolicy(unittest.TestCase):
                 components = rust.get("components", []) if isinstance(rust, dict) else []
                 self.assertIn("rustfmt", components, "wasm build scripts execute rustfmt on generated bindings")
 
+    def test_image_tasks_do_not_use_bash_only_options_with_mise_default_shell(self):
+        tasks = tomllib.loads((ROOT / "mise.toml").read_text())["tasks"]
+        for name in ["image:native", "image:wasm"]:
+            with self.subTest(task=name):
+                self.assertNotIn("pipefail", tasks[name]["run"])
+
     def test_no_workflow_keeps_superseded_rust_caches(self):
         for workflow in ACTIVE_WORKFLOWS:
             text = workflow.read_text()

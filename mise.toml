@@ -72,7 +72,7 @@ run = "cargo build --locked --package calculator --package weather --package clo
 description = "Build the native filesystem seed image"
 depends = ["build:applications"]
 run = """
-set -euo pipefail
+set -eu
 mkdir -p target/seed/native
 rm -f target/seed/native/seed.img
 cargo run --locked --package fs_image -- target/seed/native/seed.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release-wasm
@@ -81,7 +81,7 @@ cargo run --locked --package fs_image -- target/seed/native/seed.img 16777216 --
 [tasks."image:wasm"]
 description = "Build the WASM filesystem seed image"
 run = """
-set -euo pipefail
+set -eu
 cargo build --locked --package calculator --package weather --package clock --package pixel_painter --package text_editor --package synth --target wasm32-wasip1 --release
 mkdir -p target/seed/wasm
 rm -f target/seed/wasm/seed.img
