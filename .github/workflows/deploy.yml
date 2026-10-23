@@ -31,7 +31,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
-          mise-environment: host,guest,host-guest,browser
+          mise-environment: host,guest,host-guest,browser,native-linker
           nightly-toolchain: "true"
 
       - name: Find previous deployment artifacts

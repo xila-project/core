@@ -185,7 +185,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
-          mise-environment: localization
+          mise-environment: localization,native-linker
           cache-key: localization-all
 
       - name: Check | Tolgee Rust extractor regression tests
@@ -237,8 +237,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
-          mise-environment: abi
-          bootstrap-packages: "false"
+          mise-environment: abi,native-linker
           cache-workspaces: "executables/wasm/tests/translation -> target"
           cache-key: wasm-translation-${{ matrix.memory }}
           node-dependencies: "false"
@@ -272,8 +271,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
-          mise-environment: miri
-          bootstrap-packages: "false"
+          mise-environment: miri,native-linker
           cache-workspaces: "executables/wasm/tests/translation -> target/llvm-cov-target"
           cache-key: wasm-extended-${{ matrix.memory }}
           node-dependencies: "false"
@@ -354,7 +352,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
-          mise-environment: host
+          mise-environment: host,native-linker
           cache-key: host-clippy
 
       - name: Check | Clippy (Host)
@@ -403,7 +401,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
-          mise-environment: host
+          mise-environment: host,native-linker
           cache-workspaces: |
             . -> target
             tools/profiling -> target
@@ -450,7 +448,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
-          mise-environment: host,coverage
+          mise-environment: host,coverage,native-linker
           # Profiling builds into target/, coverage into its llvm-cov-target child.
           # Cache the parent once; the job-specific key isolates it from plain tests.
           cache-workspaces: ". -> target"
@@ -488,7 +486,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
-          mise-environment: host
+          mise-environment: host,native-linker
           cache-key: host-audio-docs
 
       - name: Check | Audio
@@ -525,8 +523,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
-          mise-environment: ${{ github.event_name == 'pull_request' && 'guest' || 'guest,browser' }}
-          bootstrap-packages: "false"
+          mise-environment: ${{ github.event_name == 'pull_request' && 'guest,native-linker' || 'guest,native-linker,browser' }}
           cache-key: guest
           nightly-toolchain: ${{ github.event_name != 'pull_request' }}
 
@@ -593,7 +590,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
-          mise-environment: host,guest,host-guest
+          mise-environment: host,guest,host-guest,native-linker
           cache-key: profile-benchmark-${{ matrix.profile }}
 
       - name: Benchmark | Default debug profiles
@@ -636,7 +633,7 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup
         with:
-          mise-environment: host,host-benchmark
+          mise-environment: host,host-benchmark,native-linker
           cache-key: test-runner-${{ matrix.runner }}
 
       - name: Setup | Install GNU time

@@ -33,7 +33,7 @@ jobs:
       matrix:
         strategy: ${{ fromJSON(inputs.strategy == 'all' && '["dependencies","combined","sccache","workspace"]' || format('["{0}"]', inputs.strategy)) }}
     env:
-      MISE_ENV: host
+      MISE_ENV: host,native-linker
       CARGO_INCREMENTAL: "0"
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_GHA_RW_MODE: READ_WRITE

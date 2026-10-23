@@ -52,20 +52,21 @@ Install [mise](https://mise.jdx.dev/getting-started.html), then install only
 the tools and native dependencies for the checks you need:
 
 ```bash
-export MISE_ENV=host,guest,host-guest
+export MISE_ENV=host,guest,host-guest,native-linker
 mise trust
 mise install
-MISE_ENV=host mise bootstrap packages apply --manager apt
+mise bootstrap packages apply --manager apt
 npm ci
 mise run check                  # Linux host + WASM guest checks
 ```
 
 No development container is required. `mise.toml` holds common tasks and
 toolchain pins; `mise.<environment>.toml` files select task groups, including
-`format`, `host`, `guest`, `host-guest`, and `miri`. Use `host-guest` alongside
-`host,guest` when both target sets are needed. On Debian/Ubuntu, native packages
-are provisioned from the selected environment with `mise bootstrap packages
-apply --manager apt` (mise requests sudo when needed).
+`format`, `host`, `guest`, `host-guest`, `native-linker`, and `miri`. Use
+`host-guest` alongside `host,guest` when both target sets are needed. On
+Debian/Ubuntu, native packages are provisioned from the selected environment
+with `mise bootstrap packages apply --manager apt` (mise requests sudo when
+needed).
 
 Other checks:
 

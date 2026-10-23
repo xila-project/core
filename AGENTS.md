@@ -14,7 +14,7 @@ Xila is an embedded operating system written in Rust for low-power microcontroll
 
 Tasks are defined in `mise.toml`; tool selections and system package profiles are in `mise.*.toml`. CI is the source of truth for target-specific validation.
 
-- Select a relevant `MISE_ENV` profile (such as `host`, `guest`, or both) before `mise install`; use `mise bootstrap packages apply --manager apt` for the selected native packages. No development container is required.
+- Select relevant `MISE_ENV` profiles (such as `host`, `guest`, and `native-linker`) before `mise install`; use `mise bootstrap packages apply --manager apt` for the selected native packages. No development container is required.
 - For localization, set `EMBEDDED_I18N_LOCALE` and `EMBEDDED_I18N_STRICT=1`, run `mise run localization-check`, and test extractor changes with `node --test tolgee.extractor.test.mjs`. Build host, guests, fonts and LittleFS images for the same locale, using separate Cargo target directories per locale. See `docs/localization.md`.
 
 # Architecture & Implementation Guidelines

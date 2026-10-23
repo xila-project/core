@@ -3,8 +3,6 @@ rust = { version = "1.99.0", profile = "minimal" }
 node = "24.22.0"
 
 [bootstrap.packages]
-"apt:clang" = "latest"
-"apt:mold" = "latest"
 "apt:pkg-config" = "latest"
 "apt:libasound2-dev" = "latest"
 "apt:libudev-dev" = "latest"

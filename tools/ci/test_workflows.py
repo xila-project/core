@@ -26,9 +26,10 @@ class WorkflowPolicy(unittest.TestCase):
         profiles = {
             "format": ({"taplo", "node"}, set()),
             "guest": ({"rust"}, set()),
-            "host": ({"rust", "node"}, {"clang", "mold", "pkg-config", "libasound2-dev", "libudev-dev", "libxkbcommon-dev", "libwayland-dev", "libx11-dev", "libxkbcommon-x11-dev"}),
+            "host": ({"rust", "node"}, {"pkg-config", "libasound2-dev", "libudev-dev", "libxkbcommon-dev", "libwayland-dev", "libx11-dev", "libxkbcommon-x11-dev"}),
+            "native-linker": (set(), {"clang", "mold"}),
             "host-guest": ({"rust"}, set()),
-            "localization": ({"rust", "node"}, {"clang", "mold", "pkg-config", "libasound2-dev", "libudev-dev", "libxkbcommon-dev", "libwayland-dev", "libx11-dev", "libxkbcommon-x11-dev"}),
+            "localization": ({"rust", "node"}, {"pkg-config", "libasound2-dev", "libudev-dev", "libxkbcommon-dev", "libwayland-dev", "libx11-dev", "libxkbcommon-x11-dev"}),
             "abi": ({"rust"}, set()),
             "coverage": ({"aqua:taiki-e/cargo-llvm-cov"}, set()),
             "browser": ({"cargo:trunk"}, set()),
@@ -36,8 +37,8 @@ class WorkflowPolicy(unittest.TestCase):
         }
         for profile, (tools, packages) in profiles.items():
             config = tomllib.loads((ROOT / f"mise.{profile}.toml").read_text())
-            self.assertTrue(set(config["tools"]) >= tools)
-            if "rust" in config["tools"]:
+            self.assertTrue(set(config.get("tools", {})) >= tools)
+            if "rust" in config.get("tools", {}):
                 self.assertEqual(config["tools"]["rust"]["version"], "1.99.0")
             self.assertEqual({name.removeprefix("apt:") for name in config.get("bootstrap", {}).get("packages", {})}, packages)
 
@@ -50,15 +51,12 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn("SELECTED_MISE_ENV: ${{ inputs.mise-environment }}", setup)
         self.assertIn('run: echo "MISE_ENV=$SELECTED_MISE_ENV" >> "$GITHUB_ENV"', setup)
         self.assertLess(setup.index("Select mise environment"), setup.index("Install mise tools"))
-        for name, profile in [("localization", "localization"), ("wasm-translation", "abi"), ("format", "format"), ("host-test", "host"), ("wasm-extended", "miri")]:
+        for name, profile in [("localization", "localization,native-linker"), ("wasm-translation", "abi,native-linker"), ("format", "format"), ("host-test", "host,native-linker"), ("wasm-extended", "miri,native-linker")]:
             with self.subTest(job=name):
                 self.assertRegex(job("check.yml", name), rf"mise-environment: {profile}")
         guest = job("check.yml", "guest")
         self.assertIn("mise-environment: ${{ github.event_name", guest)
-        self.assertIn("'guest,browser'", guest)
-        for name in ["wasm-translation", "wasm-extended", "guest"]:
-            with self.subTest(no_system_packages=name):
-                self.assertIn('bootstrap-packages: "false"', job("check.yml", name))
+        self.assertIn("'guest,native-linker,browser'", guest)
 
     def test_setup_action_installs_mise_tools_and_can_add_nightly_components(self):
         setup = (ROOT / ".github/actions/setup/action.yml").read_text()
@@ -68,9 +66,9 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertNotIn("source development/toolchains.env", setup)
 
     def test_mise_bootstraps_runner_system_packages(self):
-        config = tomllib.loads((ROOT / "mise.host.toml").read_text())
+        config = tomllib.loads((ROOT / "mise.native-linker.toml").read_text())
         packages = config["bootstrap"]["packages"]
-        for package in ["clang", "mold", "pkg-config", "libasound2-dev", "libudev-dev", "libxkbcommon-dev", "libwayland-dev", "libx11-dev", "libxkbcommon-x11-dev"]:
+        for package in ["clang", "mold"]:
             with self.subTest(package=package):
                 self.assertEqual(packages[f"apt:{package}"], "latest")
         setup = (ROOT / ".github/actions/setup/action.yml").read_text()
