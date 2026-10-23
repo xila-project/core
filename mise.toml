@@ -1,0 +1,134 @@
+[env]
+XILA_RUST_TOOLCHAIN = "1.99.0"
+XILA_NIGHTLY_TOOLCHAIN = "nightly-2026-10-12"
+
+[tasks.install-tools]
+description = "Install locked npm dependencies"
+run = "npm ci"
+
+[tasks.install-nightly]
+description = "Install the pinned nightly toolchain and Miri targets"
+run = "rustup toolchain install ${XILA_NIGHTLY_TOOLCHAIN} --component miri --component rust-src --target i686-unknown-linux-gnu --target powerpc-unknown-linux-gnu"
+
+[tasks.format-rust]
+description = "Format Rust sources"
+run = "cargo fmt --all"
+
+[tasks.format-toml]
+description = "Format TOML files"
+run = "taplo format"
+
+[tasks.format-json]
+description = "Format JSON files"
+run = "npm exec prettier -- --write \"**/*.json\""
+
+[tasks.format]
+description = "Format Rust, TOML, and JSON"
+depends = ["format-rust", "format-toml", "format-json"]
+
+[tasks.translate-compare]
+description = "Compare translation catalogs"
+run = "npm exec tolgee compare"
+
+[tasks.translate-sync]
+description = "Synchronize translation catalogs"
+run = "npm exec tolgee sync -- --remove-unused"
+
+[tasks.translate-pull]
+description = "Pull translation catalogs"
+run = "npm exec tolgee pull"
+
+[tasks.translate-push]
+description = "Push translation catalogs"
+run = "npm exec tolgee push"
+
+[tasks.host-check]
+description = "Check the Linux host target"
+run = "cargo check --target x86_64-unknown-linux-gnu --features graphics,abi_definitions,graphics_rendering_xrgb8888"
+
+[tasks.guest-check]
+description = "Check the WASM guest target"
+run = "cargo check --target wasm32-unknown-unknown --package wasm --no-default-features --features default_guest"
+
+[tasks.localization-host-check]
+description = "Strictly check host localization"
+env = { EMBEDDED_I18N_STRICT = "1" }
+run = "cargo check --workspace --all-targets --target x86_64-unknown-linux-gnu --features xila/graphics,xila/abi_definitions,xila/graphics_rendering_xrgb8888"
+
+[tasks.localization-guest-check]
+description = "Strictly check WASI application localization"
+env = { EMBEDDED_I18N_STRICT = "1" }
+run = "cargo check --target wasm32-wasip1 --package calculator --package weather --package clock --package pixel_painter --package text_editor --package synth"
+
+[tasks.localization-check]
+description = "Run strict host and guest localization checks"
+depends = ["localization-host-check", "localization-guest-check"]
+
+[tasks.host-clippy]
+description = "Run Clippy for the Linux host target"
+run = "cargo clippy --target x86_64-unknown-linux-gnu --features graphics,abi_definitions,graphics_rendering_xrgb8888 --all-targets -- -D warnings"
+
+[tasks.guest-clippy]
+description = "Run Clippy for the WASM guest target"
+run = "cargo clippy --package wasm --no-default-features --features default_guest --target wasm32-unknown-unknown --all-targets -- -D warnings"
+
+[tasks.clippy]
+description = "Run host and guest Clippy"
+depends = ["host-clippy", "guest-clippy"]
+
+[tasks.host-docs]
+description = "Build host documentation"
+run = "cargo doc --features graphics,abi_definitions,graphics_rendering_xrgb8888 --target x86_64-unknown-linux-gnu"
+
+[tasks.guest-docs]
+description = "Build guest documentation"
+run = "cargo doc --package wasm --no-default-features --features default_guest --target wasm32-unknown-unknown"
+
+[tasks.docs]
+description = "Build host and guest documentation"
+depends = ["host-docs", "guest-docs"]
+
+[tasks.check]
+description = "Check host and guest targets"
+depends = ["host-check", "guest-check"]
+
+[tasks.lint]
+description = "Run workspace Clippy with all features"
+run = "cargo clippy --all-targets --all-features -- -D warnings"
+
+[tasks.test]
+description = "Test the Cargo workspace"
+run = "cargo test --workspace"
+
+[tasks.run]
+description = "Run a Cargo binary"
+run = "cargo run"
+
+[tasks.build]
+description = "Build Cargo packages"
+run = "cargo build"
+
+[tasks.build-profiling]
+description = "Build the native profiling binary"
+run = "cargo build --package native_example --profile profiling"
+
+[tasks.prepare-profiling]
+description = "Build WASI applications for profiling images"
+run = "cargo build --package calculator --package weather --package clock --package pixel_painter --package text_editor --package synth --target wasm32-wasip1 --profile release-wasm"
+
+[tasks.coverage]
+description = "Run host-only workspace coverage"
+run = "cargo llvm-cov --workspace --coverage-host-only"
+
+[tasks.before-commit]
+description = "Run formatting, checks, docs, and Clippy"
+depends = ["format", "check", "docs", "clippy"]
+
+[tasks.prepare-native-image]
+description = "Build the native filesystem seed image"
+depends = ["prepare-profiling"]
+run = "bash tools/mise/prepare-native-image.sh"
+
+[tasks.prepare-wasm-image]
+description = "Build the WASM filesystem seed image"
+run = "bash tools/mise/prepare-wasm-image.sh"

@@ -107,11 +107,7 @@ fn missing_seed_explains_how_to_prepare_the_native_image() {
     let error = storage::prepare_disk(&disk, &seed, SIZE).unwrap_err();
 
     assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
-    assert!(
-        error
-            .to_string()
-            .contains("cargo make prepare-native-image")
-    );
+    assert!(error.to_string().contains("mise run prepare-native-image"));
     assert!(error.to_string().contains(seed.to_str().unwrap()));
     assert!(!disk.exists());
 }

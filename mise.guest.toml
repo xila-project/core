@@ -1,0 +1,6 @@
+[tools]
+rust = { version = "1.99.0", profile = "minimal", targets = [
+  "wasm32-unknown-unknown",
+  "wasm32-wasip1",
+] }
+node = "24.22.0"

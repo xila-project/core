@@ -1,14 +1,12 @@
 name: Cache tools
-description: Ensure Actions uses fast zstd archives instead of silently falling back to gzip
+description: Ensure hosted runners use fast zstd archives for Rust caches
 runs:
   using: composite
   steps:
     - shell: bash
       run: |
-        # The current development image has GNU tar but omits zstd. Keep this
-        # fallback until zstd is shipped in the image; then it is a cheap probe.
         if ! command -v zstd > /dev/null; then
-          apt-get update -qq
-          apt-get install -y --no-install-recommends zstd
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends zstd
         fi
         zstd --version

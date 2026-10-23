@@ -1,0 +1,7 @@
+[tools]
+rust = { version = "1.99.0", profile = "minimal", components = [
+  "llvm-tools-preview",
+], targets = [
+  "wasm32-unknown-unknown",
+  "wasm32-wasip1",
+] }

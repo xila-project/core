@@ -45,7 +45,7 @@ cargo test -p pixel_painter
 cargo build -p pixel_painter --target wasm32-wasip1 --profile release-wasm
 cargo clippy -p pixel_painter --target wasm32-wasip1 --all-targets -- -D warnings
 cargo test -p wasm --features graphics,xila/graphics_rendering_xrgb8888 --test graphics_canvas --test pixel_painter
-cargo make run -p native_example
+mise run run -- -p native_example
 ```
 
 Smoke test: launch Pixel Painter from the application drawer, draw a fast diagonal,

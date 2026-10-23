@@ -38,7 +38,7 @@ RUN npm ci --ignore-scripts
 
 COPY . .
 
-# Keep seed generation aligned with Makefile.toml's native reference image:
+# Keep seed generation aligned with `mise run prepare-native-image`:
 # bundled WASI apps are built first, then fs_image creates an MBR + LittleFS
 # disk that is copied to the image as an immutable seed.
 RUN cargo build --locked \
