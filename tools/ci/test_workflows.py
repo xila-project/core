@@ -1,7 +1,11 @@
 """Focused behavioral policy regressions for the current CI workflows."""
 
+import os
 import pathlib
 import re
+import subprocess
+import tempfile
+import textwrap
 import tomllib
 import unittest
 
@@ -104,6 +108,10 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertNotIn("XILA_MBX", quality)
         self.assertNotIn("mr-boxington-action", quality)
 
+    def test_workflow_lint_includes_shellcheck_on_local_and_ci_runs(self):
+        tasks = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]
+        self.assertIn("aqua:koalaman/shellcheck", tasks["ci:lint-workflows"]["tools"])
+
     def test_no_workflow_keeps_superseded_rust_caches(self):
         for workflow in ACTIVE_WORKFLOWS:
             text = workflow.read_text()
@@ -140,6 +148,36 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn("all_locales=true", localization)
         self.assertIn("locales=(en fr es de pt-BR it pl)", localization)
         self.assertIn("locales=(en)", localization)
+
+    def test_locale_selection_handles_build_scripts_catalogs_and_unrelated_changes(self):
+        localization = job("ci.yml", "localization")
+        script = textwrap.dedent(re.search(
+            r"(?ms)^      - name: Select locales\n.*?^        run: \|\n(.*?)(?=^      - )",
+            localization,
+        )[1])
+        for changed, expected in [
+            ("subsystems/graphics/build.rs", "en fr es de pt-BR it pl"),
+            ("executables/clock/locales/fr.json", "en fr"),
+            ("readme.md", ""),
+        ]:
+            with self.subTest(changed=changed), tempfile.TemporaryDirectory() as directory:
+                def git(*args, **kwargs):
+                    return subprocess.check_output(["git", *args], cwd=directory, text=True, **kwargs).strip()
+
+                git("init", "--quiet")
+                base = git("hash-object", "-w", "-t", "tree", "--stdin", input="")
+                path = pathlib.Path(directory) / changed
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("fixture\n")
+                git("add", "--", changed)
+                head = git("write-tree")
+                output = pathlib.Path(directory) / "github-output"
+                subprocess.run(["bash", "-c", script], cwd=directory, check=True, capture_output=True, text=True, env=os.environ | {
+                    "EVENT_NAME": "pull_request", "BASE_SHA": base, "HEAD_SHA": head, "GITHUB_OUTPUT": str(output),
+                })
+                result = dict(line.split("=", 1) for line in output.read_text().splitlines())
+                self.assertEqual(result["value"], expected)
+                self.assertEqual(result["run-check"], "true" if expected else "false")
 
     def test_extended_validation_is_reusable_and_checks_all_deep_modes(self):
         extended = (ROOT / ".github/workflows/extended.yml").read_text()

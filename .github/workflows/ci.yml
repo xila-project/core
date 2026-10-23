@@ -130,7 +130,7 @@ jobs:
             declare -A changed=()
             while IFS= read -r path; do
               case "$path" in
-                *.rs|*Cargo.toml|*Cargo.lock|mise.toml|mise.*.toml|tools/mise/*|*/build.rs|build/*|subsystems/graphics/fonts/*|tolgee.extractor.mjs|tolgee.extractor.test.mjs|*.ftl|*/i18n/*|*/localization/*|executables/wasm/src/host/translation/*|executables/wasm/tests/translation/*)
+                *.rs|*Cargo.toml|*Cargo.lock|mise.toml|mise.*.toml|tools/mise/*|build/*|subsystems/graphics/fonts/*|tolgee.extractor.mjs|tolgee.extractor.test.mjs|*.ftl|*/i18n/*|*/localization/*|executables/wasm/src/host/translation/*|executables/wasm/tests/translation/*)
                   all_locales=true
                   ;;
                 *locales/en.json) changed[en]=1 ;;

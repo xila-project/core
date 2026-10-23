@@ -53,6 +53,7 @@ node = "24.22.0"
 [tasks."ci:lint-workflows"]
 description = "Lint GitHub Actions workflows"
 tools."aqua:rhysd/actionlint" = "1.7.7"
+tools."aqua:koalaman/shellcheck" = "0.11.0"
 run = "actionlint"
 
 [tasks."ci:host"]
