@@ -99,6 +99,24 @@ fn invalid_seed_leaves_no_destination_or_temporary_file() {
 }
 
 #[test]
+fn missing_seed_explains_how_to_prepare_the_native_image() {
+    let f = Fixture::new();
+    let disk = f.0.join("drive.img");
+    let seed = f.0.join("missing-seed.img");
+
+    let error = storage::prepare_disk(&disk, &seed, SIZE).unwrap_err();
+
+    assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    assert!(
+        error
+            .to_string()
+            .contains("cargo make prepare-native-image")
+    );
+    assert!(error.to_string().contains(seed.to_str().unwrap()));
+    assert!(!disk.exists());
+}
+
+#[test]
 fn matching_size_corrupt_disk_is_preserved_on_mount_failure() {
     let f = Fixture::new();
     let disk = f.0.join("drive.img");
