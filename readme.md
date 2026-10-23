@@ -56,15 +56,16 @@ install the project tools and targets in one pass:
 mise trust
 mise install # installs the full development environment
 mise bootstrap packages apply --manager apt
-mise run install-tools
-mise run install-nightly # needed for Miri and the browser demo
-mise run check                  # Linux host + WASM guest checks
+mise run deps:npm
+mise run check:all               # Linux host + WASM guest checks
 ```
 
 No development container is required. `.miserc.toml` selects
 `mise.development.toml` by default; it includes host and WASM targets, formatting,
-browser, coverage, and benchmark tools. `mise.toml` holds common tasks and the
-pinned nightly. CI selects `mise.ci.toml`, where tools are declared on individual
+browser, coverage, and benchmark tools, plus developer-only `format:*`,
+`translate:*` and `dev:*` tasks. `mise.toml` holds reusable namespaced tasks
+such as `check:host`, `docs:all`, and `image:wasm`.
+CI selects `mise.ci.toml`, where tools are declared on individual
 tasks so a job installs only the tools its tasks use. On Debian/Ubuntu, native
 packages are provisioned from the selected environment with
 `mise bootstrap packages apply --manager apt` (mise requests sudo when needed).
@@ -72,9 +73,9 @@ packages are provisioned from the selected environment with
 Other checks:
 
 ```bash
-mise run clippy
-mise run format-rust -- --check
-mise run format-toml -- --check
+mise run clippy:all
+mise run format:rust -- --check
+mise run format:toml -- --check
 npm exec prettier -- --check "**/*.json"
 ```
 
@@ -91,8 +92,7 @@ For the browser example:
 
 ```bash
 mise exec -- cargo build -p calculator -p text_editor --target wasm32-wasip1 --release
-mise run install-nightly
-mise exec -- bash -c 'cd examples/wasm && RUSTUP_TOOLCHAIN="$XILA_NIGHTLY_TOOLCHAIN" trunk serve'
+mise exec 'rust[targets=wasm32-unknown-unknown]@nightly-2026-10-12' -- bash -c 'cd examples/wasm && trunk serve'
 ```
 
 Use `trunk build` for a build check; open the served URL to test rendering/input.
@@ -142,8 +142,8 @@ requires access to perf events; a permission error is reported in the run log.
 Build before recording, after mise has installed the project tools:
 
 ```bash
-mise run prepare-native-image
-mise run build-profiling -- --features prebuilt-applications
+mise run image:native
+mise run build:profiling -- --features prebuilt-applications
 cargo run --manifest-path tools/profiling/Cargo.toml -- measure \
   --scenario terminal-idle --output target/profiles/before --runs 3 --duration 30 \
   --applications-dir target/wasm32-wasip1/release-wasm \
@@ -166,7 +166,7 @@ between runs; restore its baseline if the workload writes to it.
 For allocation and task attribution, build with the optional features:
 
 ```bash
-mise run build-profiling -- --features profiling,heaptrack
+mise run build:profiling -- --features profiling,heaptrack
 cargo run --manifest-path tools/profiling/Cargo.toml -- cpu \
   --scenario gui-navigation --output target/profiles/cpu --runs 1 --duration 60 \
   --applications-dir target/wasm32-wasip1/release-wasm \

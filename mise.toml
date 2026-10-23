@@ -1,239 +1,76 @@
-[env]
-XILA_NIGHTLY_TOOLCHAIN = "nightly-2026-10-12"
-
-[tasks.install-tools]
+[tasks."deps:npm"]
 description = "Install locked npm dependencies"
 run = "npm ci"
 
-[tasks.install-nightly]
-description = "Install the pinned nightly toolchain and Miri targets"
-run = "rustup toolchain install ${XILA_NIGHTLY_TOOLCHAIN} --component miri --component rust-src --target i686-unknown-linux-gnu --target powerpc-unknown-linux-gnu"
-
-[tasks.format-rust]
-description = "Format Rust sources"
-run = "cargo fmt --all"
-
-[tasks.format-toml]
-description = "Format TOML files"
-run = "taplo format"
-
-[tasks.format-json]
-description = "Format JSON files"
-run = "npm exec prettier -- --write \"**/*.json\""
-
-[tasks.format]
-description = "Format Rust, TOML, and JSON"
-depends = ["format-rust", "format-toml", "format-json"]
-
-[tasks.translate-compare]
-description = "Compare translation catalogs"
-run = "npm exec tolgee compare"
-
-[tasks.translate-sync]
-description = "Synchronize translation catalogs"
-run = "npm exec tolgee sync -- --remove-unused"
-
-[tasks.translate-pull]
-description = "Pull translation catalogs"
-run = "npm exec tolgee pull"
-
-[tasks.translate-push]
-description = "Push translation catalogs"
-run = "npm exec tolgee push"
-
-[tasks.host-check]
+[tasks."check:host"]
 description = "Check the Linux host target"
 run = "cargo check --target x86_64-unknown-linux-gnu --features graphics,abi_definitions,graphics_rendering_xrgb8888"
 
-[tasks.guest-check]
+[tasks."check:guest"]
 description = "Check the WASM guest target"
 run = "cargo check --target wasm32-unknown-unknown --package wasm --no-default-features --features default_guest"
 
-[tasks.localization-host-check]
+[tasks."localization:host-check"]
 description = "Strictly check host localization"
 env = { EMBEDDED_I18N_STRICT = "1" }
 run = "cargo check --workspace --all-targets --target x86_64-unknown-linux-gnu --features xila/graphics,xila/abi_definitions,xila/graphics_rendering_xrgb8888"
 
-[tasks.localization-guest-check]
+[tasks."localization:guest-check"]
 description = "Strictly check WASI application localization"
 env = { EMBEDDED_I18N_STRICT = "1" }
 run = "cargo check --target wasm32-wasip1 --package calculator --package weather --package clock --package pixel_painter --package text_editor --package synth"
 
-[tasks.localization-check]
+[tasks."localization:check"]
 description = "Run strict host and guest localization checks"
-depends = ["localization-host-check", "localization-guest-check"]
+depends = ["localization:host-check", "localization:guest-check"]
 
-[tasks."ci:host"]
-description = "Run primary host lint, test, and native build validation"
-run = """
-set -euo pipefail
-mise run host-clippy
-cargo clippy -p wasm --features graphics,xila/graphics_rendering_xrgb8888 --target x86_64-unknown-linux-gnu -- -D warnings
-cargo clippy -p audio -p drivers_native --features drivers_native/audio --all-targets -- -D warnings
-cargo test --locked --workspace
-cargo test --locked --manifest-path tools/profiling/Cargo.toml
-cargo test --locked --manifest-path subsystems/graphics/tests/font_link/Cargo.toml
-cargo test -p drivers_native --features audio --lib devices::audio::tests
-cargo build --locked -p native_example
-"""
-
-[tasks."ci:wasm"]
-description = "Run primary guest, WASI application, image, and browser validation"
-run = """
-set -euo pipefail
-mise run guest-clippy
-cargo check -p audio -p drivers_wasm --features drivers_wasm/audio --target wasm32-unknown-unknown
-cargo clippy -p clock -p pixel_painter --all-targets --target wasm32-wasip1 -- -D warnings
-mise run prepare-wasm-image
-node --test drivers/wasm/tests/seed.test.mjs examples/wasm/tests/disk_manager.test.mjs
-"""
-
-[tasks."ci:abi"]
-description = "Run locked WASM ABI translation tests including doctests"
-run = "cargo test --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features ${CI_ABI_MEMORY:-memory_32}"
-
-[tasks."ci:localization"]
-description = "Run strict host and guest localization checks for selected locales"
-run = """
-set -euo pipefail
-read -r -a locales <<< "${CI_LOCALES:-en fr es de pt-BR it pl}"
-for locale in "${locales[@]}"; do
-  echo "::group::Localization ($locale)"
-  export EMBEDDED_I18N_STRICT=1
-  export EMBEDDED_I18N_LOCALE="$locale"
-  export CARGO_TARGET_DIR="${CARGO_TARGET_ROOT:-target/localization}/$locale"
-  mise run localization-check
-  echo "::endgroup::"
-done
-"""
-
-[tasks."ci:coverage"]
-description = "Run host-only workspace coverage in LCOV format"
-run = "cargo llvm-cov --locked --workspace --coverage-host-only --lcov --output-path lcov.info"
-
-[tasks."ci:abi-deep"]
-description = "Run ABI coverage thresholds and Miri across host architectures"
-run = """
-set -euo pipefail
-memory="${CI_ABI_MEMORY:-memory_32}"
-cargo +${XILA_NIGHTLY_TOOLCHAIN} llvm-cov --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features "$memory" --ignore-filename-regex '(tests\\.rs|tests/translation/src/lib\\.rs)$' --fail-under-lines 100 --fail-under-functions 100
-cargo +${XILA_NIGHTLY_TOOLCHAIN} miri test --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features "$memory"
-case "$memory" in
-  memory_32)
-    cargo +${XILA_NIGHTLY_TOOLCHAIN} miri test --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features memory_32 --target powerpc-unknown-linux-gnu
-    ;;
-  memory_64)
-    cargo +${XILA_NIGHTLY_TOOLCHAIN} miri test --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features memory_64 --target i686-unknown-linux-gnu
-    ;;
-  *)
-    echo "Unsupported ABI memory mode: $memory" >&2
-    exit 2
-    ;;
-esac
-"""
-
-[tasks."ci:profiling"]
-description = "Test runtime profiling and heaptrack feature configurations"
-run = """
-set -euo pipefail
-cargo test --locked -p task -p drivers_std --lib --features task/test_harness,drivers_std/profiling,drivers_std/heaptrack
-cargo test --locked -p native_example --bin native_example --features profiling,heaptrack
-"""
-
-[tasks."pages:build"]
-description = "Build documentation and all locale WASM demonstrations"
-run = """
-set -euo pipefail
-mkdir -p pages/host pages/guest pages/demonstrations/wasm target/reference-filesystem-images
-RUSTDOCFLAGS="--deny warnings" mise run host-docs
-RUSTDOCFLAGS="--deny warnings" mise run guest-docs
-cp -r target/x86_64-unknown-linux-gnu/doc/. pages/host/
-cp -r target/wasm32-unknown-unknown/doc/. pages/guest/
-for locale in en fr es de pt-BR it pl; do
-  echo "::group::WASM demonstration ($locale)"
-  export EMBEDDED_I18N_LOCALE="$locale"
-  export CARGO_TARGET_DIR="${CARGO_TARGET_ROOT:-target/pages}/$locale"
-  mise run prepare-wasm-image
-  cargo run --locked -p fs_image -- "$CARGO_TARGET_DIR/seed/wasm/repeated.img" 16777216 --bundle wasm --applications-dir "$CARGO_TARGET_DIR/wasm32-wasip1/release"
-  cmp "$CARGO_TARGET_DIR/seed/wasm/seed.img" "$CARGO_TARGET_DIR/seed/wasm/repeated.img"
-  rm "$CARGO_TARGET_DIR/seed/wasm/repeated.img"
-  cargo run --locked -p fs_image -- "$CARGO_TARGET_DIR/seed/wasm/native.img" 16777216 --bundle native --applications-dir "$CARGO_TARGET_DIR/wasm32-wasip1/release"
-  cargo run --locked -p fs_image -- "$CARGO_TARGET_DIR/seed/wasm/native-repeated.img" 16777216 --bundle native --applications-dir "$CARGO_TARGET_DIR/wasm32-wasip1/release"
-  cmp "$CARGO_TARGET_DIR/seed/wasm/native.img" "$CARGO_TARGET_DIR/seed/wasm/native-repeated.img"
-  rm "$CARGO_TARGET_DIR/seed/wasm/native-repeated.img"
-  mkdir -p "target/reference-filesystem-images/$locale"
-  cp "$CARGO_TARGET_DIR/seed/wasm/seed.img" "target/reference-filesystem-images/$locale/wasm.img"
-  cp "$CARGO_TARGET_DIR/seed/wasm/native.img" "target/reference-filesystem-images/$locale/native.img"
-  (cd examples/wasm && RUSTUP_TOOLCHAIN="$XILA_NIGHTLY_TOOLCHAIN" trunk build --release --public-url ./)
-  mkdir -p "pages/demonstrations/wasm/$locale"
-  cp -r examples/wasm/dist/. "pages/demonstrations/wasm/$locale/"
-  echo "::endgroup::"
-done
-"""
-
-[tasks.host-clippy]
+[tasks."clippy:host"]
 description = "Run Clippy for the Linux host target"
 run = "cargo clippy --target x86_64-unknown-linux-gnu --features graphics,abi_definitions,graphics_rendering_xrgb8888 --all-targets -- -D warnings"
 
-[tasks.guest-clippy]
+[tasks."clippy:guest"]
 description = "Run Clippy for the WASM guest target"
 run = "cargo clippy --package wasm --no-default-features --features default_guest --target wasm32-unknown-unknown --all-targets -- -D warnings"
 
-[tasks.clippy]
+[tasks."clippy:all"]
 description = "Run host and guest Clippy"
-depends = ["host-clippy", "guest-clippy"]
+depends = ["clippy:host", "clippy:guest"]
 
-[tasks.host-docs]
+[tasks."docs:host"]
 description = "Build host documentation"
 run = "cargo doc --features graphics,abi_definitions,graphics_rendering_xrgb8888 --target x86_64-unknown-linux-gnu"
 
-[tasks.guest-docs]
+[tasks."docs:guest"]
 description = "Build guest documentation"
 run = "cargo doc --package wasm --no-default-features --features default_guest --target wasm32-unknown-unknown"
 
-[tasks.docs]
+[tasks."docs:all"]
 description = "Build host and guest documentation"
-depends = ["host-docs", "guest-docs"]
+depends = ["docs:host", "docs:guest"]
 
-[tasks.check]
+[tasks."check:all"]
 description = "Check host and guest targets"
-depends = ["host-check", "guest-check"]
+depends = ["check:host", "check:guest"]
 
-[tasks.lint]
-description = "Run workspace Clippy with all features"
-run = "cargo clippy --all-targets --all-features -- -D warnings"
-
-[tasks.test]
+[tasks."test:workspace"]
 description = "Test the Cargo workspace"
 run = "cargo test --workspace"
 
-[tasks.run]
-description = "Run a Cargo binary"
-run = "cargo run"
-
-[tasks.build]
+[tasks."build:cargo"]
 description = "Build Cargo packages"
 run = "cargo build"
 
-[tasks.build-profiling]
+[tasks."build:profiling"]
 description = "Build the native profiling binary"
 run = "cargo build --package native_example --profile profiling"
 
-[tasks.prepare-profiling]
+[tasks."build:applications"]
 description = "Build WASI applications for profiling images"
 run = "cargo build --locked --package calculator --package weather --package clock --package pixel_painter --package text_editor --package synth --target wasm32-wasip1 --profile release-wasm"
 
-[tasks.coverage]
-description = "Run host-only workspace coverage"
-run = "cargo llvm-cov --workspace --coverage-host-only"
-
-[tasks.before-commit]
-description = "Run formatting, checks, docs, and Clippy"
-depends = ["format", "check", "docs", "clippy"]
-
-[tasks.prepare-native-image]
+[tasks."image:native"]
 description = "Build the native filesystem seed image"
-depends = ["prepare-profiling"]
+depends = ["build:applications"]
 run = """
 set -euo pipefail
 mkdir -p target/seed/native
@@ -241,7 +78,7 @@ rm -f target/seed/native/seed.img
 cargo run --locked --package fs_image -- target/seed/native/seed.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release-wasm
 """
 
-[tasks.prepare-wasm-image]
+[tasks."image:wasm"]
 description = "Build the WASM filesystem seed image"
 run = """
 set -euo pipefail

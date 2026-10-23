@@ -27,27 +27,20 @@ jobs:
     env:
       MISE_ENV: ci
       CARGO_TERM_COLOR: always
-      SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
+      XILA_MBX: "1"
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       - uses: jdx/mise-action@v5.2.2
-      - run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang mold pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libx11-dev libxkbcommon-x11-dev
-      - run: mise run install-tools
-      - run: mise run install-tools
-      - run: mise run install-nightly
-      - uses: mozilla-actions/sccache-action@v0.0.9
+      - run: mise run deps:npm
+      - run: mise exec rust@1.99.0 -- rustc --version
+      - uses: jdx/mr-boxington-action@v1
         with:
-          version: v0.18.0
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: pages-all-locales
-          cache-bin: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          toolchain: "1.99.0"
+          github-cache-mode: objects
+          cache-generation: v1-pages-all-locales
+          save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
       - name: Build Pages content
         env:
           CARGO_TARGET_ROOT: ${{ github.workspace }}/target/pages

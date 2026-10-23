@@ -30,12 +30,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5.2.2
-      - run: mise run install-tools
-      - run: mise run format-rust -- --check
-      - run: mise run format-toml -- --check
+      - run: mise run deps:npm
+      - run: mise run ci:format-rust
+      - run: mise run ci:format-toml
       - run: mise run ci:quality-js
       - run: python3 -m unittest discover -s tools/ci -v
-      - run: mise run workflow-lint
+      - run: mise run ci:lint-workflows
 
   host:
     name: Host
@@ -44,23 +44,17 @@ jobs:
     env:
       MISE_ENV: ci
       CARGO_TERM_COLOR: always
-      SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
+      XILA_MBX: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5.2.2
-      - run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang mold pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libx11-dev libxkbcommon-x11-dev
-      - run: mise run install-tools
-      - uses: mozilla-actions/sccache-action@v0.0.9
+      - run: mise run deps:npm
+      - run: mise exec rust@1.99.0 -- rustc --version
+      - uses: jdx/mr-boxington-action@v1
         with:
-          version: v0.18.0
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci-host
-          cache-bin: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          toolchain: "1.99.0"
+          github-cache-mode: objects
+          cache-generation: v1-ci-host
       - run: mise run ci:host
 
   wasm:
@@ -70,23 +64,17 @@ jobs:
     env:
       MISE_ENV: ci
       CARGO_TERM_COLOR: always
-      SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
+      XILA_MBX: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5.2.2
-      - run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang mold
-      - run: mise run install-tools
-      - uses: mozilla-actions/sccache-action@v0.0.9
+      - run: mise run deps:npm
+      - run: mise exec rust@1.99.0 -- rustc --version
+      - uses: jdx/mr-boxington-action@v1
         with:
-          version: v0.18.0
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ci-wasm
-          cache-bin: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          toolchain: "1.99.0"
+          github-cache-mode: target
+          cache-generation: v1-ci-wasm
       - run: mise run ci:wasm
 
   abi:
@@ -100,18 +88,16 @@ jobs:
     env:
       MISE_ENV: ci
       CI_ABI_MEMORY: ${{ matrix.memory }}
+      XILA_MBX: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5.2.2
-      - run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang mold
-      - uses: Swatinem/rust-cache@v2
+      - run: mise exec rust@1.99.0 -- rustc --version
+      - uses: jdx/mr-boxington-action@v1
         with:
-          workspaces: executables/wasm/tests/translation -> target
-          shared-key: ci-abi-${{ matrix.memory }}
-          cache-bin: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          toolchain: "1.99.0"
+          github-cache-mode: objects
+          cache-generation: v1-ci-abi-${{ matrix.memory }}
       - run: mise run ci:abi
 
   localization:
@@ -123,8 +109,7 @@ jobs:
     env:
       MISE_ENV: ci
       CARGO_TERM_COLOR: always
-      SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
+      XILA_MBX: "1"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -177,22 +162,16 @@ jobs:
           fi
       - uses: jdx/mise-action@v5.2.2
         if: steps.locales.outputs.run-check == 'true'
-      - run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang mold pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libx11-dev libxkbcommon-x11-dev
+      - run: mise run deps:npm
         if: steps.locales.outputs.run-check == 'true'
-      - run: mise run install-tools
+      - run: mise exec rust@1.99.0 -- rustc --version
         if: steps.locales.outputs.run-check == 'true'
-      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: jdx/mr-boxington-action@v1
         if: steps.locales.outputs.run-check == 'true'
         with:
-          version: v0.18.0
-      - uses: Swatinem/rust-cache@v2
-        if: steps.locales.outputs.run-check == 'true'
-        with:
-          shared-key: ci-localization
-          cache-bin: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          toolchain: "1.99.0"
+          github-cache-mode: objects
+          cache-generation: v1-ci-localization
       - name: Strict localization validation
         if: steps.locales.outputs.run-check == 'true'
         env:

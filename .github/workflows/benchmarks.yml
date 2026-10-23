@@ -8,8 +8,6 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  SCCACHE_GHA_ENABLED: "true"
-  SCCACHE_GHA_RW_MODE: READ_ONLY
 
 jobs:
   profile:
@@ -22,21 +20,19 @@ jobs:
         profile: [default, line-tables-only]
     env:
       MISE_ENV: ci
+      XILA_MBX: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5.2.2
-      - run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang mold pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libx11-dev libxkbcommon-x11-dev
-      - run: mise run install-tools
-      - uses: mozilla-actions/sccache-action@v0.0.9
+      - run: mise run ci:packages-host
+      - run: mise run deps:npm
+      - run: mise exec rust@1.99.0 -- rustc --version
+      - uses: jdx/mr-boxington-action@v1
         with:
-          version: v0.18.0
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: benchmark-profile-${{ matrix.profile }}
-          cache-bin: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          toolchain: "1.99.0"
+          github-cache-mode: target
+          cache-generation: v1-benchmark-profile-${{ matrix.profile }}
+          save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
       - name: Benchmark default debug profiles
         if: matrix.profile == 'default'
         run: mise run ci:benchmark-profile
@@ -62,30 +58,24 @@ jobs:
         runner: [cargo-test, nextest]
     env:
       MISE_ENV: ci
+      XILA_MBX: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5.2.2
-      - run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang mold pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libx11-dev libxkbcommon-x11-dev
-      - run: mise run install-tools
-      - uses: mozilla-actions/sccache-action@v0.0.9
+      - run: mise run ci:packages-benchmark
+      - run: mise run deps:npm
+      - run: mise exec rust@1.99.0 -- rustc --version
+      - uses: jdx/mr-boxington-action@v1
         with:
-          version: v0.18.0
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: benchmark-test-runner-${{ matrix.runner }}
-          cache-bin: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          toolchain: "1.99.0"
+          github-cache-mode: target
+          cache-generation: v1-benchmark-test-runner-${{ matrix.runner }}
+          save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
       - name: Install pinned nextest for benchmark
         if: matrix.runner == 'nextest'
         run: mise run ci:benchmark-install-nextest
       - name: Prepare benchmark results
         run: mkdir -p benchmark-results
-      - name: Install GNU time
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends time
       - name: Compile test binaries
         run: |
           /usr/bin/time -v -o "benchmark-results/compile-${{ matrix.runner }}.txt" mise run ci:benchmark-compile

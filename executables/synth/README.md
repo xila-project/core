@@ -2,7 +2,7 @@
 
 A fixed-memory, eight-voice instrument running as a `wasm32-wasip1` guest in
 Xila's Wasmi runtime, on both the native and browser examples. Build the example's
-reference image (`mise run prepare-native-image` or `mise run prepare-wasm-image`) and
+reference image (`mise run image:native` or `mise run image:wasm`) and
 open **Synth** from the application drawer, or run:
 
 ```text

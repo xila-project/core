@@ -1,30 +1,91 @@
-[tasks.format-rust.tools]
-rust = { version = "1.99.0", profile = "minimal", components = ["rustfmt"] }
+[wrappers.cargo]
+# Build jobs opt in; quality checks use real Cargo.
+command = "env"
+args = [
+  "{% if env.XILA_MBX | default(value='0') == '1' %}mbx{% else %}cargo{% endif %}",
+]
+env = { MBX_CARGO_SHIM_MODE = "1" }
 
-[tasks.format-toml.tools]
-taplo = "0.10.0"
+[bootstrap.packages]
+"apt:clang" = { env = "ci" }
+"apt:mold" = { env = "ci" }
+"apt:pkg-config" = { env = "host" }
+"apt:libasound2-dev" = { env = "host" }
+"apt:libudev-dev" = { env = "host" }
+"apt:libxkbcommon-dev" = { env = "host" }
+"apt:libwayland-dev" = { env = "host" }
+"apt:libx11-dev" = { env = "host" }
+"apt:libxkbcommon-x11-dev" = { env = "host" }
+"apt:time" = { env = "benchmark" }
 
-[tasks.format-json.tools]
-node = "24.22.0"
+[tasks."ci:packages-linker"]
+description = "Install CI linker packages only when a build task needs them"
+run = "mise -E ci bootstrap packages apply --manager apt --update --yes"
+
+[tasks."ci:packages-host"]
+description = "Install CI native GUI, audio and linker packages"
+run = "mise -E ci,host bootstrap packages apply --manager apt --update --yes"
+
+[tasks."ci:packages-benchmark"]
+description = "Install benchmark packages before timed commands"
+run = "mise -E ci,host,benchmark bootstrap packages apply --manager apt --update --yes"
+
+[tasks."ci:format-rust"]
+description = "Check Rust formatting without native build dependencies"
+tools.rust = { version = "1.99.0", profile = "minimal", components = [
+  "rustfmt",
+] }
+run = "cargo fmt --all -- --check"
+
+[tasks."ci:format-toml"]
+description = "Check TOML formatting without native build dependencies"
+tools.taplo = "0.10.0"
+run = "taplo format --check"
 
 [tasks."ci:quality-js"]
 description = "Check JSON formatting and localization extractor tests"
 tools.node = "24.22.0"
 run = "npm exec prettier -- --check \"**/*.json\" && node --test tolgee.extractor.test.mjs"
 
-[tasks.install-tools.tools]
+[tasks."deps:npm".tools]
 node = "24.22.0"
 
-[tasks.install-nightly.tools]
-rust = "1.99.0"
-
-[tasks.workflow-lint]
+[tasks."ci:lint-workflows"]
 description = "Lint GitHub Actions workflows"
 tools."aqua:rhysd/actionlint" = "1.7.7"
 run = "actionlint"
 
+[tasks."ci:host"]
+description = "Run primary host lint, test, and native build validation"
+shell = "bash -c"
+depends = ["ci:packages-host"]
+run = """
+set -euo pipefail
+mise run clippy:host
+cargo clippy -p wasm --features graphics,xila/graphics_rendering_xrgb8888 --target x86_64-unknown-linux-gnu -- -D warnings
+cargo clippy -p audio -p drivers_native --features drivers_native/audio --all-targets -- -D warnings
+cargo test --locked --workspace
+cargo test --locked --manifest-path tools/profiling/Cargo.toml
+cargo test --locked --manifest-path subsystems/graphics/tests/font_link/Cargo.toml
+cargo test -p drivers_native --features audio --lib devices::audio::tests
+cargo build --locked -p native_example
+"""
+
 [tasks."ci:host".tools]
 rust = { version = "1.99.0", profile = "minimal", components = ["clippy"] }
+
+[tasks."ci:wasm"]
+description = "Run primary guest, WASI application, image, and browser validation"
+shell = "bash -c"
+depends = ["ci:packages-linker"]
+run = """
+set -euo pipefail
+mise run clippy:guest
+cargo check -p audio -p drivers_wasm --features drivers_wasm/audio --target wasm32-unknown-unknown
+cargo clippy -p clock -p pixel_painter --all-targets --target wasm32-wasip1 -- -D warnings
+mise run image:wasm
+node --test drivers/wasm/tests/seed.test.mjs examples/wasm/tests/disk_manager.test.mjs
+"""
 
 [tasks."ci:wasm".tools]
 rust = { version = "1.99.0", profile = "minimal", components = [
@@ -35,8 +96,30 @@ rust = { version = "1.99.0", profile = "minimal", components = [
 ] }
 node = "24.22.0"
 
+[tasks."ci:abi"]
+description = "Run locked WASM ABI translation tests including doctests"
+depends = ["ci:packages-linker"]
+run = "cargo test --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features ${CI_ABI_MEMORY:-memory_32}"
+
 [tasks."ci:abi".tools]
 rust = "1.99.0"
+
+[tasks."ci:localization"]
+description = "Run strict host and guest localization checks for selected locales"
+shell = "bash -c"
+depends = ["ci:packages-host"]
+run = """
+set -euo pipefail
+read -r -a locales <<< "${CI_LOCALES:-en fr es de pt-BR it pl}"
+for locale in "${locales[@]}"; do
+  echo "::group::Localization ($locale)"
+  export EMBEDDED_I18N_STRICT=1
+  export EMBEDDED_I18N_LOCALE="$locale"
+  export CARGO_TARGET_DIR="${CARGO_TARGET_ROOT:-target/localization}/$locale"
+  mise run localization:check
+  echo "::endgroup::"
+done
+"""
 
 [tasks."ci:localization".tools]
 rust = { version = "1.99.0", profile = "minimal", targets = [
@@ -45,17 +128,60 @@ rust = { version = "1.99.0", profile = "minimal", targets = [
 ] }
 node = "24.22.0"
 
+[tasks."ci:coverage"]
+description = "Run host-only workspace coverage in LCOV format"
+depends = ["ci:packages-host"]
+run = "cargo llvm-cov --locked --workspace --coverage-host-only --lcov --output-path lcov.info"
+
 [tasks."ci:coverage".tools]
 rust = { version = "1.99.0", profile = "minimal", components = [
   "llvm-tools-preview",
 ] }
 "aqua:taiki-e/cargo-llvm-cov" = "0.6.21"
 
+[tasks."ci:abi-deep"]
+description = "Run ABI coverage thresholds and Miri across host architectures"
+shell = "bash -c"
+depends = ["ci:packages-linker"]
+run = """
+set -euo pipefail
+memory="${CI_ABI_MEMORY:-memory_32}"
+cargo llvm-cov --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features "$memory" --ignore-filename-regex '(tests\\.rs|tests/translation/src/lib\\.rs)$' --fail-under-lines 100 --fail-under-functions 100
+cargo miri test --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features "$memory"
+case "$memory" in
+  memory_32)
+    cargo miri test --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features memory_32 --target powerpc-unknown-linux-gnu
+    ;;
+  memory_64)
+    cargo miri test --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features memory_64 --target i686-unknown-linux-gnu
+    ;;
+  *)
+    echo "Unsupported ABI memory mode: $memory" >&2
+    exit 2
+    ;;
+esac
+"""
+
 [tasks."ci:abi-deep".tools]
-rust = { version = "1.99.0", profile = "minimal", components = [
+rust = { version = "nightly-2026-10-12", profile = "minimal", components = [
   "llvm-tools-preview",
+  "miri",
+  "rust-src",
+], targets = [
+  "i686-unknown-linux-gnu",
+  "powerpc-unknown-linux-gnu",
 ] }
 "aqua:taiki-e/cargo-llvm-cov" = "0.6.21"
+
+[tasks."ci:profiling"]
+description = "Test runtime profiling and heaptrack feature configurations"
+shell = "bash -c"
+depends = ["ci:packages-host"]
+run = """
+set -euo pipefail
+cargo test --locked -p task -p drivers_std --lib --features task/test_harness,drivers_std/profiling,drivers_std/heaptrack
+cargo test --locked -p native_example --bin native_example --features profiling,heaptrack
+"""
 
 [tasks."ci:profiling".tools]
 rust = { version = "1.99.0", profile = "minimal", targets = ["wasm32-wasip1"] }
@@ -69,6 +195,7 @@ run = "rustc --edition=2021 --target wasm32-wasip1 -O tests/container/runtime_sm
 
 [tasks."ci:benchmark-profile"]
 description = "Run Cargo profile benchmark commands"
+shell = "bash -c"
 tools.rust = { version = "1.99.0", profile = "minimal", components = [
   "clippy",
 ], targets = [
@@ -109,6 +236,39 @@ description = "Run workspace doctests with Cargo"
 tools.rust = "1.99.0"
 run = "cargo test --workspace --doc --timings"
 
+[tasks."pages:build"]
+description = "Build documentation and all locale WASM demonstrations"
+shell = "bash -c"
+depends = ["ci:packages-host"]
+run = """
+set -euo pipefail
+mkdir -p pages/host pages/guest pages/demonstrations/wasm target/reference-filesystem-images
+RUSTDOCFLAGS="--deny warnings" mise run docs:host
+RUSTDOCFLAGS="--deny warnings" mise run docs:guest
+cp -r target/x86_64-unknown-linux-gnu/doc/. pages/host/
+cp -r target/wasm32-unknown-unknown/doc/. pages/guest/
+for locale in en fr es de pt-BR it pl; do
+  echo "::group::WASM demonstration ($locale)"
+  export EMBEDDED_I18N_LOCALE="$locale"
+  export CARGO_TARGET_DIR="${CARGO_TARGET_ROOT:-target/pages}/$locale"
+  mise run image:wasm
+  cargo run --locked -p fs_image -- "$CARGO_TARGET_DIR/seed/wasm/repeated.img" 16777216 --bundle wasm --applications-dir "$CARGO_TARGET_DIR/wasm32-wasip1/release"
+  cmp "$CARGO_TARGET_DIR/seed/wasm/seed.img" "$CARGO_TARGET_DIR/seed/wasm/repeated.img"
+  rm "$CARGO_TARGET_DIR/seed/wasm/repeated.img"
+  cargo run --locked -p fs_image -- "$CARGO_TARGET_DIR/seed/wasm/native.img" 16777216 --bundle native --applications-dir "$CARGO_TARGET_DIR/wasm32-wasip1/release"
+  cargo run --locked -p fs_image -- "$CARGO_TARGET_DIR/seed/wasm/native-repeated.img" 16777216 --bundle native --applications-dir "$CARGO_TARGET_DIR/wasm32-wasip1/release"
+  cmp "$CARGO_TARGET_DIR/seed/wasm/native.img" "$CARGO_TARGET_DIR/seed/wasm/native-repeated.img"
+  rm "$CARGO_TARGET_DIR/seed/wasm/native-repeated.img"
+  mkdir -p "target/reference-filesystem-images/$locale"
+  cp "$CARGO_TARGET_DIR/seed/wasm/seed.img" "target/reference-filesystem-images/$locale/wasm.img"
+  cp "$CARGO_TARGET_DIR/seed/wasm/native.img" "target/reference-filesystem-images/$locale/native.img"
+  mise run pages:demo
+  mkdir -p "pages/demonstrations/wasm/$locale"
+  cp -r examples/wasm/dist/. "pages/demonstrations/wasm/$locale/"
+  echo "::endgroup::"
+done
+"""
+
 [tasks."pages:build".tools]
 rust = { version = "1.99.0", profile = "minimal", components = [
   "llvm-tools-preview",
@@ -116,39 +276,41 @@ rust = { version = "1.99.0", profile = "minimal", components = [
   "wasm32-unknown-unknown",
   "wasm32-wasip1",
 ] }
-"cargo:trunk" = "0.21.14"
 
-[tasks.host-clippy.tools]
+[tasks."pages:demo"]
+description = "Build the browser demonstration with its nightly toolchain"
+dir = "examples/wasm"
+tools.rust = { version = "nightly-2026-10-12", profile = "minimal", targets = [
+  "wasm32-unknown-unknown",
+] }
+tools."cargo:trunk" = "0.21.14"
+run = "trunk build --release --public-url ./"
+
+[tasks."clippy:host".tools]
 rust = { version = "1.99.0", profile = "minimal", components = ["clippy"] }
 
-[tasks.guest-clippy.tools]
+[tasks."clippy:guest".tools]
 rust = { version = "1.99.0", profile = "minimal", components = [
   "clippy",
 ], targets = [
   "wasm32-unknown-unknown",
 ] }
 
-[tasks.host-docs.tools]
+[tasks."docs:host".tools]
 rust = { version = "1.99.0", profile = "minimal", targets = [
   "x86_64-unknown-linux-gnu",
 ] }
 
-[tasks.guest-docs.tools]
+[tasks."docs:guest".tools]
 rust = { version = "1.99.0", profile = "minimal", targets = [
   "wasm32-unknown-unknown",
 ] }
 
-[tasks.prepare-profiling.tools]
+[tasks."build:applications".tools]
 rust = { version = "1.99.0", profile = "minimal", targets = ["wasm32-wasip1"] }
 
-[tasks.prepare-native-image.tools]
+[tasks."image:native".tools]
 rust = { version = "1.99.0", profile = "minimal", targets = ["wasm32-wasip1"] }
 
-[tasks.prepare-wasm-image.tools]
+[tasks."image:wasm".tools]
 rust = { version = "1.99.0", profile = "minimal", targets = ["wasm32-wasip1"] }
-
-[tasks.coverage.tools]
-rust = { version = "1.99.0", profile = "minimal", components = [
-  "llvm-tools-preview",
-] }
-"aqua:taiki-e/cargo-llvm-cov" = "0.6.21"

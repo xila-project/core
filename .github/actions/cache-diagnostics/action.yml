@@ -1,7 +1,0 @@
-name: Cache diagnostics
-description: Report allowlisted sccache write error categories without publishing raw logs
-runs:
-  using: node24
-  main: index.cjs
-  post: index.cjs
-  post-if: always()

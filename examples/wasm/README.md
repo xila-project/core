@@ -4,7 +4,7 @@ From the repository root, prepare the separate application disk and build the
 browser runtime:
 
 ```sh
-mise run prepare-wasm-image
+mise run image:wasm
 cargo check -p wasm_example --target wasm32-unknown-unknown
 cd examples/wasm
 RUSTUP_TOOLCHAIN=stable trunk serve

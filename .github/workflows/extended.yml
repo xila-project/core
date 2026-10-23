@@ -27,23 +27,18 @@ jobs:
     env:
       MISE_ENV: ci
       CARGO_LLVM_COV_TARGET_DIR: ${{ github.workspace }}/target/llvm-cov-target
-      SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
+      XILA_MBX: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5.2.2
-      - run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang mold pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libx11-dev libxkbcommon-x11-dev
-      - run: mise run install-tools
-      - uses: mozilla-actions/sccache-action@v0.0.9
+      - run: mise run deps:npm
+      - run: mise exec rust@1.99.0 -- rustc --version
+      - uses: jdx/mr-boxington-action@v1
         with:
-          version: v0.18.0
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: extended-coverage
-          cache-bin: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          toolchain: "1.99.0"
+          github-cache-mode: objects
+          cache-generation: v1-extended-coverage
+          save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
       - run: mise run ci:coverage
       - uses: codecov/codecov-action@v7
         with:
@@ -58,23 +53,18 @@ jobs:
     timeout-minutes: 45
     env:
       MISE_ENV: ci
-      SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
+      XILA_MBX: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5.2.2
-      - run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang mold pkg-config libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev libx11-dev libxkbcommon-x11-dev
-      - run: mise run install-tools
-      - uses: mozilla-actions/sccache-action@v0.0.9
+      - run: mise run deps:npm
+      - run: mise exec rust@1.99.0 -- rustc --version
+      - uses: jdx/mr-boxington-action@v1
         with:
-          version: v0.18.0
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: extended-profiling
-          cache-bin: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          toolchain: "1.99.0"
+          github-cache-mode: target
+          cache-generation: v1-extended-profiling
+          save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
       - run: mise run ci:profiling
 
   abi-deep:
@@ -88,24 +78,17 @@ jobs:
     env:
       MISE_ENV: ci
       CI_ABI_MEMORY: ${{ matrix.memory }}
-      SCCACHE_GHA_ENABLED: "true"
-      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
+      XILA_MBX: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5.2.2
-      - run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang mold
-      - run: mise run install-nightly
-      - uses: mozilla-actions/sccache-action@v0.0.9
+      - run: mise exec rust@nightly-2026-10-12 -- rustc --version
+      - uses: jdx/mr-boxington-action@v1
         with:
-          version: v0.18.0
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: executables/wasm/tests/translation -> target
-          shared-key: extended-abi-${{ matrix.memory }}
-          cache-bin: "false"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          toolchain: nightly-2026-10-12
+          github-cache-mode: objects
+          cache-generation: v1-extended-abi-${{ matrix.memory }}
+          save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
       - run: mise run ci:abi-deep
 
   release-gate:

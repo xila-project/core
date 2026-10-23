@@ -4,18 +4,18 @@ Xila is an embedded operating system written in Rust for low-power microcontroll
 
 # Build & Test Commands
 
-- Format Rust: `mise run format-rust -- --check`
-- Format TOML: `mise run format-toml -- --check`
+- Format Rust: `mise run format:rust -- --check`
+- Format TOML: `mise run format:toml -- --check`
 - Format JSON: `npm exec prettier -- --check "**/*.json"`
-- Run host and guest checks: `mise run check`
-- Run host and guest Clippy: `mise run clippy`
-- Test the workspace: `mise run test`
-- For focused validation, use `mise run host-check`, `mise run guest-check`, `mise run host-clippy`, or `mise run guest-clippy` as appropriate.
+- Run host and guest checks: `mise run check:all`
+- Run host and guest Clippy: `mise run clippy:all`
+- Test the workspace: `mise run test:workspace`
+- For focused validation, use `mise run check:host`, `mise run check:guest`, `mise run clippy:host`, or `mise run clippy:guest` as appropriate.
 
-Tasks are defined in `mise.toml`; tool selections and system package profiles are in `mise.*.toml`. CI is the source of truth for target-specific validation.
+Shared tasks are defined in `mise.toml`, developer-only tasks and tools in `mise.development.toml`, and CI tasks with task-scoped tools and package setup in `mise.ci.toml`. All task names use `<namespace>:<command>`. CI is the source of truth for target-specific validation.
 
-- Select relevant `MISE_ENV` profiles (such as `host`, `guest`, and `native-linker`) before `mise install`; use `mise bootstrap packages apply --manager apt` for the selected native packages. No development container is required.
-- For localization, set `EMBEDDED_I18N_LOCALE` and `EMBEDDED_I18N_STRICT=1`, run `mise run localization-check`, and test extractor changes with `node --test tolgee.extractor.test.mjs`. Build host, guests, fonts and LittleFS images for the same locale, using separate Cargo target directories per locale. See `docs/localization.md`.
+- The default `development` environment provides local tools; use `MISE_ENV=ci` for CI tasks. Run `mise bootstrap packages apply --manager apt` for local native packages; CI build tasks apply only their required package sets through dependencies, while formatting tasks install no native packages. No development container is required.
+- For localization, set `EMBEDDED_I18N_LOCALE` and `EMBEDDED_I18N_STRICT=1`, run `mise run localization:check`, and test extractor changes with `node --test tolgee.extractor.test.mjs`. Build host, guests, fonts and LittleFS images for the same locale, using separate Cargo target directories per locale. See `docs/localization.md`.
 
 # Architecture & Implementation Guidelines
 
@@ -42,8 +42,8 @@ Tasks are defined in `mise.toml`; tool selections and system package profiles ar
 
 # Optimization and Profiling
 
-- For optimization requests, define the workload first and record a native baseline before editing hot paths. Use the same inputs, locale, disk state, resolution, network mode, duration and machine for the comparison. Build outside the measured interval and run `mise run prepare-native-image` to build guest applications and the LittleFS seed image first.
-- Build an optimized binary with symbols using `mise run build-profiling -- --features prebuilt-applications` for OS workloads (the feature is compatibility-only; omit it for independent benchmarks). Applications load from the disk image, not from the recorder's `--applications-dir` (used only for artifact hashing). Record uninstrumented measurements with `cargo run --manifest-path tools/profiling/Cargo.toml -- measure --scenario NAME --output target/profiles/BASELINE --runs 3 --duration 30 --applications-dir target/wasm32-wasip1/release-wasm -- target/profiling/native_example --terminal --no-network --seed-image target/seed/native/seed.img`. Existing disks are not re-seeded automatically: restore the same disk fixture between runs. Read `summary.json` and per-run logs; a duration limit is a bounded observation, not successful workload completion. Do not use failed or forcibly killed runs to claim improvements.
-- For attribution, rebuild with `mise run build-profiling -- --features profiling,heaptrack`. The `profiling` feature records task/spawner/thread identity, cumulative poll CPU time, poll/wait wall time and allocation request volume in each run's `runtime.json`. The `heaptrack` feature annotates the native custom allocator. Features are disabled by default and Linux-only instrumentation compiles out on other targets.
+- For optimization requests, define the workload first and record a native baseline before editing hot paths. Use the same inputs, locale, disk state, resolution, network mode, duration and machine for the comparison. Build outside the measured interval and run `mise run image:native` to build guest applications and the LittleFS seed image first.
+- Build an optimized binary with symbols using `mise run build:profiling -- --features prebuilt-applications` for OS workloads (the feature is compatibility-only; omit it for independent benchmarks). Applications load from the disk image, not from the recorder's `--applications-dir` (used only for artifact hashing). Record uninstrumented measurements with `cargo run --manifest-path tools/profiling/Cargo.toml -- measure --scenario NAME --output target/profiles/BASELINE --runs 3 --duration 30 --applications-dir target/wasm32-wasip1/release-wasm -- target/profiling/native_example --terminal --no-network --seed-image target/seed/native/seed.img`. Existing disks are not re-seeded automatically: restore the same disk fixture between runs. Read `summary.json` and per-run logs; a duration limit is a bounded observation, not successful workload completion. Do not use failed or forcibly killed runs to claim improvements.
+- For attribution, rebuild with `mise run build:profiling -- --features profiling,heaptrack`. The `profiling` feature records task/spawner/thread identity, cumulative poll CPU time, poll/wait wall time and allocation request volume in each run's `runtime.json`. The `heaptrack` feature annotates the native custom allocator. Features are disabled by default and Linux-only instrumentation compiles out on other targets.
 - Use the recorder's `cpu` mode with separately installed Samply (or `--tool perf`) and `heap` mode with heaptrack. Read the README's profiling section for artifacts and limitations. Keep external profiler overhead and feature-enabled counters out of uninstrumented before/after consumption comparisons.
 - CPU time, elapsed latency, RSS, allocator-used/reserved bytes and allocation request volume are different metrics. Task IDs can be reused: use the manager/generation identity in reports. Executor poll CPU includes task CPU; do not add them together. Snapshots are periodic, not final or peak heap reports. Check active poll/wait flags: long-running polls do not update completed CPU/counts until they return. Native improvements need follow-up validation on the intended Wasm/embedded target.

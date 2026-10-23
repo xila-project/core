@@ -24,3 +24,51 @@ taplo = "0.10.0"
 "apt:libwayland-dev" = "latest"
 "apt:libx11-dev" = "latest"
 "apt:libxkbcommon-x11-dev" = "latest"
+
+[tasks."format:rust"]
+description = "Format Rust sources"
+run = "cargo fmt --all"
+
+[tasks."format:toml"]
+description = "Format TOML files"
+run = "taplo format"
+
+[tasks."format:json"]
+description = "Format JSON files"
+run = "npm exec prettier -- --write \"**/*.json\""
+
+[tasks."format:all"]
+description = "Format Rust, TOML, and JSON"
+depends = ["format:rust", "format:toml", "format:json"]
+
+[tasks."translate:compare"]
+description = "Compare translation catalogs"
+run = "npm exec tolgee compare"
+
+[tasks."translate:sync"]
+description = "Synchronize translation catalogs"
+run = "npm exec tolgee sync -- --remove-unused"
+
+[tasks."translate:pull"]
+description = "Pull translation catalogs"
+run = "npm exec tolgee pull"
+
+[tasks."translate:push"]
+description = "Push translation catalogs"
+run = "npm exec tolgee push"
+
+[tasks."lint:all"]
+description = "Run workspace Clippy with all features"
+run = "cargo clippy --all-targets --all-features -- -D warnings"
+
+[tasks."run:cargo"]
+description = "Run a Cargo binary"
+run = "cargo run"
+
+[tasks."coverage:host"]
+description = "Run host-only workspace coverage"
+run = "cargo llvm-cov --workspace --coverage-host-only"
+
+[tasks."dev:before-commit"]
+description = "Run formatting, checks, docs, and Clippy"
+depends = ["format:all", "check:all", "docs:all", "clippy:all"]

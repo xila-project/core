@@ -78,7 +78,7 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       - uses: jdx/mise-action@v5.2.2
-      - run: mise run install-tools
+      - run: mise run deps:npm
       - name: Read runtime package version
         id: version
         run: |
