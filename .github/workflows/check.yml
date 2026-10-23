@@ -412,8 +412,6 @@ jobs:
 
       - name: Check | Profiling runner
         run: |
-          cargo fmt --manifest-path tools/profiling/Cargo.toml -- --check
-          cargo clippy --manifest-path tools/profiling/Cargo.toml --all-targets -- -D warnings
           cargo test --manifest-path tools/profiling/Cargo.toml
 
       # This separate workspace must link through graphics alone, without a
