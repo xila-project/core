@@ -73,7 +73,11 @@ cargo build --locked -p native_example
 """
 
 [tasks."ci:host".tools]
-rust = { version = "1.99.0", profile = "minimal", components = ["clippy"] }
+# wasm build scripts invoke rustfmt when generating bindings, even for checks.
+rust = { version = "1.99.0", profile = "minimal", components = [
+  "clippy",
+  "rustfmt",
+] }
 
 [tasks."ci:wasm"]
 description = "Run primary guest, WASI application, image, and browser validation"
@@ -91,6 +95,7 @@ node --test drivers/wasm/tests/seed.test.mjs examples/wasm/tests/disk_manager.te
 [tasks."ci:wasm".tools]
 rust = { version = "1.99.0", profile = "minimal", components = [
   "clippy",
+  "rustfmt",
 ], targets = [
   "wasm32-unknown-unknown",
   "wasm32-wasip1",
@@ -123,7 +128,9 @@ done
 """
 
 [tasks."ci:localization".tools]
-rust = { version = "1.99.0", profile = "minimal", targets = [
+rust = { version = "1.99.0", profile = "minimal", components = [
+  "rustfmt",
+], targets = [
   "wasm32-unknown-unknown",
   "wasm32-wasip1",
 ] }
@@ -137,6 +144,7 @@ run = "cargo llvm-cov --locked --workspace --coverage-host-only --lcov --output-
 [tasks."ci:coverage".tools]
 rust = { version = "1.99.0", profile = "minimal", components = [
   "llvm-tools-preview",
+  "rustfmt",
 ] }
 "aqua:taiki-e/cargo-llvm-cov" = "0.6.21"
 
@@ -185,7 +193,11 @@ cargo test --locked -p native_example --bin native_example --features profiling,
 """
 
 [tasks."ci:profiling".tools]
-rust = { version = "1.99.0", profile = "minimal", targets = ["wasm32-wasip1"] }
+rust = { version = "1.99.0", profile = "minimal", components = [
+  "rustfmt",
+], targets = [
+  "wasm32-wasip1",
+] }
 
 [tasks."ci:runtime-smoke"]
 description = "Compile the runtime smoke-test WASI guest"
@@ -199,6 +211,7 @@ description = "Run Cargo profile benchmark commands"
 shell = "bash -c"
 tools.rust = { version = "1.99.0", profile = "minimal", components = [
   "clippy",
+  "rustfmt",
 ], targets = [
   "wasm32-unknown-unknown",
 ] }
@@ -219,22 +232,30 @@ run = "cargo binstall --no-confirm cargo-nextest@0.9.148"
 
 [tasks."ci:benchmark-compile"]
 description = "Compile workspace test binaries and collect timings"
-tools.rust = "1.99.0"
+tools.rust = { version = "1.99.0", profile = "minimal", components = [
+  "rustfmt",
+] }
 run = "cargo test --workspace --no-run --timings"
 
 [tasks."ci:benchmark-cargo-test"]
 description = "Run workspace tests and doctests with Cargo"
-tools.rust = "1.99.0"
+tools.rust = { version = "1.99.0", profile = "minimal", components = [
+  "rustfmt",
+] }
 run = "cargo test --workspace"
 
 [tasks."ci:benchmark-nextest"]
 description = "Run workspace tests with nextest and doctests with Cargo"
-tools.rust = "1.99.0"
+tools.rust = { version = "1.99.0", profile = "minimal", components = [
+  "rustfmt",
+] }
 run = "cargo nextest run --workspace --timings"
 
 [tasks."ci:benchmark-doctests"]
 description = "Run workspace doctests with Cargo"
-tools.rust = "1.99.0"
+tools.rust = { version = "1.99.0", profile = "minimal", components = [
+  "rustfmt",
+] }
 run = "cargo test --workspace --doc --timings"
 
 [tasks."pages:build"]
@@ -273,6 +294,7 @@ done
 [tasks."pages:build".tools]
 rust = { version = "1.99.0", profile = "minimal", components = [
   "llvm-tools-preview",
+  "rustfmt",
 ], targets = [
   "wasm32-unknown-unknown",
   "wasm32-wasip1",
@@ -281,37 +303,59 @@ rust = { version = "1.99.0", profile = "minimal", components = [
 [tasks."pages:demo"]
 description = "Build the browser demonstration with its nightly toolchain"
 dir = "examples/wasm"
-tools.rust = { version = "nightly-2026-10-12", profile = "minimal", targets = [
+tools.rust = { version = "nightly-2026-10-12", profile = "minimal", components = [
+  "rustfmt",
+], targets = [
   "wasm32-unknown-unknown",
 ] }
 tools."cargo:trunk" = "0.21.14"
 run = "trunk build --release --public-url ./"
 
 [tasks."clippy:host".tools]
-rust = { version = "1.99.0", profile = "minimal", components = ["clippy"] }
+rust = { version = "1.99.0", profile = "minimal", components = [
+  "clippy",
+  "rustfmt",
+] }
 
 [tasks."clippy:guest".tools]
 rust = { version = "1.99.0", profile = "minimal", components = [
   "clippy",
+  "rustfmt",
 ], targets = [
   "wasm32-unknown-unknown",
 ] }
 
 [tasks."docs:host".tools]
-rust = { version = "1.99.0", profile = "minimal", targets = [
+rust = { version = "1.99.0", profile = "minimal", components = [
+  "rustfmt",
+], targets = [
   "x86_64-unknown-linux-gnu",
 ] }
 
 [tasks."docs:guest".tools]
-rust = { version = "1.99.0", profile = "minimal", targets = [
+rust = { version = "1.99.0", profile = "minimal", components = [
+  "rustfmt",
+], targets = [
   "wasm32-unknown-unknown",
 ] }
 
 [tasks."build:applications".tools]
-rust = { version = "1.99.0", profile = "minimal", targets = ["wasm32-wasip1"] }
+rust = { version = "1.99.0", profile = "minimal", components = [
+  "rustfmt",
+], targets = [
+  "wasm32-wasip1",
+] }
 
 [tasks."image:native".tools]
-rust = { version = "1.99.0", profile = "minimal", targets = ["wasm32-wasip1"] }
+rust = { version = "1.99.0", profile = "minimal", components = [
+  "rustfmt",
+], targets = [
+  "wasm32-wasip1",
+] }
 
 [tasks."image:wasm".tools]
-rust = { version = "1.99.0", profile = "minimal", targets = ["wasm32-wasip1"] }
+rust = { version = "1.99.0", profile = "minimal", components = [
+  "rustfmt",
+], targets = [
+  "wasm32-wasip1",
+] }

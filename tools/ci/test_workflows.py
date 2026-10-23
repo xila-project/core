@@ -112,6 +112,20 @@ class WorkflowPolicy(unittest.TestCase):
         tasks = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]
         self.assertIn("aqua:koalaman/shellcheck", tasks["ci:lint-workflows"]["tools"])
 
+    def test_binding_build_tasks_install_rustfmt_even_with_minimal_toolchains(self):
+        tasks = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]
+        for name in [
+            "ci:host", "ci:wasm", "ci:localization", "ci:coverage", "ci:profiling",
+            "ci:benchmark-profile", "ci:benchmark-compile", "ci:benchmark-cargo-test",
+            "ci:benchmark-nextest", "ci:benchmark-doctests", "pages:build", "pages:demo",
+            "clippy:host", "clippy:guest", "docs:host", "docs:guest",
+            "build:applications", "image:native", "image:wasm",
+        ]:
+            with self.subTest(task=name):
+                rust = tasks[name]["tools"]["rust"]
+                components = rust.get("components", []) if isinstance(rust, dict) else []
+                self.assertIn("rustfmt", components, "wasm build scripts execute rustfmt on generated bindings")
+
     def test_no_workflow_keeps_superseded_rust_caches(self):
         for workflow in ACTIVE_WORKFLOWS:
             text = workflow.read_text()
