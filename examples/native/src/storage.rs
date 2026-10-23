@@ -26,7 +26,7 @@ pub fn prepare_disk(disk: &Path, seed: &Path, size: u64) -> io::Result<bool> {
             io::Error::new(
                 error.kind(),
                 format!(
-                    "reference disk image '{}' was not found; create it with `cargo make prepare-native-image` or pass an existing image with --seed-image",
+                    "reference disk image '{}' was not found; create it with `cargo make prepare-native-image` or configure a valid seed image path",
                     seed.display()
                 ),
             )
