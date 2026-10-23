@@ -3,8 +3,7 @@
 ARG RUST_VERSION=1.99.0
 FROM rust:${RUST_VERSION}-bookworm AS builder
 
-ENV CARGO_TERM_COLOR=always \
-    XILA_RUST_TOOLCHAIN=${RUST_VERSION}
+ENV CARGO_TERM_COLOR=always
 
 RUN apt-get update \
     && apt-get install --no-install-recommends -y \

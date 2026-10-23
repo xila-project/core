@@ -48,38 +48,46 @@ documentation and learning guides.
 
 ## Build and check Core
 
-Install [mise](https://mise.jdx.dev/getting-started.html), then install only
-the tools and native dependencies for the checks you need:
+Install [mise](https://mise.jdx.dev/getting-started.html). By default, this
+repository selects the `development` tasks. Tools are installed on demand per
+task; optionally preinstall all development task tools in one pass:
 
 ```bash
-export MISE_ENV=host,guest,host-guest,native-linker
 mise trust
-mise install
+mise install --include-task-tools # optional: preinstall development task tools
 mise bootstrap packages apply --manager apt
-npm ci
-mise run check                  # Linux host + WASM guest checks
+mise run deps:npm
+mise run check:all               # Linux host + WASM guest checks
 ```
 
-No development container is required. `mise.toml` holds common tasks and
-toolchain pins; `mise.<environment>.toml` files select task groups, including
-`format`, `host`, `guest`, `host-guest`, `native-linker`, and `miri`. Use
-`host-guest` alongside `host,guest` when both target sets are needed. On
-Debian/Ubuntu, native packages are provisioned from the selected environment
-with `mise bootstrap packages apply --manager apt` (mise requests sudo when
-needed).
+No development container is required. `.miserc.toml` selects
+`mise.development.toml` by default; tasks select host or WASM targets, formatting
+or coverage tools as needed, including developer-only `format:*`,
+`translate:*` and `dev:*` tasks. `mise.toml` holds reusable namespaced tasks
+such as `check:host`, `docs:all`, and `image:wasm`.
+CI selects `mise.ci.toml`, where tools are declared on individual
+tasks so a job installs only the tools its tasks use. On Debian/Ubuntu, native
+packages are provisioned from the selected environment with
+`mise bootstrap packages apply --manager apt` (mise requests sudo when needed).
+Developer Cargo build tasks are wrapped by mbx through Mise's native Rust
+integration. Tools are not activated globally: use `mise run build:cargo -- ...`
+or `mise run run:cargo -- ...` for ad-hoc Cargo commands with this setup.
+CI uses the mbx GitHub Action and its wrapper instead, avoiding a second mbx
+installation in CI. Formatting tasks select only rustfmt, Taplo or Node, with
+no build targets, Clippy, mbx, coverage tools or native-package bootstrap.
 
 Other checks:
 
 ```bash
-mise run clippy
-mise run format-rust -- --check
-mise run format-toml -- --check
-npm exec prettier -- --check "**/*.json"
+mise run clippy:all
+mise run format:rust -- --check
+mise run format:toml -- --check
+MISE_ENV=ci mise run ci:quality-js
 ```
 
 For opt-in native PCM playback using nanoaudio, see
 [the audio library](libraries/audio/README.md). Run its tone example with
-`mise exec -- cargo run -p drivers_native --features audio --example audio`.
+`mise run run:cargo -- -p drivers_native --features audio --example audio`.
 
 For GUI builds from a **Wayland desktop**, keep the host GPU drivers and check
 rendering, input and window closing. Windows requires x86_64 WSL2/WSLg and a GUI
@@ -89,14 +97,14 @@ current host checks and native event loop depend on Linux/Wayland.
 For the browser example:
 
 ```bash
-mise exec -- cargo build -p calculator -p text_editor --target wasm32-wasip1 --release
-mise run install-nightly
-mise exec -- bash -c 'cd examples/wasm && RUSTUP_TOOLCHAIN="$XILA_NIGHTLY_TOOLCHAIN" trunk serve'
+mise run build:applications
+MISE_ENV=ci mise run pages:demo
 ```
 
-Use `trunk build` for a build check; open the served URL to test rendering/input.
+`pages:demo` builds the browser example with its task-scoped nightly toolchain
+and Trunk. Serve `examples/wasm/dist` separately to test rendering/input.
 
-Tool versions are maintained in the `mise*.toml` files; npm dependencies are pinned by
+Tool versions are centralized in `[vars]` in `mise.toml`; npm dependencies are pinned by
 `package-lock.json`. Local task names are listed by `mise tasks` and run with
 `mise run <task>`. Tool pins do not freeze untracked Cargo lockfiles or moving
 Git dependencies.
@@ -141,8 +149,8 @@ requires access to perf events; a permission error is reported in the run log.
 Build before recording, after mise has installed the project tools:
 
 ```bash
-mise run prepare-native-image
-mise run build-profiling -- --features prebuilt-applications
+mise run image:native
+mise run build:profiling -- --features prebuilt-applications
 cargo run --manifest-path tools/profiling/Cargo.toml -- measure \
   --scenario terminal-idle --output target/profiles/before --runs 3 --duration 30 \
   --applications-dir target/wasm32-wasip1/release-wasm \
@@ -165,7 +173,7 @@ between runs; restore its baseline if the workload writes to it.
 For allocation and task attribution, build with the optional features:
 
 ```bash
-mise run build-profiling -- --features profiling,heaptrack
+mise run build:profiling -- --features profiling,heaptrack
 cargo run --manifest-path tools/profiling/Cargo.toml -- cpu \
   --scenario gui-navigation --output target/profiles/cpu --runs 1 --duration 60 \
   --applications-dir target/wasm32-wasip1/release-wasm \

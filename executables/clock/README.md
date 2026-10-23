@@ -28,7 +28,7 @@ cargo build -p clock --target wasm32-wasip1 --profile release-wasm
 The native example builds, copies, and installs Clock alongside Calculator and
 Weather. Run the native example using the normal graphical development workflow,
 then open **Clock** from the launcher. With `prebuilt-applications`, run
-`mise run prepare-profiling` to prepare all three apps first.
+`mise run build:applications` to prepare all three apps first.
 
 The browser example also bundles Clock and installs its launcher shortcut at
 boot, just like Calculator. Build both guests with `--release` before building

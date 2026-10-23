@@ -1,200 +1,521 @@
-"""Small policy regressions; actionlint remains the workflow syntax validator."""
+"""Focused behavioral policy regressions for the current CI workflows."""
 
+import os
+import functools
+import json
 import pathlib
 import re
+import subprocess
+import tempfile
+import textwrap
 import tomllib
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+ACTIVE_WORKFLOWS = [
+    path
+    for path in (ROOT / ".github/workflows").glob("*.yml")
+    if path.name != "cache-benchmark.yml"
+]
 
 
 def job(workflow, name):
     text = (ROOT / ".github/workflows" / workflow).read_text()
-    return re.search(rf"^  {name}:\n(.*?)(?=^  [\w-]+:|\Z)", text, re.M | re.S)[1]
+    return re.search(rf"^  {re.escape(name)}:\n(.*?)(?=^  [\w-]+:|\Z)", text, re.M | re.S)[1]
+
+
+@functools.lru_cache
+def configured_tasks(environment):
+    """Resolve task inheritance and tools with Mise (scripts render at execution)."""
+    result = subprocess.check_output(
+        ["mise", "tasks", "ls", "--json"], cwd=ROOT, text=True,
+        env=os.environ | {"MISE_ENV": environment},
+    )
+    tasks = {}
+    for task in json.loads(result):
+        task["run"] = "\n".join(task["run"])
+        if not task.get("depends"):
+            task.pop("depends", None)
+        tasks[task["name"]] = task
+    return tasks
+
+
+@functools.lru_cache
+def ci_config():
+    config = tomllib.loads((ROOT / "mise.ci.toml").read_text())
+    resolved = configured_tasks("ci")
+    return config | {"tasks": {name: resolved[name] for name in config["tasks"]}}
 
 
 class WorkflowPolicy(unittest.TestCase):
+    def test_tool_versions_are_central_and_templates_do_not_install_tools_globally(self):
+        shared = tomllib.loads((ROOT / "mise.toml").read_text())
+        self.assertIn("rust_version", shared.get("vars", {}))
+        self.assertIn("nightly_version", shared["vars"])
+        ci = tomllib.loads((ROOT / "mise.ci.toml").read_text())
+        self.assertIn("task_templates", ci)
+        self.assertNotIn("tools", shared)
+        self.assertNotIn("tools", ci)
+        for filename in ["mise.ci.toml", "mise.development.toml"]:
+            text = (ROOT / filename).read_text()
+            for version in shared["vars"].values():
+                self.assertNotIn(f'"{version}"', text, filename)
+        self.assertNotIn("depends", ci["task_templates"]["ci:rust-format"])
+        self.assertNotIn("depends", ci["task_templates"]["ci:node"])
+
+    def test_formatting_resolves_only_its_own_tools_in_both_environments(self):
+        for environment, cases in {
+            "ci": {"ci:format-rust": {"rust"}, "ci:format-toml": {"taplo"}, "ci:quality-js": {"node"}},
+            "development": {"format:rust": {"rust"}, "format:toml": {"taplo"}, "format:json": {"node"}},
+        }.items():
+            for name, expected_tools in cases.items():
+                with self.subTest(environment=environment, task=name):
+                    task = configured_tasks(environment)[name]
+                    self.assertEqual(set(task["tools"]), expected_tools)
+                    self.assertFalse(task.get("depends"))
+                    if "rust" in expected_tools:
+                        self.assertEqual(task["tools"]["rust"]["components"], ["rustfmt"])
+                        self.assertFalse(task["tools"]["rust"].get("targets"))
+        tasks = configured_tasks("ci")
+        self.assertEqual(tasks["ci:abi"]["tools"]["rust"], {"version": "1.99.0", "profile": "minimal"})
+        self.assertEqual(set(tasks["ci:wasm-browser-tests"]["tools"]), {"node"})
+        self.assertNotIn("tools", tomllib.loads((ROOT / "mise.development.toml").read_text()))
+
+    def test_validation_jobs_call_the_same_ordered_leaf_tasks_as_local_wrappers(self):
+        tasks = ci_config()["tasks"]
+        groups = {
+            ("ci.yml", "host"): ["ci:host-clippy", "ci:host-wasm-clippy", "ci:host-audio-clippy", "ci:host-tests", "ci:host-profiling-tests", "ci:host-font-tests", "ci:host-audio-tests", "ci:host-build"],
+            ("ci.yml", "wasm"): ["ci:wasm-clippy", "ci:wasm-audio-check", "ci:wasm-apps-clippy", "ci:wasm-image", "ci:wasm-browser-tests"],
+            ("extended.yml", "profiling"): ["ci:profiling-runtime-tests", "ci:profiling-native-tests"],
+            ("extended.yml", "abi-deep"): ["ci:abi-coverage", "ci:abi-miri", "ci:abi-miri-cross"],
+        }
+        for (workflow, group), leaves in groups.items():
+            with self.subTest(group=group):
+                wrapper = tasks[f"ci:{group}"]["run"]
+                self.assertEqual(re.findall(r"^mise run ([\w:-]+)$", wrapper, re.M), leaves)
+                self.assertNotIn("cargo ", wrapper)
+                steps = re.findall(r"^      - name: .+\n        run: mise run ([\w:-]+)$", job(workflow, group), re.M)
+                self.assertEqual(steps, leaves)
+                for leaf in leaves:
+                    task = tasks[leaf]
+                    self.assertIn("run", task)
+                    if leaf == "ci:wasm-browser-tests":
+                        self.assertIn("node", task["tools"])
+                        self.assertNotIn("depends", task)
+                    else:
+                        self.assertIn("rust", task["tools"])
+                        self.assertIn("depends", task)
+
+                # Exercise the wrapper shell without compiling or installing packages.
+                # A failing leaf must prevent every subsequent leaf from running.
+                with tempfile.TemporaryDirectory() as directory:
+                    directory = pathlib.Path(directory)
+                    mise = directory / "mise"
+                    mise.write_text('#!/bin/sh\nprintf "%s\\n" "$2" >> "$CALLS"\n[ "$2" != "$FAIL_TASK" ]\n')
+                    mise.chmod(0o755)
+                    calls = directory / "calls"
+                    env = os.environ | {"PATH": f"{directory}:{os.environ['PATH']}", "CALLS": str(calls)}
+                    for failure in ["", leaves[1]]:
+                        calls.write_text("")
+                        result = subprocess.run(["bash", "-c", wrapper], env=env | {"FAIL_TASK": failure}, capture_output=True, text=True)
+                        self.assertEqual(result.returncode, 1 if failure else 0, result.stderr)
+                        self.assertEqual(calls.read_text().splitlines(), leaves[:2] if failure else leaves)
+
+    def test_task_names_are_namespaced_and_developer_tasks_are_environment_scoped(self):
+        shared = tomllib.loads((ROOT / "mise.toml").read_text())["tasks"]
+        development = tomllib.loads((ROOT / "mise.development.toml").read_text()).get("tasks", {})
+        ci = ci_config()["tasks"]
+        for tasks in [shared, development, ci]:
+            for name in tasks:
+                self.assertRegex(name, r"^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$", name)
+                self.assertNotIn("alias", tasks[name])
+        for name in ["format:rust", "format:toml", "format:json", "format:all", "translate:sync", "dev:before-commit"]:
+            self.assertIn(name, development)
+            self.assertNotIn(name, shared)
+            self.assertNotIn(name, ci)
+        for name in ["ci:format-rust", "ci:format-toml", "ci:quality-js", "ci:lint-workflows"]:
+            self.assertIn("run", ci[name])
+        for environment in [development, ci]:
+            effective = shared | environment
+            for name, task in effective.items():
+                for dependency in task.get("depends", []):
+                    self.assertIn(dependency, effective, (name, dependency))
+                for callee in re.findall(r"mise run ([\w:-]+)", task.get("run", "")):
+                    self.assertIn(callee, effective, (name, callee))
+        for workflow in ACTIVE_WORKFLOWS:
+            for callee in re.findall(r"mise run ([\w:-]+)", workflow.read_text()):
+                self.assertIn(callee, shared | ci, (workflow.name, callee))
+
+    def test_ci_cargo_wrapper_reuses_existing_mbx_only_when_enabled(self):
+        ci = ci_config()
+        self.assertIn("cargo", ci.get("wrappers", {}))
+        wrapper = ci["wrappers"]["cargo"]
+        self.assertEqual(wrapper["command"], "env")
+        self.assertIn("XILA_MBX", wrapper["args"][0])
+        self.assertIn("mbx", wrapper["args"][0])
+        self.assertEqual(wrapper["env"]["MBX_CARGO_SHIM_MODE"], "1")
+        for task in ci["tasks"].values():
+            self.assertNotIn("mr-boxington", task.get("tools", {}))
+
+    def test_build_cache_payloads_cover_all_cargo_target_layouts(self):
+        builds = {
+            "ci.yml": {"host": "objects", "wasm": "target", "abi": "objects", "localization": "objects"},
+            "extended.yml": {"coverage": "objects", "profiling": "target", "abi-deep": "objects"},
+            "pages.yml": {"build": "objects"},
+        }
+        for workflow, names in builds.items():
+            for name, mode in names.items():
+                with self.subTest(workflow=workflow, job=name):
+                    text = job(workflow, name)
+                    self.assertEqual(text.count("jdx/mr-boxington-action@v1"), 1)
+                    self.assertIn(f"github-cache-mode: {mode}", text)
+                    self.assertIn('XILA_MBX: "1"', text)
+                    self.assertIn("cache-generation: v1-", text)
+                    self.assertNotIn("cache-key-suffix:", text)
+                    self.assertNotIn("sccache", text.lower())
+                    self.assertNotIn("Swatinem/rust-cache", text)
+                    self.assertNotIn("RUSTC_WRAPPER:", text)
+                    self.assertNotIn("RUSTC_WORKSPACE_WRAPPER:", text)
+
+    def test_cache_restore_is_read_only_on_prs_and_matrix_modes_are_separate(self):
+        for workflow in ["ci.yml", "extended.yml", "pages.yml"]:
+            text = (ROOT / ".github/workflows" / workflow).read_text()
+            for option in ["save-on-pull-request", "save-on-protected-branch", "save-on-workflow-dispatch"]:
+                self.assertNotRegex(text, rf"{option}:\s*['\"]?true")
+        for workflow, name in [("ci.yml", "abi"), ("extended.yml", "abi-deep")]:
+            self.assertRegex(job(workflow, name), r"cache-generation:.*matrix.memory")
+
+    def test_extended_and_pages_caches_can_be_seeded_by_trusted_main_dispatch(self):
+        for workflow, names in {"extended.yml": ["coverage", "profiling", "abi-deep"], "pages.yml": ["build"]}.items():
+            for name in names:
+                self.assertIn("save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}", job(workflow, name))
+
+    def test_mbx_key_toolchain_matches_build_toolchain(self):
+        for workflow, names in {
+            "ci.yml": ["host", "wasm", "abi", "localization"],
+            "extended.yml": ["coverage", "profiling"],
+            "pages.yml": ["build"],
+        }.items():
+            for name in names:
+                text = job(workflow, name)
+                self.assertIn('toolchain: ${{ steps.toolchain.outputs.version }}', text)
+                self.assertIn("run: mise run ci:toolchain", text)
+        self.assertIn("run: mise run ci:toolchain-nightly", job("extended.yml", "abi-deep"))
+        self.assertIn('toolchain: ${{ steps.toolchain.outputs.version }}', job("extended.yml", "abi-deep"))
+        pins = tomllib.loads((ROOT / "mise.toml").read_text())["vars"]
+        for task_name, pin in [("ci:toolchain", "rust_version"), ("ci:toolchain-nightly", "nightly_version")]:
+            task = configured_tasks("ci")[task_name]
+            self.assertEqual(task["tools"]["rust"], {"version": pins[pin], "profile": "minimal"})
+            self.assertIn('echo "version={{ vars.' + pin + ' }}"', task["run"])
+
+    def test_quality_does_not_enable_compilation_cache(self):
+        quality = job("ci.yml", "quality")
+        self.assertNotIn("XILA_MBX", quality)
+        self.assertNotIn("mr-boxington-action", quality)
+
+    def test_workflow_lint_includes_shellcheck_on_local_and_ci_runs(self):
+        tasks = ci_config()["tasks"]
+        self.assertIn("aqua:koalaman/shellcheck", tasks["ci:lint-workflows"]["tools"])
+
+    def test_binding_build_tasks_install_rustfmt_even_with_minimal_toolchains(self):
+        tasks = ci_config()["tasks"]
+        for name in [
+            "ci:host", "ci:wasm", "ci:localization", "ci:coverage", "ci:profiling",
+            "ci:benchmark-profile", "ci:benchmark-compile", "ci:benchmark-cargo-test",
+            "ci:benchmark-nextest", "ci:benchmark-doctests", "pages:build", "pages:demo",
+            "clippy:host", "clippy:guest", "docs:host", "docs:guest",
+            "build:applications", "image:native", "image:wasm",
+            "ci:host-clippy", "ci:host-wasm-clippy", "ci:host-audio-clippy",
+            "ci:host-tests", "ci:host-profiling-tests", "ci:host-font-tests",
+            "ci:host-audio-tests", "ci:host-build", "ci:wasm-clippy",
+            "ci:wasm-audio-check", "ci:wasm-apps-clippy", "ci:wasm-image",
+            "ci:profiling-runtime-tests", "ci:profiling-native-tests",
+        ]:
+            with self.subTest(task=name):
+                rust = tasks[name]["tools"]["rust"]
+                components = rust.get("components", []) if isinstance(rust, dict) else []
+                self.assertIn("rustfmt", components, "wasm build scripts execute rustfmt on generated bindings")
+
+    def test_image_tasks_do_not_use_bash_only_options_with_mise_default_shell(self):
+        tasks = tomllib.loads((ROOT / "mise.toml").read_text())["tasks"]
+        for name in ["image:native", "image:wasm"]:
+            with self.subTest(task=name):
+                self.assertNotIn("pipefail", tasks[name]["run"])
+
+    def test_no_workflow_keeps_superseded_rust_caches(self):
+        for workflow in ACTIVE_WORKFLOWS:
+            text = workflow.read_text()
+            self.assertNotIn("sccache", text.lower(), workflow.name)
+            self.assertNotIn("Swatinem/rust-cache", text, workflow.name)
+
+    def test_primary_ci_jobs_are_parallel_and_required_aggregates_results(self):
+        ci = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("workflow_call:", ci)
+        primary = ["quality", "host", "wasm", "abi", "localization"]
+        for name in primary:
+            with self.subTest(job=name):
+                self.assertNotRegex(job("ci.yml", name), r"(?m)^    needs:")
+
+        required = job("ci.yml", "required")
+        self.assertIn("if: always()", required)
+        self.assertIn('if [[ "$result" != success ]]', required)
+        for name in primary:
+            with self.subTest(required_job=name):
+                self.assertIn(f"needs.{name}.result", required)
+
+    def test_primary_abi_matrix_checks_both_memory_modes_on_every_event(self):
+        abi = job("ci.yml", "abi")
+        self.assertIn("memory_32", abi)
+        self.assertIn("memory_64", abi)
+        self.assertNotIn("github.event_name == 'pull_request'", abi)
+        self.assertIn("ci:abi", abi)
+
+    def test_localization_job_selects_catalogs_and_runs_all_locales_for_shared_changes(self):
+        localization = job("ci.yml", "localization")
+        self.assertIn("CI_LOCALES", localization)
+        self.assertIn("mise run ci:localization", localization)
+        self.assertIn('"$EVENT_NAME" != pull_request', localization)
+        self.assertIn("all_locales=true", localization)
+        self.assertIn("locales=(en fr es de pt-BR it pl)", localization)
+        self.assertIn("locales=(en)", localization)
+
+    def test_locale_selection_handles_build_scripts_catalogs_and_unrelated_changes(self):
+        localization = job("ci.yml", "localization")
+        script = textwrap.dedent(re.search(
+            r"(?ms)^      - name: Select locales\n.*?^        run: \|\n(.*?)(?=^      - )",
+            localization,
+        )[1])
+        for changed, expected in [
+            ("subsystems/graphics/build.rs", "en fr es de pt-BR it pl"),
+            ("executables/clock/locales/fr.json", "en fr"),
+            ("readme.md", ""),
+        ]:
+            with self.subTest(changed=changed), tempfile.TemporaryDirectory() as directory:
+                def git(*args, **kwargs):
+                    return subprocess.check_output(["git", *args], cwd=directory, text=True, **kwargs).strip()
+
+                git("init", "--quiet")
+                base = git("hash-object", "-w", "-t", "tree", "--stdin", input="")
+                path = pathlib.Path(directory) / changed
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("fixture\n")
+                git("add", "--", changed)
+                head = git("write-tree")
+                output = pathlib.Path(directory) / "github-output"
+                subprocess.run(["bash", "-c", script], cwd=directory, check=True, capture_output=True, text=True, env=os.environ | {
+                    "EVENT_NAME": "pull_request", "BASE_SHA": base, "HEAD_SHA": head, "GITHUB_OUTPUT": str(output),
+                })
+                result = dict(line.split("=", 1) for line in output.read_text().splitlines())
+                self.assertEqual(result["value"], expected)
+                self.assertEqual(result["run-check"], "true" if expected else "false")
+
+    def test_extended_validation_is_reusable_and_checks_all_deep_modes(self):
+        extended = (ROOT / ".github/workflows/extended.yml").read_text()
+        self.assertIn("workflow_call:", extended)
+        self.assertIn("schedule:", extended)
+        self.assertIn("workflow_dispatch:", extended)
+        for name in ["coverage", "abi-deep", "profiling", "release-gate"]:
+            with self.subTest(job=name):
+                self.assertRegex(extended, rf"(?m)^  {re.escape(name)}:")
+        tasks = ci_config()["tasks"]
+        deep_task = tasks["ci:abi-coverage"]["run"] + tasks["ci:abi-miri-cross"]["run"]
+        self.assertIn("fail-under-lines 100", deep_task)
+        self.assertIn("fail-under-functions 100", deep_task)
+        self.assertIn("i686-unknown-linux-gnu", deep_task)
+        self.assertIn("powerpc-unknown-linux-gnu", deep_task)
+        self.assertIn("validated-sha", extended)
+
+    def test_runtime_publication_gates_main_and_tags_but_never_prs(self):
+        runtime = (ROOT / ".github/workflows/runtime.yml").read_text()
+        self.assertIn('workflows: ["CI"]', runtime)
+        self.assertIn("pull_request:", runtime)
+        self.assertIn('tags: ["v*"]', runtime)
+        self.assertIn("uses: ./.github/workflows/ci.yml", runtime)
+        self.assertIn("uses: ./.github/workflows/extended.yml", runtime)
+        self.assertIn("needs.deep.outputs.validated-sha == github.sha", runtime)
+        self.assertIn("github.event_name == 'pull_request'", runtime)
+        self.assertIn("docker push", runtime)
+        self.assertNotIn("  changes:", runtime)
+        self.assertIn("github.event.workflow_run.head_branch == 'main'", runtime)
+
+    def test_runtime_image_is_smoke_tested_before_publication(self):
+        runtime = (ROOT / ".github/workflows/runtime.yml").read_text()
+        self.assertIn("Check image user and entrypoint", runtime)
+        self.assertIn("Test read-only root, host mounts, state persistence, and exit status", runtime)
+        self.assertIn("Exercise Xila CLI shell over stdin", runtime)
+        self.assertLess(runtime.index("Test read-only root"), runtime.index("Publish image to GitHub Container Registry"))
+        self.assertLess(runtime.index("Exercise Xila CLI shell"), runtime.index("Publish image to GitHub Container Registry"))
+
+    def test_runtime_dockerfile_does_not_export_redundant_stable_toolchain_variable(self):
+        dockerfile = (ROOT / "Dockerfile.runtime").read_text()
+        self.assertNotIn("XILA_RUST_TOOLCHAIN", dockerfile)
+
+    def test_pages_waits_for_main_ci_and_builds_without_incremental_restoration(self):
+        pages = (ROOT / ".github/workflows/pages.yml").read_text()
+        self.assertIn('workflows: ["CI"]', pages)
+        self.assertIn("workflow_run:", pages)
+        self.assertIn("mise run pages:build", pages)
+        self.assertIn("actions/upload-pages-artifact", pages)
+        self.assertIn("actions/deploy-pages", pages)
+        for old in ["listWorkflowRunArtifacts", "download-artifact", "incremental=true"]:
+            with self.subTest(old=old):
+                self.assertNotIn(old, pages)
+
+    def test_pages_task_builds_all_locale_images_deterministically(self):
+        task = ci_config()["tasks"]["pages:build"]["run"]
+        for locale in ["en", "fr", "es", "de", "pt-BR", "it", "pl"]:
+            with self.subTest(locale=locale):
+                self.assertIn(locale, task)
+        self.assertIn("--bundle wasm", task)
+        self.assertIn("--bundle native", task)
+        self.assertIn("cmp ", task)
+        ci_tasks = ci_config()["tasks"]
+        self.assertIn("mise run pages:demo", task)
+        self.assertIn("trunk build --release", ci_tasks["pages:demo"]["run"])
+
+    def test_image_generation_tasks_are_self_contained_and_limit_cleanup(self):
+        tasks = tomllib.loads((ROOT / "mise.toml").read_text())["tasks"]
+        native = tasks["image:native"]["run"]
+        wasm = tasks["image:wasm"]["run"]
+        self.assertNotIn("tools/mise/prepare-", native + wasm)
+        self.assertIn("rm -f target/seed/native/seed.img", native)
+        self.assertIn("rm -f target/seed/wasm/seed.img", wasm)
+        self.assertNotRegex(native + wasm, r"rm\s+-rf")
+
+    def test_benchmark_workflows_are_not_present(self):
+        self.assertFalse((ROOT / ".github/workflows/benchmarks.yml").exists())
+        self.assertFalse((ROOT / ".github/workflows/cache-benchmark.yml").exists())
+
+    def test_ci_task_groups_and_quality_environment_are_defined(self):
+        config = ci_config()
+        shared = tomllib.loads((ROOT / "mise.toml").read_text())["tasks"]
+        self.assertFalse([name for name in shared if name.startswith("ci:") or name == "pages:build"])
+        self.assertNotIn("install-nightly", shared)
+        self.assertNotIn("install-nightly", config["tasks"])
+        for task in [
+            "ci:host",
+            "ci:wasm",
+            "ci:abi",
+            "ci:localization",
+            "ci:coverage",
+            "ci:abi-deep",
+            "ci:profiling",
+            "pages:build",
+        ]:
+            with self.subTest(task=task):
+                self.assertIn(task, config["tasks"])
+                self.assertIn("run", config["tasks"][task])
+
+        ci = ci_config()
+        task_tools = {name: task.get("tools", {}) for name, task in ci["tasks"].items()}
+        self.assertIn("rustfmt", task_tools["ci:format-rust"]["rust"]["components"])
+        self.assertEqual(task_tools["ci:format-toml"]["taplo"], "0.10.0")
+        self.assertEqual(task_tools["ci:lint-workflows"]["aqua:rhysd/actionlint"], "1.7.7")
+        self.assertIn("clippy", task_tools["ci:host"]["rust"]["components"])
+
     def test_mise_configuration_pins_project_toolchains_and_core_tasks(self):
         config = tomllib.loads((ROOT / "mise.toml").read_text())
         self.assertNotIn("tools", config)
-        self.assertEqual(config["env"]["XILA_NIGHTLY_TOOLCHAIN"], "nightly-2026-10-12")
-        for task in ["host-check", "guest-check", "localization-check", "prepare-native-image", "prepare-wasm-image"]:
+        self.assertNotIn("XILA_RUST_TOOLCHAIN", config.get("env", {}))
+        self.assertNotIn("XILA_NIGHTLY_TOOLCHAIN", config.get("env", {}))
+        for task in ["check:host", "check:guest", "localization:check", "image:native", "image:wasm"]:
             with self.subTest(task=task):
                 self.assertIn(task, config["tasks"])
 
-    def test_mise_environments_select_only_job_toolchains_and_packages(self):
-        profiles = {
-            "format": ({"taplo", "node"}, set()),
-            "guest": ({"rust"}, set()),
-            "host": ({"rust", "node"}, {"pkg-config", "libasound2-dev", "libudev-dev", "libxkbcommon-dev", "libwayland-dev", "libx11-dev", "libxkbcommon-x11-dev"}),
-            "native-linker": (set(), {"clang", "mold"}),
-            "host-guest": ({"rust"}, set()),
-            "localization": ({"rust", "node"}, {"pkg-config", "libasound2-dev", "libudev-dev", "libxkbcommon-dev", "libwayland-dev", "libx11-dev", "libxkbcommon-x11-dev"}),
-            "abi": ({"rust"}, set()),
-            "coverage": ({"aqua:taiki-e/cargo-llvm-cov"}, set()),
-            "browser": ({"cargo:trunk"}, set()),
-            "miri": ({"rust", "aqua:taiki-e/cargo-llvm-cov"}, set()),
-        }
-        for profile, (tools, packages) in profiles.items():
-            config = tomllib.loads((ROOT / f"mise.{profile}.toml").read_text())
-            self.assertTrue(set(config.get("tools", {})) >= tools)
-            if "rust" in config.get("tools", {}):
-                self.assertEqual(config["tools"]["rust"]["version"], "1.99.0")
-            self.assertEqual({name.removeprefix("apt:") for name in config.get("bootstrap", {}).get("packages", {})}, packages)
+    def test_mise_manages_nightly_components_and_toolchain_selection(self):
+        ci_text = (ROOT / "mise.ci.toml").read_text()
+        tasks = ci_config()["tasks"]
+        self.assertNotIn("rustup toolchain install", ci_text)
+        self.assertNotIn("XILA_NIGHTLY_TOOLCHAIN", ci_text)
+        for name in ["ci:abi-deep"]:
+            rust = tasks[name]["tools"]["rust"]
+            self.assertEqual(rust["version"], "nightly-2026-10-12")
+            self.assertTrue({"miri", "rust-src"} <= set(rust["components"]))
+            self.assertTrue({"i686-unknown-linux-gnu", "powerpc-unknown-linux-gnu"} <= set(rust["targets"]))
+        self.assertIn("llvm-tools-preview", tasks["ci:abi-deep"]["tools"]["rust"]["components"])
+        self.assertNotIn("cargo +", tasks["ci:abi-deep"]["run"])
+        self.assertNotIn("RUSTUP_TOOLCHAIN=", tasks["pages:build"]["run"])
+        self.assertIn("mise run pages:demo", tasks["pages:build"]["run"])
+        self.assertEqual(tasks["pages:demo"]["tools"]["rust"]["version"], "nightly-2026-10-12")
+        self.assertIn("wasm32-unknown-unknown", tasks["pages:demo"]["tools"]["rust"]["targets"])
 
-        combined = tomllib.loads((ROOT / "mise.host-guest.toml").read_text())
-        self.assertEqual(set(combined["tools"]["rust"]["targets"]), {"wasm32-unknown-unknown", "wasm32-wasip1"})
+    def test_development_mise_environment_is_default_with_task_scoped_mbx(self):
+        default = tomllib.loads((ROOT / ".miserc.toml").read_text())
+        self.assertEqual(default["env"], ["development"])
+        development = tomllib.loads((ROOT / "mise.development.toml").read_text())
+        self.assertNotIn("tools", development)
+        tasks = configured_tasks("development")
+        for name in ["check:host", "check:guest", "clippy:host", "clippy:guest", "build:cargo", "image:wasm"]:
+            with self.subTest(task=name):
+                self.assertTrue(tasks[name]["tools"]["rust"]["mr_boxington"])
+                self.assertIn("mr-boxington", tasks[name]["tools"])
+        self.assertIn("aqua:taiki-e/cargo-llvm-cov", tasks["coverage:host"]["tools"])
 
-    def test_ci_setup_selects_mise_environment_before_install(self):
-        setup = (ROOT / ".github/actions/setup/action.yml").read_text()
-        self.assertIn("mise-environment:", setup)
-        self.assertIn("SELECTED_MISE_ENV: ${{ inputs.mise-environment }}", setup)
-        self.assertIn('run: echo "MISE_ENV=$SELECTED_MISE_ENV" >> "$GITHUB_ENV"', setup)
-        self.assertLess(setup.index("Select mise environment"), setup.index("Install mise tools"))
-        for name, profile in [("localization", "localization,native-linker"), ("wasm-translation", "abi,native-linker"), ("format", "format"), ("host-test", "host,native-linker"), ("wasm-extended", "miri,native-linker")]:
-            with self.subTest(job=name):
-                self.assertRegex(job("check.yml", name), rf"mise-environment: {profile}")
-        guest = job("check.yml", "guest")
-        self.assertIn("mise-environment: ${{ github.event_name", guest)
-        self.assertIn("'guest,native-linker,browser'", guest)
+    def test_developer_setup_documents_optional_task_tool_preinstall(self):
+        readme = (ROOT / "readme.md").read_text()
+        self.assertIn("mise install --include-task-tools", readme)
+        self.assertNotIn("mise run install-nightly", readme)
 
-    def test_setup_action_installs_mise_tools_and_can_add_nightly_components(self):
-        setup = (ROOT / ".github/actions/setup/action.yml").read_text()
-        self.assertIn("uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550", setup)
-        self.assertIn("nightly-toolchain:", setup)
-        self.assertIn("mise run install-nightly", setup)
-        self.assertNotIn("source development/toolchains.env", setup)
+    def test_ci_environment_keeps_tools_scoped_to_individual_tasks(self):
+        ci = ci_config()
+        self.assertNotIn("tools", ci)
+        task_tools = {name: task["tools"] for name, task in ci["tasks"].items() if "tools" in task}
+        self.assertIn("taplo", task_tools["ci:format-toml"])
+        self.assertIn("rust", task_tools["ci:host"])
+        self.assertIn("wasm32-wasip1", task_tools["ci:wasm"]["rust"]["targets"])
+        self.assertIn("aqua:taiki-e/cargo-llvm-cov", task_tools["ci:coverage"])
+        self.assertIn("cargo:trunk", task_tools["pages:demo"])
+        self.assertEqual({"mise.ci.toml", "mise.development.toml"}, {path.name for path in ROOT.glob("mise.*.toml")})
 
-    def test_mise_bootstraps_runner_system_packages(self):
-        config = tomllib.loads((ROOT / "mise.native-linker.toml").read_text())
+        for workflow in ACTIVE_WORKFLOWS:
+            if "MISE_ENV:" in workflow.read_text():
+                self.assertRegex(workflow.read_text(), r"(?m)^\s+MISE_ENV: ci$", workflow.name)
+
+    def test_ci_native_package_sets_are_scoped_to_build_environments(self):
+        config = tomllib.loads((ROOT / "mise.ci.toml").read_text())
+        self.assertIn("packages", config.get("bootstrap", {}))
         packages = config["bootstrap"]["packages"]
         for package in ["clang", "mold"]:
-            with self.subTest(package=package):
-                self.assertEqual(packages[f"apt:{package}"], "latest")
-        setup = (ROOT / ".github/actions/setup/action.yml").read_text()
-        self.assertIn("mise bootstrap packages apply --manager apt --update --yes", setup)
-        self.assertIn('run: echo "MISE_ENV=$SELECTED_MISE_ENV" >> "$GITHUB_ENV"', setup)
-        self.assertNotIn("sudo apt-get install", setup)
+            self.assertEqual(packages[f"apt:{package}"]["env"], "ci")
+        for package in ["pkg-config", "libasound2-dev", "libudev-dev", "libxkbcommon-dev", "libwayland-dev", "libx11-dev", "libxkbcommon-x11-dev"]:
+            self.assertEqual(packages[f"apt:{package}"]["env"], "host")
+        self.assertEqual(packages["apt:time"]["env"], "benchmark")
+        development = tomllib.loads((ROOT / "mise.development.toml").read_text())
+        self.assertEqual(development["bootstrap"]["packages"]["apt:libasound2-dev"], "latest")
 
-    def test_check_workflow_uses_mise_without_the_development_container(self):
-        check = (ROOT / ".github/workflows/check.yml").read_text()
-        self.assertNotIn("container:", check)
-        self.assertNotIn("cargo make", check)
-        self.assertIn("'mise.toml'", check)
-        self.assertIn("'mise.*.toml'", check)
-        self.assertIn("'tools/mise/**'", check)
-        self.assertNotIn("'**/Makefile.toml'", check)
-        self.assertIn("            mise:", check)
-        self.assertNotIn("            makefile:", check)
-        self.assertIn("mise run install-nightly", (ROOT / ".github/actions/setup/action.yml").read_text())
+    def test_ci_native_packages_are_task_scoped_not_applied_by_quality(self):
+        workflows = "\n".join(path.read_text() for path in ACTIVE_WORKFLOWS)
+        self.assertNotIn("apt-get", workflows)
+        tasks = ci_config()["tasks"]
+        for name, environment in {
+            "ci:packages-linker": "ci",
+            "ci:packages-host": "ci,host",
+            "ci:packages-benchmark": "ci,host,benchmark",
+        }.items():
+            self.assertIn(name, tasks)
+            self.assertEqual(tasks[name]["run"], f"mise -E {environment} bootstrap packages apply --manager apt --update --yes")
+        for name in ["ci:host", "ci:localization", "ci:coverage", "ci:profiling", "pages:build"]:
+            self.assertIn("ci:packages-host", tasks[name]["depends"])
+        for name in ["ci:wasm", "ci:abi", "ci:abi-deep"]:
+            self.assertIn("ci:packages-linker", tasks[name]["depends"])
+        for name in ["ci:format-rust", "ci:format-toml", "ci:quality-js", "ci:lint-workflows"]:
+            self.assertFalse(tasks[name].get("depends"), name)
+        self.assertNotIn("bootstrap packages apply", job("ci.yml", "quality"))
 
-    def test_deploy_and_cache_benchmark_use_hosted_mise_setup(self):
-        deploy = (ROOT / ".github/workflows/deploy.yml").read_text()
-        benchmark = (ROOT / ".github/workflows/cache-benchmark.yml").read_text()
-        self.assertNotIn("container:", deploy)
-        self.assertNotIn("cargo make", deploy)
-        self.assertIn("mise run host-docs", deploy)
-        self.assertIn("mise run guest-docs", deploy)
-        self.assertIn("mise run prepare-wasm-image", deploy)
-        self.assertIn('nightly-toolchain: "true"', deploy)
-        self.assertNotIn("container:", benchmark)
-        self.assertIn("jdx/mise-action@", benchmark)
-        self.assertIn("mise bootstrap packages apply --manager apt --update --yes", benchmark)
-        self.assertIn("MISE_ENV: host", benchmark)
-        self.assertNotIn("sudo apt-get install", benchmark)
+    def test_mise_multiline_ci_tasks_run_with_bash(self):
+        tasks = ci_config()["tasks"]
+        for name in ["ci:host", "ci:wasm", "ci:localization", "ci:abi-deep", "ci:profiling", "pages:build"]:
+            with self.subTest(task=name):
+                self.assertEqual(tasks[name].get("shell"), "bash -c")
+        ci_tasks = ci_config()["tasks"]
+        self.assertEqual(ci_tasks["ci:benchmark-profile"].get("shell"), "bash -c")
 
-    def test_local_developer_docs_use_mise_and_no_development_container(self):
-        readme = (ROOT / "readme.md").read_text()
-        agents = (ROOT / "AGENTS.md").read_text()
-        for document in [readme, agents]:
-            self.assertNotIn("cargo make", document)
-            self.assertNotIn("development-environment", document)
-            self.assertIn("mise install", document)
-        runtime = (ROOT / ".github/workflows/container.yml").read_text()
-        self.assertIn("'mise.toml'", runtime)
-        self.assertIn("'tools/mise/**'", runtime)
-        self.assertNotIn("'Makefile.toml'", runtime)
-
-    def test_seed_image_tasks_limit_removal_to_generated_seed_images(self):
-        native = (ROOT / "tools/mise/prepare-native-image.sh").read_text()
-        wasm = (ROOT / "tools/mise/prepare-wasm-image.sh").read_text()
-        self.assertIn("rm -f target/seed/native/seed.img", native)
-        self.assertIn("--bundle native", native)
-        self.assertIn("rm -f target/seed/wasm/seed.img", wasm)
-        self.assertIn("--bundle wasm", wasm)
-        self.assertNotRegex(native + wasm, r"rm\s+-rf\s+(?!target/seed)")
-
-    def test_extended_checks_override_skipped_ancestors_but_require_success(self):
-        for name, dependency in [("host-coverage", "host-test"), ("wasm-extended", "wasm-translation")]:
-            with self.subTest(job=name):
-                condition = re.search(r"^    if: (.*)$", job("check.yml", name), re.M)[1]
-                self.assertIn("!cancelled()", condition)
-                self.assertIn("github.event_name != 'pull_request'", condition)
-                self.assertIn(f"needs.{dependency}.result == 'success'", condition)
-
-    def test_container_cancels_superseded_prs_only(self):
-        text = (ROOT / ".github/workflows/container.yml").read_text()
-        self.assertRegex(text, r"concurrency:\n  group: .*github.workflow.*github.ref")
-        self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' }}", text)
-
-    def test_all_host_tools_sources_select_host_checks(self):
-        filters = job("check.yml", "changes")
-        host = filters.split("            host:\n")[1].split("            guest:\n")[0]
-        self.assertIn("'tools/**'", host)
-
-    def test_abi_jobs_do_not_install_node_dependencies(self):
-        for name in ["wasm-translation", "wasm-extended"]:
-            with self.subTest(job=name):
-                self.assertIn('node-dependencies: "false"', job("check.yml", name))
-
-    def test_abi_setup_does_not_resolve_unrelated_workspace_lockfiles(self):
-        for name in ["wasm-translation", "wasm-extended"]:
-            self.assertIn("lockfile-manifests: executables/wasm/tests/translation/Cargo.toml", job("check.yml", name))
-        setup = (ROOT / ".github/actions/setup/action.yml").read_text()
-        self.assertIn("LOCKFILE_MANIFESTS: ${{ inputs.lockfile-manifests }}", setup)
-        self.assertIn("tools/profiling/Cargo.toml", job("check.yml", "host-test"))
-
-    def test_abi_default_test_keeps_doctests_without_running_them_twice(self):
-        text = job("check.yml", "wasm-translation")
-        self.assertEqual(text.count("test --locked"), 1)
-        self.assertNotIn("--lib", text)
-        self.assertNotIn("--tests", text)
-
-    def test_node_setup_is_opt_out_because_fonts_need_it(self):
-        text = (ROOT / ".github/actions/setup/action.yml").read_text()
-        self.assertRegex(text, r"node-dependencies:\n(?:.*\n)*?    default: \"true\"")
-        for name in ["npm cache", "Report npm cache", "npm dependencies"]:
-            step = text.split(f"- name: Setup | {name}\n")[1].split("\n    - name:")[0]
-            self.assertIn("if: inputs.node-dependencies == 'true'", step)
-
-    def test_required_check_names_remain_stable(self):
-        for name in ["Guest checks", "Format checks", "Host checks (Clippy)", "Host checks (Tests)", "Host checks (Audio, docs, build)"]:
-            self.assertIn(f"    name: {name}\n", (ROOT / ".github/workflows/check.yml").read_text())
-
-    def test_cache_experiments_are_manual_isolated_and_source_keyed(self):
-        text = (ROOT / ".github/workflows/cache-benchmark.yml").read_text()
-        self.assertIn("  workflow_dispatch:", text)
-        self.assertNotIn("  pull_request:", text)
-        self.assertNotIn("  push:", text)
-        self.assertIn("cache-workspace-crates: ${{ matrix.strategy == 'workspace' }}", text)
-        self.assertIn("github.sha", text)
-        self.assertIn("prefix-key: experiment-", text)
-        self.assertIn("SCCACHE_GHA_VERSION:", text)
-        self.assertIn("max-parallel: 1", text)
-        shared = re.search(r"          shared-key: (.*)", text)[1]
-        self.assertIn("github.sha", shared)
-
-    def test_python_ci_tools_select_their_own_regressions(self):
-        filters = job("check.yml", "changes")
-        formatting = filters.split("            format:\n")[1].split("            host:\n")[0]
-        self.assertIn("'tools/ci/**'", formatting)
-
-    def test_zstd_is_available_before_rust_cache(self):
-        text = (ROOT / ".github/actions/setup/action.yml").read_text()
-        self.assertIn("uses: ./.github/actions/cache-tools", text)
-        self.assertLess(text.index("uses: ./.github/actions/cache-tools"), text.index("id: rust-cache"))
-        cache_tools = (ROOT / ".github/actions/cache-tools/action.yml").read_text()
-        self.assertIn("sudo apt-get install", cache_tools)
+    def test_github_actions_use_version_tags_instead_of_commit_shas(self):
+        for workflow in ACTIVE_WORKFLOWS:
+            for line_number, line in enumerate(workflow.read_text().splitlines(), 1):
+                if "uses:" in line:
+                    with self.subTest(workflow=workflow.name, line=line_number):
+                        self.assertNotRegex(line, r"uses:\s+[^\s]+@[0-9a-f]{40}\b")
 
 
 if __name__ == "__main__":

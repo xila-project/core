@@ -1,0 +1,71 @@
+name: Pages
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build documentation and demonstrations
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: read
+    env:
+      MISE_ENV: ci
+      CARGO_TERM_COLOR: always
+      XILA_MBX: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      - uses: jdx/mise-action@v5.2.2
+      - run: mise run deps:npm
+      - id: toolchain
+        run: mise run ci:toolchain
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          toolchain: ${{ steps.toolchain.outputs.version }}
+          github-cache-mode: objects
+          cache-generation: v1-pages-all-locales
+          save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build Pages content
+        env:
+          CARGO_TARGET_ROOT: ${{ github.workspace }}/target/pages
+        run: mise run pages:build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: reference-filesystem-images
+          path: target/reference-filesystem-images/
+          if-no-files-found: error
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: pages/
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/deploy-pages@v5
+        id: deployment

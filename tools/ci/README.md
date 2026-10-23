@@ -1,167 +1,103 @@
-# CI performance and validation policy
+# CI workflows
 
-Tracking: [#480](https://github.com/xila-project/core/issues/480).
+`ci.yml` runs the primary quality, host, WASM, ABI, and localization checks.
+The five validation jobs run independently; `Required` is the branch-protection
+status. On PRs, localization checks select affected catalogs and always expand
+to all locales for shared localization/build infrastructure. Main runs all seven
+locales.
 
-## Coverage and trust boundaries
+`extended.yml` runs coverage, ABI coverage/Miri, and profiling checks nightly or
+manually. Version-tag image publication calls this workflow on the tag commit and
+requires its exact SHA to pass. Main image publication waits for successful
+primary CI and image smoke tests, but not extended validation.
 
-- PRs retain host tests, audio/native builds, host/guest Clippy, WASI application
-  builds, ABI memory32 tests and doctests, and change-aware strict localization.
-- Main/manual Check runs additionally execute documentation, host coverage and
-  profiling, memory32/memory64 ABI coverage, Miri (including big-endian and 32-bit
-  hosts), every shipped locale and the browser example. No tests are moved to a
-  schedule by this change.
-- Required check names remain `Guest checks`, `Format checks`, `Host checks
-  (Clippy)`, `Host checks (Tests)`, and `Host checks (Audio, docs, build)`.
-- A skipped path-selection ancestor must not disable extended validation. Extended
-  jobs explicitly require successful direct tests and use `!cancelled()` to
-  override GitHub's implicit status gate. A failed direct test still blocks them.
-- PRs restore shared Rust/compiler caches read-only. Main saves dependency
-  caches. Cache experiments are authenticated manual runs with separate cache
-  namespaces; their branch-scoped caches are not promoted to main.
-- Runtime container cancellation applies to superseded PRs, not main publication.
-  Publication continues to smoke-test its own image before pushing it.
+`runtime.yml` never publishes PR images. `pages.yml` rebuilds documentation,
+deterministic filesystem images, and all locale demos after successful main CI.
+The benchmark and cache-benchmark workflows have been removed.
 
-## Reproduce measurements
+## Caching
 
-Use authenticated `gh` and Python 3 (standard library only):
+Validation and Pages build jobs use `jdx/mr-boxington-action@v1`. It reuses mbx
+from `PATH`, installing it only on runners where it is absent; there is no
+second project-managed mbx installation. The mise Cargo wrapper enables mbx
+when `XILA_MBX=1`, including nested mise tasks and explicit nightly selections.
+Quality checks do not opt in. No workflow retains sccache or `Swatinem/rust-cache`.
+
+WASM and profiling use the action's `target` payload, including Cargo downloads.
+Host (which tests independent workspaces), ABI, coverage, localization, and
+Pages use `objects` to cover multiple workspaces and custom target directories.
+Objects payloads do not carry Cargo registry downloads. Locale-specific target
+directories remain separate, while content-addressed objects share one job
+bundle. Each job family and ABI memory mode has a separate cache generation
+(isolating both primary keys and fallback restore prefixes), and
+the action keys name the selected Rust toolchain.
+
+PRs (including forks), tags, schedules, and Pages `workflow_run` builds are
+restore-only; successful default-branch pushes can save. To seed or refresh
+the extended-validation and Pages caches, manually dispatch those workflows
+on `main`: only main-branch dispatches are permitted to save. Their scheduled
+and `workflow_run` executions then reuse those entries; the action does not
+support automatic saving for these event types. Runtime image builds retain
+BuildKit/GitHub Actions caching.
+No cache timing or benchmark workflow is added by this migration.
+
+## Local checks
+
+Host, WASM, profiling, and deep ABI jobs call named leaf tasks in separate
+GitHub Actions steps, exposing individual timings and failures. Their local
+wrappers (`ci:host`, `ci:wasm`, `ci:profiling`, `ci:abi-deep`) run exactly the
+same tasks sequentially and stop at the first failure. Each leaf declares its
+own tools and native package dependencies and can also be run independently,
+for example `MISE_ENV=ci mise run ci:host-audio-tests`. Job-level mbx settings
+apply to every leaf and nested task, just as they do to the local wrappers.
+
+`mise.toml` contains reusable tasks. CI orchestration (`ci:*`) and
+Pages builds are defined completely in `mise.ci.toml`,
+alongside their tools and package dependencies; select them with `MISE_ENV=ci`.
+
+Version pins live once in `[vars]` in `mise.toml`; variables do not activate
+tools. Reusable `[task_templates]` tool clusters are selected with `extends`,
+independently of native bootstrap dependencies. Both CI and development keep
+tools task-local: Rust formatting requests only Rust/rustfmt (no targets), TOML
+formatting only Taplo, and JSON formatting only Node. No formatter bootstraps
+native packages. `mise install --include-task-tools` is an optional full local
+preinstall, not a prerequisite for running a single task.
+The compiler-preparation tasks also export the central stable/nightly pin to
+the mbx action's `toolchain` input, so workflow cache keys track the same pin.
+
+Bootstrap clusters cover linker-only, native GUI/audio, and benchmark packages.
+Native audio checks still compile `drivers_native`, whose GUI dependencies are
+unconditional, so they retain the host package cluster. Templates do not
+implicitly attach bootstrap steps. Do not override a template's `tools.rust` assuming its
+components or targets will merge: a task replaces that entire tool entry.
+See [Mise task templates](https://mise.jdx.dev/tasks/templates.html) and
+[bootstrap packages](https://mise.jdx.dev/bootstrap/packages/).
+
+All task names use `<namespace>:<command>`. Developer-only formatting,
+translation, interactive Cargo, coverage and pre-commit tasks live in
+`mise.development.toml` (for example `format:rust` and `dev:before-commit`).
+CI has its own check-only `ci:format-rust` and `ci:format-toml` tasks and does
+not load the development toolset. Shared commands include `check:host`,
+`clippy:guest`, `docs:all`, `image:native`, and `deps:npm`. Old names are not aliases.
+
+CI native package declarations live in `mise.ci.toml`, not workflow APT commands.
+CI build tasks depend on `ci:packages-linker` (Clang/Mold) or `ci:packages-host`
+(also GUI/audio libraries). These setup tasks explicitly apply mise bootstrap
+packages with the appropriate environment filter. Formatting and quality tasks
+have no package-setup dependency, and local development behavior is unchanged.
+Benchmarks run package setup, including GNU time, before their timed commands.
 
 ```sh
 python3 -m unittest discover -s tools/ci -v
-python3 tools/ci/metrics.py \
-  --run 39394164383 --run 39397807146 \
-  --run 39397807254 --run 39394164333 \
-  --output target/ci-metrics/baseline.json
+actionlint .github/workflows/*.yml
+MISE_ENV=ci mise run ci:host
+MISE_ENV=ci mise run ci:wasm
+MISE_ENV=ci CI_ABI_MEMORY=memory_32 mise run ci:abi
+MISE_ENV=ci CI_LOCALES="en fr es de pt-BR it pl" mise run ci:localization
+MISE_ENV=ci mise run ci:coverage
+MISE_ENV=ci mise run pages:build
 ```
 
-The report records commit/event/attempt, workflow wall time (attempt start to last
-non-skipped job completion), execution span, aggregate runner occupancy,
-per-job/per-step duration and conclusion, archive exact-hit outcomes, Cargo `Compiling`/`Checking` line
-counts, last sccache JSON statistics and Rust cache transfer sizes/times.
-Post-job cache compression/save is included in job occupancy. These are not
-GitHub billed/rounded minutes. A Cargo line is not a rustc invocation; sccache
-counts cacheable requests, not Cargo-fresh units, linking or all build scripts.
-Cache archive exact hit, Cargo freshness and compiler-cache hit are distinct.
-Jobs and logs are attempt-scoped: rerunning a workflow does not count days of
-inter-attempt delay or mix retained jobs from older attempts into the sample.
-
-Transfers are measured from rust-cache's restore/save markers to its completion
-marker. They include archive compression/decompression, not just network I/O.
-Unknown sizes remain null; failed transfers are marked. Ordinary npm/BuildKit
-transfers are not inferred from these Rust-cache markers; use their API step
-durations/logs separately. Logs may expire, so retain the generated JSON with
-benchmark results. Failed/cancelled/incomplete runs are not successful samples.
-
-The setup action collects sccache server DEBUG messages privately because 0.18.0
-logs write failures below WARN. Its post step publishes **only fixed error
-category counts**, then removes the raw file. Never upload the raw file, HTTP
-headers, signed URLs or environment dumps. Read-only PR write errors are expected;
-they are not evidence of a main write failure. Category counts are log events,
-not necessarily distinct compiler requests. An `other` count requires further
-private investigation; do not guess the cause.
-
-## Historical baseline, captured 2026-10-20
-
-| Run | Conclusion | Wall minutes | Runner minutes |
-| --- | --- | ---: | ---: |
-| [main Check 39394164383](https://github.com/xila-project/core/actions/runs/39394164383) | success, but extended jobs skipped | 35.917 | 86.750 |
-| [PR Check 39397807146](https://github.com/xila-project/core/actions/runs/39397807146) | success | 10.633 | 28.533 |
-| [PR OCI 39397807254](https://github.com/xila-project/core/actions/runs/39397807254) | success | 12.217 | 12.167 |
-| [main Pages 39394164333](https://github.com/xila-project/core/actions/runs/39394164333) | success | 33.000 | 32.850 |
-
-The PR pair costs 40.700 runner-minutes. The main Check baseline is **incomplete
-coverage**, so restored coverage/Miri must be accounted for in comparisons.
-These are sampled different commits, not controlled cache experiments.
-
-### Verified archive-compression waste
-
-The development image at digest `3d9738f5f02afd9147be66b2c84908a56b24da68138ba03ca88885c973f11f09`
-has GNU tar but no `zstd`. Historical logs show `tar ... -z`: the cache toolkit
-silently falls back to gzip, spending most of the 90–135-second saves compressing
-before uploading. The shared cache-tools action now installs Debian's signed
-`zstd` package only if absent, before cache setup. Prefer shipping it in the
-development image eventually. Installing it changes the cache compression/version;
-expect a one-time cold cache, not an immediate hit on old gzip archives.
-
-Local archive experiment (2026-10-20): same machine, same read-only 471-MiB
-`target/x86_64-unknown-linux-gnu/debug/deps`, fixed image above, 3 sequential runs
-per codec using GNU tar `--posix -z` versus `--posix --zstd`:
-
-| Codec | Median archive creation | Median decompress/list | Archive bytes |
-| --- | ---: | ---: | ---: |
-| gzip | 13.632 s | 2.395 s | 164,013,877 |
-| zstd | 0.523 s | 0.512 s | 139,085,977 |
-
-This demonstrates compression work and archive-size reductions, **not** a measured
-GitHub end-to-end speedup. Decompress/list is not extraction. Image package setup,
-network, larger artifacts and cache warming must be included in Actions comparisons.
-
-| Main Check job | Seconds | Cargo compiling / checking lines | Rust cache restore / save seconds | Archive bytes |
-| --- | ---: | ---: | ---: | ---: |
-| Localization | 2145 | 63 / 434 | 139.535 / exact hit, no save | 4,881,927,477 |
-| ABI memory64 | 127 | 9 / 0 | miss / 5.251 | 30,476,260 |
-| ABI memory32 | 127 | 9 / 0 | miss / 5.692 | 30,475,141 |
-| Format | 100 | 0 / 0 | no Rust cache | — |
-| Host tests | 599 | 429 / 9 | miss / 89.898 | 1,465,097,330 |
-| Host audio/docs/build | 759 | 608 / 214 | miss / 111.198 | 1,669,678,957 |
-| Guest | 842 | 554 / 74 | miss / 135.345 | 1,519,718,494 |
-| Host Clippy work | 503 | 115 / 74 | miss / 59.675 (failed reservation) | unknown |
-| Required Clippy gate | 3 | 0 / 0 | — | — |
-
-Historical main sccache failures: host tests 1,278, audio/docs 1,594, guest 1,425,
-localization 2,400. Existing logs do **not** contain their error categories.
-Upstream [sccache#2821](https://github.com/mozilla/sccache/issues/2821) demonstrates
-lost HTTP 429 writes, but this is a hypothesis for Xila, not an established cause.
-The repository cache usage API reported 12,257,374,257 bytes / 331 entries during
-this audit. The storage-limit endpoint returned HTTP 402 (payment-method
-requirement), so neither the effective limit nor billing-related write rejection
-is established. No production caches were deleted.
-
-## Controlled cache experiments
-
-`Cache benchmark` runs the same locked host workspace tests and font generation
-on a fixed development-image digest with incremental compilation disabled.
-Candidates run serially to avoid inter-candidate GHAC throttling. Default to one
-candidate to bound compute and quota costs:
-
-1. `dependencies`: rust-cache dependency artifacts, no compiler wrapper.
-2. `combined`: dependency artifacts plus sccache GHAC (current architecture).
-3. `sccache`: compiler cache only, no Cargo archive.
-4. `workspace`: combined plus workspace artifacts, keyed by source SHA to avoid
-   [rust-cache#348](https://github.com/Swatinem/rust-cache/issues/348). Checkout and
-   generated-input mtimes may still defeat freshness; measure it.
-
-After the workflow is available on main:
-
-```sh
-gh workflow run cache-benchmark.yml --ref YOUR_BRANCH \
-  -f namespace=480-study-1 -f strategy=dependencies
-# Collect the completed cold run, then repeat the identical ref/namespace for warm.
-python3 tools/ci/metrics.py --run RUN_ID --output target/ci-metrics/cold.json
-```
-
-A fresh namespace isolates cold Actions caches, not the image's preinstalled
-tools or external download mirrors. Use the **same commit**, image, strategy,
-namespace, locale and successful workload for warm measurements. Report full
-job time including cache saves, not only Cargo time. Each strategy/namespace can
-consume gigabytes; use a small bounded study, record cache usage, and remove only
-that study's experiment caches after results are retained. Do not raise quotas,
-enable PR shared-cache writes, or introduce an external service to hide churn.
-
-## Remaining investigation
-
-- Confirm actual main GHAC write failure categories with new diagnostics before
-  choosing retry/backoff, fewer writers, disk archives or a backend replacement.
-- Benchmark total compile + archive + transfer cost before changing default
-  cache strategy, enabling workspace caching, or changing dev/test debug info.
-  Existing profile and nextest benchmark jobs remain opt-in; preserve doctests.
-- Trace locale and LVGL dirty fingerprints on fixed inputs. The generator already
-  skips identical ranges; LVGL watches the generated-font directory and local
-  `lv_conf.h`. Do not suppress these watches or reuse locale artifacts blindly.
-- Consolidate compatible feature/target builds and same-revision publication
-  artifacts only after measured feature graphs demonstrate equivalent coverage.
-
-References: [Cargo performance](https://doc.rust-lang.org/cargo/guide/build-performance.html),
-[build scripts](https://doc.rust-lang.org/cargo/reference/build-scripts.html),
-[rust-cache](https://github.com/Swatinem/rust-cache),
-[sccache GHAC](https://github.com/mozilla/sccache/blob/main/docs/GHA.md),
-[GitHub caching](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching).
+The extended Miri and Pages demo tasks declare their pinned nightly toolchain,
+components and targets in `tools.rust`; mise installs them on demand, without a
+separate nightly setup task. Runtime image smoke tests require Docker.
