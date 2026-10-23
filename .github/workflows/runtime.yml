@@ -78,7 +78,6 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
-      - run: mise bootstrap packages apply --manager apt --update --yes
       - run: mise run install-tools
       - name: Read runtime package version
         id: version

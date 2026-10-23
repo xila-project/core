@@ -1,14 +1,3 @@
-[bootstrap.packages]
-"apt:clang" = "latest"
-"apt:mold" = "latest"
-"apt:pkg-config" = "latest"
-"apt:libasound2-dev" = "latest"
-"apt:libudev-dev" = "latest"
-"apt:libxkbcommon-dev" = "latest"
-"apt:libwayland-dev" = "latest"
-"apt:libx11-dev" = "latest"
-"apt:libxkbcommon-x11-dev" = "latest"
-
 [tasks.format-rust.tools]
 rust = { version = "1.99.0", profile = "minimal", components = ["rustfmt"] }
 

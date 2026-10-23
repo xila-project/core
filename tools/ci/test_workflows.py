@@ -191,6 +191,18 @@ class WorkflowPolicy(unittest.TestCase):
             if "MISE_ENV:" in workflow.read_text():
                 self.assertRegex(workflow.read_text(), r"(?m)^\s+MISE_ENV: ci$", workflow.name)
 
+    def test_ci_native_packages_are_scoped_to_workflows_not_global_bootstrap(self):
+        ci = tomllib.loads((ROOT / "mise.ci.toml").read_text())
+        self.assertNotIn("bootstrap", ci)
+        workflows = "\n".join(path.read_text() for path in (ROOT / ".github/workflows").glob("*.yml"))
+        self.assertNotIn("mise bootstrap packages apply", workflows)
+        self.assertIn("libasound2-dev", job("ci.yml", "host"))
+        self.assertNotIn("libasound2-dev", job("ci.yml", "wasm"))
+        self.assertIn("libasound2-dev", job("ci.yml", "localization"))
+        self.assertIn("libasound2-dev", job("extended.yml", "coverage"))
+        self.assertNotIn("libasound2-dev", job("extended.yml", "abi-deep"))
+        self.assertIn("libasound2-dev", job("pages.yml", "build"))
+
 
 if __name__ == "__main__":
     unittest.main()
