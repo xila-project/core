@@ -28,6 +28,10 @@ users = { workspace = true }
 
 abi_definitions = { workspace = true }
 
+[build-dependencies]
+cc = "1"
+embedded-i18n = { workspace = true, features = ["std"] }
+
 [features]
 default = []
 rendering_rgb565 = ["lvgl_rust_sys/color_depth_16"]

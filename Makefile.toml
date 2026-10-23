@@ -1,6 +1,5 @@
 [config]
 default_to_workspace = false
-init_task = "generate-fonts"
 skip_core_tasks = true
 
 [env]
@@ -12,11 +11,6 @@ XILA_RUST_TOOLCHAIN = { value = "stable", condition = { env_not_set = [
 [tasks.install-tools]
 command = "npm"
 args = ["install"]
-
-[tasks.generate-fonts]
-toolchain = "${XILA_RUST_TOOLCHAIN}"
-command = "cargo"
-args = ["run", "--package", "fonts_generator"]
 
 [tasks.format-rust]
 install_crate = "rustfmt"
@@ -115,8 +109,6 @@ args = [
   "check",
   "--workspace",
   "--all-targets",
-  "--exclude",
-  "fonts_generator",
   "--target",
   "x86_64-unknown-linux-gnu",
   "--features",

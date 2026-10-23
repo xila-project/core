@@ -38,10 +38,9 @@ at 65,536 per VM and reclaims them after native object deletion or VM teardown.
 
 ## Build and test
 
-Use the repository's configured development shell and generate fonts first:
+Use the repository's configured development shell:
 
 ```sh
-cargo make generate-fonts
 cargo test -p pixel_painter
 cargo build -p pixel_painter --target wasm32-wasip1 --profile release-wasm
 cargo clippy -p pixel_painter --target wasm32-wasip1 --all-targets -- -D warnings

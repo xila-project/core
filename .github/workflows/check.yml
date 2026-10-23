@@ -111,7 +111,7 @@ jobs:
               - 'tolgee.extractor.mjs'
               - 'tolgee.extractor.test.mjs'
               - 'tolgee.config.ts'
-              - 'subsystems/graphics/fonts_generator/**'
+              - 'subsystems/graphics/fonts/**'
             rust:
               - '**/*.rs'
             makefile:
@@ -147,7 +147,7 @@ jobs:
                 return !file.patch || /^[+-].*\btranslate\s*!/m.test(file.patch);
               }
               if (file.filename.endsWith('Makefile.toml')) {
-                return !file.patch || /^[+-].*(check-localization|generate-fonts|EMBEDDED_I18N)/im.test(file.patch);
+                return !file.patch || /^[+-].*(check-localization|EMBEDDED_I18N)/im.test(file.patch);
               }
               return false;
             });
@@ -436,12 +436,6 @@ jobs:
           cargo clippy --manifest-path tools/profiling/Cargo.toml --all-targets -- -D warnings
           cargo test --manifest-path tools/profiling/Cargo.toml
 
-      # Run the same plain tests on main and PRs so main saves a reusable cache.
-      # cargo-make's default init task generates the font sources; keep that
-      # setup explicit when invoking Cargo directly for its timing report.
-      - name: Setup | Generate fonts for tests
-        run: cargo make generate-fonts
-
       - name: Run | Test
         run: cargo test --workspace --timings
 
@@ -478,9 +472,6 @@ jobs:
           # Cache the parent once; the job-specific key isolates it from plain tests.
           cache-workspaces: ". -> target"
           cache-key: host-coverage
-
-      - name: Setup | Generate fonts
-        run: cargo make generate-fonts
 
       - name: Check | Profiling instrumentation
         run: |
@@ -520,9 +511,6 @@ jobs:
         uses: ./.github/actions/setup
         with:
           cache-key: host-audio-docs
-
-      - name: Setup | Generate fonts
-        run: cargo make generate-fonts
 
       - name: Check | Audio
         run: |
@@ -564,9 +552,6 @@ jobs:
         uses: ./.github/actions/setup
         with:
           cache-key: guest
-
-      - name: Setup | Generate fonts
-        run: cargo make generate-fonts
 
       - name: Check | Clippy (Guest)
         run: >-
@@ -638,9 +623,6 @@ jobs:
         with:
           cache-key: profile-benchmark-${{ matrix.profile }}
 
-      - name: Setup | Generate fonts
-        run: cargo make generate-fonts
-
       - name: Benchmark | Default debug profiles
         if: matrix.profile == 'default'
         run: |
@@ -687,9 +669,6 @@ jobs:
         uses: ./.github/actions/setup
         with:
           cache-key: test-runner-${{ matrix.runner }}
-
-      - name: Setup | Generate fonts
-        run: cargo make generate-fonts
 
       - name: Setup | Install GNU time
         run: |
