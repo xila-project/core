@@ -1,0 +1,127 @@
+name: Extended validation
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+  workflow_call:
+    secrets:
+      CODECOV_TOKEN:
+        required: false
+    outputs:
+      validated-sha:
+        description: Commit SHA that passed every deep validation job
+        value: ${{ jobs.release-gate.outputs.validated-sha }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  coverage:
+    name: Host coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      MISE_ENV: host,coverage,native-linker
+      CARGO_LLVM_COV_TARGET_DIR: ${{ github.workspace }}/target/llvm-cov-target
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+      - run: mise bootstrap packages apply --manager apt --update --yes
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+        with:
+          version: v0.18.0
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: extended-coverage
+          cache-bin: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: mise run ci:coverage
+      - uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: Xila-Project/Core
+          files: lcov.info
+          fail_ci_if_error: true
+
+  profiling:
+    name: Profiling feature tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MISE_ENV: host,native-linker
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+      - run: mise bootstrap packages apply --manager apt --update --yes
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+        with:
+          version: v0.18.0
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: extended-profiling
+          cache-bin: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: mise run ci:profiling
+
+  abi-deep:
+    name: ABI coverage and Miri (${{ matrix.memory }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        memory: [memory_32, memory_64]
+    env:
+      MISE_ENV: miri,native-linker
+      CI_ABI_MEMORY: ${{ matrix.memory }}
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+      - run: mise bootstrap packages apply --manager apt --update --yes
+      - run: mise run install-nightly
+      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+        with:
+          version: v0.18.0
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: executables/wasm/tests/translation -> target
+          shared-key: extended-abi-${{ matrix.memory }}
+          cache-bin: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: mise run ci:abi-deep
+
+  release-gate:
+    name: Deep validation gate
+    if: always()
+    needs: [coverage, abi-deep, profiling]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      validated-sha: ${{ steps.sha.outputs.validated-sha }}
+    steps:
+      - name: Require successful deep checks
+        env:
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
+          ABI_RESULT: ${{ needs.abi-deep.result }}
+          PROFILING_RESULT: ${{ needs.profiling.result }}
+        run: |
+          set -euo pipefail
+          for result in "$COVERAGE_RESULT" "$ABI_RESULT" "$PROFILING_RESULT"; do
+            if [[ "$result" != success ]]; then
+              echo "::error::Deep validation finished with result: $result"
+              exit 1
+            fi
+          done
+      - name: Record validated commit
+        id: sha
+        run: echo "validated-sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"

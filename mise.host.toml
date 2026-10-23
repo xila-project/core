@@ -1,5 +1,5 @@
 [tools]
-rust = { version = "1.99.0", profile = "minimal" }
+rust = { version = "1.99.0", profile = "minimal", components = ["clippy"] }
 node = "24.22.0"
 
 [bootstrap.packages]

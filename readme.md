@@ -48,25 +48,26 @@ documentation and learning guides.
 
 ## Build and check Core
 
-Install [mise](https://mise.jdx.dev/getting-started.html), then install only
-the tools and native dependencies for the checks you need:
+Install [mise](https://mise.jdx.dev/getting-started.html). By default, this
+repository selects the full `development` environment so local development can
+install the project tools and targets in one pass:
 
 ```bash
-export MISE_ENV=host,guest,host-guest,native-linker
 mise trust
-mise install
+mise install # installs the full development environment
 mise bootstrap packages apply --manager apt
-npm ci
+mise run install-tools
+mise run install-nightly # needed for Miri and the browser demo
 mise run check                  # Linux host + WASM guest checks
 ```
 
-No development container is required. `mise.toml` holds common tasks and
-toolchain pins; `mise.<environment>.toml` files select task groups, including
-`format`, `host`, `guest`, `host-guest`, `native-linker`, and `miri`. Use
-`host-guest` alongside `host,guest` when both target sets are needed. On
-Debian/Ubuntu, native packages are provisioned from the selected environment
-with `mise bootstrap packages apply --manager apt` (mise requests sudo when
-needed).
+No development container is required. `.miserc.toml` selects
+`mise.development.toml` by default; it includes host and WASM targets, formatting,
+browser, coverage, and benchmark tools. `mise.toml` holds common tasks and the
+pinned nightly. CI explicitly selects smaller job-specific environments so
+quick jobs do not install unrelated toolchains. On Debian/Ubuntu, native
+packages are provisioned from the selected environment with
+`mise bootstrap packages apply --manager apt` (mise requests sudo when needed).
 
 Other checks:
 

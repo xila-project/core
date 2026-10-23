@@ -2,3 +2,4 @@
 rust = { version = "1.99.0", profile = "minimal", components = ["rustfmt"] }
 node = "24.22.0"
 taplo = "0.10.0"
+"aqua:rhysd/actionlint" = "1.7.7"
