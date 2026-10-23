@@ -162,7 +162,6 @@ class WorkflowPolicy(unittest.TestCase):
             "ci.yml": {"host": "objects", "wasm": "target", "abi": "objects", "localization": "objects"},
             "extended.yml": {"coverage": "objects", "profiling": "target", "abi-deep": "objects"},
             "pages.yml": {"build": "objects"},
-            "benchmarks.yml": {"profile": "target", "test-runner": "target"},
         }
         for workflow, names in builds.items():
             for name, mode in names.items():
@@ -196,7 +195,6 @@ class WorkflowPolicy(unittest.TestCase):
             "ci.yml": ["host", "wasm", "abi", "localization"],
             "extended.yml": ["coverage", "profiling"],
             "pages.yml": ["build"],
-            "benchmarks.yml": ["profile", "test-runner"],
         }.items():
             for name in names:
                 text = job(workflow, name)
@@ -384,17 +382,9 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn("rm -f target/seed/wasm/seed.img", wasm)
         self.assertNotRegex(native + wasm, r"rm\s+-rf")
 
-    def test_benchmarks_are_manual_only_and_keep_profile_and_runner_experiments(self):
-        benchmarks = (ROOT / ".github/workflows/benchmarks.yml").read_text()
-        self.assertIn("workflow_dispatch:", benchmarks)
-        self.assertNotIn("pull_request:", benchmarks)
-        self.assertNotIn("push:", benchmarks)
-        self.assertRegex(benchmarks, r"(?m)^  profile:")
-        self.assertRegex(benchmarks, r"(?m)^  test-runner:")
-        self.assertIn("mise run ci:benchmark-profile", benchmarks)
-        ci_tasks = ci_config()["tasks"]
-        self.assertIn("cargo test --workspace --timings", ci_tasks["ci:benchmark-profile"]["run"])
-        self.assertIn("cargo nextest run --workspace --timings", ci_tasks["ci:benchmark-nextest"]["run"])
+    def test_benchmark_workflows_are_not_present(self):
+        self.assertFalse((ROOT / ".github/workflows/benchmarks.yml").exists())
+        self.assertFalse((ROOT / ".github/workflows/cache-benchmark.yml").exists())
 
     def test_ci_task_groups_and_quality_environment_are_defined(self):
         config = ci_config()
@@ -511,8 +501,6 @@ class WorkflowPolicy(unittest.TestCase):
         for name in ["ci:format-rust", "ci:format-toml", "ci:quality-js", "ci:lint-workflows"]:
             self.assertFalse(tasks[name].get("depends"), name)
         self.assertNotIn("bootstrap packages apply", job("ci.yml", "quality"))
-        runner = job("benchmarks.yml", "test-runner")
-        self.assertLess(runner.index("mise run ci:packages-benchmark"), runner.index("/usr/bin/time"))
 
     def test_mise_multiline_ci_tasks_run_with_bash(self):
         tasks = ci_config()["tasks"]

@@ -13,19 +13,17 @@ primary CI and image smoke tests, but not extended validation.
 
 `runtime.yml` never publishes PR images. `pages.yml` rebuilds documentation,
 deterministic filesystem images, and all locale demos after successful main CI.
-`benchmarks.yml` is manual-only and contains Cargo profile and test-runner
-experiments. The former cache-benchmark workflow was already removed from the
-working tree and is not recreated here.
+The benchmark and cache-benchmark workflows have been removed.
 
 ## Caching
 
-Validation, Pages and benchmark build jobs use `jdx/mr-boxington-action@v1`. It reuses mbx
+Validation and Pages build jobs use `jdx/mr-boxington-action@v1`. It reuses mbx
 from `PATH`, installing it only on runners where it is absent; there is no
 second project-managed mbx installation. The mise Cargo wrapper enables mbx
 when `XILA_MBX=1`, including nested mise tasks and explicit nightly selections.
 Quality checks do not opt in. No workflow retains sccache or `Swatinem/rust-cache`.
 
-WASM, profiling and benchmarks use the action's `target` payload, including Cargo downloads.
+WASM and profiling use the action's `target` payload, including Cargo downloads.
 Host (which tests independent workspaces), ABI, coverage, localization, and
 Pages use `objects` to cover multiple workspaces and custom target directories.
 Objects payloads do not carry Cargo registry downloads. Locale-specific target
@@ -36,7 +34,7 @@ the action keys name the selected Rust toolchain.
 
 PRs (including forks), tags, schedules, and Pages `workflow_run` builds are
 restore-only; successful default-branch pushes can save. To seed or refresh
-the extended-validation, Pages and benchmark caches, manually dispatch those workflows
+the extended-validation and Pages caches, manually dispatch those workflows
 on `main`: only main-branch dispatches are permitted to save. Their scheduled
 and `workflow_run` executions then reuse those entries; the action does not
 support automatic saving for these event types. Runtime image builds retain
