@@ -2,6 +2,8 @@
 
 The shell runs built-in commands and native or WebAssembly executables through Xila's task and virtual filesystem APIs. Its parser supports `no_std` and introduces no additional dependencies.
 
+Run a VFS script with `shell -s PATH`; relative paths use the shell's current directory. `shell -c COMMAND` continues to parse one explicit command string, and other already-separated executable arguments remain literal. Script lines use the same parser and commands as interactive input, including chaining, redirection, expansion, comments, quoting and escaping.
+
 ## Composing commands
 
 ```sh
@@ -19,9 +21,9 @@ long-running-command > /temporary/result & echo foreground
 - `2> path` and `2>> path` redirect standard error.
 - `cat` and `wc` consume standard input when no file is given, or when a file argument is `-`. Other built-ins retain their existing input interfaces.
 
-A zero exit status means success. Built-in failures return 1, unknown commands return 127, and malformed source passed to `shell -c` returns 2. External executable statuses are preserved within 0–255. A pipeline returns its last stage's status and waits for every stage. `true` and `false` provide status 0 and 1. `$?` expands to the preceding foreground status; successfully launching a background list sets it to zero.
+A zero exit status means success. Built-in failures return 1, unknown commands return 127, and malformed source passed to `shell -c` or a script returns 2. External executable statuses are preserved within 0–255. A pipeline returns its last stage's status and waits for every stage. `true` and `false` provide status 0 and 1. `$?` expands to the preceding foreground status; successfully launching a background list sets it to zero. Script command failures continue by default; the script returns the final executed command's status. Syntax, invalid UTF-8, read and overlong-line errors stop the script with status 2 and identify its path and line. `exit` stops the script and returns the current command status.
 
-Foreground built-ins can change the shell's current directory and environment. Pipeline stages and background lists run in child tasks with inherited environments and isolated shell state. Background input is `/devices/standard_io/null`; output and error inherit the shell's streams unless redirected and may interleave with foreground output. Completed background tasks are reaped as new jobs start. Shell exit waits for outstanding jobs; job listing, cancellation and foreground/background switching are separate work.
+Foreground built-ins can change the shell's current directory and environment. A script keeps those changes across its lines in the launched shell task; the calling shell keeps its own state. Script source is read from its VFS file, while commands inherit the shell's standard input independently. Pipeline stages and background lists run in child tasks with inherited environments and isolated shell state. Background input is `/devices/standard_io/null`; output and error inherit the shell's streams unless redirected and may interleave with foreground output. Completed background tasks are reaped as new jobs start. Shell exit waits for outstanding jobs; job listing, cancellation and foreground/background switching are separate work.
 
 ## Arguments and expansion
 
@@ -29,15 +31,16 @@ Single quotes preserve their contents literally. Double quotes allow variable ex
 
 `$NAME`, `${NAME}` and `$?` expand when a command is prepared for execution. Names use ASCII letters, digits and underscores, with a letter or underscore first. Missing variables expand to an empty string. Expansion retains one argument per source word, including empty arguments: it does not split variable values on whitespace or interpret their contents as shell operators. Quoted and unquoted fragments can form one word.
 
-Calling the executable with already separated arguments preserves those arguments literally. Use `shell -c 'COMMAND'` explicitly to parse shell source. Interactive input is parsed one line at a time; EOF also executes a final unterminated line.
+Calling the executable with already separated arguments preserves those arguments literally. Use `shell -c 'COMMAND'` explicitly to parse one command string, or `shell -s PATH` for a script file. Interactive input and scripts are parsed one line at a time; both execute a final unterminated line. LF and CRLF line endings are supported. Script lines are limited to 4096 source bytes excluding CRLF. Nested non-interactive shell invocations are limited to four levels.
 
-This is a bounded shell language, not a complete POSIX shell. Scripting files, multiline syntax, substitutions, globbing, subshells, descriptor duplication such as `2>&1`, here-documents and shell assignment syntax are outside this change. Newline characters inside explicit command source currently count as whitespace; use `;` between commands.
+This is a bounded shell language, not a complete POSIX shell. Multiline syntax, substitutions, globbing, subshells, descriptor duplication such as `2>&1`, here-documents and shell assignment syntax are unsupported. Newline characters inside explicit command source currently count as whitespace; use `;` between commands.
 
 ## Memory and execution limits
 
 | Resource                                             |      Limit |
 | ---------------------------------------------------- | ---------: |
 | Source line                                          | 4096 bytes |
+| Script line buffer                                   | 4097 bytes including possible CR before LF |
 | Tokens per line                                      |        256 |
 | Commands per line                                    |         32 |
 | Stages per pipeline                                  |          8 |
