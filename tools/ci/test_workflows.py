@@ -122,8 +122,10 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertNotIn("push:", benchmarks)
         self.assertRegex(benchmarks, r"(?m)^  profile:")
         self.assertRegex(benchmarks, r"(?m)^  test-runner:")
-        self.assertIn("cargo test --workspace --timings", benchmarks)
-        self.assertIn("cargo nextest run --workspace --timings", benchmarks)
+        self.assertIn("mise run ci:benchmark-profile", benchmarks)
+        ci_tasks = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]
+        self.assertIn("cargo test --workspace --timings", ci_tasks["ci:benchmark-profile"]["run"])
+        self.assertIn("cargo nextest run --workspace --timings", ci_tasks["ci:benchmark-nextest"]["run"])
 
     def test_ci_task_groups_and_quality_environment_are_defined(self):
         config = tomllib.loads((ROOT / "mise.toml").read_text())
@@ -140,14 +142,12 @@ class WorkflowPolicy(unittest.TestCase):
             with self.subTest(task=task):
                 self.assertIn(task, config["tasks"])
 
-        quality = tomllib.loads((ROOT / "mise.format.toml").read_text())
-        self.assertEqual(quality["tools"]["rust"]["profile"], "minimal")
-        self.assertIn("rustfmt", quality["tools"]["rust"]["components"])
-        self.assertEqual(quality["tools"]["aqua:rhysd/actionlint"], "1.7.7")
-
-        for profile in ["host", "guest"]:
-            config = tomllib.loads((ROOT / f"mise.{profile}.toml").read_text())
-            self.assertIn("clippy", config["tools"]["rust"]["components"])
+        ci = tomllib.loads((ROOT / "mise.ci.toml").read_text())
+        task_tools = {name: task.get("tools", {}) for name, task in ci["tasks"].items()}
+        self.assertIn("rustfmt", task_tools["format-rust"]["rust"]["components"])
+        self.assertEqual(task_tools["format-toml"]["taplo"], "0.10.0")
+        self.assertEqual(task_tools["workflow-lint"]["aqua:rhysd/actionlint"], "1.7.7")
+        self.assertIn("clippy", task_tools["ci:host"]["rust"]["components"])
 
     def test_mise_configuration_pins_project_toolchains_and_core_tasks(self):
         config = tomllib.loads((ROOT / "mise.toml").read_text())
@@ -175,28 +175,21 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn("mise install # installs the full development environment", readme)
         self.assertIn("mise run install-nightly", readme)
 
-    def test_mise_environments_select_only_job_toolchains_and_packages(self):
-        profiles = {
-            "format": ({"taplo", "node", "aqua:rhysd/actionlint"}, set()),
-            "guest": ({"rust", "node"}, set()),
-            "host": ({"rust", "node"}, {"pkg-config", "libasound2-dev", "libudev-dev", "libxkbcommon-dev", "libwayland-dev", "libx11-dev", "libxkbcommon-x11-dev"}),
-            "native-linker": (set(), {"clang", "mold"}),
-            "host-guest": ({"rust"}, set()),
-            "localization": ({"rust", "node"}, {"pkg-config", "libasound2-dev", "libudev-dev", "libxkbcommon-dev", "libwayland-dev", "libx11-dev", "libxkbcommon-x11-dev"}),
-            "abi": ({"rust"}, set()),
-            "coverage": ({"aqua:taiki-e/cargo-llvm-cov"}, set()),
-            "browser": ({"cargo:trunk"}, set()),
-            "miri": ({"rust", "aqua:taiki-e/cargo-llvm-cov"}, set()),
-        }
-        for profile, (tools, packages) in profiles.items():
-            config = tomllib.loads((ROOT / f"mise.{profile}.toml").read_text())
-            self.assertTrue(set(config.get("tools", {})) >= tools)
-            if "rust" in config.get("tools", {}):
-                self.assertEqual(config["tools"]["rust"]["version"], "1.99.0")
-            self.assertEqual({name.removeprefix("apt:") for name in config.get("bootstrap", {}).get("packages", {})}, packages)
+    def test_ci_environment_keeps_tools_scoped_to_individual_tasks(self):
+        ci = tomllib.loads((ROOT / "mise.ci.toml").read_text())
+        self.assertNotIn("tools", ci)
+        task_tools = {name: task["tools"] for name, task in ci["tasks"].items() if "tools" in task}
+        self.assertIn("taplo", task_tools["format-toml"])
+        self.assertIn("rust", task_tools["ci:host"])
+        self.assertIn("wasm32-wasip1", task_tools["ci:wasm"]["rust"]["targets"])
+        self.assertIn("aqua:taiki-e/cargo-llvm-cov", task_tools["ci:coverage"])
+        self.assertIn("cargo:trunk", task_tools["pages:build"])
+        self.assertEqual({"mise.ci.toml", "mise.development.toml"}, {path.name for path in ROOT.glob("mise.*.toml")})
 
-        combined = tomllib.loads((ROOT / "mise.host-guest.toml").read_text())
-        self.assertEqual(set(combined["tools"]["rust"]["targets"]), {"wasm32-unknown-unknown", "wasm32-wasip1"})
+        workflows = list((ROOT / ".github/workflows").glob("*.yml"))
+        for workflow in workflows:
+            if "MISE_ENV:" in workflow.read_text():
+                self.assertRegex(workflow.read_text(), r"(?m)^\s+MISE_ENV: ci$", workflow.name)
 
 
 if __name__ == "__main__":

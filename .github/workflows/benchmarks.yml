@@ -21,7 +21,7 @@ jobs:
       matrix:
         profile: [default, line-tables-only]
     env:
-      MISE_ENV: host,guest,host-guest,native-linker
+      MISE_ENV: ci
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
@@ -37,17 +37,12 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Benchmark default debug profiles
         if: matrix.profile == 'default'
-        run: |
-          cargo test --workspace --timings
-          cargo clippy -p wasm --no-default-features --features default_guest --target wasm32-unknown-unknown --all-targets --timings -- -D warnings
+        run: mise run ci:benchmark-profile
       - name: Benchmark reduced debug profiles
         if: matrix.profile == 'line-tables-only'
         env:
-          CARGO_PROFILE_DEV_DEBUG: line-tables-only
-          CARGO_PROFILE_TEST_DEBUG: line-tables-only
-        run: |
-          cargo test --workspace --timings
-          cargo clippy -p wasm --no-default-features --features default_guest --target wasm32-unknown-unknown --all-targets --timings -- -D warnings
+          CARGO_BENCH_PROFILE: line-tables-only
+        run: mise run ci:benchmark-profile
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -64,7 +59,7 @@ jobs:
       matrix:
         runner: [cargo-test, nextest]
     env:
-      MISE_ENV: host,host-benchmark,native-linker
+      MISE_ENV: ci
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
@@ -80,7 +75,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install pinned nextest for benchmark
         if: matrix.runner == 'nextest'
-        run: cargo binstall --no-confirm cargo-nextest@0.9.148
+        run: mise run ci:benchmark-install-nextest
       - name: Prepare benchmark results
         run: mkdir -p benchmark-results
       - name: Install GNU time
@@ -89,21 +84,21 @@ jobs:
           sudo apt-get install -y --no-install-recommends time
       - name: Compile test binaries
         run: |
-          /usr/bin/time -v -o "benchmark-results/compile-${{ matrix.runner }}.txt" cargo test --workspace --no-run --timings
+          /usr/bin/time -v -o "benchmark-results/compile-${{ matrix.runner }}.txt" mise run ci:benchmark-compile
           cat "benchmark-results/compile-${{ matrix.runner }}.txt"
       - name: Benchmark cargo test execution
         if: matrix.runner == 'cargo-test'
         run: |
-          /usr/bin/time -v -o benchmark-results/test-execution-cargo-test.txt cargo test --workspace
+          /usr/bin/time -v -o benchmark-results/test-execution-cargo-test.txt mise run ci:benchmark-cargo-test
           cat benchmark-results/test-execution-cargo-test.txt
       - name: Benchmark nextest execution
         if: matrix.runner == 'nextest'
         run: |
-          /usr/bin/time -v -o benchmark-results/test-execution-nextest.txt cargo nextest run --workspace --timings
+          /usr/bin/time -v -o benchmark-results/test-execution-nextest.txt mise run ci:benchmark-nextest
           cat benchmark-results/test-execution-nextest.txt
       - name: Benchmark doctests
         run: |
-          /usr/bin/time -v -o "benchmark-results/doctests-${{ matrix.runner }}.txt" cargo test --workspace --doc --timings
+          /usr/bin/time -v -o "benchmark-results/doctests-${{ matrix.runner }}.txt" mise run ci:benchmark-doctests
           cat "benchmark-results/doctests-${{ matrix.runner }}.txt"
       - uses: actions/upload-artifact@v7
         if: always()

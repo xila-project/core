@@ -1,0 +1,165 @@
+[bootstrap.packages]
+"apt:clang" = "latest"
+"apt:mold" = "latest"
+"apt:pkg-config" = "latest"
+"apt:libasound2-dev" = "latest"
+"apt:libudev-dev" = "latest"
+"apt:libxkbcommon-dev" = "latest"
+"apt:libwayland-dev" = "latest"
+"apt:libx11-dev" = "latest"
+"apt:libxkbcommon-x11-dev" = "latest"
+
+[tasks.format-rust.tools]
+rust = { version = "1.99.0", profile = "minimal", components = ["rustfmt"] }
+
+[tasks.format-toml.tools]
+taplo = "0.10.0"
+
+[tasks.format-json.tools]
+node = "24.22.0"
+
+[tasks."ci:quality-js"]
+description = "Check JSON formatting and localization extractor tests"
+tools.node = "24.22.0"
+run = "npm exec prettier -- --check \"**/*.json\" && node --test tolgee.extractor.test.mjs"
+
+[tasks.install-tools.tools]
+node = "24.22.0"
+
+[tasks.install-nightly.tools]
+rust = "1.99.0"
+
+[tasks.workflow-lint]
+description = "Lint GitHub Actions workflows"
+tools."aqua:rhysd/actionlint" = "1.7.7"
+run = "actionlint"
+
+[tasks."ci:host".tools]
+rust = { version = "1.99.0", profile = "minimal", components = ["clippy"] }
+
+[tasks."ci:wasm".tools]
+rust = { version = "1.99.0", profile = "minimal", components = [
+  "clippy",
+], targets = [
+  "wasm32-unknown-unknown",
+  "wasm32-wasip1",
+] }
+node = "24.22.0"
+
+[tasks."ci:abi".tools]
+rust = "1.99.0"
+
+[tasks."ci:localization".tools]
+rust = { version = "1.99.0", profile = "minimal", targets = [
+  "wasm32-unknown-unknown",
+  "wasm32-wasip1",
+] }
+node = "24.22.0"
+
+[tasks."ci:coverage".tools]
+rust = { version = "1.99.0", profile = "minimal", components = [
+  "llvm-tools-preview",
+] }
+"aqua:taiki-e/cargo-llvm-cov" = "0.6.21"
+
+[tasks."ci:abi-deep".tools]
+rust = { version = "1.99.0", profile = "minimal", components = [
+  "llvm-tools-preview",
+] }
+"aqua:taiki-e/cargo-llvm-cov" = "0.6.21"
+
+[tasks."ci:profiling".tools]
+rust = { version = "1.99.0", profile = "minimal", targets = ["wasm32-wasip1"] }
+
+[tasks."ci:runtime-smoke"]
+description = "Compile the runtime smoke-test WASI guest"
+tools.rust = { version = "1.99.0", profile = "minimal", targets = [
+  "wasm32-wasip1",
+] }
+run = "rustc --edition=2021 --target wasm32-wasip1 -O tests/container/runtime_smoke.rs -o runtime-smoke.wasm"
+
+[tasks."ci:benchmark-profile"]
+description = "Run Cargo profile benchmark commands"
+tools.rust = { version = "1.99.0", profile = "minimal", components = [
+  "clippy",
+], targets = [
+  "wasm32-unknown-unknown",
+] }
+run = """
+set -euo pipefail
+if [[ "${CARGO_BENCH_PROFILE:-default}" == line-tables-only ]]; then
+  export CARGO_PROFILE_DEV_DEBUG=line-tables-only
+  export CARGO_PROFILE_TEST_DEBUG=line-tables-only
+fi
+cargo test --workspace --timings
+cargo clippy -p wasm --no-default-features --features default_guest --target wasm32-unknown-unknown --all-targets --timings -- -D warnings
+"""
+
+[tasks."ci:benchmark-install-nextest"]
+description = "Install pinned cargo-nextest for manual timing experiments"
+tools."aqua:cargo-bins/cargo-binstall" = "1.15.7"
+run = "cargo binstall --no-confirm cargo-nextest@0.9.148"
+
+[tasks."ci:benchmark-compile"]
+description = "Compile workspace test binaries and collect timings"
+tools.rust = "1.99.0"
+run = "cargo test --workspace --no-run --timings"
+
+[tasks."ci:benchmark-cargo-test"]
+description = "Run workspace tests and doctests with Cargo"
+tools.rust = "1.99.0"
+run = "cargo test --workspace"
+
+[tasks."ci:benchmark-nextest"]
+description = "Run workspace tests with nextest and doctests with Cargo"
+tools.rust = "1.99.0"
+run = "cargo nextest run --workspace --timings"
+
+[tasks."ci:benchmark-doctests"]
+description = "Run workspace doctests with Cargo"
+tools.rust = "1.99.0"
+run = "cargo test --workspace --doc --timings"
+
+[tasks."pages:build".tools]
+rust = { version = "1.99.0", profile = "minimal", components = [
+  "llvm-tools-preview",
+], targets = [
+  "wasm32-unknown-unknown",
+  "wasm32-wasip1",
+] }
+"cargo:trunk" = "0.21.14"
+
+[tasks.host-clippy.tools]
+rust = { version = "1.99.0", profile = "minimal", components = ["clippy"] }
+
+[tasks.guest-clippy.tools]
+rust = { version = "1.99.0", profile = "minimal", components = [
+  "clippy",
+], targets = [
+  "wasm32-unknown-unknown",
+] }
+
+[tasks.host-docs.tools]
+rust = { version = "1.99.0", profile = "minimal", targets = [
+  "x86_64-unknown-linux-gnu",
+] }
+
+[tasks.guest-docs.tools]
+rust = { version = "1.99.0", profile = "minimal", targets = [
+  "wasm32-unknown-unknown",
+] }
+
+[tasks.prepare-profiling.tools]
+rust = { version = "1.99.0", profile = "minimal", targets = ["wasm32-wasip1"] }
+
+[tasks.prepare-native-image.tools]
+rust = { version = "1.99.0", profile = "minimal", targets = ["wasm32-wasip1"] }
+
+[tasks.prepare-wasm-image.tools]
+rust = { version = "1.99.0", profile = "minimal", targets = ["wasm32-wasip1"] }
+
+[tasks.coverage.tools]
+rust = { version = "1.99.0", profile = "minimal", components = [
+  "llvm-tools-preview",
+] }
+"aqua:taiki-e/cargo-llvm-cov" = "0.6.21"

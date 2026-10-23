@@ -64,8 +64,8 @@ mise run check                  # Linux host + WASM guest checks
 No development container is required. `.miserc.toml` selects
 `mise.development.toml` by default; it includes host and WASM targets, formatting,
 browser, coverage, and benchmark tools. `mise.toml` holds common tasks and the
-pinned nightly. CI explicitly selects smaller job-specific environments so
-quick jobs do not install unrelated toolchains. On Debian/Ubuntu, native
+pinned nightly. CI selects `mise.ci.toml`, where tools are declared on individual
+tasks so a job installs only the tools its tasks use. On Debian/Ubuntu, native
 packages are provisioned from the selected environment with
 `mise bootstrap packages apply --manager apt` (mise requests sudo when needed).
 

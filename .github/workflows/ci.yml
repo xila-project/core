@@ -26,24 +26,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      MISE_ENV: format
+      MISE_ENV: ci
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
-      - run: npm ci
+      - run: mise run install-tools
       - run: mise run format-rust -- --check
       - run: mise run format-toml -- --check
-      - run: npm exec prettier -- --check "**/*.json"
-      - run: node --test tolgee.extractor.test.mjs
+      - run: mise run ci:quality-js
       - run: python3 -m unittest discover -s tools/ci -v
-      - run: actionlint
+      - run: mise run workflow-lint
 
   host:
     name: Host
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      MISE_ENV: host,native-linker
+      MISE_ENV: ci
       CARGO_TERM_COLOR: always
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
@@ -51,6 +50,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
       - run: mise bootstrap packages apply --manager apt --update --yes
+      - run: mise run install-tools
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
         with:
           version: v0.18.0
@@ -66,7 +66,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      MISE_ENV: guest,native-linker
+      MISE_ENV: ci
       CARGO_TERM_COLOR: always
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
@@ -74,6 +74,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
       - run: mise bootstrap packages apply --manager apt --update --yes
+      - run: mise run install-tools
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
         with:
           version: v0.18.0
@@ -93,7 +94,7 @@ jobs:
       matrix:
         memory: ${{ fromJSON(github.event_name == 'pull_request' && '["memory_32"]' || '["memory_32", "memory_64"]') }}
     env:
-      MISE_ENV: abi
+      MISE_ENV: ci
       CI_ABI_MEMORY: ${{ matrix.memory }}
     steps:
       - uses: actions/checkout@v7
@@ -113,7 +114,7 @@ jobs:
     permissions:
       contents: read
     env:
-      MISE_ENV: localization,native-linker
+      MISE_ENV: ci
       CARGO_TERM_COLOR: always
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
@@ -170,6 +171,8 @@ jobs:
       - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         if: steps.locales.outputs.run-check == 'true'
       - run: mise bootstrap packages apply --manager apt --update --yes
+        if: steps.locales.outputs.run-check == 'true'
+      - run: mise run install-tools
         if: steps.locales.outputs.run-check == 'true'
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
         if: steps.locales.outputs.run-check == 'true'

@@ -1,3 +1,0 @@
-[bootstrap.packages]
-"apt:clang" = "latest"
-"apt:mold" = "latest"

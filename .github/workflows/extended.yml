@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      MISE_ENV: host,coverage,native-linker
+      MISE_ENV: ci
       CARGO_LLVM_COV_TARGET_DIR: ${{ github.workspace }}/target/llvm-cov-target
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
@@ -33,6 +33,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
       - run: mise bootstrap packages apply --manager apt --update --yes
+      - run: mise run install-tools
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
         with:
           version: v0.18.0
@@ -54,13 +55,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      MISE_ENV: host,native-linker
+      MISE_ENV: ci
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
       - run: mise bootstrap packages apply --manager apt --update --yes
+      - run: mise run install-tools
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
         with:
           version: v0.18.0
@@ -80,7 +82,7 @@ jobs:
       matrix:
         memory: [memory_32, memory_64]
     env:
-      MISE_ENV: miri,native-linker
+      MISE_ENV: ci
       CI_ABI_MEMORY: ${{ matrix.memory }}
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}

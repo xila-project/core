@@ -72,12 +72,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      MISE_ENV: guest
+      MISE_ENV: ci
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+      - run: mise bootstrap packages apply --manager apt --update --yes
+      - run: mise run install-tools
       - name: Read runtime package version
         id: version
         run: |
@@ -114,7 +116,7 @@ jobs:
           test "$(docker inspect --format '{{.Config.User}}' xila-runtime:ci)" = '10001:10001'
           test "$(docker inspect --format '{{json .Config.Entrypoint}}' xila-runtime:ci)" = '["/usr/bin/xila-runtime"]'
       - name: Build runtime smoke-test guest
-        run: rustc --edition=2021 --target wasm32-wasip1 -O tests/container/runtime_smoke.rs -o runtime-smoke.wasm
+        run: mise run ci:runtime-smoke
       - name: Test read-only root, host mounts, state persistence, and exit status
         run: |
           set -eu

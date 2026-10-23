@@ -29,12 +29,12 @@ not initialize Rust build caches.
 ```sh
 python3 -m unittest discover -s tools/ci -v
 actionlint .github/workflows/*.yml
-MISE_ENV=host,native-linker mise run ci:host
-MISE_ENV=guest,native-linker mise run ci:wasm
-MISE_ENV=abi CI_ABI_MEMORY=memory_32 mise run ci:abi
-MISE_ENV=localization,native-linker CI_LOCALES="en fr es de pt-BR it pl" mise run ci:localization
-MISE_ENV=host,coverage,native-linker mise run ci:coverage
-MISE_ENV=host,guest,host-guest,browser,native-linker mise run pages:build
+MISE_ENV=ci mise run ci:host
+MISE_ENV=ci mise run ci:wasm
+MISE_ENV=ci CI_ABI_MEMORY=memory_32 mise run ci:abi
+MISE_ENV=ci CI_LOCALES="en fr es de pt-BR it pl" mise run ci:localization
+MISE_ENV=ci mise run ci:coverage
+MISE_ENV=ci mise run pages:build
 ```
 
 The extended Miri and Pages tasks require their pinned nightly/tool dependencies;
