@@ -1,13 +1,14 @@
+#[path = "build/cache.rs"]
+mod cache;
 #[path = "build/fonts.rs"]
 mod fonts;
+#[path = "build/generate.rs"]
+mod generate;
 
 use std::{
     env, fs,
     path::{Path, PathBuf},
-    process::Command,
 };
-
-use embedded_i18n::format_ranges;
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
@@ -16,6 +17,8 @@ fn main() {
         "EMBEDDED_I18N_LOCALE",
         "EMBEDDED_I18N_FALLBACK",
         "PATH",
+        "NODE_OPTIONS",
+        "NODE_PATH",
         "DEP_LV_CONFIG_PATH",
         "DEP_LVGL_RUST_SYS_INCLUDE_PATHS",
         "DEP_LVGL_RUST_SYS_DEFINES",
@@ -38,42 +41,57 @@ fn main() {
         &embedded_i18n::get_fallback_locale_build(),
     )
     .unwrap_or_else(|error| panic!("{error}"));
-    let variants = fonts::supported_variants();
+    let mut variants = fonts::supported_variants();
+    if !variants.contains(&active) {
+        variants.push(active.clone());
+    }
     let converter = root.join("../../node_modules/lv_font_conv/lv_font_conv.js");
     assert!(
         converter.is_file(),
         "Font converter not found at {}. Install workspace dependencies with `npm ci`.",
         converter.display()
     );
-    let output = Command::new("node")
-        .arg(root.join("build/generate.mjs"))
-        .arg(&root)
-        .arg(out.join("generated_fonts"))
-        .arg(format_ranges(&active))
-        .args(variants.iter().map(format_ranges))
-        .output()
-        .expect("Could not execute font generator; install Node.js and run npm ci");
-    assert!(
-        output.status.success(),
-        "Font generation failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let output = String::from_utf8(output.stdout).expect("font generator UTF-8 output");
-    let mut selected = Vec::new();
-    for line in output.lines() {
-        if line.starts_with("cargo:") {
-            println!("{line}");
-        } else if let Some(path) = line.strip_prefix("source\t") {
-            selected.push(PathBuf::from(path));
-        } else {
-            panic!("Unexpected font generator output: {line}");
+    let node =
+        generate::node_path(&env::var_os("PATH").unwrap_or_default()).expect("Node.js executable");
+    let (identity, inputs) = generate::common_inputs(&root, &node).expect("font generation inputs");
+    for path in inputs {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
+    let mut sources = Vec::new();
+    let mut generated = 0;
+    let mut reused = 0;
+    for ranges in &variants {
+        for source in generate::sources(&root, &out.join("generated_fonts"), ranges, &identity)
+            .expect("font source plan")
+        {
+            if generate::generate(&source, &node, &converter)
+                .unwrap_or_else(|error| panic!("Could not generate {}: {error}", source.name))
+            {
+                generated += 1;
+            } else {
+                reused += 1;
+            }
+            for path in &source.inputs {
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
+            println!("cargo:rerun-if-changed={}", source.path.display());
+            println!(
+                "cargo:rerun-if-changed={}",
+                source.path.with_extension("c.json").display()
+            );
+            sources.push(source.path);
         }
     }
-    assert_eq!(selected.len(), 6, "expected six selected font sources");
-    compile_font_archive(&out, &selected);
+    println!("cargo:warning=Font sources: generated {generated}, reused {reused}");
+    // Only src/fonts.rs chooses which of these symbols Rust references.
+    println!(
+        "cargo:rustc-env=XILA_FONT_VARIANT={}",
+        generate::variant_id(&active)
+    );
+    compile_font_archive(&out, &sources);
 }
 
-fn compile_font_archive(out: &Path, selected: &[PathBuf]) {
+fn compile_font_archive(out: &Path, sources: &[PathBuf]) {
     let include_paths = required_metadata("DEP_LVGL_RUST_SYS_INCLUDE_PATHS");
     let defines = required_metadata("DEP_LVGL_RUST_SYS_DEFINES");
     let cflags = required_metadata("DEP_LVGL_RUST_SYS_CFLAGS");
@@ -94,7 +112,7 @@ fn compile_font_archive(out: &Path, selected: &[PathBuf]) {
         build.define(name, parts.next());
     }
     // Archivers may replace named members without removing old, differently
-    // named ones. Always start this build-owned archive empty on locale changes.
+    // named ones. Always recreate the archive from the explicit current plan.
     let archive = out.join(if target.contains("msvc") {
         "font_assets.lib"
     } else {
@@ -105,7 +123,7 @@ fn compile_font_archive(out: &Path, selected: &[PathBuf]) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => panic!("Could not replace {}: {error}", archive.display()),
     }
-    build.files(selected).compile("font_assets");
+    build.files(sources).compile("font_assets");
 }
 
 fn required_metadata(name: &str) -> String {

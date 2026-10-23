@@ -2090,6 +2090,8 @@ dependencies = [
  "log 0.1.0",
  "lvgl_rust_sys",
  "quote",
+ "serde_json",
+ "sha2 0.10.9",
  "shared",
  "syn 3.0.9",
  "synchronization",

@@ -1,5 +1,12 @@
+#[path = "../../../build/cache.rs"]
+pub mod cache;
 #[path = "../../../build/fonts.rs"]
 pub mod fonts;
+#[path = "../../../build/generate.rs"]
+pub mod generate;
+
+#[cfg(test)]
+mod cache_tests;
 
 #[cfg(test)]
 mod tests {

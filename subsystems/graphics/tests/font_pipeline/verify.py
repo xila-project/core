@@ -83,7 +83,11 @@ def main():
         assert len(generated) == 24, f"Expected four reusable variants, got {len(generated)}"
         archive = out / "libfont_assets.a"
         members = command(["ar", "t", str(archive)], f"{name}-archive").splitlines()
-        assert len(members) == 6 and all("font_" in member for member in members), members
+        assert len(members) == 24 and all("font_" in member for member in members), members
+        variant = re.search(r"cargo:rustc-env=XILA_FONT_VARIANT=(\w+)", build_output)
+        assert variant, "Missing compile-time font variant"
+        selected = [member for member in members if f"_{variant.group(1)}.generated.o" in member]
+        assert len(selected) == 6, selected
         native = snapshot(lvgl_outputs(messages))
         nm = command(["nm", "-S", "--size-sort", executable], f"{name}-symbols")
         archive_nm = command(["nm", "-S", "--size-sort", str(archive)], f"{name}-archive-symbols")
@@ -92,15 +96,50 @@ def main():
             return sorted(int(match, 16) for match in re.findall(
                 r"^[0-9a-f]+\s+([0-9a-f]+)\s+\w\s+glyph_bitmap$", text, re.M))
 
+        selected_symbols = []
+        member = None
+        for line in archive_nm.splitlines():
+            if line.endswith(".o:"):
+                member = line[:-1]
+            elif member in selected:
+                selected_symbols.append(line)
         sizes = bitmap_sizes(nm)
-        assert len(sizes) == 6 and sizes == bitmap_sizes(archive_nm), sizes
+        assert len(bitmap_sizes(archive_nm)) == 24
+        assert len(sizes) == 6 and sizes == bitmap_sizes("\n".join(selected_symbols)), sizes
         command(["size", "-A", executable], f"{name}-size")
         link_map = (report / "link.map").read_text()
         (report / f"{name}.map").write_text(link_map)
-        for member in members:
+        for member in selected:
             assert member in link_map, f"Missing selected object {member} from linker map"
         linked_fonts = set(re.findall(r"[\w-]+-font_\w+\.generated\.o", link_map))
-        assert linked_fonts == set(members), (linked_fonts, members)
+        assert linked_fonts == set(selected), (linked_fonts, selected)
+        # Prove archive-member exclusion independently of section GC. Disabling
+        # GC on the entire OS pulls unrelated unimplemented OS stubs into this
+        # small Rust fixture; this address-only C probe uses the real font
+        # objects/headers, with typed callback stubs that are never called.
+        if index < 4:
+            lvgl_output = next(iter(native))
+            metadata = (Path(lvgl_output).parent.parent / "output").read_text()
+            includes = re.search(r"cargo:INCLUDE_PATHS=(.*)", metadata).group(1).split(';')
+            defines = re.search(r"cargo:DEFINES=(.*)", metadata).group(1)
+            cflags = re.search(r"cargo:CFLAGS=(.*)", metadata).group(1)
+            names = [re.search(r"(font_\w+)\.generated\.o$", member).group(1) for member in selected]
+            probe = report / f"{name}-archive-probe.c"
+            probe.write_text('#include "lvgl.h"\n'
+                + '\n'.join(f'extern const lv_font_t {symbol};' for symbol in names)
+                + '\nstatic const lv_font_t *volatile selected[] = {' + ','.join('&' + symbol for symbol in names) + '};\n'
+                + 'bool lv_font_get_glyph_dsc_fmt_txt(const lv_font_t *f, lv_font_glyph_dsc_t *d, uint32_t c, uint32_t n) { return false; }\n'
+                + 'const void *lv_font_get_bitmap_fmt_txt(lv_font_glyph_dsc_t *d, lv_draw_buf_t *b) { return NULL; }\n'
+                + 'int main(void) { for (unsigned i = 0; i < 6; ++i) if (!selected[i]) return 1; return 0; }\n')
+            probe_exe = report / f"{name}-archive-probe"
+            probe_map = report / f"{name}-archive-probe.map"
+            flags = [f"-I{path}" for path in includes if path]
+            flags += [f"-D{entry}" for entry in re.split('[;,]', defines + ';' + cflags) if entry]
+            command(["cc", str(probe), str(archive), *flags, "-Wl,--no-gc-sections",
+                     f"-Wl,-Map={probe_map}", "-o", str(probe_exe)], f"{name}-probe-link")
+            command([str(probe_exe)], f"{name}-probe-run")
+            probe_nm = command(["nm", "-S", "--size-sort", str(probe_exe)], f"{name}-probe-symbols")
+            assert bitmap_sizes(probe_nm) == sizes, "Unselected archive font data linked without GC"
         stats = re.search(r"Font sources: generated (\d+), reused (\d+)", build_output)
         assert stats, "Missing converter reuse evidence"
         if index:
@@ -114,7 +153,7 @@ def main():
             assert {p: v["sha256"] for p, v in generated.items()} == {
                 p: v["sha256"] for p, v in results[0]["generated"].items()}
         results.append({"locale": locale, "fallback": fallback, "generated": generated,
-                        "lvgl": native, "bitmap_sizes": sizes, "members": members,
+                        "lvgl": native, "bitmap_sizes": sizes, "members": members, "selected": selected,
                         "generation": stats.groups(), "out_dir": str(out)})
         (report / "results.json").write_text(json.dumps(results, indent=2))
         damaged = Path(next(iter(generated)))
@@ -135,7 +174,7 @@ def main():
     assert results[0]["bitmap_sizes"] == results[2]["bitmap_sizes"]
     assert results[1]["bitmap_sizes"] == results[3]["bitmap_sizes"]
     assert sum(results[0]["bitmap_sizes"]) < sum(results[1]["bitmap_sizes"])
-    print(f"Verified selected-only linked fonts and reusable generation: {report}")
+    print(f"Verified archive extraction without section GC and reusable generation: {report}")
 
 
 if __name__ == "__main__":
