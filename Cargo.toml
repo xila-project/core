@@ -140,7 +140,7 @@ cbindgen = { version = "0.29" }
 syn = { version = "3.0" }
 quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
-lvgl_rust_sys = { git = "https://github.com/Xila-Project/lvgl_rust_sys.git", rev = "25fe6a7e9baebb176f656929992e71386eaa47bf", default-features = false }
+lvgl_rust_sys = { git = "https://github.com/Xila-Project/lvgl_rust_sys.git", rev = "d9cb512498f02c9aa8b8e63863e982950cb20eeb", default-features = false }
 embassy-executor = { version = "0.10", default-features = false }
 embassy-futures = { version = "0.1" }
 embassy-sync = { version = "0.8" }

@@ -34,6 +34,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=DEP_LVGL_RUST_SYS_INCLUDE_PATHS");
     println!("cargo:rerun-if-env-changed=DEP_LVGL_RUST_SYS_DEFINES");
     println!("cargo:rerun-if-env-changed=DEP_LVGL_RUST_SYS_CFLAGS");
+    println!("cargo:rerun-if-env-changed=DEP_LVGL_RUST_SYS_TARGET");
     if let Some(config_dir) = env::var_os("DEP_LV_CONFIG_PATH") {
         println!(
             "cargo:rerun-if-changed={}",
@@ -183,9 +184,11 @@ fn generate_font(
 fn compile_font_archive(generated_dir: &Path) {
     let include_paths = required_metadata("DEP_LVGL_RUST_SYS_INCLUDE_PATHS");
     let defines = required_metadata("DEP_LVGL_RUST_SYS_DEFINES");
-    let cflags = env::var("DEP_LVGL_RUST_SYS_CFLAGS").unwrap_or_default();
+    let cflags = required_metadata("DEP_LVGL_RUST_SYS_CFLAGS");
+    let target = required_metadata("DEP_LVGL_RUST_SYS_TARGET");
 
     let mut build = cc::Build::new();
+    build.target(&target).warnings(true);
     for include in include_paths.split(';').filter(|path| !path.is_empty()) {
         build.include(include);
     }
