@@ -443,7 +443,7 @@ depends = ["ci:packages-host"]
 run = """
 set -euo pipefail
 mkdir -p pages/host pages/guest pages/demonstrations/wasm target/reference-filesystem-images
-RUSTDOCFLAGS="--deny warnings" mise run docs:host
+RUSTDOCFLAGS="--deny warnings" mise run docs:host -- --no-deps
 RUSTDOCFLAGS="--deny warnings" mise run docs:guest
 cp -r target/x86_64-unknown-linux-gnu/doc/. pages/host/
 cp -r target/wasm32-unknown-unknown/doc/. pages/guest/
