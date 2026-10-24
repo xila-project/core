@@ -82,6 +82,9 @@ for (const file of readdirSync(mappingRoot).filter(name => name.endsWith(".json"
   for (const source of visit(path.join(prefix, "src"), ".rs")) {
     for (const key of extract(readFileSync(source, "utf8"), source).keys) {
       used.add(key.keyName);
+      if (!KEY.test(key.keyName)) {
+        failures.push(namespace + ": nonsemantic source key " + key.keyName + " referenced by " + path.relative(ROOT, source) + ":" + key.line);
+      }
       if (!allKeys.has(key.keyName)) {
         failures.push(namespace + ": missing key " + key.keyName + " referenced by " + path.relative(ROOT, source));
       }

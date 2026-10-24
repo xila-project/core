@@ -555,7 +555,7 @@ mod tests {
         for (arguments, expected) in [
             (
                 alloc::vec![],
-                xila::internationalization::translate!("Built-in commands:"),
+                xila::internationalization::translate!("help.built_in_commands_title"),
             ),
             (alloc::vec!["exit"], "Usage: exit"),
             (alloc::vec!["cat"], "Usage: cat"),
@@ -585,7 +585,7 @@ mod tests {
                 ));
             }
             assert!(context.output.contains(expected), "{}", context.output);
-            if expected == xila::internationalization::translate!("Built-in commands:") {
+            if expected == xila::internationalization::translate!("help.built_in_commands_title") {
                 for name in ["help", "exit", "ls", "wc", "tail", "grep"] {
                     assert!(context.output.lines().any(|line| line == name));
                 }
@@ -698,7 +698,7 @@ mod tests {
             context
                 .output
                 .contains(xila::internationalization::translate!(
-                    "external executable; usage is provided by the executable."
+                    "help.external_executable_description"
                 ))
         );
         for command in ["missing", "plain_file", "subdirectory"] {

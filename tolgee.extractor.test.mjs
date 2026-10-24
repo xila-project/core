@@ -82,3 +82,28 @@ test("select extraction discovers variants that exist in catalogs", () => {
 test("non-Rust files are ignored", () => {
   assert.deepEqual(extract('translate!("fake")', "readme.md").keys, []);
 });
+
+test("covers semantic translation keys in inline and separate Rust tests", () => {
+  const inlineTest = `
+    #[cfg(test)]
+    mod tests {
+      fn checks_help() {
+        assert_eq!(translate!("help.built_in_commands_title"), "Built-in commands:");
+        assert!(output.contains(
+          xila::internationalization::translate!("help.external_executable_description")
+        ));
+      }
+    }
+  `;
+  const separateTest = 'assert!(message.contains(xila::internationalization::translate!("errors.line_too_long")));';
+  assert.deepEqual(
+    extract(inlineTest, "executables/shell/command_line/src/commands/mod.rs")
+      .keys.map(x => x.keyName),
+    ["help.built_in_commands_title", "help.external_executable_description"],
+  );
+  assert.deepEqual(
+    extract(separateTest, "executables/shell/command_line/src/execution_tests.rs")
+      .keys.map(x => x.keyName),
+    ["errors.line_too_long"],
+  );
+});
