@@ -76,6 +76,7 @@ graphics_rendering_xrgb8888 = ["graphics", "graphics/rendering_xrgb8888"]
 
 
 [workspace.dependencies]
+verification = { path = "libraries/verification", default-features = false }
 application_metadata = { path = "libraries/application_metadata" }
 audio = { path = "libraries/audio" }
 nanoaudio = { git = "https://github.com/AlixANNERAUD/nanoaudio.git", rev = "596076c64827fd8bf9e8319addc2f215e0cde8be", default-features = false }
@@ -162,6 +163,7 @@ getargs-derive = { git = "https://github.com/AlixANNERAUD/getargs-derive.git", r
 
 [workspace]
 members = [
+  "libraries/verification",
   "libraries/application_metadata",
   "libraries/audio",
   "libraries/file_system",
