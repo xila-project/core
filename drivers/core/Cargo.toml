@@ -5,3 +5,5 @@ edition = "2024"
 
 [dependencies]
 file_system = { workspace = true }
+lifecycle = { workspace = true }
+shared = { workspace = true }

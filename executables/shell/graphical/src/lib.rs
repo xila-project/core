@@ -90,7 +90,7 @@ impl Shell {
     }
 
     pub async fn main(&mut self) -> Result<(), NonZeroUsize> {
-        while self.running {
+        while self.running && !xila::lifecycle::SYSTEM.is_shutdown_requested() {
             self.layout.run().await;
 
             if let Some(login) = &mut self.login {

@@ -29,6 +29,7 @@ async fn main(task_manager: &'static xila::task::Manager) {
     use xila::file_system::AccessFlags;
     use xila::graphics;
     use xila::little_fs;
+    use xila::lifecycle;
     use xila::log;
     use xila::network::{self, ADD_DNS_SERVER, ADD_IP_ADDRESS, ADD_ROUTE};
     use xila::task;
@@ -233,6 +234,23 @@ async fn main(task_manager: &'static xila::task::Manager) {
             }
         }
     };
+
+    virtual_file_system
+        .mount_character_device(
+            task,
+            "/devices/power/control",
+            drivers_core::PowerControlDevice::new(&lifecycle::SYSTEM),
+        )
+        .await
+        .expect("Failed to mount power control");
+    virtual_file_system
+        .set_permissions(
+            task,
+            &"/devices/power/control",
+            xila::file_system::Permissions::USER_READ_WRITE,
+        )
+        .await
+        .expect("Failed to restrict power control to root");
 
     log::information!("Default hierarchy created.");
 
@@ -472,6 +490,7 @@ async fn main(task_manager: &'static xila::task::Manager) {
         .unwrap();
     let mut join = core::pin::pin!(shell.join());
     loop {
+        // The shell must finish before its VFS resources can be released.
         use core::{
             future::{Future, poll_fn},
             task::Poll,
@@ -492,9 +511,18 @@ async fn main(task_manager: &'static xila::task::Manager) {
         task::Manager::sleep(Duration::from_millis(100)).await;
     }
 
+    if lifecycle::SYSTEM.is_shutdown_requested() {
+        let _ = lifecycle::SYSTEM.begin_shutdown();
+    }
     virtual_file_system.uninitialize().await;
     #[cfg(feature = "audio")]
     drop(audio_runner);
+    if lifecycle::SYSTEM.is_shutdown_requested() {
+        let _ = lifecycle::SYSTEM.begin_finalize();
+        let _ = lifecycle::SYSTEM.complete();
+        // The native Embassy executor does not stop when its root future returns.
+        std::process::exit(0);
+    }
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]

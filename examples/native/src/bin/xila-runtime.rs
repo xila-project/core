@@ -24,6 +24,7 @@ unsafe extern "C" {
 #[cfg(unix)]
 extern "C" fn handle_signal(signal: i32) {
     SHUTDOWN_SIGNAL.store(signal, Ordering::Relaxed);
+    let _ = xila::lifecycle::SYSTEM.request_shutdown();
     wasm::request_shutdown();
 }
 
@@ -391,6 +392,21 @@ async fn run_runtime(
             })?;
     }
 
+    vfs.mount_character_device(
+        task,
+        "/devices/power/control",
+        drivers_core::PowerControlDevice::new(&xila::lifecycle::SYSTEM),
+    )
+        .await
+        .map_err(|error| format!("cannot mount power control: {error:?}"))?;
+    vfs.set_permissions(
+        task,
+        &"/devices/power/control",
+        Permissions::USER_READ_WRITE,
+    )
+        .await
+        .map_err(|error| format!("cannot restrict power control: {error:?}"))?;
+
     xila::virtual_file_system::mount_static!(
         vfs,
         task,
@@ -514,7 +530,14 @@ async fn run_runtime(
     };
     let result = executable.join().await;
     let signal = SHUTDOWN_SIGNAL.load(Ordering::Relaxed);
+    if xila::lifecycle::SYSTEM.is_shutdown_requested() {
+        let _ = xila::lifecycle::SYSTEM.begin_shutdown();
+    }
     vfs.uninitialize().await;
+    if xila::lifecycle::SYSTEM.is_shutdown_requested() {
+        let _ = xila::lifecycle::SYSTEM.begin_finalize();
+        let _ = xila::lifecycle::SYSTEM.complete();
+    }
     Ok(if signal != 0 {
         128 + signal
     } else if result == 0 {
