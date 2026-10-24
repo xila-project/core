@@ -7,8 +7,14 @@ use embedded_i18n::{get_locale_ranges, merge_contiguous_ranges};
 const SHIPPED_LOCALES: &[&str] = &["en", "fr", "es", "de", "pt-BR", "it", "pl"];
 const EXTRA_RANGES: &[Range<u32>] = &[0xb0..0xb1, 0x2022..0x2023];
 
-fn locale_ranges(locale: &str) -> Result<&'static [Range<u32>], String> {
-    let mut normalized = locale
+pub fn uses_chinese(locale: &str, fallback: &str) -> bool {
+    std::iter::once(locale)
+        .chain(fallback.split(','))
+        .any(|locale| matches!(normalize_locale(locale).as_str(), "zh" | "zh-CN"))
+}
+
+pub fn normalize_locale(locale: &str) -> String {
+    locale
         .trim()
         .split(['-', '_'])
         .filter(|part| !part.is_empty())
@@ -21,7 +27,11 @@ fn locale_ranges(locale: &str) -> Result<&'static [Range<u32>], String> {
             }
         })
         .collect::<Vec<_>>()
-        .join("-");
+        .join("-")
+}
+
+fn locale_ranges(locale: &str) -> Result<&'static [Range<u32>], String> {
+    let mut normalized = normalize_locale(locale);
     loop {
         if let Some(ranges) = get_locale_ranges(&normalized) {
             return Ok(ranges);

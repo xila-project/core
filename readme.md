@@ -122,6 +122,11 @@ is the fallback, with French (`fr`), Spanish (`es`), German (`de`), Brazilian Po
 the host, Wasm applications, fonts and seed image with the **same**
 `EMBEDDED_I18N_LOCALE` value.
 
+Simplified Chinese (`zh-CN`) catalogs are available for validation, with
+catalog-subsetted Source Han Sans SC glyphs alongside Montserrat. Native-speaker
+and embedded-target review are still pending; Chinese is not yet enabled for
+deployment. See the [Chinese font and validation notes](subsystems/graphics/fonts/README.md).
+
 See [localized build and contribution instructions](docs/localization.md) for
 validation commands, translation review and artifact compatibility.
 

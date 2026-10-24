@@ -1,0 +1,14 @@
+{
+  "Already in use": "已被使用",
+  "Already initialized": "已初始化",
+  "Failed to create object": "创建对象失败",
+  "Failed to get resolution": "获取分辨率失败",
+  "Failed to register": "注册失败",
+  "Invalid reference": "引用无效",
+  "Invalid parameter": "参数无效",
+  "Invalid window identifier": "窗口标识符无效",
+  "Not available": "不可用",
+  "Not initialized": "未初始化",
+  "Not registered": "未注册",
+  "Out of memory": "内存不足"
+}

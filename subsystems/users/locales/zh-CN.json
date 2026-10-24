@@ -1,0 +1,13 @@
+{
+  "Already initialized": "已初始化",
+  "Duplicate group identifier": "用户组标识符重复",
+  "Duplicate group name": "用户组名称重复",
+  "Duplicate user identifier": "用户标识符重复",
+  "Duplicate user name": "用户名重复",
+  "Invalid group identifier": "用户组标识符无效",
+  "Invalid user identifier": "用户标识符无效",
+  "Not initialized": "未初始化",
+  "Poisoned lock": "锁已中毒",
+  "Too many groups": "用户组过多",
+  "Too many users": "用户过多"
+}

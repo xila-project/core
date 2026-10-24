@@ -1,0 +1,16 @@
+{
+  "Pixel Painter": "像素画板",
+  "Undo": "撤销",
+  "Clear": "清空",
+  "Save": "保存",
+  "Open": "打开",
+  "Ready - white erases": "就绪 - 使用白色擦除",
+  "Unsaved drawing - close again to discard": "画作尚未保存 - 再次关闭以放弃画作",
+  "Unsaved drawing - Open again to discard": "画作尚未保存 - 再次点击“打开”以放弃画作",
+  "Enter an absolute file path": "请输入文件的绝对路径",
+  "Opened": "已打开",
+  "Saved": "已保存",
+  "Invalid Pixel Painter file - drawing kept": "无效的像素画板文件 - 已保留当前画作",
+  "Open failed - check path and storage": "打开失败 - 请检查路径和存储空间",
+  "Save failed - drawing kept; check path and storage": "保存失败 - 已保留画作；请检查路径和存储空间"
+}

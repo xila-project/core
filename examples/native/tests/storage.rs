@@ -44,6 +44,81 @@ impl Drop for Fixture {
         let _ = fs::remove_dir_all(&self.0);
     }
 }
+
+#[test]
+fn headless_debug_application_answers_through_the_mounted_transport() {
+    use std::{
+        io::{BufRead, BufReader, Write},
+        os::unix::{fs::MetadataExt, net::UnixStream},
+        process::{Child, Command, Stdio},
+        thread,
+        time::{Duration, Instant},
+    };
+
+    struct Runtime(Child);
+    impl Drop for Runtime {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    let fixture = Fixture::new();
+    let log_path = fixture.0.join("runtime.log");
+    let log = fs::File::create(&log_path).unwrap();
+    let mut runtime = Runtime(
+        Command::new(env!("CARGO_BIN_EXE_native_example"))
+            .args([
+                "--display-driver",
+                "headless",
+                "--resolution",
+                "320x240",
+                "--no-network",
+            ])
+            .arg("--disk-size")
+            .arg(SIZE.to_string())
+            .arg("--disk-path")
+            .arg(fixture.0.join("drive.img"))
+            .arg("--seed-image")
+            .arg(fixture.0.join("seed.img"))
+            .env("TMPDIR", &fixture.0)
+            .env_remove("XILA_UI_CONTROL_ENDPOINT")
+            .env_remove("DISPLAY")
+            .env_remove("WAYLAND_DISPLAY")
+            .stdin(Stdio::null())
+            .stdout(log.try_clone().unwrap())
+            .stderr(log)
+            .spawn()
+            .unwrap(),
+    );
+    let uid = fs::metadata(&fixture.0).unwrap().uid();
+    let endpoint = fixture.0.join(format!("xila-debug-{uid}/control.sock"));
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut stream = loop {
+        if let Ok(stream) = UnixStream::connect(&endpoint) {
+            break stream;
+        }
+        assert!(
+            runtime.0.try_wait().unwrap().is_none() && Instant::now() < deadline,
+            "Headless Debug transport did not start: {}",
+            fs::read_to_string(&log_path).unwrap(),
+        );
+        thread::sleep(Duration::from_millis(20));
+    };
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream
+        .set_write_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream.write_all(b"{\"op\":\"resolution\"}\n").unwrap();
+    let mut response = String::new();
+    BufReader::new(stream).read_line(&mut response).unwrap();
+    assert!(response.contains(r#""ok":true"#), "{response}");
+    assert!(response.contains(r#""width":320"#), "{response}");
+    assert!(response.contains(r#""height":240"#), "{response}");
+}
+
 #[test]
 fn imports_once_and_preserves_existing_disk_without_seed() {
     let f = Fixture::new();

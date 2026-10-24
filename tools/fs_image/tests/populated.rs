@@ -109,13 +109,12 @@ fn browser_and_native_bundles_contain_their_declared_apps() {
         let text = String::from_utf8_lossy(&output.stdout);
         assert!(text.contains("calculator,clock,pixel_painter,synth,text_editor"));
         let image = fs::read(f.0.join(format!("{profile}.img"))).unwrap();
-        for content in [
-            b"guest fixture for synth".as_slice(),
-            b"\"name\": \"Synth\"",
-            b"guest fixture for text_editor".as_slice(),
-            b"\"name\": \"Text Editor\"",
-        ] {
-            assert!(image.windows(content.len()).any(|bytes| bytes == content));
+        for app in ["synth", "text_editor"] {
+            let fixture = format!("guest fixture for {app}");
+            let shortcut = application_metadata::shortcut(app).unwrap();
+            for content in [fixture.as_bytes(), shortcut.as_bytes()] {
+                assert!(image.windows(content.len()).any(|bytes| bytes == content));
+            }
         }
         assert_eq!(text.contains(",weather"), profile == "native");
     }

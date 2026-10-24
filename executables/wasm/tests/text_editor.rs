@@ -6,6 +6,8 @@
 ))]
 extern crate abi_definitions;
 drivers_std::memory::instantiate_global_allocator!();
+#[path = "support/localization.rs"]
+mod localization;
 #[path = "support/graphics.rs"]
 mod support;
 
@@ -121,7 +123,15 @@ async fn guest_opens_pages_edits_and_saves_large_file() {
     )
     .await
     .unwrap();
-    wait_label(manager, 4, "Choose a path").await;
+    wait_label(
+        manager,
+        4,
+        &localization::text(
+            "text_editor",
+            "Choose a path, then create or open a text file",
+        ),
+    )
+    .await;
     let path_text = std::ffi::CString::new(path).unwrap();
     let root = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
     {
@@ -132,7 +142,7 @@ async fn guest_opens_pages_edits_and_saves_large_file() {
         }
     }
     action(manager, 3).await;
-    wait_label(manager, 4, "Opened").await;
+    wait_label(manager, 4, &localization::text("text_editor", "Opened")).await;
     wait_label(manager, 2, "0 | 4096 of 9000 bytes").await;
     xila::task::sleep(Duration::from_millis(30)).await;
     action(manager, 1).await;
@@ -147,7 +157,7 @@ async fn guest_opens_pages_edits_and_saves_large_file() {
         }
     }
     action(manager, 4).await;
-    wait_label(manager, 4, "Saved").await;
+    wait_label(manager, 4, &localization::text("text_editor", "Saved")).await;
     xila::task::sleep(Duration::from_millis(30)).await;
     let mut saved = Vec::new();
     File::read_from_path(vfs, task, path, &mut saved)

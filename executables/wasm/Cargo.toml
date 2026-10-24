@@ -60,6 +60,7 @@ executable = { workspace = true, features = ["building"] }
 testing = { workspace = true }
 audio = { workspace = true }
 wat = "1"
+serde_json = "1"
 
 [[test]]
 name = "integration_test"

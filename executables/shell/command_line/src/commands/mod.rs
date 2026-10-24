@@ -553,7 +553,10 @@ mod tests {
             task::{Context, Poll, Waker},
         };
         for (arguments, expected) in [
-            (alloc::vec![], "Built-in commands:"),
+            (
+                alloc::vec![],
+                xila::internationalization::translate!("Built-in commands:"),
+            ),
             (alloc::vec!["exit"], "Usage: exit"),
             (alloc::vec!["cat"], "Usage: cat"),
             (alloc::vec!["echo"], "Usage: echo"),
@@ -582,7 +585,7 @@ mod tests {
                 ));
             }
             assert!(context.output.contains(expected), "{}", context.output);
-            if expected == "Built-in commands:" {
+            if expected == xila::internationalization::translate!("Built-in commands:") {
                 for name in ["help", "exit", "ls", "wc", "tail", "grep"] {
                     assert!(context.output.lines().any(|line| line == name));
                 }
@@ -691,7 +694,13 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(context.output.contains("external executable"));
+        assert!(
+            context
+                .output
+                .contains(xila::internationalization::translate!(
+                    "external executable; usage is provided by the executable."
+                ))
+        );
         for command in ["missing", "plain_file", "subdirectory"] {
             let mut options = getargs::Options::new([command].into_iter());
             assert!(matches!(

@@ -1,5 +1,7 @@
 #[path = "build/cache.rs"]
 mod cache;
+#[path = "build/catalogs.rs"]
+mod catalogs;
 #[path = "build/fonts.rs"]
 mod fonts;
 #[path = "build/generate.rs"]
@@ -36,11 +38,22 @@ fn main() {
 
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir"));
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo OUT_DIR"));
-    let active = fonts::effective_ranges(
-        &embedded_i18n::get_locale_build(),
-        &embedded_i18n::get_fallback_locale_build(),
-    )
-    .unwrap_or_else(|error| panic!("{error}"));
+    let locale = embedded_i18n::get_locale_build();
+    let fallback = embedded_i18n::get_fallback_locale_build();
+    let active =
+        fonts::effective_ranges(&locale, &fallback).unwrap_or_else(|error| panic!("{error}"));
+    let symbols = fonts::uses_chinese(&locale, &fallback).then(|| {
+        println!(
+            "cargo:rerun-if-changed={}",
+            root.join("../../Cargo.toml").display()
+        );
+        let symbols = catalogs::collect(&root.join("../.."), &[&locale, &fallback])
+            .expect("Chinese catalog font symbols");
+        for directory in &symbols.directories {
+            println!("cargo:rerun-if-changed={}", directory.display());
+        }
+        symbols
+    });
     let mut variants = fonts::supported_variants();
     if !variants.contains(&active) {
         variants.push(active.clone());
@@ -61,9 +74,19 @@ fn main() {
     let mut generated = 0;
     let mut reused = 0;
     for ranges in &variants {
-        for source in generate::sources(&root, &out.join("generated_fonts"), ranges, &identity)
-            .expect("font source plan")
-        {
+        let plan = if ranges == &active && symbols.is_some() {
+            generate::sources_with_catalogs(
+                &root,
+                &out.join("generated_fonts"),
+                ranges,
+                &identity,
+                symbols.as_ref(),
+            )
+        } else {
+            generate::sources(&root, &out.join("generated_fonts"), ranges, &identity)
+        }
+        .expect("font source plan");
+        for source in plan {
             if generate::generate(&source, &node, &converter)
                 .unwrap_or_else(|error| panic!("Could not generate {}: {error}", source.name))
             {

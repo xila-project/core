@@ -437,7 +437,7 @@ async fn grep_streams_matching_lines_and_reports_status_and_line_errors() {
     assert!(
         contents(&shell, "/shell-errors")
             .await
-            .contains("Line too long")
+            .contains(xila::internationalization::translate!("Line too long"))
     );
 }
 

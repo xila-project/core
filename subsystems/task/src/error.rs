@@ -64,11 +64,11 @@ mod tests {
     fn test_error_type_display() {
         let error = Error::InvalidTaskIdentifier;
         let display_string = format!("{error}");
-        assert_eq!(display_string, "Invalid task identifier");
+        assert_eq!(display_string, translate!("InvalidTaskIdentifier"));
 
         let error = Error::TooManyTasks;
         let display_string = format!("{error}");
-        assert_eq!(display_string, "Too many tasks");
+        assert_eq!(display_string, translate!("TooManyTasks"));
     }
 
     #[test]
@@ -219,13 +219,16 @@ mod tests {
         let display_str = format!("{env_error}");
         let non_zero: NonZeroU32 = env_error.into();
         assert_eq!(non_zero.get(), 8u32);
-        assert_eq!(display_str, "Invalid environment variable");
+        assert_eq!(display_str, translate!("InvalidEnvironmentVariable"));
 
         // Test task-related errors
         let task_error = Error::InvalidTaskIdentifier;
-        assert_eq!(format!("{task_error}"), "Invalid task identifier");
+        assert_eq!(format!("{task_error}"), translate!("InvalidTaskIdentifier"));
 
         let spawner_error = Error::InvalidSpawnerIdentifier;
-        assert_eq!(format!("{spawner_error}"), "Invalid spawner identifier");
+        assert_eq!(
+            format!("{spawner_error}"),
+            translate!("InvalidSpawnerIdentifier")
+        );
     }
 }

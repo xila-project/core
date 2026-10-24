@@ -33,6 +33,7 @@ mod localization_tests {
     fn stopwatch_lap_plural_matches_selected_locale() {
         let (one, other) = match embedded_i18n::get_locale() {
             "fr" => ("1 tour enregistré", "2 tours enregistrés"),
+            "zh-CN" => ("已记录 1 次", "已记录 2 次"),
             _ => ("1 lap recorded", "2 laps recorded"),
         };
         assert_eq!(lap_label(1), one);

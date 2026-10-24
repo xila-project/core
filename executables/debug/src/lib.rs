@@ -108,7 +108,7 @@ async fn serve_agent(
     let mut transport = File::open(
         vfs,
         task,
-        "/devices/debug/transport",
+        "/devices/graphics/debug/transport",
         AccessFlags::READ_WRITE.into(),
     )
     .await
