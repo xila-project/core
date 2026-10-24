@@ -5,7 +5,7 @@ browser runtime:
 
 ```sh
 mise run image:wasm
-cargo check -p wasm_example --target wasm32-unknown-unknown
+cargo check -p xila-wasm-example --target wasm32-unknown-unknown
 cd examples/wasm
 RUSTUP_TOOLCHAIN=stable trunk serve
 ```
@@ -164,7 +164,7 @@ Chrome/Chromium WebDriver matching your browser, then run from the repository ro
 ```sh
 CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
 CHROMEDRIVER=/path/to/chromedriver \
-cargo test -p drivers_wasm --target wasm32-unknown-unknown --test opfs
+cargo test -p xila-drivers-wasm --target wasm32-unknown-unknown --test opfs
 ```
 
 For a non-default browser binary, set `WASM_BINDGEN_TEST_WEBDRIVER_JSON` to a JSON

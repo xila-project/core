@@ -2,6 +2,7 @@
 
 import pathlib
 import json
+import re
 import subprocess
 import tomllib
 import unittest
@@ -145,6 +146,30 @@ class CargoPackageNames(unittest.TestCase):
         }
 
         self.assertEqual(actual, EXPECTED_BINARY_TARGETS)
+
+    def test_cargo_package_selectors_use_current_package_identities(self):
+        allowed_names = set(EXPECTED_PACKAGE_NAMES.values())
+        selector = re.compile(r"(?:--package(?:=|\s+)|-p\s+)([A-Za-z0-9_-]+)")
+        text_suffixes = {".md", ".toml", ".yml", ".yaml", ".sh", ".py", ".rs"}
+
+        for path in ROOT.rglob("*"):
+            if (
+                not path.is_file()
+                or path.suffix not in text_suffixes
+                or ".git" in path.parts
+                or ".superpowers" in path.parts
+                or path.is_relative_to(ROOT / "target")
+            ):
+                continue
+            for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
+                if "cargo" not in line:
+                    continue
+                for match in selector.finditer(line):
+                    self.assertIn(
+                        match.group(1),
+                        allowed_names,
+                        f"stale Cargo package selector {match.group(1)!r} at {path}:{line_number}",
+                    )
 
 if __name__ == "__main__":
     unittest.main()

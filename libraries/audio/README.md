@@ -162,7 +162,7 @@ is no longer needed.
 From the repository development shell:
 
 ```sh
-cargo run -p drivers_native --features audio --example audio
+cargo run -p xila-drivers-native --features audio --example audio
 ```
 
 This plays a quiet two-second 440 Hz square-wave tone through the default host
@@ -172,7 +172,7 @@ requires an available host output device; headless compilation does not test
 playback.
 
 ```sh
-cargo test -p audio
+cargo test -p xila-audio
 ```
 
 ## Later milestones
