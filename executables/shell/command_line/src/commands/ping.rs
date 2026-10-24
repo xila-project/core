@@ -199,6 +199,7 @@ mod tests {
                     "octet de",
                     "octets de",
                 ),
+                "zh-CN" => ("字节数据", "字节数据", "字节，来自", "字节，来自"),
                 _ => ("data byte", "data bytes", "byte from", "bytes from"),
             };
         assert_eq!(

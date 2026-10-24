@@ -279,83 +279,146 @@ mod tests {
         // Test display formatting for all error types
         assert_eq!(
             format!("{}", Error::FailedToInitializeFileSystem),
-            "Failed to initialize file system"
+            translate!("Failed to initialize file system")
         );
-        assert_eq!(format!("{}", Error::PermissionDenied), "Permission denied");
-        assert_eq!(format!("{}", Error::NotFound), "Not found");
-        assert_eq!(format!("{}", Error::AlreadyExists), "Already exists");
+        assert_eq!(
+            format!("{}", Error::PermissionDenied),
+            translate!("Permission denied")
+        );
+        assert_eq!(format!("{}", Error::NotFound), translate!("Not found"));
+        assert_eq!(
+            format!("{}", Error::AlreadyExists),
+            translate!("Already exists")
+        );
         assert_eq!(
             format!("{}", Error::DirectoryAlreadyExists),
-            "Directory already exists"
+            translate!("Directory already exists")
         );
-        assert_eq!(format!("{}", Error::FileSystemFull), "File system full");
-        assert_eq!(format!("{}", Error::FileSystemError), "File system error");
-        assert_eq!(format!("{}", Error::InvalidPath), "Invalid path");
-        assert_eq!(format!("{}", Error::InvalidFile), "Invalid file");
-        assert_eq!(format!("{}", Error::InvalidDirectory), "Invalid directory");
+        assert_eq!(
+            format!("{}", Error::FileSystemFull),
+            translate!("File system full")
+        );
+        assert_eq!(
+            format!("{}", Error::FileSystemError),
+            translate!("File system error")
+        );
+        assert_eq!(
+            format!("{}", Error::InvalidPath),
+            translate!("Invalid path")
+        );
+        assert_eq!(
+            format!("{}", Error::InvalidFile),
+            translate!("Invalid file")
+        );
+        assert_eq!(
+            format!("{}", Error::InvalidDirectory),
+            translate!("Invalid directory")
+        );
         assert_eq!(
             format!("{}", Error::InvalidSymbolicLink),
-            "Invalid symbolic link"
+            translate!("Invalid symbolic link")
         );
-        assert_eq!(format!("{}", Error::Unknown), "Unknown");
+        assert_eq!(format!("{}", Error::Unknown), translate!("Unknown"));
         assert_eq!(
             format!("{}", Error::InvalidIdentifier),
-            "Invalid identifier"
+            translate!("Invalid identifier")
         );
         assert_eq!(
             format!("{}", Error::FailedToGetTaskInformations),
-            "Failed to get task informations"
+            translate!("Failed to get task informations")
         );
         assert_eq!(
             format!("{}", Error::FailedToGetUsersInformations),
-            "Failed to get users informations"
+            translate!("Failed to get users informations")
         );
         assert_eq!(
             format!("{}", Error::TooManyMountedFileSystems),
-            "Too many mounted file systems"
+            translate!("Too many mounted file systems")
         );
         assert_eq!(
             format!("{}", Error::TooManyOpenFiles),
-            "Too many open files"
+            translate!("Too many open files")
         );
-        assert_eq!(format!("{}", Error::InternalError), "Internal error");
-        assert_eq!(format!("{}", Error::InvalidMode), "Invalid mode");
+        assert_eq!(
+            format!("{}", Error::InternalError),
+            translate!("Internal error")
+        );
+        assert_eq!(
+            format!("{}", Error::InvalidMode),
+            translate!("Invalid mode")
+        );
         assert_eq!(
             format!("{}", Error::UnsupportedOperation),
-            "Unsupported operation"
+            translate!("Unsupported operation")
         );
-        assert_eq!(format!("{}", Error::RessourceBusy), "Ressource busy");
+        assert_eq!(
+            format!("{}", Error::RessourceBusy),
+            translate!("Ressource busy")
+        );
         assert_eq!(
             format!("{}", Error::AlreadyInitialized),
-            "Already initialized"
+            translate!("Already initialized")
         );
-        assert_eq!(format!("{}", Error::NotInitialized), "Not initialized");
+        assert_eq!(
+            format!("{}", Error::NotInitialized),
+            translate!("Not initialized")
+        );
         assert_eq!(
             format!("{}", Error::FailedToGetUsersManagerInstance),
-            "Failed to get users manager instance"
+            translate!("Failed to get users manager instance")
         );
         assert_eq!(
             format!("{}", Error::FailedToGetTaskManagerInstance),
-            "Failed to get task manager instance"
+            translate!("Failed to get task manager instance")
         );
-        assert_eq!(format!("{}", Error::InvalidParameter), "Invalid parameter");
-        assert_eq!(format!("{}", Error::InvalidFlags), "Invalid flags");
-        assert_eq!(format!("{}", Error::NotDirectory), "Not directory");
-        assert_eq!(format!("{}", Error::IsDirectory), "Is directory");
-        assert_eq!(format!("{}", Error::InputOutput), "Input output");
+        assert_eq!(
+            format!("{}", Error::InvalidParameter),
+            translate!("Invalid parameter")
+        );
+        assert_eq!(
+            format!("{}", Error::InvalidFlags),
+            translate!("Invalid flags")
+        );
+        assert_eq!(
+            format!("{}", Error::NotDirectory),
+            translate!("Not directory")
+        );
+        assert_eq!(
+            format!("{}", Error::IsDirectory),
+            translate!("Is directory")
+        );
+        assert_eq!(
+            format!("{}", Error::InputOutput),
+            translate!("Input output")
+        );
         assert_eq!(
             format!("{}", Error::DirectoryNotEmpty),
-            "Directory not empty"
+            translate!("Directory not empty")
         );
-        assert_eq!(format!("{}", Error::FileTooLarge), "File too large");
-        assert_eq!(format!("{}", Error::NoAttribute), "No attribute");
-        assert_eq!(format!("{}", Error::NameTooLong), "Name too long");
-        assert_eq!(format!("{}", Error::Corrupted), "Corrupted");
-        assert_eq!(format!("{}", Error::NoMemory), "No memory");
-        assert_eq!(format!("{}", Error::NoSpaceLeft), "No space left");
-        assert_eq!(format!("{}", Error::TimeError), "Time error");
-        assert_eq!(format!("{}", Error::InvalidInode), "Invalid inode");
-        assert_eq!(format!("{}", Error::Other), "Other");
+        assert_eq!(
+            format!("{}", Error::FileTooLarge),
+            translate!("File too large")
+        );
+        assert_eq!(
+            format!("{}", Error::NoAttribute),
+            translate!("No attribute")
+        );
+        assert_eq!(
+            format!("{}", Error::NameTooLong),
+            translate!("Name too long")
+        );
+        assert_eq!(format!("{}", Error::Corrupted), translate!("Corrupted"));
+        assert_eq!(format!("{}", Error::NoMemory), translate!("No memory"));
+        assert_eq!(
+            format!("{}", Error::NoSpaceLeft),
+            translate!("No space left")
+        );
+        assert_eq!(format!("{}", Error::TimeError), translate!("Time error"));
+        assert_eq!(
+            format!("{}", Error::InvalidInode),
+            translate!("Invalid inode")
+        );
+        assert_eq!(format!("{}", Error::Other), translate!("Other"));
     }
 
     #[test]

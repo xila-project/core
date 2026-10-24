@@ -1,0 +1,16 @@
+{
+  "AlreadyInitialized": "已初始化",
+  "AlreadySet": "已设置",
+  "FailedToCreateThread": "创建线程失败",
+  "FailedToSpawnThread": "启动线程失败",
+  "InvalidEnvironmentVariable": "环境变量无效",
+  "InvalidSpawnerIdentifier": "任务生成器标识符无效",
+  "InvalidTaskIdentifier": "任务标识符无效",
+  "NoSpawnerAvailable": "没有可用的任务生成器",
+  "NoThreadForTask": "任务没有对应的线程",
+  "NotInitialized": "未初始化",
+  "ThreadAlreadyRegistered": "线程已注册",
+  "ThreadNotRegistered": "线程未注册",
+  "TooManySpawners": "任务生成器过多",
+  "TooManyTasks": "任务过多"
+}

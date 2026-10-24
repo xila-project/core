@@ -1,6 +1,7 @@
 //! Build-only font generation; Rust consumers select symbols in src/fonts.rs.
 
 use super::cache;
+use super::catalogs::CatalogSymbols;
 use embedded_i18n::format_ranges;
 use std::{
     env,
@@ -49,13 +50,21 @@ pub struct Source {
     pub inputs: Vec<PathBuf>,
 }
 
-pub fn sources(
+pub fn sources_with_catalogs(
     root: &Path,
     output: &Path,
     ranges: &[Range<u32>],
     common: &str,
+    symbols: Option<&CatalogSymbols>,
 ) -> io::Result<Vec<Source>> {
     let variant = variant_id(ranges);
+    // Keep canonical range-based symbol names, but rasterize only catalog Han
+    // characters. The arguments below make the subset part of the cache key.
+    let generated_ranges = ranges
+        .iter()
+        .filter(|range| symbols.is_none() || **range != embedded_i18n::CJK_UNIFIED_IDEOGRAPHS)
+        .cloned()
+        .collect::<Vec<_>>();
     FONTS
         .iter()
         .map(|(size, file, family, icons)| {
@@ -79,8 +88,22 @@ pub fn sources(
             arguments.extend([
                 font.into_os_string(),
                 "-r".into(),
-                format_ranges(ranges).into(),
+                format_ranges(&generated_ranges).into(),
             ]);
+            if let Some(symbols) = symbols {
+                if !symbols.other.is_empty() {
+                    arguments.extend(["--symbols".into(), symbols.other.clone().into()]);
+                }
+                if !symbols.cjk.is_empty() {
+                    if *icons {
+                        let cjk_font = root.join("fonts/SourceHanSansSC-Regular.otf");
+                        inputs.push(cjk_font.clone());
+                        arguments.extend(["--font".into(), cjk_font.into_os_string()]);
+                    }
+                    // Unscii already supplies terminal CJK glyphs; keep it.
+                    arguments.extend(["--symbols".into(), symbols.cjk.clone().into()]);
+                }
+            }
             if *icons {
                 let icon = root.join("fonts").join(ICON_FILE);
                 inputs.push(icon.clone());
@@ -121,6 +144,15 @@ pub fn sources(
         .collect()
 }
 
+pub fn sources(
+    root: &Path,
+    output: &Path,
+    ranges: &[Range<u32>],
+    common: &str,
+) -> io::Result<Vec<Source>> {
+    sources_with_catalogs(root, output, ranges, common, None)
+}
+
 pub fn node_path(paths: &std::ffi::OsStr) -> io::Result<PathBuf> {
     env::split_paths(paths)
         .map(|path| path.join(if cfg!(windows) { "node.exe" } else { "node" }))
@@ -138,6 +170,7 @@ pub fn common_inputs(root: &Path, node: &Path) -> io::Result<(String, Vec<PathBu
             "build.rs",
             "build/fonts.rs",
             "build/cache.rs",
+            "build/catalogs.rs",
             "build/generate.rs",
             "../../package-lock.json",
         ]

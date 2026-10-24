@@ -6,6 +6,8 @@
 ))]
 extern crate abi_definitions;
 drivers_std::memory::instantiate_global_allocator!();
+#[path = "support/localization.rs"]
+mod localization;
 #[path = "support/graphics.rs"]
 mod support;
 
@@ -20,6 +22,7 @@ use xila::{
 };
 
 async fn status(manager: &Manager, expected: &str) {
+    let expected = localization::text("pixel_painter", expected);
     let mut observed = String::new();
     for _ in 0..400 {
         if manager.get_window_count().await.unwrap() > 0 {

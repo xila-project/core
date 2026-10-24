@@ -125,11 +125,11 @@ mod tests {
     fn reports_localized_errors_with_the_input_span() {
         assert_eq!(
             evaluate_expression("1 / 0", true).unwrap_err(),
-            "Division by zero (0..5)"
+            format!("{} (0..5)", translate!("Division by zero"))
         );
         assert_eq!(
             evaluate_expression("sqrt(-1)", true).unwrap_err(),
-            "Value outside function domain (0..8)"
+            format!("{} (0..8)", translate!("Value outside function domain"))
         );
     }
 }

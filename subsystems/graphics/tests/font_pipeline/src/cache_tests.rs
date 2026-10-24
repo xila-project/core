@@ -201,3 +201,98 @@ fn plans_have_unique_variant_symbols_and_font_scoped_inputs() {
             .all(|(a, b)| a.path != b.path)
     );
 }
+
+#[test]
+fn chinese_plans_subset_catalogs_and_cache_font_and_symbol_changes() {
+    let directory = Directory::new();
+    let root = &directory.0;
+    fs::create_dir(root.join("fonts")).unwrap();
+    for name in [
+        "Montserrat-Regular.ttf",
+        "unscii-16-full.woff",
+        "FontAwesome5-Solid+Brands+Regular.woff",
+        "SourceHanSansSC-Regular.otf",
+    ] {
+        fs::write(root.join("fonts").join(name), name).unwrap();
+    }
+    let ranges = crate::fonts::effective_ranges("zh-CN", "en").unwrap();
+    let mut symbols = crate::catalogs::CatalogSymbols {
+        cjk: "中。".into(),
+        other: "“”".into(),
+        directories: Vec::new(),
+    };
+    let before = generate::sources_with_catalogs(
+        root,
+        &root.join("out"),
+        &ranges,
+        "converter",
+        Some(&symbols),
+    )
+    .unwrap();
+    for (index, source) in before.iter().enumerate() {
+        let args: Vec<_> = source
+            .arguments
+            .iter()
+            .map(|arg| arg.to_str().unwrap())
+            .collect();
+        assert!(args.windows(2).any(|args| args == ["--symbols", "中。"]));
+        assert!(args.windows(2).any(|args| args == ["--symbols", "“”"]));
+        assert!(
+            !args.contains(&"19968-40959"),
+            "must not embed the whole Han range"
+        );
+        assert_eq!(
+            source
+                .inputs
+                .iter()
+                .any(|path| path.ends_with("SourceHanSansSC-Regular.otf")),
+            index < 4
+        );
+    }
+    assert_eq!(
+        before,
+        generate::sources_with_catalogs(
+            root,
+            &root.join("out"),
+            &ranges,
+            "converter",
+            Some(&symbols)
+        )
+        .unwrap()
+    );
+    symbols.cjk.push('文');
+    let changed = generate::sources_with_catalogs(
+        root,
+        &root.join("out"),
+        &ranges,
+        "converter",
+        Some(&symbols),
+    )
+    .unwrap();
+    assert!(
+        before
+            .iter()
+            .zip(&changed)
+            .all(|(a, b)| a.name == b.name && a.path != b.path)
+    );
+    fs::write(
+        root.join("fonts/SourceHanSansSC-Regular.otf"),
+        "changed font",
+    )
+    .unwrap();
+    let changed_font = generate::sources_with_catalogs(
+        root,
+        &root.join("out"),
+        &ranges,
+        "converter",
+        Some(&symbols),
+    )
+    .unwrap();
+    assert!(
+        changed[..4]
+            .iter()
+            .zip(&changed_font)
+            .all(|(a, b)| a.path != b.path)
+    );
+    assert_eq!(changed[4..], changed_font[4..]);
+}

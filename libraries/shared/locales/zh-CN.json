@@ -1,0 +1,7 @@
+{
+  "Buffer too small": "缓冲区过小",
+  "Failed to convert length": "转换长度失败",
+  "Invalid UTF-8 string": "UTF-8 字符串无效",
+  "Invalid length": "长度无效",
+  "Invalid pointer": "指针无效"
+}

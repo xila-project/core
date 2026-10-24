@@ -4841,6 +4841,7 @@ dependencies = [
  "lvgl_rust_sys",
  "proc-macro2",
  "quote",
+ "serde_json",
  "syn 3.0.9",
  "testing",
  "wasmi",

@@ -6,11 +6,17 @@
 ))]
 extern crate abi_definitions;
 drivers_std::memory::instantiate_global_allocator!();
+#[path = "support/localization.rs"]
+mod localization;
 #[path = "support/graphics.rs"]
 mod support;
 
 use core::{ffi::CStr, future::poll_fn, task::Poll, time::Duration};
 use xila::graphics::{Manager, lvgl};
+
+fn text(key: &str) -> String {
+    localization::text("clock", key)
+}
 
 unsafe fn find_label(root: *mut lvgl::lv_obj_t, text: &str, contains: bool) -> *mut lvgl::lv_obj_t {
     unsafe {
@@ -125,20 +131,20 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
     )
     .await
     .unwrap();
-    wait_label(manager, "Cancel", true).await;
-    click(manager, Some(2), "Start / pause").await;
+    wait_label(manager, &text("Cancel"), true).await;
+    click(manager, Some(2), &text("Start / pause")).await;
     xila::task::sleep(Duration::from_millis(300)).await;
-    click(manager, Some(2), "Lap").await;
+    click(manager, Some(2), &text("Lap")).await;
     wait_label(manager, "1: ", true).await;
-    click(manager, Some(2), "Start / pause").await;
+    click(manager, Some(2), &text("Start / pause")).await;
 
     // Select a one-second countdown using the actual touch controls.
     for _ in 0..5 {
-        click(manager, Some(3), "Minute -").await;
+        click(manager, Some(3), &text("Minute -")).await;
     }
-    click(manager, Some(3), "Start").await;
-    wait_label(manager, "Timer finished!", true).await;
-    click(manager, None, "Dismiss").await;
+    click(manager, Some(3), &text("Start")).await;
+    wait_label(manager, &text("Timer finished! "), true).await;
+    click(manager, None, &text("Dismiss")).await;
 
     // Keep the saved occurrence well ahead of now, including around midnight.
     let current_hour = std::time::SystemTime::now()
@@ -149,10 +155,15 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
         % 24;
     let alarm_hour = (current_hour + 12) % 24;
     for _ in 0..(alarm_hour + 24 - 7) % 24 {
-        click(manager, Some(1), "Hour +").await;
+        click(manager, Some(1), &text("Hour +")).await;
     }
-    click(manager, Some(1), "Save and enable").await;
-    wait_label(manager, &format!("{alarm_hour:02}:00 UTC\nEnabled:"), true).await;
+    click(manager, Some(1), &text("Save and enable")).await;
+    wait_label(
+        manager,
+        &format!("{alarm_hour:02}:00 UTC\n{}", text("Enabled: ")),
+        true,
+    )
+    .await;
     let mut saved = Vec::new();
     xila::virtual_file_system::File::read_from_path(
         context.virtual_file_system,
@@ -178,14 +189,15 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
     )
     .await
     .unwrap();
-    wait_label(manager, "Cancel", true).await;
+    wait_label(manager, &text("Cancel"), true).await;
     // No save action: the new guest must load the existing enabled alarm.
-    click(manager, Some(1), "Hour +").await;
+    click(manager, Some(1), &text("Hour +")).await;
     wait_label(
         manager,
         &format!(
-            "{:02}:00 UTC\nEnabled: {alarm_hour:02}:00 UTC",
-            (alarm_hour + 1) % 24
+            "{:02}:00 UTC\n{}{alarm_hour:02}:00 UTC",
+            (alarm_hour + 1) % 24,
+            text("Enabled: ")
         ),
         true,
     )

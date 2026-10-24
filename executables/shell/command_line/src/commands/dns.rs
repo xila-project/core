@@ -166,6 +166,7 @@ mod tests {
                 "enregistrement pour le domaine",
                 "enregistrements pour le domaine",
             ),
+            "zh-CN" => ("条记录，域名", "条记录，域名"),
             _ => ("record for domain", "records for domain"),
         };
         assert_eq!(
