@@ -68,6 +68,13 @@ jobs:
         run: mise run ci:host-profiling-tests
       - name: Test font linking
         run: mise run ci:host-font-tests
+      - name: Upload font-link evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: font-pipeline-evidence
+          path: target/font-pipeline-evidence/
+          if-no-files-found: warn
       - name: Test native audio
         run: mise run ci:host-audio-tests
       - name: Build native example

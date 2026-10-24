@@ -190,11 +190,11 @@ depends = ["ci:packages-host"]
 run = """
 set -euo pipefail
 read -r -a locales <<< "${CI_LOCALES:-en fr es de pt-BR it pl}"
+export CARGO_TARGET_DIR="${CARGO_TARGET_ROOT:-target/localization}"
 for locale in "${locales[@]}"; do
   echo "::group::Localization ($locale)"
   export EMBEDDED_I18N_STRICT=1
   export EMBEDDED_I18N_LOCALE="$locale"
-  export CARGO_TARGET_DIR="${CARGO_TARGET_ROOT:-target/localization}/$locale"
   mise run localization:check
   echo "::endgroup::"
 done
@@ -280,9 +280,14 @@ run = "cargo test --locked --manifest-path tools/profiling/Cargo.toml"
 
 [tasks."ci:host-font-tests"]
 extends = "ci:rust-format"
+tools.node = "{{ vars.node_version }}"
 description = "Test the standalone font-link workspace"
 depends = ["ci:packages-linker"]
-run = "cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml"
+run = "mise run test:fonts && cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml"
+
+[tasks."test:fonts"]
+extends = "ci:rust-lint"
+tools.node = "{{ vars.node_version }}"
 
 [tasks."ci:host-audio-tests"]
 extends = "ci:rust-format"

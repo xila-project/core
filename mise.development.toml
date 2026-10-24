@@ -147,6 +147,10 @@ extends = "dev:rust-browser"
 [tasks."test:workspace"]
 extends = "dev:rust"
 
+[tasks."test:fonts"]
+extends = "dev:rust-lint"
+tools.node = "{{ vars.node_version }}"
+
 [tasks."build:cargo"]
 extends = "dev:rust"
 
