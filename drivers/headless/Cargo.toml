@@ -1,5 +1,5 @@
 [package]
-name = "drivers_headless"
+name = "xila-drivers-headless"
 version = "0.1.0"
 edition = "2024"
 

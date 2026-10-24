@@ -1,5 +1,5 @@
 [package]
-name = "text_editor"
+name = "xila-text-editor"
 version = "0.1.0"
 edition = "2024"
 description = "A page-based text editor for Xila WebAssembly."
@@ -14,3 +14,7 @@ wasm = { workspace = true, default-features = false, features = [
   "graphics",
   "memory_32",
 ] }
+
+[[bin]]
+name = "text_editor"
+path = "src/main.rs"

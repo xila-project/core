@@ -1,5 +1,5 @@
 [package]
-name = "abi_definitions"
+name = "xila-abi-definitions"
 version = "0.1.0"
 edition = "2024"
 

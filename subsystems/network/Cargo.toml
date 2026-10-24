@@ -1,5 +1,5 @@
 [package]
-name = "network"
+name = "xila-network"
 version = "0.1.0"
 edition = "2024"
 
