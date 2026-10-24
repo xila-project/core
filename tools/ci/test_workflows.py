@@ -48,6 +48,36 @@ def ci_config():
 
 
 class WorkflowPolicy(unittest.TestCase):
+    def test_localization_checks_share_one_target_directory(self):
+        script = ci_config()["tasks"]["ci:localization"]["run"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            mise = root / "mise"
+            mise.write_text('#!/bin/sh\nprintf "%s|%s|%s|%s\\n" "$EMBEDDED_I18N_LOCALE" "$CARGO_TARGET_DIR" "$EMBEDDED_I18N_STRICT" "$*" >> "$CALLS"\n')
+            mise.chmod(0o755)
+            calls = root / "calls"
+            env = os.environ | {
+                "PATH": f"{directory}:{os.environ['PATH']}",
+                "CALLS": str(calls), "CI_LOCALES": "en fr pl",
+                "CARGO_TARGET_ROOT": str(root / "target/localization"),
+            }
+            subprocess.run(["bash", "-c", script], env=env, check=True, capture_output=True)
+            records = [line.split('|') for line in calls.read_text().splitlines()]
+            self.assertEqual([row[0] for row in records], ["en", "fr", "pl"])
+            self.assertEqual({row[1] for row in records}, {str(root / "target/localization")})
+            self.assertEqual({row[2] for row in records}, {"1"})
+            self.assertEqual({row[3] for row in records}, {"run localization:check"})
+
+    def test_font_regressions_have_pinned_rust_and_node_tools(self):
+        for environment in ["ci", "development"]:
+            with self.subTest(environment=environment):
+                task = configured_tasks(environment)["test:fonts"]
+                self.assertIn("rustfmt", task["tools"]["rust"]["components"])
+                self.assertEqual(task["tools"]["node"], "24.22.0")
+        task = ci_config()["tasks"]["ci:host-font-tests"]
+        self.assertIn("mise run test:fonts", task["run"])
+        self.assertIn("cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml", task["run"])
+
     def test_tool_versions_are_central_and_templates_do_not_install_tools_globally(self):
         shared = tomllib.loads((ROOT / "mise.toml").read_text())
         self.assertIn("rust_version", shared.get("vars", {}))

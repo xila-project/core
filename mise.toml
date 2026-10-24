@@ -69,6 +69,17 @@ depends = ["check:host", "check:guest"]
 description = "Test the Cargo workspace"
 run = "cargo test --workspace"
 
+[tasks."test:fonts"]
+description = "Test font caching, compile-time selection, and linked archive exclusion"
+run = """
+set -eu
+cargo test --manifest-path subsystems/graphics/tests/font_pipeline/Cargo.toml
+cargo clippy --manifest-path subsystems/graphics/tests/font_pipeline/Cargo.toml --all-targets -- -D warnings
+cargo clippy --manifest-path subsystems/graphics/tests/font_link/Cargo.toml --all-targets -- -D warnings
+python3 -m unittest discover -s subsystems/graphics/tests/font_pipeline -p 'test_*.py' -v
+python3 subsystems/graphics/tests/font_pipeline/verify.py --target "${CARGO_TARGET_DIR:-target/font-pipeline}" --report target/font-pipeline-evidence
+"""
+
 [tasks."build:cargo"]
 description = "Build Cargo packages"
 run = "cargo build"

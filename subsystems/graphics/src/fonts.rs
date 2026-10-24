@@ -1,13 +1,26 @@
 use crate::lvgl;
 
-unsafe extern "C" {
-    static font_montserrat_10: lvgl::lv_font_t;
-    static font_montserrat_14: lvgl::lv_font_t;
-    static font_montserrat_18: lvgl::lv_font_t;
-    static font_montserrat_28: lvgl::lv_font_t;
-    static font_unscii_8: lvgl::lv_font_t;
-    static font_unscii_16: lvgl::lv_font_t;
+// Every generated range has unique C symbols in separate archive members.
+// These aliases reference only the selected range, with no runtime registry.
+macro_rules! selected_fonts {
+    ($($name:ident),* $(,)?) => {
+        unsafe extern "C" {
+            $(
+                #[link_name = concat!(stringify!($name), "_", env!("XILA_FONT_VARIANT"))]
+                static $name: lvgl::lv_font_t;
+            )*
+        }
+    };
 }
+
+selected_fonts!(
+    font_montserrat_10,
+    font_montserrat_14,
+    font_montserrat_18,
+    font_montserrat_28,
+    font_unscii_8,
+    font_unscii_16,
+);
 
 pub const fn get_font_small() -> &'static lvgl::lv_font_t {
     unsafe { &font_montserrat_10 }
