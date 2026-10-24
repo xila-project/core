@@ -187,7 +187,7 @@ impl Shell {
             if oversized {
                 self.last_status = 2;
                 self.diagnostic(xila::internationalization::translate!(
-                    "Command line is too long"
+                    "execution.errors.command_line_too_long"
                 ))
                 .await;
                 continue;
@@ -202,7 +202,7 @@ impl Shell {
                 Err(_) => {
                     self.last_status = 2;
                     self.diagnostic(xila::internationalization::translate!(
-                        "Invalid UTF-8 input"
+                        "errors.invalid_utf_8_input"
                     ))
                     .await;
                 }
@@ -258,8 +258,9 @@ impl Shell {
                 .unwrap_or(0);
             if depth >= MAX_SHELL_DEPTH {
                 self.last_status = 2;
-                let error =
-                    xila::internationalization::translate!("Maximum nested shell depth exceeded");
+                let error = xila::internationalization::translate!(
+                    "errors.maximum_nested_shell_depth_exceeded"
+                );
                 if arguments[0] == "-s" && arguments.len() == 2 {
                     self.script_diagnostic(&arguments[1], None, error).await;
                 } else {
@@ -275,8 +276,9 @@ impl Shell {
                 .is_err()
             {
                 self.last_status = 1;
-                let error =
-                    xila::internationalization::translate!("Failed to set shell nesting depth");
+                let error = xila::internationalization::translate!(
+                    "errors.failed_to_set_shell_nesting_depth"
+                );
                 if arguments[0] == "-s" && arguments.len() == 2 {
                     self.script_diagnostic(&arguments[1], None, error).await;
                 } else {
@@ -287,7 +289,7 @@ impl Shell {
                 if arguments[0] == "-s" {
                     if arguments.len() != 2 {
                         self.diagnostic(xila::internationalization::translate!(
-                            "Usage: shell -s PATH"
+                            "help.run_script_usage"
                         ))
                         .await;
                         self.last_status = 2;
@@ -297,7 +299,7 @@ impl Shell {
                 } else if arguments[0] == "-c" {
                     if arguments.len() != 2 {
                         self.diagnostic(xila::internationalization::translate!(
-                            "Usage: shell -c COMMAND"
+                            "help.execute_command_usage"
                         ))
                         .await;
                         self.last_status = 2;
@@ -400,7 +402,7 @@ impl Shell {
                     self.script_diagnostic(
                         &path,
                         Some(line_number),
-                        xila::internationalization::translate!("Invalid UTF-8 input"),
+                        xila::internationalization::translate!("errors.invalid_utf_8_input"),
                     )
                     .await;
                     break;

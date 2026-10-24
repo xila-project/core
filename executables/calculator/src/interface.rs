@@ -68,10 +68,10 @@ pub enum ButtonIdentifier {
 
 const BUTTON_MAP: [*const i8; 48] = [
     // Row 1: Clear, Backspace, Angle mode, Parentheses, Division, Factorial, Abs
-    translate!(c"RAD").as_ptr(), // Angle mode toggle
+    translate!(c"angle_mode.radians").as_ptr(), // Angle mode toggle
     c"(".as_ptr(),
     c")".as_ptr(),
-    translate!(c"Clear").as_ptr(),
+    translate!(c"controls.clear").as_ptr(),
     c"<".as_ptr(), // Backspace
     c"x!".as_ptr(),
     c"/".as_ptr(),
@@ -246,9 +246,9 @@ impl Interface {
 
             // Add angle mode indicator
             let mode_indicator = if self.is_radian_mode {
-                translate!(" [RAD]")
+                translate!("angle_mode.radians_indicator")
             } else {
-                translate!(" [DEG]")
+                translate!("angle_mode.degrees_indicator")
             };
             let full_text = format!("{}{}", display_text, mode_indicator);
 
@@ -297,7 +297,8 @@ impl Interface {
                             self.show_result = true;
                         }
                         Err(e) => {
-                            self.current_expression = format!(translate!("Error: {}"), e);
+                            self.current_expression =
+                                format!(translate!("errors.calculation_with_details"), e);
                             self.show_result = true;
                         }
                     }

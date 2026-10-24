@@ -1,4 +1,4 @@
 {
-  "Error handling file manager event: {:?}": "Error handling file manager event: {:?}",
-  "Invalid path entered: {}": "Invalid path entered: {}"
+  "errors.event_handling_failed": "Error handling file manager event: {:?}",
+  "errors.invalid_entered_path": "Invalid path entered: {}"
 }

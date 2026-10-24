@@ -1,0 +1,11 @@
+{
+  "namespace": "libraries/shared",
+  "old_to_new": {
+    "Buffer too small": "errors.buffer_too_small",
+    "Failed to convert length": "errors.failed_to_convert_length",
+    "Invalid UTF-8 string": "errors.invalid_utf_8_string",
+    "Invalid length": "errors.invalid_length",
+    "Invalid pointer": "errors.invalid_pointer"
+  },
+  "review": "Catalog has no matching Rust translation macros in current code search; retain until manually audited."
+}

@@ -1,0 +1,8 @@
+{
+  "namespace": "libraries/executable",
+  "old_to_new": {
+    "Failed to get main function": "errors.failed_to_get_main_function",
+    "Invalid stack size": "errors.invalid_stack_size",
+    "Permission denied": "errors.permission_denied"
+  }
+}

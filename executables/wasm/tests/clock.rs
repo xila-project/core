@@ -131,20 +131,20 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
     )
     .await
     .unwrap();
-    wait_label(manager, &text("Cancel"), true).await;
-    click(manager, Some(2), &text("Start / pause")).await;
+    wait_label(manager, &text("timer.controls.cancel"), true).await;
+    click(manager, Some(2), &text("stopwatch.controls.toggle_pause")).await;
     xila::task::sleep(Duration::from_millis(300)).await;
-    click(manager, Some(2), &text("Lap")).await;
+    click(manager, Some(2), &text("stopwatch.controls.record_lap")).await;
     wait_label(manager, "1: ", true).await;
-    click(manager, Some(2), &text("Start / pause")).await;
+    click(manager, Some(2), &text("stopwatch.controls.toggle_pause")).await;
 
     // Select a one-second countdown using the actual touch controls.
     for _ in 0..5 {
-        click(manager, Some(3), &text("Minute -")).await;
+        click(manager, Some(3), &text("timer.controls.decrement_minute")).await;
     }
-    click(manager, Some(3), &text("Start")).await;
-    wait_label(manager, &text("Timer finished! "), true).await;
-    click(manager, None, &text("Dismiss")).await;
+    click(manager, Some(3), &text("timer.controls.start")).await;
+    wait_label(manager, &text("alerts.timer_finished"), true).await;
+    click(manager, None, &text("alerts.dismiss")).await;
 
     // Keep the saved occurrence well ahead of now, including around midnight.
     let current_hour = std::time::SystemTime::now()
@@ -155,12 +155,12 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
         % 24;
     let alarm_hour = (current_hour + 12) % 24;
     for _ in 0..(alarm_hour + 24 - 7) % 24 {
-        click(manager, Some(1), &text("Hour +")).await;
+        click(manager, Some(1), &text("alarm.controls.increment_hour")).await;
     }
-    click(manager, Some(1), &text("Save and enable")).await;
+    click(manager, Some(1), &text("alarm.controls.save_and_enable")).await;
     wait_label(
         manager,
-        &format!("{alarm_hour:02}:00 UTC\n{}", text("Enabled: ")),
+        &format!("{alarm_hour:02}:00 UTC\n{}", text("alarm.status.enabled")),
         true,
     )
     .await;
@@ -189,15 +189,15 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
     )
     .await
     .unwrap();
-    wait_label(manager, &text("Cancel"), true).await;
+    wait_label(manager, &text("timer.controls.cancel"), true).await;
     // No save action: the new guest must load the existing enabled alarm.
-    click(manager, Some(1), &text("Hour +")).await;
+    click(manager, Some(1), &text("alarm.controls.increment_hour")).await;
     wait_label(
         manager,
         &format!(
             "{:02}:00 UTC\n{}{alarm_hour:02}:00 UTC",
             (alarm_hour + 1) % 24,
-            text("Enabled: ")
+            text("alarm.status.enabled")
         ),
         true,
     )

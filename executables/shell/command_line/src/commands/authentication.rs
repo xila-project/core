@@ -30,7 +30,10 @@ impl Shell {
     }
 
     pub async fn authenticate(&mut self) -> Result<Option<String>> {
-        write!(self.standard.out(), translate!("User name: "))?;
+        write!(
+            self.standard.out(),
+            translate!("authentication.prompts.username")
+        )?;
         let _ = self.standard.out().flush().await;
 
         let mut user_name = String::with_capacity(32);
@@ -38,7 +41,10 @@ impl Shell {
             return Ok(None);
         }
 
-        write!(self.standard.out(), translate!("Password: "))?;
+        write!(
+            self.standard.out(),
+            translate!("authentication.prompts.password")
+        )?;
         let _ = self.standard.out().flush().await;
 
         let mut password = String::with_capacity(32);

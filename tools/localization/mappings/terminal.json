@@ -1,0 +1,13 @@
+{
+  "namespace": "executables/terminal",
+  "old_to_new": {
+    "Enter your command ...": "input.command_placeholder",
+    "Failed to create object": "errors.failed_to_create_object",
+    "Failed to execute: {}": "errors.failed_to_execute",
+    "Failed to get task identifier: {}": "errors.failed_to_get_task_identifier",
+    "Failed to mount device: {}": "errors.failed_to_mount_device",
+    "Graphics: {}": "errors.graphics",
+    "Resource busy": "errors.resource_busy",
+    "UTF-8: {}": "errors.utf_8"
+  }
+}

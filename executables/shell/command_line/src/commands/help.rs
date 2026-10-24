@@ -39,7 +39,7 @@ impl UserCommand for HelpCommand {
                     .write_out_fmt(format_args!(
                         "{}: {}\n",
                         command,
-                        translate!("external executable; usage is provided by the executable.")
+                        translate!("help.external_executable_description")
                     ))
                     .await;
             }
@@ -47,13 +47,19 @@ impl UserCommand for HelpCommand {
         }
 
         context
-            .write_out_fmt(format_args!("{}\n", translate!("Built-in commands:")))
+            .write_out_fmt(format_args!(
+                "{}\n",
+                translate!("help.built_in_commands_title")
+            ))
             .await?;
         for (name, _, _) in BUILTINS {
             context.write_out_fmt(format_args!("{name}\n")).await?;
         }
         context
-            .write_out_fmt(format_args!("{}\n", translate!("Executables in Paths:")))
+            .write_out_fmt(format_args!(
+                "{}\n",
+                translate!("help.available_executables_title")
+            ))
             .await?;
         visit_executables(context, paths, None).await?;
         Ok(())

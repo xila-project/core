@@ -1,5 +1,5 @@
 {
-  "Device error: {}": "设备错误：{}",
-  "Time module already initialized": "时间模块已初始化",
-  "Time module not initialized": "时间模块未初始化"
+  "errors.device_error": "设备错误：{}",
+  "errors.time_module_already_initialized": "时间模块已初始化",
+  "errors.time_module_not_initialized": "时间模块未初始化"
 }

@@ -1,7 +1,7 @@
 {
-  "Buffer too small": "Buffer too small",
-  "Failed to convert length": "Failed to convert length",
-  "Invalid UTF-8 string": "Invalid UTF-8 string",
-  "Invalid length": "Invalid length",
-  "Invalid pointer": "Invalid pointer"
+  "errors.buffer_too_small": "Buffer too small",
+  "errors.failed_to_convert_length": "Failed to convert length",
+  "errors.invalid_utf_8_string": "Invalid UTF-8 string",
+  "errors.invalid_length": "Invalid length",
+  "errors.invalid_pointer": "Invalid pointer"
 }

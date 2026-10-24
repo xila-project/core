@@ -1,0 +1,32 @@
+{
+  "namespace": "libraries/authentication",
+  "old_to_new": {
+    "Failed to add group: {}": "errors.failed_to_add_group",
+    "Failed to add user: {}": "errors.failed_to_add_user",
+    "Failed to close file: {}": "errors.failed_to_close_file",
+    "Failed to create group directory: {}": "errors.failed_to_create_group_directory",
+    "Failed to create group: {}": "errors.failed_to_create_group",
+    "Failed to create user: {}": "errors.failed_to_create_user",
+    "Failed to create users directory: {}": "errors.failed_to_create_users_directory",
+    "Failed to get current task identifier: {}": "errors.failed_to_get_current_task_identifier",
+    "Failed to get group file path": "errors.failed_to_get_group_file_path",
+    "Failed to get new groupe identifier: {}": "errors.failed_to_get_new_groupe_identifier",
+    "Failed to get new user identifier: {}": "errors.failed_to_get_new_user_identifier",
+    "Failed to get user file path": "errors.failed_to_get_user_file_path",
+    "Failed to get user identifier: {}": "errors.failed_to_get_user_identifier",
+    "Failed to hash password: {}": "errors.failed_to_hash_password",
+    "Failed to open group file: {}": "errors.failed_to_open_group_file",
+    "Failed to open random device: {}": "errors.failed_to_open_random_device",
+    "Failed to open user file: {}": "errors.failed_to_open_user_file",
+    "Failed to parse group file: {}": "errors.failed_to_parse_group_file",
+    "Failed to parse user file: {}": "errors.failed_to_parse_user_file",
+    "Failed to read group directory: {}": "errors.failed_to_read_group_directory",
+    "Failed to read group file: {}": "errors.failed_to_read_group_file",
+    "Failed to read random device: {}": "errors.failed_to_read_random_device",
+    "Failed to read user file: {}": "errors.failed_to_read_user_file",
+    "Failed to read users directory: {}": "errors.failed_to_read_users_directory",
+    "Failed to write group file: {}": "errors.failed_to_write_group_file",
+    "Failed to write user file: {}": "errors.failed_to_write_user_file",
+    "Invalid password": "errors.invalid_password"
+  }
+}

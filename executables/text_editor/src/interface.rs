@@ -53,7 +53,7 @@ pub fn run() -> wasm::Result<()> {
             if code == EVENT_CLOSE_REQUESTED {
                 if ui.working_unusable {
                     if ui.confirm_close != Some(ui.revision) {
-                        ui.status(translate!("Edit failed - close again to discard changes"))?;
+                        ui.status(translate!("errors.edit_failed_close_again"))?;
                         ui.confirm_close = Some(ui.revision);
                         continue;
                     }
@@ -66,7 +66,7 @@ pub fn run() -> wasm::Result<()> {
                     }
                     return Ok(());
                 }
-                ui.status(translate!("Unsaved changes - close again to discard"))?;
+                ui.status(translate!("warnings.unsaved_close_again"))?;
                 ui.confirm_close = Some(ui.revision);
             } else if code == EventCode::ValueChanged as u32 && target == ui.actions {
                 let action = unsafe { buttonmatrix_get_selected_button(ui.actions)? };
@@ -122,12 +122,12 @@ impl Interface {
             object_set_width(actions, percentage(100)?)?;
             object_set_height(actions, 36)?;
             let action_map = [
-                translate!(c"Previous").as_ptr(),
-                translate!(c"Next").as_ptr(),
+                translate!(c"navigation.previous_page").as_ptr(),
+                translate!(c"navigation.next_page").as_ptr(),
                 c"\n".as_ptr(),
-                translate!(c"New").as_ptr(),
-                translate!(c"Open").as_ptr(),
-                translate!(c"Save").as_ptr(),
+                translate!(c"controls.new_file").as_ptr(),
+                translate!(c"controls.open_file").as_ptr(),
+                translate!(c"controls.save_file").as_ptr(),
                 c"".as_ptr(),
             ];
             buttonmatrix_set_map(actions, action_map.as_ptr())?;
@@ -175,7 +175,7 @@ impl Interface {
                 working_unusable: false,
                 _action_map: action_map,
             };
-            ui.status(translate!("Choose a path, then create or open a text file"))?;
+            ui.status(translate!("file_path.instructions"))?;
             ui.show_page()?;
             Ok(ui)
         }
@@ -217,7 +217,7 @@ impl Interface {
             return Ok(true);
         }
         let Some(text) = self.edited_text()? else {
-            self.status(translate!("Page text must fit within 4096 UTF-8 bytes"))?;
+            self.status(translate!("errors.page_exceeds_byte_limit"))?;
             return Ok(false);
         };
         if text != self.original_page {
@@ -230,7 +230,7 @@ impl Interface {
                 self.dirty = true;
                 self.revision = self.revision.wrapping_add(1);
                 self.working_unusable = true;
-                self.status(translate!("Edit failed - reopen the source file"))?;
+                self.status(translate!("errors.edit_failed_reopen_source"))?;
                 return Ok(false);
             }
             self.dirty = true;
@@ -245,7 +245,7 @@ impl Interface {
             return Ok(());
         }
         let Some(working) = self.working.as_mut() else {
-            self.status(translate!("Open or create a file first"))?;
+            self.status(translate!("status.open_or_create_first"))?;
             return Ok(());
         };
         if forward {
@@ -269,7 +269,7 @@ impl Interface {
         let path = match self.path() {
             Ok(path) => path,
             Err(_) => {
-                self.status(translate!("Enter an absolute file path"))?;
+                self.status(translate!("file_path.placeholder"))?;
                 return Ok(());
             }
         };
@@ -284,11 +284,9 @@ impl Interface {
                 self.working_unusable = false;
                 self.revision = self.revision.wrapping_add(1);
                 self.show_page()?;
-                self.status(translate!("New text file"))?;
+                self.status(translate!("file_path.new_file_default_name"))?;
             }
-            Err(_) => self.status(translate!(
-                "Could not create a working copy in this directory"
-            ))?,
+            Err(_) => self.status(translate!("errors.working_copy_creation_failed"))?,
         }
         Ok(())
     }
@@ -300,7 +298,7 @@ impl Interface {
         let path = match self.path() {
             Ok(path) => path,
             Err(_) => {
-                self.status(translate!("Enter an absolute file path"))?;
+                self.status(translate!("file_path.placeholder"))?;
                 return Ok(());
             }
         };
@@ -314,18 +312,16 @@ impl Interface {
                 self.working_unusable = false;
                 self.revision = self.revision.wrapping_add(1);
                 self.show_page()?;
-                self.status(translate!("Opened"))?;
+                self.status(translate!("status.opened"))?;
             }
-            Err(_) => self.status(translate!(
-                "Open failed - use a UTF-8 text file and check storage"
-            ))?,
+            Err(_) => self.status(translate!("errors.open_failed"))?,
         }
         Ok(())
     }
 
     fn save_document(&mut self) -> wasm::Result<()> {
         if self.working_unusable {
-            self.status(translate!("Edit failed - reopen the source file"))?;
+            self.status(translate!("errors.edit_failed_reopen_source"))?;
             return Ok(());
         }
         if !self.commit_page()? {
@@ -334,22 +330,20 @@ impl Interface {
         let path = match self.path() {
             Ok(path) => path,
             Err(_) => {
-                self.status(translate!("Enter an absolute file path"))?;
+                self.status(translate!("file_path.placeholder"))?;
                 return Ok(());
             }
         };
         let save_result = match self.working.as_mut() {
             Some(working) => working.save_to(&path),
-            None => return self.status(translate!("Open or create a file first")),
+            None => return self.status(translate!("status.open_or_create_first")),
         };
         if save_result.is_ok() {
             self.dirty = false;
             self.revision = self.revision.wrapping_add(1);
-            self.status(translate!("Saved"))?;
+            self.status(translate!("status.saved"))?;
         } else {
-            self.status(translate!(
-                "Save failed - working copy kept; check path and storage"
-            ))?;
+            self.status(translate!("errors.save_failed_working_copy_preserved"))?;
         }
         Ok(())
     }
@@ -357,9 +351,7 @@ impl Interface {
     fn allow_discard(&mut self) -> wasm::Result<bool> {
         if self.dirty && self.confirm_open != Some(self.revision) {
             self.confirm_open = Some(self.revision);
-            self.status(translate!(
-                "Unsaved changes - choose New or Open again to discard"
-            ))?;
+            self.status(translate!("warnings.unsaved_new_or_open_again"))?;
             return Ok(false);
         }
         self.confirm_open = None;

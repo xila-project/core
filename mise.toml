@@ -33,6 +33,10 @@ description = "Strictly check WASI application localization"
 env = { EMBEDDED_I18N_STRICT = "1" }
 run = "cargo check --target wasm32-wasip1 --package calculator --package weather --package clock --package pixel_painter --package text_editor --package synth"
 
+[tasks."localization:lint"]
+description = "Check semantic translation keys, catalogs and Rust macro references"
+run = "node tools/localization/check.mjs"
+
 [tasks."localization:check"]
 description = "Run strict host and guest localization checks"
 depends = ["localization:host-check", "localization:guest-check"]

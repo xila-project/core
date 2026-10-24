@@ -1,0 +1,19 @@
+{
+  "namespace": "subsystems/task",
+  "old_to_new": {
+    "AlreadyInitialized": "errors.already_initialized",
+    "AlreadySet": "errors.already_set",
+    "FailedToCreateThread": "errors.failed_to_create_thread",
+    "FailedToSpawnThread": "errors.failed_to_spawn_thread",
+    "InvalidEnvironmentVariable": "errors.invalid_environment_variable",
+    "InvalidSpawnerIdentifier": "errors.invalid_spawner_identifier",
+    "InvalidTaskIdentifier": "errors.invalid_task_identifier",
+    "NoSpawnerAvailable": "errors.no_spawner_available",
+    "NoThreadForTask": "errors.no_thread_for_task",
+    "NotInitialized": "errors.not_initialized",
+    "ThreadAlreadyRegistered": "errors.thread_already_registered",
+    "ThreadNotRegistered": "errors.thread_not_registered",
+    "TooManySpawners": "errors.too_many_spawners",
+    "TooManyTasks": "errors.too_many_tasks"
+  }
+}

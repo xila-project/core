@@ -23,37 +23,37 @@ impl Display for Error {
     fn fmt(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
             Self::DuplicateGroupIdentifier => {
-                write!(formatter, translate!("Duplicate group identifier"))
+                write!(formatter, translate!("errors.duplicate_group_identifier"))
             }
             Self::DuplicateGroupName => {
-                write!(formatter, translate!("Duplicate group name"))
+                write!(formatter, translate!("errors.duplicate_group_name"))
             }
             Self::DuplicateUserIdentifier => {
-                write!(formatter, translate!("Duplicate user identifier"))
+                write!(formatter, translate!("errors.duplicate_user_identifier"))
             }
             Self::DuplicateUserName => {
-                write!(formatter, translate!("Duplicate user name"))
+                write!(formatter, translate!("errors.duplicate_user_name"))
             }
             Self::InvalidGroupIdentifier => {
-                write!(formatter, translate!("Invalid group identifier"))
+                write!(formatter, translate!("errors.invalid_group_identifier"))
             }
             Self::InvalidUserIdentifier => {
-                write!(formatter, translate!("Invalid user identifier"))
+                write!(formatter, translate!("errors.invalid_user_identifier"))
             }
             Self::TooManyGroups => {
-                write!(formatter, translate!("Too many groups"))
+                write!(formatter, translate!("errors.too_many_groups"))
             }
             Self::TooManyUsers => {
-                write!(formatter, translate!("Too many users"))
+                write!(formatter, translate!("errors.too_many_users"))
             }
             Self::PoisonedLock => {
-                write!(formatter, translate!("Poisoned lock"))
+                write!(formatter, translate!("errors.poisoned_lock"))
             }
             Self::NotInitialized => {
-                write!(formatter, translate!("Not initialized"))
+                write!(formatter, translate!("errors.not_initialized"))
             }
             Self::AlreadyInitialized => {
-                write!(formatter, translate!("Already initialized"))
+                write!(formatter, translate!("errors.already_initialized"))
             }
         }
     }

@@ -176,45 +176,60 @@ impl Interface {
                 alarm_minute: settings.alarm.map_or(0, |a| a.minute),
                 alarm_alert: AlarmAlert::default(),
             };
-            ui.labels[0] = ui.label(
-                window,
-                translate!("Alerts are visible while Clock is running."),
-            )?;
+            ui.labels[0] = ui.label(window, translate!("alerts.instructions"))?;
             let alert_row = ui.row(window)?;
-            ui.button(alert_row, translate!(c"Snooze 5 min"), Action::Snooze)?;
-            ui.button(alert_row, translate!(c"Dismiss"), Action::Dismiss)?;
+            ui.button(
+                alert_row,
+                translate!(c"alerts.snooze_five_minutes"),
+                Action::Snooze,
+            )?;
+            ui.button(alert_row, translate!(c"alerts.dismiss"), Action::Dismiss)?;
 
             let tabs = tabview_create(window)?;
             object_set_width(tabs, percentage(100)?)?;
             object_set_flex_grow(tabs, 1)?;
             ui.tabs = tabs;
-            let clock_tab = ui.tab(translate!(c"Clock"))?;
+            let clock_tab = ui.tab(translate!(c"tabs.clock"))?;
             ui.labels[1] = ui.label(clock_tab, "")?;
-            ui.label(
+            ui.label(clock_tab, translate!("clock.instructions.utc_only"))?;
+            ui.button(
                 clock_tab,
-                translate!("UTC / host clock. City time zones are not available yet."),
+                translate!(c"clock.controls.toggle_hour_format"),
+                Action::Format,
             )?;
-            ui.button(clock_tab, translate!(c"12 / 24 hour"), Action::Format)?;
 
-            let alarm_tab = ui.tab(translate!(c"Alarm"))?;
+            let alarm_tab = ui.tab(translate!(c"tabs.alarm"))?;
             ui.labels[2] = ui.label(alarm_tab, "")?;
             let alarm_row = ui.row(alarm_tab)?;
-            ui.button(alarm_row, translate!(c"Hour -"), Action::AlarmHour(-1))?;
-            ui.button(alarm_row, translate!(c"Hour +"), Action::AlarmHour(1))?;
-            ui.button(alarm_row, translate!(c"Minute -"), Action::AlarmMinute(-1))?;
-            ui.button(alarm_row, translate!(c"Minute +"), Action::AlarmMinute(1))?;
-            ui.label(
-                alarm_tab,
-                translate!("Repeat on selected days; none means once. All times are UTC."),
+            ui.button(
+                alarm_row,
+                translate!(c"alarm.controls.decrement_hour"),
+                Action::AlarmHour(-1),
             )?;
+            ui.button(
+                alarm_row,
+                translate!(c"alarm.controls.increment_hour"),
+                Action::AlarmHour(1),
+            )?;
+            ui.button(
+                alarm_row,
+                translate!(c"alarm.controls.decrement_minute"),
+                Action::AlarmMinute(-1),
+            )?;
+            ui.button(
+                alarm_row,
+                translate!(c"alarm.controls.increment_minute"),
+                Action::AlarmMinute(1),
+            )?;
+            ui.label(alarm_tab, translate!("alarm.instructions.repeat_days_utc"))?;
             let days = [
-                translate!(c"Mon"),
-                translate!(c"Tue"),
-                translate!(c"Wed"),
-                translate!(c"Thu"),
-                translate!(c"Fri"),
-                translate!(c"Sat"),
-                translate!(c"Sun"),
+                translate!(c"alarm.weekdays.monday"),
+                translate!(c"alarm.weekdays.tuesday"),
+                translate!(c"alarm.weekdays.wednesday"),
+                translate!(c"alarm.weekdays.thursday"),
+                translate!(c"alarm.weekdays.friday"),
+                translate!(c"alarm.weekdays.saturday"),
+                translate!(c"alarm.weekdays.sunday"),
             ];
             let day_row = ui.row(alarm_tab)?;
             for (index, day) in days.iter().enumerate() {
@@ -231,56 +246,84 @@ impl Interface {
             let alarm_actions = ui.row(alarm_tab)?;
             ui.button(
                 alarm_actions,
-                translate!(c"Save and enable"),
+                translate!(c"alarm.controls.save_and_enable"),
                 Action::AlarmSave,
             )?;
-            ui.button(alarm_actions, translate!(c"Disable"), Action::AlarmDisable)?;
-            ui.button(alarm_actions, translate!(c"Delete"), Action::AlarmDelete)?;
+            ui.button(
+                alarm_actions,
+                translate!(c"alarm.controls.disable"),
+                Action::AlarmDisable,
+            )?;
+            ui.button(
+                alarm_actions,
+                translate!(c"alarm.controls.delete"),
+                Action::AlarmDelete,
+            )?;
 
-            let watch_tab = ui.tab(translate!(c"Stopwatch"))?;
+            let watch_tab = ui.tab(translate!(c"tabs.stopwatch"))?;
             ui.labels[3] = ui.label(watch_tab, "")?;
             let watch_actions = ui.row(watch_tab)?;
             ui.button(
                 watch_actions,
-                translate!(c"Start / pause"),
+                translate!(c"stopwatch.controls.toggle_pause"),
                 Action::StopwatchToggle,
             )?;
-            ui.button(watch_actions, translate!(c"Lap"), Action::Lap)?;
-            ui.button(watch_actions, translate!(c"Reset"), Action::StopwatchReset)?;
+            ui.button(
+                watch_actions,
+                translate!(c"stopwatch.controls.record_lap"),
+                Action::Lap,
+            )?;
+            ui.button(
+                watch_actions,
+                translate!(c"stopwatch.controls.reset"),
+                Action::StopwatchReset,
+            )?;
             ui.labels[4] = ui.label(watch_tab, "")?;
 
-            let timer_tab = ui.tab(translate!(c"Timer"))?;
+            let timer_tab = ui.tab(translate!(c"tabs.timer"))?;
             ui.labels[5] = ui.label(timer_tab, "")?;
             let duration_row = ui.row(timer_tab)?;
             ui.button(
                 duration_row,
-                translate!(c"Minute -"),
+                translate!(c"timer.controls.decrement_minute"),
                 Action::TimerAdjust(-60),
             )?;
             ui.button(
                 duration_row,
-                translate!(c"Minute +"),
+                translate!(c"timer.controls.increment_minute"),
                 Action::TimerAdjust(60),
             )?;
             ui.button(
                 duration_row,
-                translate!(c"Second -"),
+                translate!(c"timer.controls.decrement_second"),
                 Action::TimerAdjust(-1),
             )?;
             ui.button(
                 duration_row,
-                translate!(c"Second +"),
+                translate!(c"timer.controls.increment_second"),
                 Action::TimerAdjust(1),
             )?;
             let timer_actions = ui.row(timer_tab)?;
-            ui.button(timer_actions, translate!(c"Start"), Action::TimerStart)?;
             ui.button(
                 timer_actions,
-                translate!(c"Pause / resume"),
+                translate!(c"timer.controls.start"),
+                Action::TimerStart,
+            )?;
+            ui.button(
+                timer_actions,
+                translate!(c"timer.controls.toggle_pause"),
                 Action::TimerToggle,
             )?;
-            ui.button(timer_actions, translate!(c"Restart"), Action::TimerRestart)?;
-            ui.button(timer_actions, translate!(c"Cancel"), Action::TimerCancel)?;
+            ui.button(
+                timer_actions,
+                translate!(c"timer.controls.restart"),
+                Action::TimerRestart,
+            )?;
+            ui.button(
+                timer_actions,
+                translate!(c"timer.controls.cancel"),
+                Action::TimerCancel,
+            )?;
             Ok(ui)
         }
     }
@@ -434,23 +477,23 @@ impl Interface {
         let active = unsafe { tabview_get_tab_active(self.tabs)? };
         let mut alert = String::new();
         if self.alarm_alert.is_ringing() {
-            alert.push_str(translate!("Alarm! "));
+            alert.push_str(translate!("alerts.alarm_ringing"));
         }
         if self.timer.finished() {
-            alert.push_str(translate!("Timer finished! "));
+            alert.push_str(translate!("alerts.timer_finished"));
         }
         if self.alarm_alert.is_snoozed() {
-            alert.push_str(translate!("Alarm snoozed. "));
+            alert.push_str(translate!("alerts.alarm_snoozed"));
         }
         if self.persistence_error {
-            alert.push_str(translate!("Settings could not be saved. "));
+            alert.push_str(translate!("errors.settings_save_failed"));
         }
         if alert.is_empty() {
-            alert.push_str(translate!("Alerts are visible while Clock is running."));
+            alert.push_str(translate!("alerts.instructions"));
         }
         let clock = if active == 0 {
             wall.and_then(|wall| i64::try_from(wall).ok()).map_or_else(
-                || translate!("Host clock unavailable").to_string(),
+                || translate!("clock.errors.host_unavailable").to_string(),
                 |wall| {
                     let mut text = String::new();
                     let pattern = if self.settings.twelve_hour {
@@ -470,17 +513,17 @@ impl Interface {
             alarm = format!("{:02}:{:02} UTC\n", self.alarm_hour, self.alarm_minute);
             if let Some(saved) = self.settings.alarm {
                 if saved.enabled() {
-                    alarm.push_str(translate!("Enabled: "));
+                    alarm.push_str(translate!("alarm.status.enabled"));
                     alarm.push_str(&format!("{:02}:{:02} UTC\n", saved.hour, saved.minute));
                     if let Some(next) = saved.next().and_then(|value| i64::try_from(value).ok()) {
                         let _ =
                             embedded_i18n::write_unix_timestamp(&mut alarm, next, "%a %d %b %H:%M");
                     }
                 } else {
-                    alarm.push_str(translate!("Disabled"));
+                    alarm.push_str(translate!("alarm.status.disabled"));
                 }
             } else {
-                alarm.push_str(translate!("No saved alarm"));
+                alarm.push_str(translate!("alarm.status.no_saved_alarm"));
             }
         }
         let watch = if active == 2 {
@@ -494,7 +537,11 @@ impl Interface {
             let count = self.watch.laps().len();
             if count != 0 {
                 // Compiled locale forms; selection does not allocate.
-                let _ = embedded_i18n::translate_plural_write!(&mut laps, "Recorded laps", count);
+                let _ = embedded_i18n::translate_plural_write!(
+                    &mut laps,
+                    "stopwatch.laps.recorded",
+                    count
+                );
                 laps.push('\n');
             }
             for (index, lap) in self.watch.laps().iter().enumerate() {
@@ -505,7 +552,7 @@ impl Interface {
             format!(
                 "{}\n{}: {}",
                 format_duration(self.timer.remaining(now).div_ceil(1000) * 1000, false),
-                translate!("Duration"),
+                translate!("timer.labels.duration"),
                 format_duration(u64::from(self.timer_seconds) * 1000, false)
             )
         } else {

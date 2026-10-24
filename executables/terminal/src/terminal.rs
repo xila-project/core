@@ -102,7 +102,7 @@ impl Terminal {
 
                 lvgl::lv_textarea_set_placeholder_text(
                     input,
-                    translate!(c"Enter your command ...").as_ptr(),
+                    translate!(c"input.command_placeholder").as_ptr(),
                 );
                 lvgl::lv_obj_set_width(input, lvgl::lv_pct(100));
                 lvgl::lv_textarea_set_one_line(input, true);

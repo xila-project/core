@@ -1,10 +1,10 @@
 {
-  "Enter your command ...": "Enter your command ...",
-  "Failed to create object": "Failed to create object",
-  "Failed to execute: {}": "Failed to execute: {}",
-  "Failed to get task identifier: {}": "Failed to get task identifier: {}",
-  "Failed to mount device: {}": "Failed to mount device: {}",
-  "Graphics: {}": "Graphics: {}",
-  "Resource busy": "Resource busy",
-  "UTF-8: {}": "UTF-8: {}"
+  "input.command_placeholder": "Enter your command ...",
+  "errors.failed_to_create_object": "Failed to create object",
+  "errors.failed_to_execute": "Failed to execute: {}",
+  "errors.failed_to_get_task_identifier": "Failed to get task identifier: {}",
+  "errors.failed_to_mount_device": "Failed to mount device: {}",
+  "errors.graphics": "Graphics: {}",
+  "errors.resource_busy": "Resource busy",
+  "errors.utf_8": "UTF-8: {}"
 }

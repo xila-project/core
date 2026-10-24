@@ -1,4 +1,4 @@
 {
-  "Error handling file manager event: {:?}": "Error al procesar un evento del gestor de archivos: {:?}",
-  "Invalid path entered: {}": "Ruta introducida no válida: {}"
+  "errors.event_handling_failed": "Error al procesar un evento del gestor de archivos: {:?}",
+  "errors.invalid_entered_path": "Ruta introducida no válida: {}"
 }

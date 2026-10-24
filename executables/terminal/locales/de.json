@@ -1,10 +1,10 @@
 {
-  "Enter your command ...": "Befehl eingeben ...",
-  "Failed to create object": "Objekt konnte nicht erstellt werden",
-  "Failed to execute: {}": "Ausführung fehlgeschlagen: {}",
-  "Failed to get task identifier: {}": "Aufgabenkennung konnte nicht abgerufen werden: {}",
-  "Failed to mount device: {}": "Gerät konnte nicht eingebunden werden: {}",
-  "Graphics: {}": "Grafik: {}",
-  "Resource busy": "Ressource belegt",
-  "UTF-8: {}": "UTF-8: {}"
+  "input.command_placeholder": "Befehl eingeben ...",
+  "errors.failed_to_create_object": "Objekt konnte nicht erstellt werden",
+  "errors.failed_to_execute": "Ausführung fehlgeschlagen: {}",
+  "errors.failed_to_get_task_identifier": "Aufgabenkennung konnte nicht abgerufen werden: {}",
+  "errors.failed_to_mount_device": "Gerät konnte nicht eingebunden werden: {}",
+  "errors.graphics": "Grafik: {}",
+  "errors.resource_busy": "Ressource belegt",
+  "errors.utf_8": "UTF-8: {}"
 }

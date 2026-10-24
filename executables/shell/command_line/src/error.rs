@@ -90,176 +90,218 @@ impl Display for Error<'_> {
             Error::ExitStatus(status) => write!(formatter, "{status}"),
             Error::Syntax(error) => write!(
                 formatter,
-                translate!("Syntax error at byte {}: {}"),
+                translate!("errors.syntax_error_at_byte"),
                 error.position, error.message
             ),
             Error::FailedToWriteFile(error) => {
-                write!(formatter, translate!("Failed to write file: {}"), error)
+                write!(formatter, translate!("errors.failed_to_write_file"), error)
             }
-            Error::LineTooLong => write!(formatter, translate!("Line too long")),
+            Error::LineTooLong => write!(formatter, translate!("errors.line_too_long")),
             Error::FailedToRename(error) => {
-                write!(formatter, translate!("Failed to rename path: {}"), error)
+                write!(formatter, translate!("errors.failed_to_rename_path"), error)
             }
             Error::FailedToCreateSymbolicLink(error) => {
                 write!(
                     formatter,
-                    translate!("Failed to create symbolic link: {}"),
+                    translate!("errors.failed_to_create_symbolic_link"),
                     error
                 )
             }
             Error::FailedToReadSymbolicLink(error) => {
                 write!(
                     formatter,
-                    translate!("Failed to read symbolic link: {}"),
+                    translate!("errors.failed_to_read_symbolic_link"),
                     error
                 )
             }
             Error::AuthenticationFailed(error) => {
-                write!(formatter, translate!("Authentication failed: {}"), error)
+                write!(formatter, translate!("errors.authentication_failed"), error)
             }
             Error::FailedToSetTaskUser(error) => {
-                write!(formatter, translate!("Failed to set task user: {}"), error)
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_set_task_user"),
+                    error
+                )
             }
             Error::FailedToSetEnvironmentVariable(error) => {
                 write!(
                     formatter,
-                    translate!("Failed to set environment variable: {}"),
+                    translate!("errors.failed_to_set_environment_variable"),
                     error
                 )
             }
             Error::FailedToTokenizeCommandLine => {
-                write!(formatter, translate!("Failed to tokenize command line"))
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_tokenize_command_line")
+                )
             }
             Error::MissingFileNameAfterRedirectOut => {
                 write!(
                     formatter,
-                    translate!("Missing file name after redirect out")
+                    translate!("errors.missing_file_name_after_redirect_out")
                 )
             }
             Error::MissingFileNameAfterRedirectIn => {
-                write!(formatter, translate!("Missing file name after redirect in"))
+                write!(
+                    formatter,
+                    translate!("errors.missing_file_name_after_redirect_in")
+                )
             }
-            Error::MissingCommand => write!(formatter, translate!("Missing command")),
-            Error::CommandNotFound => write!(formatter, translate!("Command not found")),
+            Error::MissingCommand => {
+                write!(formatter, translate!("execution.errors.missing_command"))
+            }
+            Error::CommandNotFound => {
+                write!(formatter, translate!("execution.errors.command_not_found"))
+            }
             Error::FailedToGetTaskUser(error) => {
-                write!(formatter, translate!("Failed to get task user: {}"), error)
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_get_task_user"),
+                    error
+                )
             }
             Error::FailedToGetTaskIdentifier => {
-                write!(formatter, translate!("Failed to get task identifier"))
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_get_task_identifier")
+                )
             }
-            Error::InvalidPath => write!(formatter, translate!("Invalid path")),
+            Error::InvalidPath => write!(formatter, translate!("errors.invalid_path")),
             Error::FailedToGetPath => {
-                write!(formatter, translate!("Failed to get environment variable"))
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_get_environment_variable")
+                )
             }
             Error::FailedToExecuteCommand => {
-                write!(formatter, translate!("Failed to execute command"))
+                write!(formatter, translate!("errors.failed_to_execute_command"))
             }
             Error::FailedToJoinTask => {
-                write!(formatter, translate!("Failed to join task"))
+                write!(formatter, translate!("errors.failed_to_join_task"))
             }
             Error::InvalidNumberOfArguments => {
-                write!(formatter, translate!("Invalid number of arguments"))
+                write!(formatter, translate!("errors.invalid_number_of_arguments"))
             }
             Error::FailedToRemoveEnvironmentVariable(error) => {
                 write!(
                     formatter,
-                    translate!("Failed to remove environment variable: {}"),
+                    translate!("errors.failed_to_remove_environment_variable"),
                     error
                 )
             }
             Error::FailedToJoinPath => {
-                write!(formatter, translate!("Failed to join path"))
+                write!(formatter, translate!("errors.failed_to_join_path"))
             }
             Error::FailedToCreateDirectory(error) => {
                 write!(
                     formatter,
-                    translate!("Failed to create directory: {}"),
+                    translate!("errors.failed_to_create_directory"),
                     error
                 )
             }
             Error::FailedToRemoveDirectory(error) => {
                 write!(
                     formatter,
-                    translate!("Failed to remove directory: {}"),
+                    translate!("errors.failed_to_remove_directory"),
                     error
                 )
             }
             Error::FailedToOpenDirectory(error) => {
-                write!(formatter, translate!("Failed to open directory: {}"), error)
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_open_directory"),
+                    error
+                )
             }
             Error::FailedToOpenFile(error) => {
-                write!(formatter, translate!("Failed to open file: {}"), error)
+                write!(formatter, translate!("errors.failed_to_open_file"), error)
             }
             Error::FailedToReadFile(error) => {
-                write!(formatter, translate!("Failed to read file: {}"), error)
+                write!(formatter, translate!("errors.failed_to_read_file"), error)
             }
             Error::RequiresValue => {
-                write!(formatter, translate!("Option requires a value"))
+                write!(formatter, translate!("errors.option_requires_a_value"))
             }
             Error::DoesNotRequireValue => {
-                write!(formatter, translate!("Option does not require a value"))
+                write!(
+                    formatter,
+                    translate!("errors.option_does_not_require_a_value")
+                )
             }
             Error::InvalidArgument => {
-                write!(formatter, translate!("Invalid argument"))
+                write!(formatter, translate!("errors.invalid_argument"))
             }
             Error::MissingPositionalArgument(name) => {
                 write!(
                     formatter,
-                    translate!("Missing positional argument: {}"),
+                    translate!("errors.missing_positional_argument"),
                     name
                 )
             }
             Error::InvalidOption => {
-                write!(formatter, translate!("Invalid option"))
+                write!(formatter, translate!("errors.invalid_option"))
             }
             Error::FailedToGetMetadata(error) => {
-                write!(formatter, translate!("Failed to get metadata: {}"), error)
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_get_metadata"),
+                    error
+                )
             }
             Error::FailedToSetCurrentDirectory(error) => {
                 write!(
                     formatter,
-                    translate!("Failed to set current directory: {}"),
+                    translate!("errors.failed_to_set_current_directory"),
                     error
                 )
             }
             Error::FailedToReadDirectoryEntry(error) => {
                 write!(
                     formatter,
-                    translate!("Failed to read directory entry: {}"),
+                    translate!("errors.failed_to_read_directory_entry"),
                     error
                 )
             }
             Error::FailedToResolve(error) => {
-                write!(formatter, translate!("Failed to resolve domain: {}"), error)
-            }
-            Error::FailedToCreateSocket(error) => {
-                write!(formatter, translate!("Failed to create socket: {}"), error)
-            }
-            Error::ArgumentParsing(error) => {
-                write!(formatter, translate!("Argument parsing error: {}"), error)
-            }
-            Error::InvalidSleepDuration => {
                 write!(
                     formatter,
-                    translate!(
-                        "Invalid sleep duration: use a nonnegative integer with ms, s, m, or h (maximum 18446744073709551615 nanoseconds)"
-                    )
+                    translate!("errors.failed_to_resolve_domain"),
+                    error
                 )
+            }
+            Error::FailedToCreateSocket(error) => {
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_create_socket"),
+                    error
+                )
+            }
+            Error::ArgumentParsing(error) => {
+                write!(
+                    formatter,
+                    translate!("errors.argument_parsing_error"),
+                    error
+                )
+            }
+            Error::InvalidSleepDuration => {
+                write!(formatter, translate!("sleep.errors.invalid_duration"))
             }
             Error::FailedToSetPermissions(error) => {
                 write!(
                     formatter,
-                    translate!("Failed to set permissions: {}"),
+                    translate!("errors.failed_to_set_permissions"),
                     error
                 )
             }
             Error::Format => {
-                write!(formatter, translate!("Format error"))
+                write!(formatter, translate!("errors.format_failed"))
             }
             Error::FailedToReadEnvironmentVariable(error) => {
                 write!(
                     formatter,
-                    translate!("Failed to read environment variable: {}"),
+                    translate!("errors.failed_to_read_environment_variable"),
                     error
                 )
             }

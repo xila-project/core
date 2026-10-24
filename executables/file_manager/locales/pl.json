@@ -1,4 +1,4 @@
 {
-  "Error handling file manager event: {:?}": "Błąd obsługi zdarzenia menedżera plików: {:?}",
-  "Invalid path entered: {}": "Wprowadzono nieprawidłową ścieżkę: {}"
+  "errors.event_handling_failed": "Błąd obsługi zdarzenia menedżera plików: {:?}",
+  "errors.invalid_entered_path": "Wprowadzono nieprawidłową ścieżkę: {}"
 }

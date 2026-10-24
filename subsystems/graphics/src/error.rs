@@ -23,18 +23,18 @@ pub enum Error {
 impl Display for Error {
     fn fmt(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
         let string = match self {
-            Error::InvalidReference => translate!("Invalid reference"),
-            Error::AlreadyInitialized => translate!("Already initialized"),
-            Error::NotInitialized => translate!("Not initialized"),
-            Error::OutOfMemory => translate!("Out of memory"),
-            Error::AlreadyInUse => translate!("Already in use"),
-            Error::FailedToRegister => translate!("Failed to register"),
-            Error::FailedToGetResolution => translate!("Failed to get resolution"),
-            Error::NotRegistered => translate!("Not registered"),
-            Error::NotAvailable => translate!("Not available"),
-            Error::FailedToCreateObject => translate!("Failed to create object"),
-            Error::InvalidWindowIdentifier => translate!("Invalid window identifier"),
-            Error::InvalidParameter => translate!("Invalid parameter"),
+            Error::InvalidReference => translate!("errors.invalid_reference"),
+            Error::AlreadyInitialized => translate!("errors.already_initialized"),
+            Error::NotInitialized => translate!("errors.not_initialized"),
+            Error::OutOfMemory => translate!("errors.out_of_memory"),
+            Error::AlreadyInUse => translate!("errors.already_in_use"),
+            Error::FailedToRegister => translate!("errors.failed_to_register"),
+            Error::FailedToGetResolution => translate!("errors.failed_to_get_resolution"),
+            Error::NotRegistered => translate!("errors.not_registered"),
+            Error::NotAvailable => translate!("errors.not_available"),
+            Error::FailedToCreateObject => translate!("errors.failed_to_create_object"),
+            Error::InvalidWindowIdentifier => translate!("errors.invalid_window_identifier"),
+            Error::InvalidParameter => translate!("errors.invalid_parameter"),
         };
 
         write!(formatter, "{string}")

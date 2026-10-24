@@ -1,13 +1,13 @@
 {
-  "Already initialized": "已初始化",
-  "Duplicate group identifier": "用户组标识符重复",
-  "Duplicate group name": "用户组名称重复",
-  "Duplicate user identifier": "用户标识符重复",
-  "Duplicate user name": "用户名重复",
-  "Invalid group identifier": "用户组标识符无效",
-  "Invalid user identifier": "用户标识符无效",
-  "Not initialized": "未初始化",
-  "Poisoned lock": "锁已中毒",
-  "Too many groups": "用户组过多",
-  "Too many users": "用户过多"
+  "errors.already_initialized": "已初始化",
+  "errors.duplicate_group_identifier": "用户组标识符重复",
+  "errors.duplicate_group_name": "用户组名称重复",
+  "errors.duplicate_user_identifier": "用户标识符重复",
+  "errors.duplicate_user_name": "用户名重复",
+  "errors.invalid_group_identifier": "用户组标识符无效",
+  "errors.invalid_user_identifier": "用户标识符无效",
+  "errors.not_initialized": "未初始化",
+  "errors.poisoned_lock": "锁已中毒",
+  "errors.too_many_groups": "用户组过多",
+  "errors.too_many_users": "用户过多"
 }

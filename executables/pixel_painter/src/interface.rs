@@ -57,7 +57,7 @@ pub fn run() -> wasm::Result<()> {
                     }
                     return Ok(());
                 }
-                ui.status(translate!("Unsaved drawing - close again to discard"))?;
+                ui.status(translate!("warnings.unsaved_close_again"))?;
                 ui.confirm_close = Some(ui.revision);
             } else if target == ui.canvas {
                 if code == EventCode::Pressed as u32 || code == EventCode::Pressing as u32 {
@@ -157,10 +157,10 @@ impl Interface {
             object_set_width(actions, percentage(100)?)?;
             object_set_height(actions, 68)?;
             let action_map = [
-                translate!(c"Undo").as_ptr(),
-                translate!(c"Clear").as_ptr(),
-                translate!(c"Save").as_ptr(),
-                translate!(c"Open").as_ptr(),
+                translate!(c"controls.undo").as_ptr(),
+                translate!(c"controls.clear").as_ptr(),
+                translate!(c"controls.save").as_ptr(),
+                translate!(c"controls.open").as_ptr(),
                 c"\n".as_ptr(),
                 c"1 px".as_ptr(),
                 c"3 px".as_ptr(),
@@ -207,7 +207,7 @@ impl Interface {
                 _palette_map: palette_map,
                 _action_map: action_map,
             };
-            ui.status(translate!("Ready - white erases"))?;
+            ui.status(translate!("status.ready_white_erases"))?;
             ui.upload()?;
             Ok(ui)
         }
@@ -233,7 +233,7 @@ impl Interface {
     fn file_action(&mut self, opening: bool) -> wasm::Result<bool> {
         if opening && self.drawing.is_dirty() && self.confirm_open != Some(self.revision) {
             self.confirm_open = Some(self.revision);
-            self.status(translate!("Unsaved drawing - Open again to discard"))?;
+            self.status(translate!("warnings.unsaved_open_again"))?;
             return Ok(false);
         }
         self.confirm_open = None;
@@ -246,26 +246,24 @@ impl Interface {
             .to_str()
             .unwrap_or("");
         if !path.starts_with('/') || path.ends_with('/') {
-            self.status(translate!("Enter an absolute file path"))?;
+            self.status(translate!("file_path.placeholder"))?;
             return Ok(false);
         }
         if opening {
             match storage::read(path) {
                 Ok(bytes) if self.drawing.replace_from_bytes(&bytes).is_ok() => {
                     self.revision = self.revision.wrapping_add(1);
-                    self.status(translate!("Opened"))?;
+                    self.status(translate!("status.opened"))?;
                     return Ok(true);
                 }
-                Ok(_) => self.status(translate!("Invalid Pixel Painter file - drawing kept"))?,
-                Err(_) => self.status(translate!("Open failed - check path and storage"))?,
+                Ok(_) => self.status(translate!("errors.invalid_file_drawing_preserved"))?,
+                Err(_) => self.status(translate!("errors.open_failed"))?,
             }
         } else if storage::write(path, &self.drawing.encode()).is_ok() {
             self.drawing.mark_saved();
-            self.status(translate!("Saved"))?;
+            self.status(translate!("status.saved"))?;
         } else {
-            self.status(translate!(
-                "Save failed - drawing kept; check path and storage"
-            ))?;
+            self.status(translate!("errors.save_failed_drawing_preserved"))?;
         }
         Ok(false)
     }

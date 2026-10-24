@@ -1,4 +1,4 @@
 {
-  "Error handling file manager event: {:?}": "处理文件管理器事件时出错：{:?}",
-  "Invalid path entered: {}": "输入的路径无效：{}"
+  "errors.event_handling_failed": "处理文件管理器事件时出错：{:?}",
+  "errors.invalid_entered_path": "输入的路径无效：{}"
 }

@@ -1,5 +1,5 @@
 {
-  "Device error: {}": "Erro no dispositivo: {}",
-  "Time module already initialized": "O módulo de tempo já foi inicializado",
-  "Time module not initialized": "O módulo de tempo não foi inicializado"
+  "errors.device_error": "Erro no dispositivo: {}",
+  "errors.time_module_already_initialized": "O módulo de tempo já foi inicializado",
+  "errors.time_module_not_initialized": "O módulo de tempo não foi inicializado"
 }

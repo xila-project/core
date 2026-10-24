@@ -57,29 +57,33 @@ impl Display for Error {
     fn fmt(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
             Self::Graphics(error) => {
-                write!(formatter, translate!("Graphics: {}"), error)
+                write!(formatter, translate!("errors.graphics"), error)
             }
             Self::FailedToCreateObject => {
-                write!(formatter, translate!("Failed to create object"))
+                write!(formatter, translate!("errors.failed_to_create_object"))
             }
             Self::Utf8(error) => {
-                write!(formatter, translate!("UTF-8: {}"), error)
+                write!(formatter, translate!("errors.utf_8"), error)
             }
             Self::FailedToMountDevice(error) => {
-                write!(formatter, translate!("Failed to mount device: {}"), error)
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_mount_device"),
+                    error
+                )
             }
             Self::FailedToGetTaskIdentifier(error) => {
                 write!(
                     formatter,
-                    translate!("Failed to get task identifier: {}"),
+                    translate!("errors.failed_to_get_task_identifier"),
                     error
                 )
             }
             Self::FailedToExecute(error) => {
-                write!(formatter, translate!("Failed to execute: {}"), error)
+                write!(formatter, translate!("errors.failed_to_execute"), error)
             }
             Self::RessourceBusy => {
-                write!(formatter, translate!("Resource busy"))
+                write!(formatter, translate!("errors.resource_busy"))
             }
         }
     }

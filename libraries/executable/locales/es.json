@@ -1,5 +1,5 @@
 {
-  "Failed to get main function": "No se pudo obtener la función principal",
-  "Invalid stack size": "Tamaño de pila no válido",
-  "Permission denied": "Permiso denegado"
+  "errors.failed_to_get_main_function": "No se pudo obtener la función principal",
+  "errors.invalid_stack_size": "Tamaño de pila no válido",
+  "errors.permission_denied": "Permiso denegado"
 }

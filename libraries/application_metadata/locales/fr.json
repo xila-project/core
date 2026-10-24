@@ -1,5 +1,5 @@
 {
-  "Pixel Painter": "Pixel Painter",
-  "Settings": "Paramètres",
-  "Text Editor": "Éditeur de texte"
+  "applications.pixel_painter": "Pixel Painter",
+  "applications.settings": "Paramètres",
+  "applications.text_editor": "Éditeur de texte"
 }

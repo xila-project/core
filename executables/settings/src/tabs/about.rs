@@ -33,7 +33,7 @@ impl AboutTab {
         parent_tabview: *mut lvgl::lv_obj_t,
     ) -> Result<*mut lvgl::lv_obj_t> {
         self.container =
-            unsafe { lvgl::lv_tabview_add_tab(parent_tabview, translate!(c"About").as_ptr()) };
+            unsafe { lvgl::lv_tabview_add_tab(parent_tabview, translate!(c"tabs.about").as_ptr()) };
 
         if self.container.is_null() {
             return Err(crate::error::Error::FailedToCreateUiElement);
@@ -53,40 +53,40 @@ impl AboutTab {
         }
 
         // Populate items - convert CStr to String
-        self.create_list_item(translate!(c"Operating System:"), c"Xila")?;
+        self.create_list_item(translate!(c"about.fields.operating_system"), c"Xila")?;
 
         let description = CString::new(about::get_description())
             .map_err(|_| crate::error::Error::FailedToCreateUiElement)?;
-        self.create_list_item(translate!(c"Description:"), &description)?;
+        self.create_list_item(translate!(c"about.fields.description"), &description)?;
 
         let authors = CString::new(about::get_authors())
             .map_err(|_| crate::error::Error::FailedToCreateUiElement)?;
-        self.create_list_item(translate!(c"Developed by:"), &authors)?;
+        self.create_list_item(translate!(c"about.fields.developer"), &authors)?;
 
         let license = CString::new(about::get_license())
             .map_err(|_| crate::error::Error::FailedToCreateUiElement)?;
-        self.create_list_item(translate!(c"License:"), &license)?;
+        self.create_list_item(translate!(c"about.fields.license"), &license)?;
 
         let version = CString::new(about::get_version_string())
             .map_err(|_| crate::error::Error::FailedToCreateUiElement)?;
-        self.create_list_item(translate!(c"Version:"), &version)?;
+        self.create_list_item(translate!(c"about.fields.version"), &version)?;
 
         let locale = CString::new(format!(
             "{} ({})",
             internationalization::get_locale(),
             internationalization::get_fallback_locale(),
         ))?;
-        self.create_list_item(translate!(c"Locale:"), &locale)?;
+        self.create_list_item(translate!(c"general.fields.locale"), &locale)?;
 
         let memory = memory::global_manager().get_total_size();
         let memory = Unit::new(memory as f32, BYTES_SUFFIX.symbol);
         let memory = CString::new(format!("{}", memory))
             .map_err(|_| crate::error::Error::FailedToCreateUiElement)?;
-        self.create_list_item(translate!(c"Memory:"), &memory)?;
+        self.create_list_item(translate!(c"about.fields.memory"), &memory)?;
 
         let cpu_summary = CString::new(self.get_cpu_summary().await)
             .map_err(|_| crate::error::Error::FailedToCreateUiElement)?;
-        self.create_list_item(translate!(c"CPU:"), &cpu_summary)?;
+        self.create_list_item(translate!(c"about.fields.cpu"), &cpu_summary)?;
 
         Ok(self.container)
     }

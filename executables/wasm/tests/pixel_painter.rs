@@ -100,7 +100,7 @@ async fn real_painter_guest_draws_saves_opens_and_preserves_work_on_errors() {
     )
     .await
     .unwrap();
-    status(manager, "Ready - white erases").await;
+    status(manager, "status.ready_white_erases").await;
     // Queue two distinct pointer positions before the guest drains either one.
     // Re-reading the current input position at dequeue time would lose the start.
     {
@@ -134,7 +134,7 @@ async fn real_painter_guest_draws_saves_opens_and_preserves_work_on_errors() {
     }
     xila::task::sleep(Duration::from_millis(50)).await;
     action(manager, 2).await;
-    status(manager, "Saved").await;
+    status(manager, "status.saved").await;
     let path = "/users/0/applications/pixel_painter/data/drawing.xpnt";
     let mut saved = Vec::new();
     File::read_from_path(vfs, task, path, &mut saved)
@@ -150,21 +150,21 @@ async fn real_painter_guest_draws_saves_opens_and_preserves_work_on_errors() {
     action(manager, 0).await; // Undo clear.
     xila::task::sleep(Duration::from_millis(30)).await;
     action(manager, 2).await;
-    status(manager, "Saved").await;
+    status(manager, "status.saved").await;
     let mut after_undo = Vec::new();
     File::read_from_path(vfs, task, path, &mut after_undo)
         .await
         .unwrap();
     assert_eq!(after_undo, saved);
     action(manager, 3).await;
-    status(manager, "Opened").await;
+    status(manager, "status.opened").await;
     File::write_to_path(vfs, task, path, b"broken")
         .await
         .unwrap();
     action(manager, 3).await;
-    status(manager, "Invalid Pixel Painter file - drawing kept").await;
+    status(manager, "errors.invalid_file_drawing_preserved").await;
     action(manager, 2).await;
-    status(manager, "Saved").await;
+    status(manager, "status.saved").await;
     File::read_from_path(vfs, task, path, &mut after_undo)
         .await
         .unwrap();
@@ -172,9 +172,9 @@ async fn real_painter_guest_draws_saves_opens_and_preserves_work_on_errors() {
     action(manager, 1).await;
     xila::task::sleep(Duration::from_millis(30)).await;
     action(manager, 3).await;
-    status(manager, "Unsaved drawing - Open again to discard").await;
+    status(manager, "warnings.unsaved_open_again").await;
     action(manager, 3).await;
-    status(manager, "Opened").await;
+    status(manager, "status.opened").await;
     let root = manager.get_window_identifier(0).await.unwrap();
     {
         let _lock = manager.synchronous_lock();
@@ -185,11 +185,7 @@ async fn real_painter_guest_draws_saves_opens_and_preserves_work_on_errors() {
         }
     }
     action(manager, 2).await;
-    status(
-        manager,
-        "Save failed - drawing kept; check path and storage",
-    )
-    .await;
+    status(manager, "errors.save_failed_drawing_preserved").await;
     {
         let _lock = manager.synchronous_lock();
         let path = std::ffi::CString::new(path).unwrap();
@@ -199,7 +195,7 @@ async fn real_painter_guest_draws_saves_opens_and_preserves_work_on_errors() {
         }
     }
     action(manager, 2).await;
-    status(manager, "Saved").await;
+    status(manager, "status.saved").await;
     File::read_from_path(vfs, task, path, &mut after_undo)
         .await
         .unwrap();
@@ -207,7 +203,7 @@ async fn real_painter_guest_draws_saves_opens_and_preserves_work_on_errors() {
     action(manager, 1).await;
     xila::task::sleep(Duration::from_millis(30)).await;
     manager.send_window_close_request(root).await.unwrap();
-    status(manager, "Unsaved drawing - close again to discard").await;
+    status(manager, "warnings.unsaved_close_again").await;
     manager.send_window_close_request(root).await.unwrap();
     let mut join = core::pin::pin!(handle.join());
     for _ in 0..400 {
