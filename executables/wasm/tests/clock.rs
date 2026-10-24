@@ -89,7 +89,7 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
     let context = support::context(&standard, Some(manager));
     standard.context = context;
     let task = context.task_manager.get_current_task_identifier().await;
-    let binary = xila::executable::build_crate("clock").unwrap();
+    let binary = xila::executable::build_crate("xila-clock").unwrap();
     drivers_std::loader::load_to_virtual_file_system(
         context.task_manager,
         context.virtual_file_system,

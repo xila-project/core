@@ -21,7 +21,7 @@ async fn main() {
     let virtual_file_system = context.virtual_file_system;
     let task = context.task_manager.get_current_task_identifier().await;
 
-    let binary_path = build_crate("wasm_wasm_test").unwrap();
+    let binary_path = build_crate("xila-wasm-wasm-test").unwrap();
     load_to_virtual_file_system(
         context.task_manager,
         virtual_file_system,

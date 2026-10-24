@@ -74,7 +74,7 @@ async fn real_painter_guest_draws_saves_opens_and_preserves_work_on_errors() {
     )
     .await
     .unwrap();
-    let binary = xila::executable::build_crate("pixel_painter").unwrap();
+    let binary = xila::executable::build_crate("xila-pixel-painter").unwrap();
     drivers_std::loader::load_to_virtual_file_system(
         context.task_manager,
         vfs,
