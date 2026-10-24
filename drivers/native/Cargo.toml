@@ -3,6 +3,9 @@ name = "xila-drivers-native"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "drivers_native"
+
 [features]
 default = []
 audio = ["dep:audio", "dep:nanoaudio", "dep:nanoaudio-cpal"]

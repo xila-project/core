@@ -147,6 +147,18 @@ class CargoPackageNames(unittest.TestCase):
 
         self.assertEqual(actual, EXPECTED_BINARY_TARGETS)
 
+        native_driver = next(
+            package
+            for package in metadata["packages"]
+            if package["name"] == "xila-drivers-native"
+        )
+        library_names = [
+            target["name"]
+            for target in native_driver["targets"]
+            if "lib" in target["kind"]
+        ]
+        self.assertEqual(library_names, ["drivers_native"])
+
     def test_cargo_package_selectors_use_current_package_identities(self):
         allowed_names = set(EXPECTED_PACKAGE_NAMES.values())
         selector = re.compile(r"(?:--package(?:=|\s+)|-p\s+)([A-Za-z0-9_-]+)")
