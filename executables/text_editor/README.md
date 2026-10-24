@@ -7,6 +7,6 @@ Enter an absolute file path, then choose **New** or **Open**. Use **Previous** a
 Build and test the storage model with:
 
 ```sh
-cargo test -p text_editor
-cargo build -p text_editor --target wasm32-wasip1 --profile release-wasm
+cargo test -p xila-text-editor
+cargo build -p xila-text-editor --target wasm32-wasip1 --profile release-wasm
 ```

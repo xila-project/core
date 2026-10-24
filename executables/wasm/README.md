@@ -32,12 +32,12 @@ rustup target add --toolchain stable wasm32-wasip1
 
 # Headless acceptance: builds the real guest, enters 1 + 2 = through LVGL
 # button events, checks the displayed result, requests close, checks cleanup.
-cargo +stable test -p wasm --features graphics \
+cargo +stable test -p xila-wasm --features graphics \
   --target x86_64-unknown-linux-gnu --test calculator
 
 # Interactive native display. Click calculator buttons; press Enter in the
 # launching terminal to request close and let the test finish successfully.
-RUSTUP_TOOLCHAIN=stable cargo test -p calculator \
+RUSTUP_TOOLCHAIN=stable cargo test -p xila-calculator \
   --target x86_64-unknown-linux-gnu --test calculator_test \
   -- --ignored --nocapture
 ```
@@ -49,9 +49,9 @@ The guest handles that event as a numeric code, not an invalid Rust enum variant
 Other focused tests:
 
 ```sh
-cargo +stable test -p graphics_bindgen --target x86_64-unknown-linux-gnu
-cargo +stable test -p wasm --features graphics --target x86_64-unknown-linux-gnu
-cargo +stable test -p wasm --no-default-features \
+cargo +stable test -p xila-graphics-bindgen --target x86_64-unknown-linux-gnu
+cargo +stable test -p xila-wasm --features graphics --target x86_64-unknown-linux-gnu
+cargo +stable test -p xila-wasm --no-default-features \
   --features host,graphics,memory_64 --target x86_64-unknown-linux-gnu
 ```
 
@@ -78,7 +78,7 @@ append-only IDs starting at `0xf000`, preserving existing call numbering.
 Run the headless Wasm app acceptance and ABI boundary tests with:
 
 ```sh
-cargo test -p wasm --features graphics,xila/graphics_rendering_xrgb8888 \
+cargo test -p xila-wasm --features graphics,xila/graphics_rendering_xrgb8888 \
   --test graphics_canvas --test pixel_painter
 ```
 

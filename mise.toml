@@ -21,7 +21,7 @@ run = "cargo check --target x86_64-unknown-linux-gnu --features graphics,abi_def
 
 [tasks."check:guest"]
 description = "Check the WASM guest target"
-run = "cargo check --target wasm32-unknown-unknown --package wasm --no-default-features --features default_guest"
+run = "cargo check --target wasm32-unknown-unknown --package xila-wasm --no-default-features --features default_guest"
 
 [tasks."localization:host-check"]
 description = "Strictly check host localization"
@@ -31,7 +31,7 @@ run = "cargo check --workspace --all-targets --target x86_64-unknown-linux-gnu -
 [tasks."localization:guest-check"]
 description = "Strictly check WASI application localization"
 env = { EMBEDDED_I18N_STRICT = "1" }
-run = "cargo check --target wasm32-wasip1 --package calculator --package weather --package clock --package pixel_painter --package text_editor --package synth"
+run = "cargo check --target wasm32-wasip1 --package xila-calculator --package xila-weather --package xila-clock --package xila-pixel-painter --package xila-text-editor --package xila-synth"
 
 [tasks."localization:lint"]
 description = "Check semantic translation keys, catalogs and Rust macro references"
@@ -47,7 +47,7 @@ run = "cargo clippy --package xila --package audio --package drivers_headless --
 
 [tasks."clippy:guest"]
 description = "Run Clippy for the WASM guest target"
-run = "cargo clippy --package wasm --no-default-features --features default_guest --target wasm32-unknown-unknown --all-targets -- -D warnings"
+run = "cargo clippy --package xila-wasm --no-default-features --features default_guest --target wasm32-unknown-unknown --all-targets -- -D warnings"
 
 [tasks."clippy:all"]
 description = "Run host and guest Clippy"
@@ -59,7 +59,7 @@ run = "cargo doc --features graphics,abi_definitions,graphics_rendering_xrgb8888
 
 [tasks."docs:guest"]
 description = "Build guest documentation"
-run = "cargo doc --package wasm --no-default-features --features default_guest --target wasm32-unknown-unknown"
+run = "cargo doc --package xila-wasm --no-default-features --features default_guest --target wasm32-unknown-unknown"
 
 [tasks."docs:all"]
 description = "Build host and guest documentation"
@@ -90,11 +90,11 @@ run = "cargo build"
 
 [tasks."build:profiling"]
 description = "Build the native profiling binary"
-run = "cargo build --package native_example --profile profiling"
+run = "cargo build --package xila-native-example --profile profiling"
 
 [tasks."build:applications"]
 description = "Build WASI applications for profiling images"
-run = "cargo build --locked --package calculator --package weather --package clock --package pixel_painter --package text_editor --package synth --target wasm32-wasip1 --profile release-wasm"
+run = "cargo build --locked --package xila-calculator --package xila-weather --package xila-clock --package xila-pixel-painter --package xila-text-editor --package xila-synth --target wasm32-wasip1 --profile release-wasm"
 
 [tasks."image:native"]
 description = "Build the native filesystem seed image"
@@ -103,15 +103,15 @@ run = """
 set -eu
 mkdir -p target/seed/native
 rm -f target/seed/native/seed.img
-cargo run --locked --package fs_image -- target/seed/native/seed.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release-wasm
+cargo run --locked --package xila-fs-image -- target/seed/native/seed.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release-wasm
 """
 
 [tasks."image:wasm"]
 description = "Build the WASM filesystem seed image"
 run = """
 set -eu
-cargo build --locked --package calculator --package weather --package clock --package pixel_painter --package text_editor --package synth --target wasm32-wasip1 --release
+cargo build --locked --package xila-calculator --package xila-weather --package xila-clock --package xila-pixel-painter --package xila-text-editor --package xila-synth --target wasm32-wasip1 --release
 mkdir -p "${CARGO_TARGET_DIR:-target}/seed/wasm"
 rm -f "${CARGO_TARGET_DIR:-target}/seed/wasm/seed.img"
-cargo run --locked --package fs_image -- "${CARGO_TARGET_DIR:-target}/seed/wasm/seed.img" 16777216 --bundle wasm --applications-dir "${CARGO_TARGET_DIR:-target}/wasm32-wasip1/release"
+cargo run --locked --package xila-fs-image -- "${CARGO_TARGET_DIR:-target}/seed/wasm/seed.img" 16777216 --bundle wasm --applications-dir "${CARGO_TARGET_DIR:-target}/wasm32-wasip1/release"
 """
