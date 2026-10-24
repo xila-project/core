@@ -123,11 +123,20 @@ pub async fn main(
 impl Shell {
     pub async fn new(standard: Standard<'static>) -> Self {
         let context = standard.context;
+        let task = context.task_manager.get_current_task_identifier().await;
+        let current_directory = context
+            .task_manager
+            .get_environment_variable(task, "Current_directory")
+            .await
+            .ok()
+            .and_then(|value| PathOwned::new(value.get_value().to_string()))
+            .filter(|path| path.is_absolute())
+            .unwrap_or_else(|| Path::ROOT.to_owned());
         Self {
             context,
             standard,
-            task: context.task_manager.get_current_task_identifier().await,
-            current_directory: Path::ROOT.to_owned(),
+            task,
+            current_directory,
             running: true,
             user: String::new(),
             host: String::new(),
@@ -233,11 +242,18 @@ impl Shell {
             .map_err(|_| Error::FailedToGetPath)?
             .get_value()
             .to_string();
-        if !arguments.is_empty() {
-            let depth = manager
+        let mut depth_changed = false;
+        let previous_depth = if arguments.is_empty() {
+            None
+        } else {
+            manager
                 .get_environment_variable(self.task, SCRIPT_DEPTH_VARIABLE)
                 .await
                 .ok()
+        };
+        if !arguments.is_empty() {
+            let depth = previous_depth
+                .as_ref()
                 .and_then(|value| value.get_value().parse::<usize>().ok())
                 .unwrap_or(0);
             if depth >= MAX_SHELL_DEPTH {
@@ -266,30 +282,33 @@ impl Shell {
                 } else {
                     self.diagnostic(error).await;
                 }
-            } else if arguments[0] == "-s" {
-                if arguments.len() != 2 {
-                    self.diagnostic(xila::internationalization::translate!(
-                        "Usage: shell -s PATH"
-                    ))
-                    .await;
-                    self.last_status = 2;
-                } else {
-                    self.last_status = self.run_script(&arguments[1]).await;
-                }
-            } else if arguments[0] == "-c" {
-                if arguments.len() != 2 {
-                    self.diagnostic(xila::internationalization::translate!(
-                        "Usage: shell -c COMMAND"
-                    ))
-                    .await;
-                    self.last_status = 2;
-                } else if let Err(error) = self.execute_line(&arguments[1]).await {
-                    self.last_status = 2;
-                    self.diagnostic(error).await;
-                }
             } else {
-                // Already separated arguments remain literal; do not parse caller-provided data as shell syntax.
-                self.last_status = self.run_arguments(&arguments).await;
+                depth_changed = true;
+                if arguments[0] == "-s" {
+                    if arguments.len() != 2 {
+                        self.diagnostic(xila::internationalization::translate!(
+                            "Usage: shell -s PATH"
+                        ))
+                        .await;
+                        self.last_status = 2;
+                    } else {
+                        self.last_status = self.run_script(&arguments[1]).await;
+                    }
+                } else if arguments[0] == "-c" {
+                    if arguments.len() != 2 {
+                        self.diagnostic(xila::internationalization::translate!(
+                            "Usage: shell -c COMMAND"
+                        ))
+                        .await;
+                        self.last_status = 2;
+                    } else if let Err(error) = self.execute_line(&arguments[1]).await {
+                        self.last_status = 2;
+                        self.diagnostic(error).await;
+                    }
+                } else {
+                    // Already separated arguments remain literal; do not parse caller-provided data as shell syntax.
+                    self.last_status = self.run_arguments(&arguments).await;
+                }
             }
         } else {
             self.main_interactive().await?;
@@ -303,6 +322,27 @@ impl Shell {
         {
             self.last_status = 1;
         }
+        if depth_changed {
+            let result = match previous_depth {
+                Some(value) => {
+                    manager
+                        .set_environment_variable(
+                            self.task,
+                            SCRIPT_DEPTH_VARIABLE,
+                            value.get_value(),
+                        )
+                        .await
+                }
+                None => {
+                    manager
+                        .remove_environment_variable(self.task, SCRIPT_DEPTH_VARIABLE)
+                        .await
+                }
+            };
+            if result.is_err() {
+                self.last_status = 1;
+            }
+        }
         match NonZeroUsize::new(self.last_status) {
             Some(status) => Err(status),
             None => Ok(()),
@@ -310,11 +350,12 @@ impl Shell {
     }
 
     async fn run_script(&mut self, script_path: &str) -> usize {
+        self.last_status = 0;
         let requested_path = Path::from_str(script_path);
         let path = if requested_path.is_absolute() {
             requested_path.to_owned()
         } else {
-            let Some(path) = self.current_directory.join(requested_path) else {
+            let Some(path) = self.current_directory.clone().join(requested_path) else {
                 self.script_diagnostic(script_path, None, Error::InvalidPath)
                     .await;
                 return 1;
@@ -385,13 +426,13 @@ impl Shell {
         self.last_status
     }
 
-    async fn read_script_line(
-        file: &mut File<'_>,
-        line: &mut Vec<u8>,
-    ) -> Result<bool> {
+    async fn read_script_line(file: &mut File<'_>, line: &mut Vec<u8>) -> Result<bool> {
         loop {
             let mut byte = [0; 1];
-            let count = file.read(&mut byte).await.map_err(Error::FailedToReadFile)?;
+            let count = file
+                .read(&mut byte)
+                .await
+                .map_err(Error::FailedToReadFile)?;
             if count == 0 {
                 return if line.is_empty() {
                     Ok(false)
@@ -428,7 +469,10 @@ impl Shell {
         match line {
             Some(line) => {
                 let _ = output
-                    .write(self.standard.error(), format_args!("{path}:{line}: {error}\n"))
+                    .write(
+                        self.standard.error(),
+                        format_args!("{path}:{line}: {error}\n"),
+                    )
                     .await;
             }
             None => {
