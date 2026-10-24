@@ -267,7 +267,7 @@ depends = ["ci:packages-host"]
 run = "cargo clippy -p audio -p drivers_native --features drivers_native/audio --all-targets -- -D warnings"
 
 [tasks."ci:host-tests"]
-extends = "ci:rust-format"
+extends = "ci:rust-wasi"
 description = "Test the host workspace"
 depends = ["ci:packages-host"]
 run = "cargo test --locked --workspace"
