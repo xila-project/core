@@ -73,5 +73,8 @@
   "ICMP bytes from.other": "byte da",
   "time": "tempo",
   "DNS records for domain.one": "record per il dominio",
-  "DNS records for domain.other": "record per il dominio"
+  "DNS records for domain.other": "record per il dominio",
+  "Failed to set shell nesting depth": "Impossibile impostare il livello di annidamento della shell",
+  "Maximum nested shell depth exceeded": "Livello massimo di annidamento della shell superato",
+  "Usage: shell -s PATH": "Uso: shell -s PERCORSO"
 }

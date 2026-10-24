@@ -79,5 +79,8 @@
   "ICMP bytes from.few": "bajty od",
   "ICMP bytes from.many": "bajtów od",
   "DNS records for domain.few": "rekordy dla domeny",
-  "DNS records for domain.many": "rekordów dla domeny"
+  "DNS records for domain.many": "rekordów dla domeny",
+  "Failed to set shell nesting depth": "Nie udało się ustawić głębokości zagnieżdżenia powłoki",
+  "Maximum nested shell depth exceeded": "Przekroczono maksymalną głębokość zagnieżdżenia powłoki",
+  "Usage: shell -s PATH": "Użycie: shell -s ŚCIEŻKA"
 }

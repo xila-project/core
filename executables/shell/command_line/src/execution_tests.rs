@@ -54,6 +54,275 @@ async fn contents(shell: &Shell, path: &str) -> String {
     String::from_utf8(output).unwrap()
 }
 
+async fn write_file(shell: &Shell, path: &str, bytes: &[u8]) {
+    let mut file = File::open(
+        shell.context.virtual_file_system,
+        shell.task,
+        path,
+        Flags::new(AccessFlags::Write, Some(CreateFlags::CREATE_TRUNCATE), None),
+    )
+    .await
+    .unwrap();
+    write_all(&mut file, bytes).await.unwrap();
+    file.close(shell.context.virtual_file_system).await.unwrap();
+}
+
+#[xila::task::test(task_path = xila::task)]
+async fn launched_scripts_inherit_the_callers_directory() {
+    let mut shell = shell().await;
+    mount_executables!(
+        shell.context,
+        shell.context.virtual_file_system,
+        shell.task,
+        &[(&"/applications/executables/shell", crate::ShellExecutable)]
+    )
+    .await
+    .unwrap();
+    write_file(
+        &shell,
+        "/temporary/job",
+        b"pwd\necho child > marker\ncd /\n",
+    )
+    .await;
+    assert_eq!(shell.execute_line("cd /temporary").await.unwrap(), 0);
+
+    for path in ["job", "/temporary/job"] {
+        assert_eq!(
+            shell
+                .execute_line(&format!("/applications/executables/shell -s {path}"))
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(contents(&shell, "/temporary/marker").await, "child\n");
+        assert_eq!(shell.current_directory.as_str(), "/temporary");
+    }
+    assert_eq!(
+        contents(&shell, "/shell-output").await,
+        "/temporary\n/temporary\n"
+    );
+}
+
+#[xila::task::test(task_path = xila::task)]
+async fn sequential_shell_invocations_do_not_accumulate_nesting_depth() {
+    let mut shell = shell().await;
+    for _ in 0..6 {
+        assert_eq!(shell.main(vec!["true".into()]).await, Ok(()));
+    }
+    assert!(
+        shell
+            .context
+            .task_manager
+            .get_environment_variable(shell.task, crate::SCRIPT_DEPTH_VARIABLE)
+            .await
+            .is_err()
+    );
+}
+
+#[xila::task::test(task_path = xila::task)]
+async fn shell_invocations_restore_inherited_depth_after_errors() {
+    let mut shell = shell().await;
+    shell
+        .context
+        .task_manager
+        .set_environment_variable(shell.task, crate::SCRIPT_DEPTH_VARIABLE, "1")
+        .await
+        .unwrap();
+    for arguments in [
+        vec!["-s".into(), "/missing".into()],
+        vec!["-c".into(), "echo '".into()],
+    ] {
+        assert!(shell.main(arguments).await.is_err());
+        assert_eq!(
+            shell
+                .context
+                .task_manager
+                .get_environment_variable(shell.task, crate::SCRIPT_DEPTH_VARIABLE)
+                .await
+                .unwrap()
+                .get_value(),
+            "1"
+        );
+    }
+}
+
+#[xila::task::test(task_path = xila::task)]
+async fn script_mode_streams_commands_and_keeps_shell_state_without_consuming_stdin() {
+    let mut shell = shell().await;
+    write_file(
+        &shell,
+        "/script",
+        b"\n# comment\nexport NAME='hello world'\ncd /temporary\necho \"$NAME\"\ncat\n",
+    )
+    .await;
+
+    assert_eq!(
+        shell.main(vec!["-s".into(), "/script".into()]).await,
+        Ok(())
+    );
+    assert_eq!(contents(&shell, "/shell-output").await, "hello world\n");
+    assert_eq!(shell.current_directory.as_str(), "/temporary");
+    assert_eq!(
+        shell
+            .context
+            .task_manager
+            .get_environment_variable(shell.task, "NAME")
+            .await
+            .unwrap()
+            .get_value(),
+        "hello world"
+    );
+}
+
+#[xila::task::test(task_path = xila::task)]
+async fn script_mode_handles_crlf_final_line_and_hash_quoting() {
+    let mut shell = shell().await;
+    write_file(
+        &shell,
+        "/script",
+        b"echo \"a#b\" 'c#d' e\\#f # trailing comment\r\necho final",
+    )
+    .await;
+
+    assert_eq!(
+        shell.main(vec!["-s".into(), "/script".into()]).await,
+        Ok(())
+    );
+    assert_eq!(
+        contents(&shell, "/shell-output").await,
+        "a#b c#d e#f\nfinal\n"
+    );
+}
+
+#[xila::task::test(task_path = xila::task)]
+async fn script_mode_continues_after_command_failure_and_returns_last_status() {
+    let mut shell = shell().await;
+    write_file(&shell, "/script", b"false\necho continued\nfalse").await;
+
+    assert_eq!(
+        shell
+            .main(vec!["-s".into(), "/script".into()])
+            .await
+            .unwrap_err()
+            .get(),
+        1
+    );
+    assert_eq!(contents(&shell, "/shell-output").await, "continued\n");
+}
+
+#[xila::task::test(task_path = xila::task)]
+async fn script_mode_reports_line_errors_stops_and_closes_the_file() {
+    let mut shell = shell().await;
+    write_file(
+        &shell,
+        "/script",
+        b"echo first\necho 'unterminated\necho wrong\n",
+    )
+    .await;
+
+    assert_eq!(
+        shell
+            .main(vec!["-s".into(), "/script".into()])
+            .await
+            .unwrap_err()
+            .get(),
+        2
+    );
+    assert_eq!(contents(&shell, "/shell-output").await, "first\n");
+    assert!(
+        contents(&shell, "/shell-errors")
+            .await
+            .contains("/script:2:")
+    );
+    assert_eq!(shell.execute_line("mv /script /renamed").await.unwrap(), 0);
+}
+
+#[xila::task::test(task_path = xila::task)]
+async fn script_mode_reports_missing_and_oversized_files_with_nonzero_status() {
+    let mut shell = shell().await;
+    assert_eq!(
+        shell
+            .main(vec!["-s".into(), "/missing-script".into()])
+            .await
+            .unwrap_err()
+            .get(),
+        1
+    );
+    assert!(
+        contents(&shell, "/shell-errors")
+            .await
+            .contains("/missing-script")
+    );
+
+    let mut maximum_line = vec![b'#'; crate::tokenizer::MAX_INPUT_BYTES];
+    maximum_line.extend_from_slice(b"\r\n");
+    write_file(&shell, "/script", &maximum_line).await;
+    assert_eq!(
+        shell.main(vec!["-s".into(), "/script".into()]).await,
+        Ok(())
+    );
+
+    write_file(
+        &shell,
+        "/script",
+        &vec![b'a'; crate::tokenizer::MAX_INPUT_BYTES + 1],
+    )
+    .await;
+    assert_eq!(
+        shell
+            .main(vec!["-s".into(), "/script".into()])
+            .await
+            .unwrap_err()
+            .get(),
+        2
+    );
+    assert!(
+        contents(&shell, "/shell-errors")
+            .await
+            .contains("/script:1:")
+    );
+
+    let mut unreadable = File::open(
+        shell.context.virtual_file_system,
+        shell.task,
+        "/unreadable-script",
+        Flags::new(AccessFlags::Write, Some(CreateFlags::CREATE_TRUNCATE), None),
+    )
+    .await
+    .unwrap();
+    write_all(&mut unreadable, b"echo hidden\n").await.unwrap();
+    unreadable
+        .set_permissions(xila::file_system::Permissions::from_octal(0).unwrap())
+        .await
+        .unwrap();
+    drop(unreadable);
+    let administrator = shell
+        .context
+        .users_manager
+        .get_user_identifier("administrator")
+        .await
+        .unwrap();
+    shell
+        .context
+        .task_manager
+        .set_user(shell.task, administrator)
+        .await
+        .unwrap();
+    assert_eq!(
+        shell
+            .main(vec!["-s".into(), "/unreadable-script".into()])
+            .await
+            .unwrap_err()
+            .get(),
+        1
+    );
+    assert!(
+        contents(&shell, "/shell-errors")
+            .await
+            .contains("/unreadable-script")
+    );
+}
+
 #[xila::task::test(task_path = xila::task)]
 async fn quoting_expansion_and_short_circuit_keep_shell_state() {
     let mut shell = shell().await;
@@ -464,6 +733,116 @@ impl xila::file_system::DirectBaseOperations for FailingFlush {
 }
 impl xila::file_system::MountOperations for FailingFlush {}
 impl xila::file_system::CharacterDevice for FailingFlush {}
+
+struct FailingRead;
+impl xila::file_system::DirectBaseOperations for FailingRead {
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        _: &mut [u8],
+        _: xila::file_system::Size,
+    ) -> core::task::Poll<xila::file_system::Result<usize>> {
+        xila::file_system::ready(|| Err(xila::file_system::Error::InputOutput))
+    }
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        bytes: &[u8],
+        _: xila::file_system::Size,
+    ) -> core::task::Poll<xila::file_system::Result<usize>> {
+        xila::file_system::ready(|| Ok(bytes.len()))
+    }
+    fn flush(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<xila::file_system::Result<()>> {
+        xila::file_system::ready(|| Ok(()))
+    }
+}
+impl xila::file_system::MountOperations for FailingRead {
+    fn unmount(&self) -> xila::file_system::Result<()> {
+        Ok(())
+    }
+}
+impl xila::file_system::CharacterDevice for FailingRead {}
+
+#[xila::task::test(task_path = xila::task)]
+async fn script_mode_reports_read_errors_and_closes_the_script_file() {
+    let mut shell = shell().await;
+    shell
+        .context
+        .virtual_file_system
+        .mount_character_device(shell.task, "/devices/failing-read", FailingRead)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        shell
+            .main(vec!["-s".into(), "/devices/failing-read".into()])
+            .await
+            .unwrap_err()
+            .get(),
+        2
+    );
+    assert!(
+        contents(&shell, "/shell-errors")
+            .await
+            .contains("/devices/failing-read:1:")
+    );
+    shell
+        .context
+        .virtual_file_system
+        .unmount(&"/devices/failing-read", false)
+        .await
+        .unwrap();
+}
+
+#[xila::task::test(task_path = xila::task)]
+async fn script_mode_rejects_shell_nesting_beyond_the_limit() {
+    let mut shell = shell().await;
+    shell
+        .context
+        .task_manager
+        .set_environment_variable(
+            shell.task,
+            crate::SCRIPT_DEPTH_VARIABLE,
+            &crate::MAX_SHELL_DEPTH.to_string(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        shell
+            .main(vec!["-s".into(), "/script".into()])
+            .await
+            .unwrap_err()
+            .get(),
+        2
+    );
+    assert!(
+        contents(&shell, "/shell-errors")
+            .await
+            .contains("/script: Maximum nested shell depth exceeded")
+    );
+}
+
+#[xila::task::test(task_path = xila::task)]
+async fn script_mode_exit_stops_execution_and_closes_the_file() {
+    let mut shell = shell().await;
+    write_file(&shell, "/script", b"exit\necho wrong\n").await;
+
+    assert_eq!(
+        shell.main(vec!["-s".into(), "/script".into()]).await,
+        Ok(())
+    );
+    assert_eq!(contents(&shell, "/shell-output").await, "");
+    shell
+        .context
+        .virtual_file_system
+        .rename(shell.task, &"/script", &"/renamed-script")
+        .await
+        .unwrap();
+}
 
 #[xila::task::test(task_path = xila::task)]
 async fn pipeline_flush_failures_control_conditional_execution() {

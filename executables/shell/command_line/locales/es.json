@@ -76,5 +76,8 @@
   "Too many background jobs": "Demasiadas tareas en segundo plano",
   "Usage: shell -c COMMAND": "Uso: shell -c COMMAND",
   "User": "Usuario",
-  "User name: ": "Nombre de usuario: "
+  "User name: ": "Nombre de usuario: ",
+  "Failed to set shell nesting depth": "No se pudo establecer la profundidad de anidamiento del shell",
+  "Maximum nested shell depth exceeded": "Se excedió la profundidad máxima de anidamiento del shell",
+  "Usage: shell -s PATH": "Uso: shell -s RUTA"
 }
