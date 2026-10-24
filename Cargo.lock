@@ -5215,6 +5215,8 @@ version = "0.1.0"
 name = "xila-drivers-headless"
 version = "0.1.0"
 dependencies = [
+ "critical-section",
+ "xila-audio",
  "xila-file-system",
  "xila-graphics",
  "xila-shared",
