@@ -240,6 +240,10 @@ class WorkflowPolicy(unittest.TestCase):
         rust = ci_config()["tasks"]["ci:host-tests"]["tools"]["rust"]
         self.assertIn("wasm32-wasip1", rust.get("targets", []))
 
+    def test_font_link_fixture_can_generate_its_ignored_lockfile(self):
+        task = ci_config()["tasks"]["ci:host-font-tests"]
+        self.assertNotIn("--locked", task["run"])
+
     def test_image_tasks_do_not_use_bash_only_options_with_mise_default_shell(self):
         tasks = tomllib.loads((ROOT / "mise.toml").read_text())["tasks"]
         for name in ["image:native", "image:wasm"]:
