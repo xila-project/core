@@ -35,7 +35,6 @@ task = { workspace = true, optional = true }
 time = { workspace = true, optional = true }
 users = { workspace = true, optional = true }
 memory = { workspace = true, optional = true }
-target = { workspace = true, optional = true }
 executable = { workspace = true, optional = true }
 file_system = { workspace = true, optional = true }
 authentication = { workspace = true, optional = true }
@@ -55,7 +54,6 @@ default = [
   "dep:time",
   "dep:users",
   "dep:memory",
-  "dep:target",
   "dep:executable",
   "dep:file_system",
   "dep:authentication",
@@ -98,7 +96,6 @@ authentication = { path = "libraries/authentication" }
 log = { path = "subsystems/log" }
 shared = { path = "libraries/shared" }
 synchronization = { path = "libraries/synchronization" }
-target = { path = "libraries/target" }
 network = { path = "subsystems/network" }
 debug_protocol = { path = "libraries/debug_protocol" }
 peripherals = { path = "libraries/peripherals" }
@@ -177,7 +174,6 @@ members = [
   "libraries/abi/declarations",
   "subsystems/virtual_file_system",
   "libraries/little_fs",
-  "libraries/target",
   "executables/file_manager",
   "executables/shell/command_line",
   "libraries/executable",
