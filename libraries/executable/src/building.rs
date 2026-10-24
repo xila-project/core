@@ -5,6 +5,24 @@ use alloc::string::{String, ToString};
 use std::path::PathBuf;
 use std::process::Command;
 
+fn build_failure_message(stdout: &[u8], stderr: &[u8]) -> String {
+    let stdout = String::from_utf8_lossy(stdout);
+    let stderr = String::from_utf8_lossy(stderr);
+    let diagnostics = stdout
+        .lines()
+        .filter(|line| {
+            line.contains("\"reason\":\"compiler-message\"") && line.contains("\"level\":\"error\"")
+        })
+        .collect::<alloc::vec::Vec<_>>()
+        .join("\n");
+
+    if diagnostics.is_empty() {
+        format!("Cargo build failed.\n{stderr}\n{stdout}")
+    } else {
+        format!("Cargo build failed.\n{stderr}\n{diagnostics}")
+    }
+}
+
 pub fn build_crate(name: &str) -> Result<PathBuf, String> {
     log::information!("Building executable crate {}", name);
 
@@ -19,10 +37,7 @@ pub fn build_crate(name: &str) -> Result<PathBuf, String> {
         .map_err(|e| format!("Failed to start cargo build: {}", e))?;
 
     if !output.status.success() {
-        return Err(format!(
-            "Cargo build failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
+        return Err(build_failure_message(&output.stdout, &output.stderr));
     }
 
     // Parse JSON messages to find the executable path
@@ -66,4 +81,18 @@ pub fn build_crate(name: &str) -> Result<PathBuf, String> {
     log::information!("WASM executable built at {}", wasm_path);
 
     Ok(PathBuf::from(wasm_path))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_failure_message;
+
+    #[test]
+    fn build_failure_includes_json_compiler_diagnostics() {
+        let stdout = br#"{"reason":"compiler-message","message":{"level":"error","message":"the useful compiler error"}}"#;
+        let message = build_failure_message(stdout, b"error: could not compile dependency");
+
+        assert!(message.contains("error: could not compile dependency"));
+        assert!(message.contains("the useful compiler error"));
+    }
 }

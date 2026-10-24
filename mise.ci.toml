@@ -267,7 +267,7 @@ depends = ["ci:packages-host"]
 run = "cargo clippy -p audio -p drivers_native --features drivers_native/audio --all-targets -- -D warnings"
 
 [tasks."ci:host-tests"]
-extends = "ci:rust-format"
+extends = "ci:rust-wasi"
 description = "Test the host workspace"
 depends = ["ci:packages-host"]
 run = "cargo test --locked --workspace"
@@ -282,7 +282,7 @@ run = "cargo test --locked --manifest-path tools/profiling/Cargo.toml"
 extends = "ci:rust-format"
 description = "Test the standalone font-link workspace"
 depends = ["ci:packages-linker"]
-run = "cargo test --locked --manifest-path subsystems/graphics/tests/font_link/Cargo.toml"
+run = "cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml"
 
 [tasks."ci:host-audio-tests"]
 extends = "ci:rust-format"

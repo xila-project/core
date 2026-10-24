@@ -236,6 +236,14 @@ class WorkflowPolicy(unittest.TestCase):
                 components = rust.get("components", []) if isinstance(rust, dict) else []
                 self.assertIn("rustfmt", components, "wasm build scripts execute rustfmt on generated bindings")
 
+    def test_host_tests_install_wasi_for_nested_guest_builds(self):
+        rust = ci_config()["tasks"]["ci:host-tests"]["tools"]["rust"]
+        self.assertIn("wasm32-wasip1", rust.get("targets", []))
+
+    def test_font_link_fixture_can_generate_its_ignored_lockfile(self):
+        task = ci_config()["tasks"]["ci:host-font-tests"]
+        self.assertNotIn("--locked", task["run"])
+
     def test_image_tasks_do_not_use_bash_only_options_with_mise_default_shell(self):
         tasks = tomllib.loads((ROOT / "mise.toml").read_text())["tasks"]
         for name in ["image:native", "image:wasm"]:
