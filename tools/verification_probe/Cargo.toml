@@ -1,0 +1,27 @@
+[package]
+name = "verification_probe"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+publish = false
+
+[workspace]
+
+[dependencies]
+verification = { path = "../../libraries/verification", default-features = false }
+ed25519-dalek = { version = "3.0", default-features = false, optional = true }
+
+[features]
+default = []
+sha256 = ["verification/sha256"]
+ed25519 = ["verification/ed25519"]
+fast = ["ed25519", "dep:ed25519-dalek", "ed25519-dalek/fast"]
+# Deliberately introduces allocation to prove the link check detects it.
+allocator-control = []
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = false

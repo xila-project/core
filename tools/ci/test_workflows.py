@@ -302,7 +302,7 @@ class WorkflowPolicy(unittest.TestCase):
     def test_primary_ci_jobs_are_parallel_and_required_aggregates_results(self):
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
         self.assertIn("workflow_call:", ci)
-        primary = ["quality", "host", "wasm", "abi", "localization"]
+        primary = ["quality", "verification", "host", "wasm", "abi", "localization"]
         for name in primary:
             with self.subTest(job=name):
                 self.assertNotRegex(job("ci.yml", name), r"(?m)^    needs:")
@@ -310,9 +310,22 @@ class WorkflowPolicy(unittest.TestCase):
         required = job("ci.yml", "required")
         self.assertIn("if: always()", required)
         self.assertIn('if [[ "$result" != success ]]', required)
+        dependencies = re.search(r"(?m)^    needs: \[(.*?)\]", required)[1]
+        self.assertEqual(set(dependencies.split(", ")), set(primary))
         for name in primary:
             with self.subTest(required_job=name):
                 self.assertIn(f"needs.{name}.result", required)
+
+    def test_verification_failure_blocks_required_check(self):
+        required = job("ci.yml", "required")
+        script = textwrap.dedent(required.split("        run: |\n", 1)[1])
+        bindings = re.findall(r"([A-Z_]+): \$\{\{ needs\.([\w-]+)\.result \}\}", required)
+        for status in ["success", "failure", "cancelled", "skipped"]:
+            with self.subTest(verification_result=status):
+                env = os.environ | {name: "success" for name, _ in bindings}
+                env["VERIFICATION_RESULT"] = status
+                result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0 if status == "success" else 1, result.stdout + result.stderr)
 
     def test_primary_abi_matrix_checks_both_memory_modes_on_every_event(self):
         abi = job("ci.yml", "abi")

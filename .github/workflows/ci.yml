@@ -37,6 +37,17 @@ jobs:
       - run: python3 -m unittest discover -s tools/ci -v
       - run: mise run ci:lint-workflows
 
+  verification:
+    name: Verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MISE_ENV: ci
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5.2.2
+      - run: mise run ci:verification
+
   host:
     name: Host
     runs-on: ubuntu-latest
@@ -214,20 +225,21 @@ jobs:
   required:
     name: Required
     if: always()
-    needs: [quality, host, wasm, abi, localization]
+    needs: [quality, verification, host, wasm, abi, localization]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Verify required validation results
         env:
           QUALITY_RESULT: ${{ needs.quality.result }}
+          VERIFICATION_RESULT: ${{ needs.verification.result }}
           HOST_RESULT: ${{ needs.host.result }}
           WASM_RESULT: ${{ needs.wasm.result }}
           ABI_RESULT: ${{ needs.abi.result }}
           LOCALIZATION_RESULT: ${{ needs.localization.result }}
         run: |
           set -euo pipefail
-          for result in "$QUALITY_RESULT" "$HOST_RESULT" "$WASM_RESULT" "$ABI_RESULT" "$LOCALIZATION_RESULT"; do
+          for result in "$QUALITY_RESULT" "$VERIFICATION_RESULT" "$HOST_RESULT" "$WASM_RESULT" "$ABI_RESULT" "$LOCALIZATION_RESULT"; do
             if [[ "$result" != success ]]; then
               echo "::error::A required validation job finished with result: $result"
               exit 1
