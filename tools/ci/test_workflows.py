@@ -439,13 +439,86 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn("mise run pages:demo", task)
         self.assertIn("trunk build --release", ci_tasks["pages:demo"]["run"])
 
+    def test_pages_images_and_browser_seed_follow_each_locale_target(self):
+        # Run the real task shells; replace only compilation and browser tooling.
+        shared = tomllib.loads((ROOT / "mise.toml").read_text())["tasks"]
+        pages = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]["pages:build"]["run"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            image_script = root / "image.sh"
+            image_script.write_text(shared["image:wasm"]["run"])
+            cargo = bin_dir / "cargo"
+            cargo.write_text(textwrap.dedent('''\
+                #!/usr/bin/env python3
+                import os, pathlib, sys
+                args = sys.argv[1:]
+                target = pathlib.Path(os.environ.get("CARGO_TARGET_DIR", "target"))
+                locale = os.environ["EMBEDDED_I18N_LOCALE"]
+                if args[0] == "build":
+                    apps = target / "wasm32-wasip1/release"
+                    apps.mkdir(parents=True, exist_ok=True)
+                    for name in ["calculator", "weather", "clock", "pixel_painter", "text_editor", "synth"]:
+                        (apps / (name + ".wasm")).write_text(locale)
+                elif args[0] == "run":
+                    output = pathlib.Path(args[args.index("--") + 1])
+                    apps = pathlib.Path(args[args.index("--applications-dir") + 1])
+                    assert (apps / "calculator.wasm").read_text() == locale
+                    bundle = args[args.index("--bundle") + 1]
+                    with output.open("x") as image:
+                        image.write(locale + ":" + bundle)
+                else:
+                    raise AssertionError(args)
+                '''))
+            cargo.chmod(0o755)
+            mise = bin_dir / "mise"
+            mise.write_text(textwrap.dedent('''\
+                #!/bin/sh
+                set -eu
+                case "$2" in
+                  docs:host|docs:guest) ;;
+                  image:wasm) sh "$IMAGE_SCRIPT" ;;
+                  pages:demo)
+                    test "$(cat target/seed/wasm/seed.img)" = "$EMBEDDED_I18N_LOCALE:wasm"
+                    mkdir -p examples/wasm/dist
+                    cp target/seed/wasm/seed.img examples/wasm/dist/seed.img
+                    ;;
+                  *) exit 1 ;;
+                esac
+                '''))
+            mise.chmod(0o755)
+            for target in ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]:
+                docs = root / "target" / target / "doc"
+                docs.mkdir(parents=True)
+                (docs / "index.html").write_text("docs")
+            env = os.environ | {
+                "PATH": f"{bin_dir}:{os.environ['PATH']}",
+                "IMAGE_SCRIPT": str(image_script),
+                "CARGO_TARGET_ROOT": str(root / "locale targets"),
+            }
+            result = subprocess.run(["bash", "-c", pages], cwd=root, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            for locale in ["en", "fr", "es", "de", "pt-BR", "it", "pl"]:
+                for bundle in ["wasm", "native"]:
+                    image = root / "target/reference-filesystem-images" / locale / f"{bundle}.img"
+                    self.assertEqual(image.read_text(), f"{locale}:{bundle}")
+                seed = root / "pages/demonstrations/wasm" / locale / "seed.img"
+                self.assertEqual(seed.read_text(), f"{locale}:wasm")
+            # Normal local builds still use target/ and replace only the seed image.
+            env.pop("CARGO_TARGET_DIR", None)
+            env["EMBEDDED_I18N_LOCALE"] = "en"
+            result = subprocess.run(["sh", str(image_script)], cwd=root, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual((root / "target/seed/wasm/seed.img").read_text(), "en:wasm")
+
     def test_image_generation_tasks_are_self_contained_and_limit_cleanup(self):
         tasks = tomllib.loads((ROOT / "mise.toml").read_text())["tasks"]
         native = tasks["image:native"]["run"]
         wasm = tasks["image:wasm"]["run"]
         self.assertNotIn("tools/mise/prepare-", native + wasm)
         self.assertIn("rm -f target/seed/native/seed.img", native)
-        self.assertIn("rm -f target/seed/wasm/seed.img", wasm)
+        self.assertIn('rm -f "${CARGO_TARGET_DIR:-target}/seed/wasm/seed.img"', wasm)
         self.assertNotRegex(native + wasm, r"rm\s+-rf")
 
     def test_benchmark_workflows_are_not_present(self):
