@@ -70,14 +70,14 @@ pub fn shortcut(name: &str) -> Option<String> {
         "calculator" => ("Calculator", "Ca", [158, 158, 158], true),
         "clock" => ("Clock", "Cl", [59, 130, 246], true),
         "pixel_painter" => (
-            embedded_i18n::translate!("Pixel Painter"),
+            embedded_i18n::translate!("applications.pixel_painter"),
             "Pa",
             [142, 36, 170],
             true,
         ),
         "synth" => ("Synth", "Sy", [103, 58, 183], true),
         "text_editor" => (
-            embedded_i18n::translate!("Text Editor"),
+            embedded_i18n::translate!("applications.text_editor"),
             "Te",
             [76, 110, 245],
             true,
@@ -86,7 +86,7 @@ pub fn shortcut(name: &str) -> Option<String> {
         "file_manager" => ("File manager", "Fm", [0, 188, 212], false),
         "terminal" => ("Terminal", ">_", [0, 0, 0], false),
         "settings" => (
-            embedded_i18n::translate!("Settings"),
+            embedded_i18n::translate!("applications.settings"),
             "Se",
             [158, 158, 158],
             false,

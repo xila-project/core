@@ -25,22 +25,22 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::InvalidTaskIdentifier => write!(f, translate!("InvalidTaskIdentifier")),
-            Error::InvalidSpawnerIdentifier => write!(f, translate!("InvalidSpawnerIdentifier")),
-            Error::ThreadNotRegistered => write!(f, translate!("ThreadNotRegistered")),
-            Error::ThreadAlreadyRegistered => write!(f, translate!("ThreadAlreadyRegistered")),
-            Error::FailedToCreateThread => write!(f, translate!("FailedToCreateThread")),
-            Error::NoThreadForTask => write!(f, translate!("NoThreadForTask")),
-            Error::FailedToSpawnThread => write!(f, translate!("FailedToSpawnThread")),
+            Error::InvalidTaskIdentifier => write!(f, translate!("errors.invalid_task_identifier")),
+            Error::InvalidSpawnerIdentifier => write!(f, translate!("errors.invalid_spawner_identifier")),
+            Error::ThreadNotRegistered => write!(f, translate!("errors.thread_not_registered")),
+            Error::ThreadAlreadyRegistered => write!(f, translate!("errors.thread_already_registered")),
+            Error::FailedToCreateThread => write!(f, translate!("errors.failed_to_create_thread")),
+            Error::NoThreadForTask => write!(f, translate!("errors.no_thread_for_task")),
+            Error::FailedToSpawnThread => write!(f, translate!("errors.failed_to_spawn_thread")),
             Error::InvalidEnvironmentVariable => {
-                write!(f, translate!("InvalidEnvironmentVariable"))
+                write!(f, translate!("errors.invalid_environment_variable"))
             }
-            Error::TooManyTasks => write!(f, translate!("TooManyTasks")),
-            Error::TooManySpawners => write!(f, translate!("TooManySpawners")),
-            Error::AlreadyInitialized => write!(f, translate!("AlreadyInitialized")),
-            Error::AlreadySet => write!(f, translate!("AlreadySet")),
-            Error::NotInitialized => write!(f, translate!("NotInitialized")),
-            Error::NoSpawnerAvailable => write!(f, translate!("NoSpawnerAvailable")),
+            Error::TooManyTasks => write!(f, translate!("errors.too_many_tasks")),
+            Error::TooManySpawners => write!(f, translate!("errors.too_many_spawners")),
+            Error::AlreadyInitialized => write!(f, translate!("errors.already_initialized")),
+            Error::AlreadySet => write!(f, translate!("errors.already_set")),
+            Error::NotInitialized => write!(f, translate!("errors.not_initialized")),
+            Error::NoSpawnerAvailable => write!(f, translate!("errors.no_spawner_available")),
         }
     }
 }
@@ -64,11 +64,11 @@ mod tests {
     fn test_error_type_display() {
         let error = Error::InvalidTaskIdentifier;
         let display_string = format!("{error}");
-        assert_eq!(display_string, translate!("InvalidTaskIdentifier"));
+        assert_eq!(display_string, translate!("errors.invalid_task_identifier"));
 
         let error = Error::TooManyTasks;
         let display_string = format!("{error}");
-        assert_eq!(display_string, translate!("TooManyTasks"));
+        assert_eq!(display_string, translate!("errors.too_many_tasks"));
     }
 
     #[test]
@@ -219,16 +219,16 @@ mod tests {
         let display_str = format!("{env_error}");
         let non_zero: NonZeroU32 = env_error.into();
         assert_eq!(non_zero.get(), 8u32);
-        assert_eq!(display_str, translate!("InvalidEnvironmentVariable"));
+        assert_eq!(display_str, translate!("errors.invalid_environment_variable"));
 
         // Test task-related errors
         let task_error = Error::InvalidTaskIdentifier;
-        assert_eq!(format!("{task_error}"), translate!("InvalidTaskIdentifier"));
+        assert_eq!(format!("{task_error}"), translate!("errors.invalid_task_identifier"));
 
         let spawner_error = Error::InvalidSpawnerIdentifier;
         assert_eq!(
             format!("{spawner_error}"),
-            translate!("InvalidSpawnerIdentifier")
+            translate!("errors.invalid_spawner_identifier")
         );
     }
 }

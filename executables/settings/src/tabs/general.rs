@@ -18,7 +18,7 @@ impl GeneralTab {
         parent_tabview: *mut lvgl::lv_obj_t,
     ) -> Result<*mut lvgl::lv_obj_t> {
         let tab_container =
-            unsafe { lvgl::lv_tabview_add_tab(parent_tabview, translate!(c"General").as_ptr()) };
+            unsafe { lvgl::lv_tabview_add_tab(parent_tabview, translate!(c"tabs.general").as_ptr()) };
 
         if tab_container.is_null() {
             return Err(crate::error::Error::FailedToCreateUiElement);
@@ -31,7 +31,7 @@ impl GeneralTab {
             let info_label = lvgl::lv_label_create(tab_container);
             lvgl::lv_label_set_text(
                 info_label,
-                translate!(c"General settings will be implemented here.").as_ptr(),
+                translate!(c"general.status.coming_soon").as_ptr(),
             );
             lvgl::lv_obj_align(info_label, lvgl::lv_align_t_LV_ALIGN_CENTER, 0, 0);
         }

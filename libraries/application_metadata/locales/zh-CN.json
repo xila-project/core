@@ -1,5 +1,5 @@
 {
-  "Pixel Painter": "像素画板",
-  "Settings": "设置",
-  "Text Editor": "文本编辑器"
+  "applications.pixel_painter": "像素画板",
+  "applications.settings": "设置",
+  "applications.text_editor": "文本编辑器"
 }

@@ -1,5 +1,5 @@
 {
-  "Failed to get main function": "Impossible d'obtenir la fonction principale",
-  "Invalid stack size": "Taille de pile invalide",
-  "Permission denied": "Permission refusée"
+  "errors.failed_to_get_main_function": "Impossible d'obtenir la fonction principale",
+  "errors.invalid_stack_size": "Taille de pile invalide",
+  "errors.permission_denied": "Permission refusée"
 }

@@ -88,62 +88,62 @@ impl Display for Error {
     fn fmt(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
             Error::Graphics(error) => {
-                write!(formatter, translate!("Graphics error : {}"), error)
+                write!(formatter, translate!("errors.graphics_error"), error)
             }
             Error::VirtualFileSystem(error) => {
                 write!(
                     formatter,
-                    translate!("Virtual file system error: {}"),
+                    translate!("errors.virtual_file_system_error"),
                     error
                 )
             }
             Error::FailedToCreateObject => {
-                write!(formatter, translate!("Failed to create object"))
+                write!(formatter, translate!("errors.failed_to_create_object"))
             }
             Error::FailedToGetChild => {
-                write!(formatter, translate!("Failed to get child object"))
+                write!(formatter, translate!("errors.failed_to_get_child_object"))
             }
             Error::FailedToSetEnvironmentVariable(error) => {
                 write!(
                     formatter,
-                    translate!("Failed to set environment variable: {}"),
+                    translate!("errors.failed_to_set_environment_variable"),
                     error
                 )
             }
             Error::InvalidUtf8(error) => {
-                write!(formatter, translate!("Invalid UTF-8 string: {}"), error)
+                write!(formatter, translate!("errors.invalid_utf_8_string"), error)
             }
             Error::FailedToSetTaskUser(error) => {
-                write!(formatter, translate!("Failed to set task user: {}"), error)
+                write!(formatter, translate!("errors.failed_to_set_task_user"), error)
             }
             Error::FailedToGetCurrentTaskIdentifier(error) => {
                 write!(
                     formatter,
-                    translate!("Failed to get current task identifier: {}"),
+                    translate!("errors.failed_to_get_current_task_identifier"),
                     error
                 )
             }
             Error::FailedToReadDirectory(error) => {
-                write!(formatter, translate!("Failed to read directory: {}"), error)
+                write!(formatter, translate!("errors.failed_to_read_directory"), error)
             }
             Error::FailedToOpenStandardFile(error) => {
                 write!(
                     formatter,
-                    translate!("Failed to open standard file: {}"),
+                    translate!("errors.failed_to_open_standard_file"),
                     error
                 )
             }
             Error::NullCharacterInString(error) => {
-                write!(formatter, translate!("Null character in string: {}"), error)
+                write!(formatter, translate!("errors.null_character_in_string"), error)
             }
             Error::FailedToCreateUiElement => {
-                write!(formatter, translate!("Failed to create UI element"))
+                write!(formatter, translate!("errors.failed_to_create_ui_element"))
             }
             Error::Authentication(error) => {
-                write!(formatter, translate!("Authentication failed: {}"), error)
+                write!(formatter, translate!("errors.authentication_failed"), error)
             }
             Error::FormattingError => {
-                write!(formatter, translate!("Formatting error"))
+                write!(formatter, translate!("errors.formatting_error"))
             }
         }
     }

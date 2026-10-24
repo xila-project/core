@@ -1,7 +1,7 @@
 {
-  "Buffer too small": "Buffer muito pequeno",
-  "Failed to convert length": "Não foi possível converter o comprimento",
-  "Invalid UTF-8 string": "Texto UTF-8 inválido",
-  "Invalid length": "Comprimento inválido",
-  "Invalid pointer": "Ponteiro inválido"
+  "errors.buffer_too_small": "Buffer muito pequeno",
+  "errors.failed_to_convert_length": "Não foi possível converter o comprimento",
+  "errors.invalid_utf_8_string": "Texto UTF-8 inválido",
+  "errors.invalid_length": "Comprimento inválido",
+  "errors.invalid_pointer": "Ponteiro inválido"
 }

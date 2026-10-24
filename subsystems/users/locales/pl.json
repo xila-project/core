@@ -1,13 +1,13 @@
 {
-  "Already initialized": "Już zainicjalizowano",
-  "Duplicate group identifier": "Zduplikowany identyfikator grupy",
-  "Duplicate group name": "Zduplikowana nazwa grupy",
-  "Duplicate user identifier": "Zduplikowany identyfikator użytkownika",
-  "Duplicate user name": "Zduplikowana nazwa użytkownika",
-  "Invalid group identifier": "Nieprawidłowy identyfikator grupy",
-  "Invalid user identifier": "Nieprawidłowy identyfikator użytkownika",
-  "Not initialized": "Nie zainicjalizowano",
-  "Poisoned lock": "Uszkodzona blokada",
-  "Too many groups": "Za dużo grup",
-  "Too many users": "Za dużo użytkowników"
+  "errors.already_initialized": "Już zainicjalizowano",
+  "errors.duplicate_group_identifier": "Zduplikowany identyfikator grupy",
+  "errors.duplicate_group_name": "Zduplikowana nazwa grupy",
+  "errors.duplicate_user_identifier": "Zduplikowany identyfikator użytkownika",
+  "errors.duplicate_user_name": "Zduplikowana nazwa użytkownika",
+  "errors.invalid_group_identifier": "Nieprawidłowy identyfikator grupy",
+  "errors.invalid_user_identifier": "Nieprawidłowy identyfikator użytkownika",
+  "errors.not_initialized": "Nie zainicjalizowano",
+  "errors.poisoned_lock": "Uszkodzona blokada",
+  "errors.too_many_groups": "Za dużo grup",
+  "errors.too_many_users": "Za dużo użytkowników"
 }

@@ -1,7 +1,7 @@
 {
-  "Buffer too small": "Buffer troppo piccolo",
-  "Failed to convert length": "Impossibile convertire la lunghezza",
-  "Invalid UTF-8 string": "Stringa UTF-8 non valida",
-  "Invalid length": "Lunghezza non valida",
-  "Invalid pointer": "Puntatore non valido"
+  "errors.buffer_too_small": "Buffer troppo piccolo",
+  "errors.failed_to_convert_length": "Impossibile convertire la lunghezza",
+  "errors.invalid_utf_8_string": "Stringa UTF-8 non valida",
+  "errors.invalid_length": "Lunghezza non valida",
+  "errors.invalid_pointer": "Puntatore non valido"
 }

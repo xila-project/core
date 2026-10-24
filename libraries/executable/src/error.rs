@@ -18,10 +18,10 @@ impl Display for Error {
             Error::FileSystem(error) => write!(formatter, "{error}"),
             Error::Task(error) => write!(formatter, "{error}"),
             Error::FailedToGetMainFunction => {
-                write!(formatter, translate!("Failed to get main function"))
+                write!(formatter, translate!("errors.failed_to_get_main_function"))
             }
-            Error::InvalidStackSize => write!(formatter, translate!("Invalid stack size")),
-            Error::PermissionDenied => write!(formatter, translate!("Permission denied")),
+            Error::InvalidStackSize => write!(formatter, translate!("errors.invalid_stack_size")),
+            Error::PermissionDenied => write!(formatter, translate!("errors.permission_denied")),
         }
     }
 }

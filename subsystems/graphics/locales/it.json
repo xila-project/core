@@ -1,14 +1,14 @@
 {
-  "Already in use": "Già in uso",
-  "Already initialized": "Già inizializzato",
-  "Failed to create object": "Impossibile creare l'oggetto",
-  "Failed to get resolution": "Impossibile ottenere la risoluzione",
-  "Failed to register": "Registrazione non riuscita",
-  "Invalid reference": "Riferimento non valido",
-  "Invalid parameter": "Parametro non valido",
-  "Invalid window identifier": "Identificatore della finestra non valido",
-  "Not available": "Non disponibile",
-  "Not initialized": "Non inizializzato",
-  "Not registered": "Non registrato",
-  "Out of memory": "Memoria esaurita"
+  "errors.already_in_use": "Già in uso",
+  "errors.already_initialized": "Già inizializzato",
+  "errors.failed_to_create_object": "Impossibile creare l'oggetto",
+  "errors.failed_to_get_resolution": "Impossibile ottenere la risoluzione",
+  "errors.failed_to_register": "Registrazione non riuscita",
+  "errors.invalid_reference": "Riferimento non valido",
+  "errors.invalid_parameter": "Parametro non valido",
+  "errors.invalid_window_identifier": "Identificatore della finestra non valido",
+  "errors.not_available": "Non disponibile",
+  "errors.not_initialized": "Non inizializzato",
+  "errors.not_registered": "Non registrato",
+  "errors.out_of_memory": "Memoria esaurita"
 }

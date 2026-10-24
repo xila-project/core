@@ -1,10 +1,10 @@
 {
-  "Enter your command ...": "Inserisci un comando...",
-  "Failed to create object": "Impossibile creare l'oggetto",
-  "Failed to execute: {}": "Esecuzione non riuscita: {}",
-  "Failed to get task identifier: {}": "Impossibile ottenere l'identificatore dell'attività: {}",
-  "Failed to mount device: {}": "Impossibile montare il dispositivo: {}",
-  "Graphics: {}": "Grafica: {}",
-  "Resource busy": "Risorsa occupata",
-  "UTF-8: {}": "UTF-8: {}"
+  "input.command_placeholder": "Inserisci un comando...",
+  "errors.failed_to_create_object": "Impossibile creare l'oggetto",
+  "errors.failed_to_execute": "Esecuzione non riuscita: {}",
+  "errors.failed_to_get_task_identifier": "Impossibile ottenere l'identificatore dell'attività: {}",
+  "errors.failed_to_mount_device": "Impossibile montare il dispositivo: {}",
+  "errors.graphics": "Grafica: {}",
+  "errors.resource_busy": "Risorsa occupata",
+  "errors.utf_8": "UTF-8: {}"
 }

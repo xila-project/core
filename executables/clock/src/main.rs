@@ -24,7 +24,7 @@ mod localization_tests {
 
     fn lap_label(count: usize) -> String {
         let mut output = String::new();
-        embedded_i18n::translate_plural_write!(&mut output, "Recorded laps", count)
+        embedded_i18n::translate_plural_write!(&mut output, "stopwatch.laps.recorded", count)
             .expect("writing to String cannot fail");
         output
     }

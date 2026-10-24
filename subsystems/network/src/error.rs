@@ -76,62 +76,62 @@ impl From<Error> for NonZeroU8 {
 impl Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Error::NotFound => write!(f, translate!("Not found")),
-            Error::PermissionDenied => write!(f, translate!("Permission denied")),
-            Error::ConnectionRefused => write!(f, translate!("Connection refused")),
-            Error::ConnectionReset => write!(f, translate!("Connection reset")),
-            Error::HostUnreachable => write!(f, translate!("Host unreachable")),
-            Error::NetworkUnreachable => write!(f, translate!("Network unreachable")),
-            Error::ConnectionAborted => write!(f, translate!("Connection aborted")),
-            Error::NotConnected => write!(f, translate!("Not connected")),
-            Error::AddressInUse => write!(f, translate!("Address in use")),
-            Error::AddressNotAvailable => write!(f, translate!("Address not available")),
-            Error::NetworkDown => write!(f, translate!("Network down")),
-            Error::BrokenPipe => write!(f, translate!("Broken pipe")),
-            Error::AlreadyExists => write!(f, translate!("Already exists")),
-            Error::WouldBlock => write!(f, translate!("Would block")),
-            Error::InvalidInput => write!(f, translate!("Invalid input")),
-            Error::InvalidData => write!(f, translate!("Invalid data")),
-            Error::TimedOut => write!(f, translate!("Timed out")),
-            Error::WriteZero => write!(f, translate!("Write zero")),
-            Error::StorageFull => write!(f, translate!("Storage full")),
-            Error::ResourceBusy => write!(f, translate!("Resource busy")),
-            Error::Deadlock => write!(f, translate!("Deadlock")),
-            Error::Interrupted => write!(f, translate!("Interrupted")),
-            Error::Unsupported => write!(f, translate!("Unsupported operation")),
-            Error::UnexpectedEndOfFile => write!(f, translate!("Unexpected end of file")),
-            Error::OutOfMemory => write!(f, translate!("Out of memory")),
-            Error::Pending => write!(f, translate!("In progress operation not completed yet")),
+            Error::NotFound => write!(f, translate!("errors.not_found")),
+            Error::PermissionDenied => write!(f, translate!("errors.permission_denied")),
+            Error::ConnectionRefused => write!(f, translate!("errors.connection_refused")),
+            Error::ConnectionReset => write!(f, translate!("errors.connection_reset")),
+            Error::HostUnreachable => write!(f, translate!("errors.host_unreachable")),
+            Error::NetworkUnreachable => write!(f, translate!("errors.network_unreachable")),
+            Error::ConnectionAborted => write!(f, translate!("errors.connection_aborted")),
+            Error::NotConnected => write!(f, translate!("errors.not_connected")),
+            Error::AddressInUse => write!(f, translate!("errors.address_in_use")),
+            Error::AddressNotAvailable => write!(f, translate!("errors.address_not_available")),
+            Error::NetworkDown => write!(f, translate!("errors.network_down")),
+            Error::BrokenPipe => write!(f, translate!("errors.broken_pipe")),
+            Error::AlreadyExists => write!(f, translate!("errors.already_exists")),
+            Error::WouldBlock => write!(f, translate!("errors.would_block")),
+            Error::InvalidInput => write!(f, translate!("errors.invalid_input")),
+            Error::InvalidData => write!(f, translate!("errors.invalid_data")),
+            Error::TimedOut => write!(f, translate!("errors.timed_out")),
+            Error::WriteZero => write!(f, translate!("errors.write_zero")),
+            Error::StorageFull => write!(f, translate!("errors.storage_full")),
+            Error::ResourceBusy => write!(f, translate!("errors.resource_busy")),
+            Error::Deadlock => write!(f, translate!("errors.deadlock")),
+            Error::Interrupted => write!(f, translate!("errors.interrupted")),
+            Error::Unsupported => write!(f, translate!("errors.unsupported_operation")),
+            Error::UnexpectedEndOfFile => write!(f, translate!("errors.unexpected_end_of_file")),
+            Error::OutOfMemory => write!(f, translate!("errors.out_of_memory")),
+            Error::Pending => write!(f, translate!("errors.in_progress_operation_not_completed_yet")),
             Error::UnsupportedProtocol => {
-                write!(f, translate!("Unsupported protocol used in operation"))
+                write!(f, translate!("errors.unsupported_protocol_used_in_operation"))
             }
             Error::InvalidIdentifier => {
-                write!(f, translate!("Invalid identifier provided for operation"))
+                write!(f, translate!("errors.invalid_identifier_provided_for_operation"))
             }
             Error::DuplicateIdentifier => {
-                write!(f, translate!("Duplicate identifier found in operation"))
+                write!(f, translate!("errors.duplicate_identifier_found_in_operation"))
             }
             Error::FailedToGenerateSeed(e) => {
-                write!(f, translate!("Failed to generate seed: {}"), e)
+                write!(f, translate!("errors.failed_to_generate_seed"), e)
             }
             Error::FailedToSpawnNetworkTask(e) => {
-                write!(f, translate!("Failed to spawn network task: {}"), e)
+                write!(f, translate!("errors.failed_to_spawn_network_task"), e)
             }
-            Error::InvalidName => write!(f, translate!("Invalid name")),
-            Error::NameTooLong => write!(f, translate!("Name too long")),
-            Error::Failed => write!(f, translate!("Failed")),
-            Error::InvalidState => write!(f, translate!("Invalid state for operation")),
-            Error::InvalidPort => write!(f, translate!("Invalid port specified")),
-            Error::NoRoute => write!(f, translate!("No route to host")),
-            Error::Truncated => write!(f, translate!("Truncated packet received")),
-            Error::SocketNotBound => write!(f, translate!("Socket not bound")),
-            Error::PacketTooLarge => write!(f, translate!("Packet too large to send")),
-            Error::InvalidEndpoint => write!(f, translate!("Invalid endpoint specified")),
+            Error::InvalidName => write!(f, translate!("errors.invalid_name")),
+            Error::NameTooLong => write!(f, translate!("errors.name_too_long")),
+            Error::Failed => write!(f, translate!("errors.failed")),
+            Error::InvalidState => write!(f, translate!("errors.invalid_state_for_operation")),
+            Error::InvalidPort => write!(f, translate!("errors.invalid_port_specified")),
+            Error::NoRoute => write!(f, translate!("errors.no_route_to_host")),
+            Error::Truncated => write!(f, translate!("errors.truncated_packet_received")),
+            Error::SocketNotBound => write!(f, translate!("errors.socket_not_bound")),
+            Error::PacketTooLarge => write!(f, translate!("errors.packet_too_large_to_send")),
+            Error::InvalidEndpoint => write!(f, translate!("errors.invalid_endpoint_specified")),
             Error::FailedToMountDevice(e) => {
-                write!(f, translate!("Failed to mount device: {}"), e)
+                write!(f, translate!("errors.failed_to_mount_device"), e)
             }
-            Error::NoFreeSlot => write!(f, translate!("No free slot available")),
-            Error::Other => write!(f, translate!("Other error occurred")),
+            Error::NoFreeSlot => write!(f, translate!("errors.no_free_slot_available")),
+            Error::Other => write!(f, translate!("errors.other_error_occurred")),
         }
     }
 }

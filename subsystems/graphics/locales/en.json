@@ -1,14 +1,14 @@
 {
-  "Already in use": "Already in use",
-  "Already initialized": "Already initialized",
-  "Failed to create object": "Failed to create object",
-  "Failed to get resolution": "Failed to get resolution",
-  "Failed to register": "Failed to register",
-  "Invalid reference": "Invalid reference",
-  "Invalid parameter": "Invalid parameter",
-  "Invalid window identifier": "Invalid window identifier",
-  "Not available": "Not available",
-  "Not initialized": "Not initialized",
-  "Not registered": "Not registered",
-  "Out of memory": "Out of memory"
+  "errors.already_in_use": "Already in use",
+  "errors.already_initialized": "Already initialized",
+  "errors.failed_to_create_object": "Failed to create object",
+  "errors.failed_to_get_resolution": "Failed to get resolution",
+  "errors.failed_to_register": "Failed to register",
+  "errors.invalid_reference": "Invalid reference",
+  "errors.invalid_parameter": "Invalid parameter",
+  "errors.invalid_window_identifier": "Invalid window identifier",
+  "errors.not_available": "Not available",
+  "errors.not_initialized": "Not initialized",
+  "errors.not_registered": "Not registered",
+  "errors.out_of_memory": "Out of memory"
 }

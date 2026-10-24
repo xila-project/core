@@ -183,53 +183,53 @@ impl From<Error> for NonZeroU32 {
 impl Display for Error {
     fn fmt(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
         let string = match self {
-            Error::FailedToInitializeFileSystem => translate!("Failed to initialize file system"),
-            Error::PermissionDenied => translate!("Permission denied"),
-            Error::NotFound => translate!("Not found"),
-            Error::AlreadyExists => translate!("Already exists"),
-            Error::DirectoryAlreadyExists => translate!("Directory already exists"),
-            Error::FileSystemFull => translate!("File system full"),
-            Error::FileSystemError => translate!("File system error"),
-            Error::InvalidPath => translate!("Invalid path"),
-            Error::InvalidFile => translate!("Invalid file"),
-            Error::InvalidDirectory => translate!("Invalid directory"),
-            Error::InvalidSymbolicLink => translate!("Invalid symbolic link"),
-            Error::Unknown => translate!("Unknown"),
-            Error::InvalidIdentifier => translate!("Invalid identifier"),
-            Error::FailedToGetTaskInformations => translate!("Failed to get task informations"),
-            Error::FailedToGetUsersInformations => translate!("Failed to get users informations"),
-            Error::TooManyMountedFileSystems => translate!("Too many mounted file systems"),
-            Error::TooManyOpenFiles => translate!("Too many open files"),
-            Error::InternalError => translate!("Internal error"),
-            Error::InvalidMode => translate!("Invalid mode"),
-            Error::UnsupportedOperation => translate!("Unsupported operation"),
-            Error::RessourceBusy => translate!("Ressource busy"),
-            Error::AlreadyInitialized => translate!("Already initialized"),
-            Error::NotInitialized => translate!("Not initialized"),
+            Error::FailedToInitializeFileSystem => translate!("errors.failed_to_initialize_file_system"),
+            Error::PermissionDenied => translate!("errors.permission_denied"),
+            Error::NotFound => translate!("errors.not_found"),
+            Error::AlreadyExists => translate!("errors.already_exists"),
+            Error::DirectoryAlreadyExists => translate!("errors.directory_already_exists"),
+            Error::FileSystemFull => translate!("errors.file_system_full"),
+            Error::FileSystemError => translate!("errors.file_system_error"),
+            Error::InvalidPath => translate!("errors.invalid_path"),
+            Error::InvalidFile => translate!("errors.invalid_file"),
+            Error::InvalidDirectory => translate!("errors.invalid_directory"),
+            Error::InvalidSymbolicLink => translate!("errors.invalid_symbolic_link"),
+            Error::Unknown => translate!("errors.unknown"),
+            Error::InvalidIdentifier => translate!("errors.invalid_identifier"),
+            Error::FailedToGetTaskInformations => translate!("errors.failed_to_get_task_informations"),
+            Error::FailedToGetUsersInformations => translate!("errors.failed_to_get_users_informations"),
+            Error::TooManyMountedFileSystems => translate!("errors.too_many_mounted_file_systems"),
+            Error::TooManyOpenFiles => translate!("errors.too_many_open_files"),
+            Error::InternalError => translate!("errors.internal_error"),
+            Error::InvalidMode => translate!("errors.invalid_mode"),
+            Error::UnsupportedOperation => translate!("errors.unsupported_operation"),
+            Error::RessourceBusy => translate!("errors.ressource_busy"),
+            Error::AlreadyInitialized => translate!("errors.already_initialized"),
+            Error::NotInitialized => translate!("errors.not_initialized"),
             Error::FailedToGetUsersManagerInstance => {
-                translate!("Failed to get users manager instance")
+                translate!("errors.failed_to_get_users_manager_instance")
             }
             Error::FailedToGetTaskManagerInstance => {
-                translate!("Failed to get task manager instance")
+                translate!("errors.failed_to_get_task_manager_instance")
             }
-            Error::InvalidParameter => translate!("Invalid parameter"),
-            Error::InvalidFlags => translate!("Invalid flags"),
-            Error::NotDirectory => translate!("Not directory"),
-            Error::IsDirectory => translate!("Is directory"),
-            Error::InputOutput => translate!("Input output"),
-            Error::DirectoryNotEmpty => translate!("Directory not empty"),
-            Error::FileTooLarge => translate!("File too large"),
-            Error::NoAttribute => translate!("No attribute"),
-            Error::NameTooLong => translate!("Name too long"),
-            Error::Corrupted => translate!("Corrupted"),
-            Error::NoMemory => translate!("No memory"),
-            Error::NoSpaceLeft => translate!("No space left"),
-            Error::TimeError => translate!("Time error"),
-            Error::InvalidInode => translate!("Invalid inode"),
-            Error::NotMounted => translate!("Not mounted"),
-            Error::AlreadyMounted => translate!("Already mounted"),
-            Error::InvalidContext => translate!("Invalid context"),
-            Error::Other => translate!("Other"),
+            Error::InvalidParameter => translate!("errors.invalid_parameter"),
+            Error::InvalidFlags => translate!("errors.invalid_flags"),
+            Error::NotDirectory => translate!("errors.not_directory"),
+            Error::IsDirectory => translate!("errors.is_directory"),
+            Error::InputOutput => translate!("errors.input_output"),
+            Error::DirectoryNotEmpty => translate!("errors.directory_not_empty"),
+            Error::FileTooLarge => translate!("errors.file_too_large"),
+            Error::NoAttribute => translate!("errors.no_attribute"),
+            Error::NameTooLong => translate!("errors.name_too_long"),
+            Error::Corrupted => translate!("errors.corrupted"),
+            Error::NoMemory => translate!("errors.no_memory"),
+            Error::NoSpaceLeft => translate!("errors.no_space_left"),
+            Error::TimeError => translate!("errors.time_error"),
+            Error::InvalidInode => translate!("errors.invalid_inode"),
+            Error::NotMounted => translate!("errors.not_mounted"),
+            Error::AlreadyMounted => translate!("errors.already_mounted"),
+            Error::InvalidContext => translate!("errors.invalid_context"),
+            Error::Other => translate!("errors.other"),
         };
 
         write!(formatter, "{string}")
@@ -279,146 +279,146 @@ mod tests {
         // Test display formatting for all error types
         assert_eq!(
             format!("{}", Error::FailedToInitializeFileSystem),
-            translate!("Failed to initialize file system")
+            translate!("errors.failed_to_initialize_file_system")
         );
         assert_eq!(
             format!("{}", Error::PermissionDenied),
-            translate!("Permission denied")
+            translate!("errors.permission_denied")
         );
-        assert_eq!(format!("{}", Error::NotFound), translate!("Not found"));
+        assert_eq!(format!("{}", Error::NotFound), translate!("errors.not_found"));
         assert_eq!(
             format!("{}", Error::AlreadyExists),
-            translate!("Already exists")
+            translate!("errors.already_exists")
         );
         assert_eq!(
             format!("{}", Error::DirectoryAlreadyExists),
-            translate!("Directory already exists")
+            translate!("errors.directory_already_exists")
         );
         assert_eq!(
             format!("{}", Error::FileSystemFull),
-            translate!("File system full")
+            translate!("errors.file_system_full")
         );
         assert_eq!(
             format!("{}", Error::FileSystemError),
-            translate!("File system error")
+            translate!("errors.file_system_error")
         );
         assert_eq!(
             format!("{}", Error::InvalidPath),
-            translate!("Invalid path")
+            translate!("errors.invalid_path")
         );
         assert_eq!(
             format!("{}", Error::InvalidFile),
-            translate!("Invalid file")
+            translate!("errors.invalid_file")
         );
         assert_eq!(
             format!("{}", Error::InvalidDirectory),
-            translate!("Invalid directory")
+            translate!("errors.invalid_directory")
         );
         assert_eq!(
             format!("{}", Error::InvalidSymbolicLink),
-            translate!("Invalid symbolic link")
+            translate!("errors.invalid_symbolic_link")
         );
-        assert_eq!(format!("{}", Error::Unknown), translate!("Unknown"));
+        assert_eq!(format!("{}", Error::Unknown), translate!("errors.unknown"));
         assert_eq!(
             format!("{}", Error::InvalidIdentifier),
-            translate!("Invalid identifier")
+            translate!("errors.invalid_identifier")
         );
         assert_eq!(
             format!("{}", Error::FailedToGetTaskInformations),
-            translate!("Failed to get task informations")
+            translate!("errors.failed_to_get_task_informations")
         );
         assert_eq!(
             format!("{}", Error::FailedToGetUsersInformations),
-            translate!("Failed to get users informations")
+            translate!("errors.failed_to_get_users_informations")
         );
         assert_eq!(
             format!("{}", Error::TooManyMountedFileSystems),
-            translate!("Too many mounted file systems")
+            translate!("errors.too_many_mounted_file_systems")
         );
         assert_eq!(
             format!("{}", Error::TooManyOpenFiles),
-            translate!("Too many open files")
+            translate!("errors.too_many_open_files")
         );
         assert_eq!(
             format!("{}", Error::InternalError),
-            translate!("Internal error")
+            translate!("errors.internal_error")
         );
         assert_eq!(
             format!("{}", Error::InvalidMode),
-            translate!("Invalid mode")
+            translate!("errors.invalid_mode")
         );
         assert_eq!(
             format!("{}", Error::UnsupportedOperation),
-            translate!("Unsupported operation")
+            translate!("errors.unsupported_operation")
         );
         assert_eq!(
             format!("{}", Error::RessourceBusy),
-            translate!("Ressource busy")
+            translate!("errors.ressource_busy")
         );
         assert_eq!(
             format!("{}", Error::AlreadyInitialized),
-            translate!("Already initialized")
+            translate!("errors.already_initialized")
         );
         assert_eq!(
             format!("{}", Error::NotInitialized),
-            translate!("Not initialized")
+            translate!("errors.not_initialized")
         );
         assert_eq!(
             format!("{}", Error::FailedToGetUsersManagerInstance),
-            translate!("Failed to get users manager instance")
+            translate!("errors.failed_to_get_users_manager_instance")
         );
         assert_eq!(
             format!("{}", Error::FailedToGetTaskManagerInstance),
-            translate!("Failed to get task manager instance")
+            translate!("errors.failed_to_get_task_manager_instance")
         );
         assert_eq!(
             format!("{}", Error::InvalidParameter),
-            translate!("Invalid parameter")
+            translate!("errors.invalid_parameter")
         );
         assert_eq!(
             format!("{}", Error::InvalidFlags),
-            translate!("Invalid flags")
+            translate!("errors.invalid_flags")
         );
         assert_eq!(
             format!("{}", Error::NotDirectory),
-            translate!("Not directory")
+            translate!("errors.not_directory")
         );
         assert_eq!(
             format!("{}", Error::IsDirectory),
-            translate!("Is directory")
+            translate!("errors.is_directory")
         );
         assert_eq!(
             format!("{}", Error::InputOutput),
-            translate!("Input output")
+            translate!("errors.input_output")
         );
         assert_eq!(
             format!("{}", Error::DirectoryNotEmpty),
-            translate!("Directory not empty")
+            translate!("errors.directory_not_empty")
         );
         assert_eq!(
             format!("{}", Error::FileTooLarge),
-            translate!("File too large")
+            translate!("errors.file_too_large")
         );
         assert_eq!(
             format!("{}", Error::NoAttribute),
-            translate!("No attribute")
+            translate!("errors.no_attribute")
         );
         assert_eq!(
             format!("{}", Error::NameTooLong),
-            translate!("Name too long")
+            translate!("errors.name_too_long")
         );
-        assert_eq!(format!("{}", Error::Corrupted), translate!("Corrupted"));
-        assert_eq!(format!("{}", Error::NoMemory), translate!("No memory"));
+        assert_eq!(format!("{}", Error::Corrupted), translate!("errors.corrupted"));
+        assert_eq!(format!("{}", Error::NoMemory), translate!("errors.no_memory"));
         assert_eq!(
             format!("{}", Error::NoSpaceLeft),
-            translate!("No space left")
+            translate!("errors.no_space_left")
         );
-        assert_eq!(format!("{}", Error::TimeError), translate!("Time error"));
+        assert_eq!(format!("{}", Error::TimeError), translate!("errors.time_error"));
         assert_eq!(
             format!("{}", Error::InvalidInode),
-            translate!("Invalid inode")
+            translate!("errors.invalid_inode")
         );
-        assert_eq!(format!("{}", Error::Other), translate!("Other"));
+        assert_eq!(format!("{}", Error::Other), translate!("errors.other"));
     }
 
     #[test]

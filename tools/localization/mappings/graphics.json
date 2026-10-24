@@ -1,0 +1,17 @@
+{
+  "namespace": "subsystems/graphics",
+  "old_to_new": {
+    "Already in use": "errors.already_in_use",
+    "Already initialized": "errors.already_initialized",
+    "Failed to create object": "errors.failed_to_create_object",
+    "Failed to get resolution": "errors.failed_to_get_resolution",
+    "Failed to register": "errors.failed_to_register",
+    "Invalid reference": "errors.invalid_reference",
+    "Invalid parameter": "errors.invalid_parameter",
+    "Invalid window identifier": "errors.invalid_window_identifier",
+    "Not available": "errors.not_available",
+    "Not initialized": "errors.not_initialized",
+    "Not registered": "errors.not_registered",
+    "Out of memory": "errors.out_of_memory"
+  }
+}

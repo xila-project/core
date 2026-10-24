@@ -47,23 +47,23 @@ pub fn evaluate_expression(input: &str, radian_mode: bool) -> Result<CalculatorN
 
 fn localize_error(error: nanoexpr::Error) -> String {
     let message = match error.kind {
-        ErrorKind::UnexpectedCharacter => translate!("Unexpected character"),
-        ErrorKind::UnexpectedToken => translate!("Unexpected token"),
-        ErrorKind::UnexpectedEnd => translate!("Unexpected end of expression"),
-        ErrorKind::UnclosedParenthesis => translate!("Unclosed parenthesis"),
-        ErrorKind::InvalidNumber => translate!("Invalid number"),
-        ErrorKind::UnknownVariable => translate!("Unknown variable"),
-        ErrorKind::UnknownFunction => translate!("Unknown function"),
-        ErrorKind::TooManyArguments => translate!("Too many arguments"),
-        ErrorKind::ArgumentCount => translate!("Wrong number of arguments"),
-        ErrorKind::DivisionByZero => translate!("Division by zero"),
-        ErrorKind::Domain => translate!("Value outside function domain"),
-        ErrorKind::Overflow => translate!("Calculation overflow"),
-        ErrorKind::TooDeep => translate!("Expression nested too deeply"),
-        ErrorKind::Unsupported => translate!("Unsupported operation"),
-        ErrorKind::TooLong => translate!("Expression too long"),
-        ErrorKind::Inexact => translate!("Inexact result"),
-        _ => translate!("Calculation error"),
+        ErrorKind::UnexpectedCharacter => translate!("errors.unexpected_character"),
+        ErrorKind::UnexpectedToken => translate!("errors.unexpected_token"),
+        ErrorKind::UnexpectedEnd => translate!("errors.unexpected_end_of_expression"),
+        ErrorKind::UnclosedParenthesis => translate!("errors.unclosed_parenthesis"),
+        ErrorKind::InvalidNumber => translate!("errors.invalid_number"),
+        ErrorKind::UnknownVariable => translate!("errors.unknown_variable"),
+        ErrorKind::UnknownFunction => translate!("errors.unknown_function"),
+        ErrorKind::TooManyArguments => translate!("errors.too_many_arguments"),
+        ErrorKind::ArgumentCount => translate!("errors.wrong_number_of_arguments"),
+        ErrorKind::DivisionByZero => translate!("errors.division_by_zero"),
+        ErrorKind::Domain => translate!("errors.value_outside_function_domain"),
+        ErrorKind::Overflow => translate!("errors.calculation_overflow"),
+        ErrorKind::TooDeep => translate!("errors.expression_nested_too_deeply"),
+        ErrorKind::Unsupported => translate!("errors.unsupported_operation"),
+        ErrorKind::TooLong => translate!("errors.expression_too_long"),
+        ErrorKind::Inexact => translate!("errors.inexact_result"),
+        _ => translate!("errors.calculation_error"),
     };
     format!("{message} ({}..{})", error.span.start, error.span.end)
 }
@@ -125,11 +125,11 @@ mod tests {
     fn reports_localized_errors_with_the_input_span() {
         assert_eq!(
             evaluate_expression("1 / 0", true).unwrap_err(),
-            format!("{} (0..5)", translate!("Division by zero"))
+            format!("{} (0..5)", translate!("errors.division_by_zero"))
         );
         assert_eq!(
             evaluate_expression("sqrt(-1)", true).unwrap_err(),
-            format!("{} (0..8)", translate!("Value outside function domain"))
+            format!("{} (0..8)", translate!("errors.value_outside_function_domain"))
         );
     }
 }
