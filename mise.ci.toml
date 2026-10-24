@@ -462,6 +462,9 @@ for locale in en fr es de pt-BR it pl; do
   mkdir -p "target/reference-filesystem-images/$locale"
   cp "$CARGO_TARGET_DIR/seed/wasm/seed.img" "target/reference-filesystem-images/$locale/wasm.img"
   cp "$CARGO_TARGET_DIR/seed/wasm/native.img" "target/reference-filesystem-images/$locale/native.img"
+  # Trunk's copy-file asset uses a fixed path outside the locale target directory.
+  mkdir -p target/seed/wasm
+  cp "$CARGO_TARGET_DIR/seed/wasm/seed.img" target/seed/wasm/seed.img
   mise run pages:demo
   mkdir -p "pages/demonstrations/wasm/$locale"
   cp -r examples/wasm/dist/. "pages/demonstrations/wasm/$locale/"
