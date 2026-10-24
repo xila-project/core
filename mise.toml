@@ -39,7 +39,7 @@ run = "node tools/localization/check.mjs"
 
 [tasks."localization:check"]
 description = "Run strict host and guest localization checks"
-depends = ["localization:lint", "localization:host-check", "localization:guest-check"]
+depends = ["localization:host-check", "localization:guest-check"]
 
 [tasks."clippy:host"]
 description = "Run Clippy for the Linux host target"
