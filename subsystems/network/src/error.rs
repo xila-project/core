@@ -101,15 +101,27 @@ impl Display for Error {
             Error::Unsupported => write!(f, translate!("errors.unsupported_operation")),
             Error::UnexpectedEndOfFile => write!(f, translate!("errors.unexpected_end_of_file")),
             Error::OutOfMemory => write!(f, translate!("errors.out_of_memory")),
-            Error::Pending => write!(f, translate!("errors.in_progress_operation_not_completed_yet")),
+            Error::Pending => write!(
+                f,
+                translate!("errors.in_progress_operation_not_completed_yet")
+            ),
             Error::UnsupportedProtocol => {
-                write!(f, translate!("errors.unsupported_protocol_used_in_operation"))
+                write!(
+                    f,
+                    translate!("errors.unsupported_protocol_used_in_operation")
+                )
             }
             Error::InvalidIdentifier => {
-                write!(f, translate!("errors.invalid_identifier_provided_for_operation"))
+                write!(
+                    f,
+                    translate!("errors.invalid_identifier_provided_for_operation")
+                )
             }
             Error::DuplicateIdentifier => {
-                write!(f, translate!("errors.duplicate_identifier_found_in_operation"))
+                write!(
+                    f,
+                    translate!("errors.duplicate_identifier_found_in_operation")
+                )
             }
             Error::FailedToGenerateSeed(e) => {
                 write!(f, translate!("errors.failed_to_generate_seed"), e)

@@ -297,7 +297,8 @@ impl Interface {
                             self.show_result = true;
                         }
                         Err(e) => {
-                            self.current_expression = format!(translate!("errors.calculation_with_details"), e);
+                            self.current_expression =
+                                format!(translate!("errors.calculation_with_details"), e);
                             self.show_result = true;
                         }
                     }

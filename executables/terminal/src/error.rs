@@ -66,7 +66,11 @@ impl Display for Error {
                 write!(formatter, translate!("errors.utf_8"), error)
             }
             Self::FailedToMountDevice(error) => {
-                write!(formatter, translate!("errors.failed_to_mount_device"), error)
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_mount_device"),
+                    error
+                )
             }
             Self::FailedToGetTaskIdentifier(error) => {
                 write!(

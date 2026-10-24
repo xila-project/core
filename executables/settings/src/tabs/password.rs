@@ -182,8 +182,12 @@ impl PasswordTab {
         &mut self,
         parent_tabview: *mut lvgl::lv_obj_t,
     ) -> Result<*mut lvgl::lv_obj_t> {
-        let tab_container =
-            unsafe { lvgl::lv_tabview_add_tab(parent_tabview, translate!(c"password.fields.password").as_ptr()) };
+        let tab_container = unsafe {
+            lvgl::lv_tabview_add_tab(
+                parent_tabview,
+                translate!(c"password.fields.password").as_ptr(),
+            )
+        };
 
         unsafe {
             lvgl::lv_obj_set_flex_flow(tab_container, lvgl::lv_flex_flow_t_LV_FLEX_FLOW_COLUMN);
@@ -223,7 +227,10 @@ impl PasswordTab {
 
             // New password
             let new_password_label = lvgl::lv_label_create(tab_container);
-            lvgl::lv_label_set_text(new_password_label, translate!(c"password.fields.new").as_ptr());
+            lvgl::lv_label_set_text(
+                new_password_label,
+                translate!(c"password.fields.new").as_ptr(),
+            );
 
             let new_password_text_area = lvgl::lv_textarea_create(tab_container);
             lvgl::lv_textarea_set_password_mode(new_password_text_area, true);
@@ -246,7 +253,10 @@ impl PasswordTab {
             let change_password_button = lvgl::lv_button_create(tab_container);
 
             let button_label = lvgl::lv_label_create(change_password_button);
-            lvgl::lv_label_set_text(button_label, translate!(c"password.actions.change").as_ptr());
+            lvgl::lv_label_set_text(
+                button_label,
+                translate!(c"password.actions.change").as_ptr(),
+            );
             lvgl::lv_obj_center(button_label);
 
             // Status label

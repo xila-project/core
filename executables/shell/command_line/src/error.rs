@@ -118,7 +118,11 @@ impl Display for Error<'_> {
                 write!(formatter, translate!("errors.authentication_failed"), error)
             }
             Error::FailedToSetTaskUser(error) => {
-                write!(formatter, translate!("errors.failed_to_set_task_user"), error)
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_set_task_user"),
+                    error
+                )
             }
             Error::FailedToSetEnvironmentVariable(error) => {
                 write!(
@@ -128,7 +132,10 @@ impl Display for Error<'_> {
                 )
             }
             Error::FailedToTokenizeCommandLine => {
-                write!(formatter, translate!("errors.failed_to_tokenize_command_line"))
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_tokenize_command_line")
+                )
             }
             Error::MissingFileNameAfterRedirectOut => {
                 write!(
@@ -137,19 +144,36 @@ impl Display for Error<'_> {
                 )
             }
             Error::MissingFileNameAfterRedirectIn => {
-                write!(formatter, translate!("errors.missing_file_name_after_redirect_in"))
+                write!(
+                    formatter,
+                    translate!("errors.missing_file_name_after_redirect_in")
+                )
             }
-            Error::MissingCommand => write!(formatter, translate!("execution.errors.missing_command")),
-            Error::CommandNotFound => write!(formatter, translate!("execution.errors.command_not_found")),
+            Error::MissingCommand => {
+                write!(formatter, translate!("execution.errors.missing_command"))
+            }
+            Error::CommandNotFound => {
+                write!(formatter, translate!("execution.errors.command_not_found"))
+            }
             Error::FailedToGetTaskUser(error) => {
-                write!(formatter, translate!("errors.failed_to_get_task_user"), error)
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_get_task_user"),
+                    error
+                )
             }
             Error::FailedToGetTaskIdentifier => {
-                write!(formatter, translate!("errors.failed_to_get_task_identifier"))
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_get_task_identifier")
+                )
             }
             Error::InvalidPath => write!(formatter, translate!("errors.invalid_path")),
             Error::FailedToGetPath => {
-                write!(formatter, translate!("errors.failed_to_get_environment_variable"))
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_get_environment_variable")
+                )
             }
             Error::FailedToExecuteCommand => {
                 write!(formatter, translate!("errors.failed_to_execute_command"))
@@ -185,7 +209,11 @@ impl Display for Error<'_> {
                 )
             }
             Error::FailedToOpenDirectory(error) => {
-                write!(formatter, translate!("errors.failed_to_open_directory"), error)
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_open_directory"),
+                    error
+                )
             }
             Error::FailedToOpenFile(error) => {
                 write!(formatter, translate!("errors.failed_to_open_file"), error)
@@ -197,7 +225,10 @@ impl Display for Error<'_> {
                 write!(formatter, translate!("errors.option_requires_a_value"))
             }
             Error::DoesNotRequireValue => {
-                write!(formatter, translate!("errors.option_does_not_require_a_value"))
+                write!(
+                    formatter,
+                    translate!("errors.option_does_not_require_a_value")
+                )
             }
             Error::InvalidArgument => {
                 write!(formatter, translate!("errors.invalid_argument"))
@@ -213,7 +244,11 @@ impl Display for Error<'_> {
                 write!(formatter, translate!("errors.invalid_option"))
             }
             Error::FailedToGetMetadata(error) => {
-                write!(formatter, translate!("errors.failed_to_get_metadata"), error)
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_get_metadata"),
+                    error
+                )
             }
             Error::FailedToSetCurrentDirectory(error) => {
                 write!(
@@ -230,21 +265,28 @@ impl Display for Error<'_> {
                 )
             }
             Error::FailedToResolve(error) => {
-                write!(formatter, translate!("errors.failed_to_resolve_domain"), error)
-            }
-            Error::FailedToCreateSocket(error) => {
-                write!(formatter, translate!("errors.failed_to_create_socket"), error)
-            }
-            Error::ArgumentParsing(error) => {
-                write!(formatter, translate!("errors.argument_parsing_error"), error)
-            }
-            Error::InvalidSleepDuration => {
                 write!(
                     formatter,
-                    translate!(
-                        "sleep.errors.invalid_duration"
-                    )
+                    translate!("errors.failed_to_resolve_domain"),
+                    error
                 )
+            }
+            Error::FailedToCreateSocket(error) => {
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_create_socket"),
+                    error
+                )
+            }
+            Error::ArgumentParsing(error) => {
+                write!(
+                    formatter,
+                    translate!("errors.argument_parsing_error"),
+                    error
+                )
+            }
+            Error::InvalidSleepDuration => {
+                write!(formatter, translate!("sleep.errors.invalid_duration"))
             }
             Error::FailedToSetPermissions(error) => {
                 write!(

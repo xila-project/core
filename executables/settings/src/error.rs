@@ -114,7 +114,11 @@ impl Display for Error {
                 write!(formatter, translate!("errors.invalid_utf_8_string"), error)
             }
             Error::FailedToSetTaskUser(error) => {
-                write!(formatter, translate!("errors.failed_to_set_task_user"), error)
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_set_task_user"),
+                    error
+                )
             }
             Error::FailedToGetCurrentTaskIdentifier(error) => {
                 write!(
@@ -124,7 +128,11 @@ impl Display for Error {
                 )
             }
             Error::FailedToReadDirectory(error) => {
-                write!(formatter, translate!("errors.failed_to_read_directory"), error)
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_read_directory"),
+                    error
+                )
             }
             Error::FailedToOpenStandardFile(error) => {
                 write!(
@@ -134,7 +142,11 @@ impl Display for Error {
                 )
             }
             Error::NullCharacterInString(error) => {
-                write!(formatter, translate!("errors.null_character_in_string"), error)
+                write!(
+                    formatter,
+                    translate!("errors.null_character_in_string"),
+                    error
+                )
             }
             Error::FailedToCreateUiElement => {
                 write!(formatter, translate!("errors.failed_to_create_ui_element"))

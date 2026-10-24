@@ -263,9 +263,7 @@ impl Interface {
             self.drawing.mark_saved();
             self.status(translate!("status.saved"))?;
         } else {
-            self.status(translate!(
-                "errors.save_failed_drawing_preserved"
-            ))?;
+            self.status(translate!("errors.save_failed_drawing_preserved"))?;
         }
         Ok(false)
     }

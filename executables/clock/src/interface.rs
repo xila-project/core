@@ -176,12 +176,13 @@ impl Interface {
                 alarm_minute: settings.alarm.map_or(0, |a| a.minute),
                 alarm_alert: AlarmAlert::default(),
             };
-            ui.labels[0] = ui.label(
-                window,
-                translate!("alerts.instructions"),
-            )?;
+            ui.labels[0] = ui.label(window, translate!("alerts.instructions"))?;
             let alert_row = ui.row(window)?;
-            ui.button(alert_row, translate!(c"alerts.snooze_five_minutes"), Action::Snooze)?;
+            ui.button(
+                alert_row,
+                translate!(c"alerts.snooze_five_minutes"),
+                Action::Snooze,
+            )?;
             ui.button(alert_row, translate!(c"alerts.dismiss"), Action::Dismiss)?;
 
             let tabs = tabview_create(window)?;
@@ -190,23 +191,37 @@ impl Interface {
             ui.tabs = tabs;
             let clock_tab = ui.tab(translate!(c"tabs.clock"))?;
             ui.labels[1] = ui.label(clock_tab, "")?;
-            ui.label(
+            ui.label(clock_tab, translate!("clock.instructions.utc_only"))?;
+            ui.button(
                 clock_tab,
-                translate!("clock.instructions.utc_only"),
+                translate!(c"clock.controls.toggle_hour_format"),
+                Action::Format,
             )?;
-            ui.button(clock_tab, translate!(c"clock.controls.toggle_hour_format"), Action::Format)?;
 
             let alarm_tab = ui.tab(translate!(c"tabs.alarm"))?;
             ui.labels[2] = ui.label(alarm_tab, "")?;
             let alarm_row = ui.row(alarm_tab)?;
-            ui.button(alarm_row, translate!(c"alarm.controls.decrement_hour"), Action::AlarmHour(-1))?;
-            ui.button(alarm_row, translate!(c"alarm.controls.increment_hour"), Action::AlarmHour(1))?;
-            ui.button(alarm_row, translate!(c"alarm.controls.decrement_minute"), Action::AlarmMinute(-1))?;
-            ui.button(alarm_row, translate!(c"alarm.controls.increment_minute"), Action::AlarmMinute(1))?;
-            ui.label(
-                alarm_tab,
-                translate!("alarm.instructions.repeat_days_utc"),
+            ui.button(
+                alarm_row,
+                translate!(c"alarm.controls.decrement_hour"),
+                Action::AlarmHour(-1),
             )?;
+            ui.button(
+                alarm_row,
+                translate!(c"alarm.controls.increment_hour"),
+                Action::AlarmHour(1),
+            )?;
+            ui.button(
+                alarm_row,
+                translate!(c"alarm.controls.decrement_minute"),
+                Action::AlarmMinute(-1),
+            )?;
+            ui.button(
+                alarm_row,
+                translate!(c"alarm.controls.increment_minute"),
+                Action::AlarmMinute(1),
+            )?;
+            ui.label(alarm_tab, translate!("alarm.instructions.repeat_days_utc"))?;
             let days = [
                 translate!(c"alarm.weekdays.monday"),
                 translate!(c"alarm.weekdays.tuesday"),
@@ -234,8 +249,16 @@ impl Interface {
                 translate!(c"alarm.controls.save_and_enable"),
                 Action::AlarmSave,
             )?;
-            ui.button(alarm_actions, translate!(c"alarm.controls.disable"), Action::AlarmDisable)?;
-            ui.button(alarm_actions, translate!(c"alarm.controls.delete"), Action::AlarmDelete)?;
+            ui.button(
+                alarm_actions,
+                translate!(c"alarm.controls.disable"),
+                Action::AlarmDisable,
+            )?;
+            ui.button(
+                alarm_actions,
+                translate!(c"alarm.controls.delete"),
+                Action::AlarmDelete,
+            )?;
 
             let watch_tab = ui.tab(translate!(c"tabs.stopwatch"))?;
             ui.labels[3] = ui.label(watch_tab, "")?;
@@ -245,8 +268,16 @@ impl Interface {
                 translate!(c"stopwatch.controls.toggle_pause"),
                 Action::StopwatchToggle,
             )?;
-            ui.button(watch_actions, translate!(c"stopwatch.controls.record_lap"), Action::Lap)?;
-            ui.button(watch_actions, translate!(c"stopwatch.controls.reset"), Action::StopwatchReset)?;
+            ui.button(
+                watch_actions,
+                translate!(c"stopwatch.controls.record_lap"),
+                Action::Lap,
+            )?;
+            ui.button(
+                watch_actions,
+                translate!(c"stopwatch.controls.reset"),
+                Action::StopwatchReset,
+            )?;
             ui.labels[4] = ui.label(watch_tab, "")?;
 
             let timer_tab = ui.tab(translate!(c"tabs.timer"))?;
@@ -273,14 +304,26 @@ impl Interface {
                 Action::TimerAdjust(1),
             )?;
             let timer_actions = ui.row(timer_tab)?;
-            ui.button(timer_actions, translate!(c"timer.controls.start"), Action::TimerStart)?;
+            ui.button(
+                timer_actions,
+                translate!(c"timer.controls.start"),
+                Action::TimerStart,
+            )?;
             ui.button(
                 timer_actions,
                 translate!(c"timer.controls.toggle_pause"),
                 Action::TimerToggle,
             )?;
-            ui.button(timer_actions, translate!(c"timer.controls.restart"), Action::TimerRestart)?;
-            ui.button(timer_actions, translate!(c"timer.controls.cancel"), Action::TimerCancel)?;
+            ui.button(
+                timer_actions,
+                translate!(c"timer.controls.restart"),
+                Action::TimerRestart,
+            )?;
+            ui.button(
+                timer_actions,
+                translate!(c"timer.controls.cancel"),
+                Action::TimerCancel,
+            )?;
             Ok(ui)
         }
     }
@@ -494,7 +537,11 @@ impl Interface {
             let count = self.watch.laps().len();
             if count != 0 {
                 // Compiled locale forms; selection does not allocate.
-                let _ = embedded_i18n::translate_plural_write!(&mut laps, "stopwatch.laps.recorded", count);
+                let _ = embedded_i18n::translate_plural_write!(
+                    &mut laps,
+                    "stopwatch.laps.recorded",
+                    count
+                );
                 laps.push('\n');
             }
             for (index, lap) in self.watch.laps().iter().enumerate() {

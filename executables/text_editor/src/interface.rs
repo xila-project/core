@@ -286,9 +286,7 @@ impl Interface {
                 self.show_page()?;
                 self.status(translate!("file_path.new_file_default_name"))?;
             }
-            Err(_) => self.status(translate!(
-                "errors.working_copy_creation_failed"
-            ))?,
+            Err(_) => self.status(translate!("errors.working_copy_creation_failed"))?,
         }
         Ok(())
     }
@@ -316,9 +314,7 @@ impl Interface {
                 self.show_page()?;
                 self.status(translate!("status.opened"))?;
             }
-            Err(_) => self.status(translate!(
-                "errors.open_failed"
-            ))?,
+            Err(_) => self.status(translate!("errors.open_failed"))?,
         }
         Ok(())
     }
@@ -347,9 +343,7 @@ impl Interface {
             self.revision = self.revision.wrapping_add(1);
             self.status(translate!("status.saved"))?;
         } else {
-            self.status(translate!(
-                "errors.save_failed_working_copy_preserved"
-            ))?;
+            self.status(translate!("errors.save_failed_working_copy_preserved"))?;
         }
         Ok(())
     }
@@ -357,9 +351,7 @@ impl Interface {
     fn allow_discard(&mut self) -> wasm::Result<bool> {
         if self.dirty && self.confirm_open != Some(self.revision) {
             self.confirm_open = Some(self.revision);
-            self.status(translate!(
-                "warnings.unsaved_new_or_open_again"
-            ))?;
+            self.status(translate!("warnings.unsaved_new_or_open_again"))?;
             return Ok(false);
         }
         self.confirm_open = None;

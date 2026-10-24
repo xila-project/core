@@ -26,9 +26,13 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Error::InvalidTaskIdentifier => write!(f, translate!("errors.invalid_task_identifier")),
-            Error::InvalidSpawnerIdentifier => write!(f, translate!("errors.invalid_spawner_identifier")),
+            Error::InvalidSpawnerIdentifier => {
+                write!(f, translate!("errors.invalid_spawner_identifier"))
+            }
             Error::ThreadNotRegistered => write!(f, translate!("errors.thread_not_registered")),
-            Error::ThreadAlreadyRegistered => write!(f, translate!("errors.thread_already_registered")),
+            Error::ThreadAlreadyRegistered => {
+                write!(f, translate!("errors.thread_already_registered"))
+            }
             Error::FailedToCreateThread => write!(f, translate!("errors.failed_to_create_thread")),
             Error::NoThreadForTask => write!(f, translate!("errors.no_thread_for_task")),
             Error::FailedToSpawnThread => write!(f, translate!("errors.failed_to_spawn_thread")),
@@ -219,11 +223,17 @@ mod tests {
         let display_str = format!("{env_error}");
         let non_zero: NonZeroU32 = env_error.into();
         assert_eq!(non_zero.get(), 8u32);
-        assert_eq!(display_str, translate!("errors.invalid_environment_variable"));
+        assert_eq!(
+            display_str,
+            translate!("errors.invalid_environment_variable")
+        );
 
         // Test task-related errors
         let task_error = Error::InvalidTaskIdentifier;
-        assert_eq!(format!("{task_error}"), translate!("errors.invalid_task_identifier"));
+        assert_eq!(
+            format!("{task_error}"),
+            translate!("errors.invalid_task_identifier")
+        );
 
         let spawner_error = Error::InvalidSpawnerIdentifier;
         assert_eq!(

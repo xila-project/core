@@ -79,7 +79,11 @@ impl Display for Error {
                 write!(formatter, translate!("errors.authentication_failed"), error)
             }
             Self::FailedToSetTaskUser(error) => {
-                write!(formatter, translate!("errors.failed_to_set_task_user"), error)
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_set_task_user"),
+                    error
+                )
             }
             Self::FailedToDeserializeShortcut(error) => {
                 write!(
@@ -103,7 +107,10 @@ impl Display for Error {
                 )
             }
             Self::FailedToGetShortcutFilePath => {
-                write!(formatter, translate!("errors.failed_to_get_shortcut_file_path"))
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_get_shortcut_file_path")
+                )
             }
             Self::FailedToReadShortcutFile(error) => {
                 write!(
@@ -127,7 +134,11 @@ impl Display for Error {
                 )
             }
             Self::NullCharacterInString(error) => {
-                write!(formatter, translate!("errors.null_character_in_string"), error)
+                write!(
+                    formatter,
+                    translate!("errors.null_character_in_string"),
+                    error
+                )
             }
             Self::MissingArguments => {
                 write!(formatter, translate!("errors.missing_arguments"))
@@ -139,10 +150,18 @@ impl Display for Error {
                 write!(formatter, "Invalid number of arguments")
             }
             Self::FailedToAddShortcut(error) => {
-                write!(formatter, translate!("errors.failed_to_add_shortcut"), error)
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_add_shortcut"),
+                    error
+                )
             }
             Self::FailedToOpenDirectory(error) => {
-                write!(formatter, translate!("errors.failed_to_open_directory"), error)
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_open_directory"),
+                    error
+                )
             }
         }
     }

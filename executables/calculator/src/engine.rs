@@ -129,7 +129,10 @@ mod tests {
         );
         assert_eq!(
             evaluate_expression("sqrt(-1)", true).unwrap_err(),
-            format!("{} (0..8)", translate!("errors.value_outside_function_domain"))
+            format!(
+                "{} (0..8)",
+                translate!("errors.value_outside_function_domain")
+            )
         );
     }
 }

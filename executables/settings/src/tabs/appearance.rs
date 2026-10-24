@@ -136,10 +136,7 @@ impl AppearanceTab {
             Err(error) => {
                 xila::log::warning!("Could not save appearance preferences: {}", error);
                 unsafe {
-                    self.set_status(
-                        translate!(c"appearance.status.applied_not_saved"),
-                        true,
-                    );
+                    self.set_status(translate!(c"appearance.status.applied_not_saved"), true);
                 }
             }
         }

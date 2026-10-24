@@ -183,7 +183,9 @@ impl From<Error> for NonZeroU32 {
 impl Display for Error {
     fn fmt(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
         let string = match self {
-            Error::FailedToInitializeFileSystem => translate!("errors.failed_to_initialize_file_system"),
+            Error::FailedToInitializeFileSystem => {
+                translate!("errors.failed_to_initialize_file_system")
+            }
             Error::PermissionDenied => translate!("errors.permission_denied"),
             Error::NotFound => translate!("errors.not_found"),
             Error::AlreadyExists => translate!("errors.already_exists"),
@@ -196,8 +198,12 @@ impl Display for Error {
             Error::InvalidSymbolicLink => translate!("errors.invalid_symbolic_link"),
             Error::Unknown => translate!("errors.unknown"),
             Error::InvalidIdentifier => translate!("errors.invalid_identifier"),
-            Error::FailedToGetTaskInformations => translate!("errors.failed_to_get_task_informations"),
-            Error::FailedToGetUsersInformations => translate!("errors.failed_to_get_users_informations"),
+            Error::FailedToGetTaskInformations => {
+                translate!("errors.failed_to_get_task_informations")
+            }
+            Error::FailedToGetUsersInformations => {
+                translate!("errors.failed_to_get_users_informations")
+            }
             Error::TooManyMountedFileSystems => translate!("errors.too_many_mounted_file_systems"),
             Error::TooManyOpenFiles => translate!("errors.too_many_open_files"),
             Error::InternalError => translate!("errors.internal_error"),
@@ -285,7 +291,10 @@ mod tests {
             format!("{}", Error::PermissionDenied),
             translate!("errors.permission_denied")
         );
-        assert_eq!(format!("{}", Error::NotFound), translate!("errors.not_found"));
+        assert_eq!(
+            format!("{}", Error::NotFound),
+            translate!("errors.not_found")
+        );
         assert_eq!(
             format!("{}", Error::AlreadyExists),
             translate!("errors.already_exists")
@@ -407,13 +416,22 @@ mod tests {
             format!("{}", Error::NameTooLong),
             translate!("errors.name_too_long")
         );
-        assert_eq!(format!("{}", Error::Corrupted), translate!("errors.corrupted"));
-        assert_eq!(format!("{}", Error::NoMemory), translate!("errors.no_memory"));
+        assert_eq!(
+            format!("{}", Error::Corrupted),
+            translate!("errors.corrupted")
+        );
+        assert_eq!(
+            format!("{}", Error::NoMemory),
+            translate!("errors.no_memory")
+        );
         assert_eq!(
             format!("{}", Error::NoSpaceLeft),
             translate!("errors.no_space_left")
         );
-        assert_eq!(format!("{}", Error::TimeError), translate!("errors.time_error"));
+        assert_eq!(
+            format!("{}", Error::TimeError),
+            translate!("errors.time_error")
+        );
         assert_eq!(
             format!("{}", Error::InvalidInode),
             translate!("errors.invalid_inode")

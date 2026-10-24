@@ -46,7 +46,10 @@ async fn write_ping_line<C: CommandContext>(
     resolved_target: &xila::network::IpAddress,
     payload_size: usize,
 ) -> crate::Result<()> {
-    let unit = xila::internationalization::translate_plural!("ping.request.payload_byte_unit", payload_size);
+    let unit = xila::internationalization::translate_plural!(
+        "ping.request.payload_byte_unit",
+        payload_size
+    );
     context
         .write_out_fmt(format_args!(
             "PING {} ({}): {} {}\n",
@@ -85,8 +88,10 @@ async fn ping_loop<C: CommandContext>(
             .await
         {
             Ok(duration) => {
-                let unit =
-                    xila::internationalization::translate_plural!("ping.reply.byte_unit", payload_size);
+                let unit = xila::internationalization::translate_plural!(
+                    "ping.reply.byte_unit",
+                    payload_size
+                );
                 context
                     .write_out_fmt(format_args!(
                         "{} {} {}: icmp_seq={} {}={:.2} ms\n",

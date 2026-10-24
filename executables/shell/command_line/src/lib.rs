@@ -258,8 +258,9 @@ impl Shell {
                 .unwrap_or(0);
             if depth >= MAX_SHELL_DEPTH {
                 self.last_status = 2;
-                let error =
-                    xila::internationalization::translate!("errors.maximum_nested_shell_depth_exceeded");
+                let error = xila::internationalization::translate!(
+                    "errors.maximum_nested_shell_depth_exceeded"
+                );
                 if arguments[0] == "-s" && arguments.len() == 2 {
                     self.script_diagnostic(&arguments[1], None, error).await;
                 } else {
@@ -275,8 +276,9 @@ impl Shell {
                 .is_err()
             {
                 self.last_status = 1;
-                let error =
-                    xila::internationalization::translate!("errors.failed_to_set_shell_nesting_depth");
+                let error = xila::internationalization::translate!(
+                    "errors.failed_to_set_shell_nesting_depth"
+                );
                 if arguments[0] == "-s" && arguments.len() == 2 {
                     self.script_diagnostic(&arguments[1], None, error).await;
                 } else {

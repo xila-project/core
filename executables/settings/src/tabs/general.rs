@@ -17,8 +17,9 @@ impl GeneralTab {
         &mut self,
         parent_tabview: *mut lvgl::lv_obj_t,
     ) -> Result<*mut lvgl::lv_obj_t> {
-        let tab_container =
-            unsafe { lvgl::lv_tabview_add_tab(parent_tabview, translate!(c"tabs.general").as_ptr()) };
+        let tab_container = unsafe {
+            lvgl::lv_tabview_add_tab(parent_tabview, translate!(c"tabs.general").as_ptr())
+        };
 
         if tab_container.is_null() {
             return Err(crate::error::Error::FailedToCreateUiElement);

@@ -99,10 +99,18 @@ impl Display for Error {
                 write!(formatter, translate!("errors.failed_to_get_user_file_path"))
             }
             Self::FailedToReadUserFile(error) => {
-                write!(formatter, translate!("errors.failed_to_read_user_file"), error)
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_read_user_file"),
+                    error
+                )
             }
             Self::FailedToOpenUserFile(error) => {
-                write!(formatter, translate!("errors.failed_to_open_user_file"), error)
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_open_user_file"),
+                    error
+                )
             }
             Self::FailedToParseUserFile(error) => {
                 write!(
@@ -129,7 +137,10 @@ impl Display for Error {
                 )
             }
             Self::FailedToGetGroupFilePath => {
-                write!(formatter, translate!("errors.failed_to_get_group_file_path"))
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_get_group_file_path")
+                )
             }
             Self::FailedToOpenGroupFile(error) => {
                 write!(
@@ -204,7 +215,11 @@ impl Display for Error {
                 )
             }
             Self::FailedToCreateGroup(error) => {
-                write!(formatter, translate!("errors.failed_to_create_group"), error)
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_create_group"),
+                    error
+                )
             }
             Self::FailedToWriteGroupFile(error) => {
                 write!(
@@ -224,7 +239,11 @@ impl Display for Error {
                 write!(formatter, translate!("errors.failed_to_close_file"), error)
             }
             Self::FailedToHashPassword(error) => {
-                write!(formatter, translate!("errors.failed_to_hash_password"), error)
+                write!(
+                    formatter,
+                    translate!("errors.failed_to_hash_password"),
+                    error
+                )
             }
         }
     }
