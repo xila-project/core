@@ -119,6 +119,22 @@ not return their consumer for safe reuse. Adapters with an explicit owner can us
 the adapter and consumer must be destroyed before the reservation. Keep both in
 an owner that enforces this order, as the native `Runner` does.
 
+### Headless output
+
+`drivers_headless::HeadlessAudioOutput` reserves an output from the same pinned
+`AudioSystem` used by physical adapters. It adds no queue, thread, timer or
+allocation. Call `mix_next_block()` explicitly, then `read()` into a caller-owned
+byte buffer to inspect interleaved stereo F32 PCM. Reads return available whole
+frames without waiting; unused buffer bytes are unchanged. No samples are
+invented for an empty queue. Mixing an empty or paused stream produces silence.
+`dropped_blocks()` reports bounded-queue overflow, and dropping the driver frees
+its output slot.
+
+These tests run with normal workspace tests, without enabling
+`drivers_native/audio` or opening an audio device. To test just the headless
+crate, run `cargo test -p drivers_headless`. Native-adapter checks remain opt-in
+for work on the native example.
+
 On the x86_64 debug test build, the system is **14,544 bytes**, each stream handle
 is **16 bytes**, and each output handle is **24 bytes**. PCM queues contain exactly
 **14,336 bytes (14 KiB)**: 8 KiB for application queues plus 6 KiB for output queues.

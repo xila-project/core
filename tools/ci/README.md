@@ -48,7 +48,7 @@ GitHub Actions steps, exposing individual timings and failures. Their local
 wrappers (`ci:host`, `ci:wasm`, `ci:profiling`, `ci:abi-deep`) run exactly the
 same tasks sequentially and stop at the first failure. Each leaf declares its
 own tools and native package dependencies and can also be run independently,
-for example `MISE_ENV=ci mise run ci:host-audio-tests`. Job-level mbx settings
+for example `MISE_ENV=ci mise run ci:host-font-tests`. Job-level mbx settings
 apply to every leaf and nested task, just as they do to the local wrappers.
 
 `mise.toml` contains reusable tasks. CI orchestration (`ci:*`) and
@@ -65,9 +65,12 @@ preinstall, not a prerequisite for running a single task.
 The compiler-preparation tasks also export the central stable/nightly pin to
 the mbx action's `toolchain` input, so workflow cache keys track the same pin.
 
-Bootstrap clusters cover linker-only, native GUI/audio, and benchmark packages.
-Native audio checks still compile `drivers_native`, whose GUI dependencies are
-unconditional, so they retain the host package cluster. Templates do not
+Bootstrap clusters cover linker-only, native GUI, and benchmark packages.
+The regular host lint includes the audio library and headless driver, and the
+workspace tests exercise headless audio without a hardware backend. Native-audio
+feature lint/tests are not part of regular CI; the adapter remains available for
+the native example. Native GUI builds still need the host package cluster.
+Templates do not
 implicitly attach bootstrap steps. Do not override a template's `tools.rust` assuming its
 components or targets will merge: a task replaces that entire tool entry.
 See [Mise task templates](https://mise.jdx.dev/tasks/templates.html) and
@@ -82,7 +85,7 @@ not load the development toolset. Shared commands include `check:host`,
 
 CI native package declarations live in `mise.ci.toml`, not workflow APT commands.
 CI build tasks depend on `ci:packages-linker` (Clang/Mold) or `ci:packages-host`
-(also GUI/audio libraries). These setup tasks explicitly apply mise bootstrap
+(also GUI libraries). These setup tasks explicitly apply mise bootstrap
 packages with the appropriate environment filter. Formatting and quality tasks
 have no package-setup dependency, and local development behavior is unchanged.
 Benchmarks run package setup, including GNU time, before their timed commands.

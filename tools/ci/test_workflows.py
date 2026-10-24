@@ -78,6 +78,19 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn("mise run test:fonts", task["run"])
         self.assertIn("cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml", task["run"])
 
+    def test_regular_ci_uses_headless_audio_instead_of_native_audio_specific_checks(self):
+        host = job("ci.yml", "host")
+        tasks = ci_config()["tasks"]
+        self.assertNotIn("ci:host-audio-clippy", tasks)
+        self.assertNotIn("ci:host-audio-tests", tasks)
+        self.assertNotIn("host-audio", host)
+        lint = tomllib.loads((ROOT / "mise.toml").read_text())["tasks"]["clippy:host"]["run"]
+        self.assertIn("--package audio", lint)
+        self.assertIn("--package drivers_headless", lint)
+        self.assertNotIn("drivers_native/audio", lint)
+        self.assertIn("cargo test --locked --workspace", tasks["ci:host-tests"]["run"])
+        self.assertNotIn("apt:libasound2-dev", ci_config()["bootstrap"]["packages"])
+
     def test_tool_versions_are_central_and_templates_do_not_install_tools_globally(self):
         shared = tomllib.loads((ROOT / "mise.toml").read_text())
         self.assertIn("rust_version", shared.get("vars", {}))
@@ -114,7 +127,7 @@ class WorkflowPolicy(unittest.TestCase):
     def test_validation_jobs_call_the_same_ordered_leaf_tasks_as_local_wrappers(self):
         tasks = ci_config()["tasks"]
         groups = {
-            ("ci.yml", "host"): ["ci:host-clippy", "ci:host-wasm-clippy", "ci:host-audio-clippy", "ci:host-tests", "ci:host-profiling-tests", "ci:host-font-tests", "ci:host-audio-tests", "ci:host-build"],
+            ("ci.yml", "host"): ["ci:host-clippy", "ci:host-wasm-clippy", "ci:host-tests", "ci:host-profiling-tests", "ci:host-font-tests", "ci:host-build"],
             ("ci.yml", "wasm"): ["ci:wasm-clippy", "ci:wasm-audio-check", "ci:wasm-apps-clippy", "ci:wasm-image", "ci:wasm-browser-tests"],
             ("extended.yml", "profiling"): ["ci:profiling-runtime-tests", "ci:profiling-native-tests"],
             ("extended.yml", "abi-deep"): ["ci:abi-coverage", "ci:abi-miri", "ci:abi-miri-cross"],
@@ -255,9 +268,9 @@ class WorkflowPolicy(unittest.TestCase):
             "ci:benchmark-nextest", "ci:benchmark-doctests", "pages:build", "pages:demo",
             "clippy:host", "clippy:guest", "docs:host", "docs:guest",
             "build:applications", "image:native", "image:wasm",
-            "ci:host-clippy", "ci:host-wasm-clippy", "ci:host-audio-clippy",
+            "ci:host-clippy", "ci:host-wasm-clippy",
             "ci:host-tests", "ci:host-profiling-tests", "ci:host-font-tests",
-            "ci:host-audio-tests", "ci:host-build", "ci:wasm-clippy",
+            "ci:host-build", "ci:wasm-clippy",
             "ci:wasm-audio-check", "ci:wasm-apps-clippy", "ci:wasm-image",
             "ci:profiling-runtime-tests", "ci:profiling-native-tests",
         ]:
@@ -515,7 +528,7 @@ class WorkflowPolicy(unittest.TestCase):
         packages = config["bootstrap"]["packages"]
         for package in ["clang", "mold"]:
             self.assertEqual(packages[f"apt:{package}"]["env"], "ci")
-        for package in ["pkg-config", "libasound2-dev", "libudev-dev", "libxkbcommon-dev", "libwayland-dev", "libx11-dev", "libxkbcommon-x11-dev"]:
+        for package in ["pkg-config", "libudev-dev", "libxkbcommon-dev", "libwayland-dev", "libx11-dev", "libxkbcommon-x11-dev"]:
             self.assertEqual(packages[f"apt:{package}"]["env"], "host")
         self.assertEqual(packages["apt:time"]["env"], "benchmark")
         development = tomllib.loads((ROOT / "mise.development.toml").read_text())

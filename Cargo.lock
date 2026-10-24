@@ -1273,6 +1273,8 @@ version = "0.1.0"
 name = "drivers_headless"
 version = "0.1.0"
 dependencies = [
+ "audio",
+ "critical-section",
  "file_system",
  "graphics",
  "shared",

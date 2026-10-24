@@ -60,8 +60,6 @@ jobs:
         run: mise run ci:host-clippy
       - name: Lint host WASM runtime
         run: mise run ci:host-wasm-clippy
-      - name: Lint native audio
-        run: mise run ci:host-audio-clippy
       - name: Test host workspace
         run: mise run ci:host-tests
       - name: Test profiling tools
@@ -75,8 +73,6 @@ jobs:
           name: font-pipeline-evidence
           path: target/font-pipeline-evidence/
           if-no-files-found: warn
-      - name: Test native audio
-        run: mise run ci:host-audio-tests
       - name: Build native example
         run: mise run ci:host-build
 

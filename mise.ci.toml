@@ -69,7 +69,6 @@ env = { MBX_CARGO_SHIM_MODE = "1" }
 "apt:clang" = { env = "ci" }
 "apt:mold" = { env = "ci" }
 "apt:pkg-config" = { env = "host" }
-"apt:libasound2-dev" = { env = "host" }
 "apt:libudev-dev" = { env = "host" }
 "apt:libxkbcommon-dev" = { env = "host" }
 "apt:libwayland-dev" = { env = "host" }
@@ -104,7 +103,7 @@ fi
 """
 
 [tasks."ci:packages-host"]
-description = "Install CI native GUI, audio and linker packages"
+description = "Install CI native GUI and linker packages"
 run = "mise -E ci,host bootstrap packages apply --manager apt --update --yes"
 
 [tasks."ci:packages-benchmark"]
@@ -144,11 +143,9 @@ run = """
 set -euo pipefail
 mise run ci:host-clippy
 mise run ci:host-wasm-clippy
-mise run ci:host-audio-clippy
 mise run ci:host-tests
 mise run ci:host-profiling-tests
 mise run ci:host-font-tests
-mise run ci:host-audio-tests
 mise run ci:host-build
 """
 
@@ -260,12 +257,6 @@ description = "Lint host WASM runtime and graphics bindings"
 depends = ["ci:packages-host"]
 run = "cargo clippy -p wasm --features graphics,xila/graphics_rendering_xrgb8888 --target x86_64-unknown-linux-gnu -- -D warnings"
 
-[tasks."ci:host-audio-clippy"]
-extends = "ci:rust-lint"
-description = "Lint native audio targets"
-depends = ["ci:packages-host"]
-run = "cargo clippy -p audio -p drivers_native --features drivers_native/audio --all-targets -- -D warnings"
-
 [tasks."ci:host-tests"]
 extends = "ci:rust-wasi"
 description = "Test the host workspace"
@@ -288,12 +279,6 @@ run = "mise run test:fonts && cargo test --manifest-path subsystems/graphics/tes
 [tasks."test:fonts"]
 extends = "ci:rust-lint"
 tools.node = "{{ vars.node_version }}"
-
-[tasks."ci:host-audio-tests"]
-extends = "ci:rust-format"
-description = "Test native audio devices"
-depends = ["ci:packages-host"]
-run = "cargo test -p drivers_native --features audio --lib devices::audio::tests"
 
 [tasks."ci:host-build"]
 extends = "ci:rust-format"
