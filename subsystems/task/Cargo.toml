@@ -1,10 +1,10 @@
 [package]
-name = "task"
+name = "xila-task"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-task_macros = { path = "./task_macros" }
+task_macros = { package = "xila-task-macros", path = "./task_macros" }
 users = { workspace = true }
 embassy-executor = { workspace = true, default-features = false }
 embassy-futures = { workspace = true }

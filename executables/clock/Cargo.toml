@@ -1,5 +1,5 @@
 [package]
-name = "clock"
+name = "xila-clock"
 version = "0.1.0"
 edition = "2024"
 description = "A bounded Clock application for Xila's WebAssembly runtime."
@@ -15,3 +15,7 @@ wasm = { workspace = true, default-features = false, features = [
   "graphics",
   "memory_32",
 ] }
+
+[[bin]]
+name = "clock"
+path = "src/main.rs"

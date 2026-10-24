@@ -1,5 +1,5 @@
 [package]
-name = "weather"
+name = "xila-weather"
 version = "0.1.0"
 edition = "2024"
 
@@ -40,3 +40,7 @@ path = "tests/build_test.rs"
 [[test]]
 name = "weather_test"
 path = "tests/test.rs"
+
+[[bin]]
+name = "weather"
+path = "src/main.rs"

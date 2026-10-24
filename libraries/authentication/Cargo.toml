@@ -1,5 +1,5 @@
 [package]
-name = "authentication"
+name = "xila-authentication"
 version = "0.1.0"
 edition = "2024"
 description = "User and group authentication module for Xila OS with secure password hashing"

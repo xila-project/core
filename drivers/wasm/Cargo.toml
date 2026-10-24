@@ -1,5 +1,5 @@
 [package]
-name = "drivers_wasm"
+name = "xila-drivers-wasm"
 version = "0.1.0"
 edition = "2024"
 
