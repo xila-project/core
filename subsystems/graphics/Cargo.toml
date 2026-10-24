@@ -43,3 +43,6 @@ rendering_xrgb8888 = ["lvgl_rust_sys/color_depth_32"]
 [[test]]
 name = "graphics"
 path = "tests/graphics.rs"
+
+[lib]
+name = "graphics"

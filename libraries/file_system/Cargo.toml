@@ -22,3 +22,6 @@ drivers_std = { workspace = true }
 [features]
 std = []
 default = []
+
+[lib]
+name = "file_system"

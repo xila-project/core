@@ -5,3 +5,6 @@ edition = "2024"
 
 [dependencies]
 file_system = { workspace = true }
+
+[lib]
+name = "device"

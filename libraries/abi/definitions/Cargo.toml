@@ -27,3 +27,6 @@ drivers_shared = { workspace = true }
 drivers_std = { workspace = true }
 little_fs = { workspace = true }
 users = { workspace = true }
+
+[lib]
+name = "abi_definitions"

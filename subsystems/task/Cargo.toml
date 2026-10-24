@@ -39,3 +39,6 @@ drivers_native = { workspace = true }
 drivers_core = { workspace = true }
 drivers_shared = { workspace = true }
 drivers_std = { workspace = true }
+
+[lib]
+name = "task"

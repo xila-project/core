@@ -82,6 +82,52 @@ EXPECTED_BINARY_TARGETS = {
     "tools/fs_image/Cargo.toml": ["fs_image"],
 }
 
+EXPECTED_LIBRARY_TARGETS = {
+    "libraries/application_metadata/Cargo.toml": "application_metadata",
+    "subsystems/task/Cargo.toml": "task",
+    "libraries/synchronization/Cargo.toml": "synchronization",
+    "drivers/core/Cargo.toml": "drivers_core",
+    "libraries/file_system/Cargo.toml": "file_system",
+    "libraries/shared/Cargo.toml": "shared",
+    "subsystems/log/Cargo.toml": "log",
+    "subsystems/users/Cargo.toml": "users",
+    "drivers/native/Cargo.toml": "drivers_native",
+    "libraries/audio/Cargo.toml": "audio",
+    "libraries/debug_protocol/Cargo.toml": "debug_protocol",
+    "subsystems/graphics/Cargo.toml": "graphics",
+    "libraries/abi/declarations/Cargo.toml": "abi_declarations",
+    "subsystems/time/Cargo.toml": "time",
+    "drivers/shared/Cargo.toml": "drivers_shared",
+    "libraries/device/Cargo.toml": "device",
+    "subsystems/network/Cargo.toml": "network",
+    "subsystems/virtual_file_system/Cargo.toml": "virtual_file_system",
+    "libraries/abi/definitions/Cargo.toml": "abi_definitions",
+    "subsystems/memory/Cargo.toml": "memory",
+    "drivers/std/Cargo.toml": "drivers_std",
+    "libraries/little_fs/Cargo.toml": "little_fs",
+    "libraries/testing/Cargo.toml": "testing",
+    "libraries/authentication/Cargo.toml": "authentication",
+    "libraries/executable/Cargo.toml": "executable",
+    "libraries/peripherals/Cargo.toml": "peripherals",
+    "libraries/target/Cargo.toml": "target",
+    "executables/file_manager/Cargo.toml": "file_manager",
+    "libraries/bootsplash/Cargo.toml": "bootsplash",
+    "executables/shell/command_line/Cargo.toml": "command_line_shell",
+    "executables/wasm/Cargo.toml": "wasm",
+    "subsystems/graphics/bindings_generator/Cargo.toml": "graphics_bindgen",
+    "executables/shell/graphical/Cargo.toml": "graphical_shell",
+    "executables/terminal/Cargo.toml": "terminal",
+    "executables/settings/Cargo.toml": "settings",
+    "executables/debug/Cargo.toml": "debug_application",
+    "executables/pixel_painter/Cargo.toml": "pixel_painter",
+    "drivers/headless/Cargo.toml": "drivers_headless",
+    "drivers/wasm/Cargo.toml": "drivers_wasm",
+    "drivers/espressif/Cargo.toml": "drivers_espressif",
+    "executables/weather/Cargo.toml": "weather",
+    "executables/clock/Cargo.toml": "clock",
+    "executables/synth/Cargo.toml": "synth",
+}
+
 
 def manifest(path):
     return tomllib.loads(path.read_text())
@@ -158,6 +204,31 @@ class CargoPackageNames(unittest.TestCase):
             if "lib" in target["kind"]
         ]
         self.assertEqual(library_names, ["drivers_native"])
+
+    def test_library_target_names_remain_stable_after_package_rename(self):
+        metadata = json.loads(
+            subprocess.check_output(
+                ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+                cwd=ROOT,
+                text=True,
+            )
+        )
+        actual = {
+            pathlib.Path(package["manifest_path"]).relative_to(ROOT).as_posix(): [
+                target["name"]
+                for target in package["targets"]
+                if "lib" in target["kind"]
+            ]
+            for package in metadata["packages"]
+            if pathlib.Path(package["manifest_path"]).relative_to(ROOT).as_posix()
+            in EXPECTED_LIBRARY_TARGETS
+            if any("lib" in target["kind"] for target in package["targets"])
+        }
+
+        self.assertEqual(
+            actual,
+            {path: [name] for path, name in EXPECTED_LIBRARY_TARGETS.items()},
+        )
 
     def test_cargo_package_selectors_use_current_package_identities(self):
         allowed_names = set(EXPECTED_PACKAGE_NAMES.values())

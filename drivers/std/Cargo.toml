@@ -35,3 +35,6 @@ profiling = ["task/profiling", "dep:miniserde"]
 little_fs = { workspace = true }
 abi_definitions = { workspace = true }
 critical-section = { workspace = true, features = ["std"] }
+
+[lib]
+name = "drivers_std"

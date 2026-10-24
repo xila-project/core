@@ -25,3 +25,6 @@ synchronization = { workspace = true }
 [features]
 default = ["graphics"]
 graphics = ["executable/graphics"]
+
+[lib]
+name = "testing"

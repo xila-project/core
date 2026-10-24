@@ -8,3 +8,6 @@ xila = { path = "../../", features = ["graphics_rendering_xrgb8888"] }
 log = { workspace = true }
 debug_protocol = { workspace = true }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+
+[lib]
+name = "debug_application"

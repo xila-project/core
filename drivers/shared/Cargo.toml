@@ -24,3 +24,6 @@ sha2 = { version = "0.11" }
 
 [dev-dependencies]
 critical-section = { workspace = true, features = ["std"] }
+
+[lib]
+name = "drivers_shared"
