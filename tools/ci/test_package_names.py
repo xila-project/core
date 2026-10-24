@@ -238,7 +238,10 @@ class CargoPackageNames(unittest.TestCase):
         for path in ROOT.rglob("*"):
             if (
                 not path.is_file()
-                or path.suffix not in text_suffixes
+                or (
+                    path.suffix not in text_suffixes
+                    and not path.name.startswith("Dockerfile")
+                )
                 or ".git" in path.parts
                 or ".superpowers" in path.parts
                 or path.is_relative_to(ROOT / "target")
