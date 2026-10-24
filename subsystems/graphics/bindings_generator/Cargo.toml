@@ -10,3 +10,6 @@ syn = { workspace = true, features = ["full", "visit", "extra-traits"] }
 
 [dev-dependencies]
 lvgl_rust_sys = { workspace = true }
+
+[lib]
+name = "graphics_bindgen"

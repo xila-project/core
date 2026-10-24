@@ -23,3 +23,6 @@ testing = { workspace = true }
 [[test]]
 name = "integration_test"
 path = "tests/integration_test.rs"
+
+[lib]
+name = "graphical_shell"

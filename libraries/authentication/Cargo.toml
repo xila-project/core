@@ -29,3 +29,6 @@ drivers_native = { workspace = true }
 little_fs = { workspace = true }
 time = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }
+
+[lib]
+name = "authentication"

@@ -26,3 +26,6 @@ path = "tests/build_test.rs"
 [[bin]]
 name = "synth"
 path = "src/main.rs"
+
+[lib]
+name = "synth"

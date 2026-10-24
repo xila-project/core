@@ -44,3 +44,6 @@ path = "tests/test.rs"
 [[bin]]
 name = "weather"
 path = "src/main.rs"
+
+[lib]
+name = "weather"

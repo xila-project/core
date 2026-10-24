@@ -25,3 +25,6 @@ drivers_shared = { workspace = true }
 drivers_std = { workspace = true }
 
 abi_definitions = { workspace = true }
+
+[lib]
+name = "little_fs"

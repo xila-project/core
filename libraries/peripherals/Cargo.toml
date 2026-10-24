@@ -10,3 +10,6 @@ embedded-hal = { workspace = true, optional = true }
 default = []
 gpio = ["dep:embedded-hal"]
 mock = ["gpio"]
+
+[lib]
+name = "peripherals"

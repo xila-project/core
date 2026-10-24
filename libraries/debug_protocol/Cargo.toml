@@ -8,3 +8,6 @@ serde = { version = "1.0", default-features = false, features = [
   "alloc",
   "derive",
 ] }
+
+[lib]
+name = "debug_protocol"

@@ -28,3 +28,6 @@ task = { workspace = true, features = ["test_harness"] }
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
+
+[lib]
+name = "virtual_file_system"

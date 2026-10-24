@@ -19,3 +19,6 @@ wasm = { workspace = true, default-features = false, features = [
 [[bin]]
 name = "clock"
 path = "src/main.rs"
+
+[lib]
+name = "clock"

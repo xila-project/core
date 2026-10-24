@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 synchronization = { workspace = true }
 log_external = { package = "log", version = "0.4" }
+
+[lib]
+name = "log"

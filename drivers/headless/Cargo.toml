@@ -9,5 +9,8 @@ file_system = { workspace = true }
 graphics = { workspace = true, features = ["rendering_xrgb8888"] }
 shared = { workspace = true }
 
+[lib]
+name = "drivers_headless"
+
 [dev-dependencies]
 critical-section = { workspace = true, features = ["std"] }

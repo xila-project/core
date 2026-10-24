@@ -32,3 +32,6 @@ embassy-executor = { workspace = true, features = [
   "executor-thread",
 ] }
 embassy-time = { workspace = true, features = ["generic-queue-8"] }
+
+[lib]
+name = "drivers_shared"

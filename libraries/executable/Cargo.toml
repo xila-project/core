@@ -27,3 +27,6 @@ drivers_std = { workspace = true }
 default = []
 building = []
 graphics = ["dep:graphics"]
+
+[lib]
+name = "executable"

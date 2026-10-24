@@ -11,3 +11,6 @@ embassy-sync = { workspace = true, features = ["std"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))'.dev-dependencies]
 critical-section = { workspace = true, features = ["std"] }
+
+[lib]
+name = "synchronization"

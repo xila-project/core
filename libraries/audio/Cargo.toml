@@ -11,3 +11,6 @@ nanoaudio = { workspace = true, features = ["buffer", "dsp"] }
 
 [dev-dependencies]
 critical-section = { workspace = true, features = ["std"] }
+
+[lib]
+name = "audio"

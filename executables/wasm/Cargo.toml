@@ -65,3 +65,6 @@ serde_json = "1"
 [[test]]
 name = "integration_test"
 path = "tests/integration_test.rs"
+
+[lib]
+name = "wasm"
