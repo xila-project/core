@@ -121,6 +121,42 @@ for (const file of readdirSync(mappingRoot).filter(name => name.endsWith(".json"
     " locales; " + used.size + " extracted references; " + unused.length + " unused catalog keys");
   if (unused.length) console.log("  Review unused: " + unused.join(", "));
 }
+
+// Guest UI tests read JSON catalogs through a helper instead of translate! macros.
+// Check those assertions too, so source-text keys do not silently escape the
+// normal Rust macro extraction pass.
+const guestUiTests = [
+  {
+    application: "clock",
+    file: "executables/wasm/tests/clock.rs",
+    calls: /\btext\(\s*"([^"]+)"\s*\)/g,
+  },
+  {
+    application: "pixel_painter",
+    file: "executables/wasm/tests/pixel_painter.rs",
+    calls: /\bstatus\(\s*manager\s*,\s*"([^"]+)"/g,
+  },
+  {
+    application: "text_editor",
+    file: "executables/wasm/tests/text_editor.rs",
+    calls: /\blocalization::text\(\s*"text_editor"\s*,\s*"([^"]+)"/g,
+  },
+];
+for (const { application, file, calls } of guestUiTests) {
+  const sourcePath = path.join(ROOT, file);
+  const english = catalog(path.join(ROOT, "executables", application, "locales", "en.json"));
+  const source = readFileSync(sourcePath, "utf8");
+  let count = 0;
+  for (const match of source.matchAll(calls)) {
+    const key = match[1];
+    count++;
+    if (!KEY.test(key)) failures.push(file + ": nonsemantic guest UI test key " + JSON.stringify(key));
+    if (!Object.hasOwn(english, key)) failures.push(file + ": missing guest UI test key " + JSON.stringify(key));
+  }
+  if (!count) failures.push(file + ": no guest UI translation assertions found");
+  else console.log(file + ": validated " + count + " guest UI translation references");
+}
+
 console.log("Checked " + namespaceCount + " namespaces.");
 if (failures.length) {
   console.error("Localization validation failed:\n" + failures.join("\n"));
