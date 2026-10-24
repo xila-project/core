@@ -37,6 +37,17 @@ jobs:
       - run: python3 -m unittest discover -s tools/ci -v
       - run: mise run ci:lint-workflows
 
+  verification:
+    name: Verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MISE_ENV: ci
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5.2.2
+      - run: mise run ci:verification
+
   host:
     name: Host
     runs-on: ubuntu-latest
