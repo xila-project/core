@@ -5,7 +5,7 @@
   "errors.failed_to_get_task_informations": "タスク情報を取得できませんでした",
   "errors.failed_to_write": "書き込みできませんでした",
   "errors.file_system_error": "ファイルシステムエラー: {}",
-  "errors.invalid_file_system": "Invalid file system",
+  "errors.invalid_file_system": "無効なファイルシステム",
   "errors.invalid_identifier": "無効な識別子",
   "errors.invalid_inode": "無効な inode",
   "errors.invalid_mode": "無効なモード",
@@ -18,11 +18,11 @@
   "errors.orphaned": "孤立しています",
   "errors.permission_denied": "アクセスが拒否されました",
   "errors.ressource_busy": "リソースが使用中です",
-  "errors.task_error": "Task error: {}",
+  "errors.task_error": "タスクエラー: {}",
   "errors.time_error": "時刻エラー: {}",
   "errors.too_many_inodes": "inode が多すぎます",
   "errors.too_many_open_files": "開いているファイルが多すぎます",
   "errors.unavailable_driver": "ドライバーを利用できません",
   "errors.unsupported_operation": "サポートされていない操作",
-  "errors.users_error": "Users error: {}"
+  "errors.users_error": "ユーザーエラー: {}"
 }
