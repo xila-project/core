@@ -107,20 +107,37 @@ fn visit(
                 )
             })?;
             for (key, value) in values {
-                let value = value.as_str().ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!(
-                            "Non-string translation for {key:?} in {}",
-                            catalog.display()
-                        ),
-                    )
-                })?;
-                characters.extend(value.chars().filter(|character| *character >= '\u{a0}'));
+                collect_translation_characters(key, value, &catalog, characters)?;
             }
         }
     }
     Ok(())
+}
+
+/// Traverse flat or nested JSON catalogs without treating group objects as strings.
+fn collect_translation_characters(
+    key: &str,
+    value: &serde_json::Value,
+    catalog: &Path,
+    characters: &mut BTreeSet<char>,
+) -> io::Result<()> {
+    match value {
+        serde_json::Value::String(text) => {
+            characters.extend(text.chars().filter(|character| *character >= '\u{a0}'));
+            Ok(())
+        }
+        serde_json::Value::Object(children) => {
+            for (segment, child) in children {
+                let nested_key = format!("{key}.{segment}");
+                collect_translation_characters(&nested_key, child, catalog, characters)?;
+            }
+            Ok(())
+        }
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Non-string translation for {key:?} in {}", catalog.display()),
+        )),
+    }
 }
 
 fn path_error(path: &Path, error: io::Error) -> io::Error {
@@ -195,6 +212,19 @@ mod tests {
     }
 
     #[test]
+    fn collects_translated_glyphs_from_nested_catalogs_and_plural_groups() {
+        let root = Fixture::new();
+        root.write(
+            "executables/app/locales/zh-CN.json",
+            r#"{"menu":{"title":"设置："},"count":{"one":"项","other":"多项。"}}"#,
+        );
+        let symbols = collect(&root.0, &["zh-CN"]).unwrap();
+        for character in ['设', '置', '：', '项', '多', '。'] {
+            assert!(symbols.cjk.contains(character), "missing glyph: {character}");
+        }
+    }
+
+    #[test]
     fn watches_existing_crate_before_its_first_catalog() {
         let root = Fixture::new();
         root.write(
@@ -243,7 +273,7 @@ mod tests {
     #[test]
     fn rejects_invalid_json_and_non_string_translations_with_catalog_path() {
         let root = Fixture::new();
-        for source in ["{", r#"{"Count":3}"#, r#"{"Count":{"other":"项"}}"#, "[]"] {
+        for source in ["{", r#"{"Count":3}"#, r#"{"Count":{"other":3}}"#, "[]"] {
             root.write("libraries/shared/locales/en.json", source);
             let error = collect(&root.0, &["en"]).unwrap_err();
             assert_eq!(error.kind(), io::ErrorKind::InvalidData);
