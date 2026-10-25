@@ -295,6 +295,7 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
     ) -> Result<File<'a>> {
         let requested_path = path.as_ref();
+        let authority = self.task_manager.authority(task).await?;
 
         let mut file_systems = self.file_systems.write().await; // Get the file systems
 
@@ -461,7 +462,7 @@ impl VirtualFileSystem {
             _ => Err(Error::UnsupportedOperation)?,
         };
 
-        Ok(file)
+        Ok(file.with_authority(authority))
     }
 
     pub async fn mount_static(
@@ -1271,6 +1272,43 @@ impl VirtualFileSystem {
         Ok(())
     }
 
+    /// Single-attempt metadata adapter: never block an executor waiting for a
+    /// namespace guard held by another task. Path mutations use the same guard.
+    pub(crate) fn set_handle_attributes(
+        &self,
+        authority: &task::TaskAuthority<'_>,
+        item: &ItemStatic,
+        context: &mut Context,
+        attributes: &Attributes,
+    ) -> Result<()> {
+        if attributes.get_mask().is_empty() {
+            return Ok(());
+        }
+        let _namespace = self
+            .file_systems
+            .try_write()
+            .map_err(|_| Error::RessourceBusy)?;
+        let user = authority.try_user()?.ok_or(Error::RessourceBusy)?;
+        let operations = item
+            .as_attributes_operations()
+            .ok_or(Error::UnsupportedOperation)?;
+        let mut owner = Attributes::new().set_mask(AttributeFlags::User);
+        operations.get_attributes(context, &mut owner)?;
+        Self::authorize_metadata_change(
+            user,
+            *owner.get_user().ok_or(Error::MissingAttribute)?,
+            attributes,
+        )?;
+        if attributes
+            .get_mask()
+            .intersects(AttributeFlags::User | AttributeFlags::Group)
+        {
+            return Err(Error::UnsupportedOperation);
+        }
+        operations.set_attributes(context, attributes)?;
+        Ok(())
+    }
+
     pub async fn set_ownership(
         &self,
         task: TaskIdentifier,
@@ -1279,7 +1317,7 @@ impl VirtualFileSystem {
         group: Option<GroupIdentifier>,
     ) -> Result<()> {
         let path = path.as_ref();
-        let file_systems = self.file_systems.read().await; // Get the file systems 
+        let file_systems = self.file_systems.write().await; // Serialize metadata authority with mutation.
         let (_, current_user, _) = self.get_time_user_group(task).await?;
         let resolved = self
             .resolve_path(&file_systems, path, true, false, current_user, task)
@@ -1312,7 +1350,7 @@ impl VirtualFileSystem {
         permissions: Permissions,
     ) -> Result<()> {
         let path = path.as_ref();
-        let file_systems = self.file_systems.read().await; // Get the file systems
+        let file_systems = self.file_systems.write().await; // Get the file systems
         let (_, current_user, _) = self.get_time_user_group(task).await?;
         let resolved = self
             .resolve_path(&file_systems, path, true, false, current_user, task)

@@ -65,6 +65,11 @@ impl<'a> File<'a> {
         ))
     }
 
+    pub(crate) fn with_authority(mut self, authority: task::TaskAuthority<'static>) -> Self {
+        self.0.authority = Some(authority);
+        self
+    }
+
     pub async fn open(
         virtual_file_system: &'a VirtualFileSystem,
         task: task::TaskIdentifier,

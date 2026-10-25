@@ -428,9 +428,8 @@ impl VirtualFileSystem {
         permissions.get_others().contains(necessary_permissions)
     }
 
-    /// Path metadata authority is checked for every mutation.
-    /// Ownership changes use the conservative root-only subset; chmod permits
-    /// the owner or root. Handle-based metadata changes require separate work.
+    /// Metadata policy shared by namespace and retained handle contexts.
+    /// Ownership changes are root-only; chmod permits the owner or root.
     pub(crate) fn authorize_metadata_change(
         current_user: UserIdentifier,
         owner: UserIdentifier,

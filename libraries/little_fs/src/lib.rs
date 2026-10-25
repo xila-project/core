@@ -23,3 +23,5 @@ use file::*;
 pub use file_system::*;
 use flags::*;
 pub mod stubs;
+
+mod open_metadata;

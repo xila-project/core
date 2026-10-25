@@ -116,16 +116,44 @@ impl File {
         Ok(())
     }
 
-    pub fn set_attributes(&mut self, attributes: &Attributes) -> Result<()> {
+    pub fn set_attributes(
+        &mut self,
+        file_system: &mut littlefs::lfs_t,
+        attributes: &Attributes,
+    ) -> Result<()> {
         let mask = attributes.get_mask();
         if mask.is_empty() {
             return Ok(());
         }
         InternalAttributes::validate_attribute_mask(mask)?;
 
+        // Read-only opens cannot persist configured attributes. Never report a
+        // successful chmod that disappears when the descriptor closes.
+        if self.file.flags & 3 == littlefs::lfs_open_flags_LFS_O_RDONLY {
+            return Err(Error::UnsupportedOperation);
+        }
+        // sync skips errored files and commits data together with attributes.
+        // A dusty independent open has stale data; callers must reopen it.
+        if self.file.flags & littlefs::lfs_open_flags_LFS_F_ERRED != 0 {
+            return Err(Error::InputOutput);
+        }
+        if self.file.flags & littlefs::lfs_open_flags_LFS_F_DUSTY != 0 {
+            return Err(Error::RessourceBusy);
+        }
+        let previous = self.internal_attributes.clone();
         self.internal_attributes
             .update_with_attributes(attributes)?;
-
+        self.file.flags |= littlefs::lfs_open_flags_LFS_F_DIRTY;
+        if let Err(error) =
+            convert_result(unsafe { littlefs::lfs_file_sync(file_system, &mut self.file) })
+        {
+            self.internal_attributes = previous;
+            return Err(error);
+        }
+        // Publish only after a successful commit. A failed commit must not
+        // make independent contexts report a metadata change as successful.
+        let current = self.internal_attributes.clone();
+        crate::open_metadata::synchronize(file_system, &self.file, &current);
         Ok(())
     }
 
@@ -213,5 +241,35 @@ impl File {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn errored_handle_rejects_metadata_without_publishing_cached_changes() {
+        let device = file_system::MemoryDevice::<512>::new_static(512 * 128);
+        let fs = crate::FileSystem::new_format(device, 256).unwrap();
+        fs.operation(|native| {
+            let path = Path::new("/errored");
+            File::create(native, path)?;
+            let mut file = File::lookup(native, path, file_system::AccessFlags::READ_WRITE.into())?;
+            let original = file.internal_attributes.permissions;
+            // Fault state left by LittleFS after a failed write/commit. Its
+            // sync function returns success immediately in this state.
+            file.file.flags |= littlefs::lfs_open_flags_LFS_F_ERRED;
+            assert_eq!(
+                file.set_attributes(
+                    native,
+                    &Attributes::new().set_permissions(file_system::Permissions::ALL_FULL)
+                ),
+                Err(Error::InputOutput)
+            );
+            assert_eq!(file.internal_attributes.permissions, original);
+            file.close(native)
+        })
+        .unwrap();
     }
 }

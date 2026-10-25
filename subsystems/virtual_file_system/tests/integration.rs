@@ -16,6 +16,10 @@ use virtual_file_system::{File, VirtualFileSystem};
 #[path = "support/allocation.rs"]
 mod allocation;
 
+#[cfg(target_os = "linux")]
+#[path = "support/metadata_authorization.rs"]
+mod metadata_authorization;
+
 async fn initialize() -> (TaskIdentifier, &'static VirtualFileSystem) {
     let task_instance = Box::leak(Box::new(task::Manager::new()));
 
