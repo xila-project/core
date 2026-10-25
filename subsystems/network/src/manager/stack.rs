@@ -179,11 +179,11 @@ impl StackInner {
     }
 
     pub fn is_available(&self) -> bool {
-        self.enabled && self.is_up
+        self.enabled && self.is_link_up()
     }
 
     pub fn is_link_up(&self) -> bool {
-        self.is_up
+        controller_link_state(self.controller.as_ref(), self.is_up)
     }
 
     pub fn get_state(&self) -> bool {
@@ -492,5 +492,103 @@ impl StackInner {
                 .map(IpAddress::from_smoltcp)
                 .collect())),
         }
+    }
+}
+
+/// Unknown controllers retain their cached link semantics. A failing controller
+/// must not make a disconnected interface eligible for new sockets.
+fn controller_link_state(controller: &dyn DirectCharacterDevice, fallback: bool) -> bool {
+    use file_system::ControlCommand;
+    use shared::AnyByLayout;
+    let mut up = false;
+    match controller.control_sync(
+        crate::IS_LINK_UP::IDENTIFIER,
+        AnyByLayout::from(&()),
+        AnyByLayout::from_mutable(&mut up),
+    ) {
+        Ok(()) => up,
+        Err(file_system::Error::UnsupportedOperation) => fallback,
+        Err(_) => false,
+    }
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::*;
+    use file_system::{ControlCommandIdentifier, DirectBaseOperations, MountOperations};
+    use shared::AnyByLayout;
+    struct Controller(Option<file_system::Result<bool>>);
+    impl MountOperations for Controller {}
+    impl DirectCharacterDevice for Controller {}
+    impl DirectBaseOperations for Controller {
+        fn read(
+            &self,
+            _: &mut Context<'_>,
+            _: &mut [u8],
+            _: file_system::Size,
+        ) -> Poll<file_system::Result<usize>> {
+            Poll::Ready(Err(file_system::Error::UnsupportedOperation))
+        }
+        fn write(
+            &self,
+            _: &mut Context<'_>,
+            _: &[u8],
+            _: file_system::Size,
+        ) -> Poll<file_system::Result<usize>> {
+            Poll::Ready(Err(file_system::Error::UnsupportedOperation))
+        }
+        fn control(
+            &self,
+            _: &mut Context<'_>,
+            _: ControlCommandIdentifier,
+            _: &AnyByLayout,
+            output: &mut AnyByLayout,
+        ) -> Poll<file_system::Result<()>> {
+            Poll::Ready(match self.0 {
+                Some(Ok(value)) => {
+                    *output.cast_mutable::<bool>().unwrap() = value;
+                    Ok(())
+                }
+                Some(Err(error)) => Err(error),
+                None => Err(file_system::Error::UnsupportedOperation),
+            })
+        }
+    }
+    #[test]
+    fn availability_requires_administrative_enable_and_effective_link() {
+        let clock = Box::leak(Box::new(
+            time::Manager::new(&drivers_std::devices::TimeDevice).unwrap(),
+        ));
+        let (mut packets, _) = crate::create_loopback_device();
+        let mut stack = StackInner::new(
+            "wifi",
+            &mut packets,
+            Controller(Some(Ok(false))),
+            1,
+            smoltcp::time::Instant::from_millis(0),
+            clock,
+        );
+        assert!(stack.is_up); // the old cached default must not override disassociation
+        assert!(!stack.is_available());
+        stack.controller = Box::new(Controller(Some(Ok(true))));
+        assert!(stack.is_available());
+        stack.set_state(false);
+        assert!(!stack.is_available());
+    }
+
+    #[test]
+    fn effective_link_uses_controller_and_only_falls_back_when_unsupported() {
+        assert!(!controller_link_state(&Controller(Some(Ok(false))), true));
+        assert!(controller_link_state(&Controller(Some(Ok(true))), false));
+        assert!(controller_link_state(&Controller(None), true));
+        assert!(!controller_link_state(&Controller(None), false));
+        assert!(!controller_link_state(
+            &Controller(Some(Err(file_system::Error::RessourceBusy))),
+            true
+        ));
+        assert!(!controller_link_state(
+            &Controller(Some(Err(file_system::Error::InputOutput))),
+            true
+        ));
     }
 }
