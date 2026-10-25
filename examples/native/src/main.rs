@@ -349,6 +349,24 @@ async fn main(task_manager: &'static xila::task::Manager) {
         file.close(virtual_file_system).await.unwrap();
     }
 
+    if config.mock_wifi {
+        let (controller, runner) = drivers_native::wifi::MockWifiController::new(
+            drivers_native::wifi::MockWifiConfiguration::demo(),
+        )
+        .expect("Invalid mock Wi-Fi fixture");
+        let (packets, _) = network::create_loopback_device();
+        network_manager
+            .mount_interface(task, "wlan0", packets, controller, None)
+            .await
+            .expect("Failed to mount mock Wi-Fi");
+        task_manager
+            .spawn(task, "Mock Wi-Fi", None, move |_| async move {
+                runner.run().await
+            })
+            .await
+            .expect("Failed to spawn mock Wi-Fi runner");
+    }
+
     // Mount static executables
 
     let executable_context: &'static executable::ExecutableContext =
@@ -357,7 +375,7 @@ async fn main(task_manager: &'static xila::task::Manager) {
             users_manager,
             virtual_file_system,
             graphics_manager,
-            network_manager: config.networking.then_some(network_manager),
+            network_manager: (config.networking || config.mock_wifi).then_some(network_manager),
             time_manager,
         }));
 

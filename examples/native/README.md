@@ -79,3 +79,26 @@ driver only supplies display output and any physical inputs. The host client
 receives a bounded raw RGBA screenshot and writes it as PNG to the requested
 path. JSON headers are limited to 64 KiB and screenshot data to 8 MiB. The
 transport is available on Unix hosts.
+
+## Wi-Fi control-plane demo
+
+Run the deterministic mock alongside the headless UI, without TUN/TAP privileges:
+
+```sh
+cargo run -p xila-native-example --bin native_example -- --no-network --mock-wifi \
+  --display-driver headless --resolution 800x600 \
+  --disk-path /tmp/xila-wifi-demo.img --seed-image target/seed/native/seed.img
+```
+
+After login, open Settings → Network → wlan0. Its Wi-Fi panel controls the radio,
+scans, connects, and disconnects through `/devices/network/wlan0`. The synthetic
+`Xila demo` network uses WPA2 and the public test password `xila-demo`;
+`Xila open` requires no password. Incorrect credentials exercise authentication
+failure. The mock uses an explicit Xila task, 16 maximum scan results, and
+configurable delays/outcomes. It does not control host Wi-Fi, persist profiles,
+or provide Internet connectivity: its packet device is a smoltcp loopback.
+A hardware or TAP packet device can use the same controller API independently.
+
+Run the hardware-free VFS lifecycle regression with
+`cargo test -p xila-drivers-native --test wifi`. Generic payload validation and command
+identifier uniqueness are covered by `cargo test -p xila-network --test wifi_types`.
