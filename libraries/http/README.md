@@ -26,8 +26,8 @@ response, not framing remaining in the device body. Consumers must not decode
 chunk framing a second time. Reads can split the head; collect until its blank
 line. Each opening uses a single 2048-byte response buffer, shared between the
 worker and reader with backpressure. HTTP message size does not increase that
-allocation. Socket and TLS storage are separate; HTTPS keeps two 16 KiB record
-buffers on the heap while connected. Closing cancels the worker. Dropping its transport retires socket storage
+allocation. Socket and TLS storage are separate; HTTPS keeps a 16 KiB + 256-byte receive record buffer and a 16 KiB write
+record buffer on the heap while connected. Closing cancels the worker. Dropping its transport retires socket storage
 for reclamation by the network runner after FIN/RST dispatch (abandoned shutdowns
 are bounded to 15 seconds).
 
