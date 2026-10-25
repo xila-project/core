@@ -617,18 +617,18 @@ async fn redirection_checks_existing_file_permissions_before_truncating() {
             .unwrap(),
         0
     );
-    let mut file = File::open(
-        shell.context.virtual_file_system,
-        shell.task,
-        "/protected",
-        AccessFlags::Read.into(),
-    )
-    .await
-    .unwrap();
-    file.set_permissions(xila::file_system::Permissions::from_octal(0o444).unwrap())
+    // Use the namespace API: read-only LittleFS opens cannot commit metadata.
+    // Persist the fixture permissions instead of only changing an open cache.
+    shell
+        .context
+        .virtual_file_system
+        .set_permissions(
+            shell.task,
+            "/protected",
+            xila::file_system::Permissions::from_octal(0o444).unwrap(),
+        )
         .await
         .unwrap();
-    drop(file);
     let administrator = shell
         .context
         .users_manager

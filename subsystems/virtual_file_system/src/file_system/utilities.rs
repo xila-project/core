@@ -434,6 +434,26 @@ impl VirtualFileSystem {
         false
     }
 
+    /// Metadata policy shared by namespace and retained handle contexts.
+    /// Ownership changes are root-only; chmod permits the owner or root.
+    pub(crate) fn authorize_metadata_change(
+        current_user: UserIdentifier,
+        owner: UserIdentifier,
+        changes: &Attributes,
+    ) -> Result<()> {
+        if current_user == UserIdentifier::ROOT || changes.get_mask().is_empty() {
+            return Ok(());
+        }
+        if changes
+            .get_mask()
+            .intersects(AttributeFlags::User | AttributeFlags::Group)
+            || current_user != owner
+        {
+            return Err(Error::PermissionDenied);
+        }
+        Ok(())
+    }
+
     pub(super) fn get_file_system_index_from_path(
         file_systems: &FileSystemsArray,
         path: &impl AsRef<Path>,

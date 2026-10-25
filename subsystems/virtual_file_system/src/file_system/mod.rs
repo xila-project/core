@@ -1292,24 +1292,6 @@ impl VirtualFileSystem {
         Ok(())
     }
 
-    fn authorize_metadata_change(
-        user: UserIdentifier,
-        owner: UserIdentifier,
-        attributes: &Attributes,
-    ) -> Result<()> {
-        if user == UserIdentifier::ROOT || attributes.get_mask().is_empty() {
-            return Ok(());
-        }
-        if user != owner
-            || attributes
-                .get_mask()
-                .intersects(AttributeFlags::User | AttributeFlags::Group)
-        {
-            return Err(Error::PermissionDenied);
-        }
-        Ok(())
-    }
-
     pub async fn set_ownership(
         &self,
         task: TaskIdentifier,
