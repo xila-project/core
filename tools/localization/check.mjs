@@ -6,6 +6,7 @@
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { flattenCatalog } from "./catalog.mjs";
 import { execFileSync } from "node:child_process";
 import extract from "../../tolgee.extractor.mjs";
 
@@ -27,19 +28,6 @@ function visit(dir, suffix, output = []) {
     else if (item.isFile() && item.name.endsWith(suffix)) output.push(file);
   }
   return output;
-}
-
-function flattenCatalog(node, prefix = "", result = {}) {
-  for (const [part, value] of Object.entries(node)) {
-    const key = prefix ? prefix + "." + part : part;
-    if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-      flattenCatalog(value, key, result);
-    } else {
-      if (Object.hasOwn(result, key)) throw new Error("duplicate translation key: " + key);
-      result[key] = value;
-    }
-  }
-  return result;
 }
 
 function catalog(pathName) {
