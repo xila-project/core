@@ -125,7 +125,11 @@ the host, Wasm applications, fonts and seed image with the **same**
 Simplified Chinese (`zh-CN`) catalogs are available for validation, with
 catalog-subsetted Source Han Sans SC glyphs alongside Montserrat. Native-speaker
 and embedded-target review are still pending; Chinese is not yet enabled for
-deployment. See the [Chinese font and validation notes](subsystems/graphics/fonts/README.md).
+deployment. Japanese (`ja`) also has experimental catalogs and
+catalog-subsetted JP-region Source Han Sans glyphs. The Japanese build
+requires an explicitly installed source font; neither CJK locale is enabled
+for release/deployment until native-speaker and device review. See the
+[CJK font and validation notes](subsystems/graphics/fonts/README.md).
 
 See [localized build and contribution instructions](docs/localization.md) for
 validation commands, translation review and artifact compatibility.
