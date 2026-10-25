@@ -46,6 +46,7 @@ EXPECTED_PACKAGE_NAMES = {
     "libraries/device/Cargo.toml": "xila-device",
     "libraries/executable/Cargo.toml": "xila-executable",
     "libraries/file_system/Cargo.toml": "xila-file-system",
+    "libraries/http/Cargo.toml": "xila_http",
     "libraries/little_fs/Cargo.toml": "xila-little-fs",
     "libraries/peripherals/Cargo.toml": "xila-peripherals",
     "libraries/shared/Cargo.toml": "xila-shared",
@@ -149,9 +150,10 @@ class CargoPackageNames(unittest.TestCase):
         self.assertEqual(actual["Cargo.toml"], "xila")
         self.assertEqual(actual["tools/profiling/Cargo.toml"], "xila-profiling")
         for path, name in actual.items():
-            # Verification was added on main after the package migration.
+            # These crates were added on main after the package migration.
             if path not in {
                 "Cargo.toml",
+                "libraries/http/Cargo.toml",
                 "libraries/verification/Cargo.toml",
                 "tools/verification_probe/Cargo.toml",
             }:

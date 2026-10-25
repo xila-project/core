@@ -1,6 +1,6 @@
 # Local HTTPS interoperability test
 
-Run `cargo test -p network --test https -- --ignored --nocapture` with Python 3
+Run `cargo test -p xila-network --test https -- --ignored --nocapture` with Python 3
 (including its `ssl` module) and OpenSSL installed. The test is ignored by default
 because it launches these external tools. It generates an ephemeral ECDSA
 certificate and starts a local TLS 1.3 server; the child process and certificate
