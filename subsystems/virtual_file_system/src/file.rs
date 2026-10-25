@@ -97,6 +97,9 @@ impl<'a> File<'a> {
         crate::operation::write(&mut self.0, buffer).await
     }
 
+    /// Fill the entire slice, returning an I/O error on premature EOF.
+    /// Close explicitly on success or failure; preserve the I/O error if close
+    /// also fails.
     pub async fn read_slice_from_path(
         virtual_file_system: &VirtualFileSystem,
         task: TaskIdentifier,
@@ -111,11 +114,20 @@ impl<'a> File<'a> {
         )
         .await?;
 
-        file.read(buffer).await?;
-
-        file.close(virtual_file_system).await?;
-
-        Ok(())
+        let result = async {
+            let mut offset = 0;
+            while offset < buffer.len() {
+                let count = file.read(&mut buffer[offset..]).await?;
+                if count == 0 {
+                    return Err(Error::FileSystem(file_system::Error::InputOutput));
+                }
+                offset += count;
+            }
+            Ok(())
+        }
+        .await;
+        let close = file.close(virtual_file_system).await;
+        result.and(close)
     }
 
     pub async fn read_from_path(
@@ -134,13 +146,13 @@ impl<'a> File<'a> {
         )
         .await?;
 
-        file.read_to_end(buffer, 256).await?;
-
-        file.close(virtual_file_system).await?;
-
-        Ok(())
+        let result = file.read_to_end(buffer, 256).await.map(|_| ());
+        let close = file.close(virtual_file_system).await;
+        result.and(close)
     }
 
+    /// Write the entire buffer, retrying short writes and rejecting zero progress.
+    /// Close explicitly on success or failure.
     pub async fn write_to_path(
         virtual_file_system: &VirtualFileSystem,
         task: task::TaskIdentifier,
@@ -155,9 +167,20 @@ impl<'a> File<'a> {
         )
         .await?;
 
-        file.write(buffer).await?;
-
-        file.close(virtual_file_system).await
+        let result = async {
+            let mut offset = 0;
+            while offset < buffer.len() {
+                let count = file.write(&buffer[offset..]).await?;
+                if count == 0 {
+                    return Err(Error::FailedToWrite);
+                }
+                offset += count;
+            }
+            Ok(())
+        }
+        .await;
+        let close = file.close(virtual_file_system).await;
+        result.and(close)
     }
 
     pub async fn write_line(&mut self, buffer: &[u8]) -> Result<usize> {
