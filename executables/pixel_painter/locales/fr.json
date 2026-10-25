@@ -1,0 +1,16 @@
+{
+  "app.title": "Pixel Painter",
+  "controls.undo": "Annuler",
+  "controls.clear": "Effacer",
+  "controls.save": "Enregistrer",
+  "controls.open": "Ouvrir",
+  "status.ready_white_erases": "Prêt - le blanc efface",
+  "warnings.unsaved_close_again": "Dessin non enregistré - fermer à nouveau pour abandonner",
+  "warnings.unsaved_open_again": "Dessin non enregistré - ouvrir à nouveau pour abandonner",
+  "file_path.placeholder": "Saisir un chemin de fichier absolu",
+  "status.opened": "Ouvert",
+  "status.saved": "Enregistré",
+  "errors.invalid_file_drawing_preserved": "Fichier Pixel Painter invalide - dessin conservé",
+  "errors.open_failed": "Échec de lecture - vérifier le chemin et le stockage",
+  "errors.save_failed_drawing_preserved": "Échec de sauvegarde - dessin conservé ; vérifier le chemin et le stockage"
+}

@@ -1,0 +1,23 @@
+{
+  "errors.authentication_failed": "Authentifizierung fehlgeschlagen: {}",
+  "errors.failed_to_add_shortcut": "Verknüpfung konnte nicht hinzugefügt werden: {}",
+  "errors.failed_to_create_object": "Objekt konnte nicht erstellt werden",
+  "errors.failed_to_deserialize_shortcut": "Verknüpfung konnte nicht deserialisiert werden: {}",
+  "errors.failed_to_execute_shortcut": "Verknüpfung konnte nicht ausgeführt werden: {}",
+  "errors.failed_to_get_child": "Untergeordnetes Element konnte nicht abgerufen werden",
+  "errors.failed_to_get_current_task_identifier": "Kennung der aktuellen Aufgabe konnte nicht abgerufen werden: {}",
+  "errors.failed_to_get_shortcut_file_path": "Pfad der Verknüpfungsdatei konnte nicht ermittelt werden",
+  "errors.failed_to_open_directory": "Verzeichnis konnte nicht geöffnet werden: {}",
+  "errors.failed_to_open_standard_file": "Standarddatei konnte nicht geöffnet werden: {}",
+  "errors.failed_to_read_shortcut_directory": "Verknüpfungsverzeichnis konnte nicht gelesen werden: {}",
+  "errors.failed_to_read_shortcut_file": "Verknüpfungsdatei konnte nicht gelesen werden: {}",
+  "errors.failed_to_set_environment_variable": "Umgebungsvariable konnte nicht gesetzt werden: {}",
+  "errors.failed_to_set_task_user": "Aufgabenbenutzer konnte nicht festgelegt werden: {}",
+  "errors.graphics_error": "Grafikfehler: {}",
+  "errors.invalid_utf_8": "Ungültiges UTF-8: {}",
+  "login.actions.submit": "Anmelden",
+  "errors.missing_arguments": "Argumente fehlen",
+  "errors.null_character_in_string": "Nullzeichen in Zeichenfolge: {}",
+  "login.fields.password": "Passwort",
+  "login.fields.username": "Benutzername"
+}

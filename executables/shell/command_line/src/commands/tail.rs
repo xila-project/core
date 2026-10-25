@@ -134,7 +134,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::trim_to_last_lines;
-    use alloc::{vec, vec::Vec};
+    use alloc::vec::Vec;
 
     fn select_tail_bytes(input: &[u8], lines_to_keep: usize) -> Vec<u8> {
         let mut output = input.to_vec();
@@ -163,6 +163,6 @@ mod tests {
     #[test]
     fn keeps_nothing_when_zero_lines_requested() {
         let input = b"line1\nline2\n";
-        assert_eq!(select_tail_bytes(input, 0), vec![]);
+        assert_eq!(select_tail_bytes(input, 0), Vec::<u8>::new());
     }
 }

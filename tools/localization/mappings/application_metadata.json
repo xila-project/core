@@ -1,0 +1,8 @@
+{
+  "namespace": "libraries/application_metadata",
+  "old_to_new": {
+    "Pixel Painter": "applications.pixel_painter",
+    "Settings": "applications.settings",
+    "Text Editor": "applications.text_editor"
+  }
+}

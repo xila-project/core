@@ -2,11 +2,19 @@
 
 extern crate alloc;
 
+#[cfg(test)]
+extern crate std;
+
 xila::internationalization::track_locales!();
 
+#[cfg(test)]
+mod appearance;
 mod error;
 mod settings;
 mod tabs;
+
+#[cfg(all(test, target_os = "linux"))]
+drivers_std::memory::instantiate_global_allocator!();
 
 use alloc::boxed::Box;
 pub use error::*;
@@ -20,18 +28,7 @@ use xila::task::TaskIdentifier;
 use xila::virtual_file_system::{File, VirtualFileSystem};
 
 pub fn get_shortcut() -> alloc::string::String {
-    use xila::internationalization::translate;
-    alloc::format!(
-        r#"{{
-    "name": "{}",
-    "command": "/binaries/settings",
-    "arguments": [],
-    "terminal": false,
-    "icon_string": "Se",
-    "icon_color": [158, 158, 158]
-}}"#,
-        translate!("Settings")
-    )
+    application_metadata::shortcut("settings").unwrap()
 }
 
 pub struct SettingsExecutable;
@@ -42,13 +39,13 @@ impl SettingsExecutable {
         task: TaskIdentifier,
     ) -> core::result::Result<Self, String> {
         let _ = virtual_file_system
-            .create_directory(task, &"/configuration/shared/shortcuts")
+            .create_directory(task, &"/configuration/shared/applications/shortcuts")
             .await;
 
         File::write_to_path(
             virtual_file_system,
             task,
-            "/configuration/shared/shortcuts/settings.json",
+            "/configuration/shared/applications/shortcuts/settings.json",
             get_shortcut().as_bytes(),
         )
         .await

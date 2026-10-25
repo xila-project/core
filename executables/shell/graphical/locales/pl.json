@@ -1,0 +1,23 @@
+{
+  "errors.authentication_failed": "Uwierzytelnianie nie powiodło się: {}",
+  "errors.failed_to_add_shortcut": "Nie udało się dodać skrótu: {}",
+  "errors.failed_to_create_object": "Nie udało się utworzyć obiektu",
+  "errors.failed_to_deserialize_shortcut": "Nie udało się zdeserializować skrótu: {}",
+  "errors.failed_to_execute_shortcut": "Nie udało się uruchomić skrótu: {}",
+  "errors.failed_to_get_child": "Nie udało się pobrać elementu podrzędnego",
+  "errors.failed_to_get_current_task_identifier": "Nie udało się pobrać identyfikatora bieżącego zadania: {}",
+  "errors.failed_to_get_shortcut_file_path": "Nie udało się uzyskać ścieżki pliku skrótu",
+  "errors.failed_to_open_directory": "Nie udało się otworzyć katalogu: {}",
+  "errors.failed_to_open_standard_file": "Nie udało się otworzyć pliku standardowego: {}",
+  "errors.failed_to_read_shortcut_directory": "Nie udało się odczytać katalogu skrótów: {}",
+  "errors.failed_to_read_shortcut_file": "Nie udało się odczytać pliku skrótu: {}",
+  "errors.failed_to_set_environment_variable": "Nie udało się ustawić zmiennej środowiskowej: {}",
+  "errors.failed_to_set_task_user": "Nie udało się ustawić użytkownika zadania: {}",
+  "errors.graphics_error": "Błąd grafiki: {}",
+  "errors.invalid_utf_8": "Nieprawidłowe UTF-8: {}",
+  "login.actions.submit": "Zaloguj się",
+  "errors.missing_arguments": "Brak argumentów",
+  "errors.null_character_in_string": "Znak zerowy w ciągu: {}",
+  "login.fields.password": "Hasło",
+  "login.fields.username": "Nazwa użytkownika"
+}

@@ -18,10 +18,9 @@ rustflags = [
 
 [env]
 
-DEP_LV_CONFIG_PATH = { value = "modules/graphics/include", relative = true }
-LVGL_FONTS_DIR = { value = "modules/graphics/fonts_generator/generated_fonts", relative = true }
+DEP_LV_CONFIG_PATH = { value = "subsystems/graphics/include", relative = true }
 
-LITTLEFS_CONFIG = { value = "modules/little_fs/include/little_fs_config.h", relative = true }
+LITTLEFS_CONFIG = { value = "libraries/little_fs/include/little_fs_config.h", relative = true }
 EMBEDDED_I18N_LOCALE = "en"
 EMBEDDED_I18N_FALLBACK = "en"
 

@@ -1,0 +1,22 @@
+{
+  "app.title": "Editor de texto",
+  "navigation.previous_page": "Anterior",
+  "navigation.next_page": "Siguiente",
+  "controls.new_file": "Nuevo",
+  "controls.open_file": "Abrir",
+  "controls.save_file": "Guardar",
+  "file_path.instructions": "Elige una ruta y crea o abre un archivo de texto",
+  "warnings.unsaved_close_again": "Cambios sin guardar: vuelve a cerrar para descartarlos",
+  "warnings.unsaved_new_or_open_again": "Cambios sin guardar: vuelve a pulsar Nuevo o Abrir para descartarlos",
+  "file_path.placeholder": "Introduce una ruta de archivo absoluta",
+  "status.open_or_create_first": "Primero abre o crea un archivo",
+  "errors.working_copy_creation_failed": "No se pudo crear una copia de trabajo en este directorio",
+  "file_path.new_file_default_name": "Nuevo archivo de texto",
+  "status.opened": "Abierto",
+  "errors.open_failed": "No se pudo abrir: usa un archivo de texto UTF-8 y comprueba el almacenamiento",
+  "status.saved": "Guardado",
+  "errors.save_failed_working_copy_preserved": "No se pudo guardar: se conserva la copia de trabajo; comprueba la ruta y el almacenamiento",
+  "errors.page_exceeds_byte_limit": "El texto de la página no debe superar los 4096 bytes UTF-8",
+  "errors.edit_failed_close_again": "La edición falló: vuelve a cerrar para descartar los cambios",
+  "errors.edit_failed_reopen_source": "La edición falló: vuelve a abrir el archivo original"
+}

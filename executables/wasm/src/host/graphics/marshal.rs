@@ -6,13 +6,131 @@ use alloc::vec::Vec;
 use core::ffi::{CStr, c_char};
 
 pub const MAX_STRING_BYTES: usize = 1024;
+pub const MAX_TEXTAREA_BYTES: usize = 4097;
 /// Includes the sentinel. Calculator uses 48 entries.
 pub const MAX_MAP_ENTRIES: usize = 64;
 /// Includes every string's NUL and the native empty-string sentinel.
 pub const MAX_MAP_BYTES: usize = 8192;
+/// Includes the LVGL sentinel for each axis; each axis may have at most 31 tracks.
+pub const MAX_GRID_TRACKS_PER_AXIS: usize = 32;
+const VALID_STYLE_STATES: u32 = 0xF3FD;
+
+/// Restrict style selectors to known LVGL parts and state bits.
+pub fn validate_style_selector(selector: u32) -> Result<()> {
+    let part = selector & !0xffff;
+    let state = selector & 0xffff;
+    if matches!(
+        part,
+        0 | 0x1_0000 | 0x2_0000 | 0x3_0000 | 0x4_0000 | 0x5_0000 | 0x6_0000 | 0xf_0000
+    ) && state & !VALID_STYLE_STATES == 0
+    {
+        Ok(())
+    } else {
+        Err(GraphicsError::InvalidValue)
+    }
+}
+
+/// Stable host-owned LVGL grid descriptors. LVGL retains both pointers until
+/// the grid layout is replaced or its object is deleted.
+#[derive(Debug, PartialEq, Eq)]
+pub struct GridTracks {
+    tracks: Vec<i32>,
+    columns_len: usize,
+}
+
+impl GridTracks {
+    pub fn decode(
+        memory: &GuestMemory<'_>,
+        columns: WasmUsize,
+        rows: WasmUsize,
+        template_last: i32,
+        content: i32,
+    ) -> Result<Self> {
+        fn scan_axis(
+            memory: &GuestMemory<'_>,
+            offset: WasmUsize,
+            template_last: i32,
+            content: i32,
+        ) -> Result<([i32; MAX_GRID_TRACKS_PER_AXIS], usize)> {
+            let mut values = [0; MAX_GRID_TRACKS_PER_AXIS];
+            let fr_min = template_last - 100;
+            for (index, value) in values.iter_mut().enumerate() {
+                let address = offset
+                    .checked_add((index * i32::SIZE) as WasmUsize)
+                    .ok_or(GraphicsError::InvalidMemory)?;
+                let descriptor = memory
+                    .read(GuestPointer::<i32>::new(address))
+                    .ok_or(GraphicsError::InvalidMemory)?;
+                if descriptor == template_last {
+                    *value = descriptor;
+                    return Ok((values, index + 1));
+                }
+                // Accept bounded pixel tracks, LV_GRID_CONTENT, and valid
+                // LV_GRID_FR weights; reject arbitrary flag/coordinate values.
+                if !(0..=16_384).contains(&descriptor)
+                    && descriptor != content
+                    && !(fr_min..template_last).contains(&descriptor)
+                {
+                    return Err(GraphicsError::InvalidValue);
+                }
+                *value = descriptor;
+            }
+            Err(GraphicsError::ResourceLimit)
+        }
+
+        let (columns, columns_len) = scan_axis(memory, columns, template_last, content)?;
+        let (rows, rows_len) = scan_axis(memory, rows, template_last, content)?;
+        let mut tracks = Vec::with_capacity(columns_len + rows_len);
+        tracks.extend_from_slice(&columns[..columns_len]);
+        tracks.extend_from_slice(&rows[..rows_len]);
+        Ok(Self {
+            tracks,
+            columns_len,
+        })
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub fn columns(&self) -> &[i32] {
+        &self.tracks[..self.columns_len]
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub fn rows(&self) -> &[i32] {
+        &self.tracks[self.columns_len..]
+    }
+
+    pub fn track_count(&self) -> usize {
+        self.tracks.len()
+    }
+
+    pub fn columns_ptr(&self) -> *const i32 {
+        self.tracks.as_ptr()
+    }
+
+    pub fn rows_ptr(&self) -> *const i32 {
+        self.tracks.as_ptr().wrapping_add(self.columns_len)
+    }
+}
 
 pub fn read_c_string<'a>(memory: &'a GuestMemory<'_>, offset: WasmUsize) -> Result<&'a CStr> {
-    for index in 0..MAX_STRING_BYTES {
+    read_c_string_with_limit(memory, offset, MAX_STRING_BYTES)
+}
+
+pub fn read_textarea_string<'a>(
+    memory: &'a GuestMemory<'_>,
+    offset: WasmUsize,
+) -> Result<&'a CStr> {
+    read_c_string_with_limit(memory, offset, MAX_TEXTAREA_BYTES)
+}
+
+fn read_c_string_with_limit<'a>(
+    memory: &'a GuestMemory<'_>,
+    offset: WasmUsize,
+    limit: usize,
+) -> Result<&'a CStr> {
+    for index in 0..limit {
         let address = offset
             .checked_add(index as WasmUsize)
             .ok_or(GraphicsError::InvalidMemory)?;

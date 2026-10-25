@@ -29,7 +29,7 @@ define_wasi_module! {
             let random = xila::virtual_file_system::SynchronousFile::open(
                 caller.data().context.virtual_file_system,
                 caller.data().wasi.task,
-                xila::file_system::Path::from_str("/devices/random"),
+                xila::file_system::Path::from_str("/devices/random/source"),
                 xila::file_system::AccessFlags::Read.into(),
             ).map_err(|_| Error::Io)?;
             let mut random = random;

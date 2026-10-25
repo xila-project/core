@@ -7,6 +7,16 @@ edition = "2024"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2.84"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3.64", features = [
+  "Document",
+  "Element",
+  "EventTarget",
+  "HtmlElement",
+  "MouseEvent",
+  "Node",
+  "Window",
+] }
 xila = { path = "../../", features = [
   "bootsplash",
   "graphics",
@@ -19,7 +29,7 @@ wasm = { workspace = true, features = ["host", "graphics"] }
 terminal = { workspace = true }
 settings = { workspace = true }
 console_error_panic_hook = "0.1"
-drivers_wasm = { workspace = true }
+drivers_wasm = { workspace = true, features = ["audio"] }
 drivers_core = { workspace = true }
 drivers_shared = { workspace = true }
 

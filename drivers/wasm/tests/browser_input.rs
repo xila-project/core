@@ -3,7 +3,7 @@
 use abi_definitions as _;
 use drivers_wasm::devices::graphics::{CanvasScreenDevice, KeyboardDevice};
 use file_system::{ControlCommand, DirectBaseOperations};
-use graphics::{InputData, Key, State, WAS_RESIZED};
+use graphics::{Area, ColorARGB8888, InputData, Key, Point, SET_DRAWING_AREA, State, WAS_RESIZED};
 use shared::AnyByLayout;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
@@ -41,7 +41,7 @@ fn key(canvas: &web_sys::EventTarget, key: &str, modifier: &str) -> KeyboardEven
 
 fn read(device: &KeyboardDevice) -> InputData {
     let mut data = InputData::default();
-    device.read(data.as_mut(), 0).unwrap();
+    device.read_sync(data.as_mut(), 0).unwrap();
     data
 }
 
@@ -117,7 +117,7 @@ async fn unchanged_resize_preserves_the_canvas_bitmap() {
     assert_eq!(&pixel.0[..3], &[255, 0, 0]);
     let mut resized = false;
     device
-        .control(
+        .control_sync(
             WAS_RESIZED::IDENTIFIER,
             AnyByLayout::NONE,
             AnyByLayout::from_mutable(&mut resized),
@@ -234,7 +234,7 @@ async fn changed_viewport_updates_resolution_and_requests_redraw() {
     );
     let mut resized = false;
     device
-        .control(
+        .control_sync(
             WAS_RESIZED::IDENTIFIER,
             AnyByLayout::NONE,
             AnyByLayout::from_mutable(&mut resized),
@@ -242,12 +242,72 @@ async fn changed_viewport_updates_resolution_and_requests_redraw() {
         .unwrap();
     assert!(resized);
     device
-        .control(
+        .control_sync(
             WAS_RESIZED::IDENTIFIER,
             AnyByLayout::NONE,
             AnyByLayout::from_mutable(&mut resized),
         )
         .unwrap();
     assert!(!resized);
+    canvas.remove();
+}
+
+#[wasm_bindgen_test]
+async fn dirty_rectangle_with_unaligned_width_preserves_canvas_color_order() {
+    const WIDTH: u32 = 5;
+    const HEIGHT: u32 = 3;
+
+    let canvas = canvas();
+    canvas.set_width(WIDTH);
+    canvas.set_height(HEIGHT);
+    let device = CanvasScreenDevice::new(canvas.clone()).await.unwrap();
+    let mut area = Area::new(
+        Point::new(0, 0),
+        Point::new(WIDTH as i16 - 1, HEIGHT as i16 - 1),
+    );
+    device
+        .control(
+            SET_DRAWING_AREA::IDENTIFIER,
+            AnyByLayout::from_mutable(&mut area),
+            AnyByLayout::NONE,
+        )
+        .unwrap();
+
+    let colors: Vec<_> = (0..WIDTH * HEIGHT)
+        .map(|index| {
+            ColorARGB8888::new(
+                255,
+                (index * 37 + 11) as u8,
+                (index * 53 + 19) as u8,
+                (index * 71 + 23) as u8,
+            )
+        })
+        .collect();
+    let source = unsafe {
+        core::slice::from_raw_parts(
+            colors.as_ptr().cast::<u8>(),
+            colors.len() * core::mem::size_of::<ColorARGB8888>(),
+        )
+    };
+    assert_eq!(device.write(source, 0).unwrap(), colors.len());
+
+    let context: web_sys::CanvasRenderingContext2d = canvas
+        .get_context("2d")
+        .unwrap()
+        .unwrap()
+        .dyn_into()
+        .unwrap();
+    let pixels = context
+        .get_image_data(0.0, 0.0, WIDTH as f64, HEIGHT as f64)
+        .unwrap()
+        .data();
+    for (index, color) in colors.iter().enumerate() {
+        let offset = index * 4;
+        assert_eq!(
+            &pixels.0[offset..offset + 4],
+            &[color.get_red(), color.get_green(), color.get_blue(), 255],
+            "pixel {index} in {WIDTH}x{HEIGHT} dirty rectangle",
+        );
+    }
     canvas.remove();
 }

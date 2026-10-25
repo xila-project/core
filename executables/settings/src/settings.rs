@@ -8,12 +8,12 @@ use xila::graphics::{
 use xila::task;
 
 use crate::error::Result;
-use crate::tabs::{AboutTab, GeneralTab, NetworkTab, PasswordTab, Tab};
+use crate::tabs::{AboutTab, AppearanceTab, GeneralTab, NetworkTab, PasswordTab, Tab};
 
 pub struct Settings {
     graphics_manager: &'static graphics::Manager,
     window: OwnedWindow,
-    tabs: [Tab; 4],
+    tabs: [Tab; 5],
 }
 
 #[derive(Clone)]
@@ -32,6 +32,14 @@ impl Settings {
 
         window.set_icon("Se", palette::get(Hue::Grey, palette::Tone::MAIN));
 
+        // Flatten window chrome so the tabview fills the window edge-to-edge
+        unsafe {
+            let window = window.as_object_mutable();
+            lvgl::lv_obj_set_style_pad_all(window, 0, lvgl::LV_STATE_DEFAULT);
+            lvgl::lv_obj_set_layout(window, lvgl::lv_layout_t_LV_LAYOUT_FLEX);
+            lvgl::lv_obj_set_flex_flow(window, lvgl::lv_flex_flow_t_LV_FLEX_FLOW_COLUMN);
+        }
+
         // Create tabview
         let tabview = unsafe {
             let tabview = lvgl::lv_tabview_create(window.as_object_mutable());
@@ -39,12 +47,17 @@ impl Settings {
             if tabview.is_null() {
                 return Err(crate::error::Error::FailedToCreateUiElement);
             }
+
+            lvgl::lv_obj_set_size(tabview, lvgl::lv_pct(100), lvgl::lv_pct(100));
+            lvgl::lv_obj_set_flex_grow(tabview, 1);
+
             tabview
         };
 
         // Create tabs
         let mut tabs = [
             Tab::General(GeneralTab::new()),
+            Tab::Appearance(AppearanceTab::new(context).await),
             Tab::Password(PasswordTab::new(context)),
             Tab::Network(NetworkTab::new(context)),
             Tab::About(AboutTab::new(context)),

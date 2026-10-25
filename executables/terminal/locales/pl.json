@@ -1,0 +1,10 @@
+{
+  "input.command_placeholder": "Wpisz polecenie...",
+  "errors.failed_to_create_object": "Nie udało się utworzyć obiektu",
+  "errors.failed_to_execute": "Nie udało się wykonać: {}",
+  "errors.failed_to_get_task_identifier": "Nie udało się uzyskać identyfikatora zadania: {}",
+  "errors.failed_to_mount_device": "Nie udało się zamontować urządzenia: {}",
+  "errors.graphics": "Grafika: {}",
+  "errors.resource_busy": "Zasób zajęty",
+  "errors.utf_8": "UTF-8: {}"
+}

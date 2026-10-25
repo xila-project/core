@@ -1,0 +1,31 @@
+{
+  "namespace": "subsystems/virtual_file_system",
+  "old_to_new": {
+    "Already exists": "errors.already_exists",
+    "Already initialized": "errors.already_initialized",
+    "Delimiter not found": "errors.delimiter_not_found",
+    "Failed to get task informations": "errors.failed_to_get_task_informations",
+    "Failed to write": "errors.failed_to_write",
+    "File system error: {}": "errors.file_system_error",
+    "Invalid file system": "errors.invalid_file_system",
+    "Invalid identifier": "errors.invalid_identifier",
+    "Invalid inode": "errors.invalid_inode",
+    "Invalid mode": "errors.invalid_mode",
+    "Invalid open": "errors.invalid_open",
+    "Invalid parameter": "errors.invalid_parameter",
+    "Invalid path": "errors.invalid_path",
+    "Missing attribute": "errors.missing_attribute",
+    "Not a directory": "errors.not_a_directory",
+    "Not a file": "errors.not_a_file",
+    "Orphaned": "errors.orphaned",
+    "Permission denied": "errors.permission_denied",
+    "Ressource busy": "errors.ressource_busy",
+    "Task error: {}": "errors.task_error",
+    "Time error: {}": "errors.time_error",
+    "Too many inodes": "errors.too_many_inodes",
+    "Too many open files": "errors.too_many_open_files",
+    "Unavailable driver": "errors.unavailable_driver",
+    "Unsupported operation": "errors.unsupported_operation",
+    "Users error: {}": "errors.users_error"
+  }
+}

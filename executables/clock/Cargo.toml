@@ -6,6 +6,7 @@ description = "A bounded Clock application for Xila's WebAssembly runtime."
 license = "GPL-2.0-only"
 
 [dependencies]
+application_metadata = { workspace = true }
 embedded-i18n = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

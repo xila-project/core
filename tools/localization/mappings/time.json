@@ -1,0 +1,8 @@
+{
+  "namespace": "subsystems/time",
+  "old_to_new": {
+    "Device error: {}": "errors.device_error",
+    "Time module already initialized": "errors.time_module_already_initialized",
+    "Time module not initialized": "errors.time_module_not_initialized"
+  }
+}

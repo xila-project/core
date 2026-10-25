@@ -1,0 +1,518 @@
+# Templates supply task-local tools only. Native packages remain separate
+# ci:packages-* dependencies; formatting templates never bootstrap packages.
+[task_templates."ci:rust-format"]
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "rustfmt",
+] }
+
+[task_templates."ci:rust-lint"]
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "clippy",
+  "rustfmt",
+] }
+
+[task_templates."ci:rust-wasi"]
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "rustfmt",
+], targets = [
+  "wasm32-wasip1",
+] }
+
+[task_templates."ci:rust-browser"]
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "rustfmt",
+], targets = [
+  "wasm32-unknown-unknown",
+] }
+
+[task_templates."ci:rust-browser-lint"]
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "clippy",
+  "rustfmt",
+], targets = [
+  "wasm32-unknown-unknown",
+] }
+
+[task_templates."ci:rust-wasi-lint"]
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "clippy",
+  "rustfmt",
+], targets = [
+  "wasm32-wasip1",
+] }
+
+[task_templates."ci:node"]
+tools.node = "{{ vars.node_version }}"
+
+[task_templates."ci:coverage"]
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "llvm-tools-preview",
+  "rustfmt",
+] }
+tools."aqua:taiki-e/cargo-llvm-cov" = "{{ vars.llvm_cov_version }}"
+
+[task_templates."ci:miri"]
+tools.rust = { version = "{{ vars.nightly_version }}", profile = "minimal", components = [
+  "miri",
+  "rust-src",
+] }
+
+[wrappers.cargo]
+# Build jobs opt in; quality checks use real Cargo.
+command = "env"
+args = [
+  "{% if env.XILA_MBX | default(value='0') == '1' %}mbx{% else %}cargo{% endif %}",
+]
+env = { MBX_CARGO_SHIM_MODE = "1" }
+
+[bootstrap.packages]
+"apt:clang" = { env = "ci" }
+"apt:mold" = { env = "ci" }
+"apt:pkg-config" = { env = "host" }
+"apt:libudev-dev" = { env = "host" }
+"apt:libxkbcommon-dev" = { env = "host" }
+"apt:libwayland-dev" = { env = "host" }
+"apt:libx11-dev" = { env = "host" }
+"apt:libxkbcommon-x11-dev" = { env = "host" }
+"apt:time" = { env = "benchmark" }
+
+[tasks."ci:packages-linker"]
+description = "Install CI linker packages only when a build task needs them"
+run = "mise -E ci bootstrap packages apply --manager apt --update --yes"
+
+[tasks."ci:toolchain"]
+description = "Prepare the pinned stable compiler and report its cache key"
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal" }
+run = """
+set -eu
+rustc --version
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  echo "version={{ vars.rust_version }}" >> "$GITHUB_OUTPUT"
+fi
+"""
+
+[tasks."ci:toolchain-nightly"]
+description = "Prepare the pinned nightly compiler and report its cache key"
+tools.rust = { version = "{{ vars.nightly_version }}", profile = "minimal" }
+run = """
+set -eu
+rustc --version
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  echo "version={{ vars.nightly_version }}" >> "$GITHUB_OUTPUT"
+fi
+"""
+
+[tasks."ci:packages-host"]
+description = "Install CI native GUI and linker packages"
+run = "mise -E ci,host bootstrap packages apply --manager apt --update --yes"
+
+[tasks."ci:packages-benchmark"]
+description = "Install benchmark packages before timed commands"
+run = "mise -E ci,host,benchmark bootstrap packages apply --manager apt --update --yes"
+
+[tasks."ci:format-rust"]
+description = "Check Rust formatting without native build dependencies"
+extends = "ci:rust-format"
+run = "cargo fmt --all -- --check"
+
+[tasks."ci:format-toml"]
+description = "Check TOML formatting without native build dependencies"
+tools.taplo = "{{ vars.taplo_version }}"
+run = "taplo format --check"
+
+[tasks."ci:quality-js"]
+description = "Check JSON formatting and localization extractor tests"
+extends = "ci:node"
+run = "npm exec prettier -- --check \"**/*.json\" && node --test tolgee.extractor.test.mjs && node tools/localization/check.mjs"
+
+[tasks."deps:npm"]
+extends = "ci:node"
+
+[tasks."ci:lint-workflows"]
+description = "Lint GitHub Actions workflows"
+tools."aqua:rhysd/actionlint" = "{{ vars.actionlint_version }}"
+tools."aqua:koalaman/shellcheck" = "{{ vars.shellcheck_version }}"
+run = "actionlint"
+
+[tasks."ci:host"]
+extends = "ci:rust-lint"
+description = "Run primary host lint, test, and native build validation"
+shell = "bash -c"
+depends = ["ci:packages-host"]
+run = """
+set -euo pipefail
+mise run ci:host-clippy
+mise run ci:host-wasm-clippy
+mise run ci:host-tests
+mise run ci:host-profiling-tests
+mise run ci:host-font-tests
+mise run ci:host-build
+"""
+
+[tasks."ci:wasm"]
+description = "Run primary guest, WASI application, image, and browser validation"
+shell = "bash -c"
+depends = ["ci:packages-linker"]
+run = """
+set -euo pipefail
+mise run ci:wasm-clippy
+mise run ci:wasm-audio-check
+mise run ci:wasm-apps-clippy
+mise run ci:wasm-image
+mise run ci:wasm-browser-tests
+"""
+
+[tasks."ci:wasm".tools]
+rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "clippy",
+  "rustfmt",
+], targets = [
+  "wasm32-unknown-unknown",
+  "wasm32-wasip1",
+] }
+node = "{{ vars.node_version }}"
+
+[tasks."ci:abi"]
+description = "Run locked WASM ABI translation tests including doctests"
+depends = ["ci:packages-linker"]
+run = "cargo test --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features ${CI_ABI_MEMORY:-memory_32}"
+
+[tasks."ci:abi".tools]
+rust = { version = "{{ vars.rust_version }}", profile = "minimal" }
+
+[tasks."ci:localization"]
+description = "Run strict host and guest localization checks for selected locales"
+shell = "bash -c"
+depends = ["ci:packages-host"]
+run = """
+set -euo pipefail
+read -r -a locales <<< "${CI_LOCALES:-en fr es de pt-BR it pl zh-CN}"
+export CARGO_TARGET_DIR="${CARGO_TARGET_ROOT:-target/localization}"
+for locale in "${locales[@]}"; do
+  echo "::group::Localization ($locale)"
+  export EMBEDDED_I18N_STRICT=1
+  export EMBEDDED_I18N_LOCALE="$locale"
+  mise run localization:check
+  if [[ "$locale" == zh-CN ]]; then
+    cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml
+  fi
+  echo "::endgroup::"
+done
+"""
+
+[tasks."ci:localization".tools]
+rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "rustfmt",
+], targets = [
+  "wasm32-unknown-unknown",
+  "wasm32-wasip1",
+] }
+node = "{{ vars.node_version }}"
+
+[tasks."ci:coverage"]
+extends = "ci:coverage"
+description = "Run host-only workspace coverage in LCOV format"
+depends = ["ci:packages-host"]
+run = "cargo llvm-cov --locked --workspace --coverage-host-only --lcov --output-path lcov.info"
+
+[tasks."ci:abi-deep"]
+description = "Run ABI coverage thresholds and Miri across host architectures"
+shell = "bash -c"
+depends = ["ci:packages-linker"]
+run = """
+set -euo pipefail
+mise run ci:abi-coverage
+mise run ci:abi-miri
+mise run ci:abi-miri-cross
+"""
+
+[tasks."ci:abi-deep".tools]
+rust = { version = "{{ vars.nightly_version }}", profile = "minimal", components = [
+  "llvm-tools-preview",
+  "miri",
+  "rust-src",
+], targets = [
+  "i686-unknown-linux-gnu",
+  "powerpc-unknown-linux-gnu",
+] }
+"aqua:taiki-e/cargo-llvm-cov" = "{{ vars.llvm_cov_version }}"
+
+[tasks."ci:profiling"]
+extends = "ci:rust-wasi"
+description = "Test runtime profiling and heaptrack feature configurations"
+shell = "bash -c"
+depends = ["ci:packages-host"]
+run = """
+set -euo pipefail
+mise run ci:profiling-runtime-tests
+mise run ci:profiling-native-tests
+"""
+
+[tasks."ci:host-clippy"]
+extends = "ci:rust-lint"
+description = "Lint host workspace targets"
+depends = ["ci:packages-host"]
+run = "mise run clippy:host"
+
+[tasks."ci:host-wasm-clippy"]
+extends = "ci:rust-lint"
+description = "Lint host WASM runtime and graphics bindings"
+depends = ["ci:packages-host"]
+run = "cargo clippy -p wasm --features graphics,xila/graphics_rendering_xrgb8888 --target x86_64-unknown-linux-gnu -- -D warnings"
+
+[tasks."ci:verification"]
+description = "Test verifier features and link without an allocator on Cortex-M and WASM"
+depends = ["ci:packages-linker"]
+run = """
+bash libraries/verification/check.sh
+bash tools/verification_probe/check.sh thumbv7em-none-eabi
+bash tools/verification_probe/check.sh wasm32-unknown-unknown
+"""
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "clippy",
+  "rustfmt",
+], targets = [
+  "wasm32-unknown-unknown",
+  "wasm32-wasip1",
+  "thumbv7em-none-eabi",
+] }
+
+[tasks."ci:host-tests"]
+extends = "ci:rust-wasi"
+description = "Test the host workspace"
+depends = ["ci:packages-host"]
+run = "cargo test --locked --workspace"
+
+[tasks."ci:host-profiling-tests"]
+extends = "ci:rust-format"
+description = "Test the profiling tools workspace"
+depends = ["ci:packages-linker"]
+run = "cargo test --locked --manifest-path tools/profiling/Cargo.toml"
+
+[tasks."ci:host-font-tests"]
+extends = "ci:rust-format"
+tools.node = "{{ vars.node_version }}"
+description = "Test the standalone font-link workspace"
+depends = ["ci:packages-linker"]
+run = "mise run test:fonts && cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml"
+
+[tasks."test:fonts"]
+extends = "ci:rust-lint"
+tools.node = "{{ vars.node_version }}"
+
+[tasks."ci:host-build"]
+extends = "ci:rust-format"
+description = "Build the native example"
+depends = ["ci:packages-host"]
+run = "cargo build --locked -p native_example"
+
+[tasks."ci:wasm-clippy"]
+extends = "ci:rust-browser-lint"
+description = "Lint WASM guest targets"
+depends = ["ci:packages-linker"]
+run = "mise run clippy:guest"
+
+[tasks."ci:wasm-audio-check"]
+extends = "ci:rust-browser"
+description = "Check browser audio support"
+depends = ["ci:packages-linker"]
+run = "cargo check -p audio -p drivers_wasm --features drivers_wasm/audio --target wasm32-unknown-unknown"
+
+[tasks."ci:wasm-apps-clippy"]
+extends = "ci:rust-wasi-lint"
+description = "Lint WASI clock and pixel painter targets"
+depends = ["ci:packages-linker"]
+run = "cargo clippy -p clock -p pixel_painter --all-targets --target wasm32-wasip1 -- -D warnings"
+
+[tasks."ci:wasm-image"]
+extends = "ci:rust-wasi"
+description = "Build WASI applications and the browser seed image"
+depends = ["ci:packages-linker"]
+run = "mise run image:wasm"
+
+[tasks."ci:wasm-browser-tests"]
+extends = "ci:node"
+description = "Test browser seed and disk management"
+run = "node --test drivers/wasm/tests/seed.test.mjs examples/wasm/tests/disk_manager.test.mjs"
+
+[tasks."ci:profiling-runtime-tests"]
+extends = "ci:rust-wasi"
+description = "Test task and driver profiling instrumentation"
+depends = ["ci:packages-host"]
+run = "cargo test --locked -p task -p drivers_std --lib --features task/test_harness,drivers_std/profiling,drivers_std/heaptrack"
+
+[tasks."ci:profiling-native-tests"]
+extends = "ci:rust-wasi"
+description = "Test the native profiling and heaptrack configuration"
+depends = ["ci:packages-host"]
+run = "cargo test --locked -p native_example --bin native_example --features profiling,heaptrack"
+
+[tasks."ci:abi-coverage"]
+description = "Enforce ABI translation coverage thresholds"
+depends = ["ci:packages-linker"]
+tools.rust = { version = "{{ vars.nightly_version }}", profile = "minimal", components = [
+  "llvm-tools-preview",
+] }
+tools."aqua:taiki-e/cargo-llvm-cov" = "{{ vars.llvm_cov_version }}"
+run = "cargo llvm-cov --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features ${CI_ABI_MEMORY:-memory_32} --ignore-filename-regex '(tests\\.rs|tests/translation/src/lib\\.rs)$' --fail-under-lines 100 --fail-under-functions 100"
+
+[tasks."ci:abi-miri"]
+extends = "ci:miri"
+description = "Test ABI translation with host Miri"
+depends = ["ci:packages-linker"]
+run = "cargo miri test --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features ${CI_ABI_MEMORY:-memory_32}"
+
+[tasks."ci:abi-miri-cross"]
+description = "Test ABI translation with cross-architecture Miri"
+shell = "bash -c"
+depends = ["ci:packages-linker"]
+tools.rust = { version = "{{ vars.nightly_version }}", profile = "minimal", components = [
+  "miri",
+  "rust-src",
+], targets = [
+  "i686-unknown-linux-gnu",
+  "powerpc-unknown-linux-gnu",
+] }
+run = """
+set -euo pipefail
+memory="${CI_ABI_MEMORY:-memory_32}"
+case "$memory" in
+  memory_32)
+    cargo miri test --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features memory_32 --target powerpc-unknown-linux-gnu
+    ;;
+  memory_64)
+    cargo miri test --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features memory_64 --target i686-unknown-linux-gnu
+    ;;
+  *)
+    echo "Unsupported ABI memory mode: $memory" >&2
+    exit 2
+    ;;
+esac
+"""
+
+[tasks."ci:runtime-smoke"]
+description = "Compile the runtime smoke-test WASI guest"
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", targets = [
+  "wasm32-wasip1",
+] }
+run = "rustc --edition=2021 --target wasm32-wasip1 -O tests/container/runtime_smoke.rs -o runtime-smoke.wasm"
+
+[tasks."ci:benchmark-profile"]
+extends = "ci:rust-browser-lint"
+description = "Run Cargo profile benchmark commands"
+shell = "bash -c"
+run = """
+set -euo pipefail
+if [[ "${CARGO_BENCH_PROFILE:-default}" == line-tables-only ]]; then
+  export CARGO_PROFILE_DEV_DEBUG=line-tables-only
+  export CARGO_PROFILE_TEST_DEBUG=line-tables-only
+fi
+cargo test --workspace --timings
+cargo clippy -p wasm --no-default-features --features default_guest --target wasm32-unknown-unknown --all-targets --timings -- -D warnings
+"""
+
+[tasks."ci:benchmark-install-nextest"]
+description = "Install pinned cargo-nextest for manual timing experiments"
+tools."aqua:cargo-bins/cargo-binstall" = "{{ vars.binstall_version }}"
+run = "cargo binstall --no-confirm cargo-nextest@{{ vars.nextest_version }}"
+
+[tasks."ci:benchmark-compile"]
+extends = "ci:rust-format"
+description = "Compile workspace test binaries and collect timings"
+run = "cargo test --workspace --no-run --timings"
+
+[tasks."ci:benchmark-cargo-test"]
+extends = "ci:rust-format"
+description = "Run workspace tests and doctests with Cargo"
+run = "cargo test --workspace"
+
+[tasks."ci:benchmark-nextest"]
+extends = "ci:rust-format"
+description = "Run workspace tests with nextest and doctests with Cargo"
+run = "cargo nextest run --workspace --timings"
+
+[tasks."ci:benchmark-doctests"]
+extends = "ci:rust-format"
+description = "Run workspace doctests with Cargo"
+run = "cargo test --workspace --doc --timings"
+
+[tasks."pages:build"]
+description = "Build documentation and all locale WASM demonstrations"
+shell = "bash -c"
+depends = ["ci:packages-host"]
+run = """
+set -euo pipefail
+mkdir -p pages/host pages/guest pages/demonstrations/wasm target/reference-filesystem-images
+RUSTDOCFLAGS="--deny warnings" mise run docs:host
+RUSTDOCFLAGS="--deny warnings" mise run docs:guest
+cp -r target/x86_64-unknown-linux-gnu/doc/. pages/host/
+cp -r target/wasm32-unknown-unknown/doc/. pages/guest/
+for locale in en fr es de pt-BR it pl; do
+  echo "::group::WASM demonstration ($locale)"
+  export EMBEDDED_I18N_LOCALE="$locale"
+  export CARGO_TARGET_DIR="${CARGO_TARGET_ROOT:-target/pages}/$locale"
+  mise run image:wasm
+  cargo run --locked -p fs_image -- "$CARGO_TARGET_DIR/seed/wasm/repeated.img" 16777216 --bundle wasm --applications-dir "$CARGO_TARGET_DIR/wasm32-wasip1/release"
+  cmp "$CARGO_TARGET_DIR/seed/wasm/seed.img" "$CARGO_TARGET_DIR/seed/wasm/repeated.img"
+  rm "$CARGO_TARGET_DIR/seed/wasm/repeated.img"
+  cargo run --locked -p fs_image -- "$CARGO_TARGET_DIR/seed/wasm/native.img" 16777216 --bundle native --applications-dir "$CARGO_TARGET_DIR/wasm32-wasip1/release"
+  cargo run --locked -p fs_image -- "$CARGO_TARGET_DIR/seed/wasm/native-repeated.img" 16777216 --bundle native --applications-dir "$CARGO_TARGET_DIR/wasm32-wasip1/release"
+  cmp "$CARGO_TARGET_DIR/seed/wasm/native.img" "$CARGO_TARGET_DIR/seed/wasm/native-repeated.img"
+  rm "$CARGO_TARGET_DIR/seed/wasm/native-repeated.img"
+  mkdir -p "target/reference-filesystem-images/$locale"
+  cp "$CARGO_TARGET_DIR/seed/wasm/seed.img" "target/reference-filesystem-images/$locale/wasm.img"
+  cp "$CARGO_TARGET_DIR/seed/wasm/native.img" "target/reference-filesystem-images/$locale/native.img"
+  # Trunk's copy-file asset uses a fixed path outside the locale target directory.
+  mkdir -p target/seed/wasm
+  cp "$CARGO_TARGET_DIR/seed/wasm/seed.img" target/seed/wasm/seed.img
+  mise run pages:demo
+  mkdir -p "pages/demonstrations/wasm/$locale"
+  cp -r examples/wasm/dist/. "pages/demonstrations/wasm/$locale/"
+  echo "::endgroup::"
+done
+"""
+
+[tasks."pages:build".tools]
+rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "llvm-tools-preview",
+  "rustfmt",
+], targets = [
+  "wasm32-unknown-unknown",
+  "wasm32-wasip1",
+] }
+
+[tasks."pages:demo"]
+description = "Build the browser demonstration with its nightly toolchain"
+dir = "examples/wasm"
+tools.rust = { version = "{{ vars.nightly_version }}", profile = "minimal", components = [
+  "rustfmt",
+], targets = [
+  "wasm32-unknown-unknown",
+] }
+tools."cargo:trunk" = "{{ vars.trunk_version }}"
+run = "trunk build --release --public-url ./"
+
+[tasks."clippy:host"]
+extends = "ci:rust-lint"
+
+[tasks."clippy:guest"]
+extends = "ci:rust-browser-lint"
+
+[tasks."docs:host".tools]
+rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "rustfmt",
+], targets = [
+  "x86_64-unknown-linux-gnu",
+] }
+
+[tasks."docs:guest"]
+extends = "ci:rust-browser"
+
+[tasks."build:applications"]
+extends = "ci:rust-wasi"
+
+[tasks."image:native"]
+extends = "ci:rust-wasi"
+
+[tasks."image:wasm"]
+extends = "ci:rust-wasi"

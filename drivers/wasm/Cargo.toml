@@ -3,8 +3,14 @@ name = "drivers_wasm"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+audio = ["dep:audio", "dep:nanoaudio-web"]
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 file_system = { workspace = true }
+audio = { workspace = true, optional = true }
+nanoaudio-web = { workspace = true, optional = true }
 memory = { workspace = true }
 graphics = { workspace = true, features = ["rendering_xrgb8888"] }
 critical-section = { workspace = true, features = ["std"] }

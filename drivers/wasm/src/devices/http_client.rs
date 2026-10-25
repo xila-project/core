@@ -9,6 +9,7 @@ use web_sys::{Headers, Request, RequestInit};
 
 enum State {
     Idle,
+    Failed(Error),
     RequestPending,
     RequestReady(web_sys::Response),
     BodyPending,
@@ -17,18 +18,28 @@ enum State {
 
 struct HttpClientContext {
     state: Rc<RefCell<State>>,
+    waker: Rc<RefCell<Option<core::task::Waker>>>,
 }
 
 impl Clone for HttpClientContext {
     fn clone(&self) -> Self {
         HttpClientContext {
             state: Rc::new(RefCell::new(State::Idle)),
+            waker: Rc::new(RefCell::new(None)),
         }
     }
 }
 
 unsafe impl Send for HttpClientContext {}
 unsafe impl Sync for HttpClientContext {}
+
+fn complete(state: &RefCell<State>, waker: &RefCell<Option<core::task::Waker>>, next: State) {
+    *state.borrow_mut() = next;
+    let pending = waker.borrow_mut().take();
+    if let Some(waker) = pending {
+        waker.wake();
+    }
+}
 
 fn build_request<'a>(scheme: &str, request: HttpRequestParser<'a>) -> Option<Request> {
     let options = RequestInit::new();
@@ -122,111 +133,130 @@ impl BaseOperations for HttpClientDevice {
     fn open(&self, context: &mut Context) -> Result<()> {
         context.set_private_data(Box::new(HttpClientContext {
             state: Rc::new(RefCell::new(State::Idle)),
+            waker: Rc::new(RefCell::new(None)),
         }));
 
         Ok(())
     }
 
     fn close(&self, context: &mut Context) -> Result<()> {
-        context.take_private_data_of_type::<HttpClientContext>();
+        if let Some(context) = context.take_private_data_of_type::<HttpClientContext>() {
+            let retired = context.waker.replace(None);
+            drop(retired);
+        }
 
         Ok(())
     }
 
-    fn read(&self, context: &mut Context, buffer: &mut [u8], _: Size) -> Result<usize> {
-        let ctx = context
+    fn read(
+        &self,
+        context: &mut Context,
+        cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        _: Size,
+    ) -> core::task::Poll<Result<usize>> {
+        use core::task::Poll;
+        let context = context
             .get_private_data_mutable_of_type::<HttpClientContext>()
-            .ok_or(file_system::Error::InvalidParameter)?;
-
-        let mut state = ctx.state.borrow_mut();
-
+            .ok_or(Error::InvalidContext)?;
+        if buffer.is_empty() {
+            return Poll::Ready(Ok(0));
+        }
+        let replacement = cx.waker().clone();
+        let retired = context.waker.replace(Some(replacement));
+        drop(retired);
+        let mut state = context.state.borrow_mut();
         match core::mem::replace(&mut *state, State::Idle) {
             State::RequestPending => {
-                // Request is still in progress - restore state
                 *state = State::RequestPending;
-                Err(Error::RessourceBusy)
-            }
-            State::RequestReady(response) => {
-                // Build headers response
-                let headers_size = build_headers_response(&response, buffer)?;
-
-                // Spawn body future
-                let state_clone = ctx.state.clone();
-                spawn_local(async move {
-                    if let Ok(array_buffer_promise) = response.array_buffer() {
-                        match JsFuture::from(array_buffer_promise).await {
-                            Ok(body) => {
-                                if let Ok(body) = body.dyn_into::<js_sys::ArrayBuffer>() {
-                                    let array = js_sys::Uint8Array::new(&body);
-                                    *state_clone.borrow_mut() = State::BodyReady(array);
-                                } else {
-                                    *state_clone.borrow_mut() = State::Idle;
-                                }
-                            }
-                            Err(_) => {
-                                *state_clone.borrow_mut() = State::Idle;
-                            }
-                        }
-                    } else {
-                        *state_clone.borrow_mut() = State::Idle;
-                    }
-                });
-
-                *state = State::BodyPending;
-                Ok(headers_size)
+                Poll::Pending
             }
             State::BodyPending => {
-                // Body is still being fetched - restore state
                 *state = State::BodyPending;
-                log::information!("HttpClientDevice: body still pending");
-                Err(Error::RessourceBusy)
+                Poll::Pending
             }
-            State::BodyReady(body_array) => {
-                let body_length = body_array.length() as usize;
-                let read_length = core::cmp::min(body_length, buffer.len());
-
-                body_array
-                    .slice(0, read_length as u32)
-                    .copy_to(&mut buffer[..read_length]);
-
-                // State is already Idle from replace
-                Ok(read_length)
+            State::Failed(error) => Poll::Ready(Err(error)),
+            State::RequestReady(response) => {
+                let count = build_headers_response(&response, buffer)?;
+                *state = State::BodyPending;
+                let state = context.state.clone();
+                let waker = context.waker.clone();
+                spawn_local(async move {
+                    let result = async {
+                        let promise = response.array_buffer().map_err(|_| Error::InputOutput)?;
+                        let body = JsFuture::from(promise)
+                            .await
+                            .map_err(|_| Error::InputOutput)?;
+                        let body = body
+                            .dyn_into::<js_sys::ArrayBuffer>()
+                            .map_err(|_| Error::InputOutput)?;
+                        Ok::<_, Error>(js_sys::Uint8Array::new(&body))
+                    }
+                    .await;
+                    complete(
+                        &state,
+                        &waker,
+                        match result {
+                            Ok(body) => State::BodyReady(body),
+                            Err(error) => State::Failed(error),
+                        },
+                    );
+                });
+                Poll::Ready(Ok(count))
             }
-            State::Idle => {
-                // No more data to read
-                Ok(0)
+            State::BodyReady(body) => {
+                let length = (body.length() as usize).min(buffer.len());
+                body.subarray(0, length as u32)
+                    .copy_to(&mut buffer[..length]);
+                if length < body.length() as usize {
+                    *state = State::BodyReady(body.subarray(length as u32, body.length()));
+                }
+                Poll::Ready(Ok(length))
             }
+            State::Idle => Poll::Ready(Ok(0)),
         }
     }
 
-    fn write(&self, context: &mut Context, buffer: &[u8], _: Size) -> file_system::Result<usize> {
-        let ctx = context
-            .get_private_data_mutable_of_type::<HttpClientContext>()
-            .ok_or(file_system::Error::InvalidParameter)?;
-
-        let request_parser = HttpRequestParser::from_buffer(buffer);
-        let request =
-            build_request("https", request_parser).ok_or(file_system::Error::InvalidParameter)?;
-
-        // Spawn the request
-        let state_clone = ctx.state.clone();
-        spawn_local(async move {
-            let window = web_sys::window().unwrap();
-            match JsFuture::from(window.fetch_with_request(&request)).await {
-                Ok(response) => {
-                    if let Ok(response) = response.dyn_into::<web_sys::Response>() {
-                        *state_clone.borrow_mut() = State::RequestReady(response);
-                    }
-                }
-                Err(_) => {
-                    *state_clone.borrow_mut() = State::Idle;
-                }
+    fn write(
+        &self,
+        context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            let context = context
+                .get_private_data_mutable_of_type::<HttpClientContext>()
+                .ok_or(Error::InvalidContext)?;
+            if !matches!(*context.state.borrow(), State::Idle | State::Failed(_)) {
+                return Err(Error::RessourceBusy);
             }
-        });
-
-        *ctx.state.borrow_mut() = State::RequestPending;
-
-        Ok(buffer.len())
+            let request = build_request("https", HttpRequestParser::from_buffer(buffer))
+                .ok_or(Error::InvalidParameter)?;
+            *context.state.borrow_mut() = State::RequestPending;
+            let state = context.state.clone();
+            let waker = context.waker.clone();
+            spawn_local(async move {
+                let result = async {
+                    let window = web_sys::window().ok_or(Error::InputOutput)?;
+                    JsFuture::from(window.fetch_with_request(&request))
+                        .await
+                        .map_err(|_| Error::InputOutput)?
+                        .dyn_into::<web_sys::Response>()
+                        .map_err(|_| Error::InputOutput)
+                }
+                .await;
+                complete(
+                    &state,
+                    &waker,
+                    match result {
+                        Ok(response) => State::RequestReady(response),
+                        Err(error) => State::Failed(error),
+                    },
+                );
+            });
+            Ok(buffer.len())
+        })
     }
 
     fn clone_context(&self, context: &Context) -> file_system::Result<Context> {
@@ -236,8 +266,81 @@ impl BaseOperations for HttpClientDevice {
 
         Ok(Context::new(Some(context.clone())))
     }
+    fn cancel_operation(&self, context: &mut Context, operation: file_system::Operation) {
+        if operation == file_system::Operation::Read
+            && let Some(context) = context.get_private_data_mutable_of_type::<HttpClientContext>()
+        {
+            let retired = context.waker.replace(None);
+            drop(retired);
+        }
+    }
 }
 
 impl MountOperations for HttpClientDevice {}
 
 impl CharacterDevice for HttpClientDevice {}
+
+#[cfg(test)]
+mod polling_tests {
+    use super::*;
+    use core::task::{Context as TaskContext, Poll, Waker};
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn a_pending_browser_request_uses_the_device_polling_contract() {
+        let device = HttpClientDevice;
+        let mut context = Context::new_empty();
+        device.open(&mut context).unwrap();
+        *context
+            .get_private_data_mutable_of_type::<HttpClientContext>()
+            .unwrap()
+            .state
+            .borrow_mut() = State::RequestPending;
+        let mut cx = TaskContext::from_waker(Waker::noop());
+        assert_eq!(
+            BaseOperations::read(&device, &mut context, &mut cx, &mut [0; 8], 0),
+            Poll::Pending
+        );
+    }
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn completion_wakes_the_reader_and_cancellation_removes_registration() {
+        use alloc::sync::Arc;
+        use core::sync::atomic::{AtomicUsize, Ordering};
+        struct Counter(AtomicUsize);
+        impl alloc::task::Wake for Counter {
+            fn wake(self: Arc<Self>) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        let counter = Arc::new(Counter(AtomicUsize::new(0)));
+        let waker = Waker::from(counter.clone());
+        let mut cx = TaskContext::from_waker(&waker);
+        let device = HttpClientDevice;
+        let mut context = Context::new_empty();
+        device.open(&mut context).unwrap();
+        let inner = context
+            .get_private_data_of_type::<HttpClientContext>()
+            .unwrap();
+        let state = inner.state.clone();
+        let registration = inner.waker.clone();
+        *state.borrow_mut() = State::RequestPending;
+        assert_eq!(
+            BaseOperations::read(&device, &mut context, &mut cx, &mut [0; 8], 0),
+            Poll::Pending
+        );
+        complete(&state, &registration, State::Failed(Error::InputOutput));
+        assert_eq!(counter.0.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            BaseOperations::read(&device, &mut context, &mut cx, &mut [0; 8], 0),
+            Poll::Ready(Err(Error::InputOutput))
+        );
+        *state.borrow_mut() = State::RequestPending;
+        assert_eq!(
+            BaseOperations::read(&device, &mut context, &mut cx, &mut [0; 8], 0),
+            Poll::Pending
+        );
+        device.cancel_operation(&mut context, file_system::Operation::Read);
+        complete(&state, &registration, State::Idle);
+        assert_eq!(counter.0.load(Ordering::SeqCst), 1);
+    }
+}

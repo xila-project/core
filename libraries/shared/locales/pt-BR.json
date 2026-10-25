@@ -1,0 +1,7 @@
+{
+  "errors.buffer_too_small": "Buffer muito pequeno",
+  "errors.failed_to_convert_length": "Não foi possível converter o comprimento",
+  "errors.invalid_utf_8_string": "Texto UTF-8 inválido",
+  "errors.invalid_length": "Comprimento inválido",
+  "errors.invalid_pointer": "Ponteiro inválido"
+}

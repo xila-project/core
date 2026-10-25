@@ -6,7 +6,7 @@ use xila::virtual_file_system::File;
 
 use crate::error::{Error, Result};
 
-pub const SHORTCUT_PATH: &Path = Path::from_str("/configuration/shared/shortcuts");
+pub const SHORTCUT_PATH: &Path = Path::from_str("/configuration/shared/applications/shortcuts");
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Shortcut {

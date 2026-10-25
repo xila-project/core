@@ -1,0 +1,188 @@
+name: Runtime image
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile.runtime
+      - .dockerignore
+      - .github/workflows/runtime.yml
+      - Cargo.toml
+      - Cargo.lock
+      - .cargo/**
+      - "**/Cargo.toml"
+      - "**/build.rs"
+      - build/**
+      - src/**
+      - tests/**
+      - mise.toml
+      - "mise.*.toml"
+      - tools/mise/**
+      - examples/**
+      - assets/**
+      - drivers/**
+      - subsystems/**
+      - libraries/**
+      - executables/**
+      - tools/**
+  push:
+    tags: ["v*"]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  primary:
+    name: Primary validation for release tag
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/ci.yml
+
+  deep:
+    name: Deep validation for release tag
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/extended.yml
+    secrets: inherit
+
+  runtime:
+    name: Build, smoke-test, and publish
+    needs: [primary, deep]
+    if: >-
+      always() && (
+        github.event_name == 'pull_request' ||
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.event == 'push' &&
+         github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.head_branch == 'main') ||
+        (startsWith(github.ref, 'refs/tags/v') &&
+         needs.primary.result == 'success' &&
+         needs.deep.result == 'success' &&
+         needs.deep.outputs.validated-sha == github.sha)
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      MISE_ENV: ci
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      - uses: jdx/mise-action@v5.2.2
+      - run: mise run deps:npm
+      - name: Read runtime package version
+        id: version
+        run: |
+          version="$(python3 -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("examples/native/Cargo.toml").read_text())["package"]["version"])')"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - name: Prepare image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/xila-runtime
+          tags: |
+            type=raw,value=latest,enable=${{ github.event_name == 'workflow_run' }}
+            type=ref,event=tag,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=ref,event=pr,enable=${{ github.event_name == 'pull_request' }}
+            type=raw,value=sha-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      - name: Build local runtime image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.runtime
+          platforms: linux/amd64
+          load: true
+          tags: |
+            xila-runtime:ci
+            ${{ steps.meta.outputs.tags }}
+          build-args: |
+            XILA_VERSION=${{ steps.version.outputs.value }}
+            VCS_REF=${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          cache-from: type=gha,scope=xila-runtime-linux-amd64
+          cache-to: type=gha,mode=max,scope=xila-runtime-linux-amd64
+      - name: Check image user and entrypoint
+        run: |
+          test "$(docker inspect --format '{{.Config.User}}' xila-runtime:ci)" = '10001:10001'
+          test "$(docker inspect --format '{{json .Config.Entrypoint}}' xila-runtime:ci)" = '["/usr/bin/xila-runtime"]'
+      - name: Build runtime smoke-test guest
+        run: mise run ci:runtime-smoke
+      - name: Test read-only root, host mounts, state persistence, and exit status
+        run: |
+          set -eu
+          fixture="$PWD"
+          mkdir -p "$fixture/runtime-input" "$fixture/runtime-output" "$fixture/runtime-state" "$fixture/runtime-fixtures"
+          cp runtime-smoke.wasm "$fixture/runtime-fixtures/runtime-smoke.wasm"
+          printf 'read-only input' > "$fixture/runtime-input/message.txt"
+          chmod 0777 "$fixture/runtime-input" "$fixture/runtime-output" "$fixture/runtime-state"
+          run_guest() {
+            docker run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+              --mount "type=bind,src=$fixture/runtime-input,dst=/mnt/xila/input,readonly" \
+              --mount "type=bind,src=$fixture/runtime-output,dst=/mnt/xila/output" \
+              --mount "type=bind,src=$fixture/runtime-state,dst=/var/lib/xila" \
+              --mount "type=bind,src=$fixture/runtime-fixtures,dst=/mnt/xila/fixtures,readonly" \
+              xila-runtime:ci run --network=none \
+              --mount host=/mnt/xila/input,xila=/input,ro \
+              --mount host=/mnt/xila/output,xila=/output,rw \
+              --mount host=/mnt/xila/fixtures,xila=/fixtures,ro \
+              -- /applications/executables/wasm /fixtures/runtime-smoke.wasm "$1"
+          }
+          run_guest create
+          test "$(cat "$fixture/runtime-output/result.txt")" = 'writable output'
+          run_guest verify
+          if run_guest fail; then echo 'guest failure incorrectly returned success' >&2; exit 1; else status=$?; test "$status" -eq 23; fi
+          docker run -d --name xila-runtime-signal-test --read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+            --mount "type=bind,src=$fixture/runtime-input,dst=/mnt/xila/input,readonly" \
+            --mount "type=bind,src=$fixture/runtime-output,dst=/mnt/xila/output" \
+            --mount "type=bind,src=$fixture/runtime-state,dst=/var/lib/xila" \
+            --mount "type=bind,src=$fixture/runtime-fixtures,dst=/mnt/xila/fixtures,readonly" \
+            xila-runtime:ci run --network=none \
+            --mount host=/mnt/xila/input,xila=/input,ro \
+            --mount host=/mnt/xila/output,xila=/output,rw \
+            --mount host=/mnt/xila/fixtures,xila=/fixtures,ro \
+            -- /applications/executables/wasm /fixtures/runtime-smoke.wasm wait
+          sleep 1
+          docker stop --time 5 xila-runtime-signal-test
+          signal_status="$(docker inspect --format '{{.State.ExitCode}}' xila-runtime-signal-test)"
+          docker rm xila-runtime-signal-test
+          test "$signal_status" -eq 143
+          run_guest verify
+      - name: Exercise Xila CLI shell over stdin
+        run: |
+          set -eu
+          mkdir -p "$PWD/runtime-shell-state"
+          chmod 0777 "$PWD/runtime-shell-state"
+          shell_output="$(printf 'administrator\n\necho shell-smoke-ok\npwd\nexit\n' | \
+            docker run --rm -i --network none --read-only \
+              --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+              --mount "type=bind,src=$PWD/runtime-shell-state,dst=/var/lib/xila" \
+              xila-runtime:ci shell --network=none)"
+          printf '%s\n' "$shell_output" | grep -Fq 'shell-smoke-ok'
+          timeout 20s docker run --rm -i --network none --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+            --mount "type=bind,src=$PWD/runtime-shell-state,dst=/var/lib/xila" \
+            xila-runtime:ci shell --network=none </dev/null
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'workflow_run' || startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish image to GitHub Container Registry
+        if: github.event_name == 'workflow_run' || startsWith(github.ref, 'refs/tags/v')
+        env:
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          while IFS= read -r image; do
+            [ -z "$image" ] || docker push "$image"
+          done <<< "$IMAGE_TAGS"

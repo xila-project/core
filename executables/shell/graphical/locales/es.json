@@ -1,0 +1,23 @@
+{
+  "errors.authentication_failed": "Error de autenticación: {}",
+  "errors.failed_to_add_shortcut": "No se pudo añadir el acceso directo: {}",
+  "errors.failed_to_create_object": "No se pudo crear el objeto",
+  "errors.failed_to_deserialize_shortcut": "No se pudo deserializar el acceso directo: {}",
+  "errors.failed_to_execute_shortcut": "No se pudo ejecutar el acceso directo: {}",
+  "errors.failed_to_get_child": "No se pudo obtener el elemento hijo",
+  "errors.failed_to_get_current_task_identifier": "No se pudo obtener el identificador de la tarea actual: {}",
+  "errors.failed_to_get_shortcut_file_path": "No se pudo obtener la ruta del acceso directo",
+  "errors.failed_to_open_directory": "No se pudo abrir el directorio: {}",
+  "errors.failed_to_open_standard_file": "No se pudo abrir el archivo estándar: {}",
+  "errors.failed_to_read_shortcut_directory": "No se pudo leer el directorio de accesos directos: {}",
+  "errors.failed_to_read_shortcut_file": "No se pudo leer el acceso directo: {}",
+  "errors.failed_to_set_environment_variable": "No se pudo establecer la variable de entorno: {}",
+  "errors.failed_to_set_task_user": "No se pudo establecer el usuario de la tarea: {}",
+  "errors.graphics_error": "Error gráfico: {}",
+  "errors.invalid_utf_8": "UTF-8 no válido: {}",
+  "login.actions.submit": "Iniciar sesión",
+  "errors.missing_arguments": "Faltan argumentos",
+  "errors.null_character_in_string": "Carácter nulo en la cadena: {}",
+  "login.fields.password": "Contraseña",
+  "login.fields.username": "Nombre de usuario"
+}

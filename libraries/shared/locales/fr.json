@@ -1,0 +1,7 @@
+{
+  "errors.buffer_too_small": "Tampon trop petit",
+  "errors.failed_to_convert_length": "Impossible de convertir la longueur",
+  "errors.invalid_utf_8_string": "Chaîne UTF-8 invalide",
+  "errors.invalid_length": "Longueur invalide",
+  "errors.invalid_pointer": "Pointeur invalide"
+}

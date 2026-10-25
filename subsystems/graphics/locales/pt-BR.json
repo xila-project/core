@@ -1,0 +1,14 @@
+{
+  "errors.already_in_use": "Já em uso",
+  "errors.already_initialized": "Já inicializado",
+  "errors.failed_to_create_object": "Não foi possível criar o objeto",
+  "errors.failed_to_get_resolution": "Não foi possível obter a resolução",
+  "errors.failed_to_register": "Não foi possível registrar",
+  "errors.invalid_reference": "Referência inválida",
+  "errors.invalid_parameter": "Parâmetro inválido",
+  "errors.invalid_window_identifier": "Identificador de janela inválido",
+  "errors.not_available": "Indisponível",
+  "errors.not_initialized": "Não inicializado",
+  "errors.not_registered": "Não registrado",
+  "errors.out_of_memory": "Memória esgotada"
+}

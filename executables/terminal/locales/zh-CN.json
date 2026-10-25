@@ -1,0 +1,10 @@
+{
+  "errors.failed_to_create_object": "创建对象失败",
+  "errors.failed_to_execute": "执行失败：{}",
+  "errors.failed_to_get_task_identifier": "获取任务标识符失败：{}",
+  "errors.failed_to_mount_device": "挂载设备失败：{}",
+  "errors.graphics": "图形：{}",
+  "errors.resource_busy": "资源忙",
+  "errors.utf_8": "UTF-8：{}",
+  "input.command_placeholder": "请输入命令……"
+}

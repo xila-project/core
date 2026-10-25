@@ -4,32 +4,57 @@
     <link data-trunk rel="rust" data-keep-debug />
     <link data-trunk rel="icon" href="images/logo.svg" />
     <link data-trunk rel="copy-dir" href="images/" />
+    <link data-trunk rel="copy-dir" href="fonts/" />
+    <link data-trunk rel="copy-file" href="disk_manager.mjs" />
+    <link data-trunk rel="copy-file" href="disk_names.mjs" />
+    <link data-trunk rel="copy-file" href="../../target/seed/wasm/seed.img" />
     <link data-trunk rel="css" href="styles.css" />
 
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&family=Prompt:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&family=Rubik:ital,wght@0,300..900;1,300..900&display=swap"
-      rel="stylesheet"
-    />
+    <link rel="stylesheet" href="fonts/montserrat.css" />
     <title>Xila WASM Example</title>
   </head>
   <body>
     <div id="sidebar">
-      <h2>Default credentials</h2>
+      <h2>Xila Help</h2>
+      <p>
+        Choose a saved disk or create a new one. Your files and settings are
+        stored in this browser.
+      </p>
+      <label for="disk-list">Available disks</label>
+      <select
+        id="disk-list"
+        size="5"
+        aria-label="Available Xila disks"
+      ></select>
+      <div class="disk-actions">
+        <button id="disk-select" type="button" disabled>
+          Use selected disk
+        </button>
+        <button id="disk-create" type="button" disabled>New disk</button>
+        <button id="disk-remove" type="button" disabled>Remove</button>
+      </div>
+      <p id="disk-status" role="status" aria-live="polite">
+        Loading browser storage…
+      </p>
+      <button id="audio-enable" type="button" aria-live="polite">
+        Enable audio before launching Synth
+      </button>
+      <hr />
+      <h3>Default credentials</h3>
       <ul>
         <li><strong>Username:</strong> administrator</li>
         <li><strong>Password:</strong> (no password)</li>
       </ul>
       See <a href="https://www.xila.dev">xila.dev</a> for more information.
-      <br />
-      Due to browser security restrictions, some features are not available in
-      this web example, such as the network stack.
+      <p>
+        Some features are limited by browser security, including the network
+        stack.
+      </p>
 
       <button
         id="sidebar-toggle"
         onclick="toggleSidebar()"
-        aria-label="Toggle Credentials Sidebar"
+        aria-label="Toggle Help Panel"
       >
         <img
           id="sidebar-arrow"
@@ -51,5 +76,6 @@
         }
       }
     </script>
+    <script type="module" src="disk_manager.mjs"></script>
   </body>
 </html>

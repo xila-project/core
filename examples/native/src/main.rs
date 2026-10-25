@@ -1,18 +1,8 @@
-#[cfg(feature = "prebuilt-applications")]
-mod profiling;
-
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 mod cli;
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-#[inline(always)]
-fn application_binary(name: &str) -> Result<std::path::PathBuf, String> {
-    #[cfg(feature = "prebuilt-applications")]
-    if let Some(directory) = std::env::var_os("XILA_PROFILE_APP_DIR") {
-        return profiling::application_path(std::path::Path::new(&directory), name);
-    }
-    xila::executable::build_crate(name)
-}
+mod storage;
 
 static TASK_MANAGER: xila::task::Manager = xila::task::Manager::new();
 
@@ -31,16 +21,12 @@ async fn main(task_manager: &'static xila::task::Manager) {
 
     use alloc::vec;
     use core::time::Duration;
-    use drivers_std::loader::load_to_virtual_file_system;
     use xila::authentication;
     use xila::bootsplash::Bootsplash;
     use xila::executable;
     use xila::executable::Standard;
     use xila::executable::mount_executables;
     use xila::file_system::AccessFlags;
-    use xila::file_system::XILA_DISK_SIGNATURE;
-    use xila::file_system::mbr::Mbr;
-    use xila::file_system::mbr::PartitionKind;
     use xila::graphics;
     use xila::little_fs;
     use xila::log;
@@ -65,6 +51,18 @@ async fn main(task_manager: &'static xila::task::Manager) {
             std::process::exit(2);
         }
     };
+    if config.interface == cli::InterfaceMode::Graphical
+        && config.display_driver == cli::DisplayDriver::Headless
+        && (config.resolution.0 as usize)
+            .checked_mul(config.resolution.1 as usize)
+            .is_none_or(|area| area > xila::graphics::SCREEN_SNAPSHOT_MAX_PIXELS)
+    {
+        eprintln!(
+            "Invalid headless display resolution: area exceeds the {} pixel limit.",
+            xila::graphics::SCREEN_SNAPSHOT_MAX_PIXELS
+        );
+        std::process::exit(2);
+    }
 
     // - Initialize the system
     log::initialize(&drivers_std::log::Logger).unwrap();
@@ -81,33 +79,58 @@ async fn main(task_manager: &'static xila::task::Manager) {
     let (graphics_manager, bootsplash): (Option<&'static graphics::Manager>, Option<Bootsplash>) =
         if config.interface == cli::InterfaceMode::Graphical {
             let resolution = graphics::Point::new(config.resolution.0, config.resolution.1);
-            let (screen_device, pointer_device, keyboard_device, mut runner) =
-                drivers_native::window_screen::new(resolution)
-                    .await
-                    .unwrap();
-            let (screen_device, pointer_device, keyboard_device) = (
-                Box::leak(Box::new(screen_device)),
-                Box::leak(Box::new(pointer_device)),
-                Box::leak(Box::new(keyboard_device)),
-            );
-
-            let graphics_manager = graphics::initialize(
-                time_manager,
-                screen_device,
-                pointer_device,
-                graphics::InputKind::Pointer,
-                graphics::get_minimal_buffer_size(&resolution),
-                true,
-            )
-            .await;
+            let (graphics_manager, event_runner) = match config.display_driver {
+                cli::DisplayDriver::Native => {
+                    let (screen_device, pointer_device, keyboard_device, runner) =
+                        drivers_native::window_screen::new(resolution)
+                            .await
+                            .unwrap();
+                    let (screen_device, pointer_device, keyboard_device) = (
+                        Box::leak(Box::new(screen_device)),
+                        Box::leak(Box::new(pointer_device)),
+                        Box::leak(Box::new(keyboard_device)),
+                    );
+                    let pointer_device: &'static dyn xila::file_system::DirectCharacterDevice =
+                        pointer_device;
+                    let keyboard_device: &'static dyn xila::file_system::DirectCharacterDevice =
+                        keyboard_device;
+                    let input_devices = [
+                        (pointer_device, graphics::InputKind::Pointer),
+                        (keyboard_device, graphics::InputKind::Keypad),
+                    ];
+                    let manager = graphics::initialize_with_input_devices(
+                        time_manager,
+                        screen_device,
+                        &input_devices,
+                        graphics::get_minimal_buffer_size(&resolution),
+                        true,
+                    )
+                    .await;
+                    (manager, Some(runner))
+                }
+                cli::DisplayDriver::Headless => {
+                    let screen_device = Box::leak(Box::new(
+                        drivers_headless::HeadlessScreenDevice::new(resolution).unwrap_or_else(
+                            |error| {
+                                eprintln!("Failed to create headless display: {error}");
+                                std::process::exit(2);
+                            },
+                        ),
+                    ));
+                    let manager = graphics::initialize_with_input_devices(
+                        time_manager,
+                        screen_device,
+                        &[],
+                        graphics::get_minimal_buffer_size(&resolution),
+                        true,
+                    )
+                    .await;
+                    (manager, None)
+                }
+            };
             let graphics_manager: &'static graphics::Manager =
                 Box::leak(Box::new(graphics_manager));
             graphics::set_ffi_manager(graphics_manager);
-
-            graphics_manager
-                .add_input_device(keyboard_device, graphics::InputKind::Keypad)
-                .await
-                .unwrap();
 
             task_manager
                 .spawn(task, "Graphics", None, |_| {
@@ -116,12 +139,14 @@ async fn main(task_manager: &'static xila::task::Manager) {
                 .await
                 .unwrap();
 
-            task_manager
-                .spawn(task, "Event Loop", None, async move |_| {
-                    runner.run().await;
-                })
-                .await
-                .unwrap();
+            if let Some(mut runner) = event_runner {
+                task_manager
+                    .spawn(task, "Event Loop", None, async move |_| {
+                        runner.run().await;
+                    })
+                    .await
+                    .unwrap();
+            }
 
             let bootsplash = Bootsplash::new(graphics_manager).await.unwrap();
             (Some(graphics_manager), Some(bootsplash))
@@ -129,31 +154,20 @@ async fn main(task_manager: &'static xila::task::Manager) {
             (None, None)
         };
 
-    // - Initialize the file system
-    // Create a memory device
-    let drive = drivers_std::drive_file::FileDriveDevice::new_static(
-        &config.disk_path.as_str(),
+    storage::prepare_disk(
+        std::path::Path::new(&config.disk_path),
+        std::path::Path::new(&config.seed_image),
         config.disk_size,
-    );
-    //let drive = file_system::MemoryDevice::<512>::new_static(16 * 1024 * 1024);
-
-    // Create a partition type
-    let partition = Mbr::find_or_create_partition_with_signature(
-        drive,
-        XILA_DISK_SIGNATURE,
-        PartitionKind::Xila,
     )
-    .unwrap();
-
-    // Print MBR information
-    let mbr = Mbr::read_from_device(drive).unwrap();
-
-    log::information!("MBR information: {mbr}");
-    let partition = Box::leak(Box::new(partition));
-
-    log::information!("Partition device: {:?}", partition);
-
-    let file_system = little_fs::FileSystem::get_or_format(partition, 256).unwrap();
+    .expect("Failed to import reference disk; existing disks are never replaced");
+    let drive = Box::leak(Box::new(
+        drivers_std::drive_file::FileDriveDevice::open_existing(std::path::Path::new(
+            &config.disk_path,
+        ))
+        .expect("Failed to open disk"),
+    ));
+    let file_system = little_fs::mount_disk(drive, 256)
+        .expect("Failed to mount existing disk; it was not reformatted");
 
     // Initialize the virtual file system
     let virtual_file_system: &'static virtual_file_system::VirtualFileSystem = Box::leak(Box::new(
@@ -170,12 +184,61 @@ async fn main(task_manager: &'static xila::task::Manager) {
     // - - Mount the devices
 
     // - - Create the default system hierarchy
-    let _ = virtual_file_system::create_default_hierarchy(virtual_file_system, task).await;
-    let _ = virtual_file_system
-        .create_directory(task, &"/devices/cpu")
-        .await;
+    virtual_file_system::create_default_hierarchy(virtual_file_system, task)
+        .await
+        .expect("Failed to create the default filesystem hierarchy");
+    virtual_file_system::clear_temporary(virtual_file_system, task)
+        .await
+        .expect("Failed to clear temporary storage at boot");
+
+    #[cfg(unix)]
+    if graphics_manager.is_some() {
+        virtual_file_system
+            .create_directory(task, &"/devices/graphics/debug")
+            .await
+            .expect("Failed to create debug device directory");
+        virtual_file_system
+            .mount_character_device(
+                task,
+                "/devices/graphics/debug/transport",
+                drivers_native::window_screen::DebugTransportDevice,
+            )
+            .await
+            .expect("Failed to mount debug transport");
+    }
+
+    #[cfg(feature = "audio")]
+    let mut audio_runner = {
+        // Keep the mixer pinned for the lifetime of every mounted VFS stream.
+        let audio_system: &'static audio::AudioSystem =
+            Box::leak(Box::new(audio::AudioSystem::new().unwrap()));
+        // SAFETY: the leaked service can never move or be freed.
+        let audio_system = unsafe { core::pin::Pin::new_unchecked(audio_system) };
+        match drivers_native::audio::new(audio_system, 1) {
+            Ok(runner) => {
+                virtual_file_system
+                    .mount_character_device(
+                        task,
+                        "/devices/audio/playback",
+                        audio::AudioStreamDevice::new(audio_system),
+                    )
+                    .await
+                    .expect("Failed to mount audio playback");
+                log::information!("Native audio ready");
+                Some(runner)
+            }
+            Err(error) => {
+                log::warning!("Audio unavailable; applications can run silently: {error}");
+                None
+            }
+        }
+    };
 
     log::information!("Default hierarchy created.");
+
+    if let Some(graphics) = graphics_manager {
+        graphics::appearance::restore_appearance(graphics, virtual_file_system, task).await;
+    }
 
     let network_manager: &'static network::Manager = Box::leak(Box::new(network::initialize(
         task_manager,
@@ -198,40 +261,52 @@ async fn main(task_manager: &'static xila::task::Manager) {
         task,
         &[
             (
-                &"/devices/standard_in",
+                &"/devices/standard_io/input",
                 CharacterDevice,
                 drivers_std::console::StandardInDevice
             ),
             (
-                &"/devices/standard_out",
+                &"/devices/standard_io/output",
                 CharacterDevice,
                 drivers_std::console::StandardOutDevice
             ),
             (
-                &"/devices/standard_error",
+                &"/devices/standard_io/error",
                 CharacterDevice,
                 drivers_std::console::StandardErrorDevice
             ),
             (
-                &"/devices/time",
+                &"/devices/time/clock",
                 CharacterDevice,
                 drivers_std::devices::TimeDevice
             ),
             (
-                &"/devices/cpu/informations",
+                &"/devices/compute/informations",
                 CharacterDevice,
                 drivers_std::devices::CpuInformationsDevice
             ),
             (
-                &"/devices/random",
+                &"/devices/random/source",
                 CharacterDevice,
                 drivers_shared::devices::RandomDevice
             ),
-            (&"/devices/null", CharacterDevice, drivers_core::NullDevice),
-            (&"/devices/http_client", CharacterDevice, *http_client),
-            (&"/devices/https_client", CharacterDevice, *https_client),
             (
-                &"/devices/hasher",
+                &"/devices/standard_io/null",
+                CharacterDevice,
+                drivers_core::NullDevice
+            ),
+            (
+                &"/devices/network/http_client",
+                CharacterDevice,
+                *http_client
+            ),
+            (
+                &"/devices/network/https_client",
+                CharacterDevice,
+                *https_client
+            ),
+            (
+                &"/devices/compute/hasher",
                 CharacterDevice,
                 drivers_shared::devices::HashDevice
             ),
@@ -292,123 +367,35 @@ async fn main(task_manager: &'static xila::task::Manager) {
         task,
         &[
             (
-                &"/binaries/graphical_shell",
+                &"/applications/executables/graphical_shell",
                 graphical_shell::ShellExecutable
             ),
             (
-                &"/binaries/file_manager",
-                file_manager::FileManagerExecutable::new(virtual_file_system, task)
-                    .await
-                    .unwrap()
+                &"/applications/executables/file_manager",
+                file_manager::FileManagerExecutable
             ),
             (
-                &"/binaries/command_line_shell",
+                &"/applications/executables/command_line_shell",
                 command_line_shell::ShellExecutable
             ),
             (
-                &"/binaries/terminal",
-                terminal::TerminalExecutable::new(virtual_file_system, task)
-                    .await
-                    .unwrap()
+                &"/applications/executables/terminal",
+                terminal::TerminalExecutable
             ),
             (
-                &"/binaries/settings",
-                settings::SettingsExecutable::new(virtual_file_system, task)
-                    .await
-                    .unwrap()
+                &"/applications/executables/settings",
+                settings::SettingsExecutable
             ),
-            (&"/binaries/wasm", wasm::WasmExecutable),
+            #[cfg(unix)]
+            (
+                &"/applications/executables/debug",
+                debug_application::DebugExecutable
+            ),
+            (&"/applications/executables/wasm", wasm::WasmExecutable),
         ]
     )
     .await
     .unwrap();
-
-    // - Execute the shell
-    // - - Open the standard input, output and error
-    let standard = Standard::open(
-        &"/devices/standard_in",
-        &"/devices/standard_out",
-        &"/devices/standard_error",
-        task,
-        virtual_file_system,
-        executable_context,
-    )
-    .await
-    .unwrap();
-
-    let calculator_binary_path = application_binary("calculator").unwrap();
-
-    load_to_virtual_file_system(
-        task_manager,
-        virtual_file_system,
-        &calculator_binary_path,
-        "/binaries/calculator",
-    )
-    .await
-    .unwrap();
-
-    let weather_binary_path = application_binary("weather").unwrap();
-
-    load_to_virtual_file_system(
-        task_manager,
-        virtual_file_system,
-        &weather_binary_path,
-        "/binaries/weather",
-    )
-    .await
-    .unwrap();
-
-    let clock_binary_path = application_binary("clock").unwrap();
-    load_to_virtual_file_system(
-        task_manager,
-        virtual_file_system,
-        &clock_binary_path,
-        "/binaries/clock",
-    )
-    .await
-    .unwrap();
-
-    let _ = executable::execute(
-        executable_context,
-        "/binaries/wasm",
-        vec!["--install".to_string(), "/binaries/calculator".to_string()],
-        standard
-            .duplicate()
-            .await
-            .expect("Failed to duplicate standard for calculator."),
-        None,
-    )
-    .await
-    .unwrap()
-    .join()
-    .await;
-
-    let _ = executable::execute(
-        executable_context,
-        "/binaries/wasm",
-        vec!["--install".to_string(), "/binaries/weather".to_string()],
-        standard.duplicate().await.unwrap(),
-        None,
-    )
-    .await
-    .unwrap()
-    .join()
-    .await;
-
-    let _ = executable::execute(
-        executable_context,
-        "/binaries/wasm",
-        vec!["--install".to_string(), "/binaries/clock".to_string()],
-        standard,
-        None,
-    )
-    .await
-    .unwrap()
-    .join()
-    .await;
-
-    // - - Create the default user
-    let group_identifier = users::GroupIdentifier::new(1000);
 
     let authentication_context = authentication::Context {
         virtual_file_system,
@@ -416,41 +403,9 @@ async fn main(task_manager: &'static xila::task::Manager) {
         users_manager,
         task,
     };
-    let _ = authentication::create_group(
-        &authentication_context,
-        "administrator",
-        Some(group_identifier),
-    )
-    .await
-    .unwrap();
-
-    let administrator = authentication::create_user(
-        &authentication_context,
-        "administrator",
-        "",
-        group_identifier,
-        None,
-    )
-    .await
-    .unwrap();
-
-    // The shared configuration parent belongs to root. Provision only Clock's
-    // settings directory for the default login user, without widening its parent.
-    virtual_file_system::ignore_already_exists_error(
-        virtual_file_system
-            .create_directory(task, &"/configuration/shared/clock")
-            .await,
-    )
-    .unwrap();
-    virtual_file_system
-        .set_ownership(
-            task,
-            "/configuration/shared/clock",
-            Some(administrator),
-            Some(group_identifier),
-        )
+    authentication::initialize_seeded(&authentication_context)
         .await
-        .unwrap();
+        .expect("Failed to initialize saved accounts");
 
     // - - Set the environment variables
     task_manager
@@ -469,10 +424,37 @@ async fn main(task_manager: &'static xila::task::Manager) {
         bootsplash.stop(graphics_manager).await.unwrap();
     }
 
+    // Headless sessions have no physical input with which to open the Debug
+    // application. Start its subsystem-backed transport before the shell so
+    // a host agent can inspect and control the UI immediately after boot.
+    if config.interface == cli::InterfaceMode::Graphical
+        && config.display_driver == cli::DisplayDriver::Headless
+    {
+        let debug_standard = Standard::open(
+            &"/devices/standard_io/null",
+            &"/devices/standard_io/null",
+            &"/devices/standard_io/null",
+            task,
+            virtual_file_system,
+            executable_context,
+        )
+        .await
+        .expect("Failed to open standard files for the headless Debug app");
+        executable::execute(
+            executable_context,
+            &"/applications/executables/debug",
+            vec!["--background".into()],
+            debug_standard,
+            None,
+        )
+        .await
+        .expect("Failed to start the headless Debug app");
+    }
+
     let standard = Standard::open(
-        &"/devices/standard_in",
-        &"/devices/standard_out",
-        &"/devices/standard_error",
+        &"/devices/standard_io/input",
+        &"/devices/standard_io/output",
+        &"/devices/standard_io/error",
         task,
         virtual_file_system,
         executable_context,
@@ -482,16 +464,37 @@ async fn main(task_manager: &'static xila::task::Manager) {
 
     // - - Execute the shell
     let shell_path = match config.interface {
-        cli::InterfaceMode::Graphical => "/binaries/graphical_shell",
-        cli::InterfaceMode::Terminal => "/binaries/command_line_shell",
+        cli::InterfaceMode::Graphical => "/applications/executables/graphical_shell",
+        cli::InterfaceMode::Terminal => "/applications/executables/command_line_shell",
     };
-    let _ = executable::execute(executable_context, shell_path, vec![], standard, None)
+    let shell = executable::execute(executable_context, shell_path, vec![], standard, None)
         .await
-        .unwrap()
-        .join()
-        .await;
+        .unwrap();
+    let mut join = core::pin::pin!(shell.join());
+    loop {
+        use core::{
+            future::{Future, poll_fn},
+            task::Poll,
+        };
+        if poll_fn(|context| Poll::Ready(join.as_mut().poll(context)))
+            .await
+            .is_ready()
+        {
+            break;
+        }
+        #[cfg(feature = "audio")]
+        if let Some(runner) = &audio_runner
+            && let Err(error) = runner.check()
+        {
+            log::warning!("Native audio stopped: {error}; restart to reopen the host output");
+            audio_runner = None;
+        }
+        task::Manager::sleep(Duration::from_millis(100)).await;
+    }
 
     virtual_file_system.uninitialize().await;
+    #[cfg(feature = "audio")]
+    drop(audio_runner);
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]

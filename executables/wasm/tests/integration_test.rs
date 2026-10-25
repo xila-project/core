@@ -36,8 +36,11 @@ async fn main() {
         virtual_file_system,
         task,
         &[
-            ("/binaries/command_line_shell", ShellExecutable),
-            ("/binaries/wasm", WasmExecutable),
+            (
+                "/applications/executables/command_line_shell",
+                ShellExecutable
+            ),
+            ("/applications/executables/wasm", WasmExecutable),
         ]
     )
     .await
@@ -47,7 +50,7 @@ async fn main() {
 
     let result = executable::execute(
         context,
-        "/binaries/wasm",
+        "/applications/executables/wasm",
         vec!["/test_wasm.wasm".to_string()],
         standard,
         None,

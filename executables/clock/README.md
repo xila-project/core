@@ -28,24 +28,23 @@ cargo build -p clock --target wasm32-wasip1 --profile release-wasm
 The native example builds, copies, and installs Clock alongside Calculator and
 Weather. Run the native example using the normal graphical development workflow,
 then open **Clock** from the launcher. With `prebuilt-applications`, run
-`cargo make prepare-profiling` to prepare all three apps first.
+`mise run build:applications` to prepare all three apps first.
 
 The browser example also bundles Clock and installs its launcher shortcut at
 boot, just like Calculator. Build both guests with `--release` before building
 the browser host; see the [browser instructions](../../examples/wasm/README.md).
 
 Other hosts can load `target/wasm32-wasip1/release-wasm/clock.wasm` into the VFS
-at `/binaries/clock`, then run these commands in **Xila's shell**:
+at `/applications/executables/clock`, then run these commands in **Xila's shell**:
 
 ```sh
-wasm --install /binaries/clock
-wasm /binaries/clock
+wasm --install /applications/executables/clock
+wasm /applications/executables/clock
 ```
 
-The install export creates `/configuration/shared/shortcuts/clock.json`.
-The host must provision a writable `/configuration/shared/clock` directory for
-the app's user. Native and browser boot assign that directory to the default administrator
-account without changing the protected shared-configuration parent.
+The install export creates `/configuration/shared/applications/shortcuts/clock.json`.
+The launcher provisions a writable
+`/users/<user-id>/applications/clock/configuration` directory for each user.
 
 ## Timing and lifecycle
 
@@ -80,7 +79,7 @@ subject to executor scheduling; this is not a real-time alarm guarantee.
 ## Settings and storage
 
 The initial settings are shared by the device, in
-`/configuration/shared/clock/settings.0` and `settings.1`; use a single Clock
+`/users/<user-id>/applications/clock/configuration/settings.0` and `settings.1`; use a single Clock
 instance when editing settings. Each record is 38 bytes (generation, versioned
 payload, checksum), and reads use fixed buffers. Writes alternate slots so a torn
 or corrupt latest record can fall back to the previous valid one. Settings are

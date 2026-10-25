@@ -7,6 +7,7 @@ use xila::graphics::{
     self, Color, EventKind, Key,
     lvgl::{self, lv_obj_t},
 };
+use xila::internationalization::translate;
 use xila::synchronization::{blocking_mutex::raw::CriticalSectionRawMutex, rwlock::RwLock};
 
 pub(crate) struct Inner {
@@ -18,6 +19,8 @@ pub(crate) struct Inner {
 }
 
 pub struct Terminal {
+    pub(crate) input_waiters: xila::file_system::WaitQueue<16>,
+    pub(crate) input_closed: core::sync::atomic::AtomicBool,
     inner: RwLock<CriticalSectionRawMutex, Inner>,
     graphics_manager: &'static graphics::Manager,
 }
@@ -40,6 +43,13 @@ impl Terminal {
                     window.as_object_mutable(),
                     lvgl::lv_flex_flow_t_LV_FLEX_FLOW_COLUMN,
                 );
+                // Edge-to-edge window chrome: the shared window class already
+                // flattens border and radius, only the container padding remains.
+                lvgl::lv_obj_set_style_pad_all(
+                    window.as_object_mutable(),
+                    0,
+                    lvgl::LV_STATE_DEFAULT,
+                );
             }
 
             let container = unsafe {
@@ -47,6 +57,13 @@ impl Terminal {
 
                 lvgl::lv_obj_set_width(container, lvgl::lv_pct(100));
                 lvgl::lv_obj_set_flex_grow(container, 1);
+                lvgl::lv_obj_set_flex_flow(container, lvgl::lv_flex_flow_t_LV_FLEX_FLOW_COLUMN);
+                // Flat container chrome: keep the theme gap (space_md) between
+                // the display and the input, but drop the card padding, border
+                // and radius around the output.
+                lvgl::lv_obj_set_style_pad_all(container, 0, lvgl::LV_STATE_DEFAULT);
+                lvgl::lv_obj_set_style_border_width(container, 0, lvgl::LV_STATE_DEFAULT);
+                lvgl::lv_obj_set_style_radius(container, 0, lvgl::LV_STATE_DEFAULT);
                 lvgl::lv_obj_set_scroll_snap_y(
                     container,
                     lvgl::lv_scroll_snap_t_LV_SCROLL_SNAP_END,
@@ -83,7 +100,10 @@ impl Terminal {
                     return Err(crate::error::Error::FailedToCreateObject);
                 }
 
-                lvgl::lv_textarea_set_placeholder_text(input, c"Enter your command ...".as_ptr());
+                lvgl::lv_textarea_set_placeholder_text(
+                    input,
+                    translate!(c"input.command_placeholder").as_ptr(),
+                );
                 lvgl::lv_obj_set_width(input, lvgl::lv_pct(100));
                 lvgl::lv_textarea_set_one_line(input, true);
 
@@ -100,6 +120,8 @@ impl Terminal {
         });
 
         Ok(Self {
+            input_waiters: xila::file_system::WaitQueue::new(),
+            input_closed: core::sync::atomic::AtomicBool::new(false),
             inner: RwLock::new(inner),
             graphics_manager,
         })
@@ -198,6 +220,7 @@ impl Terminal {
 
     pub async fn handle_events(&self) -> Result<bool> {
         let mut running = true;
+        let mut notify_input = false;
 
         graphics::lock!(self.graphics_manager, {
             let mut inner = self.inner.write().await;
@@ -219,6 +242,7 @@ impl Terminal {
 
                             inner.validated_input.extend(text.as_bytes());
                             inner.validated_input.push_back(b'\n');
+                            notify_input = true;
 
                             unsafe {
                                 lvgl::lv_textarea_set_text(inner.input, c"".as_ptr());
@@ -230,6 +254,13 @@ impl Terminal {
             }
         });
 
+        if !running {
+            self.input_closed
+                .store(true, core::sync::atomic::Ordering::Release);
+        }
+        if notify_input || !running {
+            self.input_waiters.wake_all();
+        }
         Ok(running)
     }
 }

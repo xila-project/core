@@ -1,9 +1,10 @@
 {
-  "Failed to create object": "Échec de la création de l'objet",
-  "Failed to execute: {}": "Échec de l'exécution: {}",
-  "Failed to get task identifier: {}": "Échec de la récupération de l'identifiant de la tâche: {}",
-  "Failed to mount device: {}": "Échec du montage du périphérique: {}",
-  "Graphics: {}": "Graphique: {}",
-  "Resource busy": "Ressource occupée",
-  "UTF-8: {}": "UTF-8: {}"
+  "input.command_placeholder": "Saisissez votre commande...",
+  "errors.failed_to_create_object": "Échec de la création de l'objet",
+  "errors.failed_to_execute": "Échec de l'exécution: {}",
+  "errors.failed_to_get_task_identifier": "Échec de la récupération de l'identifiant de la tâche: {}",
+  "errors.failed_to_mount_device": "Échec du montage du périphérique: {}",
+  "errors.graphics": "Graphique: {}",
+  "errors.resource_busy": "Ressource occupée",
+  "errors.utf_8": "UTF-8: {}"
 }

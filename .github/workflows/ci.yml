@@ -1,0 +1,247 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MISE_ENV: ci
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5.2.2
+      - run: mise run deps:npm
+      - run: mise run ci:format-rust
+      - run: mise run ci:format-toml
+      - run: mise run ci:quality-js
+      - run: python3 -m unittest discover -s tools/ci -v
+      - run: mise run ci:lint-workflows
+
+  verification:
+    name: Verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MISE_ENV: ci
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5.2.2
+      - run: mise run ci:verification
+
+  host:
+    name: Host
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MISE_ENV: ci
+      CARGO_TERM_COLOR: always
+      XILA_MBX: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5.2.2
+      - run: mise run deps:npm
+      - id: toolchain
+        run: mise run ci:toolchain
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          toolchain: ${{ steps.toolchain.outputs.version }}
+          github-cache-mode: objects
+          cache-generation: v1-ci-host
+      - name: Lint host workspace
+        run: mise run ci:host-clippy
+      - name: Lint host WASM runtime
+        run: mise run ci:host-wasm-clippy
+      - name: Test host workspace
+        run: mise run ci:host-tests
+      - name: Test profiling tools
+        run: mise run ci:host-profiling-tests
+      - name: Test font linking
+        run: mise run ci:host-font-tests
+      - name: Upload font-link evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: font-pipeline-evidence
+          path: target/font-pipeline-evidence/
+          if-no-files-found: warn
+      - name: Build native example
+        run: mise run ci:host-build
+
+  wasm:
+    name: WASM
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MISE_ENV: ci
+      CARGO_TERM_COLOR: always
+      XILA_MBX: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5.2.2
+      - run: mise run deps:npm
+      - id: toolchain
+        run: mise run ci:toolchain
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          toolchain: ${{ steps.toolchain.outputs.version }}
+          github-cache-mode: target
+          cache-generation: v1-ci-wasm
+      - name: Lint WASM guests
+        run: mise run ci:wasm-clippy
+      - name: Check browser audio
+        run: mise run ci:wasm-audio-check
+      - name: Lint WASI applications
+        run: mise run ci:wasm-apps-clippy
+      - name: Build WASI applications and seed image
+        run: mise run ci:wasm-image
+      - name: Test browser storage
+        run: mise run ci:wasm-browser-tests
+
+  abi:
+    name: ABI (${{ matrix.memory }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        memory: [memory_32, memory_64]
+    env:
+      MISE_ENV: ci
+      CI_ABI_MEMORY: ${{ matrix.memory }}
+      XILA_MBX: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5.2.2
+      - id: toolchain
+        run: mise run ci:toolchain
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          toolchain: ${{ steps.toolchain.outputs.version }}
+          github-cache-mode: objects
+          cache-generation: v1-ci-abi-${{ matrix.memory }}
+      - run: mise run ci:abi
+
+  localization:
+    name: Localization
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      MISE_ENV: ci
+      CARGO_TERM_COLOR: always
+      XILA_MBX: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Select locales
+        id: locales
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          locales=()
+          if [[ "$EVENT_NAME" != pull_request ]]; then
+            locales=(en fr es de pt-BR it pl zh-CN)
+          else
+            all_locales=false
+            declare -A changed=()
+            while IFS= read -r path; do
+              case "$path" in
+                *.rs|*Cargo.toml|*Cargo.lock|mise.toml|mise.*.toml|tools/mise/*|build/*|subsystems/graphics/fonts/*|tolgee.extractor.mjs|tolgee.extractor.test.mjs|*.ftl|*/i18n/*|*/localization/*|executables/wasm/src/host/translation/*|executables/wasm/tests/translation/*)
+                  all_locales=true
+                  ;;
+                *locales/en.json) changed[en]=1 ;;
+                *locales/fr.json) changed[fr]=1 ;;
+                *locales/es.json) changed[es]=1 ;;
+                *locales/de.json) changed[de]=1 ;;
+                *locales/pt-BR.json) changed[pt-BR]=1 ;;
+                *locales/it.json) changed[it]=1 ;;
+                *locales/pl.json) changed[pl]=1 ;;
+                *locales/zh-CN.json) changed[zh-CN]=1 ;;
+              esac
+            done < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+            if [[ "$all_locales" == true ]]; then
+              locales=(en fr es de pt-BR it pl zh-CN)
+            elif (( ${#changed[@]} > 0 )); then
+              locales=(en)
+              for locale in fr es de pt-BR it pl zh-CN; do
+                [[ -n "${changed[$locale]:-}" ]] && locales+=("$locale")
+              done
+            fi
+          fi
+          if (( ${#locales[@]} > 0 )); then
+            printf 'value=%s\n' "${locales[*]}" >> "$GITHUB_OUTPUT"
+            echo 'run-check=true' >> "$GITHUB_OUTPUT"
+            printf 'Selected locale(s): %s\n' "${locales[*]}"
+          else
+            echo 'value=' >> "$GITHUB_OUTPUT"
+            echo 'run-check=false' >> "$GITHUB_OUTPUT"
+            echo 'No localization-relevant files changed; checks are intentionally skipped.'
+          fi
+      - uses: jdx/mise-action@v5.2.2
+        if: steps.locales.outputs.run-check == 'true'
+      - run: mise run deps:npm
+        if: steps.locales.outputs.run-check == 'true'
+      - id: toolchain
+        run: mise run ci:toolchain
+        if: steps.locales.outputs.run-check == 'true'
+      - uses: jdx/mr-boxington-action@v1
+        if: steps.locales.outputs.run-check == 'true'
+        with:
+          toolchain: ${{ steps.toolchain.outputs.version }}
+          github-cache-mode: objects
+          cache-generation: v1-ci-localization
+      - name: Strict localization validation
+        if: steps.locales.outputs.run-check == 'true'
+        env:
+          CI_LOCALES: ${{ steps.locales.outputs.value }}
+          CARGO_TARGET_ROOT: ${{ github.workspace }}/target/localization
+        run: mise run ci:localization
+
+  required:
+    name: Required
+    if: always()
+    needs: [quality, verification, host, wasm, abi, localization]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify required validation results
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          VERIFICATION_RESULT: ${{ needs.verification.result }}
+          HOST_RESULT: ${{ needs.host.result }}
+          WASM_RESULT: ${{ needs.wasm.result }}
+          ABI_RESULT: ${{ needs.abi.result }}
+          LOCALIZATION_RESULT: ${{ needs.localization.result }}
+        run: |
+          set -euo pipefail
+          for result in "$QUALITY_RESULT" "$VERIFICATION_RESULT" "$HOST_RESULT" "$WASM_RESULT" "$ABI_RESULT" "$LOCALIZATION_RESULT"; do
+            if [[ "$result" != success ]]; then
+              echo "::error::A required validation job finished with result: $result"
+              exit 1
+            fi
+          done

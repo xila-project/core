@@ -1,10 +1,69 @@
 use super::{
     error::GraphicsError,
-    marshal::{ButtonMap, read_c_string},
+    marshal::{
+        ButtonMap, GridTracks, read_c_string, read_textarea_string, validate_style_selector,
+    },
 };
 use crate::host::translation::{GuestMemory, GuestPointer, GuestValue, WasmUsize};
 use alloc::{vec, vec::Vec};
 use core::ffi::CStr;
+
+#[test]
+fn style_selectors_allow_known_parts_and_states_only() {
+    for selector in [0, 0x1_0000, 0x2_0000 | 0x80, 0x6_0000 | 0xF3FD] {
+        assert_eq!(validate_style_selector(selector), Ok(()));
+    }
+    for selector in [0x7_0000, 0x1_0000 | 0x2, 0x10_0000] {
+        assert_eq!(
+            validate_style_selector(selector),
+            Err(GraphicsError::InvalidValue)
+        );
+    }
+}
+
+#[test]
+fn grid_track_arrays_are_bounded_terminated_and_copied() {
+    const GRID_LAST: i32 = 536_870_911;
+    const GRID_CONTENT: i32 = 536_870_810;
+    let mut bytes = [0; 160];
+    let mut memory = GuestMemory::new(&mut bytes);
+    for (offset, value) in [(32, 48), (36, GRID_CONTENT), (40, GRID_LAST), (64, 24), (68, GRID_LAST)] {
+        memory.write(GuestPointer::new(offset), value).unwrap();
+    }
+    let grid = GridTracks::decode(&memory, 32, 64, GRID_LAST, GRID_CONTENT).unwrap();
+    drop(memory);
+    bytes.fill(0xff);
+    assert_eq!(grid.columns(), &[48, GRID_CONTENT, GRID_LAST]);
+    assert_eq!(grid.rows(), &[24, GRID_LAST]);
+}
+
+#[test]
+fn grid_track_arrays_reject_missing_terminators_and_unknown_descriptors() {
+    const GRID_LAST: i32 = 536_870_911;
+    const GRID_CONTENT: i32 = 536_870_810;
+    let mut bytes = [0; 256];
+    let mut memory = GuestMemory::new(&mut bytes);
+    for index in 0..32 {
+        memory
+            .write(GuestPointer::new(32 + index * 4), 16i32)
+            .unwrap();
+    }
+    memory
+        .write(GuestPointer::new(160), GRID_LAST)
+        .unwrap();
+    assert_eq!(
+        GridTracks::decode(&memory, 32, 160, GRID_LAST, GRID_CONTENT),
+        Err(GraphicsError::ResourceLimit)
+    );
+    memory.write(GuestPointer::new(32), -1i32).unwrap();
+    memory
+        .write(GuestPointer::new(36), GRID_LAST)
+        .unwrap();
+    assert_eq!(
+        GridTracks::decode(&memory, 32, 160, GRID_LAST, GRID_CONTENT),
+        Err(GraphicsError::InvalidValue)
+    );
+}
 
 fn table(memory: &mut GuestMemory<'_>, pointers: &[WasmUsize]) {
     for (index, pointer) in pointers.iter().enumerate() {
@@ -38,6 +97,19 @@ fn c_strings_are_bounded_and_never_accept_null_or_out_of_range_offsets() {
     assert_eq!(
         read_c_string(&GuestMemory::new(&mut no_nul), 1),
         Err(GraphicsError::InvalidMemory)
+    );
+}
+
+#[test]
+fn textarea_strings_allow_a_full_page_and_remain_bounded() {
+    let mut bytes = vec![b'a'; 4099];
+    bytes[4097] = 0;
+    let mut memory = GuestMemory::new(&mut bytes);
+    assert_eq!(read_textarea_string(&memory, 1).unwrap().to_bytes().len(), 4096);
+    memory.write(GuestPointer::new(4097), b'a').unwrap();
+    assert_eq!(
+        read_textarea_string(&memory, 1),
+        Err(GraphicsError::ResourceLimit)
     );
 }
 

@@ -13,8 +13,9 @@ use alloc::{
 use core::num::NonZeroUsize;
 use xila::{
     executable::{self, ExecutableTrait, Standard},
-    file_system::{Path, PathOwned},
+    file_system::{AccessFlags, Path, PathOwned},
     task::TaskIdentifier,
+    virtual_file_system::File,
 };
 mod commands;
 mod error;
@@ -24,6 +25,9 @@ mod resolver;
 mod tokenizer;
 use commands::CommandContext;
 pub use error::*;
+
+const SCRIPT_DEPTH_VARIABLE: &str = "XILA_SHELL_DEPTH";
+const MAX_SHELL_DEPTH: usize = 4;
 
 pub struct Shell {
     context: &'static executable::ExecutableContext,
@@ -119,11 +123,20 @@ pub async fn main(
 impl Shell {
     pub async fn new(standard: Standard<'static>) -> Self {
         let context = standard.context;
+        let task = context.task_manager.get_current_task_identifier().await;
+        let current_directory = context
+            .task_manager
+            .get_environment_variable(task, "Current_directory")
+            .await
+            .ok()
+            .and_then(|value| PathOwned::new(value.get_value().to_string()))
+            .filter(|path| path.is_absolute())
+            .unwrap_or_else(|| Path::ROOT.to_owned());
         Self {
             context,
             standard,
-            task: context.task_manager.get_current_task_identifier().await,
-            current_directory: Path::ROOT.to_owned(),
+            task,
+            current_directory,
             running: true,
             user: String::new(),
             host: String::new(),
@@ -174,7 +187,7 @@ impl Shell {
             if oversized {
                 self.last_status = 2;
                 self.diagnostic(xila::internationalization::translate!(
-                    "Command line is too long"
+                    "execution.errors.command_line_too_long"
                 ))
                 .await;
                 continue;
@@ -189,7 +202,7 @@ impl Shell {
                 Err(_) => {
                     self.last_status = 2;
                     self.diagnostic(xila::internationalization::translate!(
-                        "Invalid UTF-8 input"
+                        "errors.invalid_utf_8_input"
                     ))
                     .await;
                 }
@@ -217,7 +230,8 @@ impl Shell {
                 .map_err(|_| Error::FailedToGetTaskIdentifier)?,
             Err(_) => loop {
                 match self.authenticate().await {
-                    Ok(user) => break user,
+                    Ok(Some(user)) => break user,
+                    Ok(None) => return Ok(()),
                     Err(error) => self.diagnostic(error).await,
                 }
             },
@@ -228,22 +242,78 @@ impl Shell {
             .map_err(|_| Error::FailedToGetPath)?
             .get_value()
             .to_string();
-        if arguments.is_empty() {
-            self.main_interactive().await?;
-        } else if arguments[0] == "-c" {
-            if arguments.len() != 2 {
-                self.diagnostic(xila::internationalization::translate!(
-                    "Usage: shell -c COMMAND"
-                ))
-                .await;
+        let mut depth_changed = false;
+        let previous_depth = if arguments.is_empty() {
+            None
+        } else {
+            manager
+                .get_environment_variable(self.task, SCRIPT_DEPTH_VARIABLE)
+                .await
+                .ok()
+        };
+        if !arguments.is_empty() {
+            let depth = previous_depth
+                .as_ref()
+                .and_then(|value| value.get_value().parse::<usize>().ok())
+                .unwrap_or(0);
+            if depth >= MAX_SHELL_DEPTH {
                 self.last_status = 2;
-            } else if let Err(error) = self.execute_line(&arguments[1]).await {
-                self.last_status = 2;
-                self.diagnostic(error).await;
+                let error = xila::internationalization::translate!(
+                    "errors.maximum_nested_shell_depth_exceeded"
+                );
+                if arguments[0] == "-s" && arguments.len() == 2 {
+                    self.script_diagnostic(&arguments[1], None, error).await;
+                } else {
+                    self.diagnostic(error).await;
+                }
+            } else if manager
+                .set_environment_variable(
+                    self.task,
+                    SCRIPT_DEPTH_VARIABLE,
+                    &(depth + 1).to_string(),
+                )
+                .await
+                .is_err()
+            {
+                self.last_status = 1;
+                let error = xila::internationalization::translate!(
+                    "errors.failed_to_set_shell_nesting_depth"
+                );
+                if arguments[0] == "-s" && arguments.len() == 2 {
+                    self.script_diagnostic(&arguments[1], None, error).await;
+                } else {
+                    self.diagnostic(error).await;
+                }
+            } else {
+                depth_changed = true;
+                if arguments[0] == "-s" {
+                    if arguments.len() != 2 {
+                        self.diagnostic(xila::internationalization::translate!(
+                            "help.run_script_usage"
+                        ))
+                        .await;
+                        self.last_status = 2;
+                    } else {
+                        self.last_status = self.run_script(&arguments[1]).await;
+                    }
+                } else if arguments[0] == "-c" {
+                    if arguments.len() != 2 {
+                        self.diagnostic(xila::internationalization::translate!(
+                            "help.execute_command_usage"
+                        ))
+                        .await;
+                        self.last_status = 2;
+                    } else if let Err(error) = self.execute_line(&arguments[1]).await {
+                        self.last_status = 2;
+                        self.diagnostic(error).await;
+                    }
+                } else {
+                    // Already separated arguments remain literal; do not parse caller-provided data as shell syntax.
+                    self.last_status = self.run_arguments(&arguments).await;
+                }
             }
         } else {
-            // Already separated arguments remain literal; do not parse caller-provided data as shell syntax.
-            self.last_status = self.run_arguments(&arguments).await;
+            self.main_interactive().await?;
         }
         // Keep task/stream ownership explicit; an interactive prompt is free while jobs run.
         for job in self.background_jobs.drain(..) {
@@ -254,9 +324,164 @@ impl Shell {
         {
             self.last_status = 1;
         }
+        if depth_changed {
+            let result = match previous_depth {
+                Some(value) => {
+                    manager
+                        .set_environment_variable(
+                            self.task,
+                            SCRIPT_DEPTH_VARIABLE,
+                            value.get_value(),
+                        )
+                        .await
+                }
+                None => {
+                    manager
+                        .remove_environment_variable(self.task, SCRIPT_DEPTH_VARIABLE)
+                        .await
+                }
+            };
+            if result.is_err() {
+                self.last_status = 1;
+            }
+        }
         match NonZeroUsize::new(self.last_status) {
             Some(status) => Err(status),
             None => Ok(()),
+        }
+    }
+
+    async fn run_script(&mut self, script_path: &str) -> usize {
+        self.last_status = 0;
+        let requested_path = Path::from_str(script_path);
+        let path = if requested_path.is_absolute() {
+            requested_path.to_owned()
+        } else {
+            let Some(path) = self.current_directory.clone().join(requested_path) else {
+                self.script_diagnostic(script_path, None, Error::InvalidPath)
+                    .await;
+                return 1;
+            };
+            path
+        };
+        let mut file = match File::open(
+            self.context.virtual_file_system,
+            self.task,
+            &path,
+            AccessFlags::Read.into(),
+        )
+        .await
+        {
+            Ok(file) => file,
+            Err(error) => {
+                self.script_diagnostic(script_path, None, Error::FailedToOpenFile(error))
+                    .await;
+                return 1;
+            }
+        };
+
+        let mut line = Vec::with_capacity(tokenizer::MAX_INPUT_BYTES + 1);
+        let mut line_number = 1;
+        loop {
+            line.clear();
+            match Self::read_script_line(&mut file, &mut line).await {
+                Ok(false) => break,
+                Ok(true) => {}
+                Err(error) => {
+                    self.last_status = 2;
+                    self.script_diagnostic(&path, Some(line_number), error)
+                        .await;
+                    break;
+                }
+            }
+
+            let source = match core::str::from_utf8(&line) {
+                Ok(source) => source,
+                Err(_) => {
+                    self.last_status = 2;
+                    self.script_diagnostic(
+                        &path,
+                        Some(line_number),
+                        xila::internationalization::translate!("errors.invalid_utf_8_input"),
+                    )
+                    .await;
+                    break;
+                }
+            };
+            if let Err(error) = self.execute_line(source).await {
+                self.last_status = 2;
+                self.script_diagnostic(&path, Some(line_number), error)
+                    .await;
+                break;
+            }
+            if !self.running {
+                break;
+            }
+            line_number += 1;
+        }
+
+        if let Err(error) = file.close(self.context.virtual_file_system).await {
+            self.last_status = 2;
+            self.script_diagnostic(&path, Some(line_number), Error::FailedToReadFile(error))
+                .await;
+        }
+        self.last_status
+    }
+
+    async fn read_script_line(file: &mut File<'_>, line: &mut Vec<u8>) -> Result<bool> {
+        loop {
+            let mut byte = [0; 1];
+            let count = file
+                .read(&mut byte)
+                .await
+                .map_err(Error::FailedToReadFile)?;
+            if count == 0 {
+                return if line.is_empty() {
+                    Ok(false)
+                } else if line.len() > tokenizer::MAX_INPUT_BYTES {
+                    Err(Error::LineTooLong)
+                } else {
+                    Ok(true)
+                };
+            }
+            if byte[0] == b'\n' {
+                if line.last() == Some(&b'\r') {
+                    line.pop();
+                }
+                return if line.len() > tokenizer::MAX_INPUT_BYTES {
+                    Err(Error::LineTooLong)
+                } else {
+                    Ok(true)
+                };
+            }
+            if line.len() == tokenizer::MAX_INPUT_BYTES + 1 {
+                return Err(Error::LineTooLong);
+            }
+            line.push(byte[0]);
+        }
+    }
+
+    async fn script_diagnostic(
+        &mut self,
+        path: impl core::fmt::Display,
+        line: Option<usize>,
+        error: impl core::fmt::Display,
+    ) {
+        let mut output = OutputBuffer::default();
+        match line {
+            Some(line) => {
+                let _ = output
+                    .write(
+                        self.standard.error(),
+                        format_args!("{path}:{line}: {error}\n"),
+                    )
+                    .await;
+            }
+            None => {
+                let _ = output
+                    .write(self.standard.error(), format_args!("{path}: {error}\n"))
+                    .await;
+            }
         }
     }
 }

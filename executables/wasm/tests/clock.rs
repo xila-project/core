@@ -6,18 +6,26 @@
 ))]
 extern crate abi_definitions;
 drivers_std::memory::instantiate_global_allocator!();
+#[path = "support/localization.rs"]
+mod localization;
 #[path = "support/graphics.rs"]
 mod support;
 
 use core::{ffi::CStr, future::poll_fn, task::Poll, time::Duration};
 use xila::graphics::{Manager, lvgl};
 
-unsafe fn find_label(root: *mut lvgl::lv_obj_t, text: &str, prefix: bool) -> *mut lvgl::lv_obj_t {
+fn text(key: &str) -> String {
+    localization::text("clock", key)
+}
+
+unsafe fn find_label(root: *mut lvgl::lv_obj_t, text: &str, contains: bool) -> *mut lvgl::lv_obj_t {
     unsafe {
         if lvgl::lv_obj_has_class(root, &lvgl::lv_label_class) {
             let label = CStr::from_ptr(lvgl::lv_label_get_text(root)).to_bytes();
-            if if prefix {
-                label.starts_with(text.as_bytes())
+            if if contains {
+                label
+                    .windows(text.len())
+                    .any(|window| window == text.as_bytes())
             } else {
                 label == text.as_bytes()
             } {
@@ -25,7 +33,7 @@ unsafe fn find_label(root: *mut lvgl::lv_obj_t, text: &str, prefix: bool) -> *mu
             }
         }
         for index in 0..lvgl::lv_obj_get_child_count(root) {
-            let found = find_label(lvgl::lv_obj_get_child(root, index as i32), text, prefix);
+            let found = find_label(lvgl::lv_obj_get_child(root, index as i32), text, contains);
             if !found.is_null() {
                 return found;
             }
@@ -34,13 +42,13 @@ unsafe fn find_label(root: *mut lvgl::lv_obj_t, text: &str, prefix: bool) -> *mu
     }
 }
 
-async fn wait_label(manager: &Manager, text: &str) {
+async fn wait_label(manager: &Manager, text: &str, contains: bool) {
     for _ in 0..1000 {
         if manager.get_window_count().await.unwrap() != 0 {
             let root = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
             let found = {
                 let _lock = manager.synchronous_lock();
-                unsafe { !find_label(root, text, true).is_null() }
+                unsafe { !find_label(root, text, contains).is_null() }
             };
             if found {
                 return;
@@ -86,7 +94,7 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
         context.task_manager,
         context.virtual_file_system,
         binary,
-        "/binaries/clock",
+        "/applications/executables/clock",
     )
     .await
     .unwrap();
@@ -94,12 +102,11 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
         context,
         context.virtual_file_system,
         task,
-        &[("/binaries/wasm", wasm::WasmExecutable)]
+        &[("/applications/executables/wasm", wasm::WasmExecutable)]
     )
     .await
     .unwrap();
-    // Match native boot: an ordinary login user owns the application settings
-    // directory, while the configuration parent stays protected.
+    // Launch as a login user; the launcher provisions their private app settings.
     let administrator = context
         .users_manager
         .get_user_identifier("administrator")
@@ -107,17 +114,7 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
         .unwrap();
     context
         .virtual_file_system
-        .create_directory(task, &"/configuration/shared/clock")
-        .await
-        .unwrap();
-    context
-        .virtual_file_system
-        .set_ownership(
-            task,
-            "/configuration/shared/clock",
-            Some(administrator),
-            Some(xila::users::GroupIdentifier::new(1000)),
-        )
+        .ensure_user_home(task, administrator)
         .await
         .unwrap();
     context
@@ -127,27 +124,27 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
         .unwrap();
     let handle = xila::executable::execute(
         context,
-        "/binaries/wasm",
-        vec!["/binaries/clock".into()],
+        "/applications/executables/wasm",
+        vec!["/applications/executables/clock".into()],
         standard.duplicate().await.unwrap(),
         None,
     )
     .await
     .unwrap();
-    wait_label(manager, "Cancel").await;
-    click(manager, Some(2), "Start / pause").await;
+    wait_label(manager, &text("timer.controls.cancel"), true).await;
+    click(manager, Some(2), &text("stopwatch.controls.toggle_pause")).await;
     xila::task::sleep(Duration::from_millis(300)).await;
-    click(manager, Some(2), "Lap").await;
-    wait_label(manager, "1: ").await;
-    click(manager, Some(2), "Start / pause").await;
+    click(manager, Some(2), &text("stopwatch.controls.record_lap")).await;
+    wait_label(manager, "1: ", true).await;
+    click(manager, Some(2), &text("stopwatch.controls.toggle_pause")).await;
 
     // Select a one-second countdown using the actual touch controls.
     for _ in 0..5 {
-        click(manager, Some(3), "Minute -").await;
+        click(manager, Some(3), &text("timer.controls.decrement_minute")).await;
     }
-    click(manager, Some(3), "Start").await;
-    wait_label(manager, "Timer finished!").await;
-    click(manager, None, "Dismiss").await;
+    click(manager, Some(3), &text("timer.controls.start")).await;
+    wait_label(manager, &text("alerts.timer_finished"), true).await;
+    click(manager, None, &text("alerts.dismiss")).await;
 
     // Keep the saved occurrence well ahead of now, including around midnight.
     let current_hour = std::time::SystemTime::now()
@@ -158,15 +155,24 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
         % 24;
     let alarm_hour = (current_hour + 12) % 24;
     for _ in 0..(alarm_hour + 24 - 7) % 24 {
-        click(manager, Some(1), "Hour +").await;
+        click(manager, Some(1), &text("alarm.controls.increment_hour")).await;
     }
-    click(manager, Some(1), "Save and enable").await;
-    wait_label(manager, &format!("{alarm_hour:02}:00 UTC\nEnabled:")).await;
+    click(manager, Some(1), &text("alarm.controls.save_and_enable")).await;
+    wait_label(
+        manager,
+        &format!("{alarm_hour:02}:00 UTC\n{}", text("alarm.status.enabled")),
+        true,
+    )
+    .await;
     let mut saved = Vec::new();
     xila::virtual_file_system::File::read_from_path(
         context.virtual_file_system,
         task,
-        "/configuration/shared/clock/settings.1",
+        format!(
+            "/users/{}/applications/clock/configuration/settings.1",
+            administrator.as_u16()
+        )
+        .as_str(),
         &mut saved,
     )
     .await
@@ -176,22 +182,24 @@ async fn real_clock_guest_runs_stopwatch_timer_saves_alarm_and_closes() {
     close_and_join(manager, handle).await;
     let reopened = xila::executable::execute(
         context,
-        "/binaries/wasm",
-        vec!["/binaries/clock".into()],
+        "/applications/executables/wasm",
+        vec!["/applications/executables/clock".into()],
         standard,
         None,
     )
     .await
     .unwrap();
-    wait_label(manager, "Cancel").await;
+    wait_label(manager, &text("timer.controls.cancel"), true).await;
     // No save action: the new guest must load the existing enabled alarm.
-    click(manager, Some(1), "Hour +").await;
+    click(manager, Some(1), &text("alarm.controls.increment_hour")).await;
     wait_label(
         manager,
         &format!(
-            "{:02}:00 UTC\nEnabled: {alarm_hour:02}:00 UTC",
-            (alarm_hour + 1) % 24
+            "{:02}:00 UTC\n{}{alarm_hour:02}:00 UTC",
+            (alarm_hour + 1) % 24,
+            text("alarm.status.enabled")
         ),
+        true,
     )
     .await;
     close_and_join(manager, reopened).await;

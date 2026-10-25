@@ -1,0 +1,12 @@
+[package]
+name = "peripherals"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+embedded-hal = { workspace = true, optional = true }
+
+[features]
+default = []
+gpio = ["dep:embedded-hal"]
+mock = ["gpio"]

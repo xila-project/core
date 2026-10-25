@@ -1,4 +1,5 @@
 //! VM-independent graphics dispatch. Only `wasmi` depends on the VM API.
+mod canvas;
 mod dispatch;
 pub mod error;
 mod events;

@@ -1,0 +1,5 @@
+{
+  "errors.failed_to_get_main_function": "Hauptfunktion konnte nicht abgerufen werden",
+  "errors.invalid_stack_size": "Ungültige Stackgröße",
+  "errors.permission_denied": "Zugriff verweigert"
+}

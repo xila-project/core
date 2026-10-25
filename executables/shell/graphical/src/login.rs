@@ -42,7 +42,7 @@ impl Login {
 
                 lvgl::lv_textarea_set_placeholder_text(
                     user_name_text_area,
-                    translate!(c"User name").as_ptr(),
+                    translate!(c"login.fields.username").as_ptr(),
                 );
                 lvgl::lv_textarea_set_one_line(user_name_text_area, true);
 
@@ -55,7 +55,7 @@ impl Login {
 
                 lvgl::lv_textarea_set_placeholder_text(
                     password_text_area,
-                    translate!(c"Password").as_ptr(),
+                    translate!(c"login.fields.password").as_ptr(),
                 );
                 lvgl::lv_textarea_set_one_line(password_text_area, true);
                 lvgl::lv_textarea_set_password_mode(password_text_area, true);
@@ -78,7 +78,7 @@ impl Login {
 
                 let label = lvgl::lv_label_create(button);
 
-                lvgl::lv_label_set_text(label, translate!(c"Login").as_ptr());
+                lvgl::lv_label_set_text(label, translate!(c"login.actions.submit").as_ptr());
 
                 button
             };
@@ -140,6 +140,17 @@ impl Login {
             authentication::authenticate_user(&authentication_context, user_name, password)
                 .await
                 .map_err(Error::AuthenticationFailed)?;
+
+        let home = self
+            .context
+            .virtual_file_system
+            .ensure_user_home(task, user_identifier)
+            .await
+            .map_err(Error::FailedToOpenDirectory)?;
+        task_manager
+            .set_environment_variable(task, "HOME", home.as_str())
+            .await
+            .map_err(Error::FailedToSetEnvironmentVariable)?;
 
         // - Set the user
         task_manager

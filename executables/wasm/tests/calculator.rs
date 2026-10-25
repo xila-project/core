@@ -52,7 +52,7 @@ async fn real_calculator_guest_evaluates_buttons_and_closes_on_wasmi() {
         context.task_manager,
         context.virtual_file_system,
         binary,
-        "/binaries/calculator.wasm",
+        "/applications/executables/calculator.wasm",
     )
     .await
     .unwrap();
@@ -60,14 +60,14 @@ async fn real_calculator_guest_evaluates_buttons_and_closes_on_wasmi() {
         context,
         context.virtual_file_system,
         task,
-        &[("/binaries/wasm", wasm::WasmExecutable)]
+        &[("/applications/executables/wasm", wasm::WasmExecutable)]
     )
     .await
     .unwrap();
     let handle = xila::executable::execute(
         context,
-        "/binaries/wasm",
-        vec!["/binaries/calculator.wasm".into()],
+        "/applications/executables/wasm",
+        vec!["/applications/executables/calculator.wasm".into()],
         standard,
         None,
     )

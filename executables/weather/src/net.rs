@@ -1,7 +1,7 @@
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 use alloc::{format, string::String, vec, vec::Vec};
 use shared::HttpResponseParser;
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 use shared::{HttpRequestBuilder, Url};
 #[cfg(target_arch = "wasm32")]
 use std::fs::OpenOptions;
@@ -48,12 +48,8 @@ fn read_with_retry(
 }
 
 pub fn split_headers_body(input: &[u8]) -> Option<(&[u8], &[u8])> {
-    let marker = b"\r\n\r\n";
-    let index = input.windows(marker.len()).position(|w| w == marker)?;
-    Some((
-        &input[..index + marker.len()],
-        &input[index + marker.len()..],
-    ))
+    let body = shared::get_body(input)?;
+    Some((&input[..input.len() - body.len()], body))
 }
 
 pub fn extract_http_status(headers: &[u8]) -> Option<u16> {
@@ -61,90 +57,28 @@ pub fn extract_http_status(headers: &[u8]) -> Option<u16> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn extract_content_length(headers: &[u8]) -> Option<usize> {
-    HttpResponseParser::from_buffer(headers)
-        .get_headers()
-        .find(|(name, _)| *name == "Content-Length")
-        .and_then(|(_, value)| value.trim().parse::<usize>().ok())
-}
-
-#[cfg(target_arch = "wasm32")]
-fn has_chunked_encoding(headers: &[u8]) -> bool {
-    let parser = HttpResponseParser::from_buffer(headers);
-    let headers_iter = parser.get_headers();
-
-    for (name, value) in headers_iter {
-        if name.eq_ignore_ascii_case("Transfer-Encoding") {
-            let is_chunked = value.contains("chunked");
-
-            return is_chunked;
-        }
-    }
-
-    false
-}
-
-#[cfg(target_arch = "wasm32")]
-fn decode_chunked_body(body: &[u8]) -> Result<Vec<u8>, String> {
-    let mut decoded = Vec::new();
-    let mut pos = 0;
-    let mut chunk_count = 0;
-
-    while pos < body.len() {
-        // Find the line ending for chunk size (look for \r\n)
-        let mut line_end = pos;
-        while line_end + 1 < body.len() {
-            if body[line_end] == b'\r' && body[line_end + 1] == b'\n' {
-                break;
-            }
-            line_end += 1;
-        }
-
-        if line_end + 1 >= body.len() {
-            // No line ending found
-            break;
-        }
-
-        // Parse chunk size from bytes
-        let size_bytes = &body[pos..line_end];
-        let size_str = core::str::from_utf8(size_bytes)
-            .map_err(|_| String::from("invalid utf8 in chunk size"))?;
-        let chunk_size = usize::from_str_radix(size_str.trim(), 16)
-            .map_err(|_| String::from("invalid chunk size format"))?;
-
-        if chunk_size == 0 {
-            // Last chunk reached
-
-            break;
-        }
-
-        // Move past the chunk size line and \r\n
-        pos = line_end + 2;
-
-        // Read chunk data
-        if pos + chunk_size > body.len() {
-            return Err(String::from("chunk data extends beyond body"));
-        }
-
-        decoded.extend_from_slice(&body[pos..pos + chunk_size]);
-        pos += chunk_size;
-
-        // Skip trailing \r\n after chunk data
-        if pos + 1 < body.len() && body[pos] == b'\r' && body[pos + 1] == b'\n' {
-            pos += 2;
-        }
-
-        chunk_count += 1;
-    }
-
-    Ok(decoded)
-}
-
-#[cfg(target_arch = "wasm32")]
 pub fn https_get(url: &str) -> Result<Vec<u8>, String> {
+    let request_buffer = build_weather_request(url)?;
+
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/devices/network/https_client")
+        .map_err(|_e| String::from("failed to open https device"))?;
+
+    file.write_all(&request_buffer)
+        .map_err(|_| String::from("failed to write request"))?;
+
+    drop(request_buffer);
+    read_device_response(|buffer| read_with_retry(&mut file, buffer, "failed to read response"))
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn build_weather_request(url: &str) -> Result<Vec<u8>, String> {
     let parsed = Url::parse(url).ok_or_else(|| String::from("invalid url"))?;
 
-    let mut request_buffer = vec![0u8; 4096];
+    const FIXED_REQUEST: &[u8] = b"GET  HTTP/1.1\r\nHost: \r\nConnection: close\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nUser-Agent: Xila-Weather\r\n\r\n";
+    let mut request_buffer = vec![0; FIXED_REQUEST.len() + parsed.path.len() + parsed.host.len()];
     let request_length = {
         let mut builder = HttpRequestBuilder::from_buffer(&mut request_buffer);
         builder
@@ -156,79 +90,68 @@ pub fn https_get(url: &str) -> Result<Vec<u8>, String> {
             .ok_or_else(|| String::from("connection header overflow"))?
             .add_header("Accept", b"application/json")
             .ok_or_else(|| String::from("accept header overflow"))?
+            .add_header("Accept-Encoding", b"identity")
+            .ok_or_else(|| String::from("accept encoding header overflow"))?
+            .add_header("User-Agent", b"Xila-Weather")
+            .ok_or_else(|| String::from("user agent header overflow"))?
             .add_body(b"")
             .ok_or_else(|| String::from("request finalization overflow"))?;
         builder.get_position()
     };
 
-    let mut file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/devices/https_client")
-        .map_err(|_e| String::from("failed to open https device"))?;
+    request_buffer.truncate(request_length);
+    Ok(request_buffer)
+}
 
-    file.write_all(&request_buffer[..request_length])
-        .map_err(|_| String::from("failed to write request"))?;
-
-    // Read headers first (device returns headers, then transitions to body streaming)
-    let mut headers_buffer = vec![0u8; 2048];
-    let headers_len = read_with_retry(
-        &mut file,
-        &mut headers_buffer,
-        "failed to read response headers",
-    )?;
-
-    if headers_len == 0 {
-        return Err(String::from("empty response"));
-    }
-
-    let status = extract_http_status(&headers_buffer[..headers_len])
+/// VFS bodies are decoded by the device. Keep any body prefix received with
+/// the head, then reuse this allocation for JSON instead of copying through a
+/// separate stack buffer. The JSON parser still needs the complete body.
+#[cfg(any(target_arch = "wasm32", test))]
+fn read_device_response(
+    mut read: impl FnMut(&mut [u8]) -> Result<usize, String>,
+) -> Result<Vec<u8>, String> {
+    let mut buffer = vec![0; 2048];
+    let mut filled = 0;
+    let head_length = loop {
+        if let Some(body) = shared::get_body(&buffer[..filled]) {
+            break filled - body.len();
+        }
+        if filled == buffer.len() {
+            return Err(String::from("response headers too large"));
+        }
+        let n = read(&mut buffer[filled..])?;
+        if n == 0 {
+            return Err(String::from("incomplete response headers"));
+        }
+        filled += n;
+    };
+    let status = extract_http_status(&buffer[..head_length])
         .ok_or_else(|| String::from("missing status in response headers"))?;
     if status != 200 {
         return Err(format!("api error: {status}"));
     }
-
-    let expected_body_length = extract_content_length(&headers_buffer[..headers_len]);
-
-    // Read body from subsequent reads
-    let mut body = Vec::new();
-    let mut chunk = [0u8; 4096];
-    let mut retry_count = 0usize;
+    buffer.copy_within(head_length..filled, 0);
+    buffer.truncate(filled - head_length);
     loop {
-        if let Some(expected_length) = expected_body_length
-            && body.len() >= expected_length
-        {
-            break;
-        }
-
-        let count = read_with_retry(&mut file, &mut chunk, "failed to read body")?;
-        if count == 0 {
-            if let Some(expected_length) = expected_body_length
-                && body.len() < expected_length
-            {
-                retry_count += 1;
-                if retry_count >= HTTPS_READ_MAX_RETRIES {
-                    return Err(String::from("timed out waiting for https response body"));
-                }
-
-                yield_now();
-                continue;
+        if buffer.len() == buffer.capacity() {
+            // Probe EOF before growing: an exactly full response must not
+            // double its allocation just to discover that it has finished.
+            let mut byte = [0];
+            if read(&mut byte)? == 0 {
+                break;
             }
-
+            buffer.push(byte[0]);
+        }
+        let start = buffer.len();
+        let end = start + (buffer.capacity() - start).min(512);
+        buffer.resize(end, 0);
+        let n = read(&mut buffer[start..])?;
+        buffer.truncate(start + n);
+        if n == 0 {
             break;
         }
-        retry_count = 0;
-        body.extend_from_slice(&chunk[..count]);
     }
-
-    // Decode chunked transfer encoding if present
-    let final_body = if has_chunked_encoding(&headers_buffer[..headers_len]) {
-        decode_chunked_body(&body)?
-    } else {
-        body
-    };
-
-    Ok(final_body)
+    Ok(buffer)
 }
 
 #[cfg(test)]
@@ -250,20 +173,101 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_arch = "wasm32")]
-    fn detects_chunked_encoding() {
-        use super::has_chunked_encoding;
-        let headers = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Type: application/json\r\n\r\n";
-        assert!(has_chunked_encoding(headers));
+    fn response_is_independent_of_read_boundaries() {
+        use super::read_device_response;
+        let head = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n";
+        // Device bodies are already decoded, even with the original header.
+        let wire = [head.as_slice(), b"{\"ok\":true}"].concat();
+        for fragment in 1..=wire.len() {
+            let mut remaining = wire.as_slice();
+            let body = read_device_response(|out| {
+                let n = remaining.len().min(out.len()).min(fragment);
+                out[..n].copy_from_slice(&remaining[..n]);
+                remaining = &remaining[n..];
+                Ok(n)
+            })
+            .unwrap();
+            assert_eq!(body, b"{\"ok\":true}");
+        }
     }
 
     #[test]
-    #[cfg(target_arch = "wasm32")]
-    fn detects_no_chunked_encoding() {
-        use super::has_chunked_encoding;
-        let headers =
-            b"HTTP/1.1 200 OK\r\nContent-Length: 1234\r\nContent-Type: application/json\r\n\r\n";
-        assert!(!has_chunked_encoding(headers));
+    fn response_errors_and_lf_headers() {
+        use super::read_device_response;
+        for (wire, expected) in [
+            (
+                b"HTTP/1.1 503 Service Unavailable\r\n\r\n".as_slice(),
+                "api error: 503",
+            ),
+            (
+                b"HTTP/1.1 200 OK\r\nX: incomplete",
+                "incomplete response headers",
+            ),
+        ] {
+            let mut remaining = wire;
+            let error = read_device_response(|out| {
+                let n = out.len().min(remaining.len());
+                out[..n].copy_from_slice(&remaining[..n]);
+                remaining = &remaining[n..];
+                Ok(n)
+            })
+            .unwrap_err();
+            assert_eq!(error, expected);
+        }
+        let mut remaining = b"HTTP/1.0 200 OK\nX: y\n\nbody".as_slice();
+        assert_eq!(
+            read_device_response(|out| {
+                let n = out.len().min(remaining.len());
+                out[..n].copy_from_slice(&remaining[..n]);
+                remaining = &remaining[n..];
+                Ok(n)
+            })
+            .unwrap(),
+            b"body"
+        );
+        let mut remaining = b"HTTP/1.1 200 OK\r\n\r\npartial".as_slice();
+        assert_eq!(
+            read_device_response(|out| {
+                if remaining.is_empty() {
+                    return Err(alloc::string::String::from("truncated device body"));
+                }
+                let n = out.len().min(remaining.len());
+                out[..n].copy_from_slice(&remaining[..n]);
+                remaining = &remaining[n..];
+                Ok(n)
+            })
+            .unwrap_err(),
+            "truncated device body"
+        );
+    }
+
+    #[test]
+    fn request_has_exact_capacity_and_explicit_encoding() {
+        let request = super::build_weather_request("https://example.com/weather?q=Paris").unwrap();
+        assert_eq!(request.len(), request.capacity());
+        assert_eq!(request, b"GET /weather?q=Paris HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\nAccept: application/json\r\nAccept-Encoding: identity\r\nUser-Agent: Xila-Weather\r\n\r\n");
+    }
+
+    #[test]
+    fn large_response_uses_existing_capacity_until_it_is_full() {
+        use super::read_device_response;
+        let mut remaining = 8192;
+        let mut head = b"HTTP/1.1 200 OK\r\n\r\n".as_slice();
+        let body = read_device_response(|out| {
+            if !head.is_empty() {
+                let n = head.len().min(out.len());
+                out[..n].copy_from_slice(&head[..n]);
+                head = &head[n..];
+                return Ok(n);
+            }
+            let n = out.len().min(remaining);
+            out[..n].fill(b'x');
+            remaining -= n;
+            Ok(n)
+        })
+        .unwrap();
+        assert_eq!(body.len(), 8192);
+        assert_eq!(body.capacity(), 8192, "EOF must not double a full buffer");
     }
 
     #[test]

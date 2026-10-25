@@ -8,7 +8,6 @@ xila = { path = "../../", features = [
   "graphics",
   "graphics_rendering_xrgb8888",
   "bootsplash",
-  "executable_building",
 ] }
 abi_definitions = { workspace = true }
 file_manager = { workspace = true }
@@ -17,15 +16,20 @@ graphical_shell = { workspace = true }
 wasm = { workspace = true, features = ["host", "graphics"] }
 terminal = { workspace = true }
 settings = { workspace = true }
+debug_application = { workspace = true }
 drivers_core = { workspace = true }
 drivers_std = { workspace = true }
 drivers_shared = { workspace = true }
 drivers_native = { workspace = true }
+drivers_headless = { workspace = true }
+audio = { workspace = true, optional = true }
 getargs = { version = "0.5" }
 getargs-derive = { workspace = true }
 
 [features]
 default = []
+audio = ["dep:audio", "drivers_native/audio"]
+# Compatibility flag: bundled applications now always come from the seed.
 prebuilt-applications = []
 profiling = ["drivers_std/profiling", "prebuilt-applications"]
 heaptrack = ["drivers_std/heaptrack", "prebuilt-applications"]

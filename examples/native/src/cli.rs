@@ -13,11 +13,20 @@ pub enum InterfaceMode {
     Terminal,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DisplayDriver {
+    #[default]
+    Native,
+    Headless,
+}
+
 pub struct Config {
     pub interface: InterfaceMode,
     pub networking: bool,
+    pub display_driver: DisplayDriver,
     pub resolution: (i16, i16),
     pub disk_path: String,
+    pub seed_image: String,
     pub disk_size: u64,
     pub interface_name: String,
 }
@@ -35,6 +44,9 @@ struct Arguments<'a> {
     /// Use the terminal interface.
     #[arg(short = 't', long = "terminal")]
     terminal: bool,
+    /// Select the graphical output driver.
+    #[arg(long = "display-driver", conflicts_with = "terminal", value_parser = parse_display_driver)]
+    display_driver: Option<DisplayDriver>,
     /// Enable networking (default).
     #[arg(short = 'n', long = "network", conflicts_with = "no_network")]
     network: bool,
@@ -53,6 +65,14 @@ struct Arguments<'a> {
         allow_hyphen_values = true
     )]
     disk_path: &'a str,
+    /// Reference image imported only when the backing disk is absent.
+    #[arg(
+        long = "seed-image",
+        default_value = "./seed.img",
+        value_name = "PATH",
+        allow_hyphen_values = true
+    )]
+    seed_image: &'a str,
     /// Capacity in bytes (minimum: 1049600 for the MBR and filesystem).
     #[arg(short = 's', long = "disk-size", default_value_t = 16 * 1024 * 1024, value_name = "BYTES", value_parser = 1049600..)]
     disk_size: u64,
@@ -69,6 +89,14 @@ fn parse_resolution(value: &str) -> Result<(i16, i16), ()> {
         return Err(());
     }
     Ok((width, height))
+}
+
+fn parse_display_driver(value: &str) -> Result<DisplayDriver, ()> {
+    match value {
+        "native" => Ok(DisplayDriver::Native),
+        "headless" => Ok(DisplayDriver::Headless),
+        _ => Err(()),
+    }
 }
 
 fn non_empty(value: &str) -> Result<&str, ()> {
@@ -88,8 +116,10 @@ where
             InterfaceMode::Terminal
         },
         networking: arguments.network || !arguments.no_network,
+        display_driver: arguments.display_driver.unwrap_or_default(),
         resolution: arguments.resolution,
         disk_path: arguments.disk_path.to_string(),
+        seed_image: arguments.seed_image.to_string(),
         disk_size: arguments.disk_size,
         interface_name: arguments.interface_name.to_string(),
     })
@@ -97,7 +127,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{InterfaceMode, MINIMUM_DISK_SIZE, parse};
+    use super::{DisplayDriver, InterfaceMode, MINIMUM_DISK_SIZE, parse};
 
     #[test]
     fn defaults_preserve_the_current_example_setup() {
@@ -105,6 +135,7 @@ mod tests {
 
         assert_eq!(config.interface, InterfaceMode::Graphical);
         assert!(config.networking);
+        assert_eq!(config.display_driver, DisplayDriver::Native);
         assert_eq!(config.resolution, (800, 600));
         assert_eq!(config.disk_path, "./drive.img");
         assert_eq!(config.disk_size, 16 * 1024 * 1024);
@@ -136,6 +167,19 @@ mod tests {
     }
 
     #[test]
+    fn parses_headless_display_driver() {
+        let config = parse(["--display-driver", "headless"]).unwrap();
+        assert_eq!(config.display_driver, DisplayDriver::Headless);
+        assert_eq!(
+            parse(["--display-driver", "native"])
+                .unwrap()
+                .display_driver,
+            DisplayDriver::Native
+        );
+        assert!(parse(["--display-driver", "dummy"]).is_err());
+    }
+
+    #[test]
     fn preserves_hyphen_prefixed_string_option_values() {
         let config = parse(["--disk-path", "-drive.img", "--interface-name", "-xila0"]).unwrap();
         assert_eq!(config.disk_path, "-drive.img");
@@ -147,6 +191,7 @@ mod tests {
         assert!(parse(["--terminal", "--gui"]).is_err());
         assert!(parse(["--network", "--no-network"]).is_err());
         assert!(parse(["--gui", "--terminal"]).is_err());
+        assert!(parse(["--terminal", "--display-driver", "headless"]).is_err());
         assert!(parse(["--no-network", "--network"]).is_err());
     }
 

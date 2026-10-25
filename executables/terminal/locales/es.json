@@ -1,0 +1,10 @@
+{
+  "input.command_placeholder": "Introduce un comando...",
+  "errors.failed_to_create_object": "No se pudo crear el objeto",
+  "errors.failed_to_execute": "No se pudo ejecutar: {}",
+  "errors.failed_to_get_task_identifier": "No se pudo obtener el identificador de tarea: {}",
+  "errors.failed_to_mount_device": "No se pudo montar el dispositivo: {}",
+  "errors.graphics": "Gráficos: {}",
+  "errors.resource_busy": "Recurso ocupado",
+  "errors.utf_8": "UTF-8: {}"
+}

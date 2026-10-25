@@ -61,7 +61,7 @@ impl Shell {
                 if self.background_jobs.len() == MAX_BACKGROUND_JOBS {
                     self.last_status = 1;
                     self.diagnostic(xila::internationalization::translate!(
-                        "Too many background jobs"
+                        "errors.too_many_background_jobs"
                     ))
                     .await;
                 } else {
@@ -94,7 +94,7 @@ impl Shell {
         standard.standard_in = File::open(
             self.context.virtual_file_system,
             self.task,
-            "/devices/null",
+            "/devices/standard_io/null",
             AccessFlags::Read.into(),
         )
         .await

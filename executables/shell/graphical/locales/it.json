@@ -1,0 +1,23 @@
+{
+  "errors.authentication_failed": "Autenticazione non riuscita: {}",
+  "errors.failed_to_add_shortcut": "Impossibile aggiungere il collegamento: {}",
+  "errors.failed_to_create_object": "Impossibile creare l'oggetto",
+  "errors.failed_to_deserialize_shortcut": "Impossibile deserializzare il collegamento: {}",
+  "errors.failed_to_execute_shortcut": "Impossibile eseguire il collegamento: {}",
+  "errors.failed_to_get_child": "Impossibile ottenere l'elemento figlio",
+  "errors.failed_to_get_current_task_identifier": "Impossibile ottenere l'identificatore dell'attività corrente: {}",
+  "errors.failed_to_get_shortcut_file_path": "Impossibile ottenere il percorso del collegamento",
+  "errors.failed_to_open_directory": "Impossibile aprire la directory: {}",
+  "errors.failed_to_open_standard_file": "Impossibile aprire il file standard: {}",
+  "errors.failed_to_read_shortcut_directory": "Impossibile leggere la directory dei collegamenti: {}",
+  "errors.failed_to_read_shortcut_file": "Impossibile leggere il collegamento: {}",
+  "errors.failed_to_set_environment_variable": "Impossibile impostare la variabile d'ambiente: {}",
+  "errors.failed_to_set_task_user": "Impossibile impostare l'utente dell'attività: {}",
+  "errors.graphics_error": "Errore grafico: {}",
+  "errors.invalid_utf_8": "UTF-8 non valido: {}",
+  "login.actions.submit": "Accedi",
+  "errors.missing_arguments": "Argomenti mancanti",
+  "errors.null_character_in_string": "Carattere nullo nella stringa: {}",
+  "login.fields.password": "Password",
+  "login.fields.username": "Nome utente"
+}

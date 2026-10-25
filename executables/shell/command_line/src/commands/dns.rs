@@ -61,14 +61,17 @@ async fn resolve_record<C: CommandContext>(
 ) -> Result<()> {
     match network_manager.resolve(domain, kind, true, None).await {
         Ok(ip) => {
+            let count = ip.len();
+            let record_label =
+                xila::internationalization::translate_plural!("dns.records.unit", count);
+            // DNS record types (A, AAAA, etc.) remain invariant CLI identifiers.
             context
                 .write_out_fmt(format_args!(
-                    "{}\n",
-                    format_args!(
-                        translate!("{} record(s) for domain '{}':"),
-                        format_kind(kind),
-                        domain
-                    )
+                    "{}: {} {} '{}':\n",
+                    format_kind(kind),
+                    count,
+                    record_label,
+                    domain
                 ))
                 .await?;
             for address in &ip {
@@ -82,7 +85,7 @@ async fn resolve_record<C: CommandContext>(
                 .write_out_fmt(format_args!(
                     "{}\n",
                     format_args!(
-                        translate!("No {} records found for domain '{}'"),
+                        translate!("dns.status.no_records_found"),
                         format_kind(kind),
                         domain
                     )
@@ -94,7 +97,7 @@ async fn resolve_record<C: CommandContext>(
                 .write_out_fmt(format_args!(
                     "{}",
                     format_args!(
-                        translate!("Failed to resolve domain '{}' for {} records: {}"),
+                        translate!("errors.failed_to_resolve_domain_for_records"),
                         domain,
                         format_kind(kind),
                         e
@@ -155,6 +158,26 @@ where
 mod tests {
     use super::format_kind;
     use xila::network::DnsQueryKind;
+
+    #[test]
+    fn dns_record_count_selects_singular_and_plural() {
+        let (one, other) = match xila::internationalization::get_locale() {
+            "fr" => (
+                "enregistrement pour le domaine",
+                "enregistrements pour le domaine",
+            ),
+            "zh-CN" => ("条记录，域名", "条记录，域名"),
+            _ => ("record for domain", "records for domain"),
+        };
+        assert_eq!(
+            xila::internationalization::translate_plural!("dns.records.unit", 1usize),
+            one
+        );
+        assert_eq!(
+            xila::internationalization::translate_plural!("dns.records.unit", 2usize),
+            other
+        );
+    }
 
     #[test]
     fn format_kind_maps_a() {

@@ -9,6 +9,7 @@ pub enum Error {
     Wasm(wasmi::Error),
     Linker(wasmi::errors::LinkerError),
     Runtime(i32),
+    Interrupted,
     FileSystem(virtual_file_system::Error),
     Task(xila::task::Error),
     InvalidPath,

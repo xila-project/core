@@ -1,0 +1,22 @@
+{
+  "app.title": "Text Editor",
+  "navigation.previous_page": "Previous",
+  "navigation.next_page": "Next",
+  "controls.new_file": "New",
+  "controls.open_file": "Open",
+  "controls.save_file": "Save",
+  "file_path.instructions": "Choose a path, then create or open a text file",
+  "warnings.unsaved_close_again": "Unsaved changes - close again to discard",
+  "warnings.unsaved_new_or_open_again": "Unsaved changes - choose New or Open again to discard",
+  "file_path.placeholder": "Enter an absolute file path",
+  "status.open_or_create_first": "Open or create a file first",
+  "errors.working_copy_creation_failed": "Could not create a working copy in this directory",
+  "file_path.new_file_default_name": "New text file",
+  "status.opened": "Opened",
+  "errors.open_failed": "Open failed - use a UTF-8 text file and check storage",
+  "status.saved": "Saved",
+  "errors.save_failed_working_copy_preserved": "Save failed - working copy kept; check path and storage",
+  "errors.page_exceeds_byte_limit": "Page text must fit within 4096 UTF-8 bytes",
+  "errors.edit_failed_close_again": "Edit failed - close again to discard changes",
+  "errors.edit_failed_reopen_source": "Edit failed - reopen the source file"
+}

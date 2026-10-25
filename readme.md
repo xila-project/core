@@ -1,5 +1,10 @@
 # Xila — Rust embedded operating system with WebAssembly apps
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/xila-horizontal-white.svg">
+  <img src="assets/brand/xila-horizontal-ink.svg" alt="Xila" width="300">
+</picture>
+
 Build embedded experiences with **Xila**, a modular, open-source operating system
 written in Rust. Xila brings together WebAssembly (Wasm) applications, an LVGL
 graphical interface, task management, networking, and storage for
@@ -21,7 +26,7 @@ resource-constrained devices.
 - **Graphical interfaces:** build on LVGL, the shared Shadcn theme, and Xila's
   graphical shell.
 - **OS building blocks:** work with task scheduling, a virtual filesystem,
-  device drivers, and networking through reusable Rust modules.
+  device drivers, and networking through portable Rust crates.
 - **Native development:** develop and investigate CPU and memory use on Linux
   before validating shared code on your intended embedded target.
 
@@ -43,68 +48,87 @@ documentation and learning guides.
 
 ## Build and check Core
 
-**Devbox is the standard setup for local development and CI on x86_64 Linux.**
-Install [Devbox](https://www.jetify.com/docs/devbox/installing_devbox/) at the
-version recorded in `.devbox-version`, then:
+Install [mise](https://mise.jdx.dev/getting-started.html). By default, this
+repository selects the `development` tasks. Tools are installed on demand per
+task; optionally preinstall all development task tools in one pass:
 
 ```bash
-git clone https://github.com/xila-project/core.git
-cd core
-devbox shell
-devbox run setup
-devbox run check                # Linux host + WASM guest checks
+mise trust
+mise install --include-task-tools # optional: preinstall development task tools
+mise bootstrap packages apply --manager apt
+mise run deps:npm
+mise run check:all               # Linux host + WASM guest checks
 ```
 
-Devbox installs Nix if needed; setup installs Rust/WASM targets and runs `npm ci`.
-Initial setup requires internet access. Leave with `exit`; `.dev-environment/`
-and `.devbox/` hold removable local caches.
+No development container is required. `.miserc.toml` selects
+`mise.development.toml` by default; tasks select host or WASM targets, formatting
+or coverage tools as needed, including developer-only `format:*`,
+`translate:*` and `dev:*` tasks. `mise.toml` holds reusable namespaced tasks
+such as `check:host`, `docs:all`, and `image:wasm`.
+CI selects `mise.ci.toml`, where tools are declared on individual
+tasks so a job installs only the tools its tasks use. On Debian/Ubuntu, native
+packages are provisioned from the selected environment with
+`mise bootstrap packages apply --manager apt` (mise requests sudo when needed).
+Developer Cargo build tasks are wrapped by mbx through Mise's native Rust
+integration. Tools are not activated globally: use `mise run build:cargo -- ...`
+or `mise run run:cargo -- ...` for ad-hoc Cargo commands with this setup.
+CI uses the mbx GitHub Action and its wrapper instead, avoiding a second mbx
+installation in CI. Formatting tasks select only rustfmt, Taplo or Node, with
+no build targets, Clippy, mbx, coverage tools or native-package bootstrap.
 
-Other checks, inside the shell:
+Other checks:
 
 ```bash
-cargo make clippy
-cargo make format-rust -- --check
-cargo make format-toml --check
-npm exec prettier -- --check "**/*.json"
+mise run clippy:all
+mise run format:rust -- --check
+mise run format:toml -- --check
+MISE_ENV=ci mise run ci:quality-js
 ```
 
 For opt-in native PCM playback using nanoaudio, see
-[the audio module](modules/audio/README.md). Run its tone example with
-`cargo run -p drivers_native --features audio --example audio` inside the shell.
+[the audio library](libraries/audio/README.md). Run its tone example with
+`mise run run:cargo -- -p drivers_native --features audio --example audio`.
 
-Run `devbox run gui` from a **Wayland desktop** and check rendering, input and
-window closing. Keep the host GPU drivers and enter without `--pure` to retain
-the display, runtime directory and session bus. Windows requires x86_64 WSL2/WSLg
-and a GUI smoke test. Native Windows, macOS, ARM Linux and NixOS are unvalidated;
-the current host checks and native event loop depend on Linux/Wayland.
+For GUI builds from a **Wayland desktop**, keep the host GPU drivers and check
+rendering, input and window closing. Windows requires x86_64 WSL2/WSLg and a GUI
+smoke test. Native Windows, macOS, ARM Linux and NixOS are unvalidated; the
+current host checks and native event loop depend on Linux/Wayland.
 
-For the browser example, inside the shell:
+For the browser example:
 
 ```bash
-cargo build -p calculator --target wasm32-wasip1 --release
-cargo make generate-fonts
-(cd examples/wasm && RUSTUP_TOOLCHAIN="$XILA_NIGHTLY_TOOLCHAIN" trunk serve)
+mise run build:applications
+MISE_ENV=ci mise run pages:demo
 ```
 
-Use `trunk build` for a build check; open the served URL to test rendering/input.
+`pages:demo` builds the browser example with its task-scoped nightly toolchain
+and Trunk. Serve `examples/wasm/dist` separately to test rendering/input.
 
-Devbox provides a native shell and JSON configuration. Containers require GUI
-and device forwarding; mise leaves native dependencies to the OS; direct
-Nix/devenv adds Nix configuration to maintain. Versions live in `.devbox-version`
-(CLI), `devbox.json`/`devbox.lock` (native tools), `development/toolchains.env`
-(Rust versions/targets) and `package-lock.json` (npm). CI uses these same sources and setup for
-formatting, host/WASM, coverage, Miri and deployment. For local coverage/Miri,
-add `llvm-tools-preview` to the pinned stable toolchain and `miri` to the pinned
-nightly. Update the version sources together and repeat checks and GUI tests;
-tool pins do not freeze untracked Cargo lockfiles or moving Git dependencies.
-
-Manual workflows still work with the tools/targets from `devbox.json` installed separately, followed by `npm ci`; cargo-make
-defaults to stable outside Devbox.
+Tool versions are centralized in `[vars]` in `mise.toml`; npm dependencies are pinned by
+`package-lock.json`. Local task names are listed by `mise tasks` and run with
+`mise run <task>`. Tool pins do not freeze untracked Cargo lockfiles or moving
+Git dependencies.
 
 ESP-IDF, flashing and serial permissions need separate setup: follow the esp-rs
 [Xtensa](https://docs.esp-rs.org/book/installation/riscv-and-xtensa.html) or
-[RISC-V](https://docs.esp-rs.org/book/installation/riscv.html) guides after leaving
-Devbox. Host/WASM checks do not prove ESP32, nRF, STM32 or other hardware correctness.
+[RISC-V](https://docs.esp-rs.org/book/installation/riscv.html) guides. Host/WASM
+checks do not prove ESP32, nRF, STM32 or other hardware correctness.
+
+## Localization
+
+Xila embeds each language at compile time and tracks per-crate translations with
+[Tolgee](https://translate.anneraud.fr/engage/xila-core/). English (`en`)
+is the fallback, with French (`fr`), Spanish (`es`), German (`de`), Brazilian Portuguese (`pt-BR`), Italian (`it`) and Polish (`pl`) catalogs. Build
+the host, Wasm applications, fonts and seed image with the **same**
+`EMBEDDED_I18N_LOCALE` value.
+
+Simplified Chinese (`zh-CN`) catalogs are available for validation, with
+catalog-subsetted Source Han Sans SC glyphs alongside Montserrat. Native-speaker
+and embedded-target review are still pending; Chinese is not yet enabled for
+deployment. See the [Chinese font and validation notes](subsystems/graphics/fonts/README.md).
+
+See [localized build and contribution instructions](docs/localization.md) for
+validation commands, translation review and artifact compatibility.
 
 ## Graphics theme
 
@@ -127,23 +151,26 @@ or [heaptrack](https://github.com/KDE/heaptrack) separately when needed. The
 runner never installs tools or changes kernel permissions. Linux CPU recording
 requires access to perf events; a permission error is reported in the run log.
 
-Build before recording, inside the development shell:
+Build before recording, after mise has installed the project tools:
 
 ```bash
-cargo make prepare-profiling
-cargo make build-profiling --features prebuilt-applications
+mise run image:native
+mise run build:profiling -- --features prebuilt-applications
 cargo run --manifest-path tools/profiling/Cargo.toml -- measure \
   --scenario terminal-idle --output target/profiles/before --runs 3 --duration 30 \
   --applications-dir target/wasm32-wasip1/release-wasm \
-  -- target/profiling/native_example --terminal --no-network
+  -- target/profiling/native_example --terminal --no-network --seed-image target/seed/native/seed.img
 ```
 
 The `profiling` Cargo profile keeps release optimizations and full debug symbols.
 If using an explicit Cargo target or custom target directory, adjust the binary
-path. The `prebuilt-applications` feature and `--applications-dir` load prepared
-Calculator/Weather/Clock files instead of invoking Cargo during startup. A missing
-file fails explicitly. The recorder also recognizes and hashes application files
-selected by `XILA_PROFILE_APP_DIR`. Default native builds keep their existing startup builds.
+path. Every native build loads bundled applications from the disk. Prepare the
+reference image before measurement and pass `--seed-image` for a new disk;
+existing disks are mounted without reinstallation. The `prebuilt-applications`
+feature is retained for compatibility. `--applications-dir` and
+`XILA_PROFILE_APP_DIR` let the recorder identify and hash guest build artifacts;
+they no longer cause runtime compilation or copying. See the
+[native example](examples/native/README.md) and [image builder](tools/fs_image/README.md).
 Measurements still include OS startup; they are not steady-state-only data.
 Use the same disk fixture and settings on each run. A mutable disk can change
 between runs; restore its baseline if the workload writes to it.
@@ -151,15 +178,15 @@ between runs; restore its baseline if the workload writes to it.
 For allocation and task attribution, build with the optional features:
 
 ```bash
-cargo make build-profiling --features profiling,heaptrack
+mise run build:profiling -- --features profiling,heaptrack
 cargo run --manifest-path tools/profiling/Cargo.toml -- cpu \
   --scenario gui-navigation --output target/profiles/cpu --runs 1 --duration 60 \
   --applications-dir target/wasm32-wasip1/release-wasm \
-  -- target/profiling/native_example --gui --no-network --resolution 800x600
+  -- target/profiling/native_example --gui --no-network --resolution 800x600 --seed-image target/seed/native/seed.img
 cargo run --manifest-path tools/profiling/Cargo.toml -- heap \
   --scenario gui-navigation --output target/profiles/heap --runs 1 --duration 60 \
   --applications-dir target/wasm32-wasip1/release-wasm \
-  -- target/profiling/native_example --gui --no-network --resolution 800x600
+  -- target/profiling/native_example --gui --no-network --resolution 800x600 --seed-image target/seed/native/seed.img
 ```
 
 Replay the same manual GUI interactions for exploratory recordings. For repeatable
@@ -225,7 +252,8 @@ feature. It does not require installing heaptrack or access to perf events.
 
 | Directory                      | Contents                                                                     |
 | ------------------------------ | ---------------------------------------------------------------------------- |
-| [`modules/`](modules/)         | Reusable OS modules, including tasks, filesystems, graphics, and networking. |
+| [`subsystems/`](subsystems/)   | Runtime-owned services: tasks, VFS, networking, graphics, memory, and time.   |
+| [`libraries/`](libraries/)     | Reusable contracts, algorithms, adapters, and concrete implementations.      |
 | [`drivers/`](drivers/)         | Platform support and device drivers.                                         |
 | [`executables/`](executables/) | Shells, applications, and the Wasm runtime and guest bindings.               |
 | [`examples/`](examples/)       | Native and browser integration examples.                                     |

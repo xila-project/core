@@ -1,0 +1,14 @@
+{
+  "errors.already_in_use": "已被使用",
+  "errors.already_initialized": "已初始化",
+  "errors.failed_to_create_object": "创建对象失败",
+  "errors.failed_to_get_resolution": "获取分辨率失败",
+  "errors.failed_to_register": "注册失败",
+  "errors.invalid_parameter": "参数无效",
+  "errors.invalid_reference": "引用无效",
+  "errors.invalid_window_identifier": "窗口标识符无效",
+  "errors.not_available": "不可用",
+  "errors.not_initialized": "未初始化",
+  "errors.not_registered": "未注册",
+  "errors.out_of_memory": "内存不足"
+}

@@ -1,0 +1,13 @@
+[package]
+name = "drivers_headless"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+audio = { workspace = true }
+file_system = { workspace = true }
+graphics = { workspace = true, features = ["rendering_xrgb8888"] }
+shared = { workspace = true }
+
+[dev-dependencies]
+critical-section = { workspace = true, features = ["std"] }

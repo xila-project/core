@@ -1,0 +1,5 @@
+{
+  "errors.failed_to_get_main_function": "Não foi possível obter a função principal",
+  "errors.invalid_stack_size": "Tamanho de pilha inválido",
+  "errors.permission_denied": "Permissão negada"
+}

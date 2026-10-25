@@ -1,0 +1,119 @@
+# Runtime image for executing Xila applications. The builder is intentionally
+# separate so Rust, Cargo, and native build tools never reach the final stage.
+ARG RUST_VERSION=1.99.0
+FROM rust:${RUST_VERSION}-bookworm AS builder
+
+ENV CARGO_TERM_COLOR=always
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y \
+        clang \
+        cmake \
+        libasound2-dev \
+        libclang-dev \
+        libgl-dev \
+        libudev-dev \
+        libwayland-dev \
+        libxkbcommon-dev \
+        libsdl2-dev \
+        mold \
+        ninja-build \
+        pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# lv_font_conv 1.5.3 requires Node.js 24; Debian Bookworm's nodejs package is
+# too old and npm only reports the incompatibility before failing at runtime.
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x -o /tmp/nodesource_setup.sh \
+    && bash /tmp/nodesource_setup.sh \
+    && apt-get install --no-install-recommends -y nodejs \
+    && rm -rf /var/lib/apt/lists/* /tmp/nodesource_setup.sh
+
+RUN rustup component add rustfmt --toolchain ${RUST_VERSION} \
+    && rustup target add wasm32-wasip1
+
+WORKDIR /src
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts
+
+COPY . .
+
+# Keep seed generation aligned with `mise run prepare-native-image`:
+# bundled WASI apps are built first, then fs_image creates an MBR + LittleFS
+# disk that is copied to the image as an immutable seed.
+RUN cargo build --locked \
+        --package calculator \
+        --package weather \
+        --package clock \
+        --package pixel_painter \
+        --package synth \
+        --package text_editor \
+        --target wasm32-wasip1 \
+        --profile release-wasm \
+    && test -s target/wasm32-wasip1/release-wasm/text_editor.wasm \
+    && mkdir -p target/seed/native \
+    && cargo run --locked --package fs_image -- \
+        target/seed/native/seed.img 16777216 \
+        --bundle native \
+        --applications-dir target/wasm32-wasip1/release-wasm \
+    && cargo build --locked --package native_example --bin xila-runtime --release \
+    && test -s target/release/xila-runtime \
+    && test -s target/seed/native/seed.img \
+    && ldd target/release/xila-runtime > /tmp/xila-runtime-ldd \
+    && ! grep -q 'not found' /tmp/xila-runtime-ldd \
+    && awk '$2 == "=>" && $3 ~ /^\// { print $3 } $1 ~ /^\// { print $1 }' /tmp/xila-runtime-ldd \
+        | sort -u > /tmp/xila-runtime-library-paths \
+    && : > /tmp/xila-runtime-packages \
+    && while IFS= read -r library; do \
+        resolved_library="$(readlink -f "$library")"; \
+        package="$(dpkg-query --search "$resolved_library" 2>/dev/null | sed -n '1{s/: .*//;p;}')"; \
+        if [ -z "$package" ]; then \
+            package="$(dpkg-query --search "*/$(basename "$resolved_library")" | sed -n '1{s/: .*//;p;}')"; \
+        fi; \
+        if [ -z "$package" ]; then echo "No Debian package owns runtime library $library" >&2; exit 1; fi; \
+        printf '%s\n' "${package%%:*}" >> /tmp/xila-runtime-packages; \
+    done < /tmp/xila-runtime-library-paths \
+    && sort -u -o /tmp/xila-runtime-packages /tmp/xila-runtime-packages
+
+FROM debian:bookworm-slim AS runtime
+
+ARG XILA_VERSION=0.1.0
+ARG VCS_REF=unknown
+
+LABEL org.opencontainers.image.title="Xila runtime" \
+      org.opencontainers.image.description="Headless runtime for executing Xila applications" \
+      org.opencontainers.image.source="https://github.com/xila-project/core" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${XILA_VERSION}" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
+# Derive the final runtime package set from the linked executable instead of
+# copying the builder's full native toolchain dependency set.
+COPY --from=builder /tmp/xila-runtime-packages /tmp/xila-runtime-packages
+
+RUN groupadd --gid 10001 xila \
+    && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /var/lib/xila --shell /usr/sbin/nologin xila \
+    && install -d -o 10001 -g 10001 -m 0750 /var/lib/xila \
+    && install -d -o 10001 -g 10001 -m 1777 /tmp \
+    && install -d -o root -g root -m 0755 /mnt/xila /usr/share/xila \
+    && apt-get update \
+    && xargs -r apt-get install --no-install-recommends -y < /tmp/xila-runtime-packages \
+    && rm -rf /var/lib/apt/lists/* /tmp/xila-runtime-packages
+
+COPY --from=builder --chown=root:root --chmod=0555 /src/target/release/xila-runtime /usr/bin/xila-runtime
+COPY --from=builder --chown=root:root --chmod=0444 /src/target/seed/native/seed.img /usr/share/xila/base.img
+
+# The image stays on Debian's small glibc base. Fail the build if the actual
+# runner has a shared dependency missing from this stage; add only dependencies
+# demonstrated by this check when the runtime uses them.
+RUN ldd /usr/bin/xila-runtime > /tmp/xila-runtime-ldd \
+    && ! grep -q 'not found' /tmp/xila-runtime-ldd \
+    && rm /tmp/xila-runtime-ldd
+
+ENV HOME=/var/lib/xila
+VOLUME ["/var/lib/xila"]
+USER 10001:10001
+WORKDIR /var/lib/xila
+ENTRYPOINT ["/usr/bin/xila-runtime"]
+# Running the image with an attached terminal opens the Xila CLI shell.
+# One-shot WASI execution remains available with an explicit `run -- ...`.
+CMD ["shell", "--network=none"]

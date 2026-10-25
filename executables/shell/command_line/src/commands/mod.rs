@@ -3,22 +3,28 @@ mod change_directory;
 mod chmod;
 mod clear;
 mod concatenate;
+mod cp;
 mod directory;
 mod dns;
 mod echo;
 mod environment_variables;
 mod execute;
 mod exit;
+mod find;
 mod grep;
 mod head;
 mod help;
 mod ip;
 mod list;
+mod ln;
+mod mv;
 mod ping;
 mod print_working_directory;
+mod realpath;
 mod sleep;
 mod statistics;
 mod tail;
+mod touch;
 mod tree;
 mod web_request;
 mod which;
@@ -39,6 +45,7 @@ use self::{
     chmod::ChmodCommand,
     clear::ClearCommand,
     concatenate::ConcatenateCommand,
+    cp::CopyCommand,
     directory::{CreateDirectoryCommand, RemoveDirectoryCommand, RemoveFileCommand},
     dns::DnsResolveCommand,
     echo::EchoCommand,
@@ -47,14 +54,17 @@ use self::{
         SetEnvironmentVariableCommand,
     },
     exit::ExitCommand,
+    find::FindCommand,
     head::HeadCommand,
     ip::IpCommand,
     list::ListCommand,
+    mv::MoveCommand,
     ping::PingCommand,
     print_working_directory::PrintWorkingDirectoryCommand,
     sleep::SleepCommand,
     statistics::StatisticsCommand,
     tail::TailCommand,
+    touch::TouchCommand,
     tree::TreeCommand,
     web_request::WebRequestCommand,
     which::WhichCommand,
@@ -111,14 +121,21 @@ pub enum UserCommandKind {
     Ping,
     Ip,
     PrintWorkingDirectory,
+    Realpath,
     PrintEnvironmentVariable,
     Which,
     WordCount,
     Head,
     Tail,
+    Touch,
     Sleep,
     Help,
     Tree,
+    Move,
+    Copy,
+    Link,
+    ReadLink,
+    Find,
 }
 
 /// Names and help text shared by command resolution and `help`.
@@ -146,6 +163,16 @@ const BUILTINS: &[(&str, UserCommandKind, &str)] = &[
         "Usage: echo [TEXT]...\nPrint text and expand environment variables.",
     ),
     ("ls", UserCommandKind::List, list::ListArguments::HELP),
+    (
+        "ln",
+        UserCommandKind::Link,
+        "Usage: ln TARGET LINK\nCreate a symbolic link.",
+    ),
+    (
+        "readlink",
+        UserCommandKind::ReadLink,
+        "Usage: readlink LINK\nPrint a symbolic link target.",
+    ),
     ("clear", UserCommandKind::Clear, clear::ClearArguments::HELP),
     (
         "cat",
@@ -205,6 +232,11 @@ const BUILTINS: &[(&str, UserCommandKind, &str)] = &[
         "Usage: pwd\nPrint the current directory.",
     ),
     (
+        "realpath",
+        UserCommandKind::Realpath,
+        realpath::RealpathArguments::HELP,
+    ),
+    (
         "printenv",
         UserCommandKind::PrintEnvironmentVariable,
         environment_variables::GetEnvironmentVariableArguments::HELP,
@@ -219,8 +251,16 @@ const BUILTINS: &[(&str, UserCommandKind, &str)] = &[
     ("tail", UserCommandKind::Tail, tail::TailArguments::HELP),
     ("help", UserCommandKind::Help, help::HelpArguments::HELP),
     ("tree", UserCommandKind::Tree, tree::TreeArguments::HELP),
+    ("find", UserCommandKind::Find, find::FindArguments::HELP),
+    ("mv", UserCommandKind::Move, mv::MoveArguments::HELP),
+    ("cp", UserCommandKind::Copy, cp::CopyArguments::HELP),
     ("sleep", UserCommandKind::Sleep, sleep::SleepArguments::HELP),
     ("chmod", UserCommandKind::Chmod, chmod::ChmodArguments::HELP),
+    (
+        "touch",
+        UserCommandKind::Touch,
+        "Usage: touch FILE...\nCreate missing files and update access and modification times.",
+    ),
 ];
 
 pub fn resolve_user_command(name: &str) -> Option<UserCommandKind> {
@@ -286,6 +326,11 @@ where
                 .execute(context, options, paths)
                 .await
         }
+        UserCommandKind::Realpath => {
+            realpath::RealpathCommand
+                .execute(context, options, paths)
+                .await
+        }
         UserCommandKind::PrintEnvironmentVariable => {
             PrintEnvironmentVariableCommand
                 .execute(context, options, paths)
@@ -295,9 +340,15 @@ where
         UserCommandKind::WordCount => WordCountCommand.execute(context, options, paths).await,
         UserCommandKind::Head => HeadCommand.execute(context, options, paths).await,
         UserCommandKind::Tail => TailCommand.execute(context, options, paths).await,
+        UserCommandKind::Touch => TouchCommand.execute(context, options, paths).await,
         UserCommandKind::Sleep => SleepCommand.execute(context, options, paths).await,
         UserCommandKind::Help => help::HelpCommand.execute(context, options, paths).await,
         UserCommandKind::Tree => TreeCommand.execute(context, options, paths).await,
+        UserCommandKind::Find => FindCommand.execute(context, options, paths).await,
+        UserCommandKind::Move => MoveCommand.execute(context, options, paths).await,
+        UserCommandKind::Copy => CopyCommand.execute(context, options, paths).await,
+        UserCommandKind::Link => ln::LinkCommand.execute(context, options, paths).await,
+        UserCommandKind::ReadLink => ln::ReadLinkCommand.execute(context, options, paths).await,
     };
 
     match result {
@@ -380,6 +431,8 @@ mod tests {
                 resolve_user_command("sleep").expect("sleep builtin"),
             ),
             ("tree", UserCommandKind::Tree),
+            ("find", UserCommandKind::Find),
+            ("mv", UserCommandKind::Move),
             ("exit", UserCommandKind::Exit),
             ("ping", UserCommandKind::Ping),
             ("ls", UserCommandKind::List),
@@ -388,6 +441,8 @@ mod tests {
             ("cd", UserCommandKind::ChangeDirectory),
             ("clear", UserCommandKind::Clear),
             ("chmod", UserCommandKind::Chmod),
+            ("realpath", UserCommandKind::Realpath),
+            ("touch", UserCommandKind::Touch),
             ("mkdir", UserCommandKind::CreateDirectory),
             ("rm", UserCommandKind::RemoveFile),
             ("rmdir", UserCommandKind::RemoveDirectory),
@@ -498,7 +553,10 @@ mod tests {
             task::{Context, Poll, Waker},
         };
         for (arguments, expected) in [
-            (alloc::vec![], "Built-in commands:"),
+            (
+                alloc::vec![],
+                xila::internationalization::translate!("help.built_in_commands_title"),
+            ),
             (alloc::vec!["exit"], "Usage: exit"),
             (alloc::vec!["cat"], "Usage: cat"),
             (alloc::vec!["echo"], "Usage: echo"),
@@ -527,7 +585,7 @@ mod tests {
                 ));
             }
             assert!(context.output.contains(expected), "{}", context.output);
-            if expected == "Built-in commands:" {
+            if expected == xila::internationalization::translate!("help.built_in_commands_title") {
                 for name in ["help", "exit", "ls", "wc", "tail", "grep"] {
                     assert!(context.output.lines().any(|line| line == name));
                 }
@@ -636,7 +694,13 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(context.output.contains("external executable"));
+        assert!(
+            context
+                .output
+                .contains(xila::internationalization::translate!(
+                    "help.external_executable_description"
+                ))
+        );
         for command in ["missing", "plain_file", "subdirectory"] {
             let mut options = getargs::Options::new([command].into_iter());
             assert!(matches!(
@@ -786,8 +850,20 @@ mod tests {
             Some(UserCommandKind::Chmod)
         ));
         assert!(matches!(
+            resolve_user_command("touch"),
+            Some(UserCommandKind::Touch)
+        ));
+        assert!(matches!(
             resolve_user_command("tree"),
             Some(UserCommandKind::Tree)
+        ));
+        assert!(matches!(
+            resolve_user_command("realpath"),
+            Some(UserCommandKind::Realpath)
+        ));
+        assert!(matches!(
+            resolve_user_command("mv"),
+            Some(UserCommandKind::Move)
         ));
         assert!(resolve_user_command("unknown").is_none());
     }

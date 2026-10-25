@@ -1,12 +1,23 @@
 use super::{
     Function, GraphicsState, ResultKind,
     error::{GraphicsError, Result},
-    marshal::{ButtonMap, read_c_string},
+    marshal::{ButtonMap, read_c_string, read_textarea_string},
     objects::Kind,
 };
-use crate::host::translation::{GuestMemory, GuestPointer, WasmUsize};
+use crate::host::translation::{GuestMemory, GuestPointer, GuestSlice, WasmUsize};
 use core::ptr::NonNull;
 use xila::graphics::{Color, Window, lvgl};
+
+// The first cast is required when WasmUsize is u64, and intentionally redundant for memory_32.
+#[allow(clippy::unnecessary_cast)]
+pub(super) fn signed_word(value: WasmUsize) -> Result<i32> {
+    let narrowed = value as u32 as i32;
+    if narrowed as WasmUsize == value {
+        Ok(narrowed)
+    } else {
+        Err(GraphicsError::InvalidValue)
+    }
+}
 
 pub struct GraphicsCall {
     pub function: i32,
@@ -42,15 +53,246 @@ pub fn dispatch(
     }
     let _lock = manager.synchronous_lock();
     state.reap_deleted_maps();
+    if super::dispatch_generated(state, memory, &call, function)? {
+        return Ok(());
+    }
     let [a, b, c, ..] = call.arguments;
     match function {
+        Function::ObjectSetPadding => {
+            let object = state.object(a, None)?;
+            let padding = i32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            if !(0..=64).contains(&padding) {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe {
+                lvgl::lv_obj_set_style_pad_all(object, padding, 0);
+                lvgl::lv_obj_set_style_pad_row(object, padding, 0);
+                lvgl::lv_obj_set_style_pad_column(object, padding, 0);
+            }
+        }
+        Function::ObjectAlign => {
+            let object = state.object(a, None)?;
+            if b > lvgl::lv_align_t_LV_ALIGN_OUT_RIGHT_BOTTOM as WasmUsize {
+                return Err(GraphicsError::InvalidValue);
+            }
+            let x = signed_word(c)?;
+            let y = signed_word(call.arguments[3])?;
+            unsafe { lvgl::lv_obj_align(object, b as _, x, y) };
+        }
+        Function::ObjectUpdateLayout => {
+            let object = state.object(a, None)?;
+            unsafe { lvgl::lv_obj_update_layout(object) };
+        }
+        Function::ObjectSetBackground => {
+            let object = state.object(a, None)?;
+            let rgb = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let opacity = u8::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            let selector =
+                u32::try_from(call.arguments[3]).map_err(|_| GraphicsError::InvalidValue)?;
+            super::marshal::validate_style_selector(selector)?;
+            if rgb > 0x00ff_ffff {
+                return Err(GraphicsError::InvalidValue);
+            }
+            let color = unsafe { lvgl::lv_color_hex(rgb) };
+            unsafe {
+                lvgl::lv_obj_set_style_bg_color(object, color, selector);
+                lvgl::lv_obj_set_style_bg_opa(object, opacity, selector);
+            }
+        }
+        Function::ObjectSetTextColor => {
+            let object = state.object(a, None)?;
+            let rgb = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let selector = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            super::marshal::validate_style_selector(selector)?;
+            if rgb > 0x00ff_ffff {
+                return Err(GraphicsError::InvalidValue);
+            }
+            let color = unsafe { lvgl::lv_color_hex(rgb) };
+            unsafe { lvgl::lv_obj_set_style_text_color(object, color, selector) };
+        }
+        Function::ObjectSetBorder => {
+            let object = state.object(a, None)?;
+            let rgb = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let width = signed_word(c)?;
+            let side = u32::try_from(call.arguments[3]).map_err(|_| GraphicsError::InvalidValue)?;
+            let selector =
+                u32::try_from(call.arguments[4]).map_err(|_| GraphicsError::InvalidValue)?;
+            super::marshal::validate_style_selector(selector)?;
+            if rgb > 0x00ff_ffff || !(0..=64).contains(&width) || side & !0x1f != 0 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            let color = unsafe { lvgl::lv_color_hex(rgb) };
+            unsafe {
+                lvgl::lv_obj_set_style_border_color(object, color, selector);
+                lvgl::lv_obj_set_style_border_width(object, width, selector);
+                lvgl::lv_obj_set_style_border_side(object, side, selector);
+            }
+        }
+        Function::ObjectSetRadius => {
+            let object = state.object(a, None)?;
+            let radius = signed_word(b)?;
+            let selector = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            super::marshal::validate_style_selector(selector)?;
+            if !(0..=1024).contains(&radius) {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_obj_set_style_radius(object, radius, selector) };
+        }
+        Function::ObjectSetTextAlign => {
+            let object = state.object(a, None)?;
+            let align = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let selector = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            super::marshal::validate_style_selector(selector)?;
+            if align > lvgl::lv_text_align_t_LV_TEXT_ALIGN_RIGHT {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_obj_set_style_text_align(object, align, selector) };
+        }
+        Function::ObjectSetFont => {
+            let object = state.object(a, None)?;
+            let font = match b {
+                0 => xila::graphics::fonts::get_font_small(),
+                1 => xila::graphics::fonts::get_font_medium(),
+                2 => xila::graphics::fonts::get_font_large(),
+                3 => xila::graphics::fonts::get_font_extra_large(),
+                4 => xila::graphics::fonts::get_font_monospace_small(),
+                5 => xila::graphics::fonts::get_font_monospace_medium(),
+                _ => return Err(GraphicsError::InvalidValue),
+            };
+            let selector = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            super::marshal::validate_style_selector(selector)?;
+            unsafe { lvgl::lv_obj_set_style_text_font(object, font, selector) };
+        }
+        Function::ObjectSetSurface => {
+            let object = state.object(a, None)?;
+            let surface = match b {
+                0 => xila::graphics::theme::Surface::Background,
+                1 => xila::graphics::theme::Surface::Card,
+                2 => xila::graphics::theme::Surface::Popover,
+                3 => xila::graphics::theme::Surface::Muted,
+                _ => return Err(GraphicsError::InvalidValue),
+            };
+            unsafe { xila::graphics::theme::set_surface(object, surface) };
+        }
+        Function::ObjectSetMinMaxSize => {
+            let object = state.object(a, None)?;
+            let min_width = signed_word(b)?;
+            let max_width = signed_word(c)?;
+            let min_height = signed_word(call.arguments[3])?;
+            let max_height = signed_word(call.arguments[4])?;
+            let selector =
+                u32::try_from(call.arguments[5]).map_err(|_| GraphicsError::InvalidValue)?;
+            super::marshal::validate_style_selector(selector)?;
+            if !(0..=16_384).contains(&min_width)
+                || !(0..=16_384).contains(&max_width)
+                || !(0..=16_384).contains(&min_height)
+                || !(0..=16_384).contains(&max_height)
+                || min_width > max_width
+                || min_height > max_height
+            {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe {
+                lvgl::lv_obj_set_style_min_width(object, min_width, selector);
+                lvgl::lv_obj_set_style_max_width(object, max_width, selector);
+                lvgl::lv_obj_set_style_min_height(object, min_height, selector);
+                lvgl::lv_obj_set_style_max_height(object, max_height, selector);
+            }
+        }
+        Function::ObjectSetFlexAlign => {
+            let object = state.object(a, None)?;
+            let main = b;
+            let cross = c;
+            let track = call.arguments[3];
+            if [main, cross, track].iter().any(|&align| {
+                align > lvgl::lv_flex_align_t_LV_FLEX_ALIGN_SPACE_BETWEEN as WasmUsize
+            }) {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_obj_set_flex_align(object, main as _, cross as _, track as _) };
+        }
+        Function::ObjectSetLayout => {
+            let object = state.object(a, None)?;
+            if !matches!(b, 0..=2) {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_obj_set_layout(object, b as _) };
+        }
+        Function::GridFr => {
+            let weight = u8::try_from(a).map_err(|_| GraphicsError::InvalidValue)?;
+            if !(0..=99).contains(&weight) {
+                return Err(GraphicsError::InvalidValue);
+            }
+            let descriptor = unsafe { lvgl::lv_grid_fr(weight) };
+            memory
+                .write(GuestPointer::<i32>::new(call.result), descriptor)
+                .expect("validated result");
+        }
+        Function::ObjectSetGridDscArray => {
+            state.object(a, None)?;
+            let tracks = super::marshal::GridTracks::decode(
+                memory,
+                b,
+                c,
+                lvgl::LV_GRID_TEMPLATE_LAST as i32,
+                lvgl::LV_GRID_CONTENT as i32,
+            )?;
+            state.set_grid_tracks(a, tracks)?;
+        }
+        Function::ObjectSetGridAlign => {
+            let object = state.object(a, None)?;
+            let column = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let row = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            if column > lvgl::lv_grid_align_t_LV_GRID_ALIGN_SPACE_BETWEEN
+                || row > lvgl::lv_grid_align_t_LV_GRID_ALIGN_SPACE_BETWEEN
+            {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_obj_set_grid_align(object, column, row) };
+        }
+        Function::ObjectSetGridCell => {
+            let object = state.object(a, None)?;
+            let column_align = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let column = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            let column_span =
+                u32::try_from(call.arguments[3]).map_err(|_| GraphicsError::InvalidValue)?;
+            let row_align =
+                u32::try_from(call.arguments[4]).map_err(|_| GraphicsError::InvalidValue)?;
+            let row = u32::try_from(call.arguments[5]).map_err(|_| GraphicsError::InvalidValue)?;
+            let row_span =
+                u32::try_from(call.arguments[6]).map_err(|_| GraphicsError::InvalidValue)?;
+            if column_align > lvgl::lv_grid_align_t_LV_GRID_ALIGN_SPACE_BETWEEN
+                || row_align > lvgl::lv_grid_align_t_LV_GRID_ALIGN_SPACE_BETWEEN
+                || column >= (super::marshal::MAX_GRID_TRACKS_PER_AXIS - 1) as u32
+                || row >= (super::marshal::MAX_GRID_TRACKS_PER_AXIS - 1) as u32
+                || column_span == 0
+                || column_span > (super::marshal::MAX_GRID_TRACKS_PER_AXIS - 1) as u32
+                || row_span == 0
+                || row_span > (super::marshal::MAX_GRID_TRACKS_PER_AXIS - 1) as u32
+            {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe {
+                lvgl::lv_obj_set_grid_cell(
+                    object,
+                    column_align,
+                    column as i32,
+                    column_span as i32,
+                    row_align,
+                    row as i32,
+                    row_span as i32,
+                )
+            };
+        }
         Function::WindowCreate
         | Function::ObjectCreate
         | Function::LabelCreate
         | Function::ButtonCreate
         | Function::CheckboxCreate
         | Function::TabviewCreate
-        | Function::ButtonmatrixCreate => {
+        | Function::ButtonmatrixCreate
+        | Function::TextareaCreate
+        | Function::KeyboardCreate => {
             state.ensure_capacity()?;
             let (pointer, kind, parent) = if function == Function::WindowCreate {
                 let window = xila::task::block_on(manager.create_window())
@@ -62,6 +304,12 @@ pub fn dispatch(
                 let (pointer, kind) = unsafe {
                     match function {
                         Function::ObjectCreate => (lvgl::lv_obj_create(parent), Kind::Object),
+                        Function::TextareaCreate => {
+                            (lvgl::lv_textarea_create(parent), Kind::Textarea)
+                        }
+                        Function::KeyboardCreate => {
+                            (lvgl::lv_keyboard_create(parent), Kind::Keyboard)
+                        }
                         Function::LabelCreate => (lvgl::lv_label_create(parent), Kind::Label),
                         Function::ButtonCreate => (lvgl::lv_button_create(parent), Kind::Object),
                         Function::CheckboxCreate => {
@@ -115,7 +363,7 @@ pub fn dispatch(
                     .set_icon(text, Color::from_lvgl_color(color))
             };
         }
-        Function::WindowPopEvent => {
+        Function::WindowPopEvent | Function::WindowPopPointerEvent => {
             let pointer = state.object(a, Some(Kind::Window))?;
             memory
                 .validate_pointer(GuestPointer::<u32>::new(b))
@@ -123,9 +371,30 @@ pub fn dispatch(
             memory
                 .validate_pointer(GuestPointer::<WasmUsize>::new(c))
                 .ok_or(GraphicsError::InvalidMemory)?;
+            if function == Function::WindowPopPointerEvent {
+                for &offset in &call.arguments[3..7] {
+                    memory
+                        .validate_pointer(GuestPointer::<i32>::new(offset))
+                        .ok_or(GraphicsError::InvalidMemory)?;
+                }
+            }
             let mut window =
                 unsafe { Window::from_raw(pointer) }.ok_or(GraphicsError::InvalidHandle)?;
-            let (code, target) = unsafe { window.as_mut().pop_event() }.map_or((0, 0), |event| {
+            let event = unsafe { window.as_mut().pop_event() };
+            if function == Function::WindowPopPointerEvent {
+                let point = event.as_ref().and_then(|event| event.pointer).unwrap_or([
+                    i32::MIN,
+                    i32::MIN,
+                    0,
+                    0,
+                ]);
+                for (&offset, value) in call.arguments[3..7].iter().zip(point) {
+                    memory
+                        .write(GuestPointer::new(offset), value)
+                        .expect("validated pointer output");
+                }
+            }
+            let (code, target) = event.map_or((0, 0), |event| {
                 (
                     super::events::guest_code(event.code),
                     state.handle_for(event.target),
@@ -138,6 +407,89 @@ pub fn dispatch(
                 .write(GuestPointer::new(c), target)
                 .expect("validated event target");
         }
+        Function::IndexedCanvasCreate => {
+            state.ensure_capacity()?;
+            let parent = state.object(a, None)?;
+            let width = u16::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let height = u16::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            let canvas = super::canvas::IndexedCanvas::new(width as usize, height as usize)?;
+            let object = unsafe { lvgl::lv_obj_create(parent) };
+            let handle = state.insert(object, Kind::IndexedCanvas, Some(a))?;
+            if let Err(error) = state.install_canvas(handle, canvas) {
+                unsafe {
+                    lvgl::lv_obj_delete(object);
+                }
+                state.reap_deleted_maps();
+                return Err(error);
+            }
+            memory
+                .write(GuestPointer::new(call.result), handle)
+                .expect("validated result");
+        }
+        Function::IndexedCanvasSetPixels => {
+            let object = state.object(a, Some(Kind::IndexedCanvas))?;
+            let colors = call.arguments[4];
+            if colors == 0 || colors > 256 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            let pixels = memory
+                .bytes(GuestSlice::new(b, c))
+                .ok_or(GraphicsError::InvalidMemory)?;
+            let palette = memory
+                .values(GuestSlice::<u32>::new(call.arguments[3], colors))
+                .ok_or(GraphicsError::InvalidMemory)?;
+            state.canvas_mut(a).upload(pixels, palette)?;
+            unsafe {
+                lvgl::lv_obj_invalidate(object);
+            }
+        }
+        Function::TextareaSetOneLine | Function::TextareaSetMaxLength => {
+            let object = state.object(a, Some(Kind::Textarea))?;
+            unsafe {
+                if function == Function::TextareaSetOneLine {
+                    if b > 1 {
+                        return Err(GraphicsError::InvalidValue);
+                    }
+                    lvgl::lv_textarea_set_one_line(object, b != 0);
+                } else {
+                    let length = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+                    if length > 4096 {
+                        return Err(GraphicsError::ResourceLimit);
+                    }
+                    lvgl::lv_textarea_set_max_length(object, length);
+                }
+            }
+        }
+        Function::TextareaGetText | Function::TextareaGetTextLength => {
+            let object = state.object(a, Some(Kind::Textarea))?;
+            let text = unsafe { core::ffi::CStr::from_ptr(lvgl::lv_textarea_get_text(object)) };
+            let bytes = text.to_bytes_with_nul();
+            let length =
+                i32::try_from(bytes.len() - 1).map_err(|_| GraphicsError::ResourceLimit)?;
+            if function == Function::TextareaGetText {
+                if c < bytes.len() as WasmUsize {
+                    return Err(GraphicsError::InvalidValue);
+                }
+                let output = memory
+                    .bytes_mut(GuestSlice::new(b, c))
+                    .ok_or(GraphicsError::InvalidMemory)?;
+                output[..bytes.len()].copy_from_slice(bytes);
+            }
+            memory
+                .write(GuestPointer::new(call.result), length)
+                .expect("validated result");
+        }
+        Function::KeyboardSetTextarea => {
+            let keyboard = state.object(a, Some(Kind::Keyboard))?;
+            let textarea = if b == 0 {
+                core::ptr::null_mut()
+            } else {
+                state.object(b, Some(Kind::Textarea))?
+            };
+            unsafe {
+                lvgl::lv_keyboard_set_textarea(keyboard, textarea);
+            }
+        }
         Function::Percentage => {
             memory
                 .write(GuestPointer::new(call.result), unsafe {
@@ -145,20 +497,28 @@ pub fn dispatch(
                 })
                 .expect("validated result");
         }
-        Function::LabelSetText | Function::CheckboxSetText => {
+        Function::LabelSetText | Function::CheckboxSetText | Function::TextareaSetText => {
             let kind = if function == Function::LabelSetText {
                 Kind::Label
-            } else {
+            } else if function == Function::CheckboxSetText {
                 Kind::Checkbox
+            } else {
+                Kind::Textarea
             };
             let pointer = state.object(a, Some(kind))?;
-            let text = read_c_string(memory, b)?;
+            let text = if function == Function::TextareaSetText {
+                read_textarea_string(memory, b)?
+            } else {
+                read_c_string(memory, b)?
+            };
             // Both setters copy synchronously; neither retains guest bytes.
             unsafe {
                 if function == Function::LabelSetText {
                     lvgl::lv_label_set_text(pointer, text.as_ptr());
-                } else {
+                } else if function == Function::CheckboxSetText {
                     lvgl::lv_checkbox_set_text(pointer, text.as_ptr());
+                } else {
+                    lvgl::lv_textarea_set_text(pointer, text.as_ptr());
                 }
             }
         }
@@ -194,10 +554,9 @@ pub fn dispatch(
         }
         Function::ObjectSetFlexFlow
         | Function::ObjectSetFlexGrow
-        | Function::ObjectSetHeight
-        | Function::ObjectSetWidth
         | Function::ObjectAddState
-        | Function::ObjectAddFlag => {
+        | Function::ObjectAddFlag
+        | Function::ObjectRemoveFlag => {
             let pointer = state.object(a, None)?;
             unsafe {
                 match function {
@@ -211,8 +570,6 @@ pub fn dispatch(
                         pointer,
                         u8::try_from(b).map_err(|_| GraphicsError::InvalidValue)?,
                     ),
-                    Function::ObjectSetHeight => lvgl::lv_obj_set_height(pointer, b as i32),
-                    Function::ObjectSetWidth => lvgl::lv_obj_set_width(pointer, b as i32),
                     Function::ObjectAddState => {
                         let state = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
                         if state & !lvgl::lv_state_t_LV_STATE_ANY != 0 {
@@ -220,6 +577,10 @@ pub fn dispatch(
                         }
                         lvgl::lv_obj_add_state(pointer, state);
                     }
+                    Function::ObjectRemoveFlag => lvgl::lv_obj_remove_flag(
+                        pointer,
+                        u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?,
+                    ),
                     Function::ObjectAddFlag => lvgl::lv_obj_add_flag(
                         pointer,
                         u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?,
@@ -228,6 +589,7 @@ pub fn dispatch(
                 }
             }
         }
+        _ => return Err(GraphicsError::Unsupported),
     }
     Ok(())
 }

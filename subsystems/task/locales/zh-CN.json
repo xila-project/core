@@ -1,0 +1,16 @@
+{
+  "errors.already_initialized": "已初始化",
+  "errors.already_set": "已设置",
+  "errors.failed_to_create_thread": "创建线程失败",
+  "errors.failed_to_spawn_thread": "启动线程失败",
+  "errors.invalid_environment_variable": "环境变量无效",
+  "errors.invalid_spawner_identifier": "任务生成器标识符无效",
+  "errors.invalid_task_identifier": "任务标识符无效",
+  "errors.no_spawner_available": "没有可用的任务生成器",
+  "errors.no_thread_for_task": "任务没有对应的线程",
+  "errors.not_initialized": "未初始化",
+  "errors.thread_already_registered": "线程已注册",
+  "errors.thread_not_registered": "线程未注册",
+  "errors.too_many_spawners": "任务生成器过多",
+  "errors.too_many_tasks": "任务过多"
+}

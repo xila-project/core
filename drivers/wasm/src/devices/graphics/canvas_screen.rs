@@ -56,6 +56,8 @@ impl Inner {
     unsafe fn rgba_to_bgra_simd(rgba: &[u8], bgra: &mut [u8]) {
         use core::arch::wasm32::*;
 
+        assert_eq!(rgba.len(), bgra.len());
+        assert_eq!(rgba.len() % 4, 0, "pixel data must be RGBA-sized");
         let len = rgba.len();
         let mut i = 0;
         while i + 16 <= len {
@@ -69,8 +71,11 @@ impl Inner {
             i += 16;
         }
 
-        // handle remainder
-        bgra[i..len].copy_from_slice(&rgba[i..len]);
+        // XRGB8888 on little-endian WASM stores pixels as B,G,R,X.
+        // Canvas ImageData expects R,G,B,A. Swap the remaining complete pixels.
+        for (src, dst) in rgba[i..].chunks_exact(4).zip(bgra[i..].chunks_exact_mut(4)) {
+            dst.copy_from_slice(&[src[2], src[1], src[0], src[3]]);
+        }
     }
 
     fn draw_buffer(&mut self, buffer: &[RenderingColor]) -> Result<(), String> {
@@ -149,61 +154,114 @@ impl CanvasScreenDevice {
 }
 
 impl DirectBaseOperations for CanvasScreenDevice {
-    fn read(&self, _: &mut [u8], _: Size) -> file_system::Result<usize> {
-        Err(file_system::Error::UnsupportedOperation)
+    fn read(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        _: &mut [u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
     }
 
-    fn write(&self, buffer: &[u8], _: Size) -> file_system::Result<usize> {
-        let buffer: &[RenderingColor] =
-            align_slice_to(buffer).ok_or(file_system::Error::InvalidParameter)?;
+    fn write(
+        &self,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        _: Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            let buffer: &[RenderingColor] =
+                align_slice_to(buffer).ok_or(file_system::Error::InvalidParameter)?;
 
-        let mut inner = block_on(self.0.write());
+            let mut inner = block_on(self.0.write());
 
-        inner
-            .draw_buffer(buffer)
-            .map_err(|_| file_system::Error::InputOutput)?;
+            inner
+                .draw_buffer(buffer)
+                .map_err(|_| file_system::Error::InputOutput)?;
 
-        Ok(buffer.len())
+            Ok(buffer.len())
+        })
     }
 
     fn control(
         &self,
+        _cx: &mut core::task::Context<'_>,
         command: ControlCommandIdentifier,
         input: &AnyByLayout,
         output: &mut AnyByLayout,
-    ) -> file_system::Result<()> {
-        match command {
-            SET_DRAWING_AREA::IDENTIFIER => {
-                let area = SET_DRAWING_AREA::cast_input(input)?;
+    ) -> core::task::Poll<file_system::Result<()>> {
+        file_system::ready(|| {
+            match command {
+                SET_DRAWING_AREA::IDENTIFIER => {
+                    let area = SET_DRAWING_AREA::cast_input(input)?;
 
-                let mut inner = block_on(self.0.write());
-                inner.area = *area;
+                    let mut inner = block_on(self.0.write());
+                    inner.area = *area;
+                }
+                GET_RESOLUTION::IDENTIFIER => {
+                    let point = GET_RESOLUTION::cast_output(output)?;
+
+                    let inner = block_on(self.0.read());
+
+                    let resolution = inner
+                        .get_resolution()
+                        .map_err(|_| file_system::Error::InputOutput)?;
+
+                    *point = resolution;
+                }
+                WAS_RESIZED::IDENTIFIER => {
+                    let was_resized = WAS_RESIZED::cast_output(output)?;
+
+                    let mut inner = block_on(self.0.write());
+                    *was_resized = inner.was_resized;
+                    inner.was_resized = false;
+                }
+                _ => return Err(file_system::Error::InvalidParameter),
             }
-            GET_RESOLUTION::IDENTIFIER => {
-                let point = GET_RESOLUTION::cast_output(output)?;
 
-                let inner = block_on(self.0.read());
-
-                let resolution = inner
-                    .get_resolution()
-                    .map_err(|_| file_system::Error::InputOutput)?;
-
-                *point = resolution;
-            }
-            WAS_RESIZED::IDENTIFIER => {
-                let was_resized = WAS_RESIZED::cast_output(output)?;
-
-                let mut inner = block_on(self.0.write());
-                *was_resized = inner.was_resized;
-                inner.was_resized = false;
-            }
-            _ => return Err(file_system::Error::InvalidParameter),
-        }
-
-        Ok(())
+            Ok(())
+        })
     }
 }
 
 impl MountOperations for CanvasScreenDevice {}
 
 impl DirectCharacterDevice for CanvasScreenDevice {}
+
+#[cfg(test)]
+mod color_conversion_tests {
+    use alloc::{vec, vec::Vec};
+    use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    fn scalar_swap(source: &[u8]) -> Vec<u8> {
+        source
+            .chunks_exact(4)
+            .flat_map(|pixel| [pixel[2], pixel[1], pixel[0], pixel[3]])
+            .collect()
+    }
+
+    #[wasm_bindgen_test]
+    fn simd_matches_scalar_for_short_and_unaligned_rectangles() {
+        for pixels in 0..=17 {
+            let source: Vec<u8> = (0..pixels * 4)
+                .map(|index| (index * 37 + 11) as u8)
+                .collect();
+            let mut destination = vec![0; source.len()];
+            unsafe { super::Inner::rgba_to_bgra_simd(&source, &mut destination) };
+            assert_eq!(destination, scalar_swap(&source), "pixels={pixels}");
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn preserves_green_and_alpha_while_swapping_red_and_blue() {
+        let source = [10, 20, 30, 40, 255, 128, 0, 77, 0, 255, 255, 255];
+        let mut destination = [0; 12];
+        unsafe { super::Inner::rgba_to_bgra_simd(&source, &mut destination) };
+        assert_eq!(
+            destination,
+            [30, 20, 10, 40, 0, 128, 255, 77, 255, 255, 0, 255]
+        );
+    }
+}

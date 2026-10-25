@@ -1,0 +1,58 @@
+{
+  "namespace": "executables/clock",
+  "old_to_new": {
+    "12 / 24 hour": "clock.controls.toggle_hour_format",
+    "Alarm": "tabs.alarm",
+    "Alarm snoozed. ": "alerts.alarm_snoozed",
+    "Alarm! ": "alerts.alarm_ringing",
+    "Alerts are visible while Clock is running.": "alerts.instructions",
+    "Cancel": "timer.controls.cancel",
+    "Clock": "tabs.clock",
+    "Delete": "alarm.controls.delete",
+    "Disable": "alarm.controls.disable",
+    "Disabled": "alarm.status.disabled",
+    "Dismiss": "alerts.dismiss",
+    "Duration": "timer.labels.duration",
+    "Enabled: ": "alarm.status.enabled",
+    "Fri": "alarm.weekdays.friday",
+    "Host clock unavailable": "clock.errors.host_unavailable",
+    "Hour +": "alarm.controls.increment_hour",
+    "Hour -": "alarm.controls.decrement_hour",
+    "Lap": "stopwatch.controls.record_lap",
+    "Minute +": "alarm.controls.increment_minute",
+    "Minute -": "alarm.controls.decrement_minute",
+    "Mon": "alarm.weekdays.monday",
+    "No saved alarm": "alarm.status.no_saved_alarm",
+    "Pause / resume": "timer.controls.toggle_pause",
+    "Repeat on selected days; none means once. All times are UTC.": "alarm.instructions.repeat_days_utc",
+    "Recorded laps": "stopwatch.laps.recorded",
+    "Reset": "stopwatch.controls.reset",
+    "Restart": "timer.controls.restart",
+    "Sat": "alarm.weekdays.saturday",
+    "Save and enable": "alarm.controls.save_and_enable",
+    "Second +": "timer.controls.increment_second",
+    "Second -": "timer.controls.decrement_second",
+    "Settings could not be saved. ": "errors.settings_save_failed",
+    "Snooze 5 min": "alerts.snooze_five_minutes",
+    "Start": "timer.controls.start",
+    "Start / pause": "stopwatch.controls.toggle_pause",
+    "Stopwatch": "tabs.stopwatch",
+    "Sun": "alarm.weekdays.sunday",
+    "Thu": "alarm.weekdays.thursday",
+    "Timer": "tabs.timer",
+    "Timer finished! ": "alerts.timer_finished",
+    "Tue": "alarm.weekdays.tuesday",
+    "UTC / host clock. City time zones are not available yet.": "clock.instructions.utc_only",
+    "Wed": "alarm.weekdays.wednesday"
+  },
+  "split_review": {
+    "Minute +": [
+      "alarm.controls.increment_minute",
+      "timer.controls.increment_minute"
+    ],
+    "Minute -": [
+      "alarm.controls.decrement_minute",
+      "timer.controls.decrement_minute"
+    ]
+  }
+}

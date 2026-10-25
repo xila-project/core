@@ -1,0 +1,7 @@
+{
+  "errors.buffer_too_small": "Puffer zu klein",
+  "errors.failed_to_convert_length": "Länge konnte nicht konvertiert werden",
+  "errors.invalid_utf_8_string": "Ungültige UTF-8-Zeichenfolge",
+  "errors.invalid_length": "Ungültige Länge",
+  "errors.invalid_pointer": "Ungültiger Zeiger"
+}

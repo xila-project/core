@@ -1,0 +1,13 @@
+{
+  "errors.already_initialized": "Già inizializzato",
+  "errors.duplicate_group_identifier": "Identificatore di gruppo duplicato",
+  "errors.duplicate_group_name": "Nome del gruppo duplicato",
+  "errors.duplicate_user_identifier": "Identificatore utente duplicato",
+  "errors.duplicate_user_name": "Nome utente duplicato",
+  "errors.invalid_group_identifier": "Identificatore di gruppo non valido",
+  "errors.invalid_user_identifier": "Identificatore utente non valido",
+  "errors.not_initialized": "Non inizializzato",
+  "errors.poisoned_lock": "Lock invalidato",
+  "errors.too_many_groups": "Troppi gruppi",
+  "errors.too_many_users": "Troppi utenti"
+}

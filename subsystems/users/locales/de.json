@@ -1,0 +1,13 @@
+{
+  "errors.already_initialized": "Bereits initialisiert",
+  "errors.duplicate_group_identifier": "Doppelte Gruppenkennung",
+  "errors.duplicate_group_name": "Doppelter Gruppenname",
+  "errors.duplicate_user_identifier": "Doppelte Benutzerkennung",
+  "errors.duplicate_user_name": "Doppelter Benutzername",
+  "errors.invalid_group_identifier": "Ungültige Gruppenkennung",
+  "errors.invalid_user_identifier": "Ungültige Benutzerkennung",
+  "errors.not_initialized": "Nicht initialisiert",
+  "errors.poisoned_lock": "Vergiftete Sperre",
+  "errors.too_many_groups": "Zu viele Gruppen",
+  "errors.too_many_users": "Zu viele Benutzer"
+}

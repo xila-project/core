@@ -20,6 +20,6 @@ fn main() {
 fn main() {
     println!(
         "{}",
-        embedded_i18n::translate!("This executable is intended to be run in a WASM environment.")
+        embedded_i18n::translate!("errors.requires_wasm_runtime")
     );
 }

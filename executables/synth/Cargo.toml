@@ -1,0 +1,24 @@
+[package]
+name = "synth"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+application_metadata = { workspace = true }
+nanoaudio = { workspace = true, default-features = false, features = ["dsp"] }
+nanoaudio-synth = { workspace = true }
+
+[dev-dependencies]
+audio = { workspace = true }
+file_system = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm = { workspace = true, default-features = false, features = [
+  "guest",
+  "graphics",
+  "memory_32",
+] }
+
+[[test]]
+name = "build_test"
+path = "tests/build_test.rs"

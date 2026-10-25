@@ -43,54 +43,73 @@ impl BaseOperations for HashDevice {
         Ok(())
     }
 
-    fn read(&self, context: &mut Context, buffer: &mut [u8], _: Size) -> Result<usize> {
-        let hash_context = context
-            .get_private_data_mutable_of_type::<HashDeviceContext>()
-            .ok_or(file_system::Error::InvalidParameter)?;
+    fn read(
+        &self,
+        context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        _: Size,
+    ) -> core::task::Poll<Result<usize>> {
+        file_system::ready(|| {
+            let hash_context = context
+                .get_private_data_mutable_of_type::<HashDeviceContext>()
+                .ok_or(file_system::Error::InvalidParameter)?;
 
-        if buffer.len() < hash_context.hasher.output_size() {
-            return Err(Error::InvalidParameter);
-        }
+            if buffer.len() < hash_context.hasher.output_size() {
+                return Err(Error::InvalidParameter);
+            }
 
-        let result = hash_context.hasher.clone().finalize();
-        let length = result.len();
-        buffer[..length].copy_from_slice(&result);
-        Ok(length)
+            let result = hash_context.hasher.clone().finalize();
+            let length = result.len();
+            buffer[..length].copy_from_slice(&result);
+            Ok(length)
+        })
     }
 
-    fn write(&self, context: &mut Context, buffer: &[u8], _: Size) -> Result<usize> {
-        let hash_context = context
-            .get_private_data_mutable_of_type::<HashDeviceContext>()
-            .ok_or(file_system::Error::InvalidParameter)?;
+    fn write(
+        &self,
+        context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        _: Size,
+    ) -> core::task::Poll<Result<usize>> {
+        file_system::ready(|| {
+            let hash_context = context
+                .get_private_data_mutable_of_type::<HashDeviceContext>()
+                .ok_or(file_system::Error::InvalidParameter)?;
 
-        hash_context.hasher.update(buffer);
-        Ok(buffer.len())
+            hash_context.hasher.update(buffer);
+            Ok(buffer.len())
+        })
     }
 
     fn control(
         &self,
         context: &mut Context,
+        _cx: &mut core::task::Context<'_>,
         command: ControlCommandIdentifier,
         input: &AnyByLayout,
         _: &mut AnyByLayout,
-    ) -> Result<()> {
-        let hash_context = context
-            .get_private_data_mutable_of_type::<HashDeviceContext>()
-            .ok_or(file_system::Error::InvalidParameter)?;
+    ) -> core::task::Poll<Result<()>> {
+        file_system::ready(|| {
+            let hash_context = context
+                .get_private_data_mutable_of_type::<HashDeviceContext>()
+                .ok_or(file_system::Error::InvalidParameter)?;
 
-        match command {
-            hash::RESET::IDENTIFIER => {
-                hash_context.hasher.reset();
-                Ok(())
-            }
-            hash::SET_ALGORITHM::IDENTIFIER => {
-                let algorithm = SET_ALGORITHM::cast_input(input)?;
+            match command {
+                hash::RESET::IDENTIFIER => {
+                    hash_context.hasher.reset();
+                    Ok(())
+                }
+                hash::SET_ALGORITHM::IDENTIFIER => {
+                    let algorithm = SET_ALGORITHM::cast_input(input)?;
 
-                *hash_context = HashDeviceContext::new(*algorithm)?;
-                Ok(())
+                    *hash_context = HashDeviceContext::new(*algorithm)?;
+                    Ok(())
+                }
+                _ => Err(file_system::Error::UnsupportedOperation),
             }
-            _ => Err(file_system::Error::UnsupportedOperation),
-        }
+        })
     }
 
     fn clone_context(&self, context: &Context) -> Result<Context> {

@@ -1,4 +1,5 @@
 use getargs_derive::GetArgs;
+use xila::internationalization::translate;
 use xila::{
     file_system::{Kind, Path},
     virtual_file_system::Directory,
@@ -36,7 +37,9 @@ impl UserCommand for HelpCommand {
             if visit_executables(context, paths, Some(command)).await? {
                 return context
                     .write_out_fmt(format_args!(
-                        "{command}: external executable; usage is provided by the executable.\n"
+                        "{}: {}\n",
+                        command,
+                        translate!("help.external_executable_description")
                     ))
                     .await;
             }
@@ -44,13 +47,19 @@ impl UserCommand for HelpCommand {
         }
 
         context
-            .write_out_fmt(format_args!("Built-in commands:\n"))
+            .write_out_fmt(format_args!(
+                "{}\n",
+                translate!("help.built_in_commands_title")
+            ))
             .await?;
         for (name, _, _) in BUILTINS {
             context.write_out_fmt(format_args!("{name}\n")).await?;
         }
         context
-            .write_out_fmt(format_args!("Executables in Paths:\n"))
+            .write_out_fmt(format_args!(
+                "{}\n",
+                translate!("help.available_executables_title")
+            ))
             .await?;
         visit_executables(context, paths, None).await?;
         Ok(())

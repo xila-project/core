@@ -1,0 +1,16 @@
+{
+  "namespace": "subsystems/users",
+  "old_to_new": {
+    "Already initialized": "errors.already_initialized",
+    "Duplicate group identifier": "errors.duplicate_group_identifier",
+    "Duplicate group name": "errors.duplicate_group_name",
+    "Duplicate user identifier": "errors.duplicate_user_identifier",
+    "Duplicate user name": "errors.duplicate_user_name",
+    "Invalid group identifier": "errors.invalid_group_identifier",
+    "Invalid user identifier": "errors.invalid_user_identifier",
+    "Not initialized": "errors.not_initialized",
+    "Poisoned lock": "errors.poisoned_lock",
+    "Too many groups": "errors.too_many_groups",
+    "Too many users": "errors.too_many_users"
+  }
+}

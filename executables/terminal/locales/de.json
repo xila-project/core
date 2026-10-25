@@ -1,0 +1,10 @@
+{
+  "input.command_placeholder": "Befehl eingeben ...",
+  "errors.failed_to_create_object": "Objekt konnte nicht erstellt werden",
+  "errors.failed_to_execute": "Ausführung fehlgeschlagen: {}",
+  "errors.failed_to_get_task_identifier": "Aufgabenkennung konnte nicht abgerufen werden: {}",
+  "errors.failed_to_mount_device": "Gerät konnte nicht eingebunden werden: {}",
+  "errors.graphics": "Grafik: {}",
+  "errors.resource_busy": "Ressource belegt",
+  "errors.utf_8": "UTF-8: {}"
+}

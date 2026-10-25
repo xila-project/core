@@ -88,13 +88,12 @@ impl NetworkTab {
                     label_text.as_ptr() as *const _,
                 );
 
-                // center button content
-                lvgl::lv_obj_set_style_pad_all(button, 10, lvgl::LV_STATE_DEFAULT);
+                // Theme list-button style owns padding and gap; center content
                 lvgl::lv_obj_set_flex_align(
                     button,
                     lvgl::lv_flex_align_t_LV_FLEX_ALIGN_CENTER,
                     lvgl::lv_flex_align_t_LV_FLEX_ALIGN_CENTER,
-                    lvgl::lv_flex_align_t_LV_FLEX_ALIGN_SPACE_AROUND as _,
+                    lvgl::lv_flex_align_t_LV_FLEX_ALIGN_CENTER,
                 );
 
                 let switch = lvgl::lv_switch_create(button);
@@ -126,6 +125,14 @@ impl NetworkTab {
             return Err(crate::error::Error::FailedToCreateUiElement);
         }
 
+        // Flex column layout so children can use flex_grow to fill the tile
+        unsafe {
+            lvgl::lv_obj_set_flex_flow(
+                self.tab_container,
+                lvgl::lv_flex_flow_t_LV_FLEX_FLOW_COLUMN,
+            );
+        }
+
         // Create interface list
 
         unsafe {
@@ -137,9 +144,6 @@ impl NetworkTab {
             // File list properties - use flex grow to fill remaining space
             lvgl::lv_obj_set_width(self.interfaces_list, lvgl::lv_pct(100));
             lvgl::lv_obj_set_flex_grow(self.interfaces_list, 1); // Take remaining vertical space
-
-            // Ensure proper scrolling behavior
-            lvgl::lv_obj_set_style_pad_all(self.interfaces_list, 0, lvgl::LV_STATE_DEFAULT);
         }
 
         self.update_interfaces().await?;

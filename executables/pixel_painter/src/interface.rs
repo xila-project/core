@@ -1,0 +1,270 @@
+use crate::storage;
+use embedded_i18n::translate;
+use pixel_painter::drawing::{Drawing, HEIGHT, PALETTE, Viewport, WIDTH};
+use std::{
+    ffi::{CStr, CString},
+    ptr::null_mut,
+    thread::sleep,
+    time::Duration,
+};
+use wasm::*;
+
+struct Interface {
+    window: *mut Object,
+    canvas: *mut Object,
+    palette: *mut Object,
+    actions: *mut Object,
+    path: *mut Object,
+    keyboard: *mut Object,
+    status: *mut Object,
+    drawing: Drawing,
+    color: u8,
+    brush: u8,
+    revision: u64,
+    confirm_open: Option<u64>,
+    confirm_close: Option<u64>,
+    // LVGL keeps maps alive on the host; the guest maps also live for the UI's lifetime.
+    _palette_map: [*const i8; 9],
+    _action_map: [*const i8; 9],
+}
+
+pub fn run() -> wasm::Result<()> {
+    let mut ui = unsafe { Interface::new()? };
+    loop {
+        let mut repaint = false;
+        for _ in 0..32 {
+            let mut code = 0u32;
+            let mut target: *mut Object = null_mut();
+            let (mut x, mut y, mut width, mut height) = (0, 0, 0, 0);
+            unsafe {
+                window_pop_pointer_event(
+                    ui.window,
+                    &mut code,
+                    (&mut target as *mut *mut Object).cast(),
+                    &mut x,
+                    &mut y,
+                    &mut width,
+                    &mut height,
+                )?;
+            }
+            if code == EventCode::All as u32 {
+                break;
+            }
+            if code == EVENT_CLOSE_REQUESTED {
+                if !ui.drawing.is_dirty() || ui.confirm_close == Some(ui.revision) {
+                    unsafe {
+                        object_delete(u16::try_from(ui.window as usize).map_err(|_| -1)?)?;
+                    }
+                    return Ok(());
+                }
+                ui.status(translate!("warnings.unsaved_close_again"))?;
+                ui.confirm_close = Some(ui.revision);
+            } else if target == ui.canvas {
+                if code == EventCode::Pressed as u32 || code == EventCode::Pressing as u32 {
+                    if let Some((x, y)) = Viewport::new(0, 0, width, height).map(x, y) {
+                        if code == EventCode::Pressed as u32 {
+                            ui.drawing.begin_stroke(x, y, ui.color, ui.brush);
+                        } else {
+                            ui.drawing.continue_stroke(x, y, ui.color, ui.brush);
+                        }
+                        ui.revision = ui.revision.wrapping_add(1);
+                        repaint = true;
+                    } else {
+                        ui.drawing.end_stroke();
+                    }
+                } else if code == EventCode::Released as u32 || code == EventCode::PressLost as u32
+                {
+                    ui.drawing.end_stroke();
+                }
+            } else if code == EventCode::Clicked as u32 && target == ui.palette {
+                let color = unsafe { buttonmatrix_get_selected_button(ui.palette)? };
+                if color < 8 {
+                    ui.color = color as u8;
+                }
+            } else if code == EventCode::Clicked as u32 && target == ui.actions {
+                let action = unsafe { buttonmatrix_get_selected_button(ui.actions)? };
+                ui.drawing.end_stroke();
+                match action {
+                    0 => {
+                        ui.drawing.undo();
+                        ui.revision = ui.revision.wrapping_add(1);
+                        repaint = true;
+                    }
+                    1 => {
+                        ui.drawing.clear();
+                        ui.revision = ui.revision.wrapping_add(1);
+                        repaint = true;
+                    }
+                    2 | 3 => {
+                        repaint |= ui.file_action(action == 3)?;
+                    }
+                    4 => ui.brush = 1,
+                    5 => ui.brush = 3,
+                    6 => ui.brush = 5,
+                    _ => (),
+                }
+            } else if code == EventCode::Focused as u32 && target == ui.path {
+                unsafe {
+                    keyboard_set_textarea(ui.keyboard, ui.path)?;
+                    object_remove_flag(ui.keyboard, ObjectFlag::Hidden)?;
+                }
+            } else if (code == EventCode::Ready as u32 || code == EventCode::Cancel as u32)
+                && target == ui.keyboard
+            {
+                unsafe {
+                    object_add_flag(ui.keyboard, ObjectFlag::Hidden)?;
+                }
+            }
+        }
+        if repaint {
+            ui.upload()?;
+        }
+        sleep(Duration::from_millis(16));
+    }
+}
+
+impl Interface {
+    unsafe fn new() -> wasm::Result<Self> {
+        unsafe {
+            let window = window_create()?;
+            window_set_icon(
+                window,
+                c"Pa".as_ptr(),
+                Color {
+                    red: 142,
+                    green: 36,
+                    blue: 170,
+                },
+            )?;
+            object_set_flex_flow(window, FlexFlow::Column)?;
+            object_set_padding(window, 4)?;
+            let palette = buttonmatrix_create(window)?;
+            object_set_width(palette, percentage(100)?)?;
+            object_set_height(palette, 36)?;
+            let palette_map = [
+                c"W".as_ptr(),
+                c"K".as_ptr(),
+                c"R".as_ptr(),
+                c"B".as_ptr(),
+                c"G".as_ptr(),
+                c"Y".as_ptr(),
+                c"V".as_ptr(),
+                c"Br".as_ptr(),
+                c"".as_ptr(),
+            ];
+            buttonmatrix_set_map(palette, palette_map.as_ptr())?;
+            let actions = buttonmatrix_create(window)?;
+            object_set_width(actions, percentage(100)?)?;
+            object_set_height(actions, 68)?;
+            let action_map = [
+                translate!(c"controls.undo").as_ptr(),
+                translate!(c"controls.clear").as_ptr(),
+                translate!(c"controls.save").as_ptr(),
+                translate!(c"controls.open").as_ptr(),
+                c"\n".as_ptr(),
+                c"1 px".as_ptr(),
+                c"3 px".as_ptr(),
+                c"5 px".as_ptr(),
+                c"".as_ptr(),
+            ];
+            buttonmatrix_set_map(actions, action_map.as_ptr())?;
+            let path = textarea_create(window)?;
+            textarea_set_one_line(path, true)?;
+            textarea_set_max_length(path, 240)?;
+            let initial = std::env::args()
+                .nth(1)
+                .or_else(storage::default_path)
+                .unwrap_or_default();
+            let initial = CString::new(initial).map_err(|_| -1)?;
+            textarea_set_text(path, initial.as_ptr())?;
+            object_set_width(path, percentage(100)?)?;
+            object_set_height(path, 36)?;
+            let canvas = indexed_canvas_create(window, WIDTH as u16, HEIGHT as u16)?;
+            object_set_width(canvas, percentage(100)?)?;
+            object_set_flex_grow(canvas, 1)?;
+            let status = label_create(window)?;
+            object_set_width(status, percentage(100)?)?;
+            let keyboard = keyboard_create(window)?;
+            object_set_height(keyboard, 110)?;
+            object_add_flag(keyboard, ObjectFlag::Hidden)?;
+            for object in [palette, actions, path, canvas, keyboard] {
+                object_add_flag(object, ObjectFlag::EventBubble)?;
+            }
+            let ui = Self {
+                window,
+                canvas,
+                palette,
+                actions,
+                path,
+                keyboard,
+                status,
+                drawing: Drawing::new(),
+                color: 1,
+                brush: 1,
+                revision: 0,
+                confirm_open: None,
+                confirm_close: None,
+                _palette_map: palette_map,
+                _action_map: action_map,
+            };
+            ui.status(translate!("status.ready_white_erases"))?;
+            ui.upload()?;
+            Ok(ui)
+        }
+    }
+
+    fn status(&self, text: &str) -> wasm::Result<()> {
+        let text = CString::new(text).map_err(|_| -1)?;
+        unsafe { label_set_text(self.status, text.as_ptr().cast_mut()) }
+    }
+
+    fn upload(&self) -> wasm::Result<()> {
+        unsafe {
+            indexed_canvas_set_pixels(
+                self.canvas,
+                self.drawing.pixels().as_ptr(),
+                self.drawing.pixels().len(),
+                PALETTE.as_ptr(),
+                PALETTE.len(),
+            )
+        }
+    }
+
+    fn file_action(&mut self, opening: bool) -> wasm::Result<bool> {
+        if opening && self.drawing.is_dirty() && self.confirm_open != Some(self.revision) {
+            self.confirm_open = Some(self.revision);
+            self.status(translate!("warnings.unsaved_open_again"))?;
+            return Ok(false);
+        }
+        self.confirm_open = None;
+        // LVGL limits characters, not UTF-8 bytes: allow four bytes per character.
+        let mut bytes = [0i8; 240 * 4 + 1];
+        unsafe {
+            textarea_get_text(self.path, bytes.as_mut_ptr(), bytes.len())?;
+        }
+        let path = unsafe { CStr::from_ptr(bytes.as_ptr()) }
+            .to_str()
+            .unwrap_or("");
+        if !path.starts_with('/') || path.ends_with('/') {
+            self.status(translate!("file_path.placeholder"))?;
+            return Ok(false);
+        }
+        if opening {
+            match storage::read(path) {
+                Ok(bytes) if self.drawing.replace_from_bytes(&bytes).is_ok() => {
+                    self.revision = self.revision.wrapping_add(1);
+                    self.status(translate!("status.opened"))?;
+                    return Ok(true);
+                }
+                Ok(_) => self.status(translate!("errors.invalid_file_drawing_preserved"))?,
+                Err(_) => self.status(translate!("errors.open_failed"))?,
+            }
+        } else if storage::write(path, &self.drawing.encode()).is_ok() {
+            self.drawing.mark_saved();
+            self.status(translate!("status.saved"))?;
+        } else {
+            self.status(translate!("errors.save_failed_drawing_preserved"))?;
+        }
+        Ok(false)
+    }
+}

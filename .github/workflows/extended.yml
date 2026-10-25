@@ -1,0 +1,129 @@
+name: Extended validation
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+  workflow_call:
+    secrets:
+      CODECOV_TOKEN:
+        required: false
+    outputs:
+      validated-sha:
+        description: Commit SHA that passed every deep validation job
+        value: ${{ jobs.release-gate.outputs.validated-sha }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  coverage:
+    name: Host coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      MISE_ENV: ci
+      CARGO_LLVM_COV_TARGET_DIR: ${{ github.workspace }}/target/llvm-cov-target
+      XILA_MBX: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5.2.2
+      - run: mise run deps:npm
+      - id: toolchain
+        run: mise run ci:toolchain
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          toolchain: ${{ steps.toolchain.outputs.version }}
+          github-cache-mode: objects
+          cache-generation: v1-extended-coverage
+          save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
+      - run: mise run ci:coverage
+      - uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: Xila-Project/Core
+          files: lcov.info
+          fail_ci_if_error: true
+
+  profiling:
+    name: Profiling feature tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MISE_ENV: ci
+      XILA_MBX: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5.2.2
+      - run: mise run deps:npm
+      - id: toolchain
+        run: mise run ci:toolchain
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          toolchain: ${{ steps.toolchain.outputs.version }}
+          github-cache-mode: target
+          cache-generation: v1-extended-profiling
+          save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
+      - name: Test runtime profiling instrumentation
+        run: mise run ci:profiling-runtime-tests
+      - name: Test native profiling configuration
+        run: mise run ci:profiling-native-tests
+
+  abi-deep:
+    name: ABI coverage and Miri (${{ matrix.memory }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        memory: [memory_32, memory_64]
+    env:
+      MISE_ENV: ci
+      CI_ABI_MEMORY: ${{ matrix.memory }}
+      XILA_MBX: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5.2.2
+      - id: toolchain
+        run: mise run ci:toolchain-nightly
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          toolchain: ${{ steps.toolchain.outputs.version }}
+          github-cache-mode: objects
+          cache-generation: v1-extended-abi-${{ matrix.memory }}
+          save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
+      - name: Enforce ABI coverage thresholds
+        run: mise run ci:abi-coverage
+      - name: Test ABI with host Miri
+        run: mise run ci:abi-miri
+      - name: Test ABI with cross-architecture Miri
+        run: mise run ci:abi-miri-cross
+
+  release-gate:
+    name: Deep validation gate
+    if: always()
+    needs: [coverage, abi-deep, profiling]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      validated-sha: ${{ steps.sha.outputs.validated-sha }}
+    steps:
+      - name: Require successful deep checks
+        env:
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
+          ABI_RESULT: ${{ needs.abi-deep.result }}
+          PROFILING_RESULT: ${{ needs.profiling.result }}
+        run: |
+          set -euo pipefail
+          for result in "$COVERAGE_RESULT" "$ABI_RESULT" "$PROFILING_RESULT"; do
+            if [[ "$result" != success ]]; then
+              echo "::error::Deep validation finished with result: $result"
+              exit 1
+            fi
+          done
+      - name: Record validated commit
+        id: sha
+        run: echo "validated-sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"

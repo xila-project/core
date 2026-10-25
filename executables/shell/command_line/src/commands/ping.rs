@@ -44,14 +44,16 @@ async fn write_ping_line<C: CommandContext>(
     context: &mut C,
     target: &str,
     resolved_target: &xila::network::IpAddress,
+    payload_size: usize,
 ) -> crate::Result<()> {
+    let unit = xila::internationalization::translate_plural!(
+        "ping.request.payload_byte_unit",
+        payload_size
+    );
     context
         .write_out_fmt(format_args!(
-            "{}\n",
-            format_args!(
-                translate!("PING {} ({}): {} data bytes"),
-                target, resolved_target, 56
-            )
+            "PING {} ({}): {} {}\n",
+            target, resolved_target, payload_size, unit
         ))
         .await
 }
@@ -86,16 +88,19 @@ async fn ping_loop<C: CommandContext>(
             .await
         {
             Ok(duration) => {
+                let unit = xila::internationalization::translate_plural!(
+                    "ping.reply.byte_unit",
+                    payload_size
+                );
                 context
                     .write_out_fmt(format_args!(
-                        "{}\n",
-                        format_args!(
-                            translate!("{} bytes from {}: icmp_seq={} time={:.2} ms"),
-                            payload_size,
-                            resolved_target,
-                            i,
-                            duration.as_milliseconds()
-                        )
+                        "{} {} {}: icmp_seq={} {}={:.2} ms\n",
+                        payload_size,
+                        unit,
+                        resolved_target,
+                        i,
+                        translate!("ping.reply.time_label"),
+                        duration.as_milliseconds()
                     ))
                     .await?;
             }
@@ -103,7 +108,7 @@ async fn ping_loop<C: CommandContext>(
                 context
                     .write_out_fmt(format_args!(
                         "{}\n",
-                        format_args!(translate!("Request timeout for icmp_seq {}"), i)
+                        format_args!(translate!("ping.errors.request_timeout"), i)
                     ))
                     .await?;
             }
@@ -111,7 +116,7 @@ async fn ping_loop<C: CommandContext>(
                 context
                     .write_out_fmt(format_args!(
                         "{}\n",
-                        format_args!(translate!("Error: {}"), e)
+                        format_args!(translate!("errors.with_details"), e)
                     ))
                     .await?;
             }
@@ -154,14 +159,14 @@ where
             context
                 .write_out_fmt(format_args!(
                     "{}\n",
-                    format_args!(translate!("Cannot resolve {}: Unknown host"), target)
+                    format_args!(translate!("dns.errors.unknown_host"), target)
                 ))
                 .await?;
             return Ok(());
         }
     };
 
-    write_ping_line(context, target, &resolved_target).await?;
+    write_ping_line(context, target, &resolved_target, payload_size).await?;
     ping_loop(
         context,
         manager,
@@ -187,6 +192,37 @@ mod tests {
         )
         .unwrap();
         assert_eq!((parsed.count, parsed.timeout, parsed.size), (2, 3, 32));
+    }
+
+    #[test]
+    fn ping_byte_counts_select_singular_and_plural() {
+        let (data_one, data_many, reply_one, reply_many) =
+            match xila::internationalization::get_locale() {
+                "fr" => (
+                    "octet de données",
+                    "octets de données",
+                    "octet de",
+                    "octets de",
+                ),
+                "zh-CN" => ("字节数据", "字节数据", "字节，来自", "字节，来自"),
+                _ => ("data byte", "data bytes", "byte from", "bytes from"),
+            };
+        assert_eq!(
+            xila::internationalization::translate_plural!("ping.request.payload_byte_unit", 1usize),
+            data_one
+        );
+        assert_eq!(
+            xila::internationalization::translate_plural!("ping.request.payload_byte_unit", 2usize),
+            data_many
+        );
+        assert_eq!(
+            xila::internationalization::translate_plural!("ping.reply.byte_unit", 1usize),
+            reply_one
+        );
+        assert_eq!(
+            xila::internationalization::translate_plural!("ping.reply.byte_unit", 2usize),
+            reply_many
+        );
     }
 
     #[test]

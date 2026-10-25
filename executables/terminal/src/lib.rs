@@ -27,7 +27,7 @@ use crate::{error::Result, terminal::Terminal};
 pub const SHORTCUT: &str = r#"
 {
     "name": "Terminal",
-    "command": "/binaries/terminal",
+    "command": "/applications/executables/terminal",
     "arguments": [],
     "terminal": false,
     "icon_string": ">_",
@@ -41,20 +41,22 @@ async fn mount_and_open(
 ) -> Result<Standard<'static>> {
     let virtual_file_system = &standard.context.virtual_file_system;
 
-    let _ = virtual_file_system.remove(task, &"/devices/terminal").await;
+    let _ = virtual_file_system
+        .remove(task, &"/devices/standard_io/terminal")
+        .await;
 
     virtual_file_system
         .mount_static(
             task,
-            &"/devices/terminal",
+            &"/devices/standard_io/terminal",
             ItemStatic::CharacterDevice(terminal),
         )
         .await?;
 
     let standard = Standard::open(
-        &"/devices/terminal",
-        &"/devices/terminal",
-        &"/devices/terminal",
+        &"/devices/standard_io/terminal",
+        &"/devices/standard_io/terminal",
+        &"/devices/standard_io/terminal",
         task,
         virtual_file_system,
         standard.context,
@@ -73,7 +75,7 @@ async fn inner_main(task: TaskIdentifier, standard: &Standard<'static>) -> Resul
 
     xila::executable::execute(
         standard.context,
-        "/binaries/command_line_shell",
+        "/applications/executables/command_line_shell",
         vec![],
         standard,
         None,

@@ -1,0 +1,23 @@
+{
+  "errors.authentication_failed": "身份验证失败：{}",
+  "errors.failed_to_add_shortcut": "添加快捷方式失败：{}",
+  "errors.failed_to_create_object": "创建对象失败",
+  "errors.failed_to_deserialize_shortcut": "反序列化快捷方式失败：{}",
+  "errors.failed_to_execute_shortcut": "执行快捷方式失败：{}",
+  "errors.failed_to_get_child": "获取子对象失败",
+  "errors.failed_to_get_current_task_identifier": "获取当前任务标识符失败：{}",
+  "errors.failed_to_get_shortcut_file_path": "获取快捷方式文件路径失败",
+  "errors.failed_to_open_directory": "打开目录失败：{}",
+  "errors.failed_to_open_standard_file": "打开标准文件失败：{}",
+  "errors.failed_to_read_shortcut_directory": "读取快捷方式目录失败：{}",
+  "errors.failed_to_read_shortcut_file": "读取快捷方式文件失败：{}",
+  "errors.failed_to_set_environment_variable": "设置环境变量失败：{}",
+  "errors.failed_to_set_task_user": "设置任务用户失败：{}",
+  "errors.graphics_error": "图形错误：{}",
+  "errors.invalid_utf_8": "无效的 UTF-8：{}",
+  "errors.missing_arguments": "缺少参数",
+  "errors.null_character_in_string": "字符串包含空字符：{}",
+  "login.actions.submit": "登录",
+  "login.fields.password": "密码",
+  "login.fields.username": "用户名"
+}

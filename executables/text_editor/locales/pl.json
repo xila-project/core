@@ -1,0 +1,22 @@
+{
+  "app.title": "Edytor tekstu",
+  "navigation.previous_page": "Poprzednia",
+  "navigation.next_page": "Następna",
+  "controls.new_file": "Nowy",
+  "controls.open_file": "Otwórz",
+  "controls.save_file": "Zapisz",
+  "file_path.instructions": "Wybierz ścieżkę, a następnie utwórz lub otwórz plik tekstowy",
+  "warnings.unsaved_close_again": "Niezapisane zmiany - zamknij ponownie, aby odrzucić",
+  "warnings.unsaved_new_or_open_again": "Niezapisane zmiany - ponownie wybierz Nowy lub Otwórz, aby odrzucić",
+  "file_path.placeholder": "Wpisz bezwzględną ścieżkę pliku",
+  "status.open_or_create_first": "Najpierw otwórz lub utwórz plik",
+  "errors.working_copy_creation_failed": "Nie udało się utworzyć kopii roboczej w tym katalogu",
+  "file_path.new_file_default_name": "Nowy plik tekstowy",
+  "status.opened": "Otwarto",
+  "errors.open_failed": "Nie udało się otworzyć - użyj pliku UTF-8 i sprawdź pamięć",
+  "status.saved": "Zapisano",
+  "errors.save_failed_working_copy_preserved": "Nie udało się zapisać - kopia robocza zachowana; sprawdź ścieżkę i pamięć",
+  "errors.page_exceeds_byte_limit": "Tekst strony nie może przekraczać 4096 bajtów UTF-8",
+  "errors.edit_failed_close_again": "Edycja nie powiodła się - zamknij ponownie, aby odrzucić zmiany",
+  "errors.edit_failed_reopen_source": "Edycja nie powiodła się - otwórz ponownie plik źródłowy"
+}

@@ -57,7 +57,6 @@ async fn deleted_maps_are_reclaimed_without_reusing_handles() {
         let mut state = GraphicsState::new(Some(manager));
         let root = call(&mut state, &mut memory, Function::WindowCreate, &[]);
         let root_pointer = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
-        let baseline = __DRIVERS_STD_MEMORY_ALLOCATOR.get_used();
         let mut previous = root;
         for _ in 0..16 {
             let parent = if mode == "parent" {
@@ -79,6 +78,7 @@ async fn deleted_maps_are_reclaimed_without_reusing_handles() {
                 Function::ButtonmatrixSetMap,
                 &[matrix, 400],
             );
+            let with_map = __DRIVERS_STD_MEMORY_ALLOCATOR.get_used();
             if mode == "external" {
                 let _lock = manager.synchronous_lock();
                 unsafe { lvgl::lv_obj_delete(lvgl::lv_obj_get_child(root_pointer, 0)) };
@@ -92,6 +92,15 @@ async fn deleted_maps_are_reclaimed_without_reusing_handles() {
             }
             // Next dispatch reaps external deletions before allocating again.
             call(&mut state, &mut memory, Function::Percentage, &[100]);
+            let reclaimed = with_map.saturating_sub(__DRIVERS_STD_MEMORY_ALLOCATOR.get_used());
+            // Measure deletion against the same registry capacity: handles are
+            // never reused, so tombstones can legitimately outgrow one map.
+            // Eight 1000-byte strings, their NULs, and the empty sentinel must
+            // be released, in addition to the native widget allocations.
+            assert!(
+                reclaimed >= 8009,
+                "{mode} deletion reclaimed only {reclaimed} bytes"
+            );
             for _ in 0..128 {
                 call(
                     &mut state,
@@ -104,12 +113,6 @@ async fn deleted_maps_are_reclaimed_without_reusing_handles() {
                 }
             }
         }
-        let growth = __DRIVERS_STD_MEMORY_ALLOCATOR
-            .get_used()
-            .saturating_sub(baseline);
-        // Allow small tombstones/queue/registry capacity, but not even one
-        // retained 8009-byte map, let alone 16 deleted widgets' maps.
-        assert!(growth < 8009, "{mode} deletion retained {growth} bytes");
         drop(state);
         assert_eq!(manager.get_window_count().await.unwrap(), 0);
     }
