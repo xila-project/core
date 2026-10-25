@@ -135,7 +135,10 @@ fn collect_translation_characters(
         }
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("Non-string translation for {key:?} in {}", catalog.display()),
+            format!(
+                "Non-string translation for {key:?} in {}",
+                catalog.display()
+            ),
         )),
     }
 }
@@ -220,7 +223,10 @@ mod tests {
         );
         let symbols = collect(&root.0, &["zh-CN"]).unwrap();
         for character in ['设', '置', '：', '项', '多', '。'] {
-            assert!(symbols.cjk.contains(character), "missing glyph: {character}");
+            assert!(
+                symbols.cjk.contains(character),
+                "missing glyph: {character}"
+            );
         }
     }
 
