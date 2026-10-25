@@ -165,7 +165,7 @@ async fn led_handles_expose_bounded_brightness_and_toggle_operations() {
         &mut state,
         &mut memory,
         Function::LedSetBrightness,
-        &[led, 73],
+        &[led, 150],
         0,
     )
     .unwrap();
@@ -173,7 +173,7 @@ async fn led_handles_expose_bounded_brightness_and_toggle_operations() {
     {
         let _lock = manager.synchronous_lock();
         let native_led = unsafe { lvgl::lv_obj_get_child(native_window, 0) };
-        assert_eq!(unsafe { lvgl::lv_led_get_brightness(native_led) }, 73);
+        assert_eq!(unsafe { lvgl::lv_led_get_brightness(native_led) }, 150);
     }
 
     call(&mut state, &mut memory, Function::LedOff, &[led], 0).unwrap();
