@@ -115,6 +115,10 @@ impl VirtualFileSystem {
 
         let mut file_systems = self.file_systems.write().await;
 
+        if Self::protects_mount(&file_systems, path, false) {
+            return Err(Error::RessourceBusy);
+        }
+
         let parent_path = path.go_parent().ok_or(Error::InvalidPath)?;
 
         let (underlying_file_system, _, _) =
@@ -150,7 +154,8 @@ impl VirtualFileSystem {
                     return Err(Error::RessourceBusy);
                 }
 
-                underlying_file_system.file_system.remove(relative_path)?;
+                // Unmount only removes the overlay; the original directory
+                // (including hidden contents) belongs to the underlying namespace.
                 file_system.file_system.unmount()?;
                 file_systems[mountpoint_index].is_mounted = false;
             }
@@ -636,6 +641,9 @@ impl VirtualFileSystem {
         size: usize,
         task: TaskIdentifier,
     ) -> Result<()> {
+        if size == 0 {
+            return Err(Error::FileSystem(file_system::Error::InvalidParameter));
+        }
         self.mount_static(
             task,
             path,
@@ -678,6 +686,10 @@ impl VirtualFileSystem {
             .resolve_path(&file_systems, path.as_ref(), false, false, user, task)
             .await?;
         let path: &Path = &resolved_path;
+        if Self::protects_mount(&file_systems, path, true) {
+            return Err(Error::RessourceBusy);
+        }
+
         let (file_system, relative_path, _) =
             Self::get_file_system_from_path(&file_systems, &path)?; // Get the file system identifier and the relative path
 
@@ -1023,6 +1035,11 @@ impl VirtualFileSystem {
             .await?;
         let old_path: &Path = &old_path;
         let new_path: &Path = &new_path;
+        if Self::protects_mount(&file_systems, old_path, true)
+            || Self::protects_mount(&file_systems, new_path, true)
+        {
+            return Err(Error::RessourceBusy);
+        }
 
         let (old_file_system, old_relative_path, _) =
             Self::get_file_system_from_path(&file_systems, &old_path)?; // Get the file system identifier and the relative path

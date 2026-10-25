@@ -63,7 +63,7 @@ requests on the executing test thread:
 | Synchronous file object size | 80 bytes | 104 bytes |
 | Open an existing file | 11 requests | 11 requests |
 | Descriptor chmod | 0 requests | 0 requests |
-| Path chown with an open file | 3 requests | 4 requests |
+| Path chown with an open file | 4 requests | 4 requests |
 | One read / one write | 0 / 0 requests | 0 / 0 requests |
 
 These request counts exclude LittleFS's native allocator; the temporary probe

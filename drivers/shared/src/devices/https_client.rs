@@ -17,6 +17,9 @@ use shared::HttpRequestParser;
 use synchronization::Arc;
 const DEFAULT_HTTPS_PORT: u16 = 443;
 const TLS_RECORD_BUFFER_SIZE: usize = 16384;
+// TLS 1.3 ciphertext can exceed the plaintext record limit by 256 bytes
+// (RFC 8446 section 5.2; embedded-tls RecordReader requires this capacity).
+const TLS_READ_RECORD_BUFFER_SIZE: usize = TLS_RECORD_BUFFER_SIZE + 256;
 struct RandomNumberGenerator<T: DirectCharacterDevice + 'static>(&'static T);
 
 impl<T: DirectCharacterDevice + 'static> TryCryptoRng for RandomNumberGenerator<T> {}
@@ -115,7 +118,7 @@ async fn run_request<T: DirectCharacterDevice + 'static>(
         let (host, port) = split_host_port(host, DEFAULT_HTTPS_PORT);
         let socket = create_tcp_connection(manager, host, port).await?;
         // Allocate directly on the heap; no 16 KiB arrays in the worker future.
-        let mut read_record = vec![0; TLS_RECORD_BUFFER_SIZE].into_boxed_slice();
+        let mut read_record = vec![0; TLS_READ_RECORD_BUFFER_SIZE].into_boxed_slice();
         let mut write_record = vec![0; TLS_RECORD_BUFFER_SIZE].into_boxed_slice();
         let mut tls = TlsConnection::new(socket, &mut read_record, &mut write_record);
         let configuration = TlsConfig::new().with_server_name(host);

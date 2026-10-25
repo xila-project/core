@@ -986,3 +986,189 @@ async fn hostfs_absolute_link_uses_vfs_root_without_escaping_host_capability() {
     vfs.unmount(Path::from_str("/host"), true).await.unwrap();
     let _ = fs::remove_dir_all(root);
 }
+
+#[cfg(target_os = "linux")]
+async fn unprivileged_user(vfs: &VirtualFileSystem) -> users::UserIdentifier {
+    let task = vfs.task_manager().get_current_task_identifier().await;
+    vfs.set_permissions(
+        task,
+        "/",
+        file_system::Permissions::from_octal(0o755).unwrap(),
+    )
+    .await
+    .unwrap();
+    let user = users::UserIdentifier::new(1001);
+    vfs.users_manager()
+        .add_user(user, "unprivileged", users::GroupIdentifier::ROOT)
+        .await
+        .unwrap();
+    user
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn owner_permissions_do_not_fall_through_to_group_or_others() {
+    use file_system::Permissions;
+    let (task, vfs) = initialize().await;
+    let user = unprivileged_user(vfs).await;
+    File::write_to_path(vfs, task, "/owned", b"data")
+        .await
+        .unwrap();
+    vfs.set_ownership(task, "/owned", Some(user), None)
+        .await
+        .unwrap();
+    vfs.set_permissions(task, "/owned", Permissions::from_octal(0o466).unwrap())
+        .await
+        .unwrap();
+    vfs.task_manager().set_user(task, user).await.unwrap();
+    assert!(matches!(
+        File::open(vfs, task, "/owned", AccessFlags::Write.into()).await,
+        Err(virtual_file_system::Error::PermissionDenied)
+    ));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn group_permissions_do_not_fall_through_to_others() {
+    use file_system::Permissions;
+    let (task, vfs) = initialize().await;
+    let user = unprivileged_user(vfs).await;
+    File::write_to_path(vfs, task, "/foreign", b"data")
+        .await
+        .unwrap();
+    vfs.set_permissions(task, "/foreign", Permissions::from_octal(0o646).unwrap())
+        .await
+        .unwrap();
+    vfs.task_manager().set_user(task, user).await.unwrap();
+    assert!(matches!(
+        File::open(vfs, task, "/foreign", AccessFlags::Write.into()).await,
+        Err(virtual_file_system::Error::PermissionDenied)
+    ));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn owner_can_chmod_path_but_cannot_change_ownership() {
+    use file_system::Permissions;
+    let (task, vfs) = initialize().await;
+    let user = unprivileged_user(vfs).await;
+    File::write_to_path(vfs, task, "/owned", b"data")
+        .await
+        .unwrap();
+    vfs.set_ownership(task, "/owned", Some(user), None)
+        .await
+        .unwrap();
+    vfs.task_manager().set_user(task, user).await.unwrap();
+    vfs.set_permissions(task, "/owned", Permissions::from_octal(0o644).unwrap())
+        .await
+        .unwrap();
+    for (uid, gid) in [
+        (Some(users::UserIdentifier::ROOT), None),
+        (None, Some(users::GroupIdentifier::ROOT)),
+    ] {
+        assert_eq!(
+            vfs.set_ownership(task, "/owned", uid, gid).await,
+            Err(virtual_file_system::Error::PermissionDenied)
+        );
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[path = "support/path_io.rs"]
+mod path_io;
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn zero_capacity_named_pipe_is_rejected_without_creating_an_entry() {
+    let (task, vfs) = initialize().await;
+    assert_eq!(
+        vfs.create_named_pipe(&"/zero", 0, task).await,
+        Err(virtual_file_system::Error::FileSystem(
+            file_system::Error::InvalidParameter
+        ))
+    );
+    assert!(matches!(
+        vfs.get_statistics(&"/zero").await,
+        Err(virtual_file_system::Error::FileSystem(
+            file_system::Error::NotFound
+        ))
+    ));
+}
+
+#[cfg(target_os = "linux")]
+async fn mount_test_filesystem(vfs: &'static VirtualFileSystem, task: TaskIdentifier, path: &str) {
+    let device = MemoryDevice::<512>::new_static(512 * 128);
+    little_fs::FileSystem::format(device, 256).unwrap();
+    vfs.mount_file_system(
+        little_fs::FileSystem::new(device, 256).unwrap(),
+        Path::new(path),
+        task,
+    )
+    .await
+    .unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn unmount_preserves_the_underlying_directory_and_contents() {
+    let (task, vfs) = initialize().await;
+    vfs.create_directory(task, &"/mount").await.unwrap();
+    File::write_to_path(vfs, task, "/mount/original", b"kept")
+        .await
+        .unwrap();
+    mount_test_filesystem(vfs, task, "/mount").await;
+    vfs.unmount("/mount", false).await.unwrap();
+    let mut bytes = [0; 4];
+    File::read_slice_from_path(vfs, task, "/mount/original", &mut bytes)
+        .await
+        .unwrap();
+    assert_eq!(&bytes, b"kept");
+    mount_test_filesystem(vfs, task, "/mount").await;
+    vfs.unmount("/mount", false).await.unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn active_mount_ancestors_cannot_be_renamed_or_removed() {
+    let (task, vfs) = initialize().await;
+    vfs.create_directory(task, &"/ancestor").await.unwrap();
+    mount_test_filesystem(vfs, task, "/ancestor/mount").await;
+    assert_eq!(
+        vfs.rename(task, &"/ancestor", &"/moved").await,
+        Err(virtual_file_system::Error::RessourceBusy)
+    );
+    assert_eq!(
+        vfs.remove(task, "/ancestor/mount").await,
+        Err(virtual_file_system::Error::RessourceBusy)
+    );
+    assert_eq!(
+        vfs.rename(task, &"/ancestor/mount", &"/other").await,
+        Err(virtual_file_system::Error::RessourceBusy)
+    );
+    // A shorter shared string prefix must not reserve unrelated siblings.
+    vfs.create_directory(task, &"/anc").await.unwrap();
+    vfs.rename(task, &"/anc", &"/other-prefix").await.unwrap();
+    vfs.remove(task, "/other-prefix").await.unwrap();
+    // A component prefix must not reserve unrelated names.
+    vfs.create_directory(task, &"/ancestor2").await.unwrap();
+    vfs.rename(task, &"/ancestor2", &"/unrelated")
+        .await
+        .unwrap();
+    vfs.remove(task, "/unrelated").await.unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn unmount_refuses_to_orphan_nested_mounts_even_when_forced() {
+    let (task, vfs) = initialize().await;
+    mount_test_filesystem(vfs, task, "/parent").await;
+    mount_test_filesystem(vfs, task, "/parent/child").await;
+    for force in [false, true] {
+        assert_eq!(
+            vfs.unmount("/parent", force).await,
+            Err(virtual_file_system::Error::RessourceBusy)
+        );
+    }
+    vfs.unmount("/parent/child", false).await.unwrap();
+    vfs.unmount("/parent", false).await.unwrap();
+}
