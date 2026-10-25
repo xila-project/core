@@ -60,11 +60,15 @@ test("rejects ambiguous keys which Tolgee could silently merge", () => {
 test("all Xila locale files are nested and round-trip without changing messages", () => {
   const catalogs = ["executables", "libraries", "subsystems", "drivers"]
     .flatMap(directory => findCatalogs(path.join(ROOT, directory)));
-  assert.ok(catalogs.length >= 152, "expected at least 19 namespaces with 8 locales each");
+  assert.ok(catalogs.length >= 160, "expected at least 20 namespaces with 8 locales each");
   for (const file of catalogs) {
     const nested = JSON.parse(readFileSync(file, "utf8"));
     const dotted = flattenCatalog(nested);
-    assert.ok(Object.keys(dotted).length > 0, file + ": empty catalog");
+    if (Object.keys(dotted).length === 0) {
+      // Bootsplash intentionally has eight empty catalogs and no translations.
+      assert.match(file, /[/\\]libraries[/\\]bootsplash[/\\]locales[/\\]/);
+      continue;
+    }
     for (const [key, value] of Object.entries(dotted)) {
       assert.match(key, KEY, file + ": nonsemantic translation key");
       assert.equal(typeof value, "string", file + ": non-string translation: " + key);
