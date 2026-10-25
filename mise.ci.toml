@@ -123,7 +123,7 @@ run = "taplo format --check"
 [tasks."ci:quality-js"]
 description = "Check JSON formatting and localization extractor tests"
 extends = "ci:node"
-run = "npm exec prettier -- --check \"**/*.json\" && node --test tolgee.extractor.test.mjs && node tools/localization/check.mjs"
+run = "npm exec prettier -- --check \"**/*.json\" && node --test tolgee.extractor.test.mjs tools/localization/catalog.test.mjs && node tools/localization/check.mjs"
 
 [tasks."deps:npm"]
 extends = "ci:node"
