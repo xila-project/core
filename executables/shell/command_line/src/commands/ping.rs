@@ -205,6 +205,7 @@ mod tests {
                     "octets de",
                 ),
                 "zh-CN" => ("字节数据", "字节数据", "字节，来自", "字节，来自"),
+                "ja" => ("データバイト", "データバイト", "バイトの応答元", "バイトの応答元"),
                 _ => ("data byte", "data bytes", "byte from", "bytes from"),
             };
         assert_eq!(
