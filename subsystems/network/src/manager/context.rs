@@ -61,3 +61,15 @@ impl SocketContext {
             })
     }
 }
+
+impl Drop for SocketContext {
+    fn drop(&mut self) {
+        // The context owns this handle. Closing a protocol socket alone leaves
+        // its owned buffers in the SocketSet, even after the wrapper is gone.
+        // Retire it for every protocol and explicit/implicit close path; TCP
+        // storage remains owned by the runner until shutdown is dispatched.
+        embassy_futures::block_on(self.stack.with_mutable(|stack| {
+            stack.retire_socket(self.handle);
+        }));
+    }
+}

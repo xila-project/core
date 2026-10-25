@@ -35,6 +35,7 @@ where
                     if stack_inner.enabled {
                         stack_inner.poll(&mut self.device)
                     } else {
+                        stack_inner.reap_retired_sockets();
                         None
                     }
                 })

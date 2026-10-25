@@ -69,12 +69,16 @@ fn fetch_weather_with(city: &str, https_get: FetchFn) -> Result<WeatherData, App
             AppError::Network
         }
     })?;
+    drop(geocoding_url);
     let geo_text = core::str::from_utf8(&geo_bytes).map_err(|_| AppError::Parse)?;
     let geo: GeocodingResponse = json::from_str(geo_text).map_err(|_| {
         #[cfg(target_arch = "wasm32")]
         log_parse_preview("geocoding", &geo_bytes);
         AppError::Parse
     })?;
+    // Geocoding fields are owned after parsing; release its JSON before the
+    // larger forecast download starts.
+    drop(geo_bytes);
     let best = pick_best_location(geo).ok_or(AppError::NoLocationFound)?;
 
     let forecast_url = build_forecast_url(best.latitude, best.longitude);
@@ -105,6 +109,8 @@ fn fetch_weather_with(city: &str, https_get: FetchFn) -> Result<WeatherData, App
         AppError::Parse
     })?;
 
+    drop(forecast_bytes);
+    drop(forecast_url);
     let city_label = if let Some(country) = best.country {
         alloc::format!("{}, {}", best.name, country)
     } else {

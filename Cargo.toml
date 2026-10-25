@@ -74,6 +74,7 @@ graphics_rendering_xrgb8888 = ["graphics", "graphics/rendering_xrgb8888"]
 
 
 [workspace.dependencies]
+xila_http = { path = "libraries/http", default-features = false }
 verification = { path = "libraries/verification", default-features = false }
 application_metadata = { path = "libraries/application_metadata" }
 audio = { path = "libraries/audio" }
@@ -160,6 +161,7 @@ getargs-derive = { git = "https://github.com/AlixANNERAUD/getargs-derive.git", r
 
 [workspace]
 members = [
+  "libraries/http",
   "libraries/verification",
   "libraries/application_metadata",
   "libraries/audio",

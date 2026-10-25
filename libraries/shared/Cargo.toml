@@ -6,5 +6,6 @@ edition = "2024"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+xila_http = { workspace = true, features = ["alloc"] }
 num = { version = "0.4" }
 log = { workspace = true }

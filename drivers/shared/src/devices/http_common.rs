@@ -1,5 +1,5 @@
 use file_system::{Error, Result};
-use shared::{HttpRequestParser, HttpResponseBuilder, HttpResponseParser};
+use shared::HttpRequestParser;
 
 pub fn map_network_error(error: network::Error) -> Error {
     match error {
@@ -62,7 +62,7 @@ pub fn compute_request_length(buffer: &[u8], parser: HttpRequestParser<'_>) -> R
 
     let content_length = parser
         .get_headers()
-        .find(|(name, _)| *name == HttpRequestParser::CONTENT_LENGTH_HEADER)
+        .find(|(name, _)| name.eq_ignore_ascii_case(HttpRequestParser::CONTENT_LENGTH_HEADER))
         .and_then(|(_, value)| value.parse::<usize>().ok());
 
     let body_length = match content_length {
@@ -81,47 +81,155 @@ pub fn compute_request_length(buffer: &[u8], parser: HttpRequestParser<'_>) -> R
     Ok(total_length)
 }
 
-pub fn build_serialized_response_headers(raw_headers: &[u8], output: &mut [u8]) -> Result<usize> {
-    let parser = HttpResponseParser::from_buffer(raw_headers);
-    let status_code = parser.get_status_code().ok_or(Error::InvalidParameter)?;
+#[cfg(test)]
+mod request_regression {
+    use super::*;
+    #[test]
+    fn lowercase_length_preserves_binary_zero_tail() {
+        let request = b"POST / HTTP/1.1\r\nhost: localhost\r\ncontent-length: 3\r\n\r\na\0\0";
+        assert_eq!(
+            compute_request_length(request, HttpRequestParser::from_buffer(request)),
+            Ok(request.len())
+        );
+    }
+}
 
-    let mut builder = HttpResponseBuilder::from_buffer(output);
-    builder
-        .add_status_code(status_code)
-        .ok_or(Error::InternalError)?;
+use network::TcpSocket;
+#[derive(Debug, Copy, Clone)]
+pub(super) enum IoError {
+    FileSystem(Error),
+}
 
-    // Manually parse headers line by line to handle edge cases like
-    // servers that omit reason phrase (HTTP/1.1 200) causing an empty line after status
-    let lines = parser.split_lines();
-    let mut header_started = false;
-
-    for line in lines {
-        let trimmed = core::str::from_utf8(line).unwrap_or("").trim();
-
-        // Skip the status line (first non-empty line)
-        if !header_started && !trimmed.is_empty() {
-            header_started = true;
-            continue;
-        }
-
-        // Stop at empty line (end of headers)
-        if header_started && trimmed.is_empty() {
-            break;
-        }
-
-        // Skip empty lines in the header section
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        // Parse and add the header
-        if let Some((name, value)) = shared::parse_header(line) {
-            builder
-                .add_header(name, value.as_bytes())
-                .ok_or(Error::FileTooLarge)?;
+impl embedded_io::Error for IoError {
+    fn kind(&self) -> embedded_io::ErrorKind {
+        match self {
+            IoError::FileSystem(Error::NotFound) => embedded_io::ErrorKind::NotFound,
+            IoError::FileSystem(Error::PermissionDenied) => {
+                embedded_io::ErrorKind::PermissionDenied
+            }
+            _ => embedded_io::ErrorKind::Other,
         }
     }
+}
 
-    builder.add_line(b"").ok_or(Error::FileTooLarge)?;
-    Ok(builder.get_position())
+impl core::fmt::Display for IoError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            IoError::FileSystem(error) => write!(formatter, "filesystem error: {:?}", error),
+        }
+    }
+}
+
+impl core::error::Error for IoError {}
+
+pub(super) struct TcpSocketAdapter {
+    pub socket: TcpSocket,
+}
+
+impl embedded_io::ErrorType for TcpSocketAdapter {
+    type Error = IoError;
+}
+
+impl embedded_io_async::Read for TcpSocketAdapter {
+    async fn read(&mut self, buffer: &mut [u8]) -> core::result::Result<usize, Self::Error> {
+        self.socket
+            .read(buffer)
+            .await
+            .map_err(map_network_error)
+            .map_err(IoError::FileSystem)
+    }
+}
+
+impl embedded_io_async::Write for TcpSocketAdapter {
+    async fn write(&mut self, buffer: &[u8]) -> core::result::Result<usize, Self::Error> {
+        self.socket
+            .write(buffer)
+            .await
+            .map_err(map_network_error)
+            .map_err(IoError::FileSystem)
+    }
+
+    async fn flush(&mut self) -> core::result::Result<(), Self::Error> {
+        self.socket
+            .flush()
+            .await
+            .map_err(map_network_error)
+            .map_err(IoError::FileSystem)
+    }
+}
+
+pub(super) async fn create_tcp_connection(
+    manager: &'static network::Manager,
+    host: &str,
+    port: u16,
+) -> Result<TcpSocketAdapter> {
+    let addresses = manager
+        .resolve(
+            host,
+            network::DnsQueryKind::A | network::DnsQueryKind::Aaaa,
+            true,
+            None,
+        )
+        .await
+        .map_err(map_network_error)?;
+    let mut last_error = Error::NotFound;
+    for address in addresses {
+        let mut socket = manager
+            .new_tcp_socket(4096, 4096, None)
+            .await
+            .map_err(map_network_error)?;
+        socket
+            .set_timeout(Some(network::Duration::from_seconds(
+                super::http_exchange::IO_TIMEOUT_SECONDS,
+            )))
+            .await;
+        match embassy_futures::select::select(
+            socket.connect(address, network::Port::from_inner(port)),
+            task::sleep(core::time::Duration::from_secs(
+                super::http_exchange::IO_TIMEOUT_SECONDS,
+            )),
+        )
+        .await
+        {
+            embassy_futures::select::Either::First(Ok(())) => {
+                return Ok(TcpSocketAdapter { socket });
+            }
+            embassy_futures::select::Either::First(Err(e)) => last_error = map_network_error(e),
+            embassy_futures::select::Either::Second(_) => last_error = Error::InputOutput,
+        }
+        socket.close_forced().await;
+    }
+    Err(last_error)
+}
+
+pub(super) async fn send_request<W: embedded_io_async::Write>(
+    io: &mut W,
+    request: &[u8],
+) -> Result<()> {
+    use embedded_io_async::Write;
+    let parser = HttpRequestParser::from_buffer(request);
+    let length = compute_request_length(request, parser)?;
+    let payload = &request[..length];
+    Write::write_all(io, payload)
+        .await
+        .map_err(|_| Error::InputOutput)?;
+    if !payload.windows(4).any(|w| w == b"\r\n\r\n") {
+        let suffix = if payload.ends_with(b"\r\n") {
+            b"\r\n".as_slice()
+        } else {
+            b"\r\n\r\n".as_slice()
+        };
+        Write::write_all(io, suffix)
+            .await
+            .map_err(|_| Error::InputOutput)?;
+    }
+    io.flush().await.map_err(|_| Error::InputOutput)
+}
+
+impl Drop for TcpSocketAdapter {
+    fn drop(&mut self) {
+        // HTTP does not reuse a connection. Abort on cancellation or after the
+        // framed response; the network runner sends RST before reclamation.
+        task::block_on(self.socket.close_forced());
+    }
 }

@@ -1,7 +1,15 @@
+#![no_std]
+
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
+mod framing;
+pub use framing::*;
 mod request;
 mod response;
 mod url;
 
+#[cfg(feature = "alloc")]
 use alloc::string::String;
 pub use request::*;
 pub use response::*;
@@ -68,15 +76,17 @@ pub fn split_lines(buffer: &[u8]) -> impl Iterator<Item = &[u8]> + '_ + Clone {
 }
 
 pub fn get_body(buffer: &[u8]) -> Option<&[u8]> {
-    // Find the end of headers where 2 consecutive line endings occur, DO NOT SPLIT LINES
-    let headers_end = buffer
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .map(|pos| pos + 4)?; // Move past the header ending
-
-    buffer.get(headers_end..)
+    let mut position = 0;
+    for line in buffer.split_inclusive(|b| *b == b'\n') {
+        position += line.len();
+        if line == b"\r\n" || line == b"\n" {
+            return buffer.get(position..);
+        }
+    }
+    None
 }
 
+#[cfg(feature = "alloc")]
 pub fn format_url<'a>(
     scheme: &str,
     host: &str,
@@ -98,15 +108,26 @@ pub fn format_url<'a>(
         url.push('?');
 
         for (i, (key, value)) in query_parameters.enumerate() {
+            if i > 0 {
+                url.push('&');
+            }
             url.push_str(key);
             url.push('=');
             url.push_str(value);
-
-            if i < total_query_length - 1 {
-                url.push('&');
-            }
         }
     }
 
     url
+}
+
+fn number(mut value: usize, radix: usize, storage: &mut [u8]) -> &[u8] {
+    let mut pos = storage.len();
+    loop {
+        pos -= 1;
+        storage[pos] = b"0123456789abcdef"[value % radix];
+        value /= radix;
+        if value == 0 {
+            return &storage[pos..];
+        }
+    }
 }

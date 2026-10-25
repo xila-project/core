@@ -1,5 +1,4 @@
 use crate::{get_body, parse_header, split_lines};
-use alloc::string::ToString;
 
 pub struct HttpResponseParser<'a>(&'a [u8]);
 
@@ -105,13 +104,19 @@ impl<'a> HttpResponseBuilder<'a> {
     }
 
     pub fn add_status_code(&mut self, status_code: u16) -> Option<()> {
-        let status_line = &["HTTP/1.1 ", &status_code.to_string(), " "].concat();
-        self.add_line(status_line.as_bytes())
+        let mut digits = [0; 5];
+        self.add_line_iterator(
+            [
+                b"HTTP/1.1 ".as_slice(),
+                crate::number(status_code as usize, 10, &mut digits),
+                b" ",
+            ]
+            .into_iter(),
+        )
     }
 
     pub fn add_header(&mut self, name: &str, value: &[u8]) -> Option<()> {
-        let header_line = &[name.as_bytes(), b": ", value].concat();
-        self.add_line(header_line)
+        self.add_line_iterator([name.as_bytes(), b": ", value].into_iter())
     }
 
     pub fn add_body(&mut self, body: &[u8]) -> Option<()> {
@@ -126,9 +131,15 @@ impl<'a> HttpResponseBuilder<'a> {
     }
 
     pub fn add_chunk(&mut self, chunk: &[u8]) -> Option<()> {
-        self.add_line(chunk.len().to_string().as_bytes())?;
+        let mut digits = [0; usize::BITS as usize / 4];
+        self.add_line(crate::number(chunk.len(), 16, &mut digits))?;
         self.add_line(chunk)?;
         Some(())
+    }
+
+    /// Write the terminating chunk (without trailers).
+    pub fn finish_chunks(&mut self) -> Option<()> {
+        self.add_body(b"0\r\n\r\n")
     }
 
     pub fn get_position(&self) -> usize {

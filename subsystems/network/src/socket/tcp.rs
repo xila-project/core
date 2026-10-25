@@ -264,6 +264,81 @@ mod tests {
     static TEST_MUTEX: Mutex<CriticalSectionRawMutex, ()> = Mutex::new(());
 
     #[task::test]
+    async fn close_then_drop_delivers_queued_data_and_fin() {
+        let _lock = TEST_MUTEX.lock().await;
+        let manager = initialize().await;
+        let mut listener = manager.new_tcp_socket(1024, 1024, None).await.unwrap();
+        listener.with_mutable(|s| s.listen(51010).unwrap()).await;
+        let stack = listener.context.stack.clone();
+        let before = stack.with(|s| s.sockets.iter().count()).await;
+        let (client, _) = crate::tests::task_manager()
+            .spawn(
+                task::Manager::ROOT_TASK_IDENTIFIER,
+                "close regression",
+                None,
+                move |_| async move {
+                    let mut socket = manager.new_tcp_socket(1024, 1024, None).await.unwrap();
+                    socket
+                        .connect([127, 0, 0, 1], Port::from_inner(51010))
+                        .await
+                        .unwrap();
+                    assert_eq!(socket.write(b"queued").await.unwrap(), 6);
+                    socket.close().await;
+                    drop(socket);
+                },
+            )
+            .await
+            .unwrap();
+        let exchange = async {
+            listener
+                .accept(Some([127, 0, 0, 1]), Port::from_inner(51010))
+                .await
+                .unwrap();
+            let mut received = [0; 6];
+            let mut n = 0;
+            while n < received.len() {
+                let got = listener.read(&mut received[n..]).await.unwrap();
+                assert!(got > 0);
+                n += got;
+            }
+            assert_eq!(&received, b"queued");
+            assert_eq!(listener.read(&mut [0; 1]).await.unwrap(), 0);
+            listener.close().await;
+        };
+        assert!(
+            matches!(
+                embassy_futures::select::select(
+                    exchange,
+                    task::sleep(core::time::Duration::from_secs(2))
+                )
+                .await,
+                embassy_futures::select::Either::First(())
+            ),
+            "queued data/FIN lost after drop"
+        );
+        client.join().await;
+        drop(listener);
+        task::sleep(core::time::Duration::from_millis(100)).await;
+        assert_eq!(stack.with(|s| s.sockets.iter().count()).await, before - 1);
+    }
+
+    #[task::test]
+    async fn dropped_tcp_socket_releases_stack_buffers() {
+        let _lock = TEST_MUTEX.lock().await;
+        let manager = initialize().await;
+        for explicit_close in [false, true] {
+            let mut socket = manager.new_tcp_socket(4096, 4096, None).await.unwrap();
+            let stack = socket.context.stack.clone();
+            let before = stack.with(|s| s.sockets.iter().count()).await;
+            if explicit_close {
+                socket.close_forced().await;
+            }
+            drop(socket);
+            assert_eq!(stack.with(|s| s.sockets.iter().count()).await, before - 1);
+        }
+    }
+
+    #[task::test]
     async fn test_tcp_connect() {
         let _lock = TEST_MUTEX.lock().await;
         let network_manager = initialize().await;
