@@ -14,6 +14,12 @@ use xila::graphics::{Color, Window, lvgl};
 
 const MAX_RANGE_VALUE: i32 = 1_000_000;
 
+// Checked narrowing is needed for memory_64 and intentionally a no-op for memory_32.
+#[allow(clippy::useless_conversion)]
+fn checked_u32(value: WasmUsize) -> Result<u32> {
+    u32::try_from(value).map_err(|_| GraphicsError::InvalidValue)
+}
+
 // The first cast is required when WasmUsize is u64, and intentionally redundant for memory_32.
 #[allow(clippy::unnecessary_cast)]
 pub(super) fn signed_word(value: WasmUsize) -> Result<i32> {
@@ -46,7 +52,7 @@ fn valid_calendar_date(year: u32, month: u32, day: u32) -> bool {
     if year == 0 || year > u16::MAX as u32 || !(1..=12).contains(&month) {
         return false;
     }
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
     let days_in_month = match month {
         2 if leap => 29,
         2 => 28,
@@ -62,9 +68,9 @@ pub(super) fn dispatch_calendar_set_today(
     call: &GraphicsCall,
 ) -> Result<()> {
     let [calendar, year, month, day, ..] = call.arguments;
-    let year = u32::try_from(year).map_err(|_| GraphicsError::InvalidValue)?;
-    let month = u32::try_from(month).map_err(|_| GraphicsError::InvalidValue)?;
-    let day = u32::try_from(day).map_err(|_| GraphicsError::InvalidValue)?;
+    let year = checked_u32(year)?;
+    let month = checked_u32(month)?;
+    let day = checked_u32(day)?;
     if !valid_calendar_date(year, month, day) {
         return Err(GraphicsError::InvalidValue);
     }
@@ -151,7 +157,7 @@ pub(super) fn dispatch_chart_add_series(
         return Err(GraphicsError::ResourceLimit);
     }
     let chart = state.object(handle, Some(Kind::Chart))?;
-    let rgb = u32::try_from(rgb).map_err(|_| GraphicsError::InvalidValue)?;
+    let rgb = checked_u32(rgb)?;
     let color = unsafe { lvgl::lv_color_hex(rgb) };
     let series = unsafe {
         lvgl::lv_chart_add_series(chart, color, lvgl::lv_chart_axis_t_LV_CHART_AXIS_PRIMARY_Y)
@@ -202,7 +208,7 @@ pub(super) fn dispatch_chart_get_value(
     let [handle, slot, index, ..] = call.arguments;
     let chart = state.object(handle, Some(Kind::Chart))?;
     let point_count = unsafe { lvgl::lv_chart_get_point_count(chart) };
-    let index = u32::try_from(index).map_err(|_| GraphicsError::InvalidValue)?;
+    let index = checked_u32(index)?;
     if index >= point_count {
         return Err(GraphicsError::InvalidValue);
     }
@@ -329,7 +335,7 @@ pub(super) fn dispatch_tileview_add_tile(
     let view = state.object(view_handle, Some(Kind::Tileview))?;
     let column = u8::try_from(column).map_err(|_| GraphicsError::InvalidValue)?;
     let row = u8::try_from(row).map_err(|_| GraphicsError::InvalidValue)?;
-    let directions = u32::try_from(directions).map_err(|_| GraphicsError::InvalidValue)?;
+    let directions = checked_u32(directions)?;
     if directions & !lvgl::lv_dir_t_LV_DIR_ALL != 0 {
         return Err(GraphicsError::InvalidValue);
     }
@@ -391,7 +397,7 @@ pub(super) fn dispatch_theme_variant(
     call: &GraphicsCall,
 ) -> Result<()> {
     let [handle, variant, ..] = call.arguments;
-    let variant = u32::try_from(variant).map_err(|_| GraphicsError::InvalidValue)?;
+    let variant = checked_u32(variant)?;
     if variant > lvgl::lv_theme_shadcn_variant_t_LV_THEME_SHADCN_VARIANT_DESTRUCTIVE {
         return Err(GraphicsError::InvalidValue);
     }
@@ -429,7 +435,7 @@ pub(super) fn dispatch_badge_create(
     call: &GraphicsCall,
 ) -> Result<()> {
     let [parent_handle, text_pointer, variant, ..] = call.arguments;
-    let variant = u32::try_from(variant).map_err(|_| GraphicsError::InvalidValue)?;
+    let variant = checked_u32(variant)?;
     if variant > lvgl::lv_theme_shadcn_variant_t_LV_THEME_SHADCN_VARIANT_DESTRUCTIVE {
         return Err(GraphicsError::InvalidValue);
     }
