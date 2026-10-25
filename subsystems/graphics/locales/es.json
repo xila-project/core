@@ -1,14 +1,16 @@
 {
-  "errors.already_in_use": "Ya está en uso",
-  "errors.already_initialized": "Ya está inicializado",
-  "errors.failed_to_create_object": "No se pudo crear el objeto",
-  "errors.failed_to_get_resolution": "No se pudo obtener la resolución",
-  "errors.failed_to_register": "No se pudo registrar",
-  "errors.invalid_reference": "Referencia no válida",
-  "errors.invalid_parameter": "Parámetro no válido",
-  "errors.invalid_window_identifier": "Identificador de ventana no válido",
-  "errors.not_available": "No disponible",
-  "errors.not_initialized": "No inicializado",
-  "errors.not_registered": "No registrado",
-  "errors.out_of_memory": "Memoria agotada"
+  "errors": {
+    "already_in_use": "Ya está en uso",
+    "already_initialized": "Ya está inicializado",
+    "failed_to_create_object": "No se pudo crear el objeto",
+    "failed_to_get_resolution": "No se pudo obtener la resolución",
+    "failed_to_register": "No se pudo registrar",
+    "invalid_reference": "Referencia no válida",
+    "invalid_parameter": "Parámetro no válido",
+    "invalid_window_identifier": "Identificador de ventana no válido",
+    "not_available": "No disponible",
+    "not_initialized": "No inicializado",
+    "not_registered": "No registrado",
+    "out_of_memory": "Memoria agotada"
+  }
 }
