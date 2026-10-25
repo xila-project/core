@@ -50,8 +50,8 @@ EXPECTED_PACKAGE_NAMES = {
     "libraries/peripherals/Cargo.toml": "xila-peripherals",
     "libraries/shared/Cargo.toml": "xila-shared",
     "libraries/synchronization/Cargo.toml": "xila-synchronization",
-    "libraries/target/Cargo.toml": "xila-target",
     "libraries/testing/Cargo.toml": "xila-testing",
+    "libraries/verification/Cargo.toml": "verification",
     "subsystems/graphics/Cargo.toml": "xila-graphics",
     "subsystems/graphics/bindings_generator/Cargo.toml": "xila-graphics-bindgen",
     "subsystems/graphics/tests/font_link/Cargo.toml": "xila-graphics-font-link-test",
@@ -66,6 +66,7 @@ EXPECTED_PACKAGE_NAMES = {
     "subsystems/virtual_file_system/Cargo.toml": "xila-virtual-file-system",
     "tools/fs_image/Cargo.toml": "xila-fs-image",
     "tools/profiling/Cargo.toml": "xila-profiling",
+    "tools/verification_probe/Cargo.toml": "verification_probe",
 }
 
 EXPECTED_BINARY_TARGETS = {
@@ -109,7 +110,6 @@ EXPECTED_LIBRARY_TARGETS = {
     "libraries/authentication/Cargo.toml": "authentication",
     "libraries/executable/Cargo.toml": "executable",
     "libraries/peripherals/Cargo.toml": "peripherals",
-    "libraries/target/Cargo.toml": "target",
     "executables/file_manager/Cargo.toml": "file_manager",
     "libraries/bootsplash/Cargo.toml": "bootsplash",
     "executables/shell/command_line/Cargo.toml": "command_line_shell",
@@ -145,11 +145,16 @@ class CargoPackageNames(unittest.TestCase):
         }
 
         self.assertEqual(actual, EXPECTED_PACKAGE_NAMES)
-        self.assertEqual(len(set(actual.values())), 55)
+        self.assertEqual(len(set(actual.values())), len(EXPECTED_PACKAGE_NAMES))
         self.assertEqual(actual["Cargo.toml"], "xila")
         self.assertEqual(actual["tools/profiling/Cargo.toml"], "xila-profiling")
         for path, name in actual.items():
-            if path != "Cargo.toml":
+            # Verification was added on main after the package migration.
+            if path not in {
+                "Cargo.toml",
+                "libraries/verification/Cargo.toml",
+                "tools/verification_probe/Cargo.toml",
+            }:
                 self.assertTrue(name.startswith("xila-"), f"{path} has unprefixed name {name}")
 
     def test_root_workspace_dependency_keys_alias_renamed_packages(self):
@@ -256,6 +261,20 @@ class CargoPackageNames(unittest.TestCase):
                         allowed_names,
                         f"stale Cargo package selector {match.group(1)!r} at {path}:{line_number}",
                     )
+
+    def test_ci_feature_selectors_use_selected_package_names(self):
+        tasks = manifest(ROOT / "mise.ci.toml")["tasks"]
+        for task, features in {
+            "ci:wasm-audio-check": ["xila-drivers-wasm/audio"],
+            "ci:profiling-runtime-tests": [
+                "xila-task/test_harness",
+                "xila-drivers-std/profiling",
+                "xila-drivers-std/heaptrack",
+            ],
+        }.items():
+            with self.subTest(task=task):
+                run = tasks[task]["run"]
+                self.assertIn("--features " + ",".join(features), run)
 
 if __name__ == "__main__":
     unittest.main()

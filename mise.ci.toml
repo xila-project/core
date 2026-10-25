@@ -260,12 +260,6 @@ description = "Lint host WASM runtime and graphics bindings"
 depends = ["ci:packages-host"]
 run = "cargo clippy -p xila-wasm --features graphics,xila/graphics_rendering_xrgb8888 --target x86_64-unknown-linux-gnu -- -D warnings"
 
-[tasks."ci:host-audio-clippy"]
-extends = "ci:rust-lint"
-description = "Lint native audio targets"
-depends = ["ci:packages-host"]
-run = "cargo clippy -p xila-audio -p xila-drivers-native --features drivers_native/audio --all-targets -- -D warnings"
-
 [tasks."ci:verification"]
 description = "Test verifier features and link without an allocator on Cortex-M and WASM"
 depends = ["ci:packages-linker"]
@@ -306,12 +300,6 @@ run = "mise run test:fonts && cargo test --manifest-path subsystems/graphics/tes
 extends = "ci:rust-lint"
 tools.node = "{{ vars.node_version }}"
 
-[tasks."ci:host-audio-tests"]
-extends = "ci:rust-format"
-description = "Test native audio devices"
-depends = ["ci:packages-host"]
-run = "cargo test -p xila-drivers-native --features audio --lib devices::audio::tests"
-
 [tasks."ci:host-build"]
 extends = "ci:rust-format"
 description = "Build the native example"
@@ -328,7 +316,7 @@ run = "mise run clippy:guest"
 extends = "ci:rust-browser"
 description = "Check browser audio support"
 depends = ["ci:packages-linker"]
-run = "cargo check -p xila-audio -p xila-drivers-wasm --features drivers_wasm/audio --target wasm32-unknown-unknown"
+run = "cargo check -p xila-audio -p xila-drivers-wasm --features xila-drivers-wasm/audio --target wasm32-unknown-unknown"
 
 [tasks."ci:wasm-apps-clippy"]
 extends = "ci:rust-wasi-lint"
@@ -351,7 +339,7 @@ run = "node --test drivers/wasm/tests/seed.test.mjs examples/wasm/tests/disk_man
 extends = "ci:rust-wasi"
 description = "Test task and driver profiling instrumentation"
 depends = ["ci:packages-host"]
-run = "cargo test --locked -p xila-task -p xila-drivers-std --lib --features task/test_harness,drivers_std/profiling,drivers_std/heaptrack"
+run = "cargo test --locked -p xila-task -p xila-drivers-std --lib --features xila-task/test_harness,xila-drivers-std/profiling,xila-drivers-std/heaptrack"
 
 [tasks."ci:profiling-native-tests"]
 extends = "ci:rust-wasi"

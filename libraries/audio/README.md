@@ -132,7 +132,7 @@ its output slot.
 
 These tests run with normal workspace tests, without enabling
 `drivers_native/audio` or opening an audio device. To test just the headless
-crate, run `cargo test -p drivers_headless`. Native-adapter checks remain opt-in
+crate, run `cargo test -p xila-drivers-headless`. Native-adapter checks remain opt-in
 for work on the native example.
 
 On the x86_64 debug test build, the system is **14,544 bytes**, each stream handle
