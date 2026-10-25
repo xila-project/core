@@ -1,7 +1,9 @@
 {
-  "errors.buffer_too_small": "Buffer muito pequeno",
-  "errors.failed_to_convert_length": "Não foi possível converter o comprimento",
-  "errors.invalid_utf_8_string": "Texto UTF-8 inválido",
-  "errors.invalid_length": "Comprimento inválido",
-  "errors.invalid_pointer": "Ponteiro inválido"
+  "errors": {
+    "buffer_too_small": "Buffer muito pequeno",
+    "failed_to_convert_length": "Não foi possível converter o comprimento",
+    "invalid_utf_8_string": "Texto UTF-8 inválido",
+    "invalid_length": "Comprimento inválido",
+    "invalid_pointer": "Ponteiro inválido"
+  }
 }

@@ -68,7 +68,7 @@ const config: TolgeeConfig = {
   },
   pull: {
     path: "./",
-    delimiter: "",
+    delimiter: ".", // Tolgee structured JSON: split dotted semantic keys into nested objects
     fileStructureTemplate: "{namespace}/locales/{languageTag}.json",
   },
 };

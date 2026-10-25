@@ -1,25 +1,31 @@
 {
-  "angle_mode.degrees_indicator": " [DEG]",
-  "angle_mode.radians_indicator": " [RAD]",
-  "errors.calculation_error": "Erro de cálculo",
-  "errors.calculation_overflow": "Estouro no cálculo",
-  "controls.clear": "Limpar",
-  "errors.division_by_zero": "Divisão por zero",
-  "errors.calculation_with_details": "Erro: {}",
-  "errors.expression_nested_too_deeply": "Expressão com aninhamento excessivo",
-  "errors.expression_too_long": "Expressão muito longa",
-  "errors.inexact_result": "Resultado impreciso",
-  "errors.invalid_number": "Número inválido",
-  "angle_mode.radians": "RAD",
-  "errors.requires_wasm_runtime": "Este executável foi feito para ser executado em um ambiente WASM.",
-  "errors.too_many_arguments": "Argumentos demais",
-  "errors.unclosed_parenthesis": "Parêntese não fechado",
-  "errors.unexpected_character": "Caractere inesperado",
-  "errors.unexpected_end_of_expression": "Fim inesperado da expressão",
-  "errors.unexpected_token": "Token inesperado",
-  "errors.unknown_function": "Função desconhecida",
-  "errors.unknown_variable": "Variável desconhecida",
-  "errors.unsupported_operation": "Operação não suportada",
-  "errors.value_outside_function_domain": "Valor fora do domínio da função",
-  "errors.wrong_number_of_arguments": "Número incorreto de argumentos"
+  "angle_mode": {
+    "degrees_indicator": " [DEG]",
+    "radians_indicator": " [RAD]",
+    "radians": "RAD"
+  },
+  "errors": {
+    "calculation_error": "Erro de cálculo",
+    "calculation_overflow": "Estouro no cálculo",
+    "division_by_zero": "Divisão por zero",
+    "calculation_with_details": "Erro: {}",
+    "expression_nested_too_deeply": "Expressão com aninhamento excessivo",
+    "expression_too_long": "Expressão muito longa",
+    "inexact_result": "Resultado impreciso",
+    "invalid_number": "Número inválido",
+    "requires_wasm_runtime": "Este executável foi feito para ser executado em um ambiente WASM.",
+    "too_many_arguments": "Argumentos demais",
+    "unclosed_parenthesis": "Parêntese não fechado",
+    "unexpected_character": "Caractere inesperado",
+    "unexpected_end_of_expression": "Fim inesperado da expressão",
+    "unexpected_token": "Token inesperado",
+    "unknown_function": "Função desconhecida",
+    "unknown_variable": "Variável desconhecida",
+    "unsupported_operation": "Operação não suportada",
+    "value_outside_function_domain": "Valor fora do domínio da função",
+    "wrong_number_of_arguments": "Número incorreto de argumentos"
+  },
+  "controls": {
+    "clear": "Limpar"
+  }
 }

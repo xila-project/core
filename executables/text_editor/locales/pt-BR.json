@@ -1,22 +1,36 @@
 {
-  "app.title": "Editor de texto",
-  "navigation.previous_page": "Anterior",
-  "navigation.next_page": "Próximo",
-  "controls.new_file": "Novo",
-  "controls.open_file": "Abrir",
-  "controls.save_file": "Salvar",
-  "file_path.instructions": "Escolha um caminho e crie ou abra um arquivo de texto",
-  "warnings.unsaved_close_again": "Alterações não salvas - feche novamente para descartar",
-  "warnings.unsaved_new_or_open_again": "Alterações não salvas - escolha Novo ou Abrir novamente para descartar",
-  "file_path.placeholder": "Informe um caminho absoluto de arquivo",
-  "status.open_or_create_first": "Abra ou crie um arquivo primeiro",
-  "errors.working_copy_creation_failed": "Não foi possível criar uma cópia de trabalho neste diretório",
-  "file_path.new_file_default_name": "Novo arquivo de texto",
-  "status.opened": "Aberto",
-  "errors.open_failed": "Falha ao abrir - use um arquivo UTF-8 e verifique o armazenamento",
-  "status.saved": "Salvo",
-  "errors.save_failed_working_copy_preserved": "Falha ao salvar - cópia de trabalho preservada; verifique o caminho e o armazenamento",
-  "errors.page_exceeds_byte_limit": "O texto da página deve caber em 4096 bytes UTF-8",
-  "errors.edit_failed_close_again": "Falha na edição - feche novamente para descartar as alterações",
-  "errors.edit_failed_reopen_source": "Falha na edição - reabra o arquivo de origem"
+  "app": {
+    "title": "Editor de texto"
+  },
+  "navigation": {
+    "previous_page": "Anterior",
+    "next_page": "Próximo"
+  },
+  "controls": {
+    "new_file": "Novo",
+    "open_file": "Abrir",
+    "save_file": "Salvar"
+  },
+  "file_path": {
+    "instructions": "Escolha um caminho e crie ou abra um arquivo de texto",
+    "placeholder": "Informe um caminho absoluto de arquivo",
+    "new_file_default_name": "Novo arquivo de texto"
+  },
+  "warnings": {
+    "unsaved_close_again": "Alterações não salvas - feche novamente para descartar",
+    "unsaved_new_or_open_again": "Alterações não salvas - escolha Novo ou Abrir novamente para descartar"
+  },
+  "status": {
+    "open_or_create_first": "Abra ou crie um arquivo primeiro",
+    "opened": "Aberto",
+    "saved": "Salvo"
+  },
+  "errors": {
+    "working_copy_creation_failed": "Não foi possível criar uma cópia de trabalho neste diretório",
+    "open_failed": "Falha ao abrir - use um arquivo UTF-8 e verifique o armazenamento",
+    "save_failed_working_copy_preserved": "Falha ao salvar - cópia de trabalho preservada; verifique o caminho e o armazenamento",
+    "page_exceeds_byte_limit": "O texto da página deve caber em 4096 bytes UTF-8",
+    "edit_failed_close_again": "Falha na edição - feche novamente para descartar as alterações",
+    "edit_failed_reopen_source": "Falha na edição - reabra o arquivo de origem"
+  }
 }

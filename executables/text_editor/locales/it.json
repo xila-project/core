@@ -1,22 +1,36 @@
 {
-  "app.title": "Editor di testo",
-  "navigation.previous_page": "Precedente",
-  "navigation.next_page": "Successivo",
-  "controls.new_file": "Nuovo",
-  "controls.open_file": "Apri",
-  "controls.save_file": "Salva",
-  "file_path.instructions": "Scegli un percorso, quindi crea o apri un file di testo",
-  "warnings.unsaved_close_again": "Modifiche non salvate - chiudi di nuovo per scartarle",
-  "warnings.unsaved_new_or_open_again": "Modifiche non salvate - premi di nuovo Nuovo o Apri per scartarle",
-  "file_path.placeholder": "Inserisci un percorso assoluto",
-  "status.open_or_create_first": "Apri o crea prima un file",
-  "errors.working_copy_creation_failed": "Impossibile creare una copia di lavoro in questa directory",
-  "file_path.new_file_default_name": "Nuovo file di testo",
-  "status.opened": "Aperto",
-  "errors.open_failed": "Apertura non riuscita - usa un file di testo UTF-8 e controlla la memoria",
-  "status.saved": "Salvato",
-  "errors.save_failed_working_copy_preserved": "Salvataggio non riuscito - copia di lavoro conservata; controlla percorso e memoria",
-  "errors.page_exceeds_byte_limit": "Il testo della pagina non deve superare 4096 byte UTF-8",
-  "errors.edit_failed_close_again": "Modifica non riuscita - chiudi di nuovo per scartare le modifiche",
-  "errors.edit_failed_reopen_source": "Modifica non riuscita - riapri il file originale"
+  "app": {
+    "title": "Editor di testo"
+  },
+  "navigation": {
+    "previous_page": "Precedente",
+    "next_page": "Successivo"
+  },
+  "controls": {
+    "new_file": "Nuovo",
+    "open_file": "Apri",
+    "save_file": "Salva"
+  },
+  "file_path": {
+    "instructions": "Scegli un percorso, quindi crea o apri un file di testo",
+    "placeholder": "Inserisci un percorso assoluto",
+    "new_file_default_name": "Nuovo file di testo"
+  },
+  "warnings": {
+    "unsaved_close_again": "Modifiche non salvate - chiudi di nuovo per scartarle",
+    "unsaved_new_or_open_again": "Modifiche non salvate - premi di nuovo Nuovo o Apri per scartarle"
+  },
+  "status": {
+    "open_or_create_first": "Apri o crea prima un file",
+    "opened": "Aperto",
+    "saved": "Salvato"
+  },
+  "errors": {
+    "working_copy_creation_failed": "Impossibile creare una copia di lavoro in questa directory",
+    "open_failed": "Apertura non riuscita - usa un file di testo UTF-8 e controlla la memoria",
+    "save_failed_working_copy_preserved": "Salvataggio non riuscito - copia di lavoro conservata; controlla percorso e memoria",
+    "page_exceeds_byte_limit": "Il testo della pagina non deve superare 4096 byte UTF-8",
+    "edit_failed_close_again": "Modifica non riuscita - chiudi di nuovo per scartare le modifiche",
+    "edit_failed_reopen_source": "Modifica non riuscita - riapri il file originale"
+  }
 }

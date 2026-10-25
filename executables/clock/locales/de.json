@@ -1,48 +1,86 @@
 {
-  "alarm.controls.decrement_hour": "Stunde -",
-  "alarm.controls.decrement_minute": "Minute -",
-  "alarm.controls.delete": "Löschen",
-  "alarm.controls.disable": "Deaktivieren",
-  "alarm.controls.increment_hour": "Stunde +",
-  "alarm.controls.increment_minute": "Minute +",
-  "alarm.controls.save_and_enable": "Speichern und aktivieren",
-  "alarm.instructions.repeat_days_utc": "An ausgewählten Tagen wiederholen; ohne Auswahl nur einmal. Alle Uhrzeiten sind in UTC.",
-  "alarm.status.disabled": "Deaktiviert",
-  "alarm.status.enabled": "Aktiviert: ",
-  "alarm.status.no_saved_alarm": "Kein gespeicherter Wecker",
-  "alarm.weekdays.friday": "Fr",
-  "alarm.weekdays.monday": "Mo",
-  "alarm.weekdays.saturday": "Sa",
-  "alarm.weekdays.sunday": "So",
-  "alarm.weekdays.thursday": "Do",
-  "alarm.weekdays.tuesday": "Di",
-  "alarm.weekdays.wednesday": "Mi",
-  "alerts.alarm_ringing": "Weckalarm! ",
-  "alerts.alarm_snoozed": "Wecker zurückgestellt. ",
-  "alerts.dismiss": "Schließen",
-  "alerts.instructions": "Benachrichtigungen werden angezeigt, solange die Uhr läuft.",
-  "alerts.snooze_five_minutes": "5 Min. schlummern",
-  "alerts.timer_finished": "Timer abgelaufen! ",
-  "clock.controls.toggle_hour_format": "12-/24-Stunden-Format",
-  "clock.errors.host_unavailable": "Systemuhr nicht verfügbar",
-  "clock.instructions.utc_only": "UTC / Systemzeit. Zeitzonen für Städte sind noch nicht verfügbar.",
-  "errors.settings_save_failed": "Einstellungen konnten nicht gespeichert werden. ",
-  "stopwatch.controls.record_lap": "Runde",
-  "stopwatch.controls.reset": "Zurücksetzen",
-  "stopwatch.controls.toggle_pause": "Starten / Anhalten",
-  "stopwatch.laps.recorded.one": "{count} Runde aufgezeichnet",
-  "stopwatch.laps.recorded.other": "{count} Runden aufgezeichnet",
-  "tabs.alarm": "Wecker",
-  "tabs.clock": "Uhr",
-  "tabs.stopwatch": "Stoppuhr",
-  "tabs.timer": "Timer",
-  "timer.controls.cancel": "Abbrechen",
-  "timer.controls.decrement_minute": "Minute -",
-  "timer.controls.decrement_second": "Sekunde -",
-  "timer.controls.increment_minute": "Minute +",
-  "timer.controls.increment_second": "Sekunde +",
-  "timer.controls.restart": "Neustarten",
-  "timer.controls.start": "Starten",
-  "timer.controls.toggle_pause": "Anhalten / Fortsetzen",
-  "timer.labels.duration": "Dauer"
+  "alarm": {
+    "controls": {
+      "decrement_hour": "Stunde -",
+      "decrement_minute": "Minute -",
+      "delete": "Löschen",
+      "disable": "Deaktivieren",
+      "increment_hour": "Stunde +",
+      "increment_minute": "Minute +",
+      "save_and_enable": "Speichern und aktivieren"
+    },
+    "instructions": {
+      "repeat_days_utc": "An ausgewählten Tagen wiederholen; ohne Auswahl nur einmal. Alle Uhrzeiten sind in UTC."
+    },
+    "status": {
+      "disabled": "Deaktiviert",
+      "enabled": "Aktiviert: ",
+      "no_saved_alarm": "Kein gespeicherter Wecker"
+    },
+    "weekdays": {
+      "friday": "Fr",
+      "monday": "Mo",
+      "saturday": "Sa",
+      "sunday": "So",
+      "thursday": "Do",
+      "tuesday": "Di",
+      "wednesday": "Mi"
+    }
+  },
+  "alerts": {
+    "alarm_ringing": "Weckalarm! ",
+    "alarm_snoozed": "Wecker zurückgestellt. ",
+    "dismiss": "Schließen",
+    "instructions": "Benachrichtigungen werden angezeigt, solange die Uhr läuft.",
+    "snooze_five_minutes": "5 Min. schlummern",
+    "timer_finished": "Timer abgelaufen! "
+  },
+  "clock": {
+    "controls": {
+      "toggle_hour_format": "12-/24-Stunden-Format"
+    },
+    "errors": {
+      "host_unavailable": "Systemuhr nicht verfügbar"
+    },
+    "instructions": {
+      "utc_only": "UTC / Systemzeit. Zeitzonen für Städte sind noch nicht verfügbar."
+    }
+  },
+  "errors": {
+    "settings_save_failed": "Einstellungen konnten nicht gespeichert werden. "
+  },
+  "stopwatch": {
+    "controls": {
+      "record_lap": "Runde",
+      "reset": "Zurücksetzen",
+      "toggle_pause": "Starten / Anhalten"
+    },
+    "laps": {
+      "recorded": {
+        "one": "{count} Runde aufgezeichnet",
+        "other": "{count} Runden aufgezeichnet"
+      }
+    }
+  },
+  "tabs": {
+    "alarm": "Wecker",
+    "clock": "Uhr",
+    "stopwatch": "Stoppuhr",
+    "timer": "Timer"
+  },
+  "timer": {
+    "controls": {
+      "cancel": "Abbrechen",
+      "decrement_minute": "Minute -",
+      "decrement_second": "Sekunde -",
+      "increment_minute": "Minute +",
+      "increment_second": "Sekunde +",
+      "restart": "Neustarten",
+      "start": "Starten",
+      "toggle_pause": "Anhalten / Fortsetzen"
+    },
+    "labels": {
+      "duration": "Dauer"
+    }
+  }
 }

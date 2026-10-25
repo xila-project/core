@@ -5,6 +5,7 @@
  */
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { flattenCatalog } from "./tools/localization/catalog.mjs";
 
 const PLURAL = new Set(["zero", "one", "two", "few", "many", "other"]);
 const MACROS = new Set([
@@ -127,12 +128,7 @@ function formsInCatalogs(namespace, key, plural) {
     for (const file of readdirSync(directory)) {
       if (!file.endsWith(".json")) continue;
       const catalog = JSON.parse(readFileSync(path.join(directory, file), "utf8"));
-      for (const [candidate, value] of Object.entries(catalog)) {
-        if (candidate === key && value && typeof value === "object") {
-          for (const suffix of Object.keys(value)) {
-            if (!plural || PLURAL.has(suffix)) found.add(key + "." + suffix);
-          }
-        }
+      for (const candidate of Object.keys(flattenCatalog(catalog))) {
         if (!candidate.startsWith(key + ".")) continue;
         const suffix = candidate.slice(key.length + 1);
         if (!suffix || suffix.includes(".")) continue;

@@ -1,23 +1,31 @@
 {
-  "errors.authentication_failed": "Falha na autenticação: {}",
-  "errors.failed_to_add_shortcut": "Não foi possível adicionar o atalho: {}",
-  "errors.failed_to_create_object": "Não foi possível criar o objeto",
-  "errors.failed_to_deserialize_shortcut": "Não foi possível desserializar o atalho: {}",
-  "errors.failed_to_execute_shortcut": "Não foi possível executar o atalho: {}",
-  "errors.failed_to_get_child": "Não foi possível obter o elemento filho",
-  "errors.failed_to_get_current_task_identifier": "Não foi possível obter o identificador da tarefa atual: {}",
-  "errors.failed_to_get_shortcut_file_path": "Não foi possível obter o caminho do arquivo de atalho",
-  "errors.failed_to_open_directory": "Não foi possível abrir o diretório: {}",
-  "errors.failed_to_open_standard_file": "Não foi possível abrir o arquivo padrão: {}",
-  "errors.failed_to_read_shortcut_directory": "Não foi possível ler o diretório de atalhos: {}",
-  "errors.failed_to_read_shortcut_file": "Não foi possível ler o arquivo de atalho: {}",
-  "errors.failed_to_set_environment_variable": "Não foi possível definir a variável de ambiente: {}",
-  "errors.failed_to_set_task_user": "Não foi possível definir o usuário da tarefa: {}",
-  "errors.graphics_error": "Erro gráfico: {}",
-  "errors.invalid_utf_8": "UTF-8 inválido: {}",
-  "login.actions.submit": "Entrar",
-  "errors.missing_arguments": "Argumentos ausentes",
-  "errors.null_character_in_string": "Caractere nulo no texto: {}",
-  "login.fields.password": "Senha",
-  "login.fields.username": "Nome de usuário"
+  "errors": {
+    "authentication_failed": "Falha na autenticação: {}",
+    "failed_to_add_shortcut": "Não foi possível adicionar o atalho: {}",
+    "failed_to_create_object": "Não foi possível criar o objeto",
+    "failed_to_deserialize_shortcut": "Não foi possível desserializar o atalho: {}",
+    "failed_to_execute_shortcut": "Não foi possível executar o atalho: {}",
+    "failed_to_get_child": "Não foi possível obter o elemento filho",
+    "failed_to_get_current_task_identifier": "Não foi possível obter o identificador da tarefa atual: {}",
+    "failed_to_get_shortcut_file_path": "Não foi possível obter o caminho do arquivo de atalho",
+    "failed_to_open_directory": "Não foi possível abrir o diretório: {}",
+    "failed_to_open_standard_file": "Não foi possível abrir o arquivo padrão: {}",
+    "failed_to_read_shortcut_directory": "Não foi possível ler o diretório de atalhos: {}",
+    "failed_to_read_shortcut_file": "Não foi possível ler o arquivo de atalho: {}",
+    "failed_to_set_environment_variable": "Não foi possível definir a variável de ambiente: {}",
+    "failed_to_set_task_user": "Não foi possível definir o usuário da tarefa: {}",
+    "graphics_error": "Erro gráfico: {}",
+    "invalid_utf_8": "UTF-8 inválido: {}",
+    "missing_arguments": "Argumentos ausentes",
+    "null_character_in_string": "Caractere nulo no texto: {}"
+  },
+  "login": {
+    "actions": {
+      "submit": "Entrar"
+    },
+    "fields": {
+      "password": "Senha",
+      "username": "Nome de usuário"
+    }
+  }
 }

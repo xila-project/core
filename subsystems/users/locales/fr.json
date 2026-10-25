@@ -1,13 +1,15 @@
 {
-  "errors.already_initialized": "Déjà initialisé",
-  "errors.duplicate_group_identifier": "Identifiant de groupe en double",
-  "errors.duplicate_group_name": "Nom du groupe en double",
-  "errors.duplicate_user_identifier": "Identifiant d'utilisateur en double",
-  "errors.duplicate_user_name": "Nom d'utilisateur en double",
-  "errors.invalid_group_identifier": "Identifiant de groupe invalide",
-  "errors.invalid_user_identifier": "Identifiant d'utilisateur invalide",
-  "errors.not_initialized": "Non initialisé",
-  "errors.poisoned_lock": "Verrou empoisonné",
-  "errors.too_many_groups": "Trop de groupes",
-  "errors.too_many_users": "Trop d'utilisateurs"
+  "errors": {
+    "already_initialized": "Déjà initialisé",
+    "duplicate_group_identifier": "Identifiant de groupe en double",
+    "duplicate_group_name": "Nom du groupe en double",
+    "duplicate_user_identifier": "Identifiant d'utilisateur en double",
+    "duplicate_user_name": "Nom d'utilisateur en double",
+    "invalid_group_identifier": "Identifiant de groupe invalide",
+    "invalid_user_identifier": "Identifiant d'utilisateur invalide",
+    "not_initialized": "Non initialisé",
+    "poisoned_lock": "Verrou empoisonné",
+    "too_many_groups": "Trop de groupes",
+    "too_many_users": "Trop d'utilisateurs"
+  }
 }

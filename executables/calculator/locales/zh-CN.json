@@ -1,25 +1,31 @@
 {
-  "angle_mode.degrees_indicator": " [DEG]",
-  "angle_mode.radians": "RAD",
-  "angle_mode.radians_indicator": " [RAD]",
-  "controls.clear": "清除",
-  "errors.calculation_error": "计算错误",
-  "errors.calculation_overflow": "计算溢出",
-  "errors.calculation_with_details": "错误：{}",
-  "errors.division_by_zero": "除数不能为零",
-  "errors.expression_nested_too_deeply": "表达式嵌套过深",
-  "errors.expression_too_long": "表达式过长",
-  "errors.inexact_result": "结果不精确",
-  "errors.invalid_number": "无效数字",
-  "errors.requires_wasm_runtime": "此程序应在 WASM 环境中运行。",
-  "errors.too_many_arguments": "参数过多",
-  "errors.unclosed_parenthesis": "括号未闭合",
-  "errors.unexpected_character": "意外的字符",
-  "errors.unexpected_end_of_expression": "表达式意外结束",
-  "errors.unexpected_token": "意外的标记",
-  "errors.unknown_function": "未知函数",
-  "errors.unknown_variable": "未知变量",
-  "errors.unsupported_operation": "不支持的操作",
-  "errors.value_outside_function_domain": "数值超出函数定义域",
-  "errors.wrong_number_of_arguments": "参数数量错误"
+  "angle_mode": {
+    "degrees_indicator": " [DEG]",
+    "radians": "RAD",
+    "radians_indicator": " [RAD]"
+  },
+  "controls": {
+    "clear": "清除"
+  },
+  "errors": {
+    "calculation_error": "计算错误",
+    "calculation_overflow": "计算溢出",
+    "calculation_with_details": "错误：{}",
+    "division_by_zero": "除数不能为零",
+    "expression_nested_too_deeply": "表达式嵌套过深",
+    "expression_too_long": "表达式过长",
+    "inexact_result": "结果不精确",
+    "invalid_number": "无效数字",
+    "requires_wasm_runtime": "此程序应在 WASM 环境中运行。",
+    "too_many_arguments": "参数过多",
+    "unclosed_parenthesis": "括号未闭合",
+    "unexpected_character": "意外的字符",
+    "unexpected_end_of_expression": "表达式意外结束",
+    "unexpected_token": "意外的标记",
+    "unknown_function": "未知函数",
+    "unknown_variable": "未知变量",
+    "unsupported_operation": "不支持的操作",
+    "value_outside_function_domain": "数值超出函数定义域",
+    "wrong_number_of_arguments": "参数数量错误"
+  }
 }

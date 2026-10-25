@@ -1,5 +1,7 @@
 {
-  "errors.failed_to_get_main_function": "获取主函数失败",
-  "errors.invalid_stack_size": "栈大小无效",
-  "errors.permission_denied": "权限不足"
+  "errors": {
+    "failed_to_get_main_function": "获取主函数失败",
+    "invalid_stack_size": "栈大小无效",
+    "permission_denied": "权限不足"
+  }
 }

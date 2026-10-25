@@ -6,6 +6,7 @@
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { flattenCatalog } from "./catalog.mjs";
 import { execFileSync } from "node:child_process";
 import extract from "../../tolgee.extractor.mjs";
 
@@ -32,18 +33,19 @@ function visit(dir, suffix, output = []) {
 function catalog(pathName) {
   const json = JSON.parse(readFileSync(pathName, "utf8"));
   if (!json || Array.isArray(json) || typeof json !== "object") {
-    throw Error(pathName + ": expected a flat JSON object");
+    throw Error(pathName + ": expected a JSON object");
   }
-  for (const [key, value] of Object.entries(json)) {
+  const flat = flattenCatalog(json);
+  for (const [key, value] of Object.entries(flat)) {
     if (typeof value !== "string") failures.push(pathName + ": nonstring value " + key);
     if (!KEY.test(key)) failures.push(pathName + ": nonsemantic key " + key);
     const segments = key.split(".");
     for (let n = 1; n < segments.length; n++) {
       const prefix = segments.slice(0, n).join(".");
-      if (Object.hasOwn(json, prefix)) failures.push(pathName + ": dotted collision " + prefix);
+      if (Object.hasOwn(flat, prefix)) failures.push(pathName + ": dotted collision " + prefix);
     }
   }
-  return json;
+  return flat;
 }
 
 function baselineCatalog(file) {

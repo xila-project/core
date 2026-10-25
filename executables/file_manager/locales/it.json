@@ -1,4 +1,6 @@
 {
-  "errors.event_handling_failed": "Errore durante la gestione dell'evento del file manager: {:?}",
-  "errors.invalid_entered_path": "Percorso inserito non valido: {}"
+  "errors": {
+    "event_handling_failed": "Errore durante la gestione dell'evento del file manager: {:?}",
+    "invalid_entered_path": "Percorso inserito non valido: {}"
+  }
 }

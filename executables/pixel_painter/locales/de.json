@@ -1,16 +1,28 @@
 {
-  "app.title": "Pixel-Editor",
-  "controls.undo": "Rückgängig",
-  "controls.clear": "Löschen",
-  "controls.save": "Speichern",
-  "controls.open": "Öffnen",
-  "status.ready_white_erases": "Bereit - Weiß dient als Radierer",
-  "warnings.unsaved_close_again": "Ungespeicherte Zeichnung - zum Verwerfen erneut schließen",
-  "warnings.unsaved_open_again": "Ungespeicherte Zeichnung - zum Verwerfen erneut Öffnen wählen",
-  "file_path.placeholder": "Absoluten Dateipfad eingeben",
-  "status.opened": "Geöffnet",
-  "status.saved": "Gespeichert",
-  "errors.invalid_file_drawing_preserved": "Ungültige Pixel-Editor-Datei - Zeichnung bleibt erhalten",
-  "errors.open_failed": "Öffnen fehlgeschlagen - Pfad und Speicher prüfen",
-  "errors.save_failed_drawing_preserved": "Speichern fehlgeschlagen - Zeichnung bleibt erhalten; Pfad und Speicher prüfen"
+  "app": {
+    "title": "Pixel-Editor"
+  },
+  "controls": {
+    "undo": "Rückgängig",
+    "clear": "Löschen",
+    "save": "Speichern",
+    "open": "Öffnen"
+  },
+  "status": {
+    "ready_white_erases": "Bereit - Weiß dient als Radierer",
+    "opened": "Geöffnet",
+    "saved": "Gespeichert"
+  },
+  "warnings": {
+    "unsaved_close_again": "Ungespeicherte Zeichnung - zum Verwerfen erneut schließen",
+    "unsaved_open_again": "Ungespeicherte Zeichnung - zum Verwerfen erneut Öffnen wählen"
+  },
+  "file_path": {
+    "placeholder": "Absoluten Dateipfad eingeben"
+  },
+  "errors": {
+    "invalid_file_drawing_preserved": "Ungültige Pixel-Editor-Datei - Zeichnung bleibt erhalten",
+    "open_failed": "Öffnen fehlgeschlagen - Pfad und Speicher prüfen",
+    "save_failed_drawing_preserved": "Speichern fehlgeschlagen - Zeichnung bleibt erhalten; Pfad und Speicher prüfen"
+  }
 }

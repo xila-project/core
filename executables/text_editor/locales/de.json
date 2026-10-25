@@ -1,22 +1,36 @@
 {
-  "app.title": "Texteditor",
-  "navigation.previous_page": "Zurück",
-  "navigation.next_page": "Weiter",
-  "controls.new_file": "Neu",
-  "controls.open_file": "Öffnen",
-  "controls.save_file": "Speichern",
-  "file_path.instructions": "Pfad wählen und eine Textdatei erstellen oder öffnen",
-  "warnings.unsaved_close_again": "Ungespeicherte Änderungen - zum Verwerfen erneut schließen",
-  "warnings.unsaved_new_or_open_again": "Ungespeicherte Änderungen - zum Verwerfen erneut Neu oder Öffnen wählen",
-  "file_path.placeholder": "Absoluten Dateipfad eingeben",
-  "status.open_or_create_first": "Zuerst eine Datei öffnen oder erstellen",
-  "errors.working_copy_creation_failed": "Arbeitskopie konnte in diesem Verzeichnis nicht erstellt werden",
-  "file_path.new_file_default_name": "Neue Textdatei",
-  "status.opened": "Geöffnet",
-  "errors.open_failed": "Öffnen fehlgeschlagen - UTF-8-Textdatei verwenden und Speicher prüfen",
-  "status.saved": "Gespeichert",
-  "errors.save_failed_working_copy_preserved": "Speichern fehlgeschlagen - Arbeitskopie bleibt erhalten; Pfad und Speicher prüfen",
-  "errors.page_exceeds_byte_limit": "Der Seitentext darf höchstens 4096 UTF-8-Bytes umfassen",
-  "errors.edit_failed_close_again": "Bearbeitung fehlgeschlagen - zum Verwerfen der Änderungen erneut schließen",
-  "errors.edit_failed_reopen_source": "Bearbeitung fehlgeschlagen - Quelldatei erneut öffnen"
+  "app": {
+    "title": "Texteditor"
+  },
+  "navigation": {
+    "previous_page": "Zurück",
+    "next_page": "Weiter"
+  },
+  "controls": {
+    "new_file": "Neu",
+    "open_file": "Öffnen",
+    "save_file": "Speichern"
+  },
+  "file_path": {
+    "instructions": "Pfad wählen und eine Textdatei erstellen oder öffnen",
+    "placeholder": "Absoluten Dateipfad eingeben",
+    "new_file_default_name": "Neue Textdatei"
+  },
+  "warnings": {
+    "unsaved_close_again": "Ungespeicherte Änderungen - zum Verwerfen erneut schließen",
+    "unsaved_new_or_open_again": "Ungespeicherte Änderungen - zum Verwerfen erneut Neu oder Öffnen wählen"
+  },
+  "status": {
+    "open_or_create_first": "Zuerst eine Datei öffnen oder erstellen",
+    "opened": "Geöffnet",
+    "saved": "Gespeichert"
+  },
+  "errors": {
+    "working_copy_creation_failed": "Arbeitskopie konnte in diesem Verzeichnis nicht erstellt werden",
+    "open_failed": "Öffnen fehlgeschlagen - UTF-8-Textdatei verwenden und Speicher prüfen",
+    "save_failed_working_copy_preserved": "Speichern fehlgeschlagen - Arbeitskopie bleibt erhalten; Pfad und Speicher prüfen",
+    "page_exceeds_byte_limit": "Der Seitentext darf höchstens 4096 UTF-8-Bytes umfassen",
+    "edit_failed_close_again": "Bearbeitung fehlgeschlagen - zum Verwerfen der Änderungen erneut schließen",
+    "edit_failed_reopen_source": "Bearbeitung fehlgeschlagen - Quelldatei erneut öffnen"
+  }
 }

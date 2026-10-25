@@ -412,6 +412,32 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertLess(runtime.index("Test read-only root"), runtime.index("Publish image to GitHub Container Registry"))
         self.assertLess(runtime.index("Exercise Xila CLI shell"), runtime.index("Publish image to GitHub Container Registry"))
 
+    def test_runtime_pr_build_only_and_main_release_validate_image(self):
+        runtime = (ROOT / ".github/workflows/runtime.yml").read_text()
+        self.assertIn("load: ${{ github.event_name != 'pull_request' }}", runtime)
+        self.assertIn("outputs: ${{ github.event_name == 'pull_request' && 'type=cacheonly' || '' }}", runtime)
+        self.assertIn(
+            "cache-to: ${{ github.event_name != 'pull_request' && "
+            "'type=gha,mode=max,scope=xila-runtime-linux-amd64,ignore-error=true' || '' }}",
+            runtime,
+        )
+        for step in [
+            "Prepare image metadata",
+            "Check image user and entrypoint",
+            "Build runtime smoke-test guest",
+            "Test read-only root, host mounts, state persistence, and exit status",
+            "Exercise Xila CLI shell over stdin",
+        ]:
+            with self.subTest(step=step):
+                self.assertIn(
+                    f"- name: {step}\n        if: github.event_name != 'pull_request'",
+                    runtime,
+                )
+        self.assertIn("uses: docker/build-push-action@v7", runtime)
+        self.assertIn("cache-from: type=gha,scope=xila-runtime-linux-amd64", runtime)
+        self.assertIn("if: github.event_name == 'workflow_run' || startsWith(github.ref, 'refs/tags/v')", runtime)
+        self.assertNotIn("          load: true", runtime)
+
     def test_runtime_dockerfile_does_not_export_redundant_stable_toolchain_variable(self):
         dockerfile = (ROOT / "Dockerfile.runtime").read_text()
         self.assertNotIn("XILA_RUST_TOOLCHAIN", dockerfile)

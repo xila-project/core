@@ -1,5 +1,7 @@
 {
-  "errors.failed_to_get_main_function": "No se pudo obtener la función principal",
-  "errors.invalid_stack_size": "Tamaño de pila no válido",
-  "errors.permission_denied": "Permiso denegado"
+  "errors": {
+    "failed_to_get_main_function": "No se pudo obtener la función principal",
+    "invalid_stack_size": "Tamaño de pila no válido",
+    "permission_denied": "Permiso denegado"
+  }
 }
