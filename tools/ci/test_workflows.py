@@ -429,7 +429,7 @@ class WorkflowPolicy(unittest.TestCase):
         ]:
             with self.subTest(step=step):
                 self.assertIn(
-                    f"- name: {step}\\n        if: github.event_name != 'pull_request'",
+                    f"- name: {step}\n        if: github.event_name != 'pull_request'",
                     runtime,
                 )
         self.assertIn("uses: docker/build-push-action@v7", runtime)
