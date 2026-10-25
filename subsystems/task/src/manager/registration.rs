@@ -57,7 +57,13 @@ impl Manager {
 
         let name = SmolStr::new_inline(name);
 
+        let generation = inner
+            .next_generation
+            .checked_add(1)
+            .ok_or(Error::TooManyTasks)?;
+        inner.next_generation = generation;
         let metadata = Metadata {
+            generation,
             internal_identifier: 0, // Will be set later
             name: name.clone(),
             parent: parent_task_identifier,

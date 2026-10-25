@@ -116,16 +116,28 @@ impl File {
         Ok(())
     }
 
-    pub fn set_attributes(&mut self, attributes: &Attributes) -> Result<()> {
+    pub fn set_attributes(
+        &mut self,
+        file_system: &mut littlefs::lfs_t,
+        attributes: &Attributes,
+    ) -> Result<()> {
         let mask = attributes.get_mask();
         if mask.is_empty() {
             return Ok(());
         }
         InternalAttributes::validate_attribute_mask(mask)?;
 
+        // Read-only opens cannot persist configured attributes. Never report a
+        // successful chmod that disappears when the descriptor closes.
+        if self.file.flags & 3 == littlefs::lfs_open_flags_LFS_O_RDONLY {
+            return Err(Error::UnsupportedOperation);
+        }
         self.internal_attributes
             .update_with_attributes(attributes)?;
-
+        let current = self.internal_attributes.clone();
+        crate::open_metadata::synchronize(file_system, &self.file, &current);
+        self.file.flags |= littlefs::lfs_open_flags_LFS_F_DIRTY;
+        convert_result(unsafe { littlefs::lfs_file_sync(file_system, &mut self.file) })?;
         Ok(())
     }
 

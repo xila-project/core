@@ -211,10 +211,16 @@ impl Manager {
         if let Some(identifier) = inner.identifiers.get(&internal_identifier) {
             return *identifier;
         }
+        let generation = inner
+            .next_generation
+            .checked_add(1)
+            .expect("task authority generations exhausted");
+        inner.next_generation = generation;
         let root = Manager::ROOT_TASK_IDENTIFIER;
         inner.tasks.insert(
             root,
             Metadata {
+                generation,
                 internal_identifier,
                 name: "Root".into(),
                 parent: root,

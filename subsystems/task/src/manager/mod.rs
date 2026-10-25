@@ -16,12 +16,11 @@ mod tests;
 
 // - Re-exports
 
-pub(crate) use metadata::*;
+pub(crate) use metadata::Metadata;
+pub use metadata::TaskAuthority;
 pub use spawner::*;
 
 // Manager module - core Manager structure and initialization
-
-use crate::manager::Metadata;
 
 #[cfg(any(test, feature = "test_harness"))]
 use alloc::boxed::Box;
@@ -29,6 +28,7 @@ use alloc::collections::BTreeMap;
 use synchronization::{blocking_mutex::raw::CriticalSectionRawMutex, rwlock::RwLock};
 
 pub(crate) struct Inner {
+    next_generation: u64,
     pub(crate) tasks: BTreeMap<TaskIdentifier, Metadata>,
     pub(crate) identifiers: BTreeMap<usize, TaskIdentifier>,
     pub(crate) spawners: BTreeMap<usize, ::embassy_executor::Spawner>,
@@ -94,6 +94,7 @@ impl Manager {
     /// create a root task and register current thread as the root task main thread.
     pub const fn new() -> Self {
         Manager(RwLock::new(Inner {
+            next_generation: 0,
             tasks: BTreeMap::new(),
             identifiers: BTreeMap::new(),
             spawners: BTreeMap::new(),

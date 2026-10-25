@@ -14,6 +14,9 @@ use users::{GroupIdentifier, UserIdentifier};
 
 pub struct SynchronousFile<'a> {
     closed: bool,
+    // Native callers are trusted; this is the retained task context of the
+    // opening, not a sandbox between native components.
+    pub(crate) authority: Option<task::TaskAuthority<'static>>,
     virtual_file_system: &'a VirtualFileSystem,
     pub(crate) item: ItemStatic,
     cursor: crate::cursor::Cursor,
@@ -44,6 +47,7 @@ impl<'a> SynchronousFile<'a> {
     ) -> Self {
         Self {
             closed: false,
+            authority: None,
             virtual_file_system,
             item,
             cursor: crate::cursor::Cursor::new(position),
@@ -288,6 +292,7 @@ impl<'a> SynchronousFile<'a> {
 
         Ok(Self {
             closed: false,
+            authority: self.authority,
             virtual_file_system: self.virtual_file_system,
             item: self.item.clone(),
             cursor: self.cursor.duplicate(),
@@ -322,10 +327,7 @@ impl<'a> SynchronousFile<'a> {
             attributes = attributes.set_group(group);
         }
 
-        self.item
-            .as_attributes_operations()
-            .ok_or(Error::UnsupportedOperation)?
-            .set_attributes(&mut self.context, &attributes)?;
+        self.set_metadata(&attributes)?;
 
         Ok(())
     }
@@ -333,12 +335,21 @@ impl<'a> SynchronousFile<'a> {
     pub fn set_permissions(&mut self, permissions: Permissions) -> Result<()> {
         let attributes = Attributes::new().set_permissions(permissions);
 
-        self.item
-            .as_attributes_operations()
-            .ok_or(Error::UnsupportedOperation)?
-            .set_attributes(&mut self.context, &attributes)?;
+        self.set_metadata(&attributes)?;
 
         Ok(())
+    }
+
+    fn set_metadata(&mut self, attributes: &Attributes) -> Result<()> {
+        if self.closed {
+            return Err(Error::InvalidIdentifier);
+        }
+        self.virtual_file_system.set_handle_attributes(
+            self.authority.as_ref().ok_or(Error::PermissionDenied)?,
+            &self.item,
+            &mut self.context,
+            attributes,
+        )
     }
 
     pub fn control<C>(&mut self, _command: C, argument: &C::Input) -> Result<C::Output>

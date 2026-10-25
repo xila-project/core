@@ -925,3 +925,34 @@ async fn test_spawner_reuse_after_unregister() {
     let current_spawner = manager.get_spawner(current_task).await.unwrap();
     assert!(current_spawner != usize::MAX);
 }
+
+#[test(task_path = crate)]
+async fn authority_tracks_user_and_rejects_reused_task_identifier() {
+    let manager = Manager::new();
+    let root = manager.get_current_task_identifier().await;
+    let child = manager.register(root, "authority").await.unwrap();
+    let authority = manager.authority(child).await.unwrap();
+    assert_eq!(authority.user().await.unwrap(), UserIdentifier::ROOT);
+    let user = UserIdentifier::new(123);
+    manager.set_user(child, user).await.unwrap();
+    assert_eq!(authority.user().await.unwrap(), user);
+    manager.unregister(child).await.unwrap();
+    assert!(authority.user().await.is_err());
+    let replacement = manager.register(root, "replacement").await.unwrap();
+    assert_eq!(replacement, child);
+    assert_eq!(
+        manager.get_user(replacement).await.unwrap(),
+        UserIdentifier::ROOT
+    );
+    assert!(authority.user().await.is_err());
+    assert_eq!(
+        manager
+            .authority(replacement)
+            .await
+            .unwrap()
+            .user()
+            .await
+            .unwrap(),
+        UserIdentifier::ROOT
+    );
+}

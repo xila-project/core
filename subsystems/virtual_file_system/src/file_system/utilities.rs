@@ -652,34 +652,6 @@ impl VirtualFileSystem {
 
         Ok(())
     }
-
-    pub(super) async fn check_owner(
-        file_system: &dyn FileSystemOperations,
-        path: impl AsRef<Path>,
-        current_user: UserIdentifier,
-    ) -> Result<()> {
-        if current_user == UserIdentifier::ROOT {
-            return Ok(());
-        }
-
-        let mut attributes = Attributes::default().set_mask(AttributeFlags::User);
-
-        Self::get_attributes(file_system, path.as_ref(), &mut attributes).await?;
-
-        let owner_user = *attributes.get_user().ok_or(Error::MissingAttribute)?;
-
-        if current_user == owner_user {
-            return Ok(());
-        }
-
-        log::error!(
-            "User {:?} is not the owner {:?} of path {:?}",
-            current_user,
-            owner_user,
-            path.as_ref(),
-        );
-        Err(Error::PermissionDenied)
-    }
 }
 
 fn application_scope(path: &Path) -> Option<(Option<&str>, bool)> {

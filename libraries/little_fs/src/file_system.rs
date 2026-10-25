@@ -170,6 +170,27 @@ impl FileSystemOperations for FileSystem {
             let destination =
                 CString::new(destination.as_str()).map_err(|_| Error::InvalidParameter)?;
 
+            if source != destination {
+                let mut probe = littlefs::lfs_file_t::default();
+                let opened = unsafe {
+                    littlefs::lfs_file_open(
+                        file_system,
+                        &mut probe,
+                        source.as_ptr(),
+                        littlefs::lfs_open_flags_LFS_O_RDONLY as i32,
+                    )
+                };
+                if opened >= 0 {
+                    let busy = crate::open_metadata::has_other_open(file_system, &probe);
+                    convert_result(unsafe { littlefs::lfs_file_close(file_system, &mut probe) })?;
+                    if busy {
+                        return Err(Error::RessourceBusy);
+                    }
+                } else if opened != littlefs::lfs_error_LFS_ERR_ISDIR {
+                    convert_result(opened)?;
+                }
+            }
+
             convert_result(unsafe {
                 littlefs::lfs_rename(file_system, source.as_ptr(), destination.as_ptr())
             })?;
@@ -287,7 +308,21 @@ impl FileSystemOperations for FileSystem {
 
             internal_attributes.update_with_attributes(attributes)?;
 
-            convert_result(unsafe {
+            // Pin a native identity through the metadata commit (which may
+            // relocate directory blocks). The probe has no configured attrs.
+            let mut probe = littlefs::lfs_file_t::default();
+            let opened = unsafe {
+                littlefs::lfs_file_open(
+                    file_system,
+                    &mut probe,
+                    path.as_ptr(),
+                    littlefs::lfs_open_flags_LFS_O_RDONLY as i32,
+                )
+            };
+            if opened < 0 && opened != littlefs::lfs_error_LFS_ERR_ISDIR {
+                convert_result(opened)?;
+            }
+            let result = convert_result(unsafe {
                 littlefs::lfs_setattr(
                     file_system,
                     path.as_ptr(),
@@ -295,8 +330,18 @@ impl FileSystemOperations for FileSystem {
                     &internal_attributes as *const _ as *const _,
                     size_of::<InternalAttributes>() as u32,
                 )
-            })?;
-
+            });
+            if opened >= 0 {
+                if result.is_ok() {
+                    crate::open_metadata::synchronize(file_system, &probe, &internal_attributes);
+                }
+                let close =
+                    convert_result(unsafe { littlefs::lfs_file_close(file_system, &mut probe) });
+                result?;
+                close?;
+            } else {
+                result?;
+            }
             Ok(())
         })
     }
@@ -333,9 +378,11 @@ impl AttributeOperations for FileSystem {
         }
 
         if let Some(file) = context.get_private_data_of_type::<SharedContext<File>>() {
-            file.try_lock()
-                .map_err(|_| Error::RessourceBusy)?
-                .set_attributes(attributes)
+            self.operation(|file_system| {
+                file.try_lock()
+                    .map_err(|_| Error::RessourceBusy)?
+                    .set_attributes(file_system, attributes)
+            })
         } else if let Some(directory) =
             context.get_private_data_of_type::<SharedContext<Directory>>()
         {
@@ -685,6 +732,112 @@ mod tests {
         let mut after_rejection = Attributes::new().set_mask(AttributeFlags::Permissions);
         FileSystemOperations::get_attributes(&fs, file, &mut after_rejection).unwrap();
         assert_eq!(after_rejection.get_permissions(), Some(&original));
+    }
+
+    #[test]
+    fn path_ownership_updates_every_open_cache_and_survives_close() {
+        let fs = initialize();
+        let path = Path::new("/owners");
+        FileSystemOperations::create_file(&fs, path).unwrap();
+        let mut first = Context::new_empty();
+        let mut second = Context::new_empty();
+        for context in [&mut first, &mut second] {
+            fs.lookup_file(context, path, file_system::AccessFlags::READ_WRITE.into())
+                .unwrap();
+        }
+        let owner = users::UserIdentifier::new(123);
+        FileSystemOperations::set_attributes(&fs, path, &Attributes::new().set_user(owner))
+            .unwrap();
+        for context in [&mut first, &mut second] {
+            let mut attributes = Attributes::new().set_mask(AttributeFlags::User);
+            AttributeOperations::get_attributes(&fs, context, &mut attributes).unwrap();
+            assert_eq!(attributes.get_user(), Some(&owner));
+            BaseOperations::close(&fs, context).unwrap();
+        }
+        let mut attributes = Attributes::new().set_mask(AttributeFlags::User);
+        FileSystemOperations::get_attributes(&fs, path, &mut attributes).unwrap();
+        assert_eq!(attributes.get_user(), Some(&owner));
+    }
+
+    #[test]
+    fn ownership_cache_sync_uses_object_identity_after_rename_and_unlink() {
+        let fs = initialize();
+        let original = Path::new("/old");
+        let moved = Path::new("/moved");
+        FileSystemOperations::create_file(&fs, original).unwrap();
+        let mut open = Context::new_empty();
+        fs.lookup_file(
+            &mut open,
+            original,
+            file_system::AccessFlags::READ_WRITE.into(),
+        )
+        .unwrap();
+        // LittleFS detaches live source handles on rename. Reject this
+        // unsupported case instead of silently changing their object identity.
+        assert_eq!(
+            FileSystemOperations::rename(&fs, original, moved),
+            Err(Error::RessourceBusy)
+        );
+        BaseOperations::close(&fs, &mut open).unwrap();
+        FileSystemOperations::rename(&fs, original, moved).unwrap();
+        fs.lookup_file(
+            &mut open,
+            moved,
+            file_system::AccessFlags::READ_WRITE.into(),
+        )
+        .unwrap();
+        FileSystemOperations::create_file(&fs, original).unwrap();
+        let owner = users::UserIdentifier::new(123);
+        FileSystemOperations::set_attributes(&fs, moved, &Attributes::new().set_user(owner))
+            .unwrap();
+        FileSystemOperations::set_attributes(
+            &fs,
+            original,
+            &Attributes::new().set_user(users::UserIdentifier::new(456)),
+        )
+        .unwrap();
+        let mut attributes = Attributes::new().set_mask(AttributeFlags::User);
+        AttributeOperations::get_attributes(&fs, &mut open, &mut attributes).unwrap();
+        assert_eq!(attributes.get_user(), Some(&owner));
+        FileSystemOperations::remove(&fs, moved).unwrap();
+        FileSystemOperations::create_file(&fs, moved).unwrap();
+        FileSystemOperations::set_attributes(
+            &fs,
+            moved,
+            &Attributes::new().set_user(users::UserIdentifier::new(789)),
+        )
+        .unwrap();
+        AttributeOperations::get_attributes(&fs, &mut open, &mut attributes).unwrap();
+        assert_eq!(attributes.get_user(), Some(&owner));
+        BaseOperations::close(&fs, &mut open).unwrap();
+    }
+
+    #[test]
+    fn handle_chmod_after_flush_is_persisted_and_visible_to_other_handles() {
+        let fs = initialize();
+        let path = Path::new("/chmod");
+        FileSystemOperations::create_file(&fs, path).unwrap();
+        let mut first = Context::new_empty();
+        let mut second = Context::new_empty();
+        for context in [&mut first, &mut second] {
+            fs.lookup_file(context, path, file_system::AccessFlags::READ_WRITE.into())
+                .unwrap();
+        }
+        BaseOperations::flush_sync(&fs, &mut first).unwrap();
+        let permissions = file_system::Permissions::USER_READ_WRITE;
+        AttributeOperations::set_attributes(
+            &fs,
+            &mut first,
+            &Attributes::new().set_permissions(permissions),
+        )
+        .unwrap();
+        let mut attributes = Attributes::new().set_mask(AttributeFlags::Permissions);
+        AttributeOperations::get_attributes(&fs, &mut second, &mut attributes).unwrap();
+        assert_eq!(attributes.get_permissions(), Some(&permissions));
+        BaseOperations::close(&fs, &mut second).unwrap();
+        BaseOperations::close(&fs, &mut first).unwrap();
+        FileSystemOperations::get_attributes(&fs, path, &mut attributes).unwrap();
+        assert_eq!(attributes.get_permissions(), Some(&permissions));
     }
 
     #[test]

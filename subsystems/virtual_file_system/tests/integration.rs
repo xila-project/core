@@ -982,3 +982,7 @@ async fn hostfs_absolute_link_uses_vfs_root_without_escaping_host_capability() {
     vfs.unmount(Path::from_str("/host"), true).await.unwrap();
     let _ = fs::remove_dir_all(root);
 }
+
+#[cfg(target_os = "linux")]
+#[path = "support/metadata_authorization.rs"]
+mod metadata_authorization;
