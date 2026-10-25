@@ -65,10 +65,10 @@ mod tests {
     }
 
     #[test]
-    fn localized_fonts_contain_chinese_and_punctuation() {
+    fn localized_fonts_contain_cjk_catalog_glyphs() {
         let locale = option_env!("EMBEDDED_I18N_LOCALE").unwrap_or("en");
         let fallback = option_env!("EMBEDDED_I18N_FALLBACK").unwrap_or("en");
-        if !graphics_font_pipeline_test::fonts::uses_chinese(locale, fallback) {
+        if !graphics_font_pipeline_test::fonts::uses_catalog_subset(locale, fallback) {
             return;
         }
         let symbols = graphics_font_pipeline_test::catalogs::collect(
@@ -76,7 +76,15 @@ mod tests {
             &[locale, fallback],
         )
         .unwrap();
-        assert!(symbols.cjk.contains('清') && symbols.cjk.contains('：'));
+        if graphics_font_pipeline_test::fonts::uses_chinese(locale, fallback) {
+            assert!(symbols.cjk.contains('清') && symbols.cjk.contains('：'));
+        }
+        if locale == "ja" {
+            assert!(
+                symbols.cjk.contains('ア') && symbols.cjk.contains('時'),
+                "Japanese catalog must provide kana and kanji"
+            );
+        }
         for font in [
             graphics::fonts::get_font_small(),
             graphics::fonts::get_font_medium(),

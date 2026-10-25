@@ -7,6 +7,20 @@ use embedded_i18n::{get_locale_ranges, merge_contiguous_ranges};
 const SHIPPED_LOCALES: &[&str] = &["en", "fr", "es", "de", "pt-BR", "it", "pl"];
 const EXTRA_RANGES: &[Range<u32>] = &[0xb0..0xb1, 0x2022..0x2023];
 
+pub fn catalog_font(locale: &str, fallback: &str) -> Option<&'static str> {
+    std::iter::once(locale)
+        .chain(fallback.split(','))
+        .find_map(|locale| match normalize_locale(locale).as_str() {
+            "ja" | "ja-JP" => Some("SourceHanSansJP-Regular.otf"),
+            "zh" | "zh-CN" => Some("SourceHanSansSC-Regular.otf"),
+            _ => None,
+        })
+}
+
+pub fn uses_catalog_subset(locale: &str, fallback: &str) -> bool {
+    catalog_font(locale, fallback).is_some()
+}
+
 pub fn uses_chinese(locale: &str, fallback: &str) -> bool {
     std::iter::once(locale)
         .chain(fallback.split(','))

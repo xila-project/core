@@ -1,0 +1,4 @@
+{
+  "errors.event_handling_failed": "ファイルマネージャーのイベント処理に失敗しました: {:?}",
+  "errors.invalid_entered_path": "入力されたパスが無効です: {}"
+}

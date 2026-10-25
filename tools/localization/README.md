@@ -2,7 +2,8 @@
 
 Xila uses [embedded-i18n](https://github.com/AlixANNERAUD/embedded-i18n) 0.1.3
 with compile-time JSON translations. Each crate owns its own Tolgee namespace
-and eight JSON_C flat-key catalogs in its local 'locales/' directory.
+and nine JSON_C flat-key catalogs (including the experimental Japanese
+locale) in its local 'locales/' directory.
 
 ## Naming
 
@@ -61,3 +62,12 @@ entries require contextual review rather than automatic deletion. The
 embedded-i18n strict builds validate locale-specific plurals, format arguments
 and fallback conditions. All firmware-size claims require real target builds;
 these changes do not add runtime translation tables or additional locale data.
+
+## Japanese (`ja`)
+
+Japanese cardinal plurals use the CLDR `other` category. The initial
+`ja.json` catalogs require native-speaker terminology and UI review before
+release. Builds are compile-time localized: use the same locale for native
+host, Wasm guests, graphics and image. For the JP-region CJK source font,
+run `bash tools/localization/fetch-japanese-font.sh` before the Japanese
+graphics build. See `subsystems/graphics/fonts/README.md`.

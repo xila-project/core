@@ -42,13 +42,14 @@ fn main() {
     let fallback = embedded_i18n::get_fallback_locale_build();
     let active =
         fonts::effective_ranges(&locale, &fallback).unwrap_or_else(|error| panic!("{error}"));
-    let symbols = fonts::uses_chinese(&locale, &fallback).then(|| {
+    let catalog_font = fonts::catalog_font(&locale, &fallback);
+    let symbols = catalog_font.map(|_| {
         println!(
             "cargo:rerun-if-changed={}",
             root.join("../../Cargo.toml").display()
         );
         let symbols = catalogs::collect(&root.join("../.."), &[&locale, &fallback])
-            .expect("Chinese catalog font symbols");
+            .expect("CJK catalog font symbols");
         for directory in &symbols.directories {
             println!("cargo:rerun-if-changed={}", directory.display());
         }
@@ -75,12 +76,13 @@ fn main() {
     let mut reused = 0;
     for ranges in &variants {
         let plan = if ranges == &active && symbols.is_some() {
-            generate::sources_with_catalogs(
+            generate::sources_with_locale_catalogs(
                 &root,
                 &out.join("generated_fonts"),
                 ranges,
                 &identity,
                 symbols.as_ref(),
+                catalog_font.expect("active CJK font"),
             )
         } else {
             generate::sources(&root, &out.join("generated_fonts"), ranges, &identity)

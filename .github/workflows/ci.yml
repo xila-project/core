@@ -165,7 +165,7 @@ jobs:
           set -euo pipefail
           locales=()
           if [[ "$EVENT_NAME" != pull_request ]]; then
-            locales=(en fr es de pt-BR it pl zh-CN)
+            locales=(en fr es de pt-BR it pl zh-CN ja)
           else
             all_locales=false
             declare -A changed=()
@@ -182,13 +182,14 @@ jobs:
                 *locales/it.json) changed[it]=1 ;;
                 *locales/pl.json) changed[pl]=1 ;;
                 *locales/zh-CN.json) changed[zh-CN]=1 ;;
+                *locales/ja.json) changed[ja]=1 ;;
               esac
             done < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
             if [[ "$all_locales" == true ]]; then
-              locales=(en fr es de pt-BR it pl zh-CN)
+              locales=(en fr es de pt-BR it pl zh-CN ja)
             elif (( ${#changed[@]} > 0 )); then
               locales=(en)
-              for locale in fr es de pt-BR it pl zh-CN; do
+              for locale in fr es de pt-BR it pl zh-CN ja; do
                 [[ -n "${changed[$locale]:-}" ]] && locales+=("$locale")
               done
             fi

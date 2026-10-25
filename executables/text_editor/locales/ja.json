@@ -1,0 +1,22 @@
+{
+  "app.title": "テキストエディター",
+  "navigation.previous_page": "前へ",
+  "navigation.next_page": "次へ",
+  "controls.new_file": "新規",
+  "controls.open_file": "開く",
+  "controls.save_file": "保存",
+  "file_path.instructions": "パスを選択して、テキストファイルを作成または開いてください",
+  "warnings.unsaved_close_again": "未保存の変更があります。破棄するにはもう一度閉じてください",
+  "warnings.unsaved_new_or_open_again": "未保存の変更があります。破棄するにはもう一度「新規」または「開く」を選択してください",
+  "file_path.placeholder": "絶対ファイルパスを入力してください",
+  "status.open_or_create_first": "先にファイルを開くか作成してください",
+  "errors.working_copy_creation_failed": "このディレクトリに作業用コピーを作成できませんでした",
+  "file_path.new_file_default_name": "新しいテキストファイル",
+  "status.opened": "開きました",
+  "errors.open_failed": "開けませんでした。UTF-8 テキストファイルとストレージを確認してください",
+  "status.saved": "保存しました",
+  "errors.save_failed_working_copy_preserved": "保存に失敗しました。作業用コピーは保持されています。パスとストレージを確認してください",
+  "errors.page_exceeds_byte_limit": "ページのテキストは UTF-8 で 4096 バイト以内にしてください",
+  "errors.edit_failed_close_again": "編集に失敗しました。変更を破棄するにはもう一度閉じてください",
+  "errors.edit_failed_reopen_source": "編集に失敗しました。元のファイルを開き直してください"
+}

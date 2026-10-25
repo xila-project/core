@@ -1,0 +1,23 @@
+{
+  "errors.authentication_failed": "認証に失敗しました: {}",
+  "errors.failed_to_add_shortcut": "ショートカットの追加に失敗しました: {}",
+  "errors.failed_to_create_object": "オブジェクトの作成に失敗しました",
+  "errors.failed_to_deserialize_shortcut": "ショートカットのデシリアライズに失敗しました: {}",
+  "errors.failed_to_execute_shortcut": "ショートカットの実行に失敗しました: {}",
+  "errors.failed_to_get_child": "子オブジェクトの取得に失敗しました",
+  "errors.failed_to_get_current_task_identifier": "現在のタスク識別子の取得に失敗しました: {}",
+  "errors.failed_to_get_shortcut_file_path": "ショートカットファイルのパス取得に失敗しました",
+  "errors.failed_to_open_directory": "ディレクトリのオープンに失敗しました: {}",
+  "errors.failed_to_open_standard_file": "標準ファイルのオープンに失敗しました: {}",
+  "errors.failed_to_read_shortcut_directory": "ショートカットディレクトリの読み取りに失敗しました: {}",
+  "errors.failed_to_read_shortcut_file": "ショートカットファイルの読み取りに失敗しました: {}",
+  "errors.failed_to_set_environment_variable": "環境変数の設定に失敗しました: {}",
+  "errors.failed_to_set_task_user": "タスクユーザーの設定に失敗しました: {}",
+  "errors.graphics_error": "グラフィックスエラー: {}",
+  "errors.invalid_utf_8": "無効な UTF-8: {}",
+  "login.actions.submit": "ログイン",
+  "errors.missing_arguments": "引数が不足しています",
+  "errors.null_character_in_string": "文字列にヌル文字があります: {}",
+  "login.fields.password": "パスワード",
+  "login.fields.username": "ユーザー名"
+}

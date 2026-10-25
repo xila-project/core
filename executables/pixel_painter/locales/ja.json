@@ -1,0 +1,16 @@
+{
+  "app.title": "ピクセルペインター",
+  "controls.undo": "元に戻す",
+  "controls.clear": "消去",
+  "controls.save": "保存",
+  "controls.open": "開く",
+  "status.ready_white_erases": "準備完了 — 白で消去できます",
+  "warnings.unsaved_close_again": "未保存の絵があります。破棄するにはもう一度閉じてください",
+  "warnings.unsaved_open_again": "未保存の絵があります。破棄するにはもう一度「開く」を選択してください",
+  "file_path.placeholder": "絶対ファイルパスを入力してください",
+  "status.opened": "開きました",
+  "status.saved": "保存しました",
+  "errors.invalid_file_drawing_preserved": "無効なピクセルペインターファイルです。絵は保持されています",
+  "errors.open_failed": "開けませんでした。パスとストレージを確認してください",
+  "errors.save_failed_drawing_preserved": "保存に失敗しました。絵は保持されています。パスとストレージを確認してください"
+}
