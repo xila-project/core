@@ -108,6 +108,8 @@ jobs:
           file: Dockerfile.runtime
           platforms: linux/amd64
           load: ${{ github.event_name != 'pull_request' }}
+          # Explicitly keep PR build results in BuildKit only (no Docker/OCI export).
+          outputs: ${{ github.event_name == 'pull_request' && 'type=cacheonly' || '' }}
           tags: |
             xila-runtime:ci
             ${{ steps.meta.outputs.tags }}
