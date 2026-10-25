@@ -54,8 +54,7 @@ impl<'a> HttpRequestBuilder<'a> {
     }
 
     pub fn add_header(&mut self, name: &str, value: &[u8]) -> Option<&mut Self> {
-        let header_line = [name.as_bytes(), b": ", value].concat();
-        self.add_line(&header_line)
+        self.add_line_iterator([name.as_bytes(), b": ", value].into_iter())
     }
 
     pub fn add_body(&mut self, body: &[u8]) -> Option<&mut Self> {

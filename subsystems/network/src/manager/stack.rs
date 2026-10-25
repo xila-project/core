@@ -32,6 +32,7 @@ pub struct StackInner {
     pub maximum_burst_size: Option<usize>,
     pub next_local_port: Port,
     time_manager: &'static time::Manager<'static>,
+    retired_sockets: Vec<(SocketHandle, smoltcp::time::Instant)>,
 }
 
 #[derive(Clone)]
@@ -166,6 +167,7 @@ impl StackInner {
             interface,
             controller: Box::new(controller_device),
             sockets,
+            retired_sockets: Vec::new(),
             dhcp_socket: None,
             dns_socket: None,
             dns_servers: Vec::with_capacity(DNS_MAX_SERVER_COUNT),
@@ -370,10 +372,42 @@ impl StackInner {
             .map(|ip| Ipv4::from_smoltcp(&ip))
     }
 
+    /// Release datagram sockets immediately; let TCP dispatch queued data and
+    /// FIN/RST before reclaiming its storage. Bound abandoned shutdowns.
+    pub(crate) fn retire_socket(&mut self, handle: SocketHandle) {
+        let pending_tcp = self.sockets.iter().any(|(h, socket)| {
+            h == handle
+                && matches!(socket, Socket::Tcp(s) if s.is_open() || s.remote_endpoint().is_some())
+        });
+        if pending_tcp {
+            let deadline =
+                crate::get_smoltcp_time(self.time_manager) + smoltcp::time::Duration::from_secs(15);
+            self.retired_sockets.push((handle, deadline));
+        } else {
+            self.sockets.remove(handle);
+        }
+    }
+
+    pub(crate) fn reap_retired_sockets(&mut self) {
+        let now = crate::get_smoltcp_time(self.time_manager);
+        self.retired_sockets.retain(|(handle, deadline)| {
+            let socket = self.sockets.get::<smoltcp::socket::tcp::Socket>(*handle);
+            let finished = (!socket.is_open() && socket.remote_endpoint().is_none())
+                || socket.state() == smoltcp::socket::tcp::State::TimeWait;
+            if finished || now >= *deadline {
+                self.sockets.remove(*handle);
+                false
+            } else {
+                true
+            }
+        });
+    }
+
     pub fn poll(&mut self, device: &mut impl Device) -> Option<Duration> {
         let now = crate::get_smoltcp_time(self.time_manager);
 
         self.interface.poll(now, device, &mut self.sockets);
+        self.reap_retired_sockets();
 
         let poll_at = self.interface.poll_at(now, &self.sockets);
 
