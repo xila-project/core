@@ -55,7 +55,7 @@ jobs:
     secrets: inherit
 
   runtime:
-    name: Build, smoke-test, and publish
+    name: Build runtime image
     needs: [primary, deep]
     if: >-
       always() && (
@@ -78,7 +78,9 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       - uses: jdx/mise-action@v5.2.2
+        if: github.event_name != 'pull_request'
       - run: mise run deps:npm
+        if: github.event_name != 'pull_request'
       - name: Read runtime package version
         id: version
         run: |
@@ -86,6 +88,7 @@ jobs:
           echo "value=$version" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v4
       - name: Prepare image metadata
+        if: github.event_name != 'pull_request'
         id: meta
         uses: docker/metadata-action@v6
         with:
@@ -95,13 +98,16 @@ jobs:
             type=ref,event=tag,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=ref,event=pr,enable=${{ github.event_name == 'pull_request' }}
             type=raw,value=sha-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-      - name: Build local runtime image
+      # PRs only compile the full Dockerfile: no local image load, image export,
+      # cache upload, smoke tests, or publication. Main/release runs retain all
+      # image-based validation and publication steps.
+      - name: Build runtime image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.runtime
           platforms: linux/amd64
-          load: true
+          load: ${{ github.event_name != 'pull_request' }}
           tags: |
             xila-runtime:ci
             ${{ steps.meta.outputs.tags }}
@@ -111,14 +117,17 @@ jobs:
           cache-from: type=gha,scope=xila-runtime-linux-amd64
           # Cache uploads are best-effort: GitHub's cache service can time out
           # after the image was already built successfully.
-          cache-to: type=gha,mode=max,scope=xila-runtime-linux-amd64,ignore-error=true
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max,scope=xila-runtime-linux-amd64,ignore-error=true' || '' }}
       - name: Check image user and entrypoint
+        if: github.event_name != 'pull_request'
         run: |
           test "$(docker inspect --format '{{.Config.User}}' xila-runtime:ci)" = '10001:10001'
           test "$(docker inspect --format '{{json .Config.Entrypoint}}' xila-runtime:ci)" = '["/usr/bin/xila-runtime"]'
       - name: Build runtime smoke-test guest
+        if: github.event_name != 'pull_request'
         run: mise run ci:runtime-smoke
       - name: Test read-only root, host mounts, state persistence, and exit status
+        if: github.event_name != 'pull_request'
         run: |
           set -eu
           fixture="$PWD"
@@ -159,6 +168,7 @@ jobs:
           test "$signal_status" -eq 143
           run_guest verify
       - name: Exercise Xila CLI shell over stdin
+        if: github.event_name != 'pull_request'
         run: |
           set -eu
           mkdir -p "$PWD/runtime-shell-state"
