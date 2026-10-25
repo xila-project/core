@@ -354,6 +354,7 @@ class WorkflowPolicy(unittest.TestCase):
             ("subsystems/graphics/build/catalogs.rs", "en fr es de pt-BR it pl zh-CN ja"),
             ("executables/clock/locales/fr.json", "en fr"),
             ("executables/clock/locales/zh-CN.json", "en zh-CN"),
+            ("executables/clock/locales/ja.json", "en ja"),
             ("readme.md", ""),
         ]:
             with self.subTest(changed=changed), tempfile.TemporaryDirectory() as directory:
