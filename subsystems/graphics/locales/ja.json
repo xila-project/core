@@ -1,0 +1,14 @@
+{
+  "errors.already_in_use": "既に使用中です",
+  "errors.already_initialized": "既に初期化されています",
+  "errors.failed_to_create_object": "オブジェクトを作成できませんでした",
+  "errors.failed_to_get_resolution": "解像度を取得できませんでした",
+  "errors.failed_to_register": "登録できませんでした",
+  "errors.invalid_reference": "無効な参照",
+  "errors.invalid_parameter": "無効なパラメーター",
+  "errors.invalid_window_identifier": "無効なウィンドウ識別子",
+  "errors.not_available": "利用できません",
+  "errors.not_initialized": "初期化されていません",
+  "errors.not_registered": "登録されていません",
+  "errors.out_of_memory": "メモリが不足しています"
+}
