@@ -296,3 +296,61 @@ fn chinese_plans_subset_catalogs_and_cache_font_and_symbol_changes() {
     );
     assert_eq!(changed[4..], changed_font[4..]);
 }
+
+
+#[test]
+fn japanese_plans_subset_kana_and_kanji_with_jp_glyphs_in_every_font() {
+    let directory = Directory::new();
+    let root = &directory.0;
+    fs::create_dir(root.join("fonts")).unwrap();
+    for name in [
+        "Montserrat-Regular.ttf",
+        "unscii-16-full.woff",
+        "FontAwesome5-Solid+Brands+Regular.woff",
+        "SourceHanSansJP-Regular.otf",
+    ] {
+        fs::write(root.join("fonts").join(name), name).unwrap();
+    }
+
+    let ranges = crate::fonts::effective_ranges("ja", "en").unwrap();
+    assert!(crate::fonts::uses_catalog_subset("ja", "en"));
+    assert_eq!(
+        crate::fonts::catalog_font("ja", "en"),
+        Some("SourceHanSansJP-Regular.otf")
+    );
+    let symbols = crate::catalogs::CatalogSymbols {
+        cjk: "日本語あアイ。".into(),
+        other: "“”".into(),
+        directories: Vec::new(),
+    };
+    let sources = generate::sources_with_locale_catalogs(
+        root,
+        &root.join("out"),
+        &ranges,
+        "converter",
+        Some(&symbols),
+        "SourceHanSansJP-Regular.otf",
+    )
+    .unwrap();
+    assert_eq!(sources.len(), 6);
+    for source in sources {
+        assert!(source.inputs.iter().any(|p| p.ends_with("SourceHanSansJP-Regular.otf")));
+        let args: Vec<_> = source.arguments.iter().map(|arg| arg.to_str().unwrap()).collect();
+        assert!(args.windows(2).any(|pair| pair == ["--symbols", "日本語あアイ。"]));
+        assert!(!args.contains(&"19968-40959"), "must not rasterize every kanji");
+        assert!(!args.contains(&"12352-12543"), "must not rasterize every kana");
+    }
+}
+
+#[test]
+fn japanese_catalog_font_is_preferred_to_english_fallback() {
+    assert_eq!(
+        crate::fonts::catalog_font("ja", "en"),
+        Some("SourceHanSansJP-Regular.otf")
+    );
+    assert_eq!(
+        crate::fonts::catalog_font("en", "ja"),
+        Some("SourceHanSansJP-Regular.otf")
+    );
+    assert_eq!(crate::fonts::catalog_font("en", "fr"), None);
+}
