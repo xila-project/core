@@ -1,48 +1,86 @@
 {
-  "alarm.controls.decrement_hour": "Hour -",
-  "alarm.controls.decrement_minute": "Minute -",
-  "alarm.controls.delete": "Delete",
-  "alarm.controls.disable": "Disable",
-  "alarm.controls.increment_hour": "Hour +",
-  "alarm.controls.increment_minute": "Minute +",
-  "alarm.controls.save_and_enable": "Save and enable",
-  "alarm.instructions.repeat_days_utc": "Repeat on selected days; none means once. All times are UTC.",
-  "alarm.status.disabled": "Disabled",
-  "alarm.status.enabled": "Enabled: ",
-  "alarm.status.no_saved_alarm": "No saved alarm",
-  "alarm.weekdays.friday": "Fri",
-  "alarm.weekdays.monday": "Mon",
-  "alarm.weekdays.saturday": "Sat",
-  "alarm.weekdays.sunday": "Sun",
-  "alarm.weekdays.thursday": "Thu",
-  "alarm.weekdays.tuesday": "Tue",
-  "alarm.weekdays.wednesday": "Wed",
-  "alerts.alarm_ringing": "Alarm! ",
-  "alerts.alarm_snoozed": "Alarm snoozed. ",
-  "alerts.dismiss": "Dismiss",
-  "alerts.instructions": "Alerts are visible while Clock is running.",
-  "alerts.snooze_five_minutes": "Snooze 5 min",
-  "alerts.timer_finished": "Timer finished! ",
-  "clock.controls.toggle_hour_format": "12 / 24 hour",
-  "clock.errors.host_unavailable": "Host clock unavailable",
-  "clock.instructions.utc_only": "UTC / host clock. City time zones are not available yet.",
-  "errors.settings_save_failed": "Settings could not be saved. ",
-  "stopwatch.controls.record_lap": "Lap",
-  "stopwatch.controls.reset": "Reset",
-  "stopwatch.controls.toggle_pause": "Start / pause",
-  "stopwatch.laps.recorded.one": "{count} lap recorded",
-  "stopwatch.laps.recorded.other": "{count} laps recorded",
-  "tabs.alarm": "Alarm",
-  "tabs.clock": "Clock",
-  "tabs.stopwatch": "Stopwatch",
-  "tabs.timer": "Timer",
-  "timer.controls.cancel": "Cancel",
-  "timer.controls.decrement_minute": "Minute -",
-  "timer.controls.decrement_second": "Second -",
-  "timer.controls.increment_minute": "Minute +",
-  "timer.controls.increment_second": "Second +",
-  "timer.controls.restart": "Restart",
-  "timer.controls.start": "Start",
-  "timer.controls.toggle_pause": "Pause / resume",
-  "timer.labels.duration": "Duration"
+  "alarm": {
+    "controls": {
+      "decrement_hour": "Hour -",
+      "decrement_minute": "Minute -",
+      "delete": "Delete",
+      "disable": "Disable",
+      "increment_hour": "Hour +",
+      "increment_minute": "Minute +",
+      "save_and_enable": "Save and enable"
+    },
+    "instructions": {
+      "repeat_days_utc": "Repeat on selected days; none means once. All times are UTC."
+    },
+    "status": {
+      "disabled": "Disabled",
+      "enabled": "Enabled: ",
+      "no_saved_alarm": "No saved alarm"
+    },
+    "weekdays": {
+      "friday": "Fri",
+      "monday": "Mon",
+      "saturday": "Sat",
+      "sunday": "Sun",
+      "thursday": "Thu",
+      "tuesday": "Tue",
+      "wednesday": "Wed"
+    }
+  },
+  "alerts": {
+    "alarm_ringing": "Alarm! ",
+    "alarm_snoozed": "Alarm snoozed. ",
+    "dismiss": "Dismiss",
+    "instructions": "Alerts are visible while Clock is running.",
+    "snooze_five_minutes": "Snooze 5 min",
+    "timer_finished": "Timer finished! "
+  },
+  "clock": {
+    "controls": {
+      "toggle_hour_format": "12 / 24 hour"
+    },
+    "errors": {
+      "host_unavailable": "Host clock unavailable"
+    },
+    "instructions": {
+      "utc_only": "UTC / host clock. City time zones are not available yet."
+    }
+  },
+  "errors": {
+    "settings_save_failed": "Settings could not be saved. "
+  },
+  "stopwatch": {
+    "controls": {
+      "record_lap": "Lap",
+      "reset": "Reset",
+      "toggle_pause": "Start / pause"
+    },
+    "laps": {
+      "recorded": {
+        "one": "{count} lap recorded",
+        "other": "{count} laps recorded"
+      }
+    }
+  },
+  "tabs": {
+    "alarm": "Alarm",
+    "clock": "Clock",
+    "stopwatch": "Stopwatch",
+    "timer": "Timer"
+  },
+  "timer": {
+    "controls": {
+      "cancel": "Cancel",
+      "decrement_minute": "Minute -",
+      "decrement_second": "Second -",
+      "increment_minute": "Minute +",
+      "increment_second": "Second +",
+      "restart": "Restart",
+      "start": "Start",
+      "toggle_pause": "Pause / resume"
+    },
+    "labels": {
+      "duration": "Duration"
+    }
+  }
 }
