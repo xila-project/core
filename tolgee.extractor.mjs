@@ -5,6 +5,7 @@
  */
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { flattenCatalog } from "./tools/localization/catalog.mjs";
 
 const PLURAL = new Set(["zero", "one", "two", "few", "many", "other"]);
 const MACROS = new Set([
@@ -117,19 +118,6 @@ function splitArgs(tokens, openAt) {
     }
   }
   return null;
-}
-
-function flattenCatalog(node, prefix = "", result = {}) {
-  for (const [part, value] of Object.entries(node)) {
-    const key = prefix ? prefix + "." + part : part;
-    if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-      flattenCatalog(value, key, result);
-    } else {
-      if (Object.hasOwn(result, key)) throw new Error("duplicate translation key: " + key);
-      result[key] = value;
-    }
-  }
-  return result;
 }
 
 function formsInCatalogs(namespace, key, plural) {
