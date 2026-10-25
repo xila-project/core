@@ -5636,6 +5636,7 @@ name = "xila-settings"
 version = "0.1.0"
 dependencies = [
  "const_format",
+ "embassy-futures",
  "embedded-io",
  "xila",
  "xila-abi-definitions",

@@ -1,5 +1,6 @@
+use super::wifi::WifiPanel;
 use crate::{Error, Result, tabs::network::open_interface};
-use alloc::string::String;
+use alloc::{boxed::Box, string::String};
 use core::fmt::Write;
 use core::ptr::null_mut;
 use xila::{
@@ -29,12 +30,24 @@ struct GeneralTab {
     pub _list: *mut lvgl::lv_obj_t,
 }
 
+// Construction can fail after creating child widgets (for example on OOM).
+// Delete the partial tree while the caller still owns the graphics lock.
+struct PanelConstructionGuard(*mut lvgl::lv_obj_t);
+impl Drop for PanelConstructionGuard {
+    fn drop(&mut self) {
+        unsafe {
+            lvgl::lv_obj_delete(self.0);
+        }
+    }
+}
+
 pub struct InterfacePanel {
     main_container: *mut lvgl::lv_obj_t,
 
     cancel_button: *mut lvgl::lv_obj_t,
     apply_button: *mut lvgl::lv_obj_t,
     interface: String,
+    wifi: Option<Box<WifiPanel>>,
 }
 
 impl InterfacePanel {
@@ -279,6 +292,8 @@ impl InterfacePanel {
             lvgl::lv_obj_set_style_radius(main_container, 0, lvgl::LV_STATE_DEFAULT);
         }
 
+        let construction_guard = PanelConstructionGuard(main_container);
+
         // Create button container
         let button_container = unsafe { lvgl::lv_obj_create(main_container) };
         if button_container.is_null() {
@@ -357,7 +372,28 @@ impl InterfacePanel {
 
         let _general_tab = Self::create_general_tab(general_tab, &mut file).await?;
 
-        file.close(virtual_file_system).await?;
+        let wifi =
+            if file
+                .as_synchronous_file_mut()
+                .control(xila::network::GET_KIND, &())?
+                == xila::network::InterfaceKind::WiFi
+            {
+                match file
+                    .as_synchronous_file_mut()
+                    .control(xila::network::GET_WIFI_CAPABILITIES, &())
+                {
+                    Ok(capabilities) if capabilities.station != 0 => Some(Box::new(
+                        WifiPanel::new(config_tabview, file, capabilities)?,
+                    )),
+                    _ => {
+                        file.close(virtual_file_system).await?;
+                        None
+                    }
+                }
+            } else {
+                file.close(virtual_file_system).await?;
+                None
+            };
 
         // Create IPv4 tab
         let _ipv4_tab = Self::create_ip_configuration_tab(config_tabview, false, b"IPv4\0")?;
@@ -365,17 +401,38 @@ impl InterfacePanel {
         // Create IPv6 tab
         let _ipv6_tab = Self::create_ip_configuration_tab(config_tabview, true, b"IPv6\0")?;
 
+        if wifi.is_some() {
+            unsafe {
+                lvgl::lv_tabview_set_active(config_tabview, 1, false);
+            }
+        }
+
         let interface = Self {
             main_container,
             cancel_button,
             apply_button,
             interface,
+            wifi,
         };
 
+        core::mem::forget(construction_guard);
         Ok(interface)
     }
 
+    pub fn needs_refresh(&self) -> bool {
+        self.wifi.is_some()
+    }
+
+    pub fn refresh(&mut self) {
+        if let Some(wifi) = &mut self.wifi {
+            wifi.refresh();
+        }
+    }
+
     pub async fn handle_event(&mut self, event: &xila::graphics::Event) -> bool {
+        if let Some(wifi) = &mut self.wifi {
+            wifi.handle_event(event);
+        }
         // Allow only selection of one radio button at a time
 
         if event.code == EventKind::Clicked {
@@ -396,6 +453,7 @@ impl InterfacePanel {
 
 impl Drop for InterfacePanel {
     fn drop(&mut self) {
+        self.wifi.take(); // clear the password before deleting its widgets
         unsafe {
             lvgl::lv_obj_delete(self.main_container);
             log::information!("Interface panel for {} has been deleted", self.interface);

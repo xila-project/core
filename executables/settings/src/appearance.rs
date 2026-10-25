@@ -125,6 +125,7 @@ mod tests {
         xila::graphics::set_ffi_manager(graphics);
         restore_appearance(graphics, vfs, task).await;
         crate::tabs::appearance::tests::exercise_ui(context, graphics).await;
+        crate::tabs::network::wifi::tests::exercise_ui(context, graphics).await;
     }
 
     struct HeadlessScreen;

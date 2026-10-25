@@ -94,5 +94,30 @@
   },
   "app": {
     "title": "Settings"
+  },
+  "wifi": {
+    "title": "Wi-Fi",
+    "radio": "Wi-Fi radio",
+    "scan": "Scan",
+    "disconnected": "Disconnected",
+    "networks": "Available networks",
+    "no_networks": "No networks. Select Scan to search.",
+    "connect": "Connect",
+    "disconnect": "Disconnect",
+    "unavailable": "Wi-Fi temporarily unavailable",
+    "radio_off": "Wi-Fi is off",
+    "scanning": "Scanning…",
+    "connecting": "Connecting…",
+    "disconnecting": "Disconnecting…",
+    "connected": "Connected",
+    "channel": "Channel",
+    "busy": "Wi-Fi is busy. Try again shortly.",
+    "command_failed": "Could not start operation. Check selection and password.",
+    "open": "Open",
+    "unsupported": "Unsupported security",
+    "authentication_failed": "Authentication failed. Check the password.",
+    "not_found": "Network not found",
+    "timeout": "Connection timed out",
+    "connection_failed": "Connection failed"
   }
 }

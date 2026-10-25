@@ -94,5 +94,30 @@
   },
   "app": {
     "title": "Impostazioni"
+  },
+  "wifi": {
+    "title": "Wi-Fi",
+    "radio": "Radio Wi-Fi",
+    "scan": "Cerca",
+    "disconnected": "Disconnesso",
+    "networks": "Reti disponibili",
+    "no_networks": "Nessuna rete. Avvia una ricerca.",
+    "connect": "Connetti",
+    "disconnect": "Disconnetti",
+    "unavailable": "Wi-Fi temporaneamente non disponibile",
+    "radio_off": "Wi-Fi disattivato",
+    "scanning": "Ricerca…",
+    "connecting": "Connessione…",
+    "disconnecting": "Disconnessione…",
+    "connected": "Connesso",
+    "channel": "Canale",
+    "busy": "Wi-Fi occupato. Riprova tra poco.",
+    "command_failed": "Impossibile avviare l’operazione. Controlla la rete e la password.",
+    "open": "Aperta",
+    "unsupported": "Sicurezza non supportata",
+    "authentication_failed": "Autenticazione non riuscita. Controlla la password.",
+    "not_found": "Rete non trovata",
+    "timeout": "Tempo di connessione scaduto",
+    "connection_failed": "Connessione non riuscita"
   }
 }

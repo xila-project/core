@@ -8,6 +8,7 @@ application_metadata = { workspace = true }
 xila = { path = "../../", features = ["graphics"] }
 const_format = { version = "0.2", features = ["fmt"] }
 embedded-io = { workspace = true }
+embassy-futures = { workspace = true }
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dev-dependencies]
 drivers_native = { workspace = true }

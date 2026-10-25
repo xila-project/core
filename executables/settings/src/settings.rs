@@ -26,9 +26,11 @@ pub struct FileItem {
 impl Settings {
     pub async fn new(context: &'static xila::executable::ExecutableContext) -> Result<Self> {
         let graphics_manager = graphics::ffi_manager();
+        // On construction failure, release the lock before OwnedWindow::drop
+        // acquires it to delete the partially built widget tree.
+        let mut window;
         let _lock = graphics_manager.lock().await;
-
-        let mut window = graphics_manager.create_window().await?;
+        window = graphics_manager.create_window().await?;
 
         window.set_icon("Se", palette::get(Hue::Grey, palette::Tone::MAIN));
 
@@ -77,6 +79,7 @@ impl Settings {
     }
 
     pub async fn handle_events(&mut self) -> bool {
+        let mut needs_refresh = false;
         graphics::lock!(self.graphics_manager, {
             while let Some(event) = self.window.pop_event() {
                 // Logique de filtrage spécifique à Settings
@@ -92,13 +95,40 @@ impl Settings {
                     }
                 }
             }
+            for tab in &mut self.tabs {
+                if let Tab::Network(network) = tab {
+                    network.refresh().await;
+                    needs_refresh = network.needs_refresh();
+                }
+            }
         });
 
-        task::suspend(|ctx| {
+        let events = task::suspend(|ctx| {
             self.window.register_waker(ctx.waker());
-        })
-        .await;
+        });
+        if needs_refresh {
+            embassy_futures::select::select(
+                events,
+                task::sleep(core::time::Duration::from_millis(250)),
+            )
+            .await;
+        } else {
+            events.await;
+        }
 
         true
+    }
+}
+
+// Interface panels own widgets and ephemeral password inputs. Release them
+// under the graphics lock before OwnedWindow deletes their parent tree.
+impl Drop for Settings {
+    fn drop(&mut self) {
+        let _lock = task::block_on(self.graphics_manager.lock());
+        for tab in &mut self.tabs {
+            if let Tab::Network(network) = tab {
+                network.close_panel();
+            }
+        }
     }
 }

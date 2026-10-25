@@ -38,17 +38,28 @@ impl NetworkTab {
     pub async fn get_interface_kind_status(
         &self,
         interface_name: &str,
-    ) -> Result<(InterfaceKind, bool)> {
+    ) -> Result<Option<(InterfaceKind, bool)>> {
         let virtual_file_system = &self.context.virtual_file_system;
-
         let mut file = open_interface(virtual_file_system, interface_name).await?;
-
-        let kind = file.control(network::GET_KIND, &()).await?;
-        let is_up = file.control(network::IS_LINK_UP, &()).await?;
-
+        let status = match file
+            .as_synchronous_file_mut()
+            .control(network::GET_KIND, &())
+        {
+            Ok(kind) => file
+                .as_synchronous_file_mut()
+                .control(network::IS_LINK_UP, &())
+                .map(|up| Some((kind, up))),
+            // Protocol clients share this directory but are not interfaces.
+            Err(
+                xila::virtual_file_system::Error::FileSystem(
+                    xila::file_system::Error::UnsupportedOperation,
+                )
+                | xila::virtual_file_system::Error::UnsupportedOperation,
+            ) => Ok(None),
+            Err(error) => Err(error),
+        };
         file.close(virtual_file_system).await?;
-
-        Ok((kind, is_up))
+        Ok(status?)
     }
     pub async fn update_interfaces(&mut self) -> Result<()> {
         // Clear existing list items
@@ -70,7 +81,9 @@ impl NetworkTab {
                 continue;
             }
 
-            let (kind, is_up) = self.get_interface_kind_status(&entry.name).await?;
+            let Some((kind, is_up)) = self.get_interface_kind_status(&entry.name).await? else {
+                continue;
+            };
 
             let label_text =
                 CString::new(entry.name.as_str()).map_err(|_| Error::FailedToCreateUiElement)?;
@@ -151,25 +164,30 @@ impl NetworkTab {
         Ok(self.tab_container)
     }
 
-    pub async fn handle_event(&mut self, event: &Event) -> bool {
-        let time_manager = &self.context.time_manager;
+    pub fn close_panel(&mut self) {
+        self.configuration_panel.take();
+    }
 
-        let current_time = match time_manager.get_current_time() {
-            Ok(time) => time,
-            Err(_) => {
-                log::error!("Failed to get current time for network tab update");
-                return false;
+    pub fn needs_refresh(&self) -> bool {
+        self.configuration_panel
+            .as_ref()
+            .is_some_and(InterfacePanel::needs_refresh)
+    }
+
+    pub async fn refresh(&mut self) {
+        if let Some(panel) = &mut self.configuration_panel {
+            panel.refresh();
+        } else if let Ok(now) = self.context.time_manager.get_current_time()
+            && now.saturating_sub(self.last_update) >= Self::UPDATE_INTERVAL
+        {
+            if let Err(error) = self.update_interfaces().await {
+                log::error!("Failed to update network interfaces: {:?}", error);
             }
-        };
-
-        if current_time - self.last_update >= Self::UPDATE_INTERVAL {
-            if let Err(e) = self.update_interfaces().await {
-                log::error!("Failed to update network interfaces: {:?}", e);
-            }
-
-            self.last_update = current_time;
+            self.last_update = now;
         }
+    }
 
+    pub async fn handle_event(&mut self, event: &Event) -> bool {
         if let Some(panel) = &mut self.configuration_panel {
             if !panel.handle_event(event).await {
                 self.configuration_panel.take();
@@ -248,3 +266,5 @@ pub async fn open_interface<'a>(
 
     Ok(file)
 }
+
+pub(crate) mod wifi;
