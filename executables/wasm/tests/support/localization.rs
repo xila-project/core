@@ -16,6 +16,7 @@ pub fn text(application: &str, key: &str) -> String {
                 "pl" => include_str!(concat!("../../../", $application, "/locales/pl.json")),
                 "pt-br" => include_str!(concat!("../../../", $application, "/locales/pt-BR.json")),
                 "zh-cn" => include_str!(concat!("../../../", $application, "/locales/zh-CN.json")),
+                "ja" => include_str!(concat!("../../../", $application, "/locales/ja.json")),
                 _ => panic!("unsupported guest test locale: {locale}"),
             }
         };
