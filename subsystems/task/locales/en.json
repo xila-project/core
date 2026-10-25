@@ -1,16 +1,18 @@
 {
-  "errors.already_initialized": "Already initialized",
-  "errors.already_set": "Already set",
-  "errors.failed_to_create_thread": "Failed to create thread",
-  "errors.failed_to_spawn_thread": "Failed to spawn thread",
-  "errors.invalid_environment_variable": "Invalid environment variable",
-  "errors.invalid_spawner_identifier": "Invalid spawner identifier",
-  "errors.invalid_task_identifier": "Invalid task identifier",
-  "errors.no_spawner_available": "No spawner available",
-  "errors.no_thread_for_task": "No thread for task",
-  "errors.not_initialized": "Not initialized",
-  "errors.thread_already_registered": "Thread already registered",
-  "errors.thread_not_registered": "Thread not registered",
-  "errors.too_many_spawners": "Too many spawners",
-  "errors.too_many_tasks": "Too many tasks"
+  "errors": {
+    "already_initialized": "Already initialized",
+    "already_set": "Already set",
+    "failed_to_create_thread": "Failed to create thread",
+    "failed_to_spawn_thread": "Failed to spawn thread",
+    "invalid_environment_variable": "Invalid environment variable",
+    "invalid_spawner_identifier": "Invalid spawner identifier",
+    "invalid_task_identifier": "Invalid task identifier",
+    "no_spawner_available": "No spawner available",
+    "no_thread_for_task": "No thread for task",
+    "not_initialized": "Not initialized",
+    "thread_already_registered": "Thread already registered",
+    "thread_not_registered": "Thread not registered",
+    "too_many_spawners": "Too many spawners",
+    "too_many_tasks": "Too many tasks"
+  }
 }
