@@ -1,16 +1,28 @@
 {
-  "app.title": "Editor di pixel",
-  "controls.undo": "Annulla",
-  "controls.clear": "Cancella",
-  "controls.save": "Salva",
-  "controls.open": "Apri",
-  "status.ready_white_erases": "Pronto - il bianco cancella",
-  "warnings.unsaved_close_again": "Disegno non salvato - chiudi di nuovo per scartarlo",
-  "warnings.unsaved_open_again": "Disegno non salvato - premi di nuovo Apri per scartarlo",
-  "file_path.placeholder": "Inserisci un percorso assoluto",
-  "status.opened": "Aperto",
-  "status.saved": "Salvato",
-  "errors.invalid_file_drawing_preserved": "File dell'editor di pixel non valido - disegno conservato",
-  "errors.open_failed": "Apertura non riuscita - controlla percorso e memoria",
-  "errors.save_failed_drawing_preserved": "Salvataggio non riuscito - disegno conservato; controlla percorso e memoria"
+  "app": {
+    "title": "Editor di pixel"
+  },
+  "controls": {
+    "undo": "Annulla",
+    "clear": "Cancella",
+    "save": "Salva",
+    "open": "Apri"
+  },
+  "status": {
+    "ready_white_erases": "Pronto - il bianco cancella",
+    "opened": "Aperto",
+    "saved": "Salvato"
+  },
+  "warnings": {
+    "unsaved_close_again": "Disegno non salvato - chiudi di nuovo per scartarlo",
+    "unsaved_open_again": "Disegno non salvato - premi di nuovo Apri per scartarlo"
+  },
+  "file_path": {
+    "placeholder": "Inserisci un percorso assoluto"
+  },
+  "errors": {
+    "invalid_file_drawing_preserved": "File dell'editor di pixel non valido - disegno conservato",
+    "open_failed": "Apertura non riuscita - controlla percorso e memoria",
+    "save_failed_drawing_preserved": "Salvataggio non riuscito - disegno conservato; controlla percorso e memoria"
+  }
 }
