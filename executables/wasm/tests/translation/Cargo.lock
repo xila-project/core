@@ -21,13 +21,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e"
 
 [[package]]
-name = "wasm_translation_tests"
-version = "0.1.0"
-dependencies = [
- "wasmi",
-]
-
-[[package]]
 name = "wasmi"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -71,4 +64,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4abf1132c1fdf747d56bbc1bb52152400c70f336870f968b85e89ea422198ae3"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "xila-wasm-translation-tests"
+version = "0.1.0"
+dependencies = [
+ "wasmi",
 ]

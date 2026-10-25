@@ -1,5 +1,5 @@
 [package]
-name = "users"
+name = "xila-users"
 version = "0.1.0"
 edition = "2024"
 
@@ -13,3 +13,6 @@ drivers_native = { workspace = true }
 drivers_core = { workspace = true }
 drivers_shared = { workspace = true }
 drivers_std = { workspace = true }
+
+[lib]
+name = "users"

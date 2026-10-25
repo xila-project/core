@@ -1,6 +1,6 @@
 
 [package]
-name = "wasm_example"
+name = "xila-wasm-example"
 version = "0.1.0"
 authors = ["Alix ANNERAUD <alix@anneraud.fr>"]
 edition = "2024"
@@ -40,3 +40,7 @@ wasm-bindgen-test = "0.3.34"
 # [profile.release]
 # Tell `rustc` to optimize for small code size.
 # opt-level = "s"
+
+[[bin]]
+name = "wasm_example"
+path = "src/main.rs"

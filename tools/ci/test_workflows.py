@@ -85,8 +85,8 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertNotIn("ci:host-audio-tests", tasks)
         self.assertNotIn("host-audio", host)
         lint = tomllib.loads((ROOT / "mise.toml").read_text())["tasks"]["clippy:host"]["run"]
-        self.assertIn("--package audio", lint)
-        self.assertIn("--package drivers_headless", lint)
+        self.assertIn("--package xila-audio", lint)
+        self.assertIn("--package xila-drivers-headless", lint)
         self.assertNotIn("drivers_native/audio", lint)
         self.assertIn("cargo test --locked --workspace", tasks["ci:host-tests"]["run"])
         self.assertNotIn("apt:libasound2-dev", ci_config()["bootstrap"]["packages"])

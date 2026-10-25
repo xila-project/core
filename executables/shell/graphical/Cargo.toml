@@ -1,5 +1,5 @@
 [package]
-name = "graphical_shell"
+name = "xila-graphical-shell"
 version = "0.1.0"
 edition = "2024"
 
@@ -23,3 +23,6 @@ testing = { workspace = true }
 [[test]]
 name = "integration_test"
 path = "tests/integration_test.rs"
+
+[lib]
+name = "graphical_shell"

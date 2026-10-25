@@ -1,5 +1,5 @@
 [package]
-name = "synth"
+name = "xila-synth"
 version = "0.1.0"
 edition = "2024"
 
@@ -22,3 +22,10 @@ wasm = { workspace = true, default-features = false, features = [
 [[test]]
 name = "build_test"
 path = "tests/build_test.rs"
+
+[[bin]]
+name = "synth"
+path = "src/main.rs"
+
+[lib]
+name = "synth"

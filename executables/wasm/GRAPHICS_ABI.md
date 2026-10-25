@@ -61,8 +61,8 @@ Tasks 1–3 are separable from the registry data structure for scalar handle cal
 
 ## Validation status and limitations
 
-- `cargo +stable test -p graphics_bindgen` passed (6 tests).
-- Host and memory64 `cargo check -p wasm ... --tests` passed for the geometry/layout change.
+- `cargo +stable test -p xila-graphics-bindgen` passed (6 tests).
+- Host and memory64 `cargo check -p xila-wasm ... --tests` passed for the geometry/layout change.
 - Native `graphics_core` test execution currently fails at link time because the local LVGL archive does not define Xila's generated font symbols (`font_montserrat_*`, `font_unscii_*`). The documented x86_64 test target is also not installed; this environment's host target is aarch64. Thus the new runtime integration assertions have been type-checked but not executed here.
 - No ESP32-S3 build, allocation profile, fragmentation benchmark, lock timing, browser app acceptance, or peak-RAM measurement has been run. No performance/MCU cost estimate is asserted as a measurement.
 - PRs and child issues are to be opened per tranche; #483 must remain open until its acceptance criteria are satisfied.

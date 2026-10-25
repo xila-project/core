@@ -4,7 +4,7 @@ Prepare an independent reference disk, then run the example:
 
 ```sh
 mise run image:native
-cargo run -p native_example --bin native_example -- --terminal --no-network \
+cargo run -p xila-native-example --bin native_example -- --terminal --no-network \
   --seed-image target/seed/native/seed.img
 ```
 
@@ -16,7 +16,7 @@ its explicit path. The default disk size is 16 MiB; custom seeds and
 
 Host audio support is disabled by default, so builds do not require ALSA
 development files. Enable it with `--features audio`, for example
-`cargo run -p native_example --bin native_example --features audio -- --terminal`. Linux builds with
+`cargo run -p xila-native-example --bin native_example --features audio -- --terminal`. Linux builds with
 audio enabled require ALSA development files.
 
 Only an absent live disk is imported. Import validates a temporary copy before
@@ -51,7 +51,7 @@ The graphical interface uses the native window driver by default. Select the
 output-only headless driver to run without an X11 or Wayland display server:
 
 ```sh
-cargo run -p native_example --bin native_example -- --display-driver headless --resolution 800x600
+cargo run -p xila-native-example --bin native_example -- --display-driver headless --resolution 800x600
 ```
 
 `--resolution` applies to either graphical driver. Headless resolutions are
@@ -63,14 +63,14 @@ display-driver option conflicts with `--terminal`.
 In a second terminal, run the host client as the same OS user as the runtime:
 
 ```sh
-cargo run -p drivers_native --bin xila-debug -- diagnostics
-cargo run -p drivers_native --bin xila-debug -- resolution
-cargo run -p drivers_native --bin xila-debug -- screenshot /tmp/xila-ui.png
-cargo run -p drivers_native --bin xila-debug -- ui-tree
-cargo run -p drivers_native --bin xila-debug -- pointer move 120 80
-cargo run -p drivers_native --bin xila-debug -- pointer button press
-cargo run -p drivers_native --bin xila-debug -- key enter press
-cargo run -p drivers_native --bin xila-debug -- text 'hello xila'
+cargo run -p xila-drivers-native --bin xila-debug -- diagnostics
+cargo run -p xila-drivers-native --bin xila-debug -- resolution
+cargo run -p xila-drivers-native --bin xila-debug -- screenshot /tmp/xila-ui.png
+cargo run -p xila-drivers-native --bin xila-debug -- ui-tree
+cargo run -p xila-drivers-native --bin xila-debug -- pointer move 120 80
+cargo run -p xila-drivers-native --bin xila-debug -- pointer button press
+cargo run -p xila-drivers-native --bin xila-debug -- key enter press
+cargo run -p xila-drivers-native --bin xila-debug -- text 'hello xila'
 ```
 
 The Debug application uses Xila graphics, task, and memory subsystem APIs for

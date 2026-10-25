@@ -1,8 +1,11 @@
 [package]
-name = "bootsplash"
+name = "xila-bootsplash"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 
 graphics = { workspace = true }
+
+[lib]
+name = "bootsplash"

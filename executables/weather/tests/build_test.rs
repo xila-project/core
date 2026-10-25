@@ -7,7 +7,8 @@ fn workspace_registers_weather_crate() {
     let workspace_manifest = fs::read_to_string(workspace_manifest).unwrap();
 
     assert!(
-        workspace_manifest.contains("weather = { path = \"executables/weather\" }"),
+        workspace_manifest
+            .contains("weather = { package = \"xila-weather\", path = \"executables/weather\" }"),
         "workspace.dependencies must declare weather path dependency"
     );
     assert!(

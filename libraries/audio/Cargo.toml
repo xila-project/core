@@ -1,5 +1,5 @@
 [package]
-name = "audio"
+name = "xila-audio"
 version = "0.1.0"
 edition = "2024"
 
@@ -11,3 +11,6 @@ nanoaudio = { workspace = true, features = ["buffer", "dsp"] }
 
 [dev-dependencies]
 critical-section = { workspace = true, features = ["std"] }
+
+[lib]
+name = "audio"

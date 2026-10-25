@@ -1,6 +1,10 @@
 [package]
-name = "wasm_wasm_test"
+name = "xila-wasm-wasm-test"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+
+[[bin]]
+name = "wasm_wasm_test"
+path = "src/main.rs"

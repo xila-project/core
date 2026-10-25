@@ -1,5 +1,5 @@
 [package]
-name = "calculator"
+name = "xila-calculator"
 version = "0.1.0"
 edition = "2024"
 
@@ -32,3 +32,7 @@ wasm = { workspace = true, features = ["graphics"] }
 [[test]]
 name = "calculator_test"
 path = "tests/test.rs"
+
+[[bin]]
+name = "calculator"
+path = "src/main.rs"

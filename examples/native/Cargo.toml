@@ -1,5 +1,5 @@
 [package]
-name = "native_example"
+name = "xila-native-example"
 version = "0.1.0"
 edition = "2024"
 
@@ -33,3 +33,7 @@ audio = ["dep:audio", "drivers_native/audio"]
 prebuilt-applications = []
 profiling = ["drivers_std/profiling", "prebuilt-applications"]
 heaptrack = ["drivers_std/heaptrack", "prebuilt-applications"]
+
+[[bin]]
+name = "native_example"
+path = "src/main.rs"

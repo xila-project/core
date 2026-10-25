@@ -1,5 +1,5 @@
 [package]
-name = "drivers_wasm"
+name = "xila-drivers-wasm"
 version = "0.1.0"
 edition = "2024"
 
@@ -85,3 +85,6 @@ xila = { path = "../.." }
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies.web-sys]
 version = "0.3.64"
 features = ["KeyboardEventInit", "ClipboardEventInit"]
+
+[lib]
+name = "drivers_wasm"

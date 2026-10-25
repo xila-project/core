@@ -6,12 +6,12 @@ contents and metadata. Existing output files are never replaced.
 
 ```sh
 # Empty disk (16 MiB by default).
-cargo run -p fs_image -- empty.img
+cargo run -p xila-fs-image -- empty.img
 # Import a directory; host ownership and timestamps are deliberately ignored.
-cargo run -p fs_image -- populated.img 16777216 --root ./root
+cargo run -p xila-fs-image -- populated.img 16777216 --root ./root
 # Use prebuilt applications and the same shortcuts as their guest installers.
-cargo run -p fs_image -- native.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release-wasm
-cargo run -p fs_image -- browser.img 16777216 --bundle wasm --applications-dir target/wasm32-wasip1/release
+cargo run -p xila-fs-image -- native.img 16777216 --bundle native --applications-dir target/wasm32-wasip1/release-wasm
+cargo run -p xila-fs-image -- browser.img 16777216 --bundle wasm --applications-dir target/wasm32-wasip1/release
 ```
 
 Host-side population currently requires Linux or macOS. It opens source entries

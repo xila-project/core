@@ -1,5 +1,5 @@
 [package]
-name = "authentication"
+name = "xila-authentication"
 version = "0.1.0"
 edition = "2024"
 description = "User and group authentication module for Xila OS with secure password hashing"
@@ -29,3 +29,6 @@ drivers_native = { workspace = true }
 little_fs = { workspace = true }
 time = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }
+
+[lib]
+name = "authentication"

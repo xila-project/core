@@ -1,5 +1,5 @@
 [package]
-name = "abi_declarations"
+name = "xila-abi-declarations"
 version = "0.1.0"
 edition = "2024"
 
@@ -8,3 +8,6 @@ edition = "2024"
 [build-dependencies]
 bindgen = { workspace = true }
 cbindgen = { workspace = true }
+
+[lib]
+name = "abi_declarations"

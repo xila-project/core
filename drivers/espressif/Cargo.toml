@@ -1,6 +1,9 @@
 [package]
-name = "drivers_espressif"
+name = "xila-drivers-espressif"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+
+[lib]
+name = "drivers_espressif"

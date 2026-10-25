@@ -41,11 +41,11 @@ at 65,536 per VM and reclaims them after native object deletion or VM teardown.
 Use the repository's configured development shell:
 
 ```sh
-cargo test -p pixel_painter
-cargo build -p pixel_painter --target wasm32-wasip1 --profile release-wasm
-cargo clippy -p pixel_painter --target wasm32-wasip1 --all-targets -- -D warnings
-cargo test -p wasm --features graphics,xila/graphics_rendering_xrgb8888 --test graphics_canvas --test pixel_painter
-mise run run:cargo -- -p native_example
+cargo test -p xila-pixel-painter
+cargo build -p xila-pixel-painter --target wasm32-wasip1 --profile release-wasm
+cargo clippy -p xila-pixel-painter --target wasm32-wasip1 --all-targets -- -D warnings
+cargo test -p xila-wasm --features graphics,xila/graphics_rendering_xrgb8888 --test graphics_canvas --test pixel_painter
+mise run run:cargo -- -p xila-native-example
 ```
 
 Smoke test: launch Pixel Painter from the application drawer, draw a fast diagonal,
