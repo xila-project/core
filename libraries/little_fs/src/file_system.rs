@@ -841,6 +841,42 @@ mod tests {
     }
 
     #[test]
+    fn stale_handle_chmod_cannot_overwrite_another_opens_data() {
+        let fs = initialize();
+        let path = Path::new("/stale-chmod");
+        FileSystemOperations::create_file(&fs, path).unwrap();
+        let mut writer = Context::new_empty();
+        let mut stale = Context::new_empty();
+        for context in [&mut writer, &mut stale] {
+            fs.lookup_file(context, path, file_system::AccessFlags::READ_WRITE.into())
+                .unwrap();
+        }
+        BaseOperations::flush_sync(&fs, &mut stale).unwrap();
+        BaseOperations::write_sync(&fs, &mut writer, b"payload", 0).unwrap();
+        BaseOperations::flush_sync(&fs, &mut writer).unwrap();
+        assert_eq!(
+            AttributeOperations::set_attributes(
+                &fs,
+                &mut stale,
+                &Attributes::new().set_permissions(file_system::Permissions::ALL_FULL)
+            ),
+            Err(Error::RessourceBusy)
+        );
+        BaseOperations::close(&fs, &mut stale).unwrap();
+        BaseOperations::close(&fs, &mut writer).unwrap();
+        let mut check = Context::new_empty();
+        fs.lookup_file(&mut check, path, file_system::AccessFlags::Read.into())
+            .unwrap();
+        let mut bytes = [0; 7];
+        assert_eq!(
+            BaseOperations::read_sync(&fs, &mut check, &mut bytes, 0).unwrap(),
+            7
+        );
+        assert_eq!(&bytes, b"payload");
+        BaseOperations::close(&fs, &mut check).unwrap();
+    }
+
+    #[test]
     fn filesystem_contents_survive_unmount_and_remount() {
         let device = Box::leak(Box::new(MemoryDevice::<512>::new(2048 * 512)));
         FileSystem::format(device, CACHE_SIZE).unwrap();
