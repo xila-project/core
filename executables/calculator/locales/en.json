@@ -1,25 +1,31 @@
 {
-  "angle_mode.degrees_indicator": " [DEG]",
-  "angle_mode.radians_indicator": " [RAD]",
-  "errors.calculation_error": "Calculation error",
-  "errors.calculation_overflow": "Calculation overflow",
-  "controls.clear": "Clear",
-  "errors.division_by_zero": "Division by zero",
-  "errors.calculation_with_details": "Error: {}",
-  "errors.expression_nested_too_deeply": "Expression nested too deeply",
-  "errors.expression_too_long": "Expression too long",
-  "errors.inexact_result": "Inexact result",
-  "errors.invalid_number": "Invalid number",
-  "angle_mode.radians": "RAD",
-  "errors.requires_wasm_runtime": "This executable is intended to be run in a WASM environment.",
-  "errors.too_many_arguments": "Too many arguments",
-  "errors.unclosed_parenthesis": "Unclosed parenthesis",
-  "errors.unexpected_character": "Unexpected character",
-  "errors.unexpected_end_of_expression": "Unexpected end of expression",
-  "errors.unexpected_token": "Unexpected token",
-  "errors.unknown_function": "Unknown function",
-  "errors.unknown_variable": "Unknown variable",
-  "errors.unsupported_operation": "Unsupported operation",
-  "errors.value_outside_function_domain": "Value outside function domain",
-  "errors.wrong_number_of_arguments": "Wrong number of arguments"
+  "angle_mode": {
+    "degrees_indicator": " [DEG]",
+    "radians_indicator": " [RAD]",
+    "radians": "RAD"
+  },
+  "errors": {
+    "calculation_error": "Calculation error",
+    "calculation_overflow": "Calculation overflow",
+    "division_by_zero": "Division by zero",
+    "calculation_with_details": "Error: {}",
+    "expression_nested_too_deeply": "Expression nested too deeply",
+    "expression_too_long": "Expression too long",
+    "inexact_result": "Inexact result",
+    "invalid_number": "Invalid number",
+    "requires_wasm_runtime": "This executable is intended to be run in a WASM environment.",
+    "too_many_arguments": "Too many arguments",
+    "unclosed_parenthesis": "Unclosed parenthesis",
+    "unexpected_character": "Unexpected character",
+    "unexpected_end_of_expression": "Unexpected end of expression",
+    "unexpected_token": "Unexpected token",
+    "unknown_function": "Unknown function",
+    "unknown_variable": "Unknown variable",
+    "unsupported_operation": "Unsupported operation",
+    "value_outside_function_domain": "Value outside function domain",
+    "wrong_number_of_arguments": "Wrong number of arguments"
+  },
+  "controls": {
+    "clear": "Clear"
+  }
 }
