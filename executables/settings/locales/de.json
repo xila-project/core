@@ -94,5 +94,30 @@
   },
   "app": {
     "title": "Einstellungen"
+  },
+  "wifi": {
+    "title": "Wi-Fi",
+    "radio": "WLAN-Funk",
+    "scan": "Suchen",
+    "disconnected": "Getrennt",
+    "networks": "Verfügbare Netzwerke",
+    "no_networks": "Keine Netzwerke. Suche starten.",
+    "connect": "Verbinden",
+    "disconnect": "Trennen",
+    "unavailable": "WLAN vorübergehend nicht verfügbar",
+    "radio_off": "WLAN ist ausgeschaltet",
+    "scanning": "Suche…",
+    "connecting": "Verbindung wird hergestellt…",
+    "disconnecting": "Verbindung wird getrennt…",
+    "connected": "Verbunden",
+    "channel": "Kanal",
+    "busy": "WLAN ist beschäftigt. Gleich erneut versuchen.",
+    "command_failed": "Vorgang konnte nicht gestartet werden. Netzwerk und Passwort prüfen.",
+    "open": "Offen",
+    "unsupported": "Nicht unterstützte Sicherheit",
+    "authentication_failed": "Authentifizierung fehlgeschlagen. Passwort prüfen.",
+    "not_found": "Netzwerk nicht gefunden",
+    "timeout": "Zeitüberschreitung beim Verbinden",
+    "connection_failed": "Verbindung fehlgeschlagen"
   }
 }

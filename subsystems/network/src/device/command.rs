@@ -1,12 +1,16 @@
 use crate::{InterfaceKind, IpAddress, IpCidr, MacAddress, Route};
 use file_system::{ControlCommand, define_command};
 
-#[repr(C)]
-pub struct WifiClientConfiguration {
-    // TODO: Add fields
-}
-
-define_command!(GET_KIND, Read, b'n', 1, (), InterfaceKind);
+// GET_KIND previously collided with GET_STATE at n/1. Consumers must rebuild
+// for n/21; keep all existing generic command numbers stable.
+define_command!(
+    GET_KIND,
+    Read,
+    b'n',
+    CommandNumber::GetKind as u8,
+    (),
+    InterfaceKind
+);
 
 #[repr(u8)]
 enum CommandNumber {
@@ -31,6 +35,7 @@ enum CommandNumber {
     GetIpAddress,
     AddIpAddress,
     RemoveIpAddress,
+    GetKind,
 }
 
 define_command!(

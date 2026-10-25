@@ -132,19 +132,27 @@ impl Layout {
     }
 
     async fn get_interface_symbol(&self, file: &mut File<'_>) -> Result<Option<&CStr>> {
+        let kind = match file
+            .as_synchronous_file_mut()
+            .control(network::GET_KIND, &())
+        {
+            Ok(kind) => kind,
+            // HTTP(S) clients are protocol endpoints, not network interfaces.
+            Err(
+                xila::virtual_file_system::Error::FileSystem(
+                    xila::file_system::Error::UnsupportedOperation,
+                )
+                | xila::virtual_file_system::Error::UnsupportedOperation,
+            ) => return Ok(None),
+            Err(error) => return Err(Error::FailedToOpenDirectory(error)),
+        };
         let is_up = file
+            .as_synchronous_file_mut()
             .control(network::IS_LINK_UP, &())
-            .await
             .map_err(Error::FailedToOpenDirectory)?;
-
         if !is_up {
             return Ok(None);
         }
-
-        let kind = file
-            .control(network::GET_KIND, &())
-            .await
-            .map_err(Error::FailedToOpenDirectory)?;
 
         let symbol = match kind {
             InterfaceKind::WiFi => symbol::WIFI,

@@ -94,5 +94,30 @@
     "about": "关于",
     "appearance": "外观",
     "general": "常规"
+  },
+  "wifi": {
+    "title": "Wi-Fi",
+    "radio": "Wi-Fi 无线电",
+    "scan": "扫描",
+    "disconnected": "已断开",
+    "networks": "可用网络",
+    "no_networks": "没有网络。请选择扫描。",
+    "connect": "连接",
+    "disconnect": "断开连接",
+    "unavailable": "Wi-Fi 暂时不可用",
+    "radio_off": "Wi-Fi 已关闭",
+    "scanning": "正在扫描…",
+    "connecting": "正在连接…",
+    "disconnecting": "正在断开…",
+    "connected": "已连接",
+    "channel": "信道",
+    "busy": "Wi-Fi 正忙，请稍后重试。",
+    "command_failed": "无法启动操作。请检查网络和密码。",
+    "open": "开放",
+    "unsupported": "不支持的安全类型",
+    "authentication_failed": "身份验证失败。请检查密码。",
+    "not_found": "未找到网络",
+    "timeout": "连接超时",
+    "connection_failed": "连接失败"
   }
 }

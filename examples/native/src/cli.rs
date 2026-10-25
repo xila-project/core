@@ -23,6 +23,7 @@ pub enum DisplayDriver {
 pub struct Config {
     pub interface: InterfaceMode,
     pub networking: bool,
+    pub mock_wifi: bool,
     pub display_driver: DisplayDriver,
     pub resolution: (i16, i16),
     pub disk_path: String,
@@ -53,6 +54,9 @@ struct Arguments<'a> {
     /// Disable networking.
     #[arg(short = 'N', long = "no-network")]
     no_network: bool,
+    /// Mount a deterministic Wi-Fi mock (no host adapter access).
+    #[arg(long = "mock-wifi")]
+    mock_wifi: bool,
     /// Display resolution; each dimension must be between 1 and 32767.
     #[arg(short = 'r', long = "resolution", default_value = "800x600", value_name = "WIDTHxHEIGHT", value_parser = parse_resolution)]
     resolution: (i16, i16),
@@ -116,6 +120,7 @@ where
             InterfaceMode::Terminal
         },
         networking: arguments.network || !arguments.no_network,
+        mock_wifi: arguments.mock_wifi,
         display_driver: arguments.display_driver.unwrap_or_default(),
         resolution: arguments.resolution,
         disk_path: arguments.disk_path.to_string(),
@@ -130,11 +135,19 @@ mod tests {
     use super::{DisplayDriver, InterfaceMode, MINIMUM_DISK_SIZE, parse};
 
     #[test]
+    fn mock_wifi_can_run_without_host_networking() {
+        let config = parse(["--no-network", "--mock-wifi"]).unwrap();
+        assert!(config.mock_wifi);
+        assert!(!config.networking);
+    }
+
+    #[test]
     fn defaults_preserve_the_current_example_setup() {
         let config = parse([] as [&str; 0]).unwrap();
 
         assert_eq!(config.interface, InterfaceMode::Graphical);
         assert!(config.networking);
+        assert!(!config.mock_wifi);
         assert_eq!(config.display_driver, DisplayDriver::Native);
         assert_eq!(config.resolution, (800, 600));
         assert_eq!(config.disk_path, "./drive.img");

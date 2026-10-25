@@ -5294,6 +5294,7 @@ dependencies = [
  "cap-std",
  "critical-section",
  "embassy-executor",
+ "embassy-futures",
  "libc",
  "nanoaudio",
  "nanoaudio-cpal",
@@ -5303,15 +5304,21 @@ dependencies = [
  "rustix 1.1.5",
  "serde_json",
  "winit",
+ "xila-abi-definitions",
  "xila-audio",
  "xila-debug-protocol",
+ "xila-drivers-shared",
+ "xila-drivers-std",
  "xila-file-system",
  "xila-graphics",
  "xila-log",
+ "xila-network",
  "xila-shared",
  "xila-synchronization",
  "xila-task",
+ "xila-testing",
  "xila-users",
+ "xila-virtual-file-system",
 ]
 
 [[package]]
@@ -5629,6 +5636,7 @@ name = "xila-settings"
 version = "0.1.0"
 dependencies = [
  "const_format",
+ "embassy-futures",
  "embedded-io",
  "xila",
  "xila-abi-definitions",

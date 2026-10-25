@@ -28,3 +28,12 @@ flushes a temporary file before replacing the saved file with a filesystem
 rename. If saving fails, the selected appearance still applies for this session
 and Settings displays an error. Reboot persistence requires a persistent backing
 disk; an in-memory or newly formatted disk starts with the default appearance.
+
+Wi-Fi interfaces advertising station capabilities have a Wi-Fi tab in their
+Network configuration panel. It supports radio control, bounded scan results,
+security/signal/channel/BSSID metadata, ephemeral password entry, connect,
+disconnect and progress/error status. Progress refreshes while the panel is open,
+including when there is no user input. Passwords are masked and cleared after
+submission or dismissal; Settings saves no network profiles or credentials.
+Unsupported authentication methods are displayed but cannot be selected for
+connection. See the native example's `--mock-wifi` mode for hardware-free testing.
