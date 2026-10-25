@@ -163,6 +163,7 @@ getargs-derive = { git = "https://github.com/AlixANNERAUD/getargs-derive.git", r
 members = [
   "libraries/http",
   "libraries/verification",
+  "libraries/firmware_update",
   "libraries/application_metadata",
   "libraries/audio",
   "libraries/file_system",

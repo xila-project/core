@@ -144,6 +144,7 @@ set -euo pipefail
 mise run ci:host-clippy
 mise run ci:host-wasm-clippy
 mise run ci:host-tests
+mise run ci:firmware
 mise run ci:host-profiling-tests
 mise run ci:host-font-tests
 mise run ci:host-build
@@ -516,3 +517,24 @@ extends = "ci:rust-wasi"
 
 [tasks."image:wasm"]
 extends = "ci:rust-wasi"
+
+[tasks."ci:firmware"]
+extends = "ci:rust-lint"
+description = "Test native firmware simulator and its VFS integration"
+shell = "bash -c"
+depends = ["ci:packages-host"]
+run = """
+set -eu
+cargo test --locked -p xila-firmware-update --features native
+cargo clippy --locked -p xila-firmware-update --features native --all-targets -- -D warnings
+cargo check --locked -p xila-firmware-update --no-default-features --lib --target wasm32-unknown-unknown
+cargo check --locked -p xila-firmware-update --features simulator --lib --target wasm32-unknown-unknown
+cargo check --locked -p xila-firmware-update --features simulator --lib --target thumbv7em-none-eabi
+"""
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "clippy",
+  "rustfmt",
+], targets = [
+  "wasm32-unknown-unknown",
+  "thumbv7em-none-eabi",
+] }

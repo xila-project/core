@@ -471,6 +471,19 @@ impl VirtualFileSystem {
         path: impl AsRef<Path>,
         item: ItemStatic,
     ) -> Result<()> {
+        self.mount_static_with_permissions(task, path, item, Permissions::DEVICE_DEFAULT)
+            .await
+    }
+
+    /// Publish a mount with its final permissions under the namespace lock.
+    /// Sensitive devices must not become briefly accessible with default modes.
+    pub async fn mount_static_with_permissions(
+        &self,
+        task: TaskIdentifier,
+        path: impl AsRef<Path>,
+        item: ItemStatic,
+        permissions: Permissions,
+    ) -> Result<()> {
         let path: &Path = path.as_ref();
         if !path.is_valid() || !path.is_absolute() || path.is_root() {
             return Err(Error::InvalidPath);
@@ -579,7 +592,7 @@ impl VirtualFileSystem {
             .set_access(time)
             .set_status(time)
             .set_kind(underlying_kind)
-            .set_permissions(Permissions::DEVICE_DEFAULT)
+            .set_permissions(permissions)
             .set_inode(inode);
         let mask = attributes
             .get_mask()

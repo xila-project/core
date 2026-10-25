@@ -165,3 +165,11 @@ extends = "dev:rust-wasi"
 
 [tasks."image:wasm"]
 extends = "dev:rust-wasi"
+
+[tasks."firmware:test"]
+extends = "dev:rust"
+run = "cargo test --locked -p xila-firmware-update --features simulator"
+
+[tasks."firmware:integration"]
+extends = "dev:rust"
+run = "cargo test --locked -p xila-firmware-update --features native"
