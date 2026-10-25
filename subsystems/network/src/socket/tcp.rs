@@ -421,10 +421,10 @@ mod tests {
                     }
                 }
                 let response = b"Hello back!";
-                if let Err(_) = listener.write(response).await {
+                if listener.write(response).await.is_err() {
                     return;
                 }
-                if let Err(_) = listener.flush().await {
+                if listener.flush().await.is_err() {
                     return;
                 }
                 task::sleep(Duration::from_milliseconds(100)).await;
@@ -442,10 +442,10 @@ mod tests {
             return;
         }
         task::sleep(Duration::from_milliseconds(100)).await;
-        if let Err(_) = client.write(b"Hello, TCP!").await {
+        if client.write(b"Hello, TCP!").await.is_err() {
             return;
         }
-        if let Err(_) = client.flush().await {
+        if client.flush().await.is_err() {
             return;
         }
         let mut response_buffer = [0u8; 1024];
@@ -627,7 +627,7 @@ mod tests {
         if write_result.is_err() {
             return;
         }
-        if let Err(_) = client.flush().await {
+        if client.flush().await.is_err() {
             return;
         }
         task::sleep(Duration::from_milliseconds(200)).await;
