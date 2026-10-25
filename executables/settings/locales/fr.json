@@ -1,58 +1,98 @@
 {
-  "tabs.about": "À propos",
-  "network.fields.address": "Adresse",
-  "tabs.appearance": "Apparence",
-  "appearance.status.applied_not_saved": "Apparence appliquée, mais impossible à enregistrer.",
-  "appearance.status.saved": "Apparence enregistrée.",
-  "actions.apply": "Appliquer",
-  "errors.authentication_failed": "Échec de l'authentification: {}",
-  "appearance.colors.blue": "Bleu",
-  "about.fields.cpu": "Processeur :",
-  "actions.cancel": "Annuler",
-  "password.actions.change": "Changer le mot de passe",
-  "network.fields.configuration_mode": "Mode de configuration",
-  "password.fields.confirm": "Confirmer le mot de passe",
-  "errors.could_not_apply_appearance": "Impossible d’appliquer l’apparence.",
-  "errors.could_not_load_appearance_choose_settings_to_save_a_replacement": "Impossible de charger l’apparence. Choisissez des réglages pour la remplacer.",
-  "password.fields.current": "Mot de passe actuel",
-  "network.modes.dhcp": "DHCP",
-  "network.fields.dns_servers": "Serveurs DNS",
-  "appearance.fields.dark_mode": "Mode sombre",
-  "about.fields.description": "Description :",
-  "about.fields.developer": "Développé par :",
-  "errors.failed_to_create_ui_element": "Échec de la création de l'élément d'interface utilisateur",
-  "errors.failed_to_create_object": "Échec de la création de l'objet",
-  "errors.failed_to_get_child_object": "Échec de l'obtention de l'objet enfant",
-  "errors.failed_to_get_current_task_identifier": "Échec de l'obtention de l'identifiant de la tâche en cours: {}",
-  "errors.failed_to_open_standard_file": "Échec de l'ouverture du fichier standard: {}",
-  "errors.failed_to_read_directory": "Échec de la lecture du répertoire: {}",
-  "errors.failed_to_set_environment_variable": "Échec de la définition de la variable d'environnement: {}",
-  "errors.failed_to_set_task_user": "Échec de la définition de l'utilisateur de la tâche: {}",
-  "errors.formatting_error": "Erreur de formatage",
-  "network.fields.gateway": "Passerelle",
-  "tabs.general": "Général",
-  "general.status.coming_soon": "Les réglages généraux seront implémentés ici.",
-  "errors.graphics_error": "Erreur graphique: {}",
-  "appearance.colors.green": "Vert",
-  "errors.invalid_utf_8_string": "Chaîne UTF-8 invalide : {}",
-  "about.fields.license": "Licence :",
-  "general.fields.locale": "Langue :",
-  "network.fields.mac_address": "Adresse MAC",
-  "about.fields.memory": "Mémoire :",
-  "password.fields.new": "Nouveau mot de passe",
-  "common.none": "Aucun",
-  "errors.null_character_in_string": "Caractère nul dans la chaîne: {}",
-  "about.fields.operating_system": "Système d'exploitation :",
-  "appearance.colors.orange": "Orange",
-  "password.fields.password": "Mot de passe",
-  "appearance.fields.primary_color": "Couleur principale",
-  "appearance.colors.rose": "Rose",
-  "network.fields.routes": "Routes",
-  "appearance.fields.secondary_color": "Couleur secondaire",
-  "app.title": "Réglages",
-  "network.modes.static": "Statique",
-  "about.fields.version": "Version :",
-  "appearance.colors.violet": "Violet",
-  "errors.virtual_file_system_error": "Erreur du système de fichiers virtuel: {}",
-  "appearance.colors.zinc_auto": "Zinc (automatique)"
+  "tabs": {
+    "about": "À propos",
+    "appearance": "Apparence",
+    "general": "Général"
+  },
+  "network": {
+    "fields": {
+      "address": "Adresse",
+      "configuration_mode": "Mode de configuration",
+      "dns_servers": "Serveurs DNS",
+      "gateway": "Passerelle",
+      "mac_address": "Adresse MAC",
+      "routes": "Routes"
+    },
+    "modes": {
+      "dhcp": "DHCP",
+      "static": "Statique"
+    }
+  },
+  "appearance": {
+    "status": {
+      "applied_not_saved": "Apparence appliquée, mais impossible à enregistrer.",
+      "saved": "Apparence enregistrée."
+    },
+    "colors": {
+      "blue": "Bleu",
+      "green": "Vert",
+      "orange": "Orange",
+      "rose": "Rose",
+      "violet": "Violet",
+      "zinc_auto": "Zinc (automatique)"
+    },
+    "fields": {
+      "dark_mode": "Mode sombre",
+      "primary_color": "Couleur principale",
+      "secondary_color": "Couleur secondaire"
+    }
+  },
+  "actions": {
+    "apply": "Appliquer",
+    "cancel": "Annuler"
+  },
+  "errors": {
+    "authentication_failed": "Échec de l'authentification: {}",
+    "could_not_apply_appearance": "Impossible d’appliquer l’apparence.",
+    "could_not_load_appearance_choose_settings_to_save_a_replacement": "Impossible de charger l’apparence. Choisissez des réglages pour la remplacer.",
+    "failed_to_create_ui_element": "Échec de la création de l'élément d'interface utilisateur",
+    "failed_to_create_object": "Échec de la création de l'objet",
+    "failed_to_get_child_object": "Échec de l'obtention de l'objet enfant",
+    "failed_to_get_current_task_identifier": "Échec de l'obtention de l'identifiant de la tâche en cours: {}",
+    "failed_to_open_standard_file": "Échec de l'ouverture du fichier standard: {}",
+    "failed_to_read_directory": "Échec de la lecture du répertoire: {}",
+    "failed_to_set_environment_variable": "Échec de la définition de la variable d'environnement: {}",
+    "failed_to_set_task_user": "Échec de la définition de l'utilisateur de la tâche: {}",
+    "formatting_error": "Erreur de formatage",
+    "graphics_error": "Erreur graphique: {}",
+    "invalid_utf_8_string": "Chaîne UTF-8 invalide : {}",
+    "null_character_in_string": "Caractère nul dans la chaîne: {}",
+    "virtual_file_system_error": "Erreur du système de fichiers virtuel: {}"
+  },
+  "about": {
+    "fields": {
+      "cpu": "Processeur :",
+      "description": "Description :",
+      "developer": "Développé par :",
+      "license": "Licence :",
+      "memory": "Mémoire :",
+      "operating_system": "Système d'exploitation :",
+      "version": "Version :"
+    }
+  },
+  "password": {
+    "actions": {
+      "change": "Changer le mot de passe"
+    },
+    "fields": {
+      "confirm": "Confirmer le mot de passe",
+      "current": "Mot de passe actuel",
+      "new": "Nouveau mot de passe",
+      "password": "Mot de passe"
+    }
+  },
+  "general": {
+    "status": {
+      "coming_soon": "Les réglages généraux seront implémentés ici."
+    },
+    "fields": {
+      "locale": "Langue :"
+    }
+  },
+  "common": {
+    "none": "Aucun"
+  },
+  "app": {
+    "title": "Réglages"
+  }
 }
