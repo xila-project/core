@@ -1,58 +1,98 @@
 {
-  "tabs.about": "Info",
-  "network.fields.address": "Adresse",
-  "tabs.appearance": "Darstellung",
-  "appearance.status.applied_not_saved": "Darstellung übernommen, konnte aber nicht gespeichert werden.",
-  "appearance.status.saved": "Darstellung gespeichert.",
-  "actions.apply": "Anwenden",
-  "errors.authentication_failed": "Authentifizierung fehlgeschlagen: {}",
-  "appearance.colors.blue": "Blau",
-  "about.fields.cpu": "CPU:",
-  "actions.cancel": "Abbrechen",
-  "password.actions.change": "Passwort ändern",
-  "network.fields.configuration_mode": "Konfigurationsmodus",
-  "password.fields.confirm": "Passwort bestätigen",
-  "errors.could_not_apply_appearance": "Darstellung konnte nicht übernommen werden.",
-  "errors.could_not_load_appearance_choose_settings_to_save_a_replacement": "Darstellung konnte nicht geladen werden. Neue Einstellungen auswählen und speichern.",
-  "password.fields.current": "Aktuelles Passwort",
-  "network.modes.dhcp": "DHCP",
-  "network.fields.dns_servers": "DNS-Server",
-  "appearance.fields.dark_mode": "Dunkler Modus",
-  "about.fields.description": "Beschreibung:",
-  "about.fields.developer": "Entwickelt von:",
-  "errors.failed_to_create_ui_element": "Oberflächenelement konnte nicht erstellt werden",
-  "errors.failed_to_create_object": "Objekt konnte nicht erstellt werden",
-  "errors.failed_to_get_child_object": "Untergeordnetes Objekt konnte nicht abgerufen werden",
-  "errors.failed_to_get_current_task_identifier": "Kennung der aktuellen Aufgabe konnte nicht abgerufen werden: {}",
-  "errors.failed_to_open_standard_file": "Standarddatei konnte nicht geöffnet werden: {}",
-  "errors.failed_to_read_directory": "Verzeichnis konnte nicht gelesen werden: {}",
-  "errors.failed_to_set_environment_variable": "Umgebungsvariable konnte nicht gesetzt werden: {}",
-  "errors.failed_to_set_task_user": "Aufgabenbenutzer konnte nicht festgelegt werden: {}",
-  "errors.formatting_error": "Formatierungsfehler",
-  "network.fields.gateway": "Gateway",
-  "tabs.general": "Allgemein",
-  "general.status.coming_soon": "Allgemeine Einstellungen werden hier später ergänzt.",
-  "errors.graphics_error": "Grafikfehler: {}",
-  "appearance.colors.green": "Grün",
-  "errors.invalid_utf_8_string": "Ungültige UTF-8-Zeichenfolge: {}",
-  "about.fields.license": "Lizenz:",
-  "general.fields.locale": "Sprache:",
-  "network.fields.mac_address": "MAC-Adresse",
-  "about.fields.memory": "Speicher:",
-  "password.fields.new": "Neues Passwort",
-  "common.none": "Keine",
-  "errors.null_character_in_string": "Nullzeichen in Zeichenfolge: {}",
-  "about.fields.operating_system": "Betriebssystem:",
-  "appearance.colors.orange": "Orange",
-  "password.fields.password": "Passwort",
-  "appearance.fields.primary_color": "Primärfarbe",
-  "appearance.colors.rose": "Rosa",
-  "network.fields.routes": "Routen",
-  "appearance.fields.secondary_color": "Sekundärfarbe",
-  "app.title": "Einstellungen",
-  "network.modes.static": "Statisch",
-  "about.fields.version": "Version:",
-  "appearance.colors.violet": "Violett",
-  "errors.virtual_file_system_error": "Fehler im virtuellen Dateisystem: {}",
-  "appearance.colors.zinc_auto": "Zinkgrau (automatisch)"
+  "tabs": {
+    "about": "Info",
+    "appearance": "Darstellung",
+    "general": "Allgemein"
+  },
+  "network": {
+    "fields": {
+      "address": "Adresse",
+      "configuration_mode": "Konfigurationsmodus",
+      "dns_servers": "DNS-Server",
+      "gateway": "Gateway",
+      "mac_address": "MAC-Adresse",
+      "routes": "Routen"
+    },
+    "modes": {
+      "dhcp": "DHCP",
+      "static": "Statisch"
+    }
+  },
+  "appearance": {
+    "status": {
+      "applied_not_saved": "Darstellung übernommen, konnte aber nicht gespeichert werden.",
+      "saved": "Darstellung gespeichert."
+    },
+    "colors": {
+      "blue": "Blau",
+      "green": "Grün",
+      "orange": "Orange",
+      "rose": "Rosa",
+      "violet": "Violett",
+      "zinc_auto": "Zinkgrau (automatisch)"
+    },
+    "fields": {
+      "dark_mode": "Dunkler Modus",
+      "primary_color": "Primärfarbe",
+      "secondary_color": "Sekundärfarbe"
+    }
+  },
+  "actions": {
+    "apply": "Anwenden",
+    "cancel": "Abbrechen"
+  },
+  "errors": {
+    "authentication_failed": "Authentifizierung fehlgeschlagen: {}",
+    "could_not_apply_appearance": "Darstellung konnte nicht übernommen werden.",
+    "could_not_load_appearance_choose_settings_to_save_a_replacement": "Darstellung konnte nicht geladen werden. Neue Einstellungen auswählen und speichern.",
+    "failed_to_create_ui_element": "Oberflächenelement konnte nicht erstellt werden",
+    "failed_to_create_object": "Objekt konnte nicht erstellt werden",
+    "failed_to_get_child_object": "Untergeordnetes Objekt konnte nicht abgerufen werden",
+    "failed_to_get_current_task_identifier": "Kennung der aktuellen Aufgabe konnte nicht abgerufen werden: {}",
+    "failed_to_open_standard_file": "Standarddatei konnte nicht geöffnet werden: {}",
+    "failed_to_read_directory": "Verzeichnis konnte nicht gelesen werden: {}",
+    "failed_to_set_environment_variable": "Umgebungsvariable konnte nicht gesetzt werden: {}",
+    "failed_to_set_task_user": "Aufgabenbenutzer konnte nicht festgelegt werden: {}",
+    "formatting_error": "Formatierungsfehler",
+    "graphics_error": "Grafikfehler: {}",
+    "invalid_utf_8_string": "Ungültige UTF-8-Zeichenfolge: {}",
+    "null_character_in_string": "Nullzeichen in Zeichenfolge: {}",
+    "virtual_file_system_error": "Fehler im virtuellen Dateisystem: {}"
+  },
+  "about": {
+    "fields": {
+      "cpu": "CPU:",
+      "description": "Beschreibung:",
+      "developer": "Entwickelt von:",
+      "license": "Lizenz:",
+      "memory": "Speicher:",
+      "operating_system": "Betriebssystem:",
+      "version": "Version:"
+    }
+  },
+  "password": {
+    "actions": {
+      "change": "Passwort ändern"
+    },
+    "fields": {
+      "confirm": "Passwort bestätigen",
+      "current": "Aktuelles Passwort",
+      "new": "Neues Passwort",
+      "password": "Passwort"
+    }
+  },
+  "general": {
+    "status": {
+      "coming_soon": "Allgemeine Einstellungen werden hier später ergänzt."
+    },
+    "fields": {
+      "locale": "Sprache:"
+    }
+  },
+  "common": {
+    "none": "Keine"
+  },
+  "app": {
+    "title": "Einstellungen"
+  }
 }
