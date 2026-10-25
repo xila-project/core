@@ -87,7 +87,7 @@ MISE_ENV=ci mise run ci:quality-js
 
 For opt-in native PCM playback using nanoaudio, see
 [the audio library](libraries/audio/README.md). Run its tone example with
-`mise run run:cargo -- -p drivers_native --features audio --example audio`.
+`mise run run:cargo -- -p xila-drivers-native --features audio --example audio`.
 
 For GUI builds from a **Wayland desktop**, keep the host GPU drivers and check
 rendering, input and window closing. Windows requires x86_64 WSL2/WSLg and a GUI
@@ -239,8 +239,8 @@ Local checks:
 
 ```bash
 cargo test --manifest-path tools/profiling/Cargo.toml
-cargo test -p task -p drivers_std --lib --features task/test_harness,drivers_std/profiling,drivers_std/heaptrack
-cargo test -p native_example --bin native_example --features profiling,heaptrack
+cargo test -p xila-task -p xila-drivers-std --lib --features task/test_harness,drivers_std/profiling,drivers_std/heaptrack
+cargo test -p xila-native-example --bin native_example --features profiling,heaptrack
 cargo run --manifest-path tools/profiling/Cargo.toml -- heap-smoke
 ```
 

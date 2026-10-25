@@ -1,14 +1,14 @@
 [package]
-name = "graphics-font-link-test"
+name = "xila-graphics-font-link-test"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-graphics = { path = "../..", default-features = false, features = [
+graphics = { package = "xila-graphics", path = "../..", default-features = false, features = [
   "rendering_rgb565",
 ] }
 
 [dev-dependencies]
-graphics-font-pipeline-test = { path = "../font_pipeline" }
+graphics-font-pipeline-test = { package = "xila-graphics-font-pipeline-test", path = "../font_pipeline" }
 
 [workspace]

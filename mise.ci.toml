@@ -258,7 +258,7 @@ run = "mise run clippy:host"
 extends = "ci:rust-lint"
 description = "Lint host WASM runtime and graphics bindings"
 depends = ["ci:packages-host"]
-run = "cargo clippy -p wasm --features graphics,xila/graphics_rendering_xrgb8888 --target x86_64-unknown-linux-gnu -- -D warnings"
+run = "cargo clippy -p xila-wasm --features graphics,xila/graphics_rendering_xrgb8888 --target x86_64-unknown-linux-gnu -- -D warnings"
 
 [tasks."ci:verification"]
 description = "Test verifier features and link without an allocator on Cortex-M and WASM"
@@ -304,7 +304,7 @@ tools.node = "{{ vars.node_version }}"
 extends = "ci:rust-format"
 description = "Build the native example"
 depends = ["ci:packages-host"]
-run = "cargo build --locked -p native_example"
+run = "cargo build --locked -p xila-native-example"
 
 [tasks."ci:wasm-clippy"]
 extends = "ci:rust-browser-lint"
@@ -316,13 +316,13 @@ run = "mise run clippy:guest"
 extends = "ci:rust-browser"
 description = "Check browser audio support"
 depends = ["ci:packages-linker"]
-run = "cargo check -p audio -p drivers_wasm --features drivers_wasm/audio --target wasm32-unknown-unknown"
+run = "cargo check -p xila-audio -p xila-drivers-wasm --features xila-drivers-wasm/audio --target wasm32-unknown-unknown"
 
 [tasks."ci:wasm-apps-clippy"]
 extends = "ci:rust-wasi-lint"
 description = "Lint WASI clock and pixel painter targets"
 depends = ["ci:packages-linker"]
-run = "cargo clippy -p clock -p pixel_painter --all-targets --target wasm32-wasip1 -- -D warnings"
+run = "cargo clippy -p xila-clock -p xila-pixel-painter --all-targets --target wasm32-wasip1 -- -D warnings"
 
 [tasks."ci:wasm-image"]
 extends = "ci:rust-wasi"
@@ -339,13 +339,13 @@ run = "node --test drivers/wasm/tests/seed.test.mjs examples/wasm/tests/disk_man
 extends = "ci:rust-wasi"
 description = "Test task and driver profiling instrumentation"
 depends = ["ci:packages-host"]
-run = "cargo test --locked -p task -p drivers_std --lib --features task/test_harness,drivers_std/profiling,drivers_std/heaptrack"
+run = "cargo test --locked -p xila-task -p xila-drivers-std --lib --features xila-task/test_harness,xila-drivers-std/profiling,xila-drivers-std/heaptrack"
 
 [tasks."ci:profiling-native-tests"]
 extends = "ci:rust-wasi"
 description = "Test the native profiling and heaptrack configuration"
 depends = ["ci:packages-host"]
-run = "cargo test --locked -p native_example --bin native_example --features profiling,heaptrack"
+run = "cargo test --locked -p xila-native-example --bin native_example --features profiling,heaptrack"
 
 [tasks."ci:abi-coverage"]
 description = "Enforce ABI translation coverage thresholds"
@@ -408,7 +408,7 @@ if [[ "${CARGO_BENCH_PROFILE:-default}" == line-tables-only ]]; then
   export CARGO_PROFILE_TEST_DEBUG=line-tables-only
 fi
 cargo test --workspace --timings
-cargo clippy -p wasm --no-default-features --features default_guest --target wasm32-unknown-unknown --all-targets --timings -- -D warnings
+cargo clippy -p xila-wasm --no-default-features --features default_guest --target wasm32-unknown-unknown --all-targets --timings -- -D warnings
 """
 
 [tasks."ci:benchmark-install-nextest"]
@@ -443,7 +443,7 @@ depends = ["ci:packages-host"]
 run = """
 set -euo pipefail
 mkdir -p pages/host pages/guest pages/demonstrations/wasm target/reference-filesystem-images
-RUSTDOCFLAGS="--deny warnings" mise run docs:host
+RUSTDOCFLAGS="--deny warnings" mise run docs:host -- --no-deps
 RUSTDOCFLAGS="--deny warnings" mise run docs:guest
 cp -r target/x86_64-unknown-linux-gnu/doc/. pages/host/
 cp -r target/wasm32-unknown-unknown/doc/. pages/guest/
@@ -452,11 +452,11 @@ for locale in en fr es de pt-BR it pl; do
   export EMBEDDED_I18N_LOCALE="$locale"
   export CARGO_TARGET_DIR="${CARGO_TARGET_ROOT:-target/pages}/$locale"
   mise run image:wasm
-  cargo run --locked -p fs_image -- "$CARGO_TARGET_DIR/seed/wasm/repeated.img" 16777216 --bundle wasm --applications-dir "$CARGO_TARGET_DIR/wasm32-wasip1/release"
+  cargo run --locked -p xila-fs-image -- "$CARGO_TARGET_DIR/seed/wasm/repeated.img" 16777216 --bundle wasm --applications-dir "$CARGO_TARGET_DIR/wasm32-wasip1/release"
   cmp "$CARGO_TARGET_DIR/seed/wasm/seed.img" "$CARGO_TARGET_DIR/seed/wasm/repeated.img"
   rm "$CARGO_TARGET_DIR/seed/wasm/repeated.img"
-  cargo run --locked -p fs_image -- "$CARGO_TARGET_DIR/seed/wasm/native.img" 16777216 --bundle native --applications-dir "$CARGO_TARGET_DIR/wasm32-wasip1/release"
-  cargo run --locked -p fs_image -- "$CARGO_TARGET_DIR/seed/wasm/native-repeated.img" 16777216 --bundle native --applications-dir "$CARGO_TARGET_DIR/wasm32-wasip1/release"
+  cargo run --locked -p xila-fs-image -- "$CARGO_TARGET_DIR/seed/wasm/native.img" 16777216 --bundle native --applications-dir "$CARGO_TARGET_DIR/wasm32-wasip1/release"
+  cargo run --locked -p xila-fs-image -- "$CARGO_TARGET_DIR/seed/wasm/native-repeated.img" 16777216 --bundle native --applications-dir "$CARGO_TARGET_DIR/wasm32-wasip1/release"
   cmp "$CARGO_TARGET_DIR/seed/wasm/native.img" "$CARGO_TARGET_DIR/seed/wasm/native-repeated.img"
   rm "$CARGO_TARGET_DIR/seed/wasm/native-repeated.img"
   mkdir -p "target/reference-filesystem-images/$locale"

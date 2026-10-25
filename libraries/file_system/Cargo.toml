@@ -1,5 +1,5 @@
 [package]
-name = "file_system"
+name = "xila-file-system"
 version = "0.1.0"
 edition = "2024"
 
@@ -22,3 +22,6 @@ drivers_std = { workspace = true }
 [features]
 std = []
 default = []
+
+[lib]
+name = "file_system"

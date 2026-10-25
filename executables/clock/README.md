@@ -22,7 +22,7 @@ The host supplies the date/time, including whether its clock is set correctly.
 From the repository root, in the configured development shell:
 
 ```sh
-cargo build -p clock --target wasm32-wasip1 --profile release-wasm
+cargo build -p xila-clock --target wasm32-wasip1 --profile release-wasm
 ```
 
 The native example builds, copies, and installs Clock alongside Calculator and
@@ -103,9 +103,9 @@ power loss. Shared storage also does not serialize concurrent app instances.
 ## Validation
 
 ```sh
-cargo test -p clock
-cargo clippy -p clock --all-targets --target wasm32-wasip1 -- -D warnings
-cargo test -p wasm --lib --features graphics,xila/graphics_rendering_xrgb8888
+cargo test -p xila-clock
+cargo clippy -p xila-clock --all-targets --target wasm32-wasip1 -- -D warnings
+cargo test -p xila-wasm --lib --features graphics,xila/graphics_rendering_xrgb8888
 ```
 
 The pure timing models accept supplied timestamps for deterministic tests of

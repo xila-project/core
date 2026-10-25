@@ -1,5 +1,5 @@
 [package]
-name = "memory"
+name = "xila-memory"
 version = "0.1.0"
 edition = "2024"
 
@@ -18,3 +18,6 @@ shared = { workspace = true }
 default = ["Debug"]
 Debug = []
 Nightly = []
+
+[lib]
+name = "memory"

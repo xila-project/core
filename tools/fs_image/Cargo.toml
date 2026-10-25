@@ -1,5 +1,5 @@
 [package]
-name = "fs_image"
+name = "xila-fs-image"
 version = "0.1.0"
 edition = "2024"
 
@@ -14,3 +14,7 @@ critical-section = { workspace = true, features = ["std"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[[bin]]
+name = "fs_image"
+path = "src/main.rs"

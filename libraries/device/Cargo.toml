@@ -1,7 +1,10 @@
 [package]
-name = "device"
+name = "xila-device"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 file_system = { workspace = true }
+
+[lib]
+name = "device"

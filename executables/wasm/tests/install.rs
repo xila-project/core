@@ -145,8 +145,14 @@ async fn install_selects_install_export_and_never_falls_back_to_main() {
             .create_directory(task, &"/configuration/shared/applications/shortcuts")
             .await
             .unwrap();
-        for app in ["calculator", "weather", "clock", "synth", "text_editor"] {
-            let binary = executable::build_crate(app).unwrap();
+        for (package, app) in [
+            ("xila-calculator", "calculator"),
+            ("xila-weather", "weather"),
+            ("xila-clock", "clock"),
+            ("xila-synth", "synth"),
+            ("xila-text-editor", "text_editor"),
+        ] {
+            let binary = executable::build_crate(package).unwrap();
             let path = format!("/applications/executables/{app}");
             drivers_std::loader::load_to_virtual_file_system(
                 context.task_manager,

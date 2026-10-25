@@ -1,5 +1,5 @@
 [package]
-name = "network"
+name = "xila-network"
 version = "0.1.0"
 edition = "2024"
 
@@ -44,3 +44,6 @@ drivers_std = { workspace = true }
 drivers_shared = { workspace = true }
 little_fs = { workspace = true }
 abi_definitions = { workspace = true }
+
+[lib]
+name = "network"

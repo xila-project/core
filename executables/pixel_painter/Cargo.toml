@@ -1,5 +1,5 @@
 [package]
-name = "pixel_painter"
+name = "xila-pixel-painter"
 version = "0.1.0"
 edition = "2024"
 description = "A bounded pixel drawing app for Xila WebAssembly."
@@ -14,3 +14,10 @@ wasm = { workspace = true, default-features = false, features = [
   "graphics",
   "memory_32",
 ] }
+
+[[bin]]
+name = "pixel_painter"
+path = "src/main.rs"
+
+[lib]
+name = "pixel_painter"

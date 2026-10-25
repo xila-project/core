@@ -41,21 +41,21 @@ COPY . .
 # bundled WASI apps are built first, then fs_image creates an MBR + LittleFS
 # disk that is copied to the image as an immutable seed.
 RUN cargo build --locked \
-        --package calculator \
-        --package weather \
-        --package clock \
-        --package pixel_painter \
-        --package synth \
-        --package text_editor \
+        --package xila-calculator \
+        --package xila-weather \
+        --package xila-clock \
+        --package xila-pixel-painter \
+        --package xila-synth \
+        --package xila-text-editor \
         --target wasm32-wasip1 \
         --profile release-wasm \
     && test -s target/wasm32-wasip1/release-wasm/text_editor.wasm \
     && mkdir -p target/seed/native \
-    && cargo run --locked --package fs_image -- \
+    && cargo run --locked --package xila-fs-image -- \
         target/seed/native/seed.img 16777216 \
         --bundle native \
         --applications-dir target/wasm32-wasip1/release-wasm \
-    && cargo build --locked --package native_example --bin xila-runtime --release \
+    && cargo build --locked --package xila-native-example --bin xila-runtime --release \
     && test -s target/release/xila-runtime \
     && test -s target/seed/native/seed.img \
     && ldd target/release/xila-runtime > /tmp/xila-runtime-ldd \

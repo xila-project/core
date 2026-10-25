@@ -1,5 +1,5 @@
 [package]
-name = "little_fs"
+name = "xila-little-fs"
 version = "0.1.0"
 edition = "2024"
 
@@ -25,3 +25,6 @@ drivers_shared = { workspace = true }
 drivers_std = { workspace = true }
 
 abi_definitions = { workspace = true }
+
+[lib]
+name = "little_fs"

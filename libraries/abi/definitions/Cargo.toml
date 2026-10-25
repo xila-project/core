@@ -1,5 +1,5 @@
 [package]
-name = "abi_definitions"
+name = "xila-abi-definitions"
 version = "0.1.0"
 edition = "2024"
 
@@ -27,3 +27,6 @@ drivers_shared = { workspace = true }
 drivers_std = { workspace = true }
 little_fs = { workspace = true }
 users = { workspace = true }
+
+[lib]
+name = "abi_definitions"
