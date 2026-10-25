@@ -62,10 +62,7 @@ pub fn sources_with_locale_catalogs(
     // The locale's ranges are used for stable variant names, but the enormous
     // CJK and kana ranges must be replaced by only the catalog's used glyphs.
     // Hiragana and katakana merge into one contiguous range in effective_ranges.
-    let subset_ranges = [
-        embedded_i18n::CJK_UNIFIED_IDEOGRAPHS,
-        0x3040..0x3100,
-    ];
+    let subset_ranges = [embedded_i18n::CJK_UNIFIED_IDEOGRAPHS, 0x3040..0x3100];
     let generated_ranges = ranges
         .iter()
         .filter(|range| {
