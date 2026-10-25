@@ -1,47 +1,85 @@
 {
-  "alarm.controls.decrement_hour": "小时 -",
-  "alarm.controls.decrement_minute": "分钟 -",
-  "alarm.controls.delete": "删除",
-  "alarm.controls.disable": "停用",
-  "alarm.controls.increment_hour": "小时 +",
-  "alarm.controls.increment_minute": "分钟 +",
-  "alarm.controls.save_and_enable": "保存并启用",
-  "alarm.instructions.repeat_days_utc": "在选定的星期重复；不选则仅提醒一次。所有时间均为 UTC。",
-  "alarm.status.disabled": "已停用",
-  "alarm.status.enabled": "已启用： ",
-  "alarm.status.no_saved_alarm": "没有已保存的闹钟",
-  "alarm.weekdays.friday": "周五",
-  "alarm.weekdays.monday": "周一",
-  "alarm.weekdays.saturday": "周六",
-  "alarm.weekdays.sunday": "周日",
-  "alarm.weekdays.thursday": "周四",
-  "alarm.weekdays.tuesday": "周二",
-  "alarm.weekdays.wednesday": "周三",
-  "alerts.alarm_ringing": "闹钟响了！ ",
-  "alerts.alarm_snoozed": "闹钟已延后提醒。 ",
-  "alerts.dismiss": "关闭提醒",
-  "alerts.instructions": "仅在时钟运行时显示提醒。",
-  "alerts.snooze_five_minutes": "5 分钟后提醒",
-  "alerts.timer_finished": "计时结束！ ",
-  "clock.controls.toggle_hour_format": "12 / 24 小时制",
-  "clock.errors.host_unavailable": "主机时钟不可用",
-  "clock.instructions.utc_only": "使用 UTC / 主机时钟，暂不支持城市时区。",
-  "errors.settings_save_failed": "无法保存设置。 ",
-  "stopwatch.controls.record_lap": "计次",
-  "stopwatch.controls.reset": "重置",
-  "stopwatch.controls.toggle_pause": "开始 / 暂停",
-  "stopwatch.laps.recorded.other": "已记录 {count} 次",
-  "tabs.alarm": "闹钟",
-  "tabs.clock": "时钟",
-  "tabs.stopwatch": "秒表",
-  "tabs.timer": "计时器",
-  "timer.controls.cancel": "取消",
-  "timer.controls.decrement_minute": "分钟 -",
-  "timer.controls.decrement_second": "秒 -",
-  "timer.controls.increment_minute": "分钟 +",
-  "timer.controls.increment_second": "秒 +",
-  "timer.controls.restart": "重新开始",
-  "timer.controls.start": "开始",
-  "timer.controls.toggle_pause": "暂停 / 继续",
-  "timer.labels.duration": "时长"
+  "alarm": {
+    "controls": {
+      "decrement_hour": "小时 -",
+      "decrement_minute": "分钟 -",
+      "delete": "删除",
+      "disable": "停用",
+      "increment_hour": "小时 +",
+      "increment_minute": "分钟 +",
+      "save_and_enable": "保存并启用"
+    },
+    "instructions": {
+      "repeat_days_utc": "在选定的星期重复；不选则仅提醒一次。所有时间均为 UTC。"
+    },
+    "status": {
+      "disabled": "已停用",
+      "enabled": "已启用： ",
+      "no_saved_alarm": "没有已保存的闹钟"
+    },
+    "weekdays": {
+      "friday": "周五",
+      "monday": "周一",
+      "saturday": "周六",
+      "sunday": "周日",
+      "thursday": "周四",
+      "tuesday": "周二",
+      "wednesday": "周三"
+    }
+  },
+  "alerts": {
+    "alarm_ringing": "闹钟响了！ ",
+    "alarm_snoozed": "闹钟已延后提醒。 ",
+    "dismiss": "关闭提醒",
+    "instructions": "仅在时钟运行时显示提醒。",
+    "snooze_five_minutes": "5 分钟后提醒",
+    "timer_finished": "计时结束！ "
+  },
+  "clock": {
+    "controls": {
+      "toggle_hour_format": "12 / 24 小时制"
+    },
+    "errors": {
+      "host_unavailable": "主机时钟不可用"
+    },
+    "instructions": {
+      "utc_only": "使用 UTC / 主机时钟，暂不支持城市时区。"
+    }
+  },
+  "errors": {
+    "settings_save_failed": "无法保存设置。 "
+  },
+  "stopwatch": {
+    "controls": {
+      "record_lap": "计次",
+      "reset": "重置",
+      "toggle_pause": "开始 / 暂停"
+    },
+    "laps": {
+      "recorded": {
+        "other": "已记录 {count} 次"
+      }
+    }
+  },
+  "tabs": {
+    "alarm": "闹钟",
+    "clock": "时钟",
+    "stopwatch": "秒表",
+    "timer": "计时器"
+  },
+  "timer": {
+    "controls": {
+      "cancel": "取消",
+      "decrement_minute": "分钟 -",
+      "decrement_second": "秒 -",
+      "increment_minute": "分钟 +",
+      "increment_second": "秒 +",
+      "restart": "重新开始",
+      "start": "开始",
+      "toggle_pause": "暂停 / 继续"
+    },
+    "labels": {
+      "duration": "时长"
+    }
+  }
 }
