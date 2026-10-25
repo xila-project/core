@@ -27,8 +27,13 @@ pub fn text(application: &str, key: &str) -> String {
         _ => panic!("unknown guest test application: {application}"),
     };
     let messages: serde_json::Value = serde_json::from_str(catalog).unwrap();
-    messages[key]
-        .as_str()
+    // embedded-i18n resolves dotted identifiers even when catalogs are nested.
+    // Keep the flat lookup for compatibility with older/partially migrated fixtures.
+    let value = messages
+        .get(key)
+        .or_else(|| key.split('.').try_fold(&messages, |node, part| node.get(part)));
+    value
+        .and_then(serde_json::Value::as_str)
         .unwrap_or_else(|| panic!("missing {application} translation for {key:?} in {locale}"))
         .to_owned()
 }
