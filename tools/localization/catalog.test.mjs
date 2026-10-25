@@ -61,6 +61,7 @@ test("all Xila locale files are nested and round-trip without changing messages"
   const catalogs = ["executables", "libraries", "subsystems", "drivers"]
     .flatMap(directory => findCatalogs(path.join(ROOT, directory)));
   assert.ok(catalogs.length >= 160, "expected at least 20 namespaces with 8 locales each");
+  const unconverted = new Set();
   for (const file of catalogs) {
     const nested = JSON.parse(readFileSync(file, "utf8"));
     const dotted = flattenCatalog(nested);
@@ -75,11 +76,14 @@ test("all Xila locale files are nested and round-trip without changing messages"
     }
     function visit(node) {
       for (const [key, value] of Object.entries(node)) {
-        assert.ok(!key.includes("."), file + ": key is not nested: " + key);
+        if (key.includes(".")) unconverted.add(path.relative(ROOT, file));
         if (value && typeof value === "object" && !Array.isArray(value)) visit(value);
       }
     }
     visit(nested);
-    assert.deepEqual(inflate(dotted), nested, file + ": catalog not lossless");
+    if (!unconverted.has(path.relative(ROOT, file))) {
+      assert.deepEqual(inflate(dotted), nested, file + ": catalog not lossless");
+    }
   }
+  assert.deepEqual([...unconverted].sort(), [], "Remaining flat catalogs");
 });
