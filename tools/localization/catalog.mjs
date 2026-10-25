@@ -25,5 +25,14 @@ export function flattenCatalog(catalog) {
     }
   }
   visit(catalog);
+  for (const key of Object.keys(translations)) {
+    const segments = key.split(".");
+    for (let i = 1; i < segments.length; i++) {
+      const ancestor = segments.slice(0, i).join(".");
+      if (Object.hasOwn(translations, ancestor)) {
+        throw new Error("translation path collision: " + ancestor + " / " + key);
+      }
+    }
+  }
   return translations;
 }
