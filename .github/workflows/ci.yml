@@ -55,6 +55,8 @@ jobs:
     env:
       MISE_ENV: ci
       CARGO_TERM_COLOR: always
+      # Keep standalone test crates in the target tree cached by the action.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
       XILA_MBX: "1"
     steps:
       - uses: actions/checkout@v7
@@ -65,7 +67,7 @@ jobs:
       - uses: jdx/mr-boxington-action@v1
         with:
           toolchain: ${{ steps.toolchain.outputs.version }}
-          github-cache-mode: objects
+          github-cache-mode: target
           cache-generation: v1-ci-host
       - name: Lint host workspace
         run: mise run ci:host-clippy
@@ -137,8 +139,9 @@ jobs:
       - uses: jdx/mr-boxington-action@v1
         with:
           toolchain: ${{ steps.toolchain.outputs.version }}
-          github-cache-mode: objects
+          github-cache-mode: target
           cache-generation: v1-ci-abi-${{ matrix.memory }}
+          working-directory: executables/wasm/tests/translation
       - run: mise run ci:abi
 
   localization:

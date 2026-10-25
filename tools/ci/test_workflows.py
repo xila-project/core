@@ -202,7 +202,7 @@ class WorkflowPolicy(unittest.TestCase):
 
     def test_build_cache_payloads_cover_all_cargo_target_layouts(self):
         builds = {
-            "ci.yml": {"host": "objects", "wasm": "target", "abi": "objects", "localization": "objects"},
+            "ci.yml": {"host": "target", "wasm": "target", "abi": "target", "localization": "objects"},
             "extended.yml": {"coverage": "objects", "profiling": "target", "abi-deep": "objects"},
             "pages.yml": {"build": "objects"},
         }
@@ -219,6 +219,12 @@ class WorkflowPolicy(unittest.TestCase):
                     self.assertNotIn("Swatinem/rust-cache", text)
                     self.assertNotIn("RUSTC_WRAPPER:", text)
                     self.assertNotIn("RUSTC_WORKSPACE_WRAPPER:", text)
+
+    def test_host_target_cache_includes_standalone_test_crates(self):
+        self.assertIn("CARGO_TARGET_DIR: ${{ github.workspace }}/target", job("ci.yml", "host"))
+
+    def test_abi_target_cache_uses_translation_workspace(self):
+        self.assertIn("working-directory: executables/wasm/tests/translation", job("ci.yml", "abi"))
 
     def test_cache_restore_is_read_only_on_prs_and_matrix_modes_are_separate(self):
         for workflow in ["ci.yml", "extended.yml", "pages.yml"]:
