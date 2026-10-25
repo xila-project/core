@@ -109,7 +109,9 @@ jobs:
             XILA_VERSION=${{ steps.version.outputs.value }}
             VCS_REF=${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           cache-from: type=gha,scope=xila-runtime-linux-amd64
-          cache-to: type=gha,mode=max,scope=xila-runtime-linux-amd64
+          # Cache uploads are best-effort: GitHub's cache service can time out
+          # after the image was already built successfully.
+          cache-to: type=gha,mode=max,scope=xila-runtime-linux-amd64,ignore-error=true
       - name: Check image user and entrypoint
         run: |
           test "$(docker inspect --format '{{.Config.User}}' xila-runtime:ci)" = '10001:10001'
