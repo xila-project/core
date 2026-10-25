@@ -1,25 +1,31 @@
 {
-  "angle_mode.degrees_indicator": " [DEG]",
-  "angle_mode.radians_indicator": " [RAD]",
-  "errors.calculation_error": "Błąd obliczeń",
-  "errors.calculation_overflow": "Przepełnienie podczas obliczeń",
-  "controls.clear": "Wyczyść",
-  "errors.division_by_zero": "Dzielenie przez zero",
-  "errors.calculation_with_details": "Błąd: {}",
-  "errors.expression_nested_too_deeply": "Zbyt głęboko zagnieżdżone wyrażenie",
-  "errors.expression_too_long": "Zbyt długie wyrażenie",
-  "errors.inexact_result": "Niedokładny wynik",
-  "errors.invalid_number": "Nieprawidłowa liczba",
-  "angle_mode.radians": "RAD",
-  "errors.requires_wasm_runtime": "Ten program jest przeznaczony do uruchamiania w środowisku WASM.",
-  "errors.too_many_arguments": "Za dużo argumentów",
-  "errors.unclosed_parenthesis": "Niezamknięty nawias",
-  "errors.unexpected_character": "Nieoczekiwany znak",
-  "errors.unexpected_end_of_expression": "Nieoczekiwany koniec wyrażenia",
-  "errors.unexpected_token": "Nieoczekiwany token",
-  "errors.unknown_function": "Nieznana funkcja",
-  "errors.unknown_variable": "Nieznana zmienna",
-  "errors.unsupported_operation": "Nieobsługiwana operacja",
-  "errors.value_outside_function_domain": "Wartość spoza dziedziny funkcji",
-  "errors.wrong_number_of_arguments": "Nieprawidłowa liczba argumentów"
+  "angle_mode": {
+    "degrees_indicator": " [DEG]",
+    "radians_indicator": " [RAD]",
+    "radians": "RAD"
+  },
+  "errors": {
+    "calculation_error": "Błąd obliczeń",
+    "calculation_overflow": "Przepełnienie podczas obliczeń",
+    "division_by_zero": "Dzielenie przez zero",
+    "calculation_with_details": "Błąd: {}",
+    "expression_nested_too_deeply": "Zbyt głęboko zagnieżdżone wyrażenie",
+    "expression_too_long": "Zbyt długie wyrażenie",
+    "inexact_result": "Niedokładny wynik",
+    "invalid_number": "Nieprawidłowa liczba",
+    "requires_wasm_runtime": "Ten program jest przeznaczony do uruchamiania w środowisku WASM.",
+    "too_many_arguments": "Za dużo argumentów",
+    "unclosed_parenthesis": "Niezamknięty nawias",
+    "unexpected_character": "Nieoczekiwany znak",
+    "unexpected_end_of_expression": "Nieoczekiwany koniec wyrażenia",
+    "unexpected_token": "Nieoczekiwany token",
+    "unknown_function": "Nieznana funkcja",
+    "unknown_variable": "Nieznana zmienna",
+    "unsupported_operation": "Nieobsługiwana operacja",
+    "value_outside_function_domain": "Wartość spoza dziedziny funkcji",
+    "wrong_number_of_arguments": "Nieprawidłowa liczba argumentów"
+  },
+  "controls": {
+    "clear": "Wyczyść"
+  }
 }
