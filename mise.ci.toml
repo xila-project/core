@@ -192,10 +192,10 @@ for locale in "${locales[@]}"; do
   echo "::group::Localization ($locale)"
   export EMBEDDED_I18N_STRICT=1
   export EMBEDDED_I18N_LOCALE="$locale"
-  mise run localization:check
   if [[ "$locale" == ja ]]; then
     bash tools/localization/fetch-japanese-font.sh
   fi
+  mise run localization:check
   if [[ "$locale" == zh-CN || "$locale" == ja ]]; then
     cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml
   fi
