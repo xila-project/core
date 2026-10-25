@@ -6,8 +6,8 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 destination="$root/subsystems/graphics/fonts/SourceHanSansJP-Regular.otf"
 # Same Source Han Sans 2.005 source revision as the vendored SC variant.
-revision="a4f7cf94edfbf1d7ffbdfc4841de276358bd7e0f2"
-url="https://raw.githubusercontent.com/adobe-fonts/source-han-sans/$revision/OTF/Japanese/SourceHanSansJP-Regular.otf"
+revision="a4f7cf94edfb9d7ffbdfc4841de276358bd7e0f2"
+url="https://raw.githubusercontent.com/adobe-fonts/source-han-sans/$revision/SubsetOTF/JP/SourceHanSansJP-Regular.otf"
 
 if [[ -s "$destination" ]] && [[ "$(head -c 4 "$destination")" == OTTO ]]; then
   echo "Japanese Source Han Sans font already present"
@@ -22,4 +22,5 @@ if [[ "$(head -c 4 "$temporary")" != OTTO ]]; then
   exit 1
 fi
 mv "$temporary" "$destination"
+sha256sum "$destination"
 echo "Installed Source Han Sans JP from $revision"
