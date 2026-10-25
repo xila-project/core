@@ -218,7 +218,7 @@ pub fn dispatch(
         Function::RangeSetValue => {
             let object = state.object(a, None)?;
             let value = signed_word(b)?;
-            if value < -MAX_RANGE_VALUE || value > MAX_RANGE_VALUE || c > 1 {
+            if !(-MAX_RANGE_VALUE..=MAX_RANGE_VALUE).contains(&value) || c > 1 {
                 return Err(GraphicsError::InvalidValue);
             }
             match state.kind(a)? {
