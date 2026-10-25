@@ -415,6 +415,7 @@ class WorkflowPolicy(unittest.TestCase):
     def test_runtime_pr_build_only_and_main_release_validate_image(self):
         runtime = (ROOT / ".github/workflows/runtime.yml").read_text()
         self.assertIn("load: ${{ github.event_name != 'pull_request' }}", runtime)
+        self.assertIn("outputs: ${{ github.event_name == 'pull_request' && 'type=cacheonly' || '' }}", runtime)
         self.assertIn(
             "cache-to: ${{ github.event_name != 'pull_request' && "
             "'type=gha,mode=max,scope=xila-runtime-linux-amd64,ignore-error=true' || '' }}",
