@@ -19,6 +19,19 @@ pub fn get() -> TokenStream {
             pub fn object_set_font(object: *mut lv_obj_t, font: u32, selector: u32);
             pub fn object_set_surface(object: *mut lv_obj_t, surface: u32);
             pub fn object_set_min_max_size(object: *mut lv_obj_t, min_width: i32, max_width: i32, min_height: i32, max_height: i32, selector: u32);
+            /// Shared bounded operations for LVGL range controls.
+            pub fn bar_create(parent: *mut lv_obj_t) -> *mut lv_obj_t;
+            pub fn switch_create(parent: *mut lv_obj_t) -> *mut lv_obj_t;
+            pub fn spinner_create(parent: *mut lv_obj_t) -> *mut lv_obj_t;
+            pub fn range_set_range(object: *mut lv_obj_t, min: i32, max: i32);
+            pub fn range_set_value(object: *mut lv_obj_t, value: i32, animated: bool);
+            pub fn range_get_value(object: *const lv_obj_t) -> i32;
+            pub fn range_get_start_value(object: *const lv_obj_t) -> i32;
+            pub fn range_set_mode(object: *mut lv_obj_t, mode: u32);
+            pub fn range_set_orientation(object: *mut lv_obj_t, orientation: u32);
+            pub fn spinner_set_animation(object: *mut lv_obj_t, duration_ms: u32, sweep_degrees: u32);
+            pub fn spinner_get_animation_duration(object: *const lv_obj_t) -> u32;
+            pub fn spinner_get_arc_sweep(object: *const lv_obj_t) -> u32;
             /// Host-owned indexed canvas. Dimensions and uploads are bounded by the host.
             pub fn indexed_canvas_create(parent: *mut lv_obj_t, width: u16, height: u16) -> *mut lv_obj_t;
 

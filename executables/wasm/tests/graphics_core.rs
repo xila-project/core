@@ -357,6 +357,183 @@ async fn style_and_font_calls_use_validated_host_tokens() {
 }
 
 #[xila::task::test(task_path = xila::task)]
+async fn range_controls_expose_checked_values_modes_and_orientation() {
+    let _standard = testing::initialize(false, false).await;
+    let manager = support::manager().await;
+    let mut bytes = [0; 64];
+    let mut memory = GuestMemory::new(&mut bytes);
+    let mut state = GraphicsState::new(Some(manager));
+    call(&mut state, &mut memory, Function::WindowCreate, &[], 1).unwrap();
+    let window = handle(&memory);
+
+    for (constructor, expected) in [
+        (Function::ArcCreate, 55i32),
+        (Function::BarCreate, 42),
+        (Function::SliderCreate, -5),
+    ] {
+        call(&mut state, &mut memory, constructor, &[window], 1).unwrap();
+        let control = handle(&memory);
+        let (minimum, maximum) = if expected < 0 { (-10, 10) } else { (0, 100) };
+        call(
+            &mut state,
+            &mut memory,
+            Function::RangeSetRange,
+            &[control, minimum as WasmUsize, maximum],
+            0,
+        )
+        .unwrap();
+        call(
+            &mut state,
+            &mut memory,
+            Function::RangeSetValue,
+            &[control, expected as WasmUsize, 0],
+            0,
+        )
+        .unwrap();
+        call(
+            &mut state,
+            &mut memory,
+            Function::RangeGetValue,
+            &[control],
+            1,
+        )
+        .unwrap();
+        assert_eq!(memory.read(GuestPointer::<i32>::new(1)), Some(expected));
+        call(
+            &mut state,
+            &mut memory,
+            Function::RangeSetMode,
+            &[control, 2],
+            0,
+        )
+        .unwrap();
+    }
+
+    call(&mut state, &mut memory, Function::BarCreate, &[window], 1).unwrap();
+    let bar = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::RangeSetOrientation,
+        &[bar, 2],
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::RangeSetOrientation,
+            &[window, 2],
+            0,
+        ),
+        Err(GraphicsError::InvalidHandle)
+    );
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::RangeSetRange,
+            &[bar, 10, 10],
+            0,
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::RangeSetMode,
+            &[bar, 3],
+            0,
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::RangeSetValue,
+            &[bar, 101, 0],
+            0,
+        ),
+        Err(GraphicsError::InvalidValue)
+    );
+
+    call(
+        &mut state,
+        &mut memory,
+        Function::SwitchCreate,
+        &[window],
+        1,
+    )
+    .unwrap();
+    let switch = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::RangeSetOrientation,
+        &[switch, 2],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectAddState,
+        &[switch, lvgl::lv_state_t_LV_STATE_CHECKED as WasmUsize],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::ObjectRemoveState,
+        &[switch, lvgl::lv_state_t_LV_STATE_CHECKED as WasmUsize],
+        0,
+    )
+    .unwrap();
+
+    call(
+        &mut state,
+        &mut memory,
+        Function::SpinnerCreate,
+        &[window],
+        1,
+    )
+    .unwrap();
+    let spinner = handle(&memory);
+    call(
+        &mut state,
+        &mut memory,
+        Function::SpinnerSetAnimation,
+        &[spinner, 1000, 90],
+        0,
+    )
+    .unwrap();
+    call(
+        &mut state,
+        &mut memory,
+        Function::SpinnerGetAnimationDuration,
+        &[spinner],
+        1,
+    )
+    .unwrap();
+    assert_eq!(memory.read(GuestPointer::<i32>::new(1)), Some(1000));
+    call(
+        &mut state,
+        &mut memory,
+        Function::SpinnerGetArcSweep,
+        &[spinner],
+        1,
+    )
+    .unwrap();
+    assert_eq!(memory.read(GuestPointer::<u32>::new(1)), Some(90));
+    drop(state);
+    assert_eq!(manager.get_window_count().await.unwrap(), 0);
+}
+
+#[xila::task::test(task_path = xila::task)]
 async fn checked_graphics_core_owns_objects_maps_and_events() {
     let _standard = testing::initialize(false, false).await;
     let manager = support::manager().await;

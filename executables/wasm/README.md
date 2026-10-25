@@ -129,8 +129,10 @@ layout update, built-in default/flex/grid layout selection, flex flow/alignment/
 grow, width/height, flags, validated Grid tracks/placement/alignment, local
 background/text/border/radius/opacity/text-alignment/min-max styling, semantic
 theme surfaces and host font roles, labels (creation/text), button matrices
-(creation/map/selection), and percentage conversion. Most widget-specific
-query/configuration APIs and advanced style properties remain unsupported.
+(creation/map/selection), range/value/mode/orientation for Arc/Bar/Slider,
+Switch orientation/state, Spinner animation parameters/duration/sweep, and percentage
+conversion. Most other widget-specific query/configuration APIs and advanced
+style properties remain unsupported.
 
 - 256 issued object handles per execution, including subsequently deleted ones.
 - 64 map entries including the sentinel; 1024 bytes per NUL-terminated string.
@@ -143,7 +145,7 @@ memory 2, unavailable capability 3, unsupported call 4, invalid handle 5,
 resource limit 6, invalid value 7, native failure 8.
 
 Calls requiring arbitrary native structure layouts, guest callbacks, retained
-guest pointers, fonts/images/charts, or unsupported LVGL APIs return unsupported.
+guest pointers, raw font/image/chart handles, or unsupported LVGL APIs return unsupported.
 No typed host reference is formed from guest memory.
 
 ## Scheduling and remaining limitations
@@ -168,8 +170,8 @@ the generator currently emits more guest wrappers than the host implements;
 unsupported calls return status 4 and should not be treated as available APIs.
 
 Static audit of the current LVGL configuration: 28 surveyed widget families
-are enabled, while the guest generator emits 1,058 LVGL/Xila wrappers and the
-host supports 59 calls (including Xila helpers). Seven enabled widget families
+are enabled, while the guest generator emits 1,070 LVGL/Xila wrappers and the
+host supports 74 calls (including Xila helpers). Seven enabled widget families
 have creation adapters, but several remain partial. This is not a runtime or
 performance benchmark. The next ABI tranches are a shared host/guest support
 manifest and inventory, semantic style/font APIs, then the BTreeMap handle

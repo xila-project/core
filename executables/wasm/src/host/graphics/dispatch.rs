@@ -8,6 +8,8 @@ use crate::host::translation::{GuestMemory, GuestPointer, GuestSlice, WasmUsize}
 use core::ptr::NonNull;
 use xila::graphics::{Color, Window, lvgl};
 
+const MAX_RANGE_VALUE: i32 = 1_000_000;
+
 // The first cast is required when WasmUsize is u64, and intentionally redundant for memory_32.
 #[allow(clippy::unnecessary_cast)]
 pub(super) fn signed_word(value: WasmUsize) -> Result<i32> {
@@ -199,6 +201,127 @@ pub fn dispatch(
                 lvgl::lv_obj_set_style_max_height(object, max_height, selector);
             }
         }
+        Function::RangeSetRange => {
+            let object = state.object(a, None)?;
+            let minimum = signed_word(b)?;
+            let maximum = signed_word(c)?;
+            if minimum >= maximum || minimum < -MAX_RANGE_VALUE || maximum > MAX_RANGE_VALUE {
+                return Err(GraphicsError::InvalidValue);
+            }
+            match state.kind(a)? {
+                Kind::Arc => unsafe { lvgl::lv_arc_set_range(object, minimum, maximum) },
+                Kind::Bar => unsafe { lvgl::lv_bar_set_range(object, minimum, maximum) },
+                Kind::Slider => unsafe { lvgl::lv_slider_set_range(object, minimum, maximum) },
+                _ => return Err(GraphicsError::InvalidHandle),
+            }
+        }
+        Function::RangeSetValue => {
+            let object = state.object(a, None)?;
+            let value = signed_word(b)?;
+            if !(-MAX_RANGE_VALUE..=MAX_RANGE_VALUE).contains(&value) || c > 1 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            match state.kind(a)? {
+                Kind::Arc => {
+                    if c != 0 {
+                        return Err(GraphicsError::InvalidValue);
+                    }
+                    let minimum = unsafe { lvgl::lv_arc_get_min_value(object) };
+                    let maximum = unsafe { lvgl::lv_arc_get_max_value(object) };
+                    if !(minimum..=maximum).contains(&value) {
+                        return Err(GraphicsError::InvalidValue);
+                    }
+                    unsafe { lvgl::lv_arc_set_value(object, value) };
+                }
+                Kind::Bar => {
+                    let minimum = unsafe { lvgl::lv_bar_get_min_value(object) };
+                    let maximum = unsafe { lvgl::lv_bar_get_max_value(object) };
+                    if !(minimum..=maximum).contains(&value) {
+                        return Err(GraphicsError::InvalidValue);
+                    }
+                    unsafe { lvgl::lv_bar_set_value(object, value, c != 0) };
+                }
+                Kind::Slider => {
+                    let minimum = unsafe { lvgl::lv_slider_get_min_value(object) };
+                    let maximum = unsafe { lvgl::lv_slider_get_max_value(object) };
+                    if !(minimum..=maximum).contains(&value) {
+                        return Err(GraphicsError::InvalidValue);
+                    }
+                    unsafe { lvgl::lv_slider_set_value(object, value, c != 0) };
+                }
+                _ => return Err(GraphicsError::InvalidHandle),
+            }
+        }
+        Function::RangeGetValue => {
+            let object = state.object(a, None)?;
+            let value = match state.kind(a)? {
+                Kind::Arc => unsafe { lvgl::lv_arc_get_value(object) },
+                Kind::Bar => unsafe { lvgl::lv_bar_get_value(object) },
+                Kind::Slider => unsafe { lvgl::lv_slider_get_value(object) },
+                _ => return Err(GraphicsError::InvalidHandle),
+            };
+            memory
+                .write(GuestPointer::<i32>::new(call.result), value)
+                .expect("validated result");
+        }
+        Function::RangeGetStartValue => {
+            let object = state.object(a, None)?;
+            let value = match state.kind(a)? {
+                Kind::Bar => unsafe { lvgl::lv_bar_get_start_value(object) },
+                Kind::Slider => unsafe { lvgl::lv_slider_get_left_value(object) },
+                _ => return Err(GraphicsError::InvalidHandle),
+            };
+            memory
+                .write(GuestPointer::<i32>::new(call.result), value)
+                .expect("validated result");
+        }
+        Function::RangeSetMode => {
+            let object = state.object(a, None)?;
+            if b > 2 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            match state.kind(a)? {
+                Kind::Arc => unsafe { lvgl::lv_arc_set_mode(object, b as _) },
+                Kind::Bar => unsafe { lvgl::lv_bar_set_mode(object, b as _) },
+                Kind::Slider => unsafe { lvgl::lv_slider_set_mode(object, b as _) },
+                _ => return Err(GraphicsError::InvalidHandle),
+            }
+        }
+        Function::RangeSetOrientation => {
+            let object = state.object(a, None)?;
+            if b > 2 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            match state.kind(a)? {
+                Kind::Bar => unsafe { lvgl::lv_bar_set_orientation(object, b as _) },
+                Kind::Slider => unsafe { lvgl::lv_slider_set_orientation(object, b as _) },
+                Kind::Switch => unsafe { lvgl::lv_switch_set_orientation(object, b as _) },
+                _ => return Err(GraphicsError::InvalidHandle),
+            }
+        }
+        Function::SpinnerSetAnimation => {
+            let spinner = state.object(a, Some(Kind::Spinner))?;
+            let duration = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+            let sweep = u32::try_from(c).map_err(|_| GraphicsError::InvalidValue)?;
+            if duration > 600_000 || sweep > 360 {
+                return Err(GraphicsError::InvalidValue);
+            }
+            unsafe { lvgl::lv_spinner_set_anim_params(spinner, duration, sweep) };
+        }
+        Function::SpinnerGetAnimationDuration => {
+            let spinner = state.object(a, Some(Kind::Spinner))?;
+            let duration = unsafe { lvgl::lv_spinner_get_anim_duration(spinner) };
+            memory
+                .write(GuestPointer::<u32>::new(call.result), duration)
+                .expect("validated result");
+        }
+        Function::SpinnerGetArcSweep => {
+            let spinner = state.object(a, Some(Kind::Spinner))?;
+            let sweep = unsafe { lvgl::lv_spinner_get_arc_sweep(spinner) };
+            memory
+                .write(GuestPointer::<u32>::new(call.result), sweep)
+                .expect("validated result");
+        }
         Function::ObjectSetFlexAlign => {
             let object = state.object(a, None)?;
             let main = b;
@@ -292,7 +415,12 @@ pub fn dispatch(
         | Function::TabviewCreate
         | Function::ButtonmatrixCreate
         | Function::TextareaCreate
-        | Function::KeyboardCreate => {
+        | Function::KeyboardCreate
+        | Function::ArcCreate
+        | Function::BarCreate
+        | Function::SliderCreate
+        | Function::SwitchCreate
+        | Function::SpinnerCreate => {
             state.ensure_capacity()?;
             let (pointer, kind, parent) = if function == Function::WindowCreate {
                 let window = xila::task::block_on(manager.create_window())
@@ -319,6 +447,11 @@ pub fn dispatch(
                         Function::ButtonmatrixCreate => {
                             (lvgl::lv_buttonmatrix_create(parent), Kind::ButtonMatrix)
                         }
+                        Function::ArcCreate => (lvgl::lv_arc_create(parent), Kind::Arc),
+                        Function::BarCreate => (lvgl::lv_bar_create(parent), Kind::Bar),
+                        Function::SliderCreate => (lvgl::lv_slider_create(parent), Kind::Slider),
+                        Function::SwitchCreate => (lvgl::lv_switch_create(parent), Kind::Switch),
+                        Function::SpinnerCreate => (lvgl::lv_spinner_create(parent), Kind::Spinner),
                         _ => unreachable!(),
                     }
                 };
@@ -555,6 +688,7 @@ pub fn dispatch(
         Function::ObjectSetFlexFlow
         | Function::ObjectSetFlexGrow
         | Function::ObjectAddState
+        | Function::ObjectRemoveState
         | Function::ObjectAddFlag
         | Function::ObjectRemoveFlag => {
             let pointer = state.object(a, None)?;
@@ -572,10 +706,17 @@ pub fn dispatch(
                     ),
                     Function::ObjectAddState => {
                         let state = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
-                        if state & !lvgl::lv_state_t_LV_STATE_ANY != 0 {
+                        if state & !0xF3FD != 0 {
                             return Err(GraphicsError::InvalidValue);
                         }
                         lvgl::lv_obj_add_state(pointer, state);
+                    }
+                    Function::ObjectRemoveState => {
+                        let state = u32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;
+                        if state & !0xF3FD != 0 {
+                            return Err(GraphicsError::InvalidValue);
+                        }
+                        lvgl::lv_obj_remove_state(pointer, state);
                     }
                     Function::ObjectRemoveFlag => lvgl::lv_obj_remove_flag(
                         pointer,

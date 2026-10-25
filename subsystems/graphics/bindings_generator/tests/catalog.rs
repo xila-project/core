@@ -164,6 +164,18 @@ fn actual_lvgl_catalog_matches_discovered_numbering() {
         "object_set_font",
         "object_set_surface",
         "object_set_min_max_size",
+        "bar_create",
+        "switch_create",
+        "spinner_create",
+        "range_set_range",
+        "range_set_value",
+        "range_get_value",
+        "range_get_start_value",
+        "range_set_mode",
+        "range_set_orientation",
+        "spinner_set_animation",
+        "spinner_get_animation_duration",
+        "spinner_get_arc_sweep",
     ];
     signatures.retain(|signature| !extensions.contains(&signature.ident.to_string().as_str()));
     signatures.sort_by_key(|s| s.ident.to_string().to_lowercase());
