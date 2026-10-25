@@ -1,5 +1,7 @@
 {
-  "errors.failed_to_get_main_function": "Failed to get main function",
-  "errors.invalid_stack_size": "Invalid stack size",
-  "errors.permission_denied": "Permission denied"
+  "errors": {
+    "failed_to_get_main_function": "Failed to get main function",
+    "invalid_stack_size": "Invalid stack size",
+    "permission_denied": "Permission denied"
+  }
 }
