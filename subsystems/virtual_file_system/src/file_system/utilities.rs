@@ -417,21 +417,54 @@ impl VirtualFileSystem {
             return true;
         }
 
-        if current_user == owner_user && permissions.get_user().contains(necessary_permissions) {
-            return true;
+        // POSIX selects exactly one class; denied owner/group permissions must
+        // never fall through to a more permissive class.
+        if current_user == owner_user {
+            return permissions.get_user().contains(necessary_permissions);
         }
+        if users_manager.is_in_group(current_user, owner_group).await {
+            return permissions.get_group().contains(necessary_permissions);
+        }
+        permissions.get_others().contains(necessary_permissions)
+    }
 
-        if users_manager.is_in_group(current_user, owner_group).await
-            && permissions.get_group().contains(necessary_permissions)
+    /// Path metadata authority is checked for every mutation.
+    /// Ownership changes use the conservative root-only subset; chmod permits
+    /// the owner or root. Handle-based metadata changes require separate work.
+    pub(crate) fn authorize_metadata_change(
+        current_user: UserIdentifier,
+        owner: UserIdentifier,
+        changes: &Attributes,
+    ) -> Result<()> {
+        if current_user == UserIdentifier::ROOT || changes.get_mask().is_empty() {
+            return Ok(());
+        }
+        if changes
+            .get_mask()
+            .intersects(AttributeFlags::User | AttributeFlags::Group)
+            || current_user != owner
         {
-            return true;
+            return Err(Error::PermissionDenied);
         }
+        Ok(())
+    }
 
-        if permissions.get_others().contains(necessary_permissions) {
-            return true;
-        }
-
-        false
+    /// Namespace mutations may not invalidate a visible mount or its ancestors.
+    /// Call while holding the mount table write guard (before backend mutation).
+    pub(super) fn protects_mount(
+        file_systems: &FileSystemsArray,
+        path: &Path,
+        include_self: bool,
+    ) -> bool {
+        file_systems.iter().any(|fs| {
+            fs.is_mounted
+                && (include_self || fs.mount_point.as_str() != path.as_str())
+                && fs
+                    .mount_point
+                    .get_components()
+                    .strip_prefix(&path.get_components())
+                    .is_some()
+        })
     }
 
     pub(super) fn get_file_system_index_from_path(
@@ -651,34 +684,6 @@ impl VirtualFileSystem {
         .await?;
 
         Ok(())
-    }
-
-    pub(super) async fn check_owner(
-        file_system: &dyn FileSystemOperations,
-        path: impl AsRef<Path>,
-        current_user: UserIdentifier,
-    ) -> Result<()> {
-        if current_user == UserIdentifier::ROOT {
-            return Ok(());
-        }
-
-        let mut attributes = Attributes::default().set_mask(AttributeFlags::User);
-
-        Self::get_attributes(file_system, path.as_ref(), &mut attributes).await?;
-
-        let owner_user = *attributes.get_user().ok_or(Error::MissingAttribute)?;
-
-        if current_user == owner_user {
-            return Ok(());
-        }
-
-        log::error!(
-            "User {:?} is not the owner {:?} of path {:?}",
-            current_user,
-            owner_user,
-            path.as_ref(),
-        );
-        Err(Error::PermissionDenied)
     }
 }
 
