@@ -1,80 +1,122 @@
 {
-  "authentication.prompts.password": "Password: ",
-  "authentication.prompts.username": "User name: ",
-  "dns.errors.unknown_host": "Cannot resolve {}: Unknown host",
-  "dns.records.unit.one": "record for domain",
-  "dns.records.unit.other": "records for domain",
-  "dns.status.no_records_found": "No {} records found for domain '{}'",
-  "errors.argument_parsing_error": "Argument parsing error: {}",
-  "errors.authentication_failed": "Authentication failed: {}",
-  "errors.failed_to_create_directory": "Failed to create directory: {}",
-  "errors.failed_to_create_socket": "Failed to create socket: {}",
-  "errors.failed_to_create_symbolic_link": "Failed to create symbolic link: {}",
-  "errors.failed_to_execute_command": "Failed to execute command",
-  "errors.failed_to_get_environment_variable": "Failed to get environment variable",
-  "errors.failed_to_get_metadata": "Failed to get metadata: {}",
-  "errors.failed_to_get_task_identifier": "Failed to get task identifier",
-  "errors.failed_to_get_task_user": "Failed to get task user: {}",
-  "errors.failed_to_join_path": "Failed to join path",
-  "errors.failed_to_join_task": "Failed to join task",
-  "errors.failed_to_open_directory": "Failed to open directory: {}",
-  "errors.failed_to_open_file": "Failed to open file: {}",
-  "errors.failed_to_read_directory_entry": "Failed to read directory entry: {}",
-  "errors.failed_to_read_environment_variable": "Failed to read environment variable: {}",
-  "errors.failed_to_read_file": "Failed to read file: {}",
-  "errors.failed_to_read_symbolic_link": "Failed to read symbolic link: {}",
-  "errors.failed_to_remove_directory": "Failed to remove directory: {}",
-  "errors.failed_to_remove_environment_variable": "Failed to remove environment variable: {}",
-  "errors.failed_to_rename_path": "Failed to rename path: {}",
-  "errors.failed_to_resolve_domain": "Failed to resolve domain: {}",
-  "errors.failed_to_resolve_domain_for_records": "Failed to resolve domain '{}' for {} records: {}",
-  "errors.failed_to_set_current_directory": "Failed to set current directory: {}",
-  "errors.failed_to_set_environment_variable": "Failed to set environment variable: {}",
-  "errors.failed_to_set_permissions": "Failed to set permissions: {}",
-  "errors.failed_to_set_shell_nesting_depth": "Failed to set shell nesting depth",
-  "errors.failed_to_set_task_user": "Failed to set task user: {}",
-  "errors.failed_to_tokenize_command_line": "Failed to tokenize command line",
-  "errors.failed_to_write_file": "Failed to write file: {}",
-  "errors.format_failed": "Format error",
-  "errors.invalid_argument": "Invalid argument",
-  "errors.invalid_number_of_arguments": "Invalid number of arguments",
-  "errors.invalid_option": "Invalid option",
-  "errors.invalid_path": "Invalid path",
-  "errors.invalid_utf_8_input": "Invalid UTF-8 input",
-  "errors.line_too_long": "Line too long",
-  "errors.maximum_nested_shell_depth_exceeded": "Maximum nested shell depth exceeded",
-  "errors.missing_file_name_after_redirect_in": "Missing file name after redirect in",
-  "errors.missing_file_name_after_redirect_out": "Missing file name after redirect out",
-  "errors.missing_positional_argument": "Missing positional argument: {}",
-  "errors.option_does_not_require_a_value": "Option does not require a value",
-  "errors.option_requires_a_value": "Option requires a value",
-  "errors.syntax_error_at_byte": "Syntax error at byte {}: {}",
-  "errors.too_many_background_jobs": "Too many background jobs",
-  "errors.with_details": "Error: {}",
-  "execution.errors.command_line_too_long": "Command line is too long",
-  "execution.errors.command_not_found": "Command not found",
-  "execution.errors.missing_command": "Missing command",
-  "help.available_executables_title": "Executables in Paths:",
-  "help.built_in_commands_title": "Built-in commands:",
-  "help.execute_command_usage": "Usage: shell -c COMMAND",
-  "help.external_executable_description": "external executable; usage is provided by the executable.",
-  "help.run_script_usage": "Usage: shell -s PATH",
-  "listing.columns.accessed": "Accessed",
-  "listing.columns.created": "Created",
-  "listing.columns.group": "Group",
-  "listing.columns.inode": "Inode",
-  "listing.columns.kind": "Kind",
-  "listing.columns.links": "Links",
-  "listing.columns.modified": "Modified",
-  "listing.columns.permissions": "Permissions",
-  "listing.columns.size": "Size",
-  "listing.columns.status": "Status",
-  "listing.columns.user": "User",
-  "ping.errors.request_timeout": "Request timeout for icmp_seq {}",
-  "ping.reply.byte_unit.one": "byte from",
-  "ping.reply.byte_unit.other": "bytes from",
-  "ping.reply.time_label": "time",
-  "ping.request.payload_byte_unit.one": "data byte",
-  "ping.request.payload_byte_unit.other": "data bytes",
-  "sleep.errors.invalid_duration": "Invalid sleep duration: use a nonnegative integer with ms, s, m, or h (maximum 18446744073709551615 nanoseconds)"
+  "authentication": {
+    "prompts": {
+      "password": "Password: ",
+      "username": "User name: "
+    }
+  },
+  "dns": {
+    "errors": {
+      "unknown_host": "Cannot resolve {}: Unknown host"
+    },
+    "records": {
+      "unit": {
+        "one": "record for domain",
+        "other": "records for domain"
+      }
+    },
+    "status": {
+      "no_records_found": "No {} records found for domain '{}'"
+    }
+  },
+  "errors": {
+    "argument_parsing_error": "Argument parsing error: {}",
+    "authentication_failed": "Authentication failed: {}",
+    "failed_to_create_directory": "Failed to create directory: {}",
+    "failed_to_create_socket": "Failed to create socket: {}",
+    "failed_to_create_symbolic_link": "Failed to create symbolic link: {}",
+    "failed_to_execute_command": "Failed to execute command",
+    "failed_to_get_environment_variable": "Failed to get environment variable",
+    "failed_to_get_metadata": "Failed to get metadata: {}",
+    "failed_to_get_task_identifier": "Failed to get task identifier",
+    "failed_to_get_task_user": "Failed to get task user: {}",
+    "failed_to_join_path": "Failed to join path",
+    "failed_to_join_task": "Failed to join task",
+    "failed_to_open_directory": "Failed to open directory: {}",
+    "failed_to_open_file": "Failed to open file: {}",
+    "failed_to_read_directory_entry": "Failed to read directory entry: {}",
+    "failed_to_read_environment_variable": "Failed to read environment variable: {}",
+    "failed_to_read_file": "Failed to read file: {}",
+    "failed_to_read_symbolic_link": "Failed to read symbolic link: {}",
+    "failed_to_remove_directory": "Failed to remove directory: {}",
+    "failed_to_remove_environment_variable": "Failed to remove environment variable: {}",
+    "failed_to_rename_path": "Failed to rename path: {}",
+    "failed_to_resolve_domain": "Failed to resolve domain: {}",
+    "failed_to_resolve_domain_for_records": "Failed to resolve domain '{}' for {} records: {}",
+    "failed_to_set_current_directory": "Failed to set current directory: {}",
+    "failed_to_set_environment_variable": "Failed to set environment variable: {}",
+    "failed_to_set_permissions": "Failed to set permissions: {}",
+    "failed_to_set_shell_nesting_depth": "Failed to set shell nesting depth",
+    "failed_to_set_task_user": "Failed to set task user: {}",
+    "failed_to_tokenize_command_line": "Failed to tokenize command line",
+    "failed_to_write_file": "Failed to write file: {}",
+    "format_failed": "Format error",
+    "invalid_argument": "Invalid argument",
+    "invalid_number_of_arguments": "Invalid number of arguments",
+    "invalid_option": "Invalid option",
+    "invalid_path": "Invalid path",
+    "invalid_utf_8_input": "Invalid UTF-8 input",
+    "line_too_long": "Line too long",
+    "maximum_nested_shell_depth_exceeded": "Maximum nested shell depth exceeded",
+    "missing_file_name_after_redirect_in": "Missing file name after redirect in",
+    "missing_file_name_after_redirect_out": "Missing file name after redirect out",
+    "missing_positional_argument": "Missing positional argument: {}",
+    "option_does_not_require_a_value": "Option does not require a value",
+    "option_requires_a_value": "Option requires a value",
+    "syntax_error_at_byte": "Syntax error at byte {}: {}",
+    "too_many_background_jobs": "Too many background jobs",
+    "with_details": "Error: {}"
+  },
+  "execution": {
+    "errors": {
+      "command_line_too_long": "Command line is too long",
+      "command_not_found": "Command not found",
+      "missing_command": "Missing command"
+    }
+  },
+  "help": {
+    "available_executables_title": "Executables in Paths:",
+    "built_in_commands_title": "Built-in commands:",
+    "execute_command_usage": "Usage: shell -c COMMAND",
+    "external_executable_description": "external executable; usage is provided by the executable.",
+    "run_script_usage": "Usage: shell -s PATH"
+  },
+  "listing": {
+    "columns": {
+      "accessed": "Accessed",
+      "created": "Created",
+      "group": "Group",
+      "inode": "Inode",
+      "kind": "Kind",
+      "links": "Links",
+      "modified": "Modified",
+      "permissions": "Permissions",
+      "size": "Size",
+      "status": "Status",
+      "user": "User"
+    }
+  },
+  "ping": {
+    "errors": {
+      "request_timeout": "Request timeout for icmp_seq {}"
+    },
+    "reply": {
+      "byte_unit": {
+        "one": "byte from",
+        "other": "bytes from"
+      },
+      "time_label": "time"
+    },
+    "request": {
+      "payload_byte_unit": {
+        "one": "data byte",
+        "other": "data bytes"
+      }
+    }
+  },
+  "sleep": {
+    "errors": {
+      "invalid_duration": "Invalid sleep duration: use a nonnegative integer with ms, s, m, or h (maximum 18446744073709551615 nanoseconds)"
+    }
+  }
 }

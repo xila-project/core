@@ -1,50 +1,88 @@
 {
-  "alarm.controls.decrement_hour": "Godzina -",
-  "alarm.controls.decrement_minute": "Minuta -",
-  "alarm.controls.delete": "Usuń",
-  "alarm.controls.disable": "Wyłącz",
-  "alarm.controls.increment_hour": "Godzina +",
-  "alarm.controls.increment_minute": "Minuta +",
-  "alarm.controls.save_and_enable": "Zapisz i włącz",
-  "alarm.instructions.repeat_days_utc": "Powtarzaj w wybrane dni; brak wyboru oznacza jednorazowe uruchomienie. Wszystkie godziny są w UTC.",
-  "alarm.status.disabled": "Wyłączony",
-  "alarm.status.enabled": "Włączony: ",
-  "alarm.status.no_saved_alarm": "Brak zapisanego alarmu",
-  "alarm.weekdays.friday": "Pt",
-  "alarm.weekdays.monday": "Pn",
-  "alarm.weekdays.saturday": "Sob",
-  "alarm.weekdays.sunday": "Nd",
-  "alarm.weekdays.thursday": "Czw",
-  "alarm.weekdays.tuesday": "Wt",
-  "alarm.weekdays.wednesday": "Śr",
-  "alerts.alarm_ringing": "Alarm! ",
-  "alerts.alarm_snoozed": "Alarm odłożony. ",
-  "alerts.dismiss": "Zamknij",
-  "alerts.instructions": "Powiadomienia są widoczne podczas działania Zegara.",
-  "alerts.snooze_five_minutes": "Odłóż o 5 min",
-  "alerts.timer_finished": "Minutnik zakończył odliczanie! ",
-  "clock.controls.toggle_hour_format": "Format 12/24-godzinny",
-  "clock.errors.host_unavailable": "Zegar systemowy niedostępny",
-  "clock.instructions.utc_only": "UTC / czas systemowy. Strefy czasowe miast nie są jeszcze dostępne.",
-  "errors.settings_save_failed": "Nie udało się zapisać ustawień. ",
-  "stopwatch.controls.record_lap": "Okrążenie",
-  "stopwatch.controls.reset": "Resetuj",
-  "stopwatch.controls.toggle_pause": "Uruchom / wstrzymaj",
-  "stopwatch.laps.recorded.few": "Zapisano {count} okrążenia",
-  "stopwatch.laps.recorded.many": "Zapisano {count} okrążeń",
-  "stopwatch.laps.recorded.one": "Zapisano {count} okrążenie",
-  "stopwatch.laps.recorded.other": "Zapisano {count} okrążeń",
-  "tabs.alarm": "Alarm",
-  "tabs.clock": "Zegar",
-  "tabs.stopwatch": "Stoper",
-  "tabs.timer": "Minutnik",
-  "timer.controls.cancel": "Anuluj",
-  "timer.controls.decrement_minute": "Minuta -",
-  "timer.controls.decrement_second": "Sekunda -",
-  "timer.controls.increment_minute": "Minuta +",
-  "timer.controls.increment_second": "Sekunda +",
-  "timer.controls.restart": "Uruchom ponownie",
-  "timer.controls.start": "Uruchom",
-  "timer.controls.toggle_pause": "Wstrzymaj / wznów",
-  "timer.labels.duration": "Czas trwania"
+  "alarm": {
+    "controls": {
+      "decrement_hour": "Godzina -",
+      "decrement_minute": "Minuta -",
+      "delete": "Usuń",
+      "disable": "Wyłącz",
+      "increment_hour": "Godzina +",
+      "increment_minute": "Minuta +",
+      "save_and_enable": "Zapisz i włącz"
+    },
+    "instructions": {
+      "repeat_days_utc": "Powtarzaj w wybrane dni; brak wyboru oznacza jednorazowe uruchomienie. Wszystkie godziny są w UTC."
+    },
+    "status": {
+      "disabled": "Wyłączony",
+      "enabled": "Włączony: ",
+      "no_saved_alarm": "Brak zapisanego alarmu"
+    },
+    "weekdays": {
+      "friday": "Pt",
+      "monday": "Pn",
+      "saturday": "Sob",
+      "sunday": "Nd",
+      "thursday": "Czw",
+      "tuesday": "Wt",
+      "wednesday": "Śr"
+    }
+  },
+  "alerts": {
+    "alarm_ringing": "Alarm! ",
+    "alarm_snoozed": "Alarm odłożony. ",
+    "dismiss": "Zamknij",
+    "instructions": "Powiadomienia są widoczne podczas działania Zegara.",
+    "snooze_five_minutes": "Odłóż o 5 min",
+    "timer_finished": "Minutnik zakończył odliczanie! "
+  },
+  "clock": {
+    "controls": {
+      "toggle_hour_format": "Format 12/24-godzinny"
+    },
+    "errors": {
+      "host_unavailable": "Zegar systemowy niedostępny"
+    },
+    "instructions": {
+      "utc_only": "UTC / czas systemowy. Strefy czasowe miast nie są jeszcze dostępne."
+    }
+  },
+  "errors": {
+    "settings_save_failed": "Nie udało się zapisać ustawień. "
+  },
+  "stopwatch": {
+    "controls": {
+      "record_lap": "Okrążenie",
+      "reset": "Resetuj",
+      "toggle_pause": "Uruchom / wstrzymaj"
+    },
+    "laps": {
+      "recorded": {
+        "few": "Zapisano {count} okrążenia",
+        "many": "Zapisano {count} okrążeń",
+        "one": "Zapisano {count} okrążenie",
+        "other": "Zapisano {count} okrążeń"
+      }
+    }
+  },
+  "tabs": {
+    "alarm": "Alarm",
+    "clock": "Zegar",
+    "stopwatch": "Stoper",
+    "timer": "Minutnik"
+  },
+  "timer": {
+    "controls": {
+      "cancel": "Anuluj",
+      "decrement_minute": "Minuta -",
+      "decrement_second": "Sekunda -",
+      "increment_minute": "Minuta +",
+      "increment_second": "Sekunda +",
+      "restart": "Uruchom ponownie",
+      "start": "Uruchom",
+      "toggle_pause": "Wstrzymaj / wznów"
+    },
+    "labels": {
+      "duration": "Czas trwania"
+    }
+  }
 }

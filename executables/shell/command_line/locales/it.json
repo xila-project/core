@@ -1,80 +1,122 @@
 {
-  "authentication.prompts.password": "Password: ",
-  "authentication.prompts.username": "Nome utente: ",
-  "dns.errors.unknown_host": "Impossibile risolvere {}: host sconosciuto",
-  "dns.records.unit.one": "record per il dominio",
-  "dns.records.unit.other": "record per il dominio",
-  "dns.status.no_records_found": "Nessun record {} trovato per il dominio '{}'",
-  "errors.argument_parsing_error": "Errore nell'analisi degli argomenti: {}",
-  "errors.authentication_failed": "Autenticazione non riuscita: {}",
-  "errors.failed_to_create_directory": "Impossibile creare la directory: {}",
-  "errors.failed_to_create_socket": "Impossibile creare il socket: {}",
-  "errors.failed_to_create_symbolic_link": "Impossibile creare il collegamento simbolico: {}",
-  "errors.failed_to_execute_command": "Impossibile eseguire il comando",
-  "errors.failed_to_get_environment_variable": "Impossibile ottenere la variabile d'ambiente",
-  "errors.failed_to_get_metadata": "Impossibile ottenere i metadati: {}",
-  "errors.failed_to_get_task_identifier": "Impossibile ottenere l'identificatore dell'attività",
-  "errors.failed_to_get_task_user": "Impossibile ottenere l'utente dell'attività: {}",
-  "errors.failed_to_join_path": "Impossibile unire i percorsi",
-  "errors.failed_to_join_task": "Impossibile attendere l'attività",
-  "errors.failed_to_open_directory": "Impossibile aprire la directory: {}",
-  "errors.failed_to_open_file": "Impossibile aprire il file: {}",
-  "errors.failed_to_read_directory_entry": "Impossibile leggere la voce della directory: {}",
-  "errors.failed_to_read_environment_variable": "Impossibile leggere la variabile d'ambiente: {}",
-  "errors.failed_to_read_file": "Impossibile leggere il file: {}",
-  "errors.failed_to_read_symbolic_link": "Impossibile leggere il collegamento simbolico: {}",
-  "errors.failed_to_remove_directory": "Impossibile rimuovere la directory: {}",
-  "errors.failed_to_remove_environment_variable": "Impossibile rimuovere la variabile d'ambiente: {}",
-  "errors.failed_to_rename_path": "Impossibile rinominare il percorso: {}",
-  "errors.failed_to_resolve_domain": "Impossibile risolvere il dominio: {}",
-  "errors.failed_to_resolve_domain_for_records": "Impossibile risolvere il dominio '{}' per {} record: {}",
-  "errors.failed_to_set_current_directory": "Impossibile impostare la directory corrente: {}",
-  "errors.failed_to_set_environment_variable": "Impossibile impostare la variabile d'ambiente: {}",
-  "errors.failed_to_set_permissions": "Impossibile impostare i permessi: {}",
-  "errors.failed_to_set_shell_nesting_depth": "Impossibile impostare il livello di annidamento della shell",
-  "errors.failed_to_set_task_user": "Impossibile impostare l'utente dell'attività: {}",
-  "errors.failed_to_tokenize_command_line": "Impossibile suddividere la riga di comando in token",
-  "errors.failed_to_write_file": "Impossibile scrivere il file: {}",
-  "errors.format_failed": "Errore di formato",
-  "errors.invalid_argument": "Argomento non valido",
-  "errors.invalid_number_of_arguments": "Numero di argomenti non valido",
-  "errors.invalid_option": "Opzione non valida",
-  "errors.invalid_path": "Percorso non valido",
-  "errors.invalid_utf_8_input": "Input UTF-8 non valido",
-  "errors.line_too_long": "Riga troppo lunga",
-  "errors.maximum_nested_shell_depth_exceeded": "Livello massimo di annidamento della shell superato",
-  "errors.missing_file_name_after_redirect_in": "Nome file mancante dopo il reindirizzamento di input",
-  "errors.missing_file_name_after_redirect_out": "Nome file mancante dopo il reindirizzamento di output",
-  "errors.missing_positional_argument": "Argomento posizionale mancante: {}",
-  "errors.option_does_not_require_a_value": "L'opzione non richiede un valore",
-  "errors.option_requires_a_value": "L'opzione richiede un valore",
-  "errors.syntax_error_at_byte": "Errore di sintassi al byte {}: {}",
-  "errors.too_many_background_jobs": "Troppe attività in background",
-  "errors.with_details": "Errore: {}",
-  "execution.errors.command_line_too_long": "Riga di comando troppo lunga",
-  "execution.errors.command_not_found": "Comando non trovato",
-  "execution.errors.missing_command": "Comando mancante",
-  "help.available_executables_title": "Eseguibili nei percorsi:",
-  "help.built_in_commands_title": "Comandi integrati:",
-  "help.execute_command_usage": "Uso: shell -c COMMAND",
-  "help.external_executable_description": "Eseguibile esterno; la guida è fornita dal programma.",
-  "help.run_script_usage": "Uso: shell -s PERCORSO",
-  "listing.columns.accessed": "Accesso",
-  "listing.columns.created": "Creato",
-  "listing.columns.group": "Gruppo",
-  "listing.columns.inode": "Inode",
-  "listing.columns.kind": "Tipo",
-  "listing.columns.links": "Collegamenti",
-  "listing.columns.modified": "Modificato",
-  "listing.columns.permissions": "Permessi",
-  "listing.columns.size": "Dimensione",
-  "listing.columns.status": "Stato",
-  "listing.columns.user": "Utente",
-  "ping.errors.request_timeout": "Timeout per icmp_seq {}",
-  "ping.reply.byte_unit.one": "byte da",
-  "ping.reply.byte_unit.other": "byte da",
-  "ping.reply.time_label": "tempo",
-  "ping.request.payload_byte_unit.one": "byte di dati",
-  "ping.request.payload_byte_unit.other": "byte di dati",
-  "sleep.errors.invalid_duration": "Durata non valida: usare un intero non negativo con ms, s, m oppure h (massimo 18446744073709551615 nanosecondi)"
+  "authentication": {
+    "prompts": {
+      "password": "Password: ",
+      "username": "Nome utente: "
+    }
+  },
+  "dns": {
+    "errors": {
+      "unknown_host": "Impossibile risolvere {}: host sconosciuto"
+    },
+    "records": {
+      "unit": {
+        "one": "record per il dominio",
+        "other": "record per il dominio"
+      }
+    },
+    "status": {
+      "no_records_found": "Nessun record {} trovato per il dominio '{}'"
+    }
+  },
+  "errors": {
+    "argument_parsing_error": "Errore nell'analisi degli argomenti: {}",
+    "authentication_failed": "Autenticazione non riuscita: {}",
+    "failed_to_create_directory": "Impossibile creare la directory: {}",
+    "failed_to_create_socket": "Impossibile creare il socket: {}",
+    "failed_to_create_symbolic_link": "Impossibile creare il collegamento simbolico: {}",
+    "failed_to_execute_command": "Impossibile eseguire il comando",
+    "failed_to_get_environment_variable": "Impossibile ottenere la variabile d'ambiente",
+    "failed_to_get_metadata": "Impossibile ottenere i metadati: {}",
+    "failed_to_get_task_identifier": "Impossibile ottenere l'identificatore dell'attività",
+    "failed_to_get_task_user": "Impossibile ottenere l'utente dell'attività: {}",
+    "failed_to_join_path": "Impossibile unire i percorsi",
+    "failed_to_join_task": "Impossibile attendere l'attività",
+    "failed_to_open_directory": "Impossibile aprire la directory: {}",
+    "failed_to_open_file": "Impossibile aprire il file: {}",
+    "failed_to_read_directory_entry": "Impossibile leggere la voce della directory: {}",
+    "failed_to_read_environment_variable": "Impossibile leggere la variabile d'ambiente: {}",
+    "failed_to_read_file": "Impossibile leggere il file: {}",
+    "failed_to_read_symbolic_link": "Impossibile leggere il collegamento simbolico: {}",
+    "failed_to_remove_directory": "Impossibile rimuovere la directory: {}",
+    "failed_to_remove_environment_variable": "Impossibile rimuovere la variabile d'ambiente: {}",
+    "failed_to_rename_path": "Impossibile rinominare il percorso: {}",
+    "failed_to_resolve_domain": "Impossibile risolvere il dominio: {}",
+    "failed_to_resolve_domain_for_records": "Impossibile risolvere il dominio '{}' per {} record: {}",
+    "failed_to_set_current_directory": "Impossibile impostare la directory corrente: {}",
+    "failed_to_set_environment_variable": "Impossibile impostare la variabile d'ambiente: {}",
+    "failed_to_set_permissions": "Impossibile impostare i permessi: {}",
+    "failed_to_set_shell_nesting_depth": "Impossibile impostare il livello di annidamento della shell",
+    "failed_to_set_task_user": "Impossibile impostare l'utente dell'attività: {}",
+    "failed_to_tokenize_command_line": "Impossibile suddividere la riga di comando in token",
+    "failed_to_write_file": "Impossibile scrivere il file: {}",
+    "format_failed": "Errore di formato",
+    "invalid_argument": "Argomento non valido",
+    "invalid_number_of_arguments": "Numero di argomenti non valido",
+    "invalid_option": "Opzione non valida",
+    "invalid_path": "Percorso non valido",
+    "invalid_utf_8_input": "Input UTF-8 non valido",
+    "line_too_long": "Riga troppo lunga",
+    "maximum_nested_shell_depth_exceeded": "Livello massimo di annidamento della shell superato",
+    "missing_file_name_after_redirect_in": "Nome file mancante dopo il reindirizzamento di input",
+    "missing_file_name_after_redirect_out": "Nome file mancante dopo il reindirizzamento di output",
+    "missing_positional_argument": "Argomento posizionale mancante: {}",
+    "option_does_not_require_a_value": "L'opzione non richiede un valore",
+    "option_requires_a_value": "L'opzione richiede un valore",
+    "syntax_error_at_byte": "Errore di sintassi al byte {}: {}",
+    "too_many_background_jobs": "Troppe attività in background",
+    "with_details": "Errore: {}"
+  },
+  "execution": {
+    "errors": {
+      "command_line_too_long": "Riga di comando troppo lunga",
+      "command_not_found": "Comando non trovato",
+      "missing_command": "Comando mancante"
+    }
+  },
+  "help": {
+    "available_executables_title": "Eseguibili nei percorsi:",
+    "built_in_commands_title": "Comandi integrati:",
+    "execute_command_usage": "Uso: shell -c COMMAND",
+    "external_executable_description": "Eseguibile esterno; la guida è fornita dal programma.",
+    "run_script_usage": "Uso: shell -s PERCORSO"
+  },
+  "listing": {
+    "columns": {
+      "accessed": "Accesso",
+      "created": "Creato",
+      "group": "Gruppo",
+      "inode": "Inode",
+      "kind": "Tipo",
+      "links": "Collegamenti",
+      "modified": "Modificato",
+      "permissions": "Permessi",
+      "size": "Dimensione",
+      "status": "Stato",
+      "user": "Utente"
+    }
+  },
+  "ping": {
+    "errors": {
+      "request_timeout": "Timeout per icmp_seq {}"
+    },
+    "reply": {
+      "byte_unit": {
+        "one": "byte da",
+        "other": "byte da"
+      },
+      "time_label": "tempo"
+    },
+    "request": {
+      "payload_byte_unit": {
+        "one": "byte di dati",
+        "other": "byte di dati"
+      }
+    }
+  },
+  "sleep": {
+    "errors": {
+      "invalid_duration": "Durata non valida: usare un intero non negativo con ms, s, m oppure h (massimo 18446744073709551615 nanosecondi)"
+    }
+  }
 }

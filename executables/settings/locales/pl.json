@@ -1,58 +1,98 @@
 {
-  "tabs.about": "Informacje",
-  "network.fields.address": "Adres",
-  "tabs.appearance": "Wygląd",
-  "appearance.status.applied_not_saved": "Zastosowano wygląd, ale nie udało się go zapisać.",
-  "appearance.status.saved": "Wygląd zapisany.",
-  "actions.apply": "Zastosuj",
-  "errors.authentication_failed": "Uwierzytelnianie nie powiodło się: {}",
-  "appearance.colors.blue": "Niebieski",
-  "about.fields.cpu": "CPU:",
-  "actions.cancel": "Anuluj",
-  "password.actions.change": "Zmień hasło",
-  "network.fields.configuration_mode": "Tryb konfiguracji",
-  "password.fields.confirm": "Potwierdź hasło",
-  "errors.could_not_apply_appearance": "Nie udało się zastosować wyglądu.",
-  "errors.could_not_load_appearance_choose_settings_to_save_a_replacement": "Nie udało się wczytać wyglądu. Wybierz ustawienia i zapisz nową konfigurację.",
-  "password.fields.current": "Obecne hasło",
-  "network.modes.dhcp": "DHCP",
-  "network.fields.dns_servers": "Serwery DNS",
-  "appearance.fields.dark_mode": "Tryb ciemny",
-  "about.fields.description": "Opis:",
-  "about.fields.developer": "Opracowane przez:",
-  "errors.failed_to_create_ui_element": "Nie udało się utworzyć elementu interfejsu",
-  "errors.failed_to_create_object": "Nie udało się utworzyć obiektu",
-  "errors.failed_to_get_child_object": "Nie udało się pobrać obiektu podrzędnego",
-  "errors.failed_to_get_current_task_identifier": "Nie udało się pobrać identyfikatora bieżącego zadania: {}",
-  "errors.failed_to_open_standard_file": "Nie udało się otworzyć pliku standardowego: {}",
-  "errors.failed_to_read_directory": "Nie udało się odczytać katalogu: {}",
-  "errors.failed_to_set_environment_variable": "Nie udało się ustawić zmiennej środowiskowej: {}",
-  "errors.failed_to_set_task_user": "Nie udało się ustawić użytkownika zadania: {}",
-  "errors.formatting_error": "Błąd formatowania",
-  "network.fields.gateway": "Brama",
-  "tabs.general": "Ogólne",
-  "general.status.coming_soon": "Ustawienia ogólne zostaną dodane tutaj.",
-  "errors.graphics_error": "Błąd grafiki: {}",
-  "appearance.colors.green": "Zielony",
-  "errors.invalid_utf_8_string": "Nieprawidłowy ciąg UTF-8: {}",
-  "about.fields.license": "Licencja:",
-  "general.fields.locale": "Język:",
-  "network.fields.mac_address": "Adres MAC",
-  "about.fields.memory": "Pamięć:",
-  "password.fields.new": "Nowe hasło",
-  "common.none": "Brak",
-  "errors.null_character_in_string": "Znak zerowy w ciągu: {}",
-  "about.fields.operating_system": "System operacyjny:",
-  "appearance.colors.orange": "Pomarańczowy",
-  "password.fields.password": "Hasło",
-  "appearance.fields.primary_color": "Kolor podstawowy",
-  "appearance.colors.rose": "Różowy",
-  "network.fields.routes": "Trasy",
-  "appearance.fields.secondary_color": "Kolor dodatkowy",
-  "app.title": "Ustawienia",
-  "network.modes.static": "Statyczny",
-  "about.fields.version": "Wersja:",
-  "appearance.colors.violet": "Fioletowy",
-  "errors.virtual_file_system_error": "Błąd wirtualnego systemu plików: {}",
-  "appearance.colors.zinc_auto": "Szary cynkowy (automatycznie)"
+  "tabs": {
+    "about": "Informacje",
+    "appearance": "Wygląd",
+    "general": "Ogólne"
+  },
+  "network": {
+    "fields": {
+      "address": "Adres",
+      "configuration_mode": "Tryb konfiguracji",
+      "dns_servers": "Serwery DNS",
+      "gateway": "Brama",
+      "mac_address": "Adres MAC",
+      "routes": "Trasy"
+    },
+    "modes": {
+      "dhcp": "DHCP",
+      "static": "Statyczny"
+    }
+  },
+  "appearance": {
+    "status": {
+      "applied_not_saved": "Zastosowano wygląd, ale nie udało się go zapisać.",
+      "saved": "Wygląd zapisany."
+    },
+    "colors": {
+      "blue": "Niebieski",
+      "green": "Zielony",
+      "orange": "Pomarańczowy",
+      "rose": "Różowy",
+      "violet": "Fioletowy",
+      "zinc_auto": "Szary cynkowy (automatycznie)"
+    },
+    "fields": {
+      "dark_mode": "Tryb ciemny",
+      "primary_color": "Kolor podstawowy",
+      "secondary_color": "Kolor dodatkowy"
+    }
+  },
+  "actions": {
+    "apply": "Zastosuj",
+    "cancel": "Anuluj"
+  },
+  "errors": {
+    "authentication_failed": "Uwierzytelnianie nie powiodło się: {}",
+    "could_not_apply_appearance": "Nie udało się zastosować wyglądu.",
+    "could_not_load_appearance_choose_settings_to_save_a_replacement": "Nie udało się wczytać wyglądu. Wybierz ustawienia i zapisz nową konfigurację.",
+    "failed_to_create_ui_element": "Nie udało się utworzyć elementu interfejsu",
+    "failed_to_create_object": "Nie udało się utworzyć obiektu",
+    "failed_to_get_child_object": "Nie udało się pobrać obiektu podrzędnego",
+    "failed_to_get_current_task_identifier": "Nie udało się pobrać identyfikatora bieżącego zadania: {}",
+    "failed_to_open_standard_file": "Nie udało się otworzyć pliku standardowego: {}",
+    "failed_to_read_directory": "Nie udało się odczytać katalogu: {}",
+    "failed_to_set_environment_variable": "Nie udało się ustawić zmiennej środowiskowej: {}",
+    "failed_to_set_task_user": "Nie udało się ustawić użytkownika zadania: {}",
+    "formatting_error": "Błąd formatowania",
+    "graphics_error": "Błąd grafiki: {}",
+    "invalid_utf_8_string": "Nieprawidłowy ciąg UTF-8: {}",
+    "null_character_in_string": "Znak zerowy w ciągu: {}",
+    "virtual_file_system_error": "Błąd wirtualnego systemu plików: {}"
+  },
+  "about": {
+    "fields": {
+      "cpu": "CPU:",
+      "description": "Opis:",
+      "developer": "Opracowane przez:",
+      "license": "Licencja:",
+      "memory": "Pamięć:",
+      "operating_system": "System operacyjny:",
+      "version": "Wersja:"
+    }
+  },
+  "password": {
+    "actions": {
+      "change": "Zmień hasło"
+    },
+    "fields": {
+      "confirm": "Potwierdź hasło",
+      "current": "Obecne hasło",
+      "new": "Nowe hasło",
+      "password": "Hasło"
+    }
+  },
+  "general": {
+    "status": {
+      "coming_soon": "Ustawienia ogólne zostaną dodane tutaj."
+    },
+    "fields": {
+      "locale": "Język:"
+    }
+  },
+  "common": {
+    "none": "Brak"
+  },
+  "app": {
+    "title": "Ustawienia"
+  }
 }

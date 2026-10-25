@@ -2,7 +2,7 @@
 
 Xila uses [embedded-i18n](https://github.com/AlixANNERAUD/embedded-i18n) 0.1.3
 with compile-time JSON translations. Each crate owns its own Tolgee namespace
-and eight JSON_C flat-key catalogs in its local 'locales/' directory.
+and eight JSON_C catalogs in its local 'locales/' directory. These files use\n**nested JSON objects** to avoid repeating dotted key prefixes; the semantic\nidentifiers used by Rust macros and Tolgee remain unchanged.
 
 ## Naming
 
@@ -30,6 +30,50 @@ CLDR plural categories. Use Tolgee's description field for ambiguity,
 placeholders, domain-specific terms, or the intended UI location; that
 metadata does not belong in the embedded runtime catalogs.
 
+## Catalog structure and Tolgee
+
+Group translations by their dotted semantic identifiers:
+
+```json
+{
+  "alarm": {
+    "controls": {
+      "delete": "Delete"
+    }
+  },
+  "stopwatch": {
+    "laps": {
+      "recorded": {
+        "one": "1 lap recorded",
+        "other": "{count} laps recorded"
+      }
+    }
+  }
+}
+```
+
+A key such as `alarm.controls.delete` is **still** accessed with
+`translate!("alarm.controls.delete")`. Both embedded-i18n and Tolgee flatten
+nested groups to dotted IDs; nesting changes source representation, not runtime
+lookups, translation keys or firmware tables. CLDR plural suffixes are leaves.
+
+The Tolgee CLI retains `format: "JSON_C"` for the existing C-style message
+format, but **must** export nested keys: `pull.delimiter: "."` in
+`tolgee.config.ts`. The old empty delimiter would export flat JSON and
+undo the layout during `tolgee pull`. The configured `push.files` can
+import nested JSON as the same dotted keys; `push.removeOtherKeys` stays
+`false`.
+
+Tolgee documents a potential ambiguity when a key is both a string and a
+parent (for example `menu` and `menu.title`), or when mixed flat/nested
+JSON declares the same key twice. The shared `flattenCatalog` and static
+checks reject those cases, rather than silently losing translations.
+Do not use `pull --empty-dir` during migration; inspect the diff and run
+`node tools/localization/check.mjs` after a pull and before a push.
+
+Reference: https://docs.tolgee.io/platform/formats/structured_json
+and https://docs.tolgee.io/tolgee-cli/project-configuration.
+
 ## Migration
 
 The machine-readable old-to-new manifests are under 'mappings/' and are
@@ -41,12 +85,12 @@ for manual review. The empty bootsplash namespace has no mappings.
 This migration intentionally makes a **breaking change to Tolgee keys**;
 there is no special remote key-rename or translation-history migration.
 Do not run an automatic remove-unused sweep without separately reviewing
-its impact. For routine updates follow the existing Tolgee JSON_C push/pull
-workflow, and inspect 'tolgee compare' first.
+its impact. For routine updates follow the nested JSON_C push/pull configuration,
+validate the resulting catalogs, and inspect `tolgee compare` first.
 
 ## Checks
 
-    node --test tolgee.extractor.test.mjs
+    node --test tolgee.extractor.test.mjs tools/localization/catalog.test.mjs
     node tools/localization/check.mjs
     node tools/localization/check.mjs --baseline <PRE_MIGRATION_SHA>
     EMBEDDED_I18N_STRICT=1 mise run localization:check

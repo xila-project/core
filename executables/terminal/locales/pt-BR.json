@@ -1,10 +1,14 @@
 {
-  "input.command_placeholder": "Digite um comando...",
-  "errors.failed_to_create_object": "Não foi possível criar o objeto",
-  "errors.failed_to_execute": "Falha ao executar: {}",
-  "errors.failed_to_get_task_identifier": "Não foi possível obter o identificador da tarefa: {}",
-  "errors.failed_to_mount_device": "Não foi possível montar o dispositivo: {}",
-  "errors.graphics": "Gráficos: {}",
-  "errors.resource_busy": "Recurso ocupado",
-  "errors.utf_8": "UTF-8: {}"
+  "input": {
+    "command_placeholder": "Digite um comando..."
+  },
+  "errors": {
+    "failed_to_create_object": "Não foi possível criar o objeto",
+    "failed_to_execute": "Falha ao executar: {}",
+    "failed_to_get_task_identifier": "Não foi possível obter o identificador da tarefa: {}",
+    "failed_to_mount_device": "Não foi possível montar o dispositivo: {}",
+    "graphics": "Gráficos: {}",
+    "resource_busy": "Recurso ocupado",
+    "utf_8": "UTF-8: {}"
+  }
 }

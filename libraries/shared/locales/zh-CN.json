@@ -1,7 +1,9 @@
 {
-  "errors.buffer_too_small": "缓冲区过小",
-  "errors.failed_to_convert_length": "转换长度失败",
-  "errors.invalid_length": "长度无效",
-  "errors.invalid_pointer": "指针无效",
-  "errors.invalid_utf_8_string": "UTF-8 字符串无效"
+  "errors": {
+    "buffer_too_small": "缓冲区过小",
+    "failed_to_convert_length": "转换长度失败",
+    "invalid_length": "长度无效",
+    "invalid_pointer": "指针无效",
+    "invalid_utf_8_string": "UTF-8 字符串无效"
+  }
 }

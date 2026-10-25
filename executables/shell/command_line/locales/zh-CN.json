@@ -1,77 +1,119 @@
 {
-  "authentication.prompts.password": "密码： ",
-  "authentication.prompts.username": "用户名： ",
-  "dns.errors.unknown_host": "无法解析 {}：未知主机",
-  "dns.records.unit.other": "条记录，域名",
-  "dns.status.no_records_found": "未找到 {} 记录，域名：'{}'",
-  "errors.argument_parsing_error": "参数解析错误：{}",
-  "errors.authentication_failed": "身份验证失败：{}",
-  "errors.failed_to_create_directory": "创建目录失败：{}",
-  "errors.failed_to_create_socket": "创建套接字失败：{}",
-  "errors.failed_to_create_symbolic_link": "创建符号链接失败：{}",
-  "errors.failed_to_execute_command": "执行命令失败",
-  "errors.failed_to_get_environment_variable": "获取环境变量失败",
-  "errors.failed_to_get_metadata": "获取元数据失败：{}",
-  "errors.failed_to_get_task_identifier": "获取任务标识符失败",
-  "errors.failed_to_get_task_user": "获取任务用户失败：{}",
-  "errors.failed_to_join_path": "拼接路径失败",
-  "errors.failed_to_join_task": "等待任务结束失败",
-  "errors.failed_to_open_directory": "打开目录失败：{}",
-  "errors.failed_to_open_file": "打开文件失败：{}",
-  "errors.failed_to_read_directory_entry": "读取目录项失败：{}",
-  "errors.failed_to_read_environment_variable": "读取环境变量失败：{}",
-  "errors.failed_to_read_file": "读取文件失败：{}",
-  "errors.failed_to_read_symbolic_link": "读取符号链接失败：{}",
-  "errors.failed_to_remove_directory": "删除目录失败：{}",
-  "errors.failed_to_remove_environment_variable": "删除环境变量失败：{}",
-  "errors.failed_to_rename_path": "重命名路径失败：{}",
-  "errors.failed_to_resolve_domain": "解析域名失败：{}",
-  "errors.failed_to_resolve_domain_for_records": "解析域名 '{}' 的 {} 记录失败：{}",
-  "errors.failed_to_set_current_directory": "设置当前目录失败：{}",
-  "errors.failed_to_set_environment_variable": "设置环境变量失败：{}",
-  "errors.failed_to_set_permissions": "设置权限失败：{}",
-  "errors.failed_to_set_shell_nesting_depth": "设置 shell 嵌套深度失败",
-  "errors.failed_to_set_task_user": "设置任务用户失败：{}",
-  "errors.failed_to_tokenize_command_line": "命令行分词失败",
-  "errors.failed_to_write_file": "写入文件失败：{}",
-  "errors.format_failed": "格式化错误",
-  "errors.invalid_argument": "无效参数",
-  "errors.invalid_number_of_arguments": "参数数量无效",
-  "errors.invalid_option": "无效选项",
-  "errors.invalid_path": "无效路径",
-  "errors.invalid_utf_8_input": "无效的 UTF-8 输入",
-  "errors.line_too_long": "行过长",
-  "errors.maximum_nested_shell_depth_exceeded": "超出 shell 最大嵌套深度",
-  "errors.missing_file_name_after_redirect_in": "输入重定向后缺少文件名",
-  "errors.missing_file_name_after_redirect_out": "输出重定向后缺少文件名",
-  "errors.missing_positional_argument": "缺少位置参数：{}",
-  "errors.option_does_not_require_a_value": "此选项不需要值",
-  "errors.option_requires_a_value": "此选项需要值",
-  "errors.syntax_error_at_byte": "第 {} 字节处有语法错误：{}",
-  "errors.too_many_background_jobs": "后台作业过多",
-  "errors.with_details": "错误：{}",
-  "execution.errors.command_line_too_long": "命令行过长",
-  "execution.errors.command_not_found": "未找到命令",
-  "execution.errors.missing_command": "缺少命令",
-  "help.available_executables_title": "搜索路径中的可执行程序：",
-  "help.built_in_commands_title": "内置命令：",
-  "help.execute_command_usage": "用法：shell -c COMMAND",
-  "help.external_executable_description": "外部可执行程序；用法由该程序提供。",
-  "help.run_script_usage": "用法：shell -s PATH",
-  "listing.columns.accessed": "访问时间",
-  "listing.columns.created": "创建时间",
-  "listing.columns.group": "用户组",
-  "listing.columns.inode": "Inode",
-  "listing.columns.kind": "类型",
-  "listing.columns.links": "链接数",
-  "listing.columns.modified": "修改时间",
-  "listing.columns.permissions": "权限",
-  "listing.columns.size": "大小",
-  "listing.columns.status": "状态",
-  "listing.columns.user": "用户",
-  "ping.errors.request_timeout": "icmp_seq {} 的请求超时",
-  "ping.reply.byte_unit.other": "字节，来自",
-  "ping.reply.time_label": "时间",
-  "ping.request.payload_byte_unit.other": "字节数据",
-  "sleep.errors.invalid_duration": "无效的休眠时长：请使用非负整数，单位为 ms、s、m 或 h（最大值为 18446744073709551615 纳秒）"
+  "authentication": {
+    "prompts": {
+      "password": "密码： ",
+      "username": "用户名： "
+    }
+  },
+  "dns": {
+    "errors": {
+      "unknown_host": "无法解析 {}：未知主机"
+    },
+    "records": {
+      "unit": {
+        "other": "条记录，域名"
+      }
+    },
+    "status": {
+      "no_records_found": "未找到 {} 记录，域名：'{}'"
+    }
+  },
+  "errors": {
+    "argument_parsing_error": "参数解析错误：{}",
+    "authentication_failed": "身份验证失败：{}",
+    "failed_to_create_directory": "创建目录失败：{}",
+    "failed_to_create_socket": "创建套接字失败：{}",
+    "failed_to_create_symbolic_link": "创建符号链接失败：{}",
+    "failed_to_execute_command": "执行命令失败",
+    "failed_to_get_environment_variable": "获取环境变量失败",
+    "failed_to_get_metadata": "获取元数据失败：{}",
+    "failed_to_get_task_identifier": "获取任务标识符失败",
+    "failed_to_get_task_user": "获取任务用户失败：{}",
+    "failed_to_join_path": "拼接路径失败",
+    "failed_to_join_task": "等待任务结束失败",
+    "failed_to_open_directory": "打开目录失败：{}",
+    "failed_to_open_file": "打开文件失败：{}",
+    "failed_to_read_directory_entry": "读取目录项失败：{}",
+    "failed_to_read_environment_variable": "读取环境变量失败：{}",
+    "failed_to_read_file": "读取文件失败：{}",
+    "failed_to_read_symbolic_link": "读取符号链接失败：{}",
+    "failed_to_remove_directory": "删除目录失败：{}",
+    "failed_to_remove_environment_variable": "删除环境变量失败：{}",
+    "failed_to_rename_path": "重命名路径失败：{}",
+    "failed_to_resolve_domain": "解析域名失败：{}",
+    "failed_to_resolve_domain_for_records": "解析域名 '{}' 的 {} 记录失败：{}",
+    "failed_to_set_current_directory": "设置当前目录失败：{}",
+    "failed_to_set_environment_variable": "设置环境变量失败：{}",
+    "failed_to_set_permissions": "设置权限失败：{}",
+    "failed_to_set_shell_nesting_depth": "设置 shell 嵌套深度失败",
+    "failed_to_set_task_user": "设置任务用户失败：{}",
+    "failed_to_tokenize_command_line": "命令行分词失败",
+    "failed_to_write_file": "写入文件失败：{}",
+    "format_failed": "格式化错误",
+    "invalid_argument": "无效参数",
+    "invalid_number_of_arguments": "参数数量无效",
+    "invalid_option": "无效选项",
+    "invalid_path": "无效路径",
+    "invalid_utf_8_input": "无效的 UTF-8 输入",
+    "line_too_long": "行过长",
+    "maximum_nested_shell_depth_exceeded": "超出 shell 最大嵌套深度",
+    "missing_file_name_after_redirect_in": "输入重定向后缺少文件名",
+    "missing_file_name_after_redirect_out": "输出重定向后缺少文件名",
+    "missing_positional_argument": "缺少位置参数：{}",
+    "option_does_not_require_a_value": "此选项不需要值",
+    "option_requires_a_value": "此选项需要值",
+    "syntax_error_at_byte": "第 {} 字节处有语法错误：{}",
+    "too_many_background_jobs": "后台作业过多",
+    "with_details": "错误：{}"
+  },
+  "execution": {
+    "errors": {
+      "command_line_too_long": "命令行过长",
+      "command_not_found": "未找到命令",
+      "missing_command": "缺少命令"
+    }
+  },
+  "help": {
+    "available_executables_title": "搜索路径中的可执行程序：",
+    "built_in_commands_title": "内置命令：",
+    "execute_command_usage": "用法：shell -c COMMAND",
+    "external_executable_description": "外部可执行程序；用法由该程序提供。",
+    "run_script_usage": "用法：shell -s PATH"
+  },
+  "listing": {
+    "columns": {
+      "accessed": "访问时间",
+      "created": "创建时间",
+      "group": "用户组",
+      "inode": "Inode",
+      "kind": "类型",
+      "links": "链接数",
+      "modified": "修改时间",
+      "permissions": "权限",
+      "size": "大小",
+      "status": "状态",
+      "user": "用户"
+    }
+  },
+  "ping": {
+    "errors": {
+      "request_timeout": "icmp_seq {} 的请求超时"
+    },
+    "reply": {
+      "byte_unit": {
+        "other": "字节，来自"
+      },
+      "time_label": "时间"
+    },
+    "request": {
+      "payload_byte_unit": {
+        "other": "字节数据"
+      }
+    }
+  },
+  "sleep": {
+    "errors": {
+      "invalid_duration": "无效的休眠时长：请使用非负整数，单位为 ms、s、m 或 h（最大值为 18446744073709551615 纳秒）"
+    }
+  }
 }

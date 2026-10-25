@@ -1,86 +1,128 @@
 {
-  "authentication.prompts.password": "Hasło: ",
-  "authentication.prompts.username": "Nazwa użytkownika: ",
-  "dns.errors.unknown_host": "Nie można rozwiązać {}: nieznany host",
-  "dns.records.unit.few": "rekordy dla domeny",
-  "dns.records.unit.many": "rekordów dla domeny",
-  "dns.records.unit.one": "rekord dla domeny",
-  "dns.records.unit.other": "rekordów dla domeny",
-  "dns.status.no_records_found": "Nie znaleziono rekordów {} dla domeny '{}'",
-  "errors.argument_parsing_error": "Błąd parsowania argumentów: {}",
-  "errors.authentication_failed": "Uwierzytelnianie nie powiodło się: {}",
-  "errors.failed_to_create_directory": "Nie udało się utworzyć katalogu: {}",
-  "errors.failed_to_create_socket": "Nie udało się utworzyć gniazda: {}",
-  "errors.failed_to_create_symbolic_link": "Nie udało się utworzyć dowiązania symbolicznego: {}",
-  "errors.failed_to_execute_command": "Nie udało się wykonać polecenia",
-  "errors.failed_to_get_environment_variable": "Nie udało się pobrać zmiennej środowiskowej",
-  "errors.failed_to_get_metadata": "Nie udało się pobrać metadanych: {}",
-  "errors.failed_to_get_task_identifier": "Nie udało się pobrać identyfikatora zadania",
-  "errors.failed_to_get_task_user": "Nie udało się pobrać użytkownika zadania: {}",
-  "errors.failed_to_join_path": "Nie udało się połączyć ścieżek",
-  "errors.failed_to_join_task": "Nie udało się dołączyć do zadania",
-  "errors.failed_to_open_directory": "Nie udało się otworzyć katalogu: {}",
-  "errors.failed_to_open_file": "Nie udało się otworzyć pliku: {}",
-  "errors.failed_to_read_directory_entry": "Nie udało się odczytać wpisu katalogu: {}",
-  "errors.failed_to_read_environment_variable": "Nie udało się odczytać zmiennej środowiskowej: {}",
-  "errors.failed_to_read_file": "Nie udało się odczytać pliku: {}",
-  "errors.failed_to_read_symbolic_link": "Nie udało się odczytać dowiązania symbolicznego: {}",
-  "errors.failed_to_remove_directory": "Nie udało się usunąć katalogu: {}",
-  "errors.failed_to_remove_environment_variable": "Nie udało się usunąć zmiennej środowiskowej: {}",
-  "errors.failed_to_rename_path": "Nie udało się zmienić nazwy ścieżki: {}",
-  "errors.failed_to_resolve_domain": "Nie udało się rozwiązać domeny: {}",
-  "errors.failed_to_resolve_domain_for_records": "Nie udało się rozwiązać domeny '{}' dla {} rekordów: {}",
-  "errors.failed_to_set_current_directory": "Nie udało się ustawić bieżącego katalogu: {}",
-  "errors.failed_to_set_environment_variable": "Nie udało się ustawić zmiennej środowiskowej: {}",
-  "errors.failed_to_set_permissions": "Nie udało się ustawić uprawnień: {}",
-  "errors.failed_to_set_shell_nesting_depth": "Nie udało się ustawić głębokości zagnieżdżenia powłoki",
-  "errors.failed_to_set_task_user": "Nie udało się ustawić użytkownika zadania: {}",
-  "errors.failed_to_tokenize_command_line": "Nie udało się podzielić wiersza polecenia na tokeny",
-  "errors.failed_to_write_file": "Nie udało się zapisać pliku: {}",
-  "errors.format_failed": "Błąd formatu",
-  "errors.invalid_argument": "Nieprawidłowy argument",
-  "errors.invalid_number_of_arguments": "Nieprawidłowa liczba argumentów",
-  "errors.invalid_option": "Nieprawidłowa opcja",
-  "errors.invalid_path": "Nieprawidłowa ścieżka",
-  "errors.invalid_utf_8_input": "Nieprawidłowe dane UTF-8",
-  "errors.line_too_long": "Wiersz jest za długi",
-  "errors.maximum_nested_shell_depth_exceeded": "Przekroczono maksymalną głębokość zagnieżdżenia powłoki",
-  "errors.missing_file_name_after_redirect_in": "Brak nazwy pliku po przekierowaniu wejścia",
-  "errors.missing_file_name_after_redirect_out": "Brak nazwy pliku po przekierowaniu wyjścia",
-  "errors.missing_positional_argument": "Brak argumentu pozycyjnego: {}",
-  "errors.option_does_not_require_a_value": "Opcja nie wymaga wartości",
-  "errors.option_requires_a_value": "Opcja wymaga wartości",
-  "errors.syntax_error_at_byte": "Błąd składni przy bajcie {}: {}",
-  "errors.too_many_background_jobs": "Za dużo zadań w tle",
-  "errors.with_details": "Błąd: {}",
-  "execution.errors.command_line_too_long": "Wiersz polecenia jest za długi",
-  "execution.errors.command_not_found": "Nie znaleziono polecenia",
-  "execution.errors.missing_command": "Brak polecenia",
-  "help.available_executables_title": "Programy w ścieżkach:",
-  "help.built_in_commands_title": "Polecenia wbudowane:",
-  "help.execute_command_usage": "Użycie: shell -c COMMAND",
-  "help.external_executable_description": "Program zewnętrzny; pomoc udostępnia program.",
-  "help.run_script_usage": "Użycie: shell -s ŚCIEŻKA",
-  "listing.columns.accessed": "Dostęp",
-  "listing.columns.created": "Utworzono",
-  "listing.columns.group": "Grupa",
-  "listing.columns.inode": "Inode",
-  "listing.columns.kind": "Rodzaj",
-  "listing.columns.links": "Łącza",
-  "listing.columns.modified": "Zmodyfikowano",
-  "listing.columns.permissions": "Uprawnienia",
-  "listing.columns.size": "Rozmiar",
-  "listing.columns.status": "Stan",
-  "listing.columns.user": "Użytkownik",
-  "ping.errors.request_timeout": "Przekroczono limit czasu dla icmp_seq {}",
-  "ping.reply.byte_unit.few": "bajty od",
-  "ping.reply.byte_unit.many": "bajtów od",
-  "ping.reply.byte_unit.one": "bajt od",
-  "ping.reply.byte_unit.other": "bajtów od",
-  "ping.reply.time_label": "czas",
-  "ping.request.payload_byte_unit.few": "bajty danych",
-  "ping.request.payload_byte_unit.many": "bajtów danych",
-  "ping.request.payload_byte_unit.one": "bajt danych",
-  "ping.request.payload_byte_unit.other": "bajtów danych",
-  "sleep.errors.invalid_duration": "Nieprawidłowy czas uśpienia: użyj nieujemnej liczby całkowitej z ms, s, m lub h (maksymalnie 18446744073709551615 nanosekund)"
+  "authentication": {
+    "prompts": {
+      "password": "Hasło: ",
+      "username": "Nazwa użytkownika: "
+    }
+  },
+  "dns": {
+    "errors": {
+      "unknown_host": "Nie można rozwiązać {}: nieznany host"
+    },
+    "records": {
+      "unit": {
+        "few": "rekordy dla domeny",
+        "many": "rekordów dla domeny",
+        "one": "rekord dla domeny",
+        "other": "rekordów dla domeny"
+      }
+    },
+    "status": {
+      "no_records_found": "Nie znaleziono rekordów {} dla domeny '{}'"
+    }
+  },
+  "errors": {
+    "argument_parsing_error": "Błąd parsowania argumentów: {}",
+    "authentication_failed": "Uwierzytelnianie nie powiodło się: {}",
+    "failed_to_create_directory": "Nie udało się utworzyć katalogu: {}",
+    "failed_to_create_socket": "Nie udało się utworzyć gniazda: {}",
+    "failed_to_create_symbolic_link": "Nie udało się utworzyć dowiązania symbolicznego: {}",
+    "failed_to_execute_command": "Nie udało się wykonać polecenia",
+    "failed_to_get_environment_variable": "Nie udało się pobrać zmiennej środowiskowej",
+    "failed_to_get_metadata": "Nie udało się pobrać metadanych: {}",
+    "failed_to_get_task_identifier": "Nie udało się pobrać identyfikatora zadania",
+    "failed_to_get_task_user": "Nie udało się pobrać użytkownika zadania: {}",
+    "failed_to_join_path": "Nie udało się połączyć ścieżek",
+    "failed_to_join_task": "Nie udało się dołączyć do zadania",
+    "failed_to_open_directory": "Nie udało się otworzyć katalogu: {}",
+    "failed_to_open_file": "Nie udało się otworzyć pliku: {}",
+    "failed_to_read_directory_entry": "Nie udało się odczytać wpisu katalogu: {}",
+    "failed_to_read_environment_variable": "Nie udało się odczytać zmiennej środowiskowej: {}",
+    "failed_to_read_file": "Nie udało się odczytać pliku: {}",
+    "failed_to_read_symbolic_link": "Nie udało się odczytać dowiązania symbolicznego: {}",
+    "failed_to_remove_directory": "Nie udało się usunąć katalogu: {}",
+    "failed_to_remove_environment_variable": "Nie udało się usunąć zmiennej środowiskowej: {}",
+    "failed_to_rename_path": "Nie udało się zmienić nazwy ścieżki: {}",
+    "failed_to_resolve_domain": "Nie udało się rozwiązać domeny: {}",
+    "failed_to_resolve_domain_for_records": "Nie udało się rozwiązać domeny '{}' dla {} rekordów: {}",
+    "failed_to_set_current_directory": "Nie udało się ustawić bieżącego katalogu: {}",
+    "failed_to_set_environment_variable": "Nie udało się ustawić zmiennej środowiskowej: {}",
+    "failed_to_set_permissions": "Nie udało się ustawić uprawnień: {}",
+    "failed_to_set_shell_nesting_depth": "Nie udało się ustawić głębokości zagnieżdżenia powłoki",
+    "failed_to_set_task_user": "Nie udało się ustawić użytkownika zadania: {}",
+    "failed_to_tokenize_command_line": "Nie udało się podzielić wiersza polecenia na tokeny",
+    "failed_to_write_file": "Nie udało się zapisać pliku: {}",
+    "format_failed": "Błąd formatu",
+    "invalid_argument": "Nieprawidłowy argument",
+    "invalid_number_of_arguments": "Nieprawidłowa liczba argumentów",
+    "invalid_option": "Nieprawidłowa opcja",
+    "invalid_path": "Nieprawidłowa ścieżka",
+    "invalid_utf_8_input": "Nieprawidłowe dane UTF-8",
+    "line_too_long": "Wiersz jest za długi",
+    "maximum_nested_shell_depth_exceeded": "Przekroczono maksymalną głębokość zagnieżdżenia powłoki",
+    "missing_file_name_after_redirect_in": "Brak nazwy pliku po przekierowaniu wejścia",
+    "missing_file_name_after_redirect_out": "Brak nazwy pliku po przekierowaniu wyjścia",
+    "missing_positional_argument": "Brak argumentu pozycyjnego: {}",
+    "option_does_not_require_a_value": "Opcja nie wymaga wartości",
+    "option_requires_a_value": "Opcja wymaga wartości",
+    "syntax_error_at_byte": "Błąd składni przy bajcie {}: {}",
+    "too_many_background_jobs": "Za dużo zadań w tle",
+    "with_details": "Błąd: {}"
+  },
+  "execution": {
+    "errors": {
+      "command_line_too_long": "Wiersz polecenia jest za długi",
+      "command_not_found": "Nie znaleziono polecenia",
+      "missing_command": "Brak polecenia"
+    }
+  },
+  "help": {
+    "available_executables_title": "Programy w ścieżkach:",
+    "built_in_commands_title": "Polecenia wbudowane:",
+    "execute_command_usage": "Użycie: shell -c COMMAND",
+    "external_executable_description": "Program zewnętrzny; pomoc udostępnia program.",
+    "run_script_usage": "Użycie: shell -s ŚCIEŻKA"
+  },
+  "listing": {
+    "columns": {
+      "accessed": "Dostęp",
+      "created": "Utworzono",
+      "group": "Grupa",
+      "inode": "Inode",
+      "kind": "Rodzaj",
+      "links": "Łącza",
+      "modified": "Zmodyfikowano",
+      "permissions": "Uprawnienia",
+      "size": "Rozmiar",
+      "status": "Stan",
+      "user": "Użytkownik"
+    }
+  },
+  "ping": {
+    "errors": {
+      "request_timeout": "Przekroczono limit czasu dla icmp_seq {}"
+    },
+    "reply": {
+      "byte_unit": {
+        "few": "bajty od",
+        "many": "bajtów od",
+        "one": "bajt od",
+        "other": "bajtów od"
+      },
+      "time_label": "czas"
+    },
+    "request": {
+      "payload_byte_unit": {
+        "few": "bajty danych",
+        "many": "bajtów danych",
+        "one": "bajt danych",
+        "other": "bajtów danych"
+      }
+    }
+  },
+  "sleep": {
+    "errors": {
+      "invalid_duration": "Nieprawidłowy czas uśpienia: użyj nieujemnej liczby całkowitej z ms, s, m lub h (maksymalnie 18446744073709551615 nanosekund)"
+    }
+  }
 }

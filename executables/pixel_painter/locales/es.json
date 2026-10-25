@@ -1,16 +1,28 @@
 {
-  "app.title": "Editor de píxeles",
-  "controls.undo": "Deshacer",
-  "controls.clear": "Borrar",
-  "controls.save": "Guardar",
-  "controls.open": "Abrir",
-  "status.ready_white_erases": "Listo: el blanco borra",
-  "warnings.unsaved_close_again": "Dibujo sin guardar: vuelve a cerrar para descartarlo",
-  "warnings.unsaved_open_again": "Dibujo sin guardar: vuelve a pulsar Abrir para descartarlo",
-  "file_path.placeholder": "Introduce una ruta de archivo absoluta",
-  "status.opened": "Abierto",
-  "status.saved": "Guardado",
-  "errors.invalid_file_drawing_preserved": "Archivo de Pixel Painter no válido: se conserva el dibujo",
-  "errors.open_failed": "No se pudo abrir: comprueba la ruta y el almacenamiento",
-  "errors.save_failed_drawing_preserved": "No se pudo guardar: se conserva el dibujo; comprueba la ruta y el almacenamiento"
+  "app": {
+    "title": "Editor de píxeles"
+  },
+  "controls": {
+    "undo": "Deshacer",
+    "clear": "Borrar",
+    "save": "Guardar",
+    "open": "Abrir"
+  },
+  "status": {
+    "ready_white_erases": "Listo: el blanco borra",
+    "opened": "Abierto",
+    "saved": "Guardado"
+  },
+  "warnings": {
+    "unsaved_close_again": "Dibujo sin guardar: vuelve a cerrar para descartarlo",
+    "unsaved_open_again": "Dibujo sin guardar: vuelve a pulsar Abrir para descartarlo"
+  },
+  "file_path": {
+    "placeholder": "Introduce una ruta de archivo absoluta"
+  },
+  "errors": {
+    "invalid_file_drawing_preserved": "Archivo de Pixel Painter no válido: se conserva el dibujo",
+    "open_failed": "No se pudo abrir: comprueba la ruta y el almacenamiento",
+    "save_failed_drawing_preserved": "No se pudo guardar: se conserva el dibujo; comprueba la ruta y el almacenamiento"
+  }
 }

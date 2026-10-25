@@ -1,5 +1,7 @@
 {
-  "errors.failed_to_get_main_function": "Nie udało się uzyskać funkcji głównej",
-  "errors.invalid_stack_size": "Nieprawidłowy rozmiar stosu",
-  "errors.permission_denied": "Odmowa dostępu"
+  "errors": {
+    "failed_to_get_main_function": "Nie udało się uzyskać funkcji głównej",
+    "invalid_stack_size": "Nieprawidłowy rozmiar stosu",
+    "permission_denied": "Odmowa dostępu"
+  }
 }

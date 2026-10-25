@@ -1,5 +1,7 @@
 {
-  "errors.failed_to_get_main_function": "Impossibile ottenere la funzione principale",
-  "errors.invalid_stack_size": "Dimensione dello stack non valida",
-  "errors.permission_denied": "Accesso negato"
+  "errors": {
+    "failed_to_get_main_function": "Impossibile ottenere la funzione principale",
+    "invalid_stack_size": "Dimensione dello stack non valida",
+    "permission_denied": "Accesso negato"
+  }
 }

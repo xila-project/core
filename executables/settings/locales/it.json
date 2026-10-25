@@ -1,58 +1,98 @@
 {
-  "tabs.about": "Informazioni",
-  "network.fields.address": "Indirizzo",
-  "tabs.appearance": "Aspetto",
-  "appearance.status.applied_not_saved": "Aspetto applicato, ma non è stato possibile salvarlo.",
-  "appearance.status.saved": "Aspetto salvato.",
-  "actions.apply": "Applica",
-  "errors.authentication_failed": "Autenticazione non riuscita: {}",
-  "appearance.colors.blue": "Blu",
-  "about.fields.cpu": "CPU:",
-  "actions.cancel": "Annulla",
-  "password.actions.change": "Cambia password",
-  "network.fields.configuration_mode": "Modalità di configurazione",
-  "password.fields.confirm": "Conferma password",
-  "errors.could_not_apply_appearance": "Impossibile applicare l'aspetto.",
-  "errors.could_not_load_appearance_choose_settings_to_save_a_replacement": "Impossibile caricare l'aspetto. Scegli le impostazioni e salva una nuova configurazione.",
-  "password.fields.current": "Password attuale",
-  "network.modes.dhcp": "DHCP",
-  "network.fields.dns_servers": "Server DNS",
-  "appearance.fields.dark_mode": "Modalità scura",
-  "about.fields.description": "Descrizione:",
-  "about.fields.developer": "Sviluppato da:",
-  "errors.failed_to_create_ui_element": "Impossibile creare l'elemento dell'interfaccia",
-  "errors.failed_to_create_object": "Impossibile creare l'oggetto",
-  "errors.failed_to_get_child_object": "Impossibile ottenere l'oggetto figlio",
-  "errors.failed_to_get_current_task_identifier": "Impossibile ottenere l'identificatore dell'attività corrente: {}",
-  "errors.failed_to_open_standard_file": "Impossibile aprire il file standard: {}",
-  "errors.failed_to_read_directory": "Impossibile leggere la directory: {}",
-  "errors.failed_to_set_environment_variable": "Impossibile impostare la variabile d'ambiente: {}",
-  "errors.failed_to_set_task_user": "Impossibile impostare l'utente dell'attività: {}",
-  "errors.formatting_error": "Errore di formattazione",
-  "network.fields.gateway": "Gateway",
-  "tabs.general": "Generale",
-  "general.status.coming_soon": "Le impostazioni generali saranno implementate qui.",
-  "errors.graphics_error": "Errore grafico: {}",
-  "appearance.colors.green": "Verde",
-  "errors.invalid_utf_8_string": "Stringa UTF-8 non valida: {}",
-  "about.fields.license": "Licenza:",
-  "general.fields.locale": "Lingua:",
-  "network.fields.mac_address": "Indirizzo MAC",
-  "about.fields.memory": "Memoria:",
-  "password.fields.new": "Nuova password",
-  "common.none": "Nessuno",
-  "errors.null_character_in_string": "Carattere nullo nella stringa: {}",
-  "about.fields.operating_system": "Sistema operativo:",
-  "appearance.colors.orange": "Arancione",
-  "password.fields.password": "Password",
-  "appearance.fields.primary_color": "Colore primario",
-  "appearance.colors.rose": "Rosa",
-  "network.fields.routes": "Route",
-  "appearance.fields.secondary_color": "Colore secondario",
-  "app.title": "Impostazioni",
-  "network.modes.static": "Statico",
-  "about.fields.version": "Versione:",
-  "appearance.colors.violet": "Viola",
-  "errors.virtual_file_system_error": "Errore del file system virtuale: {}",
-  "appearance.colors.zinc_auto": "Grigio zinco (automatico)"
+  "tabs": {
+    "about": "Informazioni",
+    "appearance": "Aspetto",
+    "general": "Generale"
+  },
+  "network": {
+    "fields": {
+      "address": "Indirizzo",
+      "configuration_mode": "Modalità di configurazione",
+      "dns_servers": "Server DNS",
+      "gateway": "Gateway",
+      "mac_address": "Indirizzo MAC",
+      "routes": "Route"
+    },
+    "modes": {
+      "dhcp": "DHCP",
+      "static": "Statico"
+    }
+  },
+  "appearance": {
+    "status": {
+      "applied_not_saved": "Aspetto applicato, ma non è stato possibile salvarlo.",
+      "saved": "Aspetto salvato."
+    },
+    "colors": {
+      "blue": "Blu",
+      "green": "Verde",
+      "orange": "Arancione",
+      "rose": "Rosa",
+      "violet": "Viola",
+      "zinc_auto": "Grigio zinco (automatico)"
+    },
+    "fields": {
+      "dark_mode": "Modalità scura",
+      "primary_color": "Colore primario",
+      "secondary_color": "Colore secondario"
+    }
+  },
+  "actions": {
+    "apply": "Applica",
+    "cancel": "Annulla"
+  },
+  "errors": {
+    "authentication_failed": "Autenticazione non riuscita: {}",
+    "could_not_apply_appearance": "Impossibile applicare l'aspetto.",
+    "could_not_load_appearance_choose_settings_to_save_a_replacement": "Impossibile caricare l'aspetto. Scegli le impostazioni e salva una nuova configurazione.",
+    "failed_to_create_ui_element": "Impossibile creare l'elemento dell'interfaccia",
+    "failed_to_create_object": "Impossibile creare l'oggetto",
+    "failed_to_get_child_object": "Impossibile ottenere l'oggetto figlio",
+    "failed_to_get_current_task_identifier": "Impossibile ottenere l'identificatore dell'attività corrente: {}",
+    "failed_to_open_standard_file": "Impossibile aprire il file standard: {}",
+    "failed_to_read_directory": "Impossibile leggere la directory: {}",
+    "failed_to_set_environment_variable": "Impossibile impostare la variabile d'ambiente: {}",
+    "failed_to_set_task_user": "Impossibile impostare l'utente dell'attività: {}",
+    "formatting_error": "Errore di formattazione",
+    "graphics_error": "Errore grafico: {}",
+    "invalid_utf_8_string": "Stringa UTF-8 non valida: {}",
+    "null_character_in_string": "Carattere nullo nella stringa: {}",
+    "virtual_file_system_error": "Errore del file system virtuale: {}"
+  },
+  "about": {
+    "fields": {
+      "cpu": "CPU:",
+      "description": "Descrizione:",
+      "developer": "Sviluppato da:",
+      "license": "Licenza:",
+      "memory": "Memoria:",
+      "operating_system": "Sistema operativo:",
+      "version": "Versione:"
+    }
+  },
+  "password": {
+    "actions": {
+      "change": "Cambia password"
+    },
+    "fields": {
+      "confirm": "Conferma password",
+      "current": "Password attuale",
+      "new": "Nuova password",
+      "password": "Password"
+    }
+  },
+  "general": {
+    "status": {
+      "coming_soon": "Le impostazioni generali saranno implementate qui."
+    },
+    "fields": {
+      "locale": "Lingua:"
+    }
+  },
+  "common": {
+    "none": "Nessuno"
+  },
+  "app": {
+    "title": "Impostazioni"
+  }
 }

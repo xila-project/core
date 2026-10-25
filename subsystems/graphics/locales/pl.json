@@ -1,14 +1,16 @@
 {
-  "errors.already_in_use": "Już w użyciu",
-  "errors.already_initialized": "Już zainicjalizowano",
-  "errors.failed_to_create_object": "Nie udało się utworzyć obiektu",
-  "errors.failed_to_get_resolution": "Nie udało się odczytać rozdzielczości",
-  "errors.failed_to_register": "Nie udało się zarejestrować",
-  "errors.invalid_reference": "Nieprawidłowe odwołanie",
-  "errors.invalid_parameter": "Nieprawidłowy parametr",
-  "errors.invalid_window_identifier": "Nieprawidłowy identyfikator okna",
-  "errors.not_available": "Niedostępny",
-  "errors.not_initialized": "Nie zainicjalizowano",
-  "errors.not_registered": "Nie zarejestrowano",
-  "errors.out_of_memory": "Wyczerpano pamięć"
+  "errors": {
+    "already_in_use": "Już w użyciu",
+    "already_initialized": "Już zainicjalizowano",
+    "failed_to_create_object": "Nie udało się utworzyć obiektu",
+    "failed_to_get_resolution": "Nie udało się odczytać rozdzielczości",
+    "failed_to_register": "Nie udało się zarejestrować",
+    "invalid_reference": "Nieprawidłowe odwołanie",
+    "invalid_parameter": "Nieprawidłowy parametr",
+    "invalid_window_identifier": "Nieprawidłowy identyfikator okna",
+    "not_available": "Niedostępny",
+    "not_initialized": "Nie zainicjalizowano",
+    "not_registered": "Nie zarejestrowano",
+    "out_of_memory": "Wyczerpano pamięć"
+  }
 }

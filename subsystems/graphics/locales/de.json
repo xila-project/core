@@ -1,14 +1,16 @@
 {
-  "errors.already_in_use": "Bereits in Verwendung",
-  "errors.already_initialized": "Bereits initialisiert",
-  "errors.failed_to_create_object": "Objekt konnte nicht erstellt werden",
-  "errors.failed_to_get_resolution": "Auflösung konnte nicht ermittelt werden",
-  "errors.failed_to_register": "Registrierung fehlgeschlagen",
-  "errors.invalid_reference": "Ungültige Referenz",
-  "errors.invalid_parameter": "Ungültiger Parameter",
-  "errors.invalid_window_identifier": "Ungültige Fensterkennung",
-  "errors.not_available": "Nicht verfügbar",
-  "errors.not_initialized": "Nicht initialisiert",
-  "errors.not_registered": "Nicht registriert",
-  "errors.out_of_memory": "Arbeitsspeicher erschöpft"
+  "errors": {
+    "already_in_use": "Bereits in Verwendung",
+    "already_initialized": "Bereits initialisiert",
+    "failed_to_create_object": "Objekt konnte nicht erstellt werden",
+    "failed_to_get_resolution": "Auflösung konnte nicht ermittelt werden",
+    "failed_to_register": "Registrierung fehlgeschlagen",
+    "invalid_reference": "Ungültige Referenz",
+    "invalid_parameter": "Ungültiger Parameter",
+    "invalid_window_identifier": "Ungültige Fensterkennung",
+    "not_available": "Nicht verfügbar",
+    "not_initialized": "Nicht initialisiert",
+    "not_registered": "Nicht registriert",
+    "out_of_memory": "Arbeitsspeicher erschöpft"
+  }
 }

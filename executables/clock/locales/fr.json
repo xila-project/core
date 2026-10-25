@@ -1,48 +1,86 @@
 {
-  "alarm.controls.decrement_hour": "Heure -",
-  "alarm.controls.decrement_minute": "Minute -",
-  "alarm.controls.delete": "Supprimer",
-  "alarm.controls.disable": "Désactiver",
-  "alarm.controls.increment_hour": "Heure +",
-  "alarm.controls.increment_minute": "Minute +",
-  "alarm.controls.save_and_enable": "Enregistrer et activer",
-  "alarm.instructions.repeat_days_utc": "Répéter les jours sélectionnés ; aucun pour une seule fois. Les heures sont en UTC.",
-  "alarm.status.disabled": "Désactivée",
-  "alarm.status.enabled": "Activée : ",
-  "alarm.status.no_saved_alarm": "Aucune alarme enregistrée",
-  "alarm.weekdays.friday": "Ven",
-  "alarm.weekdays.monday": "Lun",
-  "alarm.weekdays.saturday": "Sam",
-  "alarm.weekdays.sunday": "Dim",
-  "alarm.weekdays.thursday": "Jeu",
-  "alarm.weekdays.tuesday": "Mar",
-  "alarm.weekdays.wednesday": "Mer",
-  "alerts.alarm_ringing": "Alarme ! ",
-  "alerts.alarm_snoozed": "Alarme reportée. ",
-  "alerts.dismiss": "Arrêter",
-  "alerts.instructions": "Les alertes s’affichent tant que l’Horloge est ouverte.",
-  "alerts.snooze_five_minutes": "Rappel dans 5 min",
-  "alerts.timer_finished": "Minuteur terminé ! ",
-  "clock.controls.toggle_hour_format": "12 / 24 heures",
-  "clock.errors.host_unavailable": "Heure du système indisponible",
-  "clock.instructions.utc_only": "UTC / heure du système. Les fuseaux des villes ne sont pas encore disponibles.",
-  "errors.settings_save_failed": "Impossible d’enregistrer les réglages. ",
-  "stopwatch.controls.record_lap": "Tour",
-  "stopwatch.controls.reset": "Réinitialiser",
-  "stopwatch.controls.toggle_pause": "Démarrer / pause",
-  "stopwatch.laps.recorded.one": "{count} tour enregistré",
-  "stopwatch.laps.recorded.other": "{count} tours enregistrés",
-  "tabs.alarm": "Alarme",
-  "tabs.clock": "Horloge",
-  "tabs.stopwatch": "Chronomètre",
-  "tabs.timer": "Minuteur",
-  "timer.controls.cancel": "Annuler",
-  "timer.controls.decrement_minute": "Minute -",
-  "timer.controls.decrement_second": "Seconde -",
-  "timer.controls.increment_minute": "Minute +",
-  "timer.controls.increment_second": "Seconde +",
-  "timer.controls.restart": "Redémarrer",
-  "timer.controls.start": "Démarrer",
-  "timer.controls.toggle_pause": "Pause / reprendre",
-  "timer.labels.duration": "Durée"
+  "alarm": {
+    "controls": {
+      "decrement_hour": "Heure -",
+      "decrement_minute": "Minute -",
+      "delete": "Supprimer",
+      "disable": "Désactiver",
+      "increment_hour": "Heure +",
+      "increment_minute": "Minute +",
+      "save_and_enable": "Enregistrer et activer"
+    },
+    "instructions": {
+      "repeat_days_utc": "Répéter les jours sélectionnés ; aucun pour une seule fois. Les heures sont en UTC."
+    },
+    "status": {
+      "disabled": "Désactivée",
+      "enabled": "Activée : ",
+      "no_saved_alarm": "Aucune alarme enregistrée"
+    },
+    "weekdays": {
+      "friday": "Ven",
+      "monday": "Lun",
+      "saturday": "Sam",
+      "sunday": "Dim",
+      "thursday": "Jeu",
+      "tuesday": "Mar",
+      "wednesday": "Mer"
+    }
+  },
+  "alerts": {
+    "alarm_ringing": "Alarme ! ",
+    "alarm_snoozed": "Alarme reportée. ",
+    "dismiss": "Arrêter",
+    "instructions": "Les alertes s’affichent tant que l’Horloge est ouverte.",
+    "snooze_five_minutes": "Rappel dans 5 min",
+    "timer_finished": "Minuteur terminé ! "
+  },
+  "clock": {
+    "controls": {
+      "toggle_hour_format": "12 / 24 heures"
+    },
+    "errors": {
+      "host_unavailable": "Heure du système indisponible"
+    },
+    "instructions": {
+      "utc_only": "UTC / heure du système. Les fuseaux des villes ne sont pas encore disponibles."
+    }
+  },
+  "errors": {
+    "settings_save_failed": "Impossible d’enregistrer les réglages. "
+  },
+  "stopwatch": {
+    "controls": {
+      "record_lap": "Tour",
+      "reset": "Réinitialiser",
+      "toggle_pause": "Démarrer / pause"
+    },
+    "laps": {
+      "recorded": {
+        "one": "{count} tour enregistré",
+        "other": "{count} tours enregistrés"
+      }
+    }
+  },
+  "tabs": {
+    "alarm": "Alarme",
+    "clock": "Horloge",
+    "stopwatch": "Chronomètre",
+    "timer": "Minuteur"
+  },
+  "timer": {
+    "controls": {
+      "cancel": "Annuler",
+      "decrement_minute": "Minute -",
+      "decrement_second": "Seconde -",
+      "increment_minute": "Minute +",
+      "increment_second": "Seconde +",
+      "restart": "Redémarrer",
+      "start": "Démarrer",
+      "toggle_pause": "Pause / reprendre"
+    },
+    "labels": {
+      "duration": "Durée"
+    }
+  }
 }

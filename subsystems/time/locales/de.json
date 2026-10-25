@@ -1,5 +1,7 @@
 {
-  "errors.device_error": "Gerätefehler: {}",
-  "errors.time_module_already_initialized": "Zeitmodul ist bereits initialisiert",
-  "errors.time_module_not_initialized": "Zeitmodul ist nicht initialisiert"
+  "errors": {
+    "device_error": "Gerätefehler: {}",
+    "time_module_already_initialized": "Zeitmodul ist bereits initialisiert",
+    "time_module_not_initialized": "Zeitmodul ist nicht initialisiert"
+  }
 }
