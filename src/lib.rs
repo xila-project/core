@@ -11,6 +11,8 @@ pub use embedded_i18n as internationalization;
 pub use executable;
 pub use file_system;
 pub use little_fs;
+#[cfg(feature = "lifecycle")]
+pub use lifecycle;
 pub use log;
 pub use memory;
 pub use network;

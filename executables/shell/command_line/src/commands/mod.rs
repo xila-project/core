@@ -19,6 +19,7 @@ mod list;
 mod ln;
 mod mv;
 mod ping;
+mod power;
 mod print_working_directory;
 mod realpath;
 mod sleep;
@@ -61,6 +62,7 @@ use self::{
     mv::MoveCommand,
     ping::PingCommand,
     print_working_directory::PrintWorkingDirectoryCommand,
+    power::ShutdownCommand,
     sleep::SleepCommand,
     statistics::StatisticsCommand,
     tail::TailCommand,
@@ -103,6 +105,7 @@ pub enum UserCommandKind {
     True,
     False,
     Exit,
+    Shutdown,
     ChangeDirectory,
     Echo,
     List,
@@ -152,6 +155,7 @@ const BUILTINS: &[(&str, UserCommandKind, &str)] = &[
         "Usage: false\nReturn status 1 without output.",
     ),
     ("exit", UserCommandKind::Exit, exit::ExitArguments::HELP),
+    ("shutdown", UserCommandKind::Shutdown, power::ShutdownArguments::HELP),
     (
         "cd",
         UserCommandKind::ChangeDirectory,
@@ -284,6 +288,7 @@ where
         UserCommandKind::True => Ok(()),
         UserCommandKind::False => Err(crate::Error::ExitStatus(core::num::NonZeroUsize::MIN)),
         UserCommandKind::Exit => ExitCommand.execute(context, options, paths).await,
+        UserCommandKind::Shutdown => ShutdownCommand.execute(context, options, paths).await,
         UserCommandKind::ChangeDirectory => {
             ChangeDirectoryCommand
                 .execute(context, options, paths)

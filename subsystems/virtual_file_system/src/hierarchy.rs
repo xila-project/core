@@ -40,6 +40,7 @@ pub async fn create_default_hierarchy(
         Path::GRAPHICS_DEVICES,
         Path::INPUT_DEVICES,
         Path::NETWORK_DEVICES,
+        Path::POWER_DEVICES,
         Path::RANDOM_DEVICES,
         Path::STANDARD_IO_DEVICES,
         Path::STORAGE_DEVICES,

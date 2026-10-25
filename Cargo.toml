@@ -43,6 +43,7 @@ shared = { workspace = true, optional = true }
 synchronization = { workspace = true, optional = true }
 bootsplash = { workspace = true, optional = true }
 network = { workspace = true, optional = true }
+lifecycle = { workspace = true, optional = true }
 
 [features]
 default = [
@@ -62,8 +63,10 @@ default = [
   "dep:synchronization",
   "abi_definitions",
   "dep:network",
+  "lifecycle",
 ]
 
+lifecycle = ["dep:lifecycle"]
 executable_building = ["executable/building"]
 audio = ["dep:audio"]
 abi_definitions = ["dep:abi_definitions"]
@@ -97,6 +100,7 @@ log = { path = "subsystems/log" }
 shared = { path = "libraries/shared" }
 synchronization = { path = "libraries/synchronization" }
 network = { path = "subsystems/network" }
+lifecycle = { path = "subsystems/lifecycle" }
 debug_protocol = { path = "libraries/debug_protocol" }
 peripherals = { path = "libraries/peripherals" }
 bootsplash = { path = "libraries/bootsplash" }
@@ -187,6 +191,7 @@ members = [
   "executables/text_editor",
   "libraries/authentication",
   "subsystems/network",
+  "subsystems/lifecycle",
   "libraries/debug_protocol",
   "libraries/synchronization",
   "subsystems/task/task_macros",

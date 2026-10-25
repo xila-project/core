@@ -1289,6 +1289,8 @@ name = "drivers_core"
 version = "0.1.0"
 dependencies = [
  "file_system",
+ "lifecycle",
+ "shared",
 ]
 
 [[package]]
@@ -2538,6 +2540,13 @@ name = "linked_list_allocator"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b23ac50abb8261cb38c6e2a7192d3302e0836dac1628f6a93b82b4fad185897"
+
+[[package]]
+name = "lifecycle"
+version = "0.1.0"
+dependencies = [
+ "file_system",
+]
 
 [[package]]
 name = "linux-raw-sys"
@@ -5865,6 +5874,7 @@ dependencies = [
  "executable",
  "file_system",
  "graphics",
+ "lifecycle",
  "little_fs",
  "log 0.1.0",
  "memory",
