@@ -53,7 +53,6 @@ EXPECTED_PACKAGE_NAMES = {
     "libraries/shared/Cargo.toml": "xila-shared",
     "libraries/synchronization/Cargo.toml": "xila-synchronization",
     "libraries/testing/Cargo.toml": "xila-testing",
-    "libraries/verification/Cargo.toml": "verification",
     "subsystems/graphics/Cargo.toml": "xila-graphics",
     "subsystems/graphics/bindings_generator/Cargo.toml": "xila-graphics-bindgen",
     "subsystems/graphics/tests/font_link/Cargo.toml": "xila-graphics-font-link-test",
@@ -156,7 +155,6 @@ class CargoPackageNames(unittest.TestCase):
             if path not in {
                 "Cargo.toml",
                 "libraries/http/Cargo.toml",
-                "libraries/verification/Cargo.toml",
                 "tools/verification_probe/Cargo.toml",
             }:
                 self.assertTrue(name.startswith("xila-"), f"{path} has unprefixed name {name}")

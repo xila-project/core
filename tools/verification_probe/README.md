@@ -10,7 +10,7 @@ Install the targets using the compiler that runs Cargo:
 
 ```sh
 rustup target add thumbv7em-none-eabi wasm32-unknown-unknown wasm32-wasip1
-bash libraries/verification/check.sh
+bash tools/verification_probe/check-verification.sh
 bash tools/verification_probe/check.sh thumbv7em-none-eabi
 COMPACT_SHA2=1 bash tools/verification_probe/check.sh thumbv7em-none-eabi
 bash tools/verification_probe/check.sh wasm32-unknown-unknown
