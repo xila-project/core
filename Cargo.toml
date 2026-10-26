@@ -75,6 +75,7 @@ graphics_rendering_xrgb8888 = ["graphics", "graphics/rendering_xrgb8888"]
 
 [workspace.dependencies]
 xila_http = { path = "libraries/http", default-features = false }
+timezone = { package = "xila-timezone", path = "libraries/timezone", default-features = false }
 verification = { git = "https://github.com/xila-project/package_manager", rev = "f5e3f0b323a79a80d106ce2b88b77bfa8667d71b", default-features = false }
 application_metadata = { package = "xila-application-metadata", path = "libraries/application_metadata" }
 audio = { package = "xila-audio", path = "libraries/audio" }
@@ -162,6 +163,7 @@ getargs-derive = { git = "https://github.com/AlixANNERAUD/getargs-derive.git", r
 [workspace]
 members = [
   "libraries/http",
+  "libraries/timezone",
   "libraries/firmware_update",
   "libraries/application_metadata",
   "libraries/audio",

@@ -1,0 +1,31 @@
+[package]
+name = "xila-timezone"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Allocation-free IANA civil time conversion for Xila"
+
+[lib]
+name = "timezone"
+
+[dependencies]
+jiff = { version = "=0.2.38", default-features = false }
+
+[build-dependencies]
+jiff-tzdb = { version = "=0.1.9", optional = true }
+
+[features]
+default = []
+iana-data = ["jiff/static", "dep:jiff-tzdb"]
+zone-europe-paris = ["iana-data"]
+zone-america-new-york = ["iana-data"]
+zone-asia-kathmandu = ["iana-data"]
+zone-asia-kolkata = ["iana-data"]
+zone-australia-lord-howe = ["iana-data"]
+bundled = [
+  "zone-europe-paris",
+  "zone-america-new-york",
+  "zone-asia-kathmandu",
+  "zone-asia-kolkata",
+  "zone-australia-lord-howe",
+]
