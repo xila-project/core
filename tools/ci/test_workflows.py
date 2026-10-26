@@ -635,7 +635,8 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn("rust", task_tools["ci:host"])
         self.assertIn("wasm32-wasip1", task_tools["ci:wasm"]["rust"]["targets"])
         self.assertIn("aqua:taiki-e/cargo-llvm-cov", task_tools["ci:coverage"])
-        self.assertIn("cargo:trunk", task_tools["pages:demo"])
+        self.assertEqual(task_tools["pages:demo"]["github:trunk-rs/trunk"], "0.21.14")
+        self.assertNotIn("cargo:trunk", task_tools["pages:demo"])
         self.assertEqual({"mise.ci.toml", "mise.development.toml"}, {path.name for path in ROOT.glob("mise.*.toml")})
 
         for workflow in ACTIVE_WORKFLOWS:
