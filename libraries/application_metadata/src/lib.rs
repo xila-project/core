@@ -13,9 +13,9 @@ pub const GUESTS: &[&str] = &[
     "weather",
 ];
 #[cfg(unix)]
-pub const NATIVE: &[&str] = &["file_manager", "terminal", "settings", "debug"];
+pub const NATIVE: &[&str] = &["file_manager", "terminal", "settings", "debug", "activity"];
 #[cfg(not(unix))]
-pub const NATIVE: &[&str] = &["file_manager", "terminal", "settings"];
+pub const NATIVE: &[&str] = &["file_manager", "terminal", "settings", "activity"];
 pub const PENDING_PATH: &str = "/system/accounts/.seed-pending";
 pub const PENDING_CONTENT: &[u8] = b"xila-seed-v1\n";
 
@@ -33,6 +33,7 @@ pub fn application_identifier(name: &str) -> Option<task::ApplicationIdentifier>
         "settings" => 9,
         "command_line_shell" => 10,
         "graphical_shell" => 11,
+        "activity" => 12,
         _ => return None,
     };
     task::ApplicationIdentifier::new(value)
@@ -60,6 +61,7 @@ pub fn application_name_for_path(path: &str) -> Option<&'static str> {
         "settings",
         "command_line_shell",
         "graphical_shell",
+        "activity",
     ]
     .into_iter()
     .find(|candidate| *candidate == name)
@@ -91,6 +93,7 @@ pub fn shortcut(name: &str) -> Option<String> {
             [158, 158, 158],
             false,
         ),
+        "activity" => ("System activity", "Ac", [0, 150, 136], false),
         "debug" => ("Debug", "Db", [235, 87, 87], false),
         _ => return None,
     };
@@ -104,4 +107,21 @@ pub fn shortcut(name: &str) -> Option<String> {
         r#"{{"name": "{label}","command": "/applications/executables/{command}","arguments": [{arguments}],"terminal":false,"icon_string":"{icon}","icon_color":[{},{},{}]}}"#,
         color[0], color[1], color[2]
     ))
+}
+
+#[cfg(test)]
+mod activity_tests {
+    #[test]
+    fn activity_launcher_is_native() {
+        assert!(super::NATIVE.contains(&"activity"));
+        assert!(!super::GUESTS.contains(&"activity"));
+        let shortcut = super::shortcut("activity").unwrap();
+        assert!(shortcut.contains("/applications/executables/activity"));
+        assert!(!shortcut.contains("/applications/executables/wasm"));
+        assert_eq!(
+            super::application_name_for_path("/applications/executables/activity"),
+            Some("activity")
+        );
+        assert!(super::application_identifier("activity").is_some());
+    }
 }

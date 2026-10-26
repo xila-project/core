@@ -956,3 +956,32 @@ async fn authority_tracks_user_and_rejects_reused_task_identifier() {
         UserIdentifier::ROOT
     );
 }
+
+#[test(task_path = crate)]
+async fn task_count_tracks_registration_and_completion() {
+    let manager = initialize();
+    let parent = manager.get_current_task_identifier().await;
+    let before = manager.get_task_count().await;
+    let release = alloc::sync::Arc::new(synchronization::signal::Signal::<
+        synchronization::blocking_mutex::raw::CriticalSectionRawMutex,
+        (),
+    >::new());
+    let child_release = release.clone();
+    let (child, _) = manager
+        .spawn(parent, "counted", None, move |_| async move {
+            child_release.wait().await
+        })
+        .await
+        .unwrap();
+    assert_eq!(manager.get_task_count().await, before + 1);
+    release.signal(());
+    child.join().await;
+    // Join completion is signalled before task unregistration finishes.
+    for _ in 0..100 {
+        if manager.get_task_count().await == before {
+            return;
+        }
+        crate::sleep(Duration::from_millis(1)).await;
+    }
+    assert_eq!(manager.get_task_count().await, before);
+}

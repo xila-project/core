@@ -1,0 +1,16 @@
+{
+  "app.title": "System activity",
+  "metrics.uptime": "Uptime: {} s",
+  "metrics.tasks": "Registered tasks: {}",
+  "metrics.memory_used": "Allocator used: {} bytes",
+  "metrics.memory_capacity": "Allocator capacity: {} bytes",
+  "metrics.capacity_unavailable": "Allocator capacity: unavailable",
+  "metrics.unsupported": "CPU load / registered devices: unavailable",
+  "app.sources": "Xila time, task registry and allocator",
+  "actions.interval": "Refresh: {} ms (change)",
+  "actions.start": "Start demo (4 KiB / 10 s)",
+  "actions.stop": "Stop demo",
+  "workload.idle": "Demo: stopped",
+  "workload.running": "Demo: running (512 bytes / 25 ms)",
+  "workload.failed": "Demo: unavailable (allocation failed)"
+}
