@@ -219,6 +219,56 @@ async fn wasmi_adapter_uses_context_and_checked_exports() {
             );
         }
     }
+    // GraphicsState::new has no filesystem context; the Wasmi boundary must
+    // capture the trusted guest's task/VFS rather than the graphics worker.
+    memory.data_mut(&mut store)[700..702].copy_from_slice(b"/\0");
+    assert_eq!(
+        invoke
+            .call(
+                &mut store,
+                (
+                    Function::FilePickerCreate.id(),
+                    1,
+                    2,
+                    700,
+                    0,
+                    0,
+                    0,
+                    0,
+                    3,
+                    800
+                )
+            )
+            .unwrap(),
+        0
+    );
+    let picker = {
+        use wasm::translation::{GuestMemory, GuestPointer, WasmUsize};
+        GuestMemory::new(memory.data_mut(&mut store))
+            .read::<WasmUsize>(GuestPointer::new(800))
+            .unwrap()
+    };
+    assert_eq!(
+        invoke
+            .call(
+                &mut store,
+                (
+                    Function::FilePickerGetStatus.id(),
+                    picker,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    1,
+                    820
+                )
+            )
+            .unwrap(),
+        0
+    );
+    assert_eq!(&memory.data(&store)[820..824], &[0, 0, 0, 0]);
     drop(store);
     assert_eq!(manager.get_window_count().await.unwrap(), 0);
 }

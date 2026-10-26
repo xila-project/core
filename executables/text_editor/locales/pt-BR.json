@@ -9,12 +9,14 @@
   "controls": {
     "new_file": "Novo",
     "open_file": "Abrir",
-    "save_file": "Salvar"
+    "save_file": "Salvar",
+    "choose_folder": "Pasta"
   },
   "file_path": {
     "instructions": "Escolha um caminho e crie ou abra um arquivo de texto",
     "placeholder": "Informe um caminho absoluto de arquivo",
-    "new_file_default_name": "Novo arquivo de texto"
+    "new_file_default_name": "Novo arquivo de texto",
+    "picker_instructions": "Escolha Abrir, Salvar ou Pasta para procurar arquivos"
   },
   "warnings": {
     "unsaved_close_again": "Alterações não salvas - feche novamente para descartar",
@@ -23,7 +25,8 @@
   "status": {
     "open_or_create_first": "Abra ou crie um arquivo primeiro",
     "opened": "Aberto",
-    "saved": "Salvo"
+    "saved": "Salvo",
+    "folder_selected": "Pasta selecionada - escolha Novo para criar um arquivo aqui"
   },
   "errors": {
     "working_copy_creation_failed": "Não foi possível criar uma cópia de trabalho neste diretório",
@@ -31,6 +34,7 @@
     "save_failed_working_copy_preserved": "Falha ao salvar - cópia de trabalho preservada; verifique o caminho e o armazenamento",
     "page_exceeds_byte_limit": "O texto da página deve caber em 4096 bytes UTF-8",
     "edit_failed_close_again": "Falha na edição - feche novamente para descartar as alterações",
-    "edit_failed_reopen_source": "Falha na edição - reabra o arquivo de origem"
+    "edit_failed_reopen_source": "Falha na edição - reabra o arquivo de origem",
+    "folder_path_too_long": "O caminho da pasta não deixa espaço para um nome de arquivo"
   }
 }

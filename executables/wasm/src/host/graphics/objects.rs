@@ -38,6 +38,7 @@ unsafe extern "C" fn deleted(event: *mut lvgl::lv_event_t) {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Kind {
     Window,
+    FilePicker,
     Object,
     Label,
     ButtonMatrix,
@@ -102,6 +103,11 @@ pub struct GraphicsState {
     entries: Vec<Entry>,
     grid_tracks: usize,
     widget_options_bytes: usize,
+    /// Trusted native context, refreshed from GlobalStore at the VM boundary.
+    pub(crate) file_system: Option<(
+        &'static xila::virtual_file_system::VirtualFileSystem,
+        xila::task::TaskIdentifier,
+    )>,
 }
 
 impl GraphicsState {
@@ -111,7 +117,20 @@ impl GraphicsState {
             entries: Vec::new(),
             grid_tracks: 0,
             widget_options_bytes: 0,
+            file_system: None,
         }
+    }
+
+    /// Supply the caller identity when using the VM-independent dispatcher.
+    /// The Wasmi adapter always supplies its own trusted store context.
+    pub fn with_file_system(
+        manager: Option<&'static Manager>,
+        vfs: &'static xila::virtual_file_system::VirtualFileSystem,
+        task: xila::task::TaskIdentifier,
+    ) -> Self {
+        let mut state = Self::new(manager);
+        state.file_system = Some((vfs, task));
+        state
     }
 
     pub(crate) fn ensure_capacity(&self) -> Result<()> {

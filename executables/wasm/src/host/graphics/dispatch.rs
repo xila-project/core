@@ -557,6 +557,67 @@ pub fn dispatch(
     }
     let [a, b, c, ..] = call.arguments;
     match function {
+        Function::FilePickerCreate => {
+            state.ensure_capacity()?;
+            let parent = state.object(a, None)?;
+            let mode = match b {
+                0 => xila::graphics::FilePickerMode::OpenFile,
+                1 => xila::graphics::FilePickerMode::SaveFile,
+                2 => xila::graphics::FilePickerMode::Directory,
+                _ => return Err(GraphicsError::InvalidValue),
+            };
+            let initial = read_c_string(memory, c)?
+                .to_str()
+                .map_err(|_| GraphicsError::InvalidValue)?;
+            let (vfs, task) = state.file_system.ok_or(GraphicsError::Unavailable)?;
+            let picker =
+                unsafe { xila::graphics::FilePicker::new(parent, vfs, task, mode, initial) }
+                    .map_err(|error| match error {
+                        xila::graphics::Error::InvalidParameter => GraphicsError::InvalidValue,
+                        _ => GraphicsError::NativeFailure,
+                    })?;
+            let handle = state.insert(picker.as_ptr().cast(), Kind::FilePicker, Some(a))?;
+            memory
+                .write(GuestPointer::new(call.result), handle)
+                .expect("validated result");
+        }
+        Function::FilePickerGetStatus => {
+            let picker = state
+                .object(a, Some(Kind::FilePicker))?
+                .cast::<xila::graphics::FilePicker>();
+            let status = match unsafe { (*picker).status() } {
+                xila::graphics::FilePickerStatus::Pending => 0u32,
+                xila::graphics::FilePickerStatus::Selected => 1,
+                xila::graphics::FilePickerStatus::Cancelled => 2,
+            };
+            memory
+                .write(GuestPointer::new(call.result), status)
+                .expect("validated result");
+        }
+        Function::FilePickerGetPath => {
+            let picker = state
+                .object(a, Some(Kind::FilePicker))?
+                .cast::<xila::graphics::FilePicker>();
+            let path = unsafe { (*picker).selected_path() };
+            let length = if let Some(path) = path {
+                if path.len() as WasmUsize >= c {
+                    return Err(GraphicsError::InvalidValue);
+                }
+                // Validate only the range written. Retain the selection on every
+                // error so a caller can retry with a valid/larger buffer.
+                let bytes = memory
+                    .bytes_mut(GuestSlice::new(b, (path.len() + 1) as WasmUsize))
+                    .ok_or(GraphicsError::InvalidMemory)?;
+                bytes[..path.len()].copy_from_slice(path.as_bytes());
+                bytes[path.len()] = 0;
+                path.len() as i32
+            } else {
+                -1
+            };
+            memory
+                .write(GuestPointer::new(call.result), length)
+                .expect("validated result");
+        }
         Function::ObjectSetPadding => {
             let object = state.object(a, None)?;
             let padding = i32::try_from(b).map_err(|_| GraphicsError::InvalidValue)?;

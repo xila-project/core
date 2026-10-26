@@ -11,6 +11,14 @@ pub fn default_path() -> Option<String> {
         .ok()
         .map(|directory| format!("{directory}/untitled.txt"))
 }
+/// Prepare the folder-picker example without exceeding the system path budget.
+pub fn new_path(directory: &str) -> Option<String> {
+    let directory = directory.trim_end_matches('/');
+    if directory.len() + "/new.txt".len() > 1023 {
+        return None;
+    }
+    Some(format!("{directory}/new.txt"))
+}
 const IO_BYTES: usize = 4096;
 
 pub struct WorkingCopy {
@@ -393,5 +401,17 @@ mod tests {
             assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
         }
         fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod picker_path_tests {
+    #[test]
+    fn folder_destination_respects_picker_byte_limit() {
+        assert_eq!(super::new_path("/").as_deref(), Some("/new.txt"));
+        assert_eq!(super::new_path("/data/").as_deref(), Some("/data/new.txt"));
+        assert!(super::new_path(&format!("/{}", "a".repeat(1014))).is_some());
+        assert!(super::new_path(&format!("/{}", "a".repeat(1015))).is_none());
+        assert!(super::new_path(&format!("/{}", "é".repeat(508))).is_none());
     }
 }

@@ -67,6 +67,15 @@ pub fn get() -> TokenStream {
             pub fn window_pop_pointer_event(window: *mut lv_obj_t, code: *mut u32, target: *mut WasmPointer, x: *mut i32, y: *mut i32, width: *mut i32, height: *mut i32);
             pub fn object_delete(__translator : &mut Translator, object: u16);
 
+            /// Create a system LVGL picker. Modes: 0=open, 1=save, 2=directory.
+            /// Initial path is copied; filesystem access uses the calling guest task.
+            pub fn file_picker_create(parent: *mut lv_obj_t, mode: u32, initial: *const core::ffi::c_char) -> *mut lv_obj_t;
+            /// 0=pending, 1=selected, 2=cancelled. Result persists until deletion.
+            pub fn file_picker_get_status(picker: *mut lv_obj_t) -> u32;
+            /// Copy selected absolute VFS path including NUL. Returns byte count
+            /// excluding NUL, or -1 without a selection. Short buffers are errors.
+            pub fn file_picker_get_path(picker: *mut lv_obj_t, buffer: *mut i8, size: usize) -> i32;
+
             pub fn window_create() -> *mut lv_obj_t;
 
             pub fn window_pop_event(

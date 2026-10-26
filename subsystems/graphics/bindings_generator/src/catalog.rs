@@ -52,6 +52,9 @@ fn extension_id(name: &str) -> Option<u16> {
         "object_set_theme_error" => 0xf02a,
         "badge_create" => 0xf02b,
         "card_create" => 0xf02c,
+        "file_picker_create" => 0xf02d,
+        "file_picker_get_status" => 0xf02e,
+        "file_picker_get_path" => 0xf02f,
         _ => return None,
     })
 }
