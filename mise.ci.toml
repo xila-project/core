@@ -491,7 +491,8 @@ tools.rust = { version = "{{ vars.nightly_version }}", profile = "minimal", comp
 ], targets = [
   "wasm32-unknown-unknown",
 ] }
-tools."cargo:trunk" = "{{ vars.trunk_version }}"
+# Install Trunk from upstream release assets to avoid compiling it (and bootstrapping stable Rust).
+tools."github:trunk-rs/trunk" = "{{ vars.trunk_version }}"
 run = "trunk build --release --public-url ./"
 
 [tasks."clippy:host"]
