@@ -7,6 +7,10 @@ use core::ffi::{CStr, c_char};
 
 pub const MAX_STRING_BYTES: usize = 1024;
 pub const MAX_TEXTAREA_BYTES: usize = 4097;
+pub const MAX_WIDGET_OPTIONS_BYTES: usize = 1024;
+pub const MAX_WIDGET_OPTIONS: usize = 64;
+pub const MAX_ROLLER_INFINITE_OPTIONS_BYTES: usize = 512;
+pub const MAX_WIDGET_OPTIONS_BYTES_PER_VM: usize = 8192;
 /// Includes the sentinel. Calculator uses 48 entries.
 pub const MAX_MAP_ENTRIES: usize = 64;
 /// Includes every string's NUL and the native empty-string sentinel.
@@ -14,6 +18,21 @@ pub const MAX_MAP_BYTES: usize = 8192;
 /// Includes the LVGL sentinel for each axis; each axis may have at most 31 tracks.
 pub const MAX_GRID_TRACKS_PER_AXIS: usize = 32;
 const VALID_STYLE_STATES: u32 = 0xF3FD;
+
+/// LVGL's void setters may retain the old value on allocation failure, so
+/// replacements conservatively retain the per-object high-water charge.
+pub fn updated_widget_options_usage(total: usize, previous: usize, new: usize) -> Result<usize> {
+    let used = total
+        .checked_sub(previous)
+        .ok_or(GraphicsError::InvalidValue)?
+        .checked_add(previous.max(new))
+        .ok_or(GraphicsError::ResourceLimit)?;
+    if used > MAX_WIDGET_OPTIONS_BYTES_PER_VM {
+        Err(GraphicsError::ResourceLimit)
+    } else {
+        Ok(used)
+    }
+}
 
 /// Restrict style selectors to known LVGL parts and state bits.
 pub fn validate_style_selector(selector: u32) -> Result<()> {
@@ -118,11 +137,36 @@ pub fn read_c_string<'a>(memory: &'a GuestMemory<'_>, offset: WasmUsize) -> Resu
     read_c_string_with_limit(memory, offset, MAX_STRING_BYTES)
 }
 
+/// Reads a bounded, NUL-terminated UTF-8 guest string for LVGL text APIs.
+pub fn read_utf8_c_string<'a>(memory: &'a GuestMemory<'_>, offset: WasmUsize) -> Result<&'a str> {
+    read_c_string(memory, offset)?
+        .to_str()
+        .map_err(|_| GraphicsError::InvalidValue)
+}
+
 pub fn read_textarea_string<'a>(
     memory: &'a GuestMemory<'_>,
     offset: WasmUsize,
 ) -> Result<&'a CStr> {
     read_c_string_with_limit(memory, offset, MAX_TEXTAREA_BYTES)
+}
+
+/// Reads newline-separated widget options. LVGL's dynamic setters copy this
+/// string, so the returned borrow is only valid for the current host call.
+pub fn read_widget_options<'a>(memory: &'a GuestMemory<'_>, offset: WasmUsize) -> Result<&'a CStr> {
+    let options = read_c_string_with_limit(memory, offset, MAX_WIDGET_OPTIONS_BYTES)?;
+    let entries = options.to_bytes().split(|byte| *byte == b'\n');
+    let mut count = 0;
+    for entry in entries {
+        count += 1;
+        if entry.len() >= MAX_STRING_BYTES {
+            return Err(GraphicsError::ResourceLimit);
+        }
+    }
+    if count > MAX_WIDGET_OPTIONS {
+        return Err(GraphicsError::ResourceLimit);
+    }
+    Ok(options)
 }
 
 fn read_c_string_with_limit<'a>(

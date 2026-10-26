@@ -1,12 +1,68 @@
 use super::{
     error::GraphicsError,
     marshal::{
-        ButtonMap, GridTracks, read_c_string, read_textarea_string, validate_style_selector,
+        ButtonMap, GridTracks, read_c_string, read_textarea_string, read_utf8_c_string, read_widget_options,
+        updated_widget_options_usage, validate_style_selector,
     },
 };
 use crate::host::translation::{GuestMemory, GuestPointer, GuestValue, WasmUsize};
 use alloc::{vec, vec::Vec};
 use core::ffi::CStr;
+
+#[test]
+fn widget_option_usage_charges_replacement_high_water_and_caps_vm_budget() {
+    assert_eq!(updated_widget_options_usage(700, 100, 200), Ok(800));
+    assert_eq!(updated_widget_options_usage(700, 200, 100), Ok(700));
+    assert_eq!(
+        updated_widget_options_usage(8192, 1024, 1025),
+        Err(GraphicsError::ResourceLimit)
+    );
+    assert_eq!(
+        updated_widget_options_usage(100, 101, 50),
+        Err(GraphicsError::InvalidValue)
+    );
+}
+
+#[test]
+fn utf8_c_strings_reject_invalid_sequences_before_native_copying() {
+    let mut bytes = [0; 8];
+    bytes[1..4].copy_from_slice(&[0xc3, 0x28, 0]);
+    let memory = GuestMemory::new(&mut bytes);
+    assert_eq!(read_utf8_c_string(&memory, 1), Err(GraphicsError::InvalidValue));
+}
+
+#[test]
+fn widget_options_are_bounded_for_guest_to_lvgl_copying() {
+    let mut bytes = [0; 9000];
+    bytes[64..77].copy_from_slice(b"One\nDeux\n\xe4\xb8\x89\0");
+    let memory = GuestMemory::new(&mut bytes);
+    assert_eq!(read_widget_options(&memory, 64).unwrap().to_bytes(), "One\nDeux\n三".as_bytes());
+}
+
+#[test]
+fn widget_options_reject_excess_entries_and_oversized_option_text() {
+    let mut bytes = [0; 9000];
+    bytes[64..64 + 1100].fill(b'a');
+    bytes[64 + 1100] = 0;
+    let memory = GuestMemory::new(&mut bytes);
+    assert_eq!(
+        read_widget_options(&memory, 64),
+        Err(GraphicsError::ResourceLimit)
+    );
+
+    drop(memory);
+    bytes.fill(0);
+    for index in 0..65 {
+        bytes[64 + index * 2] = b'x';
+        bytes[65 + index * 2] = b'\n';
+    }
+    bytes[64 + 130] = 0;
+    let memory = GuestMemory::new(&mut bytes);
+    assert_eq!(
+        read_widget_options(&memory, 64),
+        Err(GraphicsError::ResourceLimit)
+    );
+}
 
 #[test]
 fn style_selectors_allow_known_parts_and_states_only() {

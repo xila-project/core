@@ -130,13 +130,35 @@ grow, width/height, flags, validated Grid tracks/placement/alignment, local
 background/text/border/radius/opacity/text-alignment/min-max styling, semantic
 theme surfaces and host font roles, labels (creation/text), button matrices
 (creation/map/selection), range/value/mode/orientation for Arc/Bar/Slider,
-Switch orientation/state, Spinner animation parameters/duration/sweep, and percentage
-conversion. Most other widget-specific query/configuration APIs and advanced
-style properties remain unsupported.
+Switch orientation/state, Spinner animation parameters/duration/sweep, Dropdown
+and Roller with bounded copied options, selection and selected-text queries, and
+percentage conversion. Calendar supports validated today/shown dates, bounded
+copied highlights, and shown-date output. Spinbox supports bounded range/value/
+step/digit-format operations, rollover, increment, and decrement. Most other
+widget-specific query/configuration APIs and advanced style properties remain
+unsupported. Chart supports bounded series slots and copied values; Line accepts
+bounded points copied into host-owned memory because LVGL retains the point
+array pointer. List supports copied text sections/buttons with safe child
+handles, and Tileview supports bounded tile creation and active-tile navigation.
+List text is UTF-8 validated and copied before native calls; the guest never
+passes icon, tile, or series pointers to LVGL.
+The shadcn-themed slice adds Badge and Card helpers, Button variants, and Input
+error states by calling the shared `lvgl_theme_shadcn` theme APIs.
 
 - 256 issued object handles per execution, including subsequently deleted ones.
 - 64 map entries including the sentinel; 1024 bytes per NUL-terminated string.
 - 8192 retained map-string bytes per widget, including the native sentinel.
+- 1024 option-string bytes/64 entries per Dropdown or Roller, with an 8192-byte
+  per-VM retained high-water budget shared with Calendar highlights, Line points,
+  and List text. Calendar accepts at most 32 dates; Roller infinite mode has a
+  512-byte input cap to bound LVGL's repeated internal option storage.
+- Spinbox values are limited to ±1,000,000, step to 1..=1,000,000, and digit
+  count to 1..=10. Calendar dates use Gregorian validation.
+- Chart allows up to 8 series and 128 values per series; Line allows up to 128
+  points. List allows 64 child items and Tileview 32 live tiles per view; tile
+  coordinates must be unique within a view.
+- Theme variants are 0..=4, surfaces are 0..=3, and error flags are boolean;
+  palette updates remain owned by the existing display theme integration.
 - Null and empty-string guest map sentinels both become LVGL's empty-string
   terminator. Row separators are preserved.
 
@@ -170,8 +192,8 @@ the generator currently emits more guest wrappers than the host implements;
 unsupported calls return status 4 and should not be treated as available APIs.
 
 Static audit of the current LVGL configuration: 28 surveyed widget families
-are enabled, while the guest generator emits 1,070 LVGL/Xila wrappers and the
-host supports 74 calls (including Xila helpers). Seven enabled widget families
+are enabled, while the guest generator emits 1,074 LVGL/Xila wrappers and the
+host supports 92 calls (including Xila helpers). Seven enabled widget families
 have creation adapters, but several remain partial. This is not a runtime or
 performance benchmark. The next ABI tranches are a shared host/guest support
 manifest and inventory, semantic style/font APIs, then the BTreeMap handle
