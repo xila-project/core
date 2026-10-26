@@ -33,6 +33,7 @@ virtual_file_system = { workspace = true, optional = true }
 graphics = { workspace = true, optional = true }
 task = { workspace = true, optional = true }
 time = { workspace = true, optional = true }
+timezone = { workspace = true, optional = true }
 users = { workspace = true, optional = true }
 memory = { workspace = true, optional = true }
 executable = { workspace = true, optional = true }
@@ -66,6 +67,8 @@ default = [
 
 executable_building = ["executable/building"]
 audio = ["dep:audio"]
+timezone = ["dep:timezone"]
+timezone-clock = ["timezone", "timezone/runtime-clock"]
 abi_definitions = ["dep:abi_definitions"]
 bootsplash = ["dep:bootsplash"]
 graphics = ["dep:graphics", "executable/graphics"]

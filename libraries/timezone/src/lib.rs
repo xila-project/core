@@ -15,6 +15,8 @@
 //! ```
 #![no_std]
 
+#[cfg(feature = "runtime-clock")]
+mod clock;
 mod error;
 mod zone;
 

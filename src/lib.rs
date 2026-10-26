@@ -18,6 +18,8 @@ pub use shared;
 pub use synchronization;
 pub use task;
 pub use time;
+#[cfg(feature = "timezone")]
+pub use timezone;
 pub use users;
 pub use virtual_file_system;
 

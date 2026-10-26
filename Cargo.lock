@@ -5160,6 +5160,7 @@ dependencies = [
  "xila-synchronization",
  "xila-task",
  "xila-time",
+ "xila-timezone",
  "xila-users",
  "xila-virtual-file-system",
 ]
@@ -5842,8 +5843,10 @@ dependencies = [
 name = "xila-timezone"
 version = "0.1.0"
 dependencies = [
+ "critical-section",
  "jiff",
  "jiff-tzdb",
+ "xila-time",
 ]
 
 [[package]]
