@@ -26,12 +26,15 @@ struct Interface {
     confirm_open: Option<u64>,
     confirm_close: Option<u64>,
     working_unusable: bool,
-    _action_map: [*const i8; 7],
+    picker: Option<(*mut Object, FilePickerMode)>,
+    retained_picker: Option<*mut Object>,
+    _action_map: [*const i8; 8],
 }
 
 pub fn run() -> wasm::Result<()> {
     let mut ui = unsafe { Interface::new()? };
     loop {
+        ui.poll_picker()?;
         for _ in 0..32 {
             let mut code = 0u32;
             let mut target: *mut Object = null_mut();
@@ -68,14 +71,17 @@ pub fn run() -> wasm::Result<()> {
                 }
                 ui.status(translate!("warnings.unsaved_close_again"))?;
                 ui.confirm_close = Some(ui.revision);
+            } else if ui.picker.is_some() {
+                continue;
             } else if code == EventCode::ValueChanged as u32 && target == ui.actions {
                 let action = unsafe { buttonmatrix_get_selected_button(ui.actions)? };
                 match action {
                     0 => ui.navigate(false)?,
                     1 => ui.navigate(true)?,
                     2 => ui.new_document()?,
-                    3 => ui.open_document()?,
-                    4 => ui.save_document()?,
+                    3 => ui.choose_path(FilePickerMode::OpenFile)?,
+                    4 => ui.choose_path(FilePickerMode::SaveFile)?,
+                    5 => ui.choose_path(FilePickerMode::Directory)?,
                     _ => (),
                 }
             } else if code == EventCode::Focused as u32 && (target == ui.path || target == ui.text)
@@ -120,7 +126,7 @@ impl Interface {
             object_set_padding(window, 4)?;
             let actions = buttonmatrix_create(window)?;
             object_set_width(actions, percentage(100)?)?;
-            object_set_height(actions, 36)?;
+            object_set_height(actions, 72)?;
             let action_map = [
                 translate!(c"navigation.previous_page").as_ptr(),
                 translate!(c"navigation.next_page").as_ptr(),
@@ -128,12 +134,13 @@ impl Interface {
                 translate!(c"controls.new_file").as_ptr(),
                 translate!(c"controls.open_file").as_ptr(),
                 translate!(c"controls.save_file").as_ptr(),
+                translate!(c"controls.choose_folder").as_ptr(),
                 c"".as_ptr(),
             ];
             buttonmatrix_set_map(actions, action_map.as_ptr())?;
             let path = textarea_create(window)?;
             textarea_set_one_line(path, true)?;
-            textarea_set_max_length(path, 240)?;
+            textarea_set_max_length(path, 1023)?;
             let initial = std::env::args()
                 .nth(1)
                 .or_else(storage::default_path)
@@ -173,16 +180,18 @@ impl Interface {
                 confirm_open: None,
                 confirm_close: None,
                 working_unusable: false,
+                picker: None,
+                retained_picker: None,
                 _action_map: action_map,
             };
-            ui.status(translate!("file_path.instructions"))?;
+            ui.status(translate!("file_path.picker_instructions"))?;
             ui.show_page()?;
             Ok(ui)
         }
     }
 
     fn path(&self) -> wasm::Result<String> {
-        let mut bytes = [0i8; 240 * 4 + 1];
+        let mut bytes = [0i8; 1024];
         unsafe {
             textarea_get_text(self.path, bytes.as_mut_ptr(), bytes.len())?;
         }
@@ -291,10 +300,92 @@ impl Interface {
         Ok(())
     }
 
-    fn open_document(&mut self) -> wasm::Result<()> {
-        if (!self.working_unusable && !self.commit_page()?) || !self.allow_discard()? {
+    fn choose_path(&mut self, mode: FilePickerMode) -> wasm::Result<()> {
+        if self.picker.is_some() {
             return Ok(());
         }
+        if mode == FilePickerMode::OpenFile {
+            if (!self.working_unusable && !self.commit_page()?) || !self.allow_discard()? {
+                return Ok(());
+            }
+        } else if mode == FilePickerMode::SaveFile {
+            if self.working_unusable {
+                return self.status(translate!("errors.edit_failed_reopen_source"));
+            }
+            if !self.commit_page()? {
+                return Ok(());
+            }
+            if self.working.is_none() {
+                return self.status(translate!("status.open_or_create_first"));
+            }
+        }
+        let mut initial = self.path().unwrap_or_else(|_| "/".into());
+        if mode == FilePickerMode::Directory {
+            initial = Path::new(&initial)
+                .parent()
+                .and_then(Path::to_str)
+                .unwrap_or("/")
+                .into();
+        }
+        let initial = CString::new(initial).map_err(|_| -1)?;
+        unsafe {
+            object_add_flag(self.keyboard, ObjectFlag::Hidden)?;
+            let picker = if let Some(picker) = self.retained_picker {
+                file_picker_reset(picker, mode as u32, initial.as_ptr())?;
+                picker
+            } else {
+                let picker = file_picker_create(self.window, mode as u32, initial.as_ptr())?;
+                self.retained_picker = Some(picker);
+                picker
+            };
+            self.picker = Some((picker, mode));
+        }
+        Ok(())
+    }
+
+    fn poll_picker(&mut self) -> wasm::Result<()> {
+        let Some((picker, mode)) = self.picker else {
+            return Ok(());
+        };
+        let status = unsafe { file_picker_get_status(picker)? };
+        if status == FilePickerStatus::Pending as u32 {
+            return Ok(());
+        }
+        if status == FilePickerStatus::Selected as u32 {
+            let mut bytes = [0i8; 1024];
+            unsafe {
+                file_picker_get_path(picker, bytes.as_mut_ptr(), bytes.len())?;
+            }
+            let selected = unsafe { CStr::from_ptr(bytes.as_ptr()) }
+                .to_str()
+                .map_err(|_| -1)?;
+            let selected = if mode == FilePickerMode::Directory {
+                let Some(destination) = storage::new_path(selected) else {
+                    self.picker = None;
+                    return self.status(translate!("errors.folder_path_too_long"));
+                };
+                destination
+            } else {
+                selected.to_owned()
+            };
+            let selected = CString::new(selected).map_err(|_| -1)?;
+            unsafe {
+                textarea_set_text(self.path, selected.as_ptr())?;
+            }
+        }
+        self.picker = None;
+        if status == FilePickerStatus::Selected as u32 {
+            match mode {
+                FilePickerMode::OpenFile => self.open_document()?,
+                FilePickerMode::SaveFile => self.save_document()?,
+                FilePickerMode::Directory => self.status(translate!("status.folder_selected"))?,
+            }
+        }
+        Ok(())
+    }
+
+    fn open_document(&mut self) -> wasm::Result<()> {
+        // choose_path checked dirty-document consent before opening the picker.
         let path = match self.path() {
             Ok(path) => path,
             Err(_) => {

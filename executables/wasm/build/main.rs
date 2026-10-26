@@ -29,6 +29,30 @@ fn generate() {
     let supported: &[Adapter<'_>] = &[
         ("window_create", &[], "Word", Some("*mut lv_obj_t")),
         (
+            "file_picker_create",
+            &["*mut lv_obj_t", "u32", "*const core::ffi::c_char"],
+            "Word",
+            Some("*mut lv_obj_t"),
+        ),
+        (
+            "file_picker_reset",
+            &["*mut lv_obj_t", "u32", "*const core::ffi::c_char"],
+            "None",
+            None,
+        ),
+        (
+            "file_picker_get_status",
+            &["*mut lv_obj_t"],
+            "U32",
+            Some("u32"),
+        ),
+        (
+            "file_picker_get_path",
+            &["*mut lv_obj_t", "*mut i8", "usize"],
+            "I32",
+            Some("i32"),
+        ),
+        (
             "window_set_icon",
             &["*mut lv_obj_t", "*const core::ffi::c_char", "lv_color_t"],
             "None",

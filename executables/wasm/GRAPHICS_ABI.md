@@ -78,3 +78,13 @@ Tasks 1–3 are separable from the registry data structure for scalar handle cal
 - Native `graphics_core` test execution currently fails at link time because the local LVGL archive does not define Xila's generated font symbols (`font_montserrat_*`, `font_unscii_*`). The documented x86_64 test target is also not installed; this environment's host target is aarch64. Thus the new runtime integration assertions have been type-checked but not executed here.
 - No ESP32-S3 build, allocation profile, fragmentation benchmark, lock timing, browser app acceptance, or peak-RAM measurement has been run. No performance/MCU cost estimate is asserted as a measurement.
 - PRs and child issues are to be opened per tranche; #483 must remain open until its acceptance criteria are satisfied.
+
+## System file picker
+
+`file_picker_create(parent, mode, initial)` creates a graphics-owned LVGL component under an application object. Modes are `0` (open existing file), `1` (save file path), and `2` (directory). `initial` is a copied absolute Xila VFS path of at most 1,023 UTF-8 bytes. The component captures the guest task's VFS identity; its private child controls never receive guest handles. Browsing retains 16 entries per page and reports filesystem errors inside the picker.
+
+Poll `file_picker_get_status(picker)` for `0` (pending), `1` (selected), or `2` (cancelled). On selection, `file_picker_get_path(picker, buffer, size)` copies the absolute UTF-8 path with its NUL terminator and returns the byte length excluding NUL. It returns `-1` without a selection. Invalid memory and short buffers return ABI errors and preserve the result for retry. Call `file_picker_reset(picker, mode, initial)` to reuse the same handle for another request. It clears the old result and returns to pending with the new mode/path; invalid reset arguments leave the old result intact. Retaining and resetting the picker avoids spending a new monotonic registry handle for each dialog. Use `object_delete` when the component is no longer needed; deleting its parent also releases it and restores keyboard focus.
+
+Selection does not create or truncate a file. Save checks existing-file write access or parent-directory create authorization. The consuming application still performs the actual operation, which rechecks permissions, and owns overwrite policy. Native callers use `graphics::FilePicker::new` with an explicit VFS/task under the graphics lock and poll the same status/path behavior.
+
+These helpers use append-only IDs `0xf02d` through `0xf030`. The Text Editor demonstrates Open, Save, and Folder selection; cancelling leaves its document and path unchanged.

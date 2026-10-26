@@ -12,5 +12,15 @@
     "not_initialized": "Nicht initialisiert",
     "not_registered": "Nicht registriert",
     "out_of_memory": "Arbeitsspeicher erschöpft"
+  },
+  "file_picker": {
+    "parent": "Übergeordnet",
+    "previous": "Zurück",
+    "next": "Weiter",
+    "cancel": "Abbrechen",
+    "error": "Pfad kann nicht ausgewählt werden",
+    "open": "Öffnen",
+    "save": "Speichern",
+    "select_directory": "Ordner auswählen"
   }
 }

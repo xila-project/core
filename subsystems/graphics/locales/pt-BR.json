@@ -12,5 +12,15 @@
     "not_initialized": "Não inicializado",
     "not_registered": "Não registrado",
     "out_of_memory": "Memória esgotada"
+  },
+  "file_picker": {
+    "parent": "Pasta superior",
+    "previous": "Anterior",
+    "next": "Próxima",
+    "cancel": "Cancelar",
+    "error": "Não foi possível selecionar o caminho",
+    "open": "Abrir",
+    "save": "Salvar",
+    "select_directory": "Selecionar pasta"
   }
 }

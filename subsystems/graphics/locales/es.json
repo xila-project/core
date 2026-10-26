@@ -12,5 +12,15 @@
     "not_initialized": "No inicializado",
     "not_registered": "No registrado",
     "out_of_memory": "Memoria agotada"
+  },
+  "file_picker": {
+    "parent": "Carpeta superior",
+    "previous": "Anterior",
+    "next": "Siguiente",
+    "cancel": "Cancelar",
+    "error": "No se puede seleccionar la ruta",
+    "open": "Abrir",
+    "save": "Guardar",
+    "select_directory": "Seleccionar carpeta"
   }
 }

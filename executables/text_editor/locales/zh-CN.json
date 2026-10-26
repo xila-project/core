@@ -5,7 +5,8 @@
   "controls": {
     "new_file": "新建",
     "open_file": "打开",
-    "save_file": "保存"
+    "save_file": "保存",
+    "choose_folder": "文件夹"
   },
   "errors": {
     "edit_failed_close_again": "编辑失败 - 再次关闭以放弃更改",
@@ -13,12 +14,14 @@
     "open_failed": "打开失败 - 请使用 UTF-8 文本文件并检查存储空间",
     "page_exceeds_byte_limit": "每页文本的 UTF-8 编码不得超过 4096 字节",
     "save_failed_working_copy_preserved": "保存失败 - 已保留工作副本；请检查路径和存储空间",
-    "working_copy_creation_failed": "无法在此目录中创建工作副本"
+    "working_copy_creation_failed": "无法在此目录中创建工作副本",
+    "folder_path_too_long": "所选文件夹路径过长，无法添加文件名"
   },
   "file_path": {
     "instructions": "请选择路径，然后新建或打开文本文件",
     "new_file_default_name": "新建文本文件",
-    "placeholder": "请输入文件的绝对路径"
+    "placeholder": "请输入文件的绝对路径",
+    "picker_instructions": "选择打开、保存或文件夹来浏览文件"
   },
   "navigation": {
     "next_page": "下一页",
@@ -27,7 +30,8 @@
   "status": {
     "open_or_create_first": "请先打开或新建文件",
     "opened": "已打开",
-    "saved": "已保存"
+    "saved": "已保存",
+    "folder_selected": "已选择文件夹 - 选择新建以在此创建文件"
   },
   "warnings": {
     "unsaved_close_again": "更改尚未保存 - 再次关闭以放弃更改",

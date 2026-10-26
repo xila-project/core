@@ -29,6 +29,7 @@ fn call(
         return GraphicsError::Unavailable as i32;
     }
     let (bytes, store) = memory.data_and_store_mut(&mut caller);
+    store.graphics.file_system = Some((store.context.virtual_file_system, store.wasi.task));
     dispatch(
         &mut store.graphics,
         &mut GuestMemory::new(bytes),

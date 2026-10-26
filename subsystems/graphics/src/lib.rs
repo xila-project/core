@@ -39,3 +39,6 @@ pub use logo::*;
 pub mod appearance;
 pub mod fonts;
 pub mod theme;
+
+mod file_picker;
+pub use file_picker::*;

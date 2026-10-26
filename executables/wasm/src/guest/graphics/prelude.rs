@@ -19,6 +19,24 @@ unsafe extern "C" {
     ) -> i32;
 }
 
+/// System file picker selection policy. Selection never creates or truncates a file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum FilePickerMode {
+    OpenFile = 0,
+    SaveFile = 1,
+    Directory = 2,
+}
+
+/// A result remains available until the caller deletes the picker object.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum FilePickerStatus {
+    Pending = 0,
+    Selected = 1,
+    Cancelled = 2,
+}
+
 pub type Error = i32;
 
 pub type Result<T> = core::result::Result<T, Error>;
