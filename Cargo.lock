@@ -330,7 +330,7 @@ dependencies = [
  "regex",
  "rustc-hash 2.1.3",
  "shlex 2.0.1",
- "syn 3.0.9",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -3745,9 +3745,9 @@ dependencies = [
 
 [[package]]
 name = "smol_str"
-version = "0.3.6"
+version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4aaa7368fcf4852a4c2dd92df0cace6a71f2091ca0a23391ce7f3a31833f1523"
+checksum = "eeb7109d23f319619d4cc0de5464613c8b7b1a09db2774a58101459cf6be2f10"
 dependencies = [
  "borsh",
  "serde_core",
@@ -5631,7 +5631,7 @@ dependencies = [
  "embedded-i18n",
  "embedded-io-async",
  "heapless",
- "smol_str 0.3.6",
+ "smol_str 0.3.7",
  "smoltcp",
  "xila-abi-definitions",
  "xila-drivers-shared",
@@ -5721,7 +5721,7 @@ dependencies = [
  "embassy-time",
  "embedded-i18n",
  "libc",
- "smol_str 0.3.6",
+ "smol_str 0.3.7",
  "xila-drivers-core",
  "xila-drivers-native",
  "xila-drivers-shared",
