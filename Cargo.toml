@@ -124,6 +124,7 @@ wasm = { package = "xila-wasm", path = "executables/wasm" }
 terminal = { package = "xila-terminal", path = "executables/terminal" }
 settings = { package = "xila-settings", path = "executables/settings" }
 debug_application = { package = "xila-debug-application", path = "executables/debug" }
+activity = { package = "xila-activity", path = "executables/activity" }
 pixel_painter = { package = "xila-pixel-painter", path = "executables/pixel_painter" }
 text_editor = { package = "xila-text-editor", path = "executables/text_editor" }
 calculator = { package = "xila-calculator", path = "executables/calculator" }
@@ -185,6 +186,7 @@ members = [
   "executables/terminal",
   "executables/settings",
   "executables/debug",
+  "executables/activity",
   "executables/pixel_painter",
   "executables/text_editor",
   "libraries/authentication",

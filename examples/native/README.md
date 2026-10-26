@@ -102,3 +102,10 @@ A hardware or TAP packet device can use the same controller API independently.
 Run the hardware-free VFS lifecycle regression with
 `cargo test -p xila-drivers-native --test wifi`. Generic payload validation and command
 identifier uniqueness are covered by `cargo test -p xila-network --test wifi_types`.
+
+## System activity dashboard
+
+The native System activity app reports uptime, registered tasks and allocator
+usage with asynchronous refresh, explicit unavailable metrics, and a bounded
+start/stop demo workload. See [its metric sources and smoke test](../../executables/activity/README.md).
+It is compiled into the native runtime; it has no guest Wasm binary.

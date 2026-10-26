@@ -21,6 +21,7 @@ EXPECTED_PACKAGE_NAMES = {
     "drivers/wasm/Cargo.toml": "xila-drivers-wasm",
     "examples/native/Cargo.toml": "xila-native-example",
     "examples/wasm/Cargo.toml": "xila-wasm-example",
+    "executables/activity/Cargo.toml": "xila-activity",
     "executables/calculator/Cargo.toml": "xila-calculator",
     "executables/clock/Cargo.toml": "xila-clock",
     "executables/debug/Cargo.toml": "xila-debug-application",
@@ -86,6 +87,7 @@ EXPECTED_BINARY_TARGETS = {
 }
 
 EXPECTED_LIBRARY_TARGETS = {
+    "executables/activity/Cargo.toml": "activity",
     "libraries/application_metadata/Cargo.toml": "application_metadata",
     "subsystems/task/Cargo.toml": "task",
     "libraries/synchronization/Cargo.toml": "synchronization",

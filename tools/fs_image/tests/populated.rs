@@ -117,6 +117,11 @@ fn browser_and_native_bundles_contain_their_declared_apps() {
             }
         }
         assert_eq!(text.contains(",weather"), profile == "native");
+        let activity = b"/applications/executables/activity";
+        assert_eq!(
+            image.windows(activity.len()).any(|bytes| bytes == activity),
+            profile == "native"
+        );
     }
 }
 

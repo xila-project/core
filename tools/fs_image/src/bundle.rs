@@ -73,7 +73,11 @@ pub fn prepare(profile: &str, applications: &Path) -> Result<Staging, Box<dyn Er
         )?;
         fs::create_dir_all(staging.0.join(format!("data/applications/{name}")))?;
     }
-    for name in guests.iter().chain(application_metadata::NATIVE) {
+    for name in guests
+        .iter()
+        .chain(application_metadata::NATIVE)
+        .filter(|name| profile == "native" || **name != "activity")
+    {
         fs::write(
             staging.0.join(format!(
                 "configuration/shared/applications/shortcuts/{name}.json"

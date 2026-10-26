@@ -1,0 +1,24 @@
+{
+  "app": {
+    "title": "Atividade do sistema",
+    "sources": "Relógio, registro de tarefas e alocador do Xila"
+  },
+  "metrics": {
+    "uptime": "Tempo de atividade: {} s",
+    "tasks": "Tarefas registradas: {}",
+    "memory_used": "Memória usada pelo alocador: {} bytes",
+    "memory_capacity": "Capacidade do alocador: {} bytes",
+    "capacity_unavailable": "Capacidade do alocador: indisponível",
+    "unsupported": "Uso de CPU / dispositivos registrados: indisponível"
+  },
+  "actions": {
+    "interval": "Atualização: {} ms (alterar)",
+    "start": "Iniciar demonstração (4 KiB / 10 s)",
+    "stop": "Parar demonstração"
+  },
+  "workload": {
+    "idle": "Demonstração: parada",
+    "running": "Demonstração: em execução (512 bytes / 25 ms)",
+    "failed": "Demonstração: indisponível (falha de alocação)"
+  }
+}

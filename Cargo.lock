@@ -5153,6 +5153,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "xila-activity"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+ "embassy-futures",
+ "xila",
+ "xila-drivers-std",
+]
+
+[[package]]
 name = "xila-application-metadata"
 version = "0.1.0"
 dependencies = [
@@ -5595,6 +5605,7 @@ dependencies = [
  "getargs-derive",
  "xila",
  "xila-abi-definitions",
+ "xila-activity",
  "xila-audio",
  "xila-command-line-shell",
  "xila-debug-application",

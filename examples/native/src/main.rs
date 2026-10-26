@@ -404,6 +404,10 @@ async fn main(task_manager: &'static xila::task::Manager) {
                 &"/applications/executables/settings",
                 settings::SettingsExecutable
             ),
+            (
+                &"/applications/executables/activity",
+                activity::ActivityExecutable
+            ),
             #[cfg(unix)]
             (
                 &"/applications/executables/debug",
