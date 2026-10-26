@@ -8,7 +8,7 @@ publish = false
 [workspace]
 
 [dependencies]
-verification = { path = "../../libraries/verification", default-features = false }
+verification = { git = "https://github.com/xila-project/package_manager", rev = "f5e3f0b323a79a80d106ce2b88b77bfa8667d71b", default-features = false }
 ed25519-dalek = { version = "3.0", default-features = false, optional = true }
 
 [features]

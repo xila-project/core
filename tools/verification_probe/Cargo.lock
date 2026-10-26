@@ -195,6 +195,7 @@ checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 [[package]]
 name = "verification"
 version = "0.1.0"
+source = "git+https://github.com/xila-project/package_manager?rev=f5e3f0b323a79a80d106ce2b88b77bfa8667d71b#f5e3f0b323a79a80d106ce2b88b77bfa8667d71b"
 dependencies = [
  "ed25519-dalek",
  "sha2",
