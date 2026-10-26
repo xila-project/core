@@ -2,6 +2,7 @@
   "applications": {
     "pixel_painter": "Pixel Painter",
     "settings": "Settings",
-    "text_editor": "Text Editor"
+    "text_editor": "Text Editor",
+    "activity": "System activity"
   }
 }

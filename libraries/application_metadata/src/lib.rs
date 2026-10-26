@@ -93,7 +93,12 @@ pub fn shortcut(name: &str) -> Option<String> {
             [158, 158, 158],
             false,
         ),
-        "activity" => ("System activity", "Ac", [0, 150, 136], false),
+        "activity" => (
+            embedded_i18n::translate!("applications.activity"),
+            "Ac",
+            [0, 150, 136],
+            false,
+        ),
         "debug" => ("Debug", "Db", [235, 87, 87], false),
         _ => return None,
     };

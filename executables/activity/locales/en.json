@@ -1,16 +1,24 @@
 {
-  "app.title": "System activity",
-  "metrics.uptime": "Uptime: {} s",
-  "metrics.tasks": "Registered tasks: {}",
-  "metrics.memory_used": "Allocator used: {} bytes",
-  "metrics.memory_capacity": "Allocator capacity: {} bytes",
-  "metrics.capacity_unavailable": "Allocator capacity: unavailable",
-  "metrics.unsupported": "CPU load / registered devices: unavailable",
-  "app.sources": "Xila time, task registry and allocator",
-  "actions.interval": "Refresh: {} ms (change)",
-  "actions.start": "Start demo (4 KiB / 10 s)",
-  "actions.stop": "Stop demo",
-  "workload.idle": "Demo: stopped",
-  "workload.running": "Demo: running (512 bytes / 25 ms)",
-  "workload.failed": "Demo: unavailable (allocation failed)"
+  "app": {
+    "title": "System activity",
+    "sources": "Xila time, task registry and allocator"
+  },
+  "metrics": {
+    "uptime": "Uptime: {} s",
+    "tasks": "Registered tasks: {}",
+    "memory_used": "Allocator used: {} bytes",
+    "memory_capacity": "Allocator capacity: {} bytes",
+    "capacity_unavailable": "Allocator capacity: unavailable",
+    "unsupported": "CPU load / registered devices: unavailable"
+  },
+  "actions": {
+    "interval": "Refresh: {} ms (change)",
+    "start": "Start demo (4 KiB / 10 s)",
+    "stop": "Stop demo"
+  },
+  "workload": {
+    "idle": "Demo: stopped",
+    "running": "Demo: running (512 bytes / 25 ms)",
+    "failed": "Demo: unavailable (allocation failed)"
+  }
 }

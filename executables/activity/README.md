@@ -80,3 +80,8 @@ also returned to that baseline. A separate launch with `--interval-ms 10000`
 processed rapid Start/Stop within 0.65 s and closed while running within 0.33 s
 (measured host-client round trips, not a latency guarantee). No MCU hardware or
 non-Linux platform claim is made by this smoke test.
+
+UI and launcher catalogs cover English, French, Spanish, German, Brazilian
+Portuguese, Italian, Polish and Simplified Chinese. They use nested JSON with
+stable semantic keys and preserve numeric placeholders. CI validates each
+primary locale with `EMBEDDED_I18N_STRICT=1`.

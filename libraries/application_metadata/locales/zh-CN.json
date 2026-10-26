@@ -2,6 +2,7 @@
   "applications": {
     "pixel_painter": "像素画板",
     "settings": "设置",
-    "text_editor": "文本编辑器"
+    "text_editor": "文本编辑器",
+    "activity": "系统活动"
   }
 }
