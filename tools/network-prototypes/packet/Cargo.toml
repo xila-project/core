@@ -1,0 +1,17 @@
+[package]
+name = "xila-packet-network-prototype"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+smoltcp = { version = "0.13", default-features = false, features = [
+  "std",
+  "medium-ethernet",
+  "proto-ipv4",
+  "socket-tcp",
+  "socket-udp",
+  "socket-dns",
+] }
