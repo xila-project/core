@@ -20,6 +20,7 @@ embedded-i18n = { workspace = true }
 task = { workspace = true }
 
 [dev-dependencies]
+little_fs = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }
 drivers_native = { workspace = true }
 drivers_core = { workspace = true }

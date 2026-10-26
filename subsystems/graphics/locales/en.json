@@ -12,5 +12,15 @@
     "not_initialized": "Not initialized",
     "not_registered": "Not registered",
     "out_of_memory": "Out of memory"
+  },
+  "file_picker": {
+    "parent": "Parent",
+    "previous": "Previous",
+    "next": "Next",
+    "cancel": "Cancel",
+    "error": "Unable to select path",
+    "open": "Open",
+    "save": "Save",
+    "select_directory": "Select folder"
   }
 }

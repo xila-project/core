@@ -12,5 +12,15 @@
     "not_initialized": "Non initialisé",
     "not_registered": "Non enregistré",
     "out_of_memory": "Pas assez de mémoire"
+  },
+  "file_picker": {
+    "parent": "Dossier parent",
+    "previous": "Précédent",
+    "next": "Suivant",
+    "cancel": "Annuler",
+    "error": "Impossible de sélectionner le chemin",
+    "open": "Ouvrir",
+    "save": "Enregistrer",
+    "select_directory": "Choisir un dossier"
   }
 }

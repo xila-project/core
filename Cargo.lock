@@ -5528,6 +5528,7 @@ dependencies = [
  "xila-drivers-shared",
  "xila-drivers-std",
  "xila-file-system",
+ "xila-little-fs",
  "xila-log",
  "xila-shared",
  "xila-synchronization",

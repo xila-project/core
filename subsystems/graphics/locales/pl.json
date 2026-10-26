@@ -12,5 +12,15 @@
     "not_initialized": "Nie zainicjalizowano",
     "not_registered": "Nie zarejestrowano",
     "out_of_memory": "Wyczerpano pamięć"
+  },
+  "file_picker": {
+    "parent": "Folder nadrzędny",
+    "previous": "Poprzednia",
+    "next": "Następna",
+    "cancel": "Anuluj",
+    "error": "Nie można wybrać ścieżki",
+    "open": "Otwórz",
+    "save": "Zapisz",
+    "select_directory": "Wybierz folder"
   }
 }
