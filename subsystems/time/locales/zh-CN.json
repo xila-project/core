@@ -2,6 +2,9 @@
   "errors": {
     "device_error": "设备错误：{}",
     "time_module_already_initialized": "时间模块已初始化",
-    "time_module_not_initialized": "时间模块未初始化"
+    "time_module_not_initialized": "时间模块未初始化",
+    "utc_unsynchronized": "UTC 时钟尚未同步",
+    "timestamp_overflow": "时间戳超出范围",
+    "invalid_clock_resolution": "时钟分辨率必须为正值"
   }
 }

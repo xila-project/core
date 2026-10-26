@@ -21,13 +21,17 @@ mod allocation;
 mod metadata_authorization;
 
 async fn initialize() -> (TaskIdentifier, &'static VirtualFileSystem) {
-    let task_instance = Box::leak(Box::new(task::Manager::new()));
-
-    let users_manager = Box::leak(Box::new(users::Manager::new()));
-
     let time_manager = Box::leak(Box::new(
         time::Manager::new(&drivers_std::devices::TimeDevice).unwrap(),
     ));
+    initialize_with_time(time_manager).await
+}
+
+async fn initialize_with_time(
+    time_manager: &'static time::Manager<'static>,
+) -> (TaskIdentifier, &'static VirtualFileSystem) {
+    let task_instance = Box::leak(Box::new(task::Manager::new()));
+    let users_manager = Box::leak(Box::new(users::Manager::new()));
 
     if !log::is_initialized() {
         log::initialize(&drivers_std::log::Logger).unwrap();
@@ -1171,4 +1175,39 @@ async fn unmount_refuses_to_orphan_nested_mounts_even_when_forced() {
     }
     vfs.unmount("/parent/child", false).await.unwrap();
     vfs.unmount("/parent", false).await.unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn invalid_or_pre_epoch_utc_does_not_become_unsigned_file_metadata() {
+    let time_manager = Box::leak(Box::new(time::Manager::unsynchronized()));
+    let (task, vfs) = initialize_with_time(time_manager).await;
+    let flags = Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None);
+    assert!(matches!(
+        File::open(vfs, task, "/invalid-time", flags).await,
+        Err(virtual_file_system::Error::Time(
+            time::Error::Unsynchronized
+        ))
+    ));
+    time_manager
+        .set_realtime(time::RealtimeSample {
+            timestamp: time::Timestamp::from_nanos(-10_000_000_000),
+            source: time::ClockSource::Manual,
+            resolution: core::time::Duration::from_secs(1),
+            accuracy: None,
+        })
+        .unwrap();
+    assert!(matches!(
+        File::open(vfs, task, "/invalid-time", flags).await,
+        Err(virtual_file_system::Error::Time(time::Error::Overflow))
+    ));
+    time_manager
+        .set_realtime(time::RealtimeSample {
+            timestamp: time::Timestamp::from_nanos(1_000_000_000),
+            source: time::ClockSource::Manual,
+            resolution: core::time::Duration::from_secs(1),
+            accuracy: None,
+        })
+        .unwrap();
+    File::open(vfs, task, "/invalid-time", flags).await.unwrap();
 }

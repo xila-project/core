@@ -118,9 +118,17 @@ impl Layout {
             return;
         }
 
-        match self.context.time_manager.realtime_now() {
-            Ok(utc) => self.update_clock(utc).await,
-            Err(error) => log::error!("Failed to get current time: {}", error),
+        match self
+            .context
+            .time_manager
+            .realtime_now()
+            .and_then(|utc| utc.try_as_seconds())
+        {
+            Ok(seconds) => self.update_clock(Some(seconds)).await,
+            Err(error) => {
+                self.update_clock(None).await;
+                log::error!("Failed to get current time: {}", error);
+            }
         }
 
         if let Err(e) = self.update_network_icon().await {
@@ -220,16 +228,20 @@ impl Layout {
         Ok(())
     }
 
-    async fn update_clock(&mut self, current_time: Duration) {
+    async fn update_clock(&mut self, current_time: Option<i64>) {
         let graphics_manager = graphics::ffi_manager();
         graphics::lock!(graphics_manager, {
             self.clock_string.clear();
-            // Writing to a String cannot return a formatting error.
-            let _ = internationalization::write_unix_timestamp(
-                &mut self.clock_string,
-                current_time.as_secs() as i64,
-                "%H:%M",
-            );
+            if let Some(seconds) = current_time {
+                // Writing to a String cannot return a formatting error.
+                let _ = internationalization::write_unix_timestamp(
+                    &mut self.clock_string,
+                    seconds,
+                    "%H:%M",
+                );
+            } else {
+                self.clock_string.push_str("--:--");
+            }
             self.clock_string.push('\0');
 
             unsafe {
