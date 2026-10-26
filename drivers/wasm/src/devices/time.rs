@@ -116,3 +116,20 @@ mod tests {
         assert!(matches!(result, Err(Error::UnsupportedOperation)));
     }
 }
+
+/// Bootstrap epoch source. Browser time is untrusted for security decisions.
+impl time::RealtimeSource for TimeDevice {
+    fn read(&self) -> time::Result<time::RealtimeSample> {
+        let millis = date_now();
+        // JavaScript Date's specified range, including pre-epoch values.
+        if !millis.is_finite() || millis.abs() > 8_640_000_000_000_000.0 {
+            return Err(time::Error::DeviceError(Error::InternalError));
+        }
+        Ok(time::RealtimeSample {
+            timestamp: time::Timestamp::from_nanos((millis as i128) * 1_000_000),
+            source: time::ClockSource::Host,
+            resolution: Duration::from_millis(1),
+            accuracy: None,
+        })
+    }
+}

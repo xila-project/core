@@ -230,7 +230,7 @@ impl VirtualFileSystem {
 
         let mut file_systems = self.file_systems.write().await; // Get the file systems
 
-        let (time, user, _) = self.get_time_user_group(task).await?;
+        let user = self.task_manager.get_user(task).await?;
         let resolved_path = self
             .resolve_path(&file_systems, requested_path, true, false, user, task)
             .await?;
@@ -262,15 +262,22 @@ impl VirtualFileSystem {
             return Err(Error::NotADirectory);
         }
 
-        let attributes = Attributes::new().set_access(time);
-        let mask = attributes
-            .get_mask()
-            .intersection(file_system.file_system.writable_attributes());
-        let attributes = attributes.set_mask(mask);
-        Self::set_attributes(file_system.file_system, relative_path, &attributes).await?;
+        // An unsynchronized or unrepresentable UTC must not prevent reading
+        // existing storage. Keep its previous access timestamp in that case.
+        if let Ok(time) = self.get_time() {
+            let attributes = Attributes::new().set_access(time);
+            let mask = attributes
+                .get_mask()
+                .intersection(file_system.file_system.writable_attributes());
+            Self::set_attributes(
+                file_system.file_system,
+                relative_path,
+                &attributes.set_mask(mask),
+            )
+            .await?;
+        }
 
         let mut context = Context::new_empty();
-
         poll(|| {
             Ok(file_system
                 .file_system
@@ -299,7 +306,9 @@ impl VirtualFileSystem {
 
         let mut file_systems = self.file_systems.write().await; // Get the file systems
 
-        let (time, user, group) = self.get_time_user_group(task).await?;
+        let user = self.task_manager.get_user(task).await?;
+        let group = self.users_manager.get_user_primary_group(user).await?;
+        let time = self.get_time();
         let (mode, open, _) = flags.split();
 
         if (open.contains(CreateFlags::Truncate) || flags.get_state().contains(StateFlags::Append))
@@ -357,6 +366,7 @@ impl VirtualFileSystem {
                 task,
             )
             .await?;
+            let time = time?;
             poll(|| Ok(file_system.file_system.create_file(relative_path)?)).await?;
             let attributes = Attributes::new()
                 .set_user(user)
@@ -379,16 +389,24 @@ impl VirtualFileSystem {
         let (file_system, relative_path, _) =
             Self::get_mutable_file_system_from_path(&mut file_systems, &path)?; // Get the file system identifier and the relative path
 
-        let attributes = if mode.contains(AccessFlags::Write) {
-            Attributes::new().set_modification(time).set_access(time)
-        } else {
-            Attributes::new().set_access(time)
-        };
-        let mask = attributes
-            .get_mask()
-            .intersection(file_system.file_system.writable_attributes());
-        let attributes = attributes.set_mask(mask);
-        Self::set_attributes(file_system.file_system, relative_path, &attributes).await?;
+        // Preserve previous timestamps while UTC is unavailable; never publish
+        // uptime or wrap a signed epoch into unsigned filesystem metadata.
+        if let Ok(time) = time {
+            let attributes = if mode.contains(AccessFlags::Write) {
+                Attributes::new().set_modification(time).set_access(time)
+            } else {
+                Attributes::new().set_access(time)
+            };
+            let mask = attributes
+                .get_mask()
+                .intersection(file_system.file_system.writable_attributes());
+            Self::set_attributes(
+                file_system.file_system,
+                relative_path,
+                &attributes.set_mask(mask),
+            )
+            .await?;
+        }
 
         let mut attributes =
             Attributes::new().set_mask(AttributeFlags::Inode | AttributeFlags::Kind);
@@ -501,7 +519,7 @@ impl VirtualFileSystem {
         let (parent_file_system, relative_path, _) =
             Self::get_mutable_file_system_from_path(&mut file_systems, &path)?; // Get the file system identifier and the relative path
 
-        let (_, user, _) = self.get_time_user_group(task).await?;
+        let (time, user, group) = self.get_time_user_group(task).await?;
 
         self.check_permissions(
             parent_file_system.file_system,
@@ -573,7 +591,6 @@ impl VirtualFileSystem {
             }
         };
 
-        let (time, user, group) = self.get_time_user_group(task).await?;
         let underlying_kind = match &item {
             ItemStatic::FileSystem(_) => Kind::Directory,
             ItemStatic::BlockDevice(_) => Kind::BlockDevice,
@@ -694,7 +711,7 @@ impl VirtualFileSystem {
 
     pub async fn remove(&self, task: TaskIdentifier, path: impl AsRef<Path>) -> Result<()> {
         let file_systems = self.file_systems.write().await; // Serialize path resolution with removal.
-        let (_, user, _) = self.get_time_user_group(task).await?;
+        let user = self.task_manager.get_user(task).await?;
         let resolved_path = self
             .resolve_path(&file_systems, path.as_ref(), false, false, user, task)
             .await?;
@@ -808,7 +825,7 @@ impl VirtualFileSystem {
             return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
         }
 
-        let (_, user, _) = self.get_time_user_group(task).await?;
+        let user = self.task_manager.get_user(task).await?;
         // Serialize staging and publication against other VFS namespace
         // mutations, so temporary entries are never opened through the VFS.
         let file_systems = self.file_systems.write().await;
@@ -970,7 +987,7 @@ impl VirtualFileSystem {
             return Err(Error::InvalidPath);
         }
 
-        let (_, user, _) = self.get_time_user_group(task).await?;
+        let user = self.task_manager.get_user(task).await?;
         let file_systems = self.file_systems.read().await;
         let resolved_link = self
             .resolve_path(&file_systems, link, false, false, user, task)
@@ -1039,7 +1056,7 @@ impl VirtualFileSystem {
         new_path: &impl AsRef<Path>,
     ) -> Result<()> {
         let file_systems = self.file_systems.write().await; // Serialize source/destination resolution with rename.
-        let (_, user, _) = self.get_time_user_group(task).await?;
+        let user = self.task_manager.get_user(task).await?;
         let old_path = self
             .resolve_path(&file_systems, old_path.as_ref(), false, false, user, task)
             .await?;
@@ -1127,7 +1144,7 @@ impl VirtualFileSystem {
         follow_final: bool,
     ) -> Result<Statistics> {
         let file_systems = self.file_systems.read().await;
-        let (_, user, _) = self.get_time_user_group(task).await?;
+        let user = self.task_manager.get_user(task).await?;
         let resolved_path = self
             .resolve_path(
                 &file_systems,
@@ -1331,7 +1348,7 @@ impl VirtualFileSystem {
     ) -> Result<()> {
         let path = path.as_ref();
         let file_systems = self.file_systems.write().await; // Serialize metadata authority with mutation.
-        let (_, current_user, _) = self.get_time_user_group(task).await?;
+        let current_user = self.task_manager.get_user(task).await?;
         let resolved = self
             .resolve_path(&file_systems, path, true, false, current_user, task)
             .await?;
@@ -1364,7 +1381,7 @@ impl VirtualFileSystem {
     ) -> Result<()> {
         let path = path.as_ref();
         let file_systems = self.file_systems.write().await; // Get the file systems
-        let (_, current_user, _) = self.get_time_user_group(task).await?;
+        let current_user = self.task_manager.get_user(task).await?;
         let resolved = self
             .resolve_path(&file_systems, path, true, false, current_user, task)
             .await?;

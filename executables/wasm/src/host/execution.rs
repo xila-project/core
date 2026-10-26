@@ -29,7 +29,7 @@ impl wasmi::errors::HostError for Suspend {}
 pub(crate) fn clock_now(
     context: &xila::executable::ExecutableContext,
     required: [bool; 2],
-) -> core::result::Result<[u64; 2], wasmi::Error> {
+) -> core::result::Result<[u64; 2], PollError> {
     clock_snapshot(context.time_manager, required)
 }
 
@@ -39,7 +39,10 @@ pub(crate) fn clock_value(
 ) -> core::result::Result<u64, PollError> {
     match id {
         0 => {
-            let realtime = manager.realtime_now().map_err(|_| PollError::Io)?;
+            let realtime = manager.realtime_now().map_err(|error| match error {
+                xila::time::Error::Overflow => PollError::Overflow,
+                _ => PollError::Io,
+            })?;
             u64::try_from(realtime.as_nanos()).map_err(|_| PollError::Overflow)
         }
         1 => monotonic_now(manager).map_err(|_| PollError::Overflow),
@@ -50,11 +53,11 @@ pub(crate) fn clock_value(
 fn clock_snapshot(
     manager: &xila::time::Manager<'_>,
     required: [bool; 2],
-) -> core::result::Result<[u64; 2], wasmi::Error> {
+) -> core::result::Result<[u64; 2], PollError> {
     let mut now = [0; 2];
     for id in 0..2 {
         if required[id] {
-            now[id] = clock_value(manager, id).map_err(|_| wasmi::Error::new("clock error"))?;
+            now[id] = clock_value(manager, id)?;
         }
     }
     Ok(now)
@@ -111,7 +114,11 @@ pub async fn run(
                                 if super::shutdown_requested() {
                                     return Err(Error::Interrupted);
                                 }
-                                let delay = poll.delay(clock_now(context, required)?);
+                                let now = match clock_now(context, required) {
+                                    Ok(now) => now,
+                                    Err(error) => break error as i32,
+                                };
+                                let delay = poll.delay(now);
                                 if !delay.is_zero() {
                                     // Bound timer and signal polling latency.
                                     xila::task::Manager::sleep(
@@ -121,7 +128,10 @@ pub async fn run(
                                 } else {
                                     xila::task::yield_now().await;
                                 }
-                                let now = clock_now(context, required)?;
+                                let now = match clock_now(context, required) {
+                                    Ok(now) => now,
+                                    Err(error) => break error as i32,
+                                };
                                 match poll.complete(
                                     &mut GuestMemory::new(memory.data_mut(&mut *store)),
                                     now,
@@ -154,7 +164,6 @@ pub async fn run(
 mod clock_tests {
     use super::*;
     use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-    use xila::file_system::{DirectBaseOperations, DirectCharacterDevice, MountOperations, Size};
 
     struct WallClock(AtomicU64, AtomicBool);
     impl WallClock {
@@ -162,39 +171,21 @@ mod clock_tests {
             Self(AtomicU64::new(seconds), AtomicBool::new(false))
         }
     }
-    impl DirectBaseOperations for WallClock {
-        fn read(
-            &self,
-            _cx: &mut core::task::Context<'_>,
-            buffer: &mut [u8],
-            _: Size,
-        ) -> core::task::Poll<xila::file_system::Result<usize>> {
-            xila::file_system::ready(|| {
-                if self.1.load(Ordering::Relaxed) {
-                    return Err(xila::file_system::Error::InternalError);
-                }
-                let time = Duration::from_secs(self.0.load(Ordering::Relaxed));
-                let bytes = unsafe {
-                    core::slice::from_raw_parts(
-                        (&time as *const Duration).cast::<u8>(),
-                        size_of::<Duration>(),
-                    )
-                };
-                buffer[..bytes.len()].copy_from_slice(bytes);
-                Ok(bytes.len())
+    impl xila::time::RealtimeSource for WallClock {
+        fn read(&self) -> xila::time::Result<xila::time::RealtimeSample> {
+            if self.1.load(Ordering::Relaxed) {
+                return Err(xila::time::Error::DeviceError(
+                    xila::file_system::Error::InternalError,
+                ));
+            }
+            Ok(xila::time::RealtimeSample {
+                timestamp: Duration::from_secs(self.0.load(Ordering::Relaxed)).into(),
+                source: xila::time::ClockSource::Host,
+                resolution: Duration::from_millis(1),
+                accuracy: None,
             })
         }
-        fn write(
-            &self,
-            _cx: &mut core::task::Context<'_>,
-            _: &[u8],
-            _: Size,
-        ) -> core::task::Poll<xila::file_system::Result<usize>> {
-            xila::file_system::ready(|| Err(xila::file_system::Error::UnsupportedOperation))
-        }
     }
-    impl MountOperations for WallClock {}
-    impl DirectCharacterDevice for WallClock {}
 
     struct Monotonic(core::sync::atomic::AtomicU64);
     impl xila::time::MonotonicClock for Monotonic {
@@ -211,15 +202,47 @@ mod clock_tests {
         let first = clock_snapshot(&manager, [true, true]).unwrap();
         device.0.store(2000, Ordering::Relaxed);
         clock.0.store(501, Ordering::Relaxed);
+        assert_eq!(clock_value(&manager, 0), Ok(1_000_001_000_000));
+        manager.synchronize(&device).unwrap();
         let forward = clock_snapshot(&manager, [true, true]).unwrap();
         device.0.store(1500, Ordering::Relaxed);
         clock.0.store(502, Ordering::Relaxed);
+        manager.synchronize(&device).unwrap();
         let backward = clock_snapshot(&manager, [true, true]).unwrap();
         assert_eq!(first[0], 1_000_000_000_000);
         assert_eq!(backward[0], 1_500_000_000_000);
         assert_eq!(first[1], 500_000_000);
         assert_eq!(forward[1], 501_000_000);
         assert_eq!(backward[1], 502_000_000);
+    }
+
+    #[test]
+    fn wasi_realtime_overflow_and_unsigned_range_are_errors() {
+        let clock = Monotonic(AtomicU64::new(0));
+        let manager = xila::time::Manager::with_clock(&clock);
+        assert_eq!(clock_value(&manager, 0), Err(PollError::Io));
+        assert_eq!(clock_value(&manager, 1), Ok(0));
+        for nanos in [-1, u64::MAX as i128 + 1] {
+            manager
+                .set_realtime(xila::time::RealtimeSample {
+                    timestamp: xila::time::Timestamp::from_nanos(nanos),
+                    source: xila::time::ClockSource::Manual,
+                    resolution: Duration::from_nanos(1),
+                    accuracy: None,
+                })
+                .unwrap();
+            assert_eq!(clock_value(&manager, 0), Err(PollError::Overflow));
+        }
+        manager
+            .set_realtime(xila::time::RealtimeSample {
+                timestamp: xila::time::Timestamp::from_nanos(i128::MAX),
+                source: xila::time::ClockSource::Manual,
+                resolution: Duration::from_nanos(1),
+                accuracy: None,
+            })
+            .unwrap();
+        clock.0.store(1, Ordering::Relaxed);
+        assert_eq!(clock_value(&manager, 0), Err(PollError::Overflow));
     }
 
     #[test]
@@ -250,7 +273,7 @@ mod clock_tests {
                 },
             )
             .unwrap();
-        device.1.store(true, Ordering::Relaxed);
+        manager.invalidate();
         let poll =
             ClockPoll::prepare(&memory, 8, 64, 1, 200, |id| clock_value(&manager, id)).unwrap();
         let now = clock_snapshot(&manager, poll.required_clocks()).unwrap();

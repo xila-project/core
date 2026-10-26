@@ -2,6 +2,9 @@
   "errors": {
     "device_error": "Erreur du périphérique : {}",
     "time_module_already_initialized": "Module de temps déjà initialisé",
-    "time_module_not_initialized": "Module de temps non initialisé"
+    "time_module_not_initialized": "Module de temps non initialisé",
+    "utc_unsynchronized": "L’horloge UTC n’est pas synchronisée",
+    "timestamp_overflow": "L’horodatage est hors limites",
+    "invalid_clock_resolution": "La résolution de l’horloge doit être positive"
   }
 }

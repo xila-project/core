@@ -21,13 +21,17 @@ mod allocation;
 mod metadata_authorization;
 
 async fn initialize() -> (TaskIdentifier, &'static VirtualFileSystem) {
-    let task_instance = Box::leak(Box::new(task::Manager::new()));
-
-    let users_manager = Box::leak(Box::new(users::Manager::new()));
-
     let time_manager = Box::leak(Box::new(
         time::Manager::new(&drivers_std::devices::TimeDevice).unwrap(),
     ));
+    initialize_with_time(time_manager).await
+}
+
+async fn initialize_with_time(
+    time_manager: &'static time::Manager<'static>,
+) -> (TaskIdentifier, &'static VirtualFileSystem) {
+    let task_instance = Box::leak(Box::new(task::Manager::new()));
+    let users_manager = Box::leak(Box::new(users::Manager::new()));
 
     if !log::is_initialized() {
         log::initialize(&drivers_std::log::Logger).unwrap();
@@ -1171,4 +1175,120 @@ async fn unmount_refuses_to_orphan_nested_mounts_even_when_forced() {
     }
     vfs.unmount("/parent/child", false).await.unwrap();
     vfs.unmount("/parent", false).await.unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn invalid_or_pre_epoch_utc_does_not_become_unsigned_file_metadata() {
+    let time_manager = Box::leak(Box::new(time::Manager::unsynchronized()));
+    let (task, vfs) = initialize_with_time(time_manager).await;
+    let flags = Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None);
+    assert!(matches!(
+        File::open(vfs, task, "/invalid-time", flags).await,
+        Err(virtual_file_system::Error::Time(
+            time::Error::Unsynchronized
+        ))
+    ));
+    time_manager
+        .set_realtime(time::RealtimeSample {
+            timestamp: time::Timestamp::from_nanos(-10_000_000_000),
+            source: time::ClockSource::Manual,
+            resolution: core::time::Duration::from_secs(1),
+            accuracy: None,
+        })
+        .unwrap();
+    assert!(matches!(
+        File::open(vfs, task, "/invalid-time", flags).await,
+        Err(virtual_file_system::Error::Time(time::Error::Overflow))
+    ));
+    assert!(matches!(
+        vfs.get_statistics_for_task(task, &"/invalid-time").await,
+        Err(virtual_file_system::Error::FileSystem(
+            file_system::Error::NotFound
+        ))
+    ));
+    time_manager
+        .set_realtime(time::RealtimeSample {
+            timestamp: time::Timestamp::from_nanos(1_000_000_000),
+            source: time::ClockSource::Manual,
+            resolution: core::time::Duration::from_secs(1),
+            accuracy: None,
+        })
+        .unwrap();
+    File::open(vfs, task, "/invalid-time", flags).await.unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn existing_files_remain_accessible_without_representable_utc() {
+    let clock = Box::leak(Box::new(
+        time::Manager::new(&drivers_std::devices::TimeDevice).unwrap(),
+    ));
+    let (task, vfs) = initialize_with_time(clock).await;
+    let mut file = File::open(
+        vfs,
+        task,
+        "/existing",
+        Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None),
+    )
+    .await
+    .unwrap();
+    file.write(b"epoch-independent data").await.unwrap();
+    drop(file);
+    vfs.create_symlink(task, Path::from_str("/existing"), Path::from_str("/link"))
+        .await
+        .unwrap();
+    let before = vfs
+        .get_statistics_for_task(task, &"/existing")
+        .await
+        .unwrap();
+    for invalid in [false, true] {
+        if invalid {
+            clock.invalidate();
+        } else {
+            clock
+                .set_realtime(time::RealtimeSample {
+                    timestamp: time::Timestamp::from_nanos(-10_000_000_000),
+                    source: time::ClockSource::Manual,
+                    resolution: core::time::Duration::from_secs(1),
+                    accuracy: None,
+                })
+                .unwrap();
+        }
+        let stats = vfs
+            .get_statistics_for_task(task, &"/existing")
+            .await
+            .unwrap();
+        assert_eq!(stats.access, before.access);
+        assert_eq!(stats.modification, before.modification);
+        let mut file = File::open(vfs, task, "/link", Flags::from(AccessFlags::Read))
+            .await
+            .unwrap();
+        let mut data = [0; 22];
+        assert_eq!(file.read(&mut data).await.unwrap(), 22);
+        assert_eq!(&data, b"epoch-independent data");
+        drop(file);
+        let mut writable = File::open(vfs, task, "/existing", Flags::from(AccessFlags::READ_WRITE))
+            .await
+            .unwrap();
+        writable.write(b"epoch-independent data").await.unwrap();
+        drop(writable);
+        let mut target = [0; 32];
+        let size = vfs
+            .read_symlink(task, Path::from_str("/link"), &mut target)
+            .await
+            .unwrap();
+        assert_eq!(&target[..size], b"/existing");
+        drop(vfs.open_directory(task, &"/").await.unwrap());
+        let stats = vfs
+            .get_statistics_for_task(task, &"/existing")
+            .await
+            .unwrap();
+        assert_eq!(stats.access, before.access);
+        assert_eq!(stats.modification, before.modification);
+        vfs.rename(task, &"/existing", &"/renamed").await.unwrap();
+        vfs.rename(task, &"/renamed", &"/existing").await.unwrap();
+    }
+    vfs.remove(task, "/link").await.unwrap();
+    vfs.remove(task, "/existing").await.unwrap();
 }

@@ -2,6 +2,9 @@
   "errors": {
     "device_error": "Error del dispositivo: {}",
     "time_module_already_initialized": "El módulo de tiempo ya está inicializado",
-    "time_module_not_initialized": "El módulo de tiempo no está inicializado"
+    "time_module_not_initialized": "El módulo de tiempo no está inicializado",
+    "utc_unsynchronized": "El reloj UTC no está sincronizado",
+    "timestamp_overflow": "La marca de tiempo está fuera de rango",
+    "invalid_clock_resolution": "La resolución del reloj debe ser positiva"
   }
 }
