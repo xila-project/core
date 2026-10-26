@@ -28,11 +28,10 @@ use crate::{
 };
 
 pub fn get_smoltcp_time(time_manager: &time::Manager<'_>) -> smoltcp::time::Instant {
-    let current_time = time_manager
-        .get_current_time()
-        .expect("Failed to get current time");
-
-    smoltcp::time::Instant::from_millis(current_time.as_millis() as i64)
+    // smoltcp stores signed microseconds. Saturate only at its representable
+    // limit rather than wrapping into a negative timestamp.
+    let micros = i64::try_from(time_manager.monotonic_now().as_micros()).unwrap_or(i64::MAX);
+    smoltcp::time::Instant::from_micros(micros)
 }
 
 type StackList = Vec<Stack>;
@@ -368,5 +367,31 @@ impl Manager {
         let socket = IcmpSocket::new(context);
 
         Ok(socket)
+    }
+}
+
+#[cfg(test)]
+mod clock_tests {
+    use super::*;
+    use core::{
+        sync::atomic::{AtomicU64, Ordering},
+        time::Duration,
+    };
+
+    struct Clock(AtomicU64);
+    impl time::MonotonicClock for Clock {
+        fn now(&self) -> Duration {
+            Duration::from_micros(self.0.load(Ordering::Relaxed))
+        }
+    }
+
+    #[test]
+    fn smoltcp_uses_monotonic_microseconds_and_saturates_without_rewinding() {
+        let clock = Clock(AtomicU64::new(10_123));
+        let manager =
+            time::Manager::with_monotonic_clock(&drivers_std::devices::TimeDevice, &clock).unwrap();
+        assert_eq!(get_smoltcp_time(&manager).total_micros(), 10_123);
+        clock.0.store(i64::MAX as u64 + 1, Ordering::Relaxed);
+        assert_eq!(get_smoltcp_time(&manager).total_micros(), i64::MAX);
     }
 }

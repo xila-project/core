@@ -26,11 +26,8 @@ pub enum XilaTimerFlags {
 /// The current time since the system startup in microseconds.
 #[unsafe(no_mangle)]
 pub extern "C" fn xila_time_get_time_since_startup_microseconds() -> u64 {
-    crate::runtime_context()
-        .time_manager
-        .get_current_time_since_startup()
-        .unwrap_or_default()
-        .as_micros() as u64
+    // Saturate rather than silently wrapping at the ABI's u64 boundary.
+    u64::try_from(crate::runtime_context().time_manager.uptime().as_micros()).unwrap_or(u64::MAX)
 }
 
 #[unsafe(no_mangle)]

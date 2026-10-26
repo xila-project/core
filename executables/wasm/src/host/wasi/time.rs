@@ -22,7 +22,7 @@ define_wasi_module! {
         let resolution = match clock_id {
             // The wall-clock device API does not expose finer resolution.
             0 => 1_000_000u64,
-            1 => 1_000_000_000u64.div_ceil(embassy_time::TICK_HZ),
+            1 => xila::time::MONOTONIC_RESOLUTION.as_nanos() as u64,
             _ => return Ok(58),
         };
         borrow_memory(&memory, &mut caller)
@@ -41,8 +41,8 @@ define_wasi_module! {
         let memory = get_memory(&caller).ok_or_else(|| wasmi::Error::new("missing memory"))?;
         let manager=caller.data().context.time_manager;
         let now = match clock_id {
-            0=>u64::try_from(manager.get_current_time().map_err(|_| wasmi::Error::new("time error"))?.as_nanos()).map_err(|_| wasmi::Error::new("clock overflow"))?,
-            1=>crate::host::execution::monotonic_now(),
+            0=>u64::try_from(manager.realtime_now().map_err(|_| wasmi::Error::new("time error"))?.as_nanos()).map_err(|_| wasmi::Error::new("clock overflow"))?,
+            1=>crate::host::execution::monotonic_now(manager)?,
             _=>return Ok(58),
         };
         borrow_memory(&memory, &mut caller)

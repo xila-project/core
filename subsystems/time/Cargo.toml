@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+embassy-time = { workspace = true }
 file_system = { workspace = true }
 log = { workspace = true }
 shared = { workspace = true }
@@ -11,9 +12,6 @@ synchronization = { workspace = true }
 embedded-i18n = { workspace = true }
 
 [dev-dependencies]
-drivers_native = { workspace = true }
-drivers_core = { workspace = true }
-drivers_shared = { workspace = true }
 drivers_std = { workspace = true }
 log = { workspace = true }
 

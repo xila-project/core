@@ -21,7 +21,7 @@ pub struct Layout {
     clock_string: String,
     _battery: *mut lvgl::lv_obj_t,
     network: *mut lvgl::lv_obj_t,
-    last_update: Duration,
+    last_update: Option<Duration>,
 }
 
 impl Drop for Layout {
@@ -110,25 +110,24 @@ impl Layout {
     pub const UPDATE_INTERVAL: Duration = Duration::from_secs(30);
 
     pub async fn run(&mut self) {
-        let current_time = match self.context.time_manager.get_current_time() {
-            Ok(time) => time,
-            Err(e) => {
-                log::error!("Failed to get current time: {}", e);
-                return;
-            }
-        };
-
-        if current_time - self.last_update < Self::UPDATE_INTERVAL {
+        let now = self.context.time_manager.monotonic_now();
+        if self
+            .last_update
+            .is_some_and(|last| now - last < Self::UPDATE_INTERVAL)
+        {
             return;
         }
 
-        self.update_clock(current_time).await;
+        match self.context.time_manager.realtime_now() {
+            Ok(utc) => self.update_clock(utc).await,
+            Err(error) => log::error!("Failed to get current time: {}", error),
+        }
 
         if let Err(e) = self.update_network_icon().await {
             log::error!("Failed to update network icon: {}", e);
         }
 
-        self.last_update = current_time;
+        self.last_update = Some(now);
     }
 
     async fn get_interface_symbol(&self, file: &mut File<'_>) -> Result<Option<&CStr>> {
@@ -420,7 +419,7 @@ impl Layout {
                 clock_string: String::with_capacity(6),
                 _battery: battery,
                 network,
-                last_update: Duration::ZERO,
+                last_update: None,
             }
         });
 

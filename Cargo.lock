@@ -5785,10 +5785,8 @@ dependencies = [
 name = "xila-time"
 version = "0.1.0"
 dependencies = [
+ "embassy-time",
  "embedded-i18n",
- "xila-drivers-core",
- "xila-drivers-native",
- "xila-drivers-shared",
  "xila-drivers-std",
  "xila-file-system",
  "xila-log",

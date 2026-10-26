@@ -183,9 +183,9 @@ impl IcmpSocket {
         use wire::{Icmpv4Packet, Icmpv4Repr, Icmpv6Packet, Icmpv6Repr};
 
         let mut echo_payload = vec![0u8; payload_size];
-        let start_time = crate::get_smoltcp_time(self.context.stack.time_manager());
+        let start_time = self.context.stack.time_manager().monotonic_now();
 
-        let timestamp_millis = start_time.total_millis() as u64;
+        let timestamp_millis = start_time.as_millis() as u64;
         echo_payload[0..8].copy_from_slice(&timestamp_millis.to_be_bytes());
 
         let mut stack_lock = self.context.stack.lock().await;
@@ -255,16 +255,16 @@ impl IcmpSocket {
 
         self.context.stack.wake_runner();
 
-        let timeout_end = start_time + timeout.into_smoltcp();
+        let timeout = core::time::Duration::from(timeout);
 
         loop {
-            let now = crate::get_smoltcp_time(self.context.stack.time_manager());
-            if now >= timeout_end {
-                return Err(Error::TimedOut);
-            }
+            let now = self.context.stack.time_manager().monotonic_now();
+            let remaining = remaining_timeout(start_time, now, timeout)?;
 
             let mut recv_buffer = [0u8; 256];
-            let result = self.read_from_with_timeout(&mut recv_buffer, timeout).await;
+            let result = self
+                .read_from_with_timeout(&mut recv_buffer, remaining)
+                .await;
 
             match result {
                 Ok((size, addr)) if addr == *remote_address => {
@@ -320,9 +320,9 @@ impl IcmpSocket {
                     };
 
                     if is_valid_reply {
-                        let end_time = crate::get_smoltcp_time(self.context.stack.time_manager());
+                        let end_time = self.context.stack.time_manager().monotonic_now();
                         let rtt = end_time - start_time;
-                        return Ok(Duration::from_milliseconds(rtt.total_millis()));
+                        return Ok(rtt.into());
                     }
                 }
                 Ok(_) => {
@@ -376,5 +376,42 @@ impl IcmpSocket {
             socket.set_hop_limit(hop_limit);
         })
         .await
+    }
+}
+
+fn remaining_timeout(
+    start: core::time::Duration,
+    now: core::time::Duration,
+    timeout: core::time::Duration,
+) -> Result<core::time::Duration> {
+    let remaining = timeout.saturating_sub(now.saturating_sub(start));
+    if remaining.is_zero() {
+        Err(Error::TimedOut)
+    } else {
+        Ok(remaining)
+    }
+}
+
+#[cfg(test)]
+mod timeout_tests {
+    use super::*;
+    use core::time::Duration as StdDuration;
+
+    #[test]
+    fn unrelated_packets_do_not_restart_ping_timeout_budget() {
+        let start = StdDuration::from_secs(10);
+        let timeout = StdDuration::from_secs(30);
+        assert_eq!(
+            remaining_timeout(start, StdDuration::from_secs(39), timeout).unwrap(),
+            StdDuration::from_secs(1)
+        );
+        assert_eq!(
+            remaining_timeout(start, StdDuration::from_secs(40), timeout),
+            Err(Error::TimedOut)
+        );
+        assert_eq!(
+            remaining_timeout(start, StdDuration::from_secs(41), timeout),
+            Err(Error::TimedOut)
+        );
     }
 }
