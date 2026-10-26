@@ -1,0 +1,53 @@
+name: Engineering task
+description: Track an audit, refactor, optimization, hardening, or maintenance task.
+title: "[Task] "
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and problem
+      description: What is broken, fragile, inefficient, or in need of investigation? Link relevant code and evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope of work
+      description: State what should change or be investigated, and what is intentionally out of scope.
+    validations:
+      required: true
+  - type: textarea
+    id: completion
+    attributes:
+      label: Definition of done
+      description: Concrete deliverables, tests, measurements, or follow-up issues. Separate known fixes from hypotheses.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Primary area
+      options:
+        - Subsystems (task, VFS, graphics, network, etc.)
+        - Libraries / shared APIs
+        - Drivers / hardware
+        - Wasm runtime / ABI
+        - Executables / applications
+        - Localization / fonts
+        - Build / CI / tooling
+        - Other / cross-cutting
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan and constraints
+      description: Relevant host/Wasm/hardware targets, reproduction or baseline, benchmarks, memory/flash limits, security and compatibility concerns.
+  - type: textarea
+    id: references
+    attributes:
+      label: References and implementation notes
+      description: Related issues, code, traces, upstream work, or possible implementation approaches (optional).
