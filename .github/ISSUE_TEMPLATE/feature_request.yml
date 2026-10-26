@@ -1,0 +1,57 @@
+name: Feature proposal
+description: Propose a new capability, API, driver, or application behavior.
+title: "[Feature] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Prefer a focused problem and observable acceptance criteria. Xila targets resource-constrained systems; describe costs and portability where relevant.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What cannot be done today, and who needs it?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the desired behavior, API, or user-facing result rather than prescribing every implementation detail.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Primary area
+      options:
+        - Subsystems (task, VFS, graphics, network, etc.)
+        - Libraries / shared APIs
+        - Drivers / hardware
+        - Wasm runtime / ABI
+        - Executables / applications
+        - Localization / fonts
+        - Build / CI / tooling
+        - Other / cross-cutting
+    validations:
+      required: true
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Acceptance criteria
+      description: List outcomes that can be checked by code, tests, documentation, or a demo.
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Target support and constraints
+      description: Note supported targets, no_std/alloc requirements, RAM/flash/stack or CPU budget, ABI compatibility, security, and feature-gating where relevant.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and prior work
+      description: Existing APIs, related issues/PRs, upstream solutions, or options considered.
