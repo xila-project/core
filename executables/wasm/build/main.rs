@@ -35,6 +35,12 @@ fn generate() {
             Some("*mut lv_obj_t"),
         ),
         (
+            "file_picker_reset",
+            &["*mut lv_obj_t", "u32", "*const core::ffi::c_char"],
+            "None",
+            None,
+        ),
+        (
             "file_picker_get_status",
             &["*mut lv_obj_t"],
             "U32",

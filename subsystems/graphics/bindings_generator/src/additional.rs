@@ -69,8 +69,13 @@ pub fn get() -> TokenStream {
 
             /// Create a system LVGL picker. Modes: 0=open, 1=save, 2=directory.
             /// Initial path is copied; filesystem access uses the calling guest task.
+            /// Retain the handle and call file_picker_reset for subsequent sessions;
+            /// delete with its parent to avoid exhausting monotonic guest handles.
             pub fn file_picker_create(parent: *mut lv_obj_t, mode: u32, initial: *const core::ffi::c_char) -> *mut lv_obj_t;
-            /// 0=pending, 1=selected, 2=cancelled. Result persists until deletion.
+            /// Reuse a retained picker without allocating another guest handle.
+            /// Clears its prior result, changes mode/path, and reactivates the UI.
+            pub fn file_picker_reset(picker: *mut lv_obj_t, mode: u32, initial: *const core::ffi::c_char);
+            /// 0=pending, 1=selected, 2=cancelled. Result persists until reset/deletion.
             pub fn file_picker_get_status(picker: *mut lv_obj_t) -> u32;
             /// Copy selected absolute VFS path including NUL. Returns byte count
             /// excluding NUL, or -1 without a selection. Short buffers are errors.

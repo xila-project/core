@@ -197,6 +197,7 @@ fn actual_lvgl_catalog_matches_discovered_numbering() {
         "file_picker_create",
         "file_picker_get_status",
         "file_picker_get_path",
+        "file_picker_reset",
     ];
     signatures.retain(|signature| !extensions.contains(&signature.ident.to_string().as_str()));
     signatures.sort_by_key(|s| s.ident.to_string().to_lowercase());

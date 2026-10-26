@@ -55,6 +55,7 @@ fn extension_id(name: &str) -> Option<u16> {
         "file_picker_create" => 0xf02d,
         "file_picker_get_status" => 0xf02e,
         "file_picker_get_path" => 0xf02f,
+        "file_picker_reset" => 0xf030,
         _ => return None,
     })
 }

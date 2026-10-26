@@ -278,7 +278,7 @@ impl FilePicker {
                 lvgl::lv_group_add_obj(modal.group, control);
             }
             modal.activate();
-            let mut state = Box::new(State {
+            let state = Box::new(State {
                 _modal: modal,
                 vfs,
                 model: Model::new(caller, mode),
@@ -292,16 +292,62 @@ impl FilePicker {
                 cancel,
                 rows,
             });
-            let directory = match vfs.kind(caller, &initial) {
+            picker.as_mut().state = Some(state);
+            picker.as_mut().reset(mode, &initial)?;
+            Ok(picker)
+        }
+    }
+    /// Reuse this picker and its guest handle for another selection session.
+    /// Clears the previous result while preserving the original VFS and caller.
+    ///
+    /// # Safety
+    /// The graphics lock must be held and this must be a live LVGL picker.
+    pub unsafe fn reset(&mut self, mode: FilePickerMode, initial: &str) -> Result<()> {
+        let initial = model::normalize(initial).map_err(|_| Error::InvalidParameter)?;
+        unsafe {
+            let state = self.state.as_mut().ok_or(Error::InvalidReference)?;
+            if state._modal.group.is_null() {
+                let modal = ModalFocus::capture()?;
+                for control in [
+                    state.path,
+                    state.up,
+                    state.previous,
+                    state.next,
+                    state.confirm,
+                    state.cancel,
+                    state.keyboard,
+                ]
+                .into_iter()
+                .chain(state.rows.iter().copied())
+                {
+                    lvgl::lv_group_add_obj(modal.group, control);
+                }
+                state._modal = modal;
+            }
+            state.model = Model::new(state.model.caller, mode);
+            let directory = match state.vfs.kind(state.model.caller, &initial) {
                 Ok(file_system::Kind::Directory) => initial.as_str(),
                 _ => model::parent(&initial),
             };
-            let result = state.model.navigate(vfs, directory, 0);
-            picker.as_mut().state = Some(state);
-            picker.as_mut().refresh();
+            let result = state.model.navigate(state.vfs, directory, 0);
+            text(
+                lvgl::lv_obj_get_child(state.confirm, 0),
+                match mode {
+                    FilePickerMode::OpenFile => translate!("file_picker.open"),
+                    FilePickerMode::SaveFile => translate!("file_picker.save"),
+                    FilePickerMode::Directory => translate!("file_picker.select_directory"),
+                },
+            );
+            state._modal.activate();
+            let path = state.path;
+            lvgl::lv_keyboard_set_textarea(state.keyboard, ptr::null_mut());
+            lvgl::lv_obj_add_flag(state.keyboard, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_HIDDEN);
+            self.refresh();
             lvgl::lv_textarea_set_text(path, CString::new(initial).unwrap().as_ptr());
-            picker.as_mut().show_result(result);
-            Ok(picker)
+            self.show_result(result);
+            lvgl::lv_obj_remove_flag(&mut self.object, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_HIDDEN);
+            lvgl::lv_obj_move_foreground(&mut self.object);
+            Ok(())
         }
     }
     pub fn status(&self) -> FilePickerStatus {
@@ -443,10 +489,14 @@ unsafe extern "C" fn callback(event: *mut lvgl::lv_event_t) {
             state.model.cancel();
             Ok(())
         } else if target == state.confirm
-            || (target == state.path && code == lvgl::lv_event_code_t_LV_EVENT_READY)
+            || ((target == state.path || target == state.keyboard)
+                && code == lvgl::lv_event_code_t_LV_EVENT_READY)
         {
             path.map_err(|_| virtual_file_system::Error::InvalidPath)
-                .and_then(|path| state.model.confirm(state.vfs, &path))
+                .and_then(|path| state.model.activate(state.vfs, &path))
+                .map(|did_navigate| {
+                    navigated = did_navigate;
+                })
         } else {
             let (destination, offset) = if target == state.up {
                 (String::from(model::parent(&state.model.directory)), 0)
@@ -469,6 +519,13 @@ unsafe extern "C" fn callback(event: *mut lvgl::lv_event_t) {
                     state.model.directory.trim_end_matches('/'),
                     entry.name
                 );
+                let destination = match model::normalize(&destination) {
+                    Ok(destination) => destination,
+                    Err(error) => {
+                        picker.show_result(Err(error));
+                        return;
+                    }
+                };
                 match state.vfs.kind(state.model.caller, &destination) {
                     Ok(file_system::Kind::Directory) => {}
                     Ok(_) => {

@@ -73,6 +73,7 @@ async fn confirm_picker(manager: &Manager) {
                 let picker = lvgl::lv_obj_get_child(root, -1);
                 if !picker.is_null()
                     && lvgl::lv_obj_get_class(picker) == xila::graphics::get_file_picker_class()
+                    && !lvgl::lv_obj_has_flag(picker, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_HIDDEN)
                 {
                     let path = lvgl::lv_obj_get_child(picker, 0);
                     // READY is the same completion used by physical Enter.

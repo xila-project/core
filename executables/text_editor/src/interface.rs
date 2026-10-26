@@ -27,6 +27,7 @@ struct Interface {
     confirm_close: Option<u64>,
     working_unusable: bool,
     picker: Option<(*mut Object, FilePickerMode)>,
+    retained_picker: Option<*mut Object>,
     _action_map: [*const i8; 8],
 }
 
@@ -180,6 +181,7 @@ impl Interface {
                 confirm_close: None,
                 working_unusable: false,
                 picker: None,
+                retained_picker: None,
                 _action_map: action_map,
             };
             ui.status(translate!("file_path.picker_instructions"))?;
@@ -328,7 +330,14 @@ impl Interface {
         let initial = CString::new(initial).map_err(|_| -1)?;
         unsafe {
             object_add_flag(self.keyboard, ObjectFlag::Hidden)?;
-            let picker = file_picker_create(self.window, mode as u32, initial.as_ptr())?;
+            let picker = if let Some(picker) = self.retained_picker {
+                file_picker_reset(picker, mode as u32, initial.as_ptr())?;
+                picker
+            } else {
+                let picker = file_picker_create(self.window, mode as u32, initial.as_ptr())?;
+                self.retained_picker = Some(picker);
+                picker
+            };
             self.picker = Some((picker, mode));
         }
         Ok(())
@@ -352,9 +361,6 @@ impl Interface {
                 .map_err(|_| -1)?;
             let selected = if mode == FilePickerMode::Directory {
                 let Some(destination) = storage::new_path(selected) else {
-                    unsafe {
-                        object_delete(u16::try_from(picker as usize).map_err(|_| -1)?)?;
-                    }
                     self.picker = None;
                     return self.status(translate!("errors.folder_path_too_long"));
                 };
@@ -366,9 +372,6 @@ impl Interface {
             unsafe {
                 textarea_set_text(self.path, selected.as_ptr())?;
             }
-        }
-        unsafe {
-            object_delete(u16::try_from(picker as usize).map_err(|_| -1)?)?;
         }
         self.picker = None;
         if status == FilePickerStatus::Selected as u32 {

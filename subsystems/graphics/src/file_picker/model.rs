@@ -13,24 +13,9 @@ pub fn normalize(path: &str) -> Result<String> {
     if !path.starts_with('/') || path.len() > MAX_PATH || path.as_bytes().contains(&0) {
         return Err(Error::InvalidPath);
     }
-    let mut result = String::from("/");
-    for part in path.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                if let Some(index) = result.rfind('/') {
-                    result.truncate(index.max(1));
-                }
-            }
-            _ => {
-                if result.len() > 1 {
-                    result.push('/');
-                }
-                result.push_str(part);
-            }
-        }
-    }
-    Ok(result)
+    // VFS resolves dot components, symlinks, and trailing-slash directory
+    // requirements. Rewriting them here can silently select a different file.
+    Ok(String::from(path))
 }
 pub fn parent(path: &str) -> &str {
     match path.rfind('/') {
@@ -45,9 +30,13 @@ pub struct Page {
 pub trait Browser {
     fn kind(&self, task: TaskIdentifier, path: &str) -> Result<Kind>;
     fn file_access(&self, task: TaskIdentifier, path: &str, write: bool) -> Result<()>;
+    fn create_access(&self, task: TaskIdentifier, path: &str) -> Result<()>;
     fn page(&self, task: TaskIdentifier, path: &str, offset: usize) -> Result<Page>;
 }
 impl Browser for VirtualFileSystem {
+    fn create_access(&self, task: TaskIdentifier, path: &str) -> Result<()> {
+        task::block_on(self.check_create_file_access(task, &Path::from_str(path)))
+    }
     fn file_access(&self, task: TaskIdentifier, path: &str, write: bool) -> Result<()> {
         // No create/truncate flags: validation must preserve existing contents.
         SynchronousFile::open(
@@ -133,6 +122,22 @@ impl Model {
         self.page = page;
         Ok(())
     }
+    /// Shared activation for pointer confirmation and either keyboard.
+    /// File modes enter directories; directory mode selects the typed directory.
+    /// Returns true when the caller should refresh its directory listing.
+    pub fn activate(&mut self, browser: &impl Browser, path: &str) -> Result<bool> {
+        let path = normalize(path)?;
+        if self.mode != FilePickerMode::Directory
+            && matches!(browser.kind(self.caller, &path), Ok(Kind::Directory))
+        {
+            self.navigate(browser, &path, 0)?;
+            Ok(true)
+        } else {
+            self.confirm(browser, &path)?;
+            Ok(false)
+        }
+    }
+
     pub fn confirm(&mut self, browser: &impl Browser, path: &str) -> Result<()> {
         if self.status != FilePickerStatus::Pending {
             return Err(Error::InvalidParameter);
@@ -149,8 +154,7 @@ impl Model {
                 if browser.kind(self.caller, parent(&path))? != Kind::Directory {
                     return Err(Error::NotADirectory);
                 }
-                // Reading the parent verifies traversal/read permission without creating a target.
-                let _ = browser.page(self.caller, parent(&path), 0)?;
+                browser.create_access(self.caller, &path)?;
             }
             (_, Err(error)) => return Err(error),
             (FilePickerMode::Directory, _) => return Err(Error::NotADirectory),
@@ -171,9 +175,9 @@ impl Model {
 mod tests {
     use super::*;
     #[test]
-    fn normalizes_absolute_paths_and_enforces_byte_bounds() {
-        assert_eq!(normalize("//a/./b/../c/").unwrap(), "/a/c");
-        assert_eq!(normalize("/../../a").unwrap(), "/a");
+    fn preserves_vfs_components_and_enforces_byte_bounds() {
+        assert_eq!(normalize("//a/./b/../c/").unwrap(), "//a/./b/../c/");
+        assert_eq!(normalize("/../../a").unwrap(), "/../../a");
         assert!(normalize("relative").is_err());
         assert!(normalize("/a\0b").is_err());
         assert!(normalize(&alloc::format!("/{}", "a".repeat(1023))).is_err());
@@ -195,6 +199,10 @@ mod behavior_tests {
         calls: RefCell<Vec<TaskIdentifier>>,
     }
     impl Browser for Backend {
+        fn create_access(&self, task: TaskIdentifier, _path: &str) -> Result<()> {
+            self.calls.borrow_mut().push(task);
+            Ok(())
+        }
         fn file_access(&self, task: TaskIdentifier, _: &str, _: bool) -> Result<()> {
             self.calls.borrow_mut().push(task);
             Ok(())
@@ -273,5 +281,43 @@ mod behavior_tests {
         assert_eq!(model.status, FilePickerStatus::Cancelled);
         assert!(model.selected.is_none());
         assert!(model.confirm(&backend, "/file").is_err());
+    }
+}
+
+#[cfg(test)]
+mod activation_tests {
+    use super::*;
+    struct BrowserFixture;
+    impl Browser for BrowserFixture {
+        fn kind(&self, _: TaskIdentifier, path: &str) -> Result<Kind> {
+            if path == "/" {
+                Ok(Kind::Directory)
+            } else {
+                Ok(Kind::File)
+            }
+        }
+        fn file_access(&self, _: TaskIdentifier, _: &str, _: bool) -> Result<()> {
+            Ok(())
+        }
+        fn create_access(&self, _: TaskIdentifier, _: &str) -> Result<()> {
+            Ok(())
+        }
+        fn page(&self, _: TaskIdentifier, _: &str, _: usize) -> Result<Page> {
+            Ok(Page {
+                entries: Vec::new(),
+                more: false,
+            })
+        }
+    }
+    #[test]
+    fn same_activation_browses_directories_and_selects_files_in_file_mode() {
+        let mut model = Model::new(TaskIdentifier::new(42), FilePickerMode::OpenFile);
+        assert_eq!(model.activate(&BrowserFixture, "/"), Ok(true));
+        assert_eq!(model.status, FilePickerStatus::Pending);
+        assert_eq!(model.activate(&BrowserFixture, "/file"), Ok(false));
+        assert_eq!(model.selected.as_deref(), Some("/file"));
+        let mut directory = Model::new(TaskIdentifier::new(42), FilePickerMode::Directory);
+        assert_eq!(directory.activate(&BrowserFixture, "/"), Ok(false));
+        assert_eq!(directory.selected.as_deref(), Some("/"));
     }
 }

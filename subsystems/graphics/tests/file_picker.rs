@@ -72,6 +72,53 @@ async fn privileged_worker_cannot_browse_or_select_for_unprivileged_caller() {
     )
     .await
     .unwrap();
+    vfs.create_directory(caller, &"/writable").await.unwrap();
+    vfs.set_permissions(caller, "/writable", Permissions::from_octal(0o777).unwrap())
+        .await
+        .unwrap();
+    for path in ["/target", "/target/child"] {
+        vfs.create_directory(caller, &path).await.unwrap();
+        vfs.set_permissions(caller, path, Permissions::from_octal(0o755).unwrap())
+            .await
+            .unwrap();
+    }
+    File::open(
+        vfs,
+        caller,
+        "/target/file",
+        Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
+    )
+    .await
+    .unwrap()
+    .close(vfs)
+    .await
+    .unwrap();
+    vfs.set_permissions(
+        caller,
+        "/target/file",
+        Permissions::from_octal(0o644).unwrap(),
+    )
+    .await
+    .unwrap();
+    vfs.create_symlink(
+        caller,
+        file_system::Path::from_str("/target/child"),
+        file_system::Path::from_str("/link"),
+    )
+    .await
+    .unwrap();
+    for (link, target) in [
+        ("/dangling", "/writable/new-link-target"),
+        ("/denied-link", "/private/new-link-target"),
+    ] {
+        vfs.create_symlink(
+            caller,
+            file_system::Path::from_str(target),
+            file_system::Path::from_str(link),
+        )
+        .await
+        .unwrap();
+    }
     let group = users::GroupIdentifier::new(1000);
     let user = users::UserIdentifier::new(1000);
     users.add_group(group, "picker-user", &[]).await.unwrap();
@@ -115,6 +162,17 @@ async fn privileged_worker_cannot_browse_or_select_for_unprivileged_caller() {
                     model.confirm(vfs, "/restricted"),
                     Err(Error::PermissionDenied)
                 );
+                for path in ["/target/file/.", "/target/file/"] {
+                    let mut invalid = Model::new(caller, FilePickerMode::OpenFile);
+                    assert!(
+                        invalid.confirm(vfs, path).is_err(),
+                        "must preserve VFS directory requirement: {path}"
+                    );
+                    assert!(invalid.selected.is_none());
+                }
+                let mut via_link = Model::new(caller, FilePickerMode::OpenFile);
+                via_link.confirm(vfs, "/link/../file").unwrap();
+                assert_eq!(via_link.selected.as_deref(), Some("/link/../file"));
                 let mut directory = Model::new(caller, FilePickerMode::Directory);
                 assert_eq!(
                     directory.confirm(vfs, "/private"),
@@ -131,6 +189,36 @@ async fn privileged_worker_cannot_browse_or_select_for_unprivileged_caller() {
                 );
                 assert!(matches!(
                     vfs.kind(worker, "/private/new"),
+                    Err(Error::FileSystem(file_system::Error::NotFound))
+                ));
+                let mut save = Model::new(caller, FilePickerMode::SaveFile);
+                assert_eq!(save.confirm(vfs, "/new"), Err(Error::PermissionDenied));
+                assert_eq!(save.status, FilePickerStatus::Pending);
+                assert!(save.selected.is_none());
+                assert!(matches!(
+                    vfs.kind(worker, "/new"),
+                    Err(Error::FileSystem(file_system::Error::NotFound))
+                ));
+                save.confirm(vfs, "/writable/new").unwrap();
+                assert_eq!(save.selected.as_deref(), Some("/writable/new"));
+                assert!(matches!(
+                    vfs.kind(worker, "/writable/new"),
+                    Err(Error::FileSystem(file_system::Error::NotFound))
+                ));
+                let mut linked_save = Model::new(caller, FilePickerMode::SaveFile);
+                linked_save.confirm(vfs, "/dangling").unwrap();
+                assert_eq!(linked_save.selected.as_deref(), Some("/dangling"));
+                assert!(matches!(
+                    vfs.kind(worker, "/writable/new-link-target"),
+                    Err(Error::FileSystem(file_system::Error::NotFound))
+                ));
+                let mut denied_save = Model::new(caller, FilePickerMode::SaveFile);
+                assert_eq!(
+                    denied_save.confirm(vfs, "/denied-link"),
+                    Err(Error::PermissionDenied)
+                );
+                assert!(matches!(
+                    vfs.kind(worker, "/private/new-link-target"),
                     Err(Error::FileSystem(file_system::Error::NotFound))
                 ));
                 let mut save = Model::new(caller, FilePickerMode::SaveFile);

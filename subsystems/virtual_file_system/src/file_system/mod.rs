@@ -295,6 +295,33 @@ impl VirtualFileSystem {
         ))
     }
 
+    /// Check the caller's parent-directory authorization for creating a file.
+    /// Resolves paths exactly as a nonexclusive create would, without creating
+    /// or opening a file. This is a UI preflight, not a reservation: the actual
+    /// create must still enforce access when it executes.
+    pub async fn check_create_file_access(
+        &self,
+        task: TaskIdentifier,
+        path: &impl AsRef<Path>,
+    ) -> Result<()> {
+        let user = self.task_manager.get_user(task).await?;
+        let file_systems = self.file_systems.read().await;
+        let resolved = self
+            .resolve_path(&file_systems, path.as_ref(), true, true, user, task)
+            .await?;
+        let parent = resolved.as_ref().go_parent().ok_or(Error::InvalidPath)?;
+        let (file_system, relative_path, _) =
+            Self::get_file_system_from_path(&file_systems, &parent)?;
+        self.check_permissions(
+            file_system.file_system,
+            relative_path,
+            Permission::Write | Permission::Execute,
+            user,
+            task,
+        )
+        .await
+    }
+
     pub async fn open<'a>(
         &'a self,
         path: &impl AsRef<Path>,

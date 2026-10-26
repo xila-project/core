@@ -581,6 +581,24 @@ pub fn dispatch(
                 .write(GuestPointer::new(call.result), handle)
                 .expect("validated result");
         }
+        Function::FilePickerReset => {
+            let picker = state
+                .object(a, Some(Kind::FilePicker))?
+                .cast::<xila::graphics::FilePicker>();
+            let mode = match b {
+                0 => xila::graphics::FilePickerMode::OpenFile,
+                1 => xila::graphics::FilePickerMode::SaveFile,
+                2 => xila::graphics::FilePickerMode::Directory,
+                _ => return Err(GraphicsError::InvalidValue),
+            };
+            let initial = read_c_string(memory, c)?
+                .to_str()
+                .map_err(|_| GraphicsError::InvalidValue)?;
+            unsafe { (*picker).reset(mode, initial) }.map_err(|error| match error {
+                xila::graphics::Error::InvalidParameter => GraphicsError::InvalidValue,
+                _ => GraphicsError::NativeFailure,
+            })?;
+        }
         Function::FilePickerGetStatus => {
             let picker = state
                 .object(a, Some(Kind::FilePicker))?
