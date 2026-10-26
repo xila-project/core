@@ -1,6 +1,6 @@
 [package]
 name = "xila"
-version = "0.1.0"
+version.workspace = true
 authors = ["Alix ANNERAUD <alix@anneraud.fr>"]
 edition.workspace = true
 rust-version.workspace = true

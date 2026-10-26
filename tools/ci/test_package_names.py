@@ -173,6 +173,18 @@ class CargoPackageNames(unittest.TestCase):
         self.assertEqual(pathlib.Path(packages[0]["manifest_path"]), ROOT / "core/Cargo.toml")
         self.assertEqual(metadata["workspace_default_members"], [packages[0]["id"]])
 
+    def test_facade_and_workspace_libraries_share_version(self):
+        root = manifest(ROOT / "Cargo.toml")
+        self.assertIn("version", root["workspace"]["package"])
+        metadata = json.loads(subprocess.check_output(
+            ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],
+            cwd=ROOT, text=True,
+        ))
+        for package in metadata["packages"]:
+            path = pathlib.Path(package["manifest_path"]).relative_to(ROOT)
+            if path.parts[0] in {"core", "libraries", "subsystems"}:
+                self.assertEqual(manifest(ROOT / path)["package"]["version"], {"workspace": True}, str(path))
+
     def test_root_workspace_dependency_keys_alias_renamed_packages(self):
         workspace = manifest(ROOT / "Cargo.toml")["workspace"]["dependencies"]
 

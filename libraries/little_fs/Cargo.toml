@@ -1,6 +1,6 @@
 [package]
 name = "xila-little-fs"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 
 [features]

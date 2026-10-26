@@ -2,7 +2,9 @@
 
 `xila` is the public OS façade. The repository root is a virtual Cargo
 workspace and selects this package by default; other crates can use the
-workspace dependency `xila` or depend directly on smaller contracts.
+workspace dependency `xila` or depend directly on smaller contracts. The façade,
+main-workspace libraries and subsystems inherit their version from the root;
+applications, drivers and standalone workspaces keep their own versions.
 
 The services re-exported unconditionally are available with
 `--no-default-features`. ABI definitions are enabled by default and can be
