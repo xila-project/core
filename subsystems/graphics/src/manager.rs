@@ -388,10 +388,7 @@ impl Drop for Manager {
 extern "C" fn binding_tick_callback_function() -> u32 {
     let manager = TICK_TIME_MANAGER.load(Ordering::Acquire);
     assert!(!manager.is_null(), "Graphics time manager not initialized");
-    unsafe { &*manager }
-        .get_current_time()
-        .unwrap_or_default()
-        .as_millis() as u32
+    unsafe { &*manager }.monotonic_milliseconds_wrapping()
 }
 
 unsafe impl Send for Manager {}

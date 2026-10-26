@@ -7,7 +7,9 @@ use crate::{IpAddress, IpCidr};
 pub struct Route {
     pub cidr: IpCidr,
     pub via_router: IpAddress,
+    /// Absolute monotonic time in the time manager source's epoch, not UTC.
     pub preferred_until: Option<Duration>,
+    /// Absolute monotonic time in the time manager source's epoch, not UTC.
     pub expires_at: Option<Duration>,
 }
 

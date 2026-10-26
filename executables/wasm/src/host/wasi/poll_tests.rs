@@ -49,7 +49,7 @@ fn poll_waits_for_earliest_deadline_and_writes_only_ready_events() {
     memory
         .write(GuestPointer::new(49), subscription(25, 1, 1))
         .unwrap();
-    let poll = ClockPoll::prepare(&memory, 1, 101, 2, 201, [10, 10]).unwrap();
+    let poll = ClockPoll::prepare(&memory, 1, 101, 2, 201, |_| Ok(10)).unwrap();
     assert_eq!(poll.delay([10, 10]).as_nanos(), 10);
     assert_eq!(poll.complete(&mut memory, [19, 19]).unwrap(), 0);
     assert_eq!(memory.read(GuestPointer::<WasmUsize>::new(201)), Some(0));
@@ -62,7 +62,7 @@ fn poll_waits_for_earliest_deadline_and_writes_only_ready_events() {
     );
     assert_eq!(poll.complete(&mut memory, [25, 25]).unwrap(), 2);
     // Both outputs may overlap; values are written in a defined sequential order.
-    let overlap = ClockPoll::prepare(&memory, 1, 101, 1, 101, [0, 0]).unwrap();
+    let overlap = ClockPoll::prepare(&memory, 1, 101, 1, 101, |_| Ok(0)).unwrap();
     assert_eq!(overlap.complete(&mut memory, [100, 100]).unwrap(), 1);
     assert_eq!(memory.read(GuestPointer::<WasmUsize>::new(101)), Some(1));
 }
@@ -85,7 +85,7 @@ fn polling_rejects_invalid_requests_without_output_side_effects() {
         (1, 100, 1, WasmUsize::MAX, PollError::Fault),
     ] {
         assert_eq!(
-            ClockPoll::prepare(&memory, input, events, count, written, [0, 0]).err(),
+            ClockPoll::prepare(&memory, input, events, count, written, |_| Ok(0)).err(),
             Some(errno)
         );
     }
@@ -100,7 +100,7 @@ fn polling_rejects_invalid_requests_without_output_side_effects() {
         }
         memory.write(GuestPointer::new(1), value).unwrap();
         assert_eq!(
-            ClockPoll::prepare(&memory, 1, 100, 1, 200, [1, 1]).err(),
+            ClockPoll::prepare(&memory, 1, 100, 1, 200, |_| Ok(1)).err(),
             Some(errno)
         );
     }
@@ -111,7 +111,7 @@ fn polling_rejects_invalid_requests_without_output_side_effects() {
     memory
         .write(GuestPointer::new(1), subscription(1, 0, 0))
         .unwrap();
-    let poll = ClockPoll::prepare(&memory, 1, 100, 1, 200, [0, 0]).unwrap();
+    let poll = ClockPoll::prepare(&memory, 1, 100, 1, 200, |_| Ok(0)).unwrap();
     assert_eq!(poll.complete(&mut tiny, [1, 1]), Err(PollError::Fault));
     let mut full = vec![0; 4096];
     let mut full = GuestMemory::new(&mut full);
@@ -120,7 +120,7 @@ fn polling_rejects_invalid_requests_without_output_side_effects() {
             .unwrap();
     }
     assert_eq!(
-        ClockPoll::prepare(&full, 1, 3100, 64, 3080, [0, 0]).err(),
+        ClockPoll::prepare(&full, 1, 3100, 64, 3080, |_| Ok(0)).err(),
         Some(PollError::Fault)
     );
     // A full output table needs its own memory, not truncation to one event.
@@ -130,6 +130,6 @@ fn polling_rejects_invalid_requests_without_output_side_effects() {
         full.write(GuestPointer::new(1 + 48 * i), subscription(0, 0, 0))
             .unwrap();
     }
-    let poll = ClockPoll::prepare(&full, 1, 3100, 64, 3080, [0, 0]).unwrap();
+    let poll = ClockPoll::prepare(&full, 1, 3100, 64, 3080, |_| Ok(0)).unwrap();
     assert_eq!(poll.complete(&mut full, [0, 0]).unwrap(), 64);
 }

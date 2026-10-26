@@ -16,7 +16,7 @@ pub struct NetworkTab {
     context: &'static xila::executable::ExecutableContext,
     tab_container: *mut lvgl::lv_obj_t,
     interfaces_list: *mut lvgl::lv_obj_t,
-    last_update: Duration,
+    last_update: Option<Duration>,
     configuration_panel: Option<InterfacePanel>,
     parent_tabview: *mut lvgl::lv_obj_t,
 }
@@ -29,7 +29,7 @@ impl NetworkTab {
             context,
             tab_container: null_mut(),
             interfaces_list: null_mut(),
-            last_update: Duration::from_secs(0),
+            last_update: None,
             configuration_panel: None,
             parent_tabview: null_mut(),
         }
@@ -177,13 +177,18 @@ impl NetworkTab {
     pub async fn refresh(&mut self) {
         if let Some(panel) = &mut self.configuration_panel {
             panel.refresh();
-        } else if let Ok(now) = self.context.time_manager.get_current_time()
-            && now.saturating_sub(self.last_update) >= Self::UPDATE_INTERVAL
-        {
+        } else {
+            let now = self.context.time_manager.monotonic_now();
+            if self
+                .last_update
+                .is_some_and(|last| now - last < Self::UPDATE_INTERVAL)
+            {
+                return;
+            }
             if let Err(error) = self.update_interfaces().await {
                 log::error!("Failed to update network interfaces: {:?}", error);
             }
-            self.last_update = now;
+            self.last_update = Some(now);
         }
     }
 

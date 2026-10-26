@@ -11,6 +11,7 @@ use core::time::Duration;
 pub enum PollError {
     Fault = 21,
     Invalid = 28,
+    Io = 29,
     NotSupported = 58,
     Overflow = 61,
 }
@@ -87,7 +88,7 @@ impl ClockPoll {
         events: WasmUsize,
         count: WasmUsize,
         written: WasmUsize,
-        now: [u64; 2],
+        mut now: impl FnMut(usize) -> Result<u64, PollError>,
     ) -> Result<Self, PollError> {
         if count == 0 || count > 64 {
             return Err(PollError::Invalid);
@@ -100,6 +101,7 @@ impl ClockPoll {
             .values(GuestSlice::<Subscription>::new(input, count))
             .ok_or(PollError::Fault)?;
         let mut clocks = Vec::with_capacity(count as usize);
+        let mut readings = [None; 2];
         for subscription in subscriptions {
             if subscription.tag != 0 || subscription.clock > 1 {
                 return Err(PollError::NotSupported);
@@ -111,7 +113,15 @@ impl ClockPoll {
             let deadline = if subscription.flags == 1 {
                 subscription.timeout
             } else {
-                now[id]
+                let current = match readings[id] {
+                    Some(current) => current,
+                    None => {
+                        let current = now(id)?;
+                        readings[id] = Some(current);
+                        current
+                    }
+                };
+                current
                     .checked_add(subscription.timeout)
                     .ok_or(PollError::Overflow)?
             };
@@ -126,6 +136,15 @@ impl ClockPoll {
             events,
             written,
         })
+    }
+
+    /// Clocks used by this poll, including absolute subscriptions.
+    pub fn required_clocks(&self) -> [bool; 2] {
+        let mut required = [false; 2];
+        for clock in &self.clocks {
+            required[clock.id] = true;
+        }
+        required
     }
 
     pub fn delay(&self, now: [u64; 2]) -> Duration {
