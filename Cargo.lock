@@ -5456,6 +5456,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "xila-firmware-update"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+ "ed25519-dalek",
+ "verification",
+ "xila-abi-definitions",
+ "xila-drivers-std",
+ "xila-file-system",
+ "xila-little-fs",
+ "xila-shared",
+ "xila-synchronization",
+ "xila-task",
+ "xila-time",
+ "xila-users",
+ "xila-virtual-file-system",
+]
+
+[[package]]
 name = "xila-fs-image"
 version = "0.1.0"
 dependencies = [

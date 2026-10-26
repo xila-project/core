@@ -127,7 +127,7 @@ class WorkflowPolicy(unittest.TestCase):
     def test_validation_jobs_call_the_same_ordered_leaf_tasks_as_local_wrappers(self):
         tasks = ci_config()["tasks"]
         groups = {
-            ("ci.yml", "host"): ["ci:host-clippy", "ci:host-wasm-clippy", "ci:host-tests", "ci:host-profiling-tests", "ci:host-font-tests", "ci:host-build"],
+            ("ci.yml", "host"): ["ci:host-clippy", "ci:host-wasm-clippy", "ci:host-tests", "ci:firmware", "ci:host-profiling-tests", "ci:host-font-tests", "ci:host-build"],
             ("ci.yml", "wasm"): ["ci:wasm-clippy", "ci:wasm-audio-check", "ci:wasm-apps-clippy", "ci:wasm-image", "ci:wasm-browser-tests"],
             ("extended.yml", "profiling"): ["ci:profiling-runtime-tests", "ci:profiling-native-tests"],
             ("extended.yml", "abi-deep"): ["ci:abi-coverage", "ci:abi-miri", "ci:abi-miri-cross"],

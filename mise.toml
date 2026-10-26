@@ -115,3 +115,11 @@ mkdir -p "${CARGO_TARGET_DIR:-target}/seed/wasm"
 rm -f "${CARGO_TARGET_DIR:-target}/seed/wasm/seed.img"
 cargo run --locked --package xila-fs-image -- "${CARGO_TARGET_DIR:-target}/seed/wasm/seed.img" 16777216 --bundle wasm --applications-dir "${CARGO_TARGET_DIR:-target}/wasm32-wasip1/release"
 """
+
+[tasks."firmware:test"]
+description = "Test bounded firmware transactions and NOR power-loss simulation"
+run = "cargo test --locked -p xila-firmware-update --features simulator"
+
+[tasks."firmware:integration"]
+description = "Test firmware VFS permissions and persistent child-process boot flow"
+run = "cargo test --locked -p xila-firmware-update --features native"

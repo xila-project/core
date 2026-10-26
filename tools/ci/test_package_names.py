@@ -46,6 +46,7 @@ EXPECTED_PACKAGE_NAMES = {
     "libraries/device/Cargo.toml": "xila-device",
     "libraries/executable/Cargo.toml": "xila-executable",
     "libraries/file_system/Cargo.toml": "xila-file-system",
+    "libraries/firmware_update/Cargo.toml": "xila-firmware-update",
     "libraries/http/Cargo.toml": "xila_http",
     "libraries/little_fs/Cargo.toml": "xila-little-fs",
     "libraries/peripherals/Cargo.toml": "xila-peripherals",
@@ -71,6 +72,7 @@ EXPECTED_PACKAGE_NAMES = {
 }
 
 EXPECTED_BINARY_TARGETS = {
+    "libraries/firmware_update/Cargo.toml": ["xila-firmware-sim"],
     "drivers/native/Cargo.toml": ["xila-debug"],
     "executables/wasm/tests/wasm_test/Cargo.toml": ["wasm_wasm_test"],
     "executables/pixel_painter/Cargo.toml": ["pixel_painter"],

@@ -75,6 +75,8 @@ jobs:
         run: mise run ci:host-wasm-clippy
       - name: Test host workspace
         run: mise run ci:host-tests
+      - name: Test native firmware simulator
+        run: mise run ci:firmware
       - name: Test profiling tools
         run: mise run ci:host-profiling-tests
       - name: Test font linking

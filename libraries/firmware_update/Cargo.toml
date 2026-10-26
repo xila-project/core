@@ -1,0 +1,61 @@
+[package]
+name = "xila-firmware-update"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "Apache-2.0"
+description = "Bounded firmware transactions and experimental native NOR reference backend"
+
+[lib]
+name = "firmware_update"
+
+[features]
+default = []
+simulator = ["dep:verification"]
+std = ["simulator"]
+device = ["dep:file_system", "dep:shared", "dep:synchronization"]
+
+native = [
+  "std",
+  "device",
+  "dep:virtual_file_system",
+  "dep:task",
+  "dep:users",
+  "dep:time",
+  "dep:little_fs",
+  "dep:drivers_std",
+  "dep:abi_definitions",
+  "dep:critical-section",
+]
+
+[dependencies]
+verification = { workspace = true, optional = true, features = [
+  "sha256",
+  "ed25519",
+] }
+file_system = { workspace = true, optional = true }
+shared = { workspace = true, optional = true }
+synchronization = { workspace = true, optional = true }
+
+virtual_file_system = { workspace = true, optional = true }
+task = { workspace = true, optional = true }
+users = { workspace = true, optional = true }
+time = { workspace = true, optional = true }
+little_fs = { workspace = true, optional = true }
+drivers_std = { workspace = true, optional = true }
+abi_definitions = { workspace = true, optional = true }
+critical-section = { workspace = true, optional = true, features = ["std"] }
+
+[dev-dependencies]
+task = { workspace = true, features = ["test_harness"] }
+ed25519-dalek = { version = "3.0", default-features = false }
+critical-section = { workspace = true, features = ["std"] }
+
+[[test]]
+name = "device"
+required-features = ["native"]
+
+[[bin]]
+name = "xila-firmware-sim"
+path = "src/bin/xila-firmware-sim.rs"
+required-features = ["native"]

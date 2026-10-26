@@ -365,6 +365,13 @@ mod tests {
             vfs,
             task,
             Path::from_str("/fd-control"),
+            Flags::new(AccessFlags::READ_WRITE, None, None),
+        )
+        .unwrap();
+        let readonly_file = SynchronousFile::open(
+            vfs,
+            task,
+            Path::from_str("/fd-control"),
             Flags::new(AccessFlags::Read, None, None),
         )
         .unwrap();
@@ -390,7 +397,7 @@ mod tests {
         let module = Module::new(&engine, &wasm[..]).unwrap();
         let mut wasi = crate::host::wasi::WasiContext {
             files: Default::default(),
-            next_fd: 5,
+            next_fd: 7,
             arguments: vec![],
             environment: vec![],
             task,
@@ -399,6 +406,12 @@ mod tests {
         };
         wasi.files
             .insert(4, FileSystemItem::File(FileVariant { file }));
+        wasi.files.insert(
+            6,
+            FileSystemItem::File(FileVariant {
+                file: readonly_file,
+            }),
+        );
         wasi.files.insert(
             5,
             FileSystemItem::Directory(crate::host::wasi::context::DirectoryVariant {
@@ -430,6 +443,16 @@ mod tests {
         let memory = instance.get_memory(&store, "memory").unwrap();
         assert_eq!(&memory.data(&store)[48..52], &43u32.to_le_bytes());
         assert_eq!(CONTROL_CALLS.load(Ordering::SeqCst), 1);
+
+        // Write-directed controls require a writable descriptor, including
+        // through the guest ABI. Rejection must not dispatch or copy output.
+        assert_eq!(
+            run.call(&mut store, (6, CONTROL.raw() as i32, 32, 4, 48, 4))
+                .unwrap(),
+            29
+        );
+        assert_eq!(CONTROL_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(&memory.data(&store)[48..52], &43u32.to_le_bytes());
 
         assert_eq!(
             run.call(&mut store, (-1, CONTROL.raw() as i32, 32, 4, 48, 4))

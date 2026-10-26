@@ -178,6 +178,13 @@ impl<'a> SynchronousFile<'a> {
         input: &AnyByLayout,
         output: &mut AnyByLayout,
     ) -> core::task::Poll<Result<()>> {
+        if command
+            .get_direction()
+            .contains(file_system::ControlDirectionFlags::Write)
+            && !self.flags.get_access().contains(AccessFlags::Write)
+        {
+            return core::task::Poll::Ready(Err(Error::InvalidMode));
+        }
         self.item
             .as_base_operations()
             .ok_or(Error::UnsupportedOperation)?
@@ -359,6 +366,13 @@ impl<'a> SynchronousFile<'a> {
     {
         let mut output = C::Output::default();
 
+        if C::IDENTIFIER
+            .get_direction()
+            .contains(file_system::ControlDirectionFlags::Write)
+            && !self.flags.get_access().contains(AccessFlags::Write)
+        {
+            return Err(Error::InvalidMode);
+        }
         self.item
             .as_base_operations()
             .ok_or(Error::UnsupportedOperation)?
@@ -379,6 +393,13 @@ impl<'a> SynchronousFile<'a> {
         input: &AnyByLayout,
         output: &mut AnyByLayout,
     ) -> Result<()> {
+        if command
+            .get_direction()
+            .contains(file_system::ControlDirectionFlags::Write)
+            && !self.flags.get_access().contains(AccessFlags::Write)
+        {
+            return Err(Error::InvalidMode);
+        }
         self.item
             .as_base_operations()
             .ok_or(Error::UnsupportedOperation)?
