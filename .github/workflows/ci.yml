@@ -47,6 +47,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5.2.2
       - run: mise run ci:verification
+      - run: mise run ci:timezone
 
   host:
     name: Host

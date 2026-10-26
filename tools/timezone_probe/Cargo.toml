@@ -1,0 +1,38 @@
+[package]
+name = "xila-timezone-probe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[lib]
+name = "timezone_probe"
+
+[[bin]]
+name = "timezone-probe"
+path = "src/main.rs"
+
+[[bin]]
+name = "timezone-probe-host"
+path = "src/host.rs"
+required-features = ["hosted"]
+
+[dependencies]
+timezone = { package = "xila-timezone", path = "../../libraries/timezone", default-features = false, optional = true }
+
+[features]
+default = ["utc"]
+utc = ["dep:timezone"]
+paris = ["utc", "timezone/zone-europe-paris"]
+bundled = ["utc", "timezone/bundled"]
+hosted = []
+# Positive control: the no-allocator link probe must reject this.
+allocator-control = []
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

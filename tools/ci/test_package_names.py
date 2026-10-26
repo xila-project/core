@@ -53,6 +53,7 @@ EXPECTED_PACKAGE_NAMES = {
     "libraries/shared/Cargo.toml": "xila-shared",
     "libraries/synchronization/Cargo.toml": "xila-synchronization",
     "libraries/testing/Cargo.toml": "xila-testing",
+    "libraries/timezone/Cargo.toml": "xila-timezone",
     "subsystems/graphics/Cargo.toml": "xila-graphics",
     "subsystems/graphics/bindings_generator/Cargo.toml": "xila-graphics-bindgen",
     "subsystems/graphics/tests/font_link/Cargo.toml": "xila-graphics-font-link-test",
@@ -68,6 +69,7 @@ EXPECTED_PACKAGE_NAMES = {
     "tools/fs_image/Cargo.toml": "xila-fs-image",
     "tools/profiling/Cargo.toml": "xila-profiling",
     "tools/verification_probe/Cargo.toml": "verification_probe",
+    "tools/timezone_probe/Cargo.toml": "xila-timezone-probe",
 }
 
 EXPECTED_BINARY_TARGETS = {

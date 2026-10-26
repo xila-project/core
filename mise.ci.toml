@@ -279,6 +279,23 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", compone
   "thumbv7em-none-eabi",
 ] }
 
+[tasks."ci:timezone"]
+description = "Test timezone features and link static IANA conversion without an allocator"
+depends = ["ci:packages-linker"]
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "clippy",
+  "rustfmt",
+], targets = [
+  "wasm32-unknown-unknown",
+  "wasm32-wasip1",
+  "thumbv7em-none-eabi",
+] }
+run = """
+bash libraries/timezone/check.sh
+bash tools/timezone_probe/check.sh thumbv7em-none-eabi
+bash tools/timezone_probe/check.sh wasm32-unknown-unknown
+"""
+
 [tasks."ci:host-tests"]
 extends = "ci:rust-wasi"
 description = "Test the host workspace"
