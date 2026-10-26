@@ -10,7 +10,6 @@ Install the targets using the compiler that runs Cargo:
 
 ```sh
 rustup target add thumbv7em-none-eabi wasm32-unknown-unknown wasm32-wasip1
-bash tools/verification_probe/check-verification.sh
 bash tools/verification_probe/check.sh thumbv7em-none-eabi
 COMPACT_SHA2=1 bash tools/verification_probe/check.sh thumbv7em-none-eabi
 bash tools/verification_probe/check.sh wasm32-unknown-unknown
@@ -35,12 +34,7 @@ Probe release settings are `opt-level=z`, LTO, one codegen unit, panic abort.
 The probe deliberately exposes pointers so the compiler cannot replace verification
 with a known result; callers must uphold the documented safety contract.
 
-Native latency/throughput (build before timing):
-
-```sh
-cargo build --locked -p verification --example resources --release --all-features
-target/release/examples/resources
-```
+Native microbenchmark tools have moved to the shared `package_manager` repository, alongside the library and its examples. Run its benchmark commands from that workspace, not from Xila Core.
 
 This host-only example uses a public test seed to create its 1 KiB signature
 fixture outside timing. It does not ship signing keys in firmware. It reports
