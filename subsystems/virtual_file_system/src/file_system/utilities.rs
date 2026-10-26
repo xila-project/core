@@ -547,7 +547,11 @@ impl VirtualFileSystem {
         &self,
         task: TaskIdentifier,
     ) -> Result<(Time, UserIdentifier, GroupIdentifier)> {
-        let time: Time = self.time_manager.realtime_now()?.into();
+        let time: Time = self
+            .time_manager
+            .realtime_now()?
+            .try_into_duration()?
+            .into();
 
         let user = self.task_manager.get_user(task).await?;
 

@@ -9,6 +9,7 @@ audio = ["dep:audio", "dep:nanoaudio-web"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 file_system = { workspace = true }
+time = { workspace = true }
 audio = { workspace = true, optional = true }
 nanoaudio-web = { workspace = true, optional = true }
 memory = { workspace = true }

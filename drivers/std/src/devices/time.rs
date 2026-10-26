@@ -50,3 +50,21 @@ impl DirectBaseOperations for TimeDevice {
 impl MountOperations for TimeDevice {}
 
 impl DirectCharacterDevice for TimeDevice {}
+
+/// Bootstrap epoch source. Host wall-clock changes require explicit resynchronization.
+impl time::RealtimeSource for TimeDevice {
+    fn read(&self) -> time::Result<time::RealtimeSample> {
+        let now = SystemTime::now();
+        let timestamp = match now.duration_since(UNIX_EPOCH) {
+            Ok(duration) => time::Timestamp::from(duration),
+            Err(before) => time::Timestamp::from_nanos(-(before.duration().as_nanos() as i128)),
+        };
+        Ok(time::RealtimeSample {
+            timestamp,
+            source: time::ClockSource::Host,
+            // Portable conservative quantization; actual host accuracy is unknown.
+            resolution: Duration::from_millis(1),
+            accuracy: None,
+        })
+    }
+}

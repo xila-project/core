@@ -5397,6 +5397,7 @@ dependencies = [
  "xila-shared",
  "xila-synchronization",
  "xila-task",
+ "xila-time",
 ]
 
 [[package]]
@@ -5785,6 +5786,7 @@ dependencies = [
 name = "xila-time"
 version = "0.1.0"
 dependencies = [
+ "critical-section",
  "embassy-time",
  "embedded-i18n",
  "xila-drivers-std",

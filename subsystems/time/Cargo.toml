@@ -21,3 +21,10 @@ path = "Tests/integration.rs"
 
 [lib]
 name = "time"
+
+[[test]]
+name = "realtime"
+path = "Tests/realtime.rs"
+
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dev-dependencies]
+critical-section = { workspace = true, features = ["std"] }

@@ -13,7 +13,7 @@ fn test_realtime_now() {
 
     information!("Current time : {current_time:?}");
 
-    assert_ne!(current_time, Duration::default());
+    assert_ne!(current_time.as_nanos(), 0);
 }
 
 #[test]
@@ -28,47 +28,23 @@ fn test_uptime() {
 }
 
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use file_system::{DirectBaseOperations, DirectCharacterDevice, MountOperations, Size};
-
 struct WallClock {
     seconds: AtomicU64,
     failed: AtomicBool,
 }
-
-impl DirectBaseOperations for WallClock {
-    fn read(
-        &self,
-        _: &mut core::task::Context<'_>,
-        buffer: &mut [u8],
-        _: Size,
-    ) -> core::task::Poll<file_system::Result<usize>> {
-        file_system::ready(|| {
-            if self.failed.load(Ordering::Relaxed) {
-                return Err(file_system::Error::InternalError);
-            }
-            let value = Duration::from_secs(self.seconds.load(Ordering::Relaxed));
-            let bytes = unsafe {
-                core::slice::from_raw_parts(
-                    (&value as *const Duration).cast::<u8>(),
-                    size_of::<Duration>(),
-                )
-            };
-            buffer[..bytes.len()].copy_from_slice(bytes);
-            Ok(bytes.len())
+impl time::RealtimeSource for WallClock {
+    fn read(&self) -> time::Result<time::RealtimeSample> {
+        if self.failed.load(Ordering::Relaxed) {
+            return Err(time::Error::DeviceError(file_system::Error::InternalError));
+        }
+        Ok(time::RealtimeSample {
+            timestamp: Duration::from_secs(self.seconds.load(Ordering::Relaxed)).into(),
+            source: time::ClockSource::Host,
+            resolution: Duration::from_millis(1),
+            accuracy: None,
         })
     }
-
-    fn write(
-        &self,
-        _: &mut core::task::Context<'_>,
-        _: &[u8],
-        _: Size,
-    ) -> core::task::Poll<file_system::Result<usize>> {
-        file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
-    }
 }
-impl MountOperations for WallClock {}
-impl DirectCharacterDevice for WallClock {}
 
 struct Clock(AtomicU64);
 impl time::MonotonicClock for Clock {
@@ -92,9 +68,10 @@ fn utc_steps_do_not_change_uptime_ticks_or_deadlines() {
 
     for seconds in [2_000, 100] {
         wall.seconds.store(seconds, Ordering::Relaxed);
+        manager.synchronize(&wall).unwrap();
         assert_eq!(
             manager.realtime_now().unwrap(),
-            Duration::from_secs(seconds)
+            time::Timestamp::from(Duration::from_secs(seconds))
         );
         assert_eq!(manager.monotonic_now(), Duration::from_millis(500));
         assert_eq!(manager.monotonic_milliseconds_wrapping(), 500);
@@ -111,6 +88,9 @@ fn utc_steps_do_not_change_uptime_ticks_or_deadlines() {
     assert_eq!(restarted.monotonic_now(), deadline);
 
     wall.failed.store(true, Ordering::Relaxed);
+    assert!(manager.synchronize(&wall).is_err());
+    assert!(manager.realtime_now().is_ok());
+    manager.invalidate();
     assert!(manager.realtime_now().is_err());
     assert_eq!(manager.uptime(), Duration::from_secs(30));
     assert_eq!(manager.monotonic_milliseconds_wrapping(), 30_500);
