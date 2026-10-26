@@ -252,12 +252,16 @@ feature. It does not require installing heaptrack or access to perf events.
 
 | Directory                      | Contents                                                                     |
 | ------------------------------ | ---------------------------------------------------------------------------- |
+| [`core/`](core/)               | Public `xila` façade and re-exports.                                         |
 | [`subsystems/`](subsystems/)   | Runtime-owned services: tasks, VFS, networking, graphics, memory, and time.   |
 | [`libraries/`](libraries/)     | Reusable contracts, algorithms, adapters, and concrete implementations.      |
 | [`drivers/`](drivers/)         | Platform support and device drivers.                                         |
 | [`executables/`](executables/) | Shells, applications, and the Wasm runtime and guest bindings.               |
 | [`examples/`](examples/)       | Native and browser integration examples.                                     |
 | [`tools/`](tools/)             | Development tools, including native profiling.                               |
+
+The root Cargo manifest is a virtual workspace. A plain `cargo check` selects the
+`xila` façade; use `cargo check --workspace` to check all members.
 
 The [component map](https://www.xila.dev/explanation/architecture/components)
 connects the source tree to architecture explanations and API references.

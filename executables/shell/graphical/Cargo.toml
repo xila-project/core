@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-xila = { path = "../../../", features = ["graphics"] }
+xila = { workspace = true, features = ["graphics"] }
 miniserde = { workspace = true }
 getargs = { version = "0.5" }
 getargs-derive = { workspace = true }

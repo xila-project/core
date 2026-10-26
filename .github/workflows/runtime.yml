@@ -12,7 +12,7 @@ on:
       - "**/Cargo.toml"
       - "**/build.rs"
       - build/**
-      - src/**
+      - core/**
       - tests/**
       - mise.toml
       - "mise.*.toml"

@@ -1,0 +1,45 @@
+[package]
+name = "xila"
+version = "0.1.0"
+authors = ["Alix ANNERAUD <alix@anneraud.fr>"]
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license = "Apache-2.0"
+description = "An operating system for embedded systems written in Rust."
+
+[dependencies]
+# - Always included
+embedded-i18n = { workspace = true }
+
+
+# - Host
+audio = { workspace = true, optional = true }
+abi_declarations = { workspace = true }
+abi_definitions = { workspace = true, optional = true }
+little_fs = { workspace = true }
+virtual_file_system = { workspace = true }
+graphics = { workspace = true, optional = true }
+task = { workspace = true }
+time = { workspace = true }
+users = { workspace = true }
+memory = { workspace = true }
+executable = { workspace = true }
+file_system = { workspace = true }
+authentication = { workspace = true }
+log = { workspace = true }
+shared = { workspace = true }
+synchronization = { workspace = true }
+bootsplash = { workspace = true, optional = true }
+network = { workspace = true }
+
+[features]
+default = ["abi_definitions"]
+
+executable_building = ["executable/building"]
+audio = ["dep:audio"]
+abi_definitions = ["dep:abi_definitions"]
+bootsplash = ["dep:bootsplash"]
+graphics = ["dep:graphics", "executable/graphics"]
+graphics_rendering_rgb565 = ["graphics", "graphics/rendering_rgb565"]
+graphics_rendering_xrgb8888 = ["graphics", "graphics/rendering_xrgb8888"]
