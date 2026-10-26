@@ -10,6 +10,18 @@ use xila::network::InterfaceKind;
 use xila::virtual_file_system::{Directory, File};
 use xila::{internationalization, network};
 
+// Only the time of day is displayed. Bound calendar conversion independently of
+// the signed timestamp range, including far-future and pre-epoch corrections.
+fn write_clock_text(output: &mut String, current_time: Option<i64>) {
+    output.clear();
+    if let Some(seconds) = current_time {
+        let _ =
+            internationalization::write_unix_timestamp(output, seconds.rem_euclid(86_400), "%H:%M");
+    } else {
+        output.push_str("--:--");
+    }
+}
+
 const KEYBOARD_SIZE_RATIO: f64 = 3.0 / 1.0;
 
 pub struct Layout {
@@ -231,17 +243,7 @@ impl Layout {
     async fn update_clock(&mut self, current_time: Option<i64>) {
         let graphics_manager = graphics::ffi_manager();
         graphics::lock!(graphics_manager, {
-            self.clock_string.clear();
-            if let Some(seconds) = current_time {
-                // Writing to a String cannot return a formatting error.
-                let _ = internationalization::write_unix_timestamp(
-                    &mut self.clock_string,
-                    seconds,
-                    "%H:%M",
-                );
-            } else {
-                self.clock_string.push_str("--:--");
-            }
+            write_clock_text(&mut self.clock_string, current_time);
             self.clock_string.push('\0');
 
             unsafe {
@@ -438,5 +440,25 @@ impl Layout {
         graphics_manager.set_window_parent(layout._body).await?;
 
         Ok(layout)
+    }
+}
+
+#[cfg(test)]
+mod clock_tests {
+    use super::*;
+
+    #[test]
+    fn clock_text_handles_extreme_and_pre_epoch_utc_with_bounded_work() {
+        let mut text = String::new();
+        for (seconds, expected) in [
+            (None, "--:--"),
+            (Some(0), "00:00"),
+            (Some(-1), "23:59"),
+            (Some(i64::MAX), "15:30"),
+            (Some(i64::MIN), "08:29"),
+        ] {
+            write_clock_text(&mut text, seconds);
+            assert_eq!(text, expected);
+        }
     }
 }

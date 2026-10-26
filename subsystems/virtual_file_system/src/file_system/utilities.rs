@@ -543,15 +543,20 @@ impl VirtualFileSystem {
         Ok((internal_file_system, relative_path, i))
     }
 
+    /// UTC representable by the filesystem's unsigned seconds format.
+    pub(super) fn get_time(&self) -> Result<Time> {
+        Ok(self
+            .time_manager
+            .realtime_now()?
+            .try_into_duration()?
+            .into())
+    }
+
     pub(super) async fn get_time_user_group(
         &self,
         task: TaskIdentifier,
     ) -> Result<(Time, UserIdentifier, GroupIdentifier)> {
-        let time: Time = self
-            .time_manager
-            .realtime_now()?
-            .try_into_duration()?
-            .into();
+        let time = self.get_time()?;
 
         let user = self.task_manager.get_user(task).await?;
 
