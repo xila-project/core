@@ -12,7 +12,7 @@ resource-constrained devices.
 
 [Documentation](https://www.xila.dev/docs/) ·
 [Run Xila natively](https://www.xila.dev/tutorials/native) ·
-[Try the browser example](https://xila-project.github.io/platforms/) ·
+[Try the browser example](https://platforms.xila.dev/) ·
 [Community](https://matrix.to/#/#xila:anneraud.fr)
 
 [![codecov](https://codecov.io/github/Xila-Project/Core/graph/badge.svg?token=01M6GQFBEC)](https://codecov.io/github/Xila-Project/Core)
