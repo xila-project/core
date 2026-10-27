@@ -81,7 +81,7 @@ js-sys = "0.3"
 wasm-bindgen-test = "0.3"
 little_fs = { workspace = true }
 abi_definitions = { workspace = true }
-xila = { path = "../.." }
+xila = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies.web-sys]
 version = "0.3.64"

@@ -17,7 +17,7 @@ web-sys = { version = "0.3.64", features = [
   "Node",
   "Window",
 ] }
-xila = { path = "../../", features = [
+xila = { workspace = true, features = [
   "bootsplash",
   "graphics",
   "graphics_rendering_xrgb8888",

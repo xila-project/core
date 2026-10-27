@@ -11,7 +11,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 EXPECTED_PACKAGE_NAMES = {
-    "Cargo.toml": "xila",
+    "core/Cargo.toml": "xila",
     "drivers/core/Cargo.toml": "xila-drivers-core",
     "drivers/espressif/Cargo.toml": "xila-drivers-espressif",
     "drivers/headless/Cargo.toml": "xila-drivers-headless",
@@ -150,16 +150,40 @@ class CargoPackageNames(unittest.TestCase):
 
         self.assertEqual(actual, EXPECTED_PACKAGE_NAMES)
         self.assertEqual(len(set(actual.values())), len(EXPECTED_PACKAGE_NAMES))
-        self.assertEqual(actual["Cargo.toml"], "xila")
+        self.assertEqual(actual["core/Cargo.toml"], "xila")
         self.assertEqual(actual["tools/profiling/Cargo.toml"], "xila-profiling")
         for path, name in actual.items():
             # These crates were added on main after the package migration.
             if path not in {
-                "Cargo.toml",
+                "core/Cargo.toml",
                 "libraries/http/Cargo.toml",
                 "tools/verification_probe/Cargo.toml",
             }:
                 self.assertTrue(name.startswith("xila-"), f"{path} has unprefixed name {name}")
+
+    def test_virtual_workspace_defaults_to_xila_facade(self):
+        root = manifest(ROOT / "Cargo.toml")
+        self.assertNotIn("package", root)
+        metadata = json.loads(subprocess.check_output(
+            ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],
+            cwd=ROOT, text=True,
+        ))
+        packages = [p for p in metadata["packages"] if p["name"] == "xila"]
+        self.assertEqual(len(packages), 1)
+        self.assertEqual(pathlib.Path(packages[0]["manifest_path"]), ROOT / "core/Cargo.toml")
+        self.assertEqual(metadata["workspace_default_members"], [packages[0]["id"]])
+
+    def test_facade_and_workspace_libraries_share_version(self):
+        root = manifest(ROOT / "Cargo.toml")
+        self.assertIn("version", root["workspace"]["package"])
+        metadata = json.loads(subprocess.check_output(
+            ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],
+            cwd=ROOT, text=True,
+        ))
+        for package in metadata["packages"]:
+            path = pathlib.Path(package["manifest_path"]).relative_to(ROOT)
+            if path.parts[0] in {"core", "libraries", "subsystems"}:
+                self.assertEqual(manifest(ROOT / path)["package"]["version"], {"workspace": True}, str(path))
 
     def test_root_workspace_dependency_keys_alias_renamed_packages(self):
         workspace = manifest(ROOT / "Cargo.toml")["workspace"]["dependencies"]

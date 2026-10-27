@@ -1,6 +1,6 @@
 [package]
 name = "xila-authentication"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 description = "User and group authentication module for Xila OS with secure password hashing"
 keywords = ["authentication", "security", "users", "groups", "no-std"]

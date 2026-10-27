@@ -21,7 +21,7 @@ wasm = { workspace = true, default-features = false, features = [
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dev-dependencies]
 task = { workspace = true, features = ["test_harness"] }
-xila = { path = "../../", features = [
+xila = { workspace = true, features = [
   "graphics",
   "executable_building",
   "graphics_rendering_xrgb8888",
