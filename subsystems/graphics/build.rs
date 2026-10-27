@@ -22,6 +22,7 @@ fn main() {
         "NODE_OPTIONS",
         "NODE_PATH",
         "XILA_LV_FONT_CONV_DIR",
+        "XILA_FONT_CATALOG_ROOTS",
         "DEP_LV_CONFIG_PATH",
         "DEP_LVGL_RUST_SYS_INCLUDE_PATHS",
         "DEP_LVGL_RUST_SYS_DEFINES",
@@ -48,7 +49,13 @@ fn main() {
             "cargo:rerun-if-changed={}",
             root.join("../../Cargo.toml").display()
         );
-        let symbols = catalogs::collect(&root.join("../.."), &[&locale, &fallback])
+        let core_root = root.join("../..");
+        let mut roots = vec![core_root];
+        if let Some(extra) = env::var_os("XILA_FONT_CATALOG_ROOTS") {
+            roots.extend(env::split_paths(&extra));
+        }
+        let roots: Vec<&Path> = roots.iter().map(PathBuf::as_path).collect();
+        let symbols = catalogs::collect_multiple(&roots, &[&locale, &fallback])
             .expect("Chinese catalog font symbols");
         for directory in &symbols.directories {
             println!("cargo:rerun-if-changed={}", directory.display());

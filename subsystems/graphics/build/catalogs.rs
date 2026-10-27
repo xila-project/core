@@ -12,7 +12,13 @@ pub struct CatalogSymbols {
 }
 
 /// Collect translated glyphs and directories Cargo must watch for catalog changes.
+#[allow(dead_code)]
 pub fn collect(root: &Path, locales: &[&str]) -> io::Result<CatalogSymbols> {
+    collect_multiple(&[root], locales)
+}
+
+/// Combine catalogs from the Core checkout and explicitly supplied workspaces.
+pub fn collect_multiple(roots: &[&Path], locales: &[&str]) -> io::Result<CatalogSymbols> {
     let mut expanded = BTreeSet::new();
     for locale in locales.iter().flat_map(|locales| locales.split(',')) {
         let locale = super::fonts::normalize_locale(locale);
@@ -27,8 +33,9 @@ pub fn collect(root: &Path, locales: &[&str]) -> io::Result<CatalogSymbols> {
 
     let mut characters = BTreeSet::new();
     let mut symbols = CatalogSymbols::default();
-    for owner in ["executables", "libraries", "subsystems", "drivers"] {
-        let path = root.join(owner);
+    for path in roots.iter().flat_map(|root| {
+        ["executables", "libraries", "subsystems", "drivers"].map(|owner| root.join(owner))
+    }) {
         match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.is_dir() => {
                 visit(&path, &expanded, &mut characters, &mut symbols.directories)?;
@@ -182,6 +189,19 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn combines_core_and_external_application_catalogs() {
+        let core = Fixture::new();
+        let applications = Fixture::new();
+        core.write("libraries/core/locales/zh-CN.json", r#"{"key":"核心"}"#);
+        applications.write("executables/clock/locales/zh-CN.json", r#"{"key":"时钟"}"#);
+        let symbols = collect_multiple(&[&core.0, &applications.0], &["zh-CN"]).unwrap();
+        for character in ['核', '心', '时', '钟'] {
+            assert!(symbols.cjk.contains(character));
+        }
+        assert_eq!(symbols.directories.len(), 2);
     }
 
     #[test]
