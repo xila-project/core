@@ -21,9 +21,9 @@ jobs:
        github.event.workflow_run.head_branch == 'main')
     permissions:
       contents: read
-    uses: xila-project/platforms/.github/workflows/demo.yml@0fda35ee9430c931ff16c7da77b41c8d456e4738
+    uses: xila-project/platforms/.github/workflows/demo.yml@c81348d9520640b359ea5fe77a4f881949006c7d
     with:
-      platform_ref: 0fda35ee9430c931ff16c7da77b41c8d456e4738
+      platform_ref: c81348d9520640b359ea5fe77a4f881949006c7d
   build:
     needs: demo
     name: Build documentation and demonstrations
