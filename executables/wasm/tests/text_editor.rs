@@ -4,6 +4,8 @@
     feature = "memory_32",
     not(feature = "memory_64")
 ))]
+#[path = "support/applications.rs"]
+mod applications;
 extern crate abi_definitions;
 drivers_std::memory::instantiate_global_allocator!();
 #[path = "support/localization.rs"]
@@ -124,7 +126,7 @@ async fn guest_opens_pages_edits_and_saves_large_file() {
         .await
         .unwrap();
     assert_eq!(source_contents, original.as_bytes());
-    let binary = xila::executable::build_crate("xila-text-editor").unwrap();
+    let binary = applications::build("xila-text-editor").unwrap();
     drivers_std::loader::load_to_virtual_file_system(
         context.task_manager,
         vfs,

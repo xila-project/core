@@ -4,6 +4,8 @@
     feature = "memory_32",
     not(feature = "memory_64")
 ))]
+#[path = "support/applications.rs"]
+mod applications;
 extern crate abi_definitions;
 drivers_std::memory::instantiate_global_allocator!();
 #[path = "support/localization.rs"]
@@ -74,7 +76,7 @@ async fn real_painter_guest_draws_saves_opens_and_preserves_work_on_errors() {
     )
     .await
     .unwrap();
-    let binary = xila::executable::build_crate("xila-pixel-painter").unwrap();
+    let binary = applications::build("xila-pixel-painter").unwrap();
     drivers_std::loader::load_to_virtual_file_system(
         context.task_manager,
         vfs,

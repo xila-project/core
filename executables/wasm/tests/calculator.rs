@@ -4,6 +4,8 @@
     feature = "memory_32",
     not(feature = "memory_64")
 ))]
+#[path = "support/applications.rs"]
+mod applications;
 extern crate abi_definitions;
 drivers_std::memory::instantiate_global_allocator!();
 #[path = "support/graphics.rs"]
@@ -47,7 +49,7 @@ async fn real_calculator_guest_evaluates_buttons_and_closes_on_wasmi() {
     let context = support::context(&standard, Some(manager));
     standard.context = context;
     let task = context.task_manager.get_current_task_identifier().await;
-    let binary = xila::executable::build_crate("xila-calculator").unwrap();
+    let binary = applications::build("xila-calculator").unwrap();
     drivers_std::loader::load_to_virtual_file_system(
         context.task_manager,
         context.virtual_file_system,
