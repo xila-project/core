@@ -13,9 +13,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 EXPECTED_PACKAGE_NAMES = {
     "core/Cargo.toml": "xila",
     "drivers/core/Cargo.toml": "xila-drivers-core",
-    "executables/wasm/Cargo.toml": "xila-wasm",
-    "executables/wasm/tests/translation/Cargo.toml": "xila-wasm-translation-tests",
-    "executables/wasm/tests/wasm_test/Cargo.toml": "xila-wasm-wasm-test",
     "libraries/abi/declarations/Cargo.toml": "xila-abi-declarations",
     "libraries/abi/definitions/Cargo.toml": "xila-abi-definitions",
     "libraries/application_metadata/Cargo.toml": "xila-application-metadata",
@@ -29,6 +26,7 @@ EXPECTED_PACKAGE_NAMES = {
     "libraries/firmware_update/Cargo.toml": "xila-firmware-update",
     "libraries/http/Cargo.toml": "xila_http",
     "libraries/little_fs/Cargo.toml": "xila-little-fs",
+    "libraries/littlefs2_sys/Cargo.toml": "littlefs2-sys",
     "libraries/peripherals/Cargo.toml": "xila-peripherals",
     "libraries/shared/Cargo.toml": "xila-shared",
     "libraries/synchronization/Cargo.toml": "xila-synchronization",
@@ -48,7 +46,6 @@ EXPECTED_PACKAGE_NAMES = {
 }
 
 EXPECTED_BINARY_TARGETS = {
-    "executables/wasm/tests/wasm_test/Cargo.toml": ["wasm_wasm_test"],
 }
 
 EXPECTED_LIBRARY_TARGETS = {
@@ -75,7 +72,6 @@ EXPECTED_LIBRARY_TARGETS = {
     "libraries/executable/Cargo.toml": "executable",
     "libraries/peripherals/Cargo.toml": "peripherals",
     "libraries/bootsplash/Cargo.toml": "bootsplash",
-    "executables/wasm/Cargo.toml": "wasm",
     "subsystems/graphics/bindings_generator/Cargo.toml": "graphics_bindgen",
 }
 
@@ -105,6 +101,7 @@ class CargoPackageNames(unittest.TestCase):
             if path not in {
                 "core/Cargo.toml",
                 "libraries/http/Cargo.toml",
+                "libraries/littlefs2_sys/Cargo.toml",
                 "tools/verification_probe/Cargo.toml",
             }:
                 self.assertTrue(name.startswith("xila-"), f"{path} has unprefixed name {name}")
@@ -200,7 +197,7 @@ class CargoPackageNames(unittest.TestCase):
         )
 
     def test_cargo_package_selectors_use_current_package_identities(self):
-        allowed_names = set(EXPECTED_PACKAGE_NAMES.values())
+        allowed_names = set(EXPECTED_PACKAGE_NAMES.values()) | {"xila-wasm"}  # Applications workspace selector
         selector = re.compile(r"(?:--package(?:=|\s+)|-p\s+)([A-Za-z0-9_-]+)")
         text_suffixes = {".md", ".toml", ".yml", ".yaml", ".sh", ".py", ".rs"}
 

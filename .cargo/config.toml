@@ -1,8 +1,8 @@
 [env]
 
 DEP_LV_CONFIG_PATH = { value = "subsystems/graphics/include", relative = true }
+XILA_LV_FONT_CONV_DIR = { value = "node_modules/lv_font_conv", relative = true }
 
-LITTLEFS_CONFIG = { value = "libraries/little_fs/include/little_fs_config.h", relative = true }
 EMBEDDED_I18N_LOCALE = "en"
 EMBEDDED_I18N_FALLBACK = "en"
 

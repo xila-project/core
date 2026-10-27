@@ -58,7 +58,6 @@ const config: TolgeeConfig = {
     "./src/**/*.rs",
     "./subsystems/**/src/**/*.rs",
     "./libraries/**/src/**/*.rs",
-    "./executables/wasm/**/src/**/*.rs",
     "./drivers/core/**/src/**/*.rs",
   ],
   push: {

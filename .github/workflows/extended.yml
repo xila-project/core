@@ -43,7 +43,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: xila-project/applications
-          ref: 45f27e53fe393860b812674415eb5c9c703c9bdf
+          ref: 26ee04355c3ddea0f41ee81ece168cec2f9eb376
           path: .application-src
           persist-credentials: false
       - uses: jdx/mise-action@v5.2.2
@@ -81,6 +81,12 @@ jobs:
         with:
           repository: xila-project/core
           ref: ${{ inputs.core_ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: xila-project/applications
+          ref: 26ee04355c3ddea0f41ee81ece168cec2f9eb376
+          path: .application-src
           persist-credentials: false
       - uses: jdx/mise-action@v5.2.2
       - id: toolchain

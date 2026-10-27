@@ -21,9 +21,9 @@ jobs:
        github.event.workflow_run.head_branch == 'main')
     permissions:
       contents: read
-    uses: xila-project/platforms/.github/workflows/demo.yml@c81348d9520640b359ea5fe77a4f881949006c7d
+    uses: xila-project/platforms/.github/workflows/demo.yml@5fd89904fbe6da91dabbae6ac52b52bd8ff16220
     with:
-      platform_ref: c81348d9520640b359ea5fe77a4f881949006c7d
+      platform_ref: 5fd89904fbe6da91dabbae6ac52b52bd8ff16220
   build:
     needs: demo
     name: Build documentation and demonstrations
@@ -41,10 +41,17 @@ jobs:
       MISE_ENV: ci
       CARGO_TERM_COLOR: always
       XILA_MBX: "1"
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/checkout@v7
+        with:
+          repository: xila-project/applications
+          ref: 26ee04355c3ddea0f41ee81ece168cec2f9eb376
+          path: .application-src
+          persist-credentials: false
       - uses: jdx/mise-action@v5.2.2
       - run: mise run deps:npm
       - id: toolchain

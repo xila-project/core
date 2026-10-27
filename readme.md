@@ -154,7 +154,7 @@ are maintained in [Platforms](https://github.com/xila-project/platforms/tree/mai
 | [`subsystems/`](subsystems/)   | Runtime-owned services: tasks, VFS, networking, graphics, memory, and time.   |
 | [`libraries/`](libraries/)     | Reusable contracts, algorithms, adapters, and concrete implementations.      |
 | [`drivers/core/`](drivers/core/) | Generic portable device implementations.                                   |
-| [`executables/wasm/`](executables/wasm/) | Wasm host runtime, guest API, and ABI tests.                     |
+| [Applications](https://github.com/xila-project/applications) | Wasm host runtime, guest API, and ABI tests. |
 | [`tools/`](tools/)             | Core verification and localization tools.                                    |
 
 The root Cargo manifest is a virtual workspace. A plain `cargo check` selects the

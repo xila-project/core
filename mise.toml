@@ -21,7 +21,7 @@ run = "cargo check --target x86_64-unknown-linux-gnu --features graphics,abi_def
 
 [tasks."check:guest"]
 description = "Check the WASM guest target"
-run = "cargo check --target wasm32-unknown-unknown --package xila-wasm --no-default-features --features default_guest"
+run = "cargo check --manifest-path \"${XILA_APPLICATIONS_ROOT:-.application-src}/Cargo.toml\" --target wasm32-unknown-unknown --package xila-wasm --no-default-features --features default_guest"
 
 [tasks."localization:host-check"]
 description = "Strictly check host localization"
@@ -31,7 +31,7 @@ run = "cargo check --workspace --all-targets --target x86_64-unknown-linux-gnu -
 [tasks."localization:guest-check"]
 description = "Strictly check Wasm guest API localization"
 env = { EMBEDDED_I18N_STRICT = "1" }
-run = "cargo check --target wasm32-unknown-unknown --package xila-wasm --no-default-features --features default_guest"
+run = "cargo check --manifest-path \"${XILA_APPLICATIONS_ROOT:-.application-src}/Cargo.toml\" --target wasm32-unknown-unknown --package xila-wasm --no-default-features --features default_guest"
 
 [tasks."localization:lint"]
 description = "Check semantic translation keys, catalogs and Rust macro references"
@@ -47,7 +47,7 @@ run = "cargo clippy --package xila --package xila-audio --target x86_64-unknown-
 
 [tasks."clippy:guest"]
 description = "Run Clippy for the WASM guest target"
-run = "cargo clippy --package xila-wasm --no-default-features --features default_guest --target wasm32-unknown-unknown --all-targets -- -D warnings"
+run = "cargo clippy --manifest-path \"${XILA_APPLICATIONS_ROOT:-.application-src}/Cargo.toml\" --package xila-wasm --no-default-features --features default_guest --target wasm32-unknown-unknown --all-targets -- -D warnings"
 
 [tasks."clippy:all"]
 description = "Run host and guest Clippy"
@@ -59,7 +59,7 @@ run = "cargo doc --features graphics,abi_definitions,graphics_rendering_xrgb8888
 
 [tasks."docs:guest"]
 description = "Build guest documentation"
-run = "cargo doc --package xila-wasm --no-default-features --features default_guest --target wasm32-unknown-unknown"
+run = "cargo doc --manifest-path \"${XILA_APPLICATIONS_ROOT:-.application-src}/Cargo.toml\" --package xila-wasm --no-default-features --features default_guest --target wasm32-unknown-unknown"
 
 [tasks."docs:all"]
 description = "Build host and guest documentation"

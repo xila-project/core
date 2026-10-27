@@ -1,0 +1,40 @@
+[package]
+name = "littlefs2-sys"
+description = "Low-level bindings to littlefs"
+version = "0.4.0"
+authors = ["Nicolas Stalder <n@stalder.io>", "The Trussed Developers"]
+edition = "2018"
+license = "BSD-3-Clause"
+readme = "README.md"
+categories = ["embedded", "filesystem", "no-std"]
+repository = "https://github.com/nickray/littlefs2-sys"
+
+[dependencies]
+tinyrlibc = { version = "0.5", default-features = false, features = [
+  "strchr",
+  "strlen",
+  "strcspn",
+  "strspn",
+], optional = true }
+
+[build-dependencies]
+bindgen = { version = "0.70.1", default-features = false, features = [
+  "runtime",
+] }
+cc = "1"
+
+[features]
+assertions = []
+trace = []
+malloc = []
+software-intrinsics = []
+multiversion = []
+
+# littlefs2-sys requires implementations of the strchr, strlen, strcspn and strspn functions.  If
+# these are not provided by a different source, enable this feature to pull them in from tinyrlibc.
+tinyrlibc = ["dep:tinyrlibc"]
+
+# unstable features -- enabling one of the following features may break semantic versioning guarantees
+
+# use a patched version of littlefs: https://github.com/trussed-dev/littlefs/releases/tag/v2.9-trussed.1
+unstable-littlefs-patched = []
