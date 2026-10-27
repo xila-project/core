@@ -88,6 +88,37 @@ mod tests {
     use super::build_failure_message;
 
     #[test]
+    fn builds_a_guest_from_an_external_workspace_manifest() {
+        use std::{
+            fs,
+            time::{SystemTime, UNIX_EPOCH},
+        };
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "xila-external-guest-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("Cargo.toml"), "[package]\nname = \"external-guest-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[profile.release-wasm]\ninherits = \"release\"\n").unwrap();
+        fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+        let result = super::build_crate_with_manifest(
+            "external-guest-fixture",
+            Some(&root.join("Cargo.toml")),
+        );
+        match result {
+            Ok(path) => {
+                let wasm = fs::read(path).unwrap();
+                assert!(wasm.starts_with(b"\0asm"));
+            }
+            Err(error) => panic!("external guest failed to build: {error}"),
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn build_failure_includes_json_compiler_diagnostics() {
         let stdout = br#"{"reason":"compiler-message","message":{"level":"error","message":"the useful compiler error"}}"#;
         let message = build_failure_message(stdout, b"error: could not compile dependency");
