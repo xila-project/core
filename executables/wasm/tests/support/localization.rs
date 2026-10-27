@@ -3,32 +3,34 @@
 pub fn text(application: &str, key: &str) -> String {
     let locale = option_env!("EMBEDDED_I18N_LOCALE")
         .unwrap_or("en")
-        .replace('_', "-")
-        .to_ascii_lowercase();
-    macro_rules! catalog {
-        ($application:literal) => {
-            match locale.as_str() {
-                "en" => include_str!(concat!("../../../", $application, "/locales/en.json")),
-                "de" => include_str!(concat!("../../../", $application, "/locales/de.json")),
-                "es" => include_str!(concat!("../../../", $application, "/locales/es.json")),
-                "fr" => include_str!(concat!("../../../", $application, "/locales/fr.json")),
-                "it" => include_str!(concat!("../../../", $application, "/locales/it.json")),
-                "pl" => include_str!(concat!("../../../", $application, "/locales/pl.json")),
-                "pt-br" => include_str!(concat!("../../../", $application, "/locales/pt-BR.json")),
-                "zh-cn" => include_str!(concat!("../../../", $application, "/locales/zh-CN.json")),
-                _ => panic!("unsupported guest test locale: {locale}"),
-            }
-        };
-    }
-    let catalog = match application {
-        "clock" => catalog!("clock"),
-        "pixel_painter" => catalog!("pixel_painter"),
-        "text_editor" => catalog!("text_editor"),
-        _ => panic!("unknown guest test application: {application}"),
+        .replace('_', "-");
+    let locale = match locale.to_ascii_lowercase().as_str() {
+        "en" => "en",
+        "de" => "de",
+        "es" => "es",
+        "fr" => "fr",
+        "it" => "it",
+        "pl" => "pl",
+        "pt-br" => "pt-BR",
+        "zh-cn" => "zh-CN",
+        _ => panic!("unsupported guest test locale: {locale}"),
     };
-    let messages: serde_json::Value = serde_json::from_str(catalog).unwrap();
-    // embedded-i18n resolves dotted identifiers even when catalogs are nested.
-    // Keep the flat lookup for compatibility with older/partially migrated fixtures.
+    assert!(matches!(
+        application,
+        "clock" | "pixel_painter" | "text_editor"
+    ));
+    let root = std::env::var_os("XILA_APPLICATIONS_MANIFEST")
+        .map(std::path::PathBuf::from)
+        .and_then(|manifest| manifest.parent().map(std::path::Path::to_path_buf))
+        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
+    let path = root
+        .join("executables")
+        .join(application)
+        .join("locales")
+        .join(format!("{locale}.json"));
+    let source = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+    let messages: serde_json::Value = serde_json::from_str(&source).unwrap();
     let value = messages.get(key).or_else(|| {
         key.split('.')
             .try_fold(&messages, |node, part| node.get(part))

@@ -55,6 +55,7 @@ drivers_core = { workspace = true }
 drivers_shared = { workspace = true }
 drivers_std = { workspace = true }
 abi_definitions = { workspace = true }
+application_shortcuts = { workspace = true }
 command_line_shell = { workspace = true }
 executable = { workspace = true, features = ["building"] }
 testing = { workspace = true }

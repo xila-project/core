@@ -6,6 +6,7 @@ pub(crate) fn build_command(name: &str, manifest: Option<&Path>) -> Command {
     let mut command = Command::new("cargo");
     command
         .arg("build")
+        .arg("--locked")
         .arg("--profile=release-wasm")
         .arg("--target=wasm32-wasip1")
         .arg("-p")
@@ -35,5 +36,6 @@ mod tests {
         );
         assert!(args.windows(2).any(|pair| pair == ["-p", "xila-weather"]));
         assert!(args.iter().any(|arg| arg == "--target=wasm32-wasip1"));
+        assert!(args.iter().any(|arg| arg == "--locked"));
     }
 }

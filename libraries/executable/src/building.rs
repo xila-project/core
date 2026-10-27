@@ -104,6 +104,11 @@ mod tests {
         fs::create_dir_all(root.join("src")).unwrap();
         fs::write(root.join("Cargo.toml"), "[package]\nname = \"external-guest-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[profile.release-wasm]\ninherits = \"release\"\n").unwrap();
         fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+        fs::write(
+            root.join("Cargo.lock"),
+            "version = 4\n\n[[package]]\nname = \"external-guest-fixture\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
         let result = super::build_crate_with_manifest(
             "external-guest-fixture",
             Some(&root.join("Cargo.toml")),

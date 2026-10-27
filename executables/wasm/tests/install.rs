@@ -182,7 +182,7 @@ async fn install_selects_install_export_and_never_falls_back_to_main() {
             .await
             .unwrap();
             let shortcut = core::str::from_utf8(&contents).unwrap();
-            assert_eq!(shortcut, application_metadata::shortcut(app).unwrap());
+            assert_eq!(shortcut, application_shortcuts::shortcut(app).unwrap());
             assert!(shortcut.contains(r#""command": "/applications/executables/wasm""#));
             assert!(shortcut.contains(&format!(r#""arguments": ["{path}"]"#)));
         }

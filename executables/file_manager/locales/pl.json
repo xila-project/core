@@ -1,6 +1,0 @@
-{
-  "errors": {
-    "event_handling_failed": "Błąd obsługi zdarzenia menedżera plików: {:?}",
-    "invalid_entered_path": "Wprowadzono nieprawidłową ścieżkę: {}"
-  }
-}

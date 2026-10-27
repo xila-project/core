@@ -25,10 +25,11 @@ memory.
 
 ## Test Calculator
 
-From the repository root on Linux:
+From the Core repository root on Linux, set `XILA_APPLICATIONS_MANIFEST` to the pinned Applications checkout’s `Cargo.toml`:
 
 ```sh
 rustup target add --toolchain stable wasm32-wasip1
+export XILA_APPLICATIONS_MANIFEST=/absolute/path/to/applications/Cargo.toml
 
 # Headless acceptance: builds the real guest, enters 1 + 2 = through LVGL
 # button events, checks the displayed result, requests close, checks cleanup.
@@ -37,7 +38,8 @@ cargo +stable test -p xila-wasm --features graphics \
 
 # Interactive native display. Click calculator buttons; press Enter in the
 # launching terminal to request close and let the test finish successfully.
-RUSTUP_TOOLCHAIN=stable cargo test -p xila-calculator \
+cd /absolute/path/to/applications
+RUSTUP_TOOLCHAIN=stable cargo test --manifest-path executables/calculator/Cargo.toml \
   --target x86_64-unknown-linux-gnu --test calculator_test \
   -- --ignored --nocapture
 ```
