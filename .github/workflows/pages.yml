@@ -13,20 +13,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  demo:
-    if: >-
-      github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.head_branch == 'main')
-    permissions:
-      contents: read
-    uses: xila-project/platforms/.github/workflows/demo.yml@5fd89904fbe6da91dabbae6ac52b52bd8ff16220
-    with:
-      platform_ref: 5fd89904fbe6da91dabbae6ac52b52bd8ff16220
   build:
-    needs: demo
-    name: Build documentation and demonstrations
+    name: Build Core documentation
     if: >-
       github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
@@ -46,12 +34,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-      - uses: actions/checkout@v7
-        with:
-          repository: xila-project/applications
-          ref: 26ee04355c3ddea0f41ee81ece168cec2f9eb376
-          path: .application-src
-          persist-credentials: false
       - uses: jdx/mise-action@v5.2.2
       - run: mise run deps:npm
       - id: toolchain
@@ -66,15 +48,9 @@ jobs:
         run: |
           set -eu
           mise run ci:packages-host
-          mkdir -p pages/host pages/guest
+          mkdir -p pages/host
           RUSTDOCFLAGS="--deny warnings" mise run docs:host -- --no-deps
-          RUSTDOCFLAGS="--deny warnings" mise run docs:guest
           cp -r target/x86_64-unknown-linux-gnu/doc/. pages/host/
-          cp -r target/wasm32-unknown-unknown/doc/. pages/guest/
-      - uses: actions/download-artifact@v7
-        with:
-          name: platform-demonstrations
-          path: pages/demonstrations/
       - uses: actions/upload-pages-artifact@v5
         with:
           path: pages/
