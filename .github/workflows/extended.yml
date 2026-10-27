@@ -43,7 +43,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: xila-project/applications
-          ref: 2706ef46c555c2353617303abfdf82c20111149e
+          ref: 38a90085da842e14df548b7be9be3c355e166df8
           path: .application-src
           persist-credentials: false
       - uses: jdx/mise-action@v5.2.2
@@ -85,7 +85,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: xila-project/applications
-          ref: 2706ef46c555c2353617303abfdf82c20111149e
+          ref: 38a90085da842e14df548b7be9be3c355e166df8
           path: .application-src
           persist-credentials: false
       - uses: jdx/mise-action@v5.2.2
