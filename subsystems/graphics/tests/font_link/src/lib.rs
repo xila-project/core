@@ -71,11 +71,17 @@ mod tests {
         if !graphics_font_pipeline_test::fonts::uses_chinese(locale, fallback) {
             return;
         }
-        let symbols = graphics_font_pipeline_test::catalogs::collect(
-            std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../..")),
-            &[locale, fallback],
-        )
-        .unwrap();
+        let mut roots = vec![std::path::PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../.."
+        ))];
+        if let Some(extra) = std::env::var_os("XILA_FONT_CATALOG_ROOTS") {
+            roots.extend(std::env::split_paths(&extra));
+        }
+        let roots: Vec<&std::path::Path> = roots.iter().map(std::path::PathBuf::as_path).collect();
+        let symbols =
+            graphics_font_pipeline_test::catalogs::collect_multiple(&roots, &[locale, fallback])
+                .unwrap();
         assert!(symbols.cjk.contains('清') && symbols.cjk.contains('：'));
         for font in [
             graphics::fonts::get_font_small(),
