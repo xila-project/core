@@ -222,7 +222,7 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn("CARGO_TARGET_DIR: ${{ github.workspace }}/target", job("ci.yml", "host"))
 
     def test_abi_target_cache_uses_translation_workspace(self):
-        self.assertIn("working-directory: executables/wasm/tests/translation", job("ci.yml", "abi"))
+        self.assertIn("working-directory: .application-src/executables/wasm/tests/translation", job("ci.yml", "abi"))
 
     def test_cache_restore_is_read_only_on_prs_and_matrix_modes_are_separate(self):
         for workflow in ["ci.yml", "extended.yml", "pages.yml"]:
