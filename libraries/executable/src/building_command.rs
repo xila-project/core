@@ -20,7 +20,8 @@ pub(crate) fn build_command(name: &str, manifest: Option<&Path>) -> Command {
 
 #[cfg(test)]
 mod tests {
-    use super::build_command;
+    use super::{build_command, std};
+    use alloc::vec::Vec;
     use std::path::Path;
 
     #[test]

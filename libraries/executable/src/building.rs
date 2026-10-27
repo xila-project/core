@@ -85,7 +85,8 @@ pub fn build_crate_with_manifest(name: &str, manifest: Option<&Path>) -> Result<
 
 #[cfg(test)]
 mod tests {
-    use super::build_failure_message;
+    use super::{build_failure_message, std};
+    use alloc::format;
 
     #[test]
     fn builds_a_guest_from_an_external_workspace_manifest() {
