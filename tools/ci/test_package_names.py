@@ -72,7 +72,6 @@ EXPECTED_PACKAGE_NAMES = {
 }
 
 EXPECTED_BINARY_TARGETS = {
-    "libraries/firmware_update/Cargo.toml": ["xila-firmware-sim"],
     "drivers/native/Cargo.toml": ["xila-debug"],
     "executables/wasm/tests/wasm_test/Cargo.toml": ["wasm_wasm_test"],
     "executables/pixel_painter/Cargo.toml": ["pixel_painter"],

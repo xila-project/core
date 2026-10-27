@@ -94,10 +94,10 @@ cargo clippy --locked -p xila-firmware-update --features native --all-targets --
 cargo check --locked -p xila-firmware-update --features simulator --lib --target wasm32-unknown-unknown
 ```
 
-The process tests create public-key/signed synthetic fixtures using a deterministic **test-only** seed and start separate `xila-firmware-sim` processes for staging, trial, revert and confirmation. No private production key is present. For manual use, supply your own **test** public key, manifest and image files:
+The [Platforms firmware simulator](https://github.com/xila-project/platforms) and its process tests create public-key/signed synthetic fixtures using a deterministic **test-only** seed and start separate `xila-firmware-sim` processes for staging, trial, revert and confirmation. No private production key is present. From a Platforms checkout, supply your own **test** public key, manifest and image files:
 
 ```sh
-cargo run -p xila-firmware-update --features native --bin xila-firmware-sim -- \
+cargo run --bin xila-firmware-sim -- \
   init --flash /tmp/fw.img --key test-public-key.bin --target xila-native-test \
   --manifest factory.manifest --image factory.bin
 # Same public key/target options are required for every command below.
@@ -109,7 +109,7 @@ xila-firmware-sim inspect --flash /tmp/fw.img --key test-public-key.bin --target
 
 `cargo run` does not install the binary in PATH; use `target/debug/xila-firmware-sim` or the same `cargo run ... --` prefix. `update --stage-only` closes without activation. `update` or `boot --fault-operation N --fault-byte K` injects a torn operation; rerun without fault flags to simulate reset.
 
-Tests cover positive signed streams; wrong key/target/size/version; malformed metadata; corruption at finish, activation and boot; erase/program geometry and bit rules; every update operation at before/after/selected byte offsets; boot/confirm journal cuts; seeded schedules (`0x526f1a5`, seed and case on failure); root permissions, read-only modes, exclusivity, duplicate rejection and close behavior; file locking and child-process persistence. CI runs the native suite and no_std/Wasm compilation. This is deterministic adversarial testing, not a claim of exhaustive physical hardware validation or a fuzzing campaign.
+Tests cover positive signed streams; wrong key/target/size/version; malformed metadata; corruption at finish, activation and boot; erase/program geometry and bit rules; every update operation at before/after/selected byte offsets; boot/confirm journal cuts; seeded schedules (`0x526f1a5`, seed and case on failure); root permissions, read-only modes, exclusivity, duplicate rejection and close behavior; file locking and child-process persistence. Core CI runs the simulator and device suites and no_std/Wasm compilation; Platforms CI runs the child-process suite. This is deterministic adversarial testing, not a claim of exhaustive physical hardware validation or a fuzzing campaign.
 
 ## Measurements and remaining gates
 
