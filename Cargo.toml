@@ -121,7 +121,7 @@ members = [
 ]
 
 [patch.crates-io]
-littlefs2-sys = { git = "https://github.com/AlixANNERAUD/littlefs2-sys.git", rev = "2c2aab090f7592d79eec991656c03797d1a22c8f" }
+littlefs2-sys = { path = "libraries/littlefs2_sys" }
 
 [patch."https://github.com/xila-project/core"]
 xila = { path = "core" }

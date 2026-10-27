@@ -1983,7 +1983,6 @@ checksum = "4744e383959f0db86ede514b809b1c53251889093803c05267acc7d4e7030d70"
 [[package]]
 name = "littlefs2-sys"
 version = "0.4.0"
-source = "git+https://github.com/AlixANNERAUD/littlefs2-sys.git?rev=2c2aab090f7592d79eec991656c03797d1a22c8f#2c2aab090f7592d79eec991656c03797d1a22c8f"
 dependencies = [
  "bindgen 0.70.1",
  "cc",

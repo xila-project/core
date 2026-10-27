@@ -26,6 +26,7 @@ EXPECTED_PACKAGE_NAMES = {
     "libraries/firmware_update/Cargo.toml": "xila-firmware-update",
     "libraries/http/Cargo.toml": "xila_http",
     "libraries/little_fs/Cargo.toml": "xila-little-fs",
+    "libraries/littlefs2_sys/Cargo.toml": "littlefs2-sys",
     "libraries/peripherals/Cargo.toml": "xila-peripherals",
     "libraries/shared/Cargo.toml": "xila-shared",
     "libraries/synchronization/Cargo.toml": "xila-synchronization",
@@ -100,6 +101,7 @@ class CargoPackageNames(unittest.TestCase):
             if path not in {
                 "core/Cargo.toml",
                 "libraries/http/Cargo.toml",
+                "libraries/littlefs2_sys/Cargo.toml",
                 "tools/verification_probe/Cargo.toml",
             }:
                 self.assertTrue(name.startswith("xila-"), f"{path} has unprefixed name {name}")
