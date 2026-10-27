@@ -452,10 +452,14 @@ class WorkflowPolicy(unittest.TestCase):
         pages = (ROOT / ".github/workflows/pages.yml").read_text()
         self.assertIn('workflows: ["CI"]', pages)
         self.assertIn("workflow_run:", pages)
-        self.assertIn("mise run pages:build", pages)
+        self.assertIn("xila-project/platforms/.github/workflows/demo.yml@", pages)
+        self.assertIn("name: platform-demonstrations", pages)
+        self.assertIn("path: pages/demonstrations/", pages)
+        self.assertIn("mise run docs:host", pages)
+        self.assertIn("mise run docs:guest", pages)
         self.assertIn("actions/upload-pages-artifact", pages)
         self.assertIn("actions/deploy-pages", pages)
-        for old in ["listWorkflowRunArtifacts", "download-artifact", "incremental=true"]:
+        for old in ["listWorkflowRunArtifacts", "incremental=true"]:
             with self.subTest(old=old):
                 self.assertNotIn(old, pages)
 
@@ -685,7 +689,7 @@ class WorkflowPolicy(unittest.TestCase):
     def test_github_actions_use_version_tags_instead_of_commit_shas(self):
         for workflow in ACTIVE_WORKFLOWS:
             for line_number, line in enumerate(workflow.read_text().splitlines(), 1):
-                if "uses:" in line:
+                if "uses:" in line and "xila-project/platforms/.github/workflows/" not in line:
                     with self.subTest(workflow=workflow.name, line=line_number):
                         self.assertNotRegex(line, r"uses:\s+[^\s]+@[0-9a-f]{40}\b")
 
