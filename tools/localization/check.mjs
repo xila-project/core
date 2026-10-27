@@ -146,7 +146,7 @@ const guestUiTests = [
   },
 ];
 for (const { application, file, calls } of guestUiTests) {
-  const sourcePath = path.join(ROOT, file);
+  const sourcePath = path.join(APPLICATIONS_ROOT, file);
   const english = catalog(path.join(APPLICATIONS_ROOT, "executables", application, "locales", "en.json"));
   const source = readFileSync(sourcePath, "utf8");
   let count = 0;

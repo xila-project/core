@@ -172,7 +172,7 @@ node = "{{ vars.node_version }}"
 [tasks."ci:abi"]
 description = "Run locked WASM ABI translation tests including doctests"
 depends = ["ci:packages-linker"]
-run = "cargo test --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features ${CI_ABI_MEMORY:-memory_32}"
+run = "cargo test --locked --manifest-path .application-src/executables/wasm/tests/translation/Cargo.toml --no-default-features --features ${CI_ABI_MEMORY:-memory_32}"
 
 [tasks."ci:abi".tools]
 rust = { version = "{{ vars.rust_version }}", profile = "minimal" }
@@ -244,7 +244,7 @@ run = "mise run clippy:host"
 extends = "ci:rust-lint"
 description = "Lint host WASM runtime and graphics bindings"
 depends = ["ci:packages-host"]
-run = "cargo clippy -p xila-wasm --features graphics,xila/graphics_rendering_xrgb8888 --target x86_64-unknown-linux-gnu -- -D warnings"
+run = "cargo clippy --manifest-path .application-src/Cargo.toml -p xila-wasm --features graphics,xila/graphics_rendering_xrgb8888 --target x86_64-unknown-linux-gnu -- -D warnings"
 
 [tasks."ci:verification"]
 description = "Test verifier features and link without an allocator on Cortex-M and WASM"
@@ -300,13 +300,13 @@ tools.rust = { version = "{{ vars.nightly_version }}", profile = "minimal", comp
   "llvm-tools-preview",
 ] }
 tools."aqua:taiki-e/cargo-llvm-cov" = "{{ vars.llvm_cov_version }}"
-run = "cargo llvm-cov --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features ${CI_ABI_MEMORY:-memory_32} --ignore-filename-regex '(tests\\.rs|tests/translation/src/lib\\.rs)$' --fail-under-lines 100 --fail-under-functions 100"
+run = "cargo llvm-cov --locked --manifest-path .application-src/executables/wasm/tests/translation/Cargo.toml --no-default-features --features ${CI_ABI_MEMORY:-memory_32} --ignore-filename-regex '(tests\\.rs|tests/translation/src/lib\\.rs)$' --fail-under-lines 100 --fail-under-functions 100"
 
 [tasks."ci:abi-miri"]
 extends = "ci:miri"
 description = "Test ABI translation with host Miri"
 depends = ["ci:packages-linker"]
-run = "cargo miri test --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features ${CI_ABI_MEMORY:-memory_32}"
+run = "cargo miri test --locked --manifest-path .application-src/executables/wasm/tests/translation/Cargo.toml --no-default-features --features ${CI_ABI_MEMORY:-memory_32}"
 
 [tasks."ci:abi-miri-cross"]
 description = "Test ABI translation with cross-architecture Miri"
@@ -324,10 +324,10 @@ set -euo pipefail
 memory="${CI_ABI_MEMORY:-memory_32}"
 case "$memory" in
   memory_32)
-    cargo miri test --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features memory_32 --target powerpc-unknown-linux-gnu
+    cargo miri test --locked --manifest-path .application-src/executables/wasm/tests/translation/Cargo.toml --no-default-features --features memory_32 --target powerpc-unknown-linux-gnu
     ;;
   memory_64)
-    cargo miri test --locked --manifest-path executables/wasm/tests/translation/Cargo.toml --no-default-features --features memory_64 --target i686-unknown-linux-gnu
+    cargo miri test --locked --manifest-path .application-src/executables/wasm/tests/translation/Cargo.toml --no-default-features --features memory_64 --target i686-unknown-linux-gnu
     ;;
   *)
     echo "Unsupported ABI memory mode: $memory" >&2
