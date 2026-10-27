@@ -10,10 +10,17 @@ categories = ["embedded", "filesystem", "no-std"]
 repository = "https://github.com/nickray/littlefs2-sys"
 
 [dependencies]
-tinyrlibc = { version = "0.5", default-features = false, features = ["strchr", "strlen", "strcspn", "strspn"], optional = true }
+tinyrlibc = { version = "0.5", default-features = false, features = [
+  "strchr",
+  "strlen",
+  "strcspn",
+  "strspn",
+], optional = true }
 
 [build-dependencies]
-bindgen = { version = "0.70.1", default-features = false , features = ["runtime"] }
+bindgen = { version = "0.70.1", default-features = false, features = [
+  "runtime",
+] }
 cc = "1"
 
 [features]
