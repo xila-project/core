@@ -4775,7 +4775,7 @@ dependencies = [
 [[package]]
 name = "xila-drivers-native"
 version = "0.1.0"
-source = "git+https://github.com/xila-project/platforms?rev=12b670d565e4c1edc1aafd9240535b010b1da69e#12b670d565e4c1edc1aafd9240535b010b1da69e"
+source = "git+https://github.com/xila-project/platforms?rev=5fd89904fbe6da91dabbae6ac52b52bd8ff16220#5fd89904fbe6da91dabbae6ac52b52bd8ff16220"
 dependencies = [
  "arboard",
  "cap-std",
@@ -4803,7 +4803,7 @@ dependencies = [
 [[package]]
 name = "xila-drivers-shared"
 version = "0.1.0"
-source = "git+https://github.com/xila-project/platforms?rev=12b670d565e4c1edc1aafd9240535b010b1da69e#12b670d565e4c1edc1aafd9240535b010b1da69e"
+source = "git+https://github.com/xila-project/platforms?rev=5fd89904fbe6da91dabbae6ac52b52bd8ff16220#5fd89904fbe6da91dabbae6ac52b52bd8ff16220"
 dependencies = [
  "embassy-futures",
  "embedded-io",
@@ -4826,7 +4826,7 @@ dependencies = [
 [[package]]
 name = "xila-drivers-std"
 version = "0.1.0"
-source = "git+https://github.com/xila-project/platforms?rev=12b670d565e4c1edc1aafd9240535b010b1da69e#12b670d565e4c1edc1aafd9240535b010b1da69e"
+source = "git+https://github.com/xila-project/platforms?rev=5fd89904fbe6da91dabbae6ac52b52bd8ff16220#5fd89904fbe6da91dabbae6ac52b52bd8ff16220"
 dependencies = [
  "embassy-executor",
  "libc",
@@ -5067,7 +5067,7 @@ dependencies = [
 [[package]]
 name = "xila-testing"
 version = "0.1.0"
-source = "git+https://github.com/xila-project/platforms?rev=12b670d565e4c1edc1aafd9240535b010b1da69e#12b670d565e4c1edc1aafd9240535b010b1da69e"
+source = "git+https://github.com/xila-project/platforms?rev=5fd89904fbe6da91dabbae6ac52b52bd8ff16220#5fd89904fbe6da91dabbae6ac52b52bd8ff16220"
 dependencies = [
  "xila-abi-definitions",
  "xila-authentication",

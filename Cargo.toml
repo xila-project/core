@@ -20,7 +20,7 @@ xila = { path = "core" }
 xila_http = { path = "libraries/http", default-features = false }
 verification = { git = "https://github.com/xila-project/package_manager", rev = "f5e3f0b323a79a80d106ce2b88b77bfa8667d71b", default-features = false }
 application_metadata = { package = "xila-application-metadata", path = "libraries/application_metadata" }
-application_shortcuts = { package = "xila-application-shortcuts", git = "https://github.com/xila-project/applications", rev = "38a90085da842e14df548b7be9be3c355e166df8" }
+application_shortcuts = { package = "xila-application-shortcuts", git = "https://github.com/xila-project/applications", rev = "26ee04355c3ddea0f41ee81ece168cec2f9eb376" }
 audio = { package = "xila-audio", path = "libraries/audio" }
 nanoaudio = { git = "https://github.com/AlixANNERAUD/nanoaudio.git", rev = "596076c64827fd8bf9e8319addc2f215e0cde8be", default-features = false }
 abi_declarations = { package = "xila-abi-declarations", path = "libraries/abi/declarations" }
@@ -45,17 +45,17 @@ bootsplash = { package = "xila-bootsplash", path = "libraries/bootsplash" }
 embedded-i18n = { version = "=0.1.3", default-features = false, features = [
   "backend-json",
 ] }
-testing = { package = "xila-testing", git = "https://github.com/xila-project/platforms", rev = "12b670d565e4c1edc1aafd9240535b010b1da69e" }
+testing = { package = "xila-testing", git = "https://github.com/xila-project/platforms", rev = "5fd89904fbe6da91dabbae6ac52b52bd8ff16220" }
 device = { package = "xila-device", path = "libraries/device" }
 
 # - Drivers
 drivers_core = { package = "xila-drivers-core", path = "drivers/core" }
-drivers_native = { package = "xila-drivers-native", git = "https://github.com/xila-project/platforms", rev = "12b670d565e4c1edc1aafd9240535b010b1da69e" }
-drivers_shared = { package = "xila-drivers-shared", git = "https://github.com/xila-project/platforms", rev = "12b670d565e4c1edc1aafd9240535b010b1da69e" }
-drivers_std = { package = "xila-drivers-std", git = "https://github.com/xila-project/platforms", rev = "12b670d565e4c1edc1aafd9240535b010b1da69e" }
+drivers_native = { package = "xila-drivers-native", git = "https://github.com/xila-project/platforms", rev = "5fd89904fbe6da91dabbae6ac52b52bd8ff16220" }
+drivers_shared = { package = "xila-drivers-shared", git = "https://github.com/xila-project/platforms", rev = "5fd89904fbe6da91dabbae6ac52b52bd8ff16220" }
+drivers_std = { package = "xila-drivers-std", git = "https://github.com/xila-project/platforms", rev = "5fd89904fbe6da91dabbae6ac52b52bd8ff16220" }
 
 # - Executables
-command_line_shell = { package = "xila-command-line-shell", git = "https://github.com/xila-project/applications", rev = "38a90085da842e14df548b7be9be3c355e166df8" }
+command_line_shell = { package = "xila-command-line-shell", git = "https://github.com/xila-project/applications", rev = "26ee04355c3ddea0f41ee81ece168cec2f9eb376" }
 
 # - External crates
 embedded-hal = { version = "1", default-features = false }
