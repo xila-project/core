@@ -2,8 +2,10 @@ extern crate std;
 
 use alloc::format;
 use alloc::string::{String, ToString};
-use std::path::PathBuf;
-use std::process::Command;
+use std::path::{Path, PathBuf};
+
+#[path = "building_command.rs"]
+mod building_command;
 
 fn build_failure_message(stdout: &[u8], stderr: &[u8]) -> String {
     let stdout = String::from_utf8_lossy(stdout);
@@ -24,15 +26,13 @@ fn build_failure_message(stdout: &[u8], stderr: &[u8]) -> String {
 }
 
 pub fn build_crate(name: &str) -> Result<PathBuf, String> {
-    log::information!("Building executable crate {}", name);
+    build_crate_with_manifest(name, None)
+}
 
-    let output = Command::new("cargo")
-        .arg("build")
-        .arg("--profile=release-wasm")
-        .arg("--target=wasm32-wasip1")
-        .arg("-p")
-        .arg(name)
-        .arg("--message-format=json")
+/// Build a guest from an explicitly selected Cargo workspace manifest.
+pub fn build_crate_with_manifest(name: &str, manifest: Option<&Path>) -> Result<PathBuf, String> {
+    log::information!("Building executable crate {}", name);
+    let output = building_command::build_command(name, manifest)
         .output()
         .map_err(|e| format!("Failed to start cargo build: {}", e))?;
 
