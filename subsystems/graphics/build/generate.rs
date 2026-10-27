@@ -162,9 +162,18 @@ pub fn node_path(paths: &std::ffi::OsStr) -> io::Result<PathBuf> {
         })
 }
 
-pub fn common_inputs(root: &Path, node: &Path) -> io::Result<(String, Vec<PathBuf>)> {
-    let converter = root.join("../../node_modules/lv_font_conv");
-    let mut inputs = cache::converter_inputs(&converter)?;
+pub fn converter_directory(root: &Path, configured: Option<&Path>) -> PathBuf {
+    configured
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| root.join("../../node_modules/lv_font_conv"))
+}
+
+pub fn common_inputs(
+    root: &Path,
+    node: &Path,
+    converter: &Path,
+) -> io::Result<(String, Vec<PathBuf>)> {
+    let mut inputs = cache::converter_inputs(converter)?;
     inputs.extend(
         [
             "build.rs",
