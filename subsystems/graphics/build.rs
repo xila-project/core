@@ -21,6 +21,8 @@ fn main() {
         "PATH",
         "NODE_OPTIONS",
         "NODE_PATH",
+        "XILA_LV_FONT_CONV_DIR",
+        "XILA_FONT_CATALOG_ROOTS",
         "DEP_LV_CONFIG_PATH",
         "DEP_LVGL_RUST_SYS_INCLUDE_PATHS",
         "DEP_LVGL_RUST_SYS_DEFINES",
@@ -47,7 +49,13 @@ fn main() {
             "cargo:rerun-if-changed={}",
             root.join("../../Cargo.toml").display()
         );
-        let symbols = catalogs::collect(&root.join("../.."), &[&locale, &fallback])
+        let core_root = root.join("../..");
+        let mut roots = vec![core_root];
+        if let Some(extra) = env::var_os("XILA_FONT_CATALOG_ROOTS") {
+            roots.extend(env::split_paths(&extra));
+        }
+        let roots: Vec<&Path> = roots.iter().map(PathBuf::as_path).collect();
+        let symbols = catalogs::collect_multiple(&roots, &[&locale, &fallback])
             .expect("Chinese catalog font symbols");
         for directory in &symbols.directories {
             println!("cargo:rerun-if-changed={}", directory.display());
@@ -58,7 +66,9 @@ fn main() {
     if !variants.contains(&active) {
         variants.push(active.clone());
     }
-    let converter = root.join("../../node_modules/lv_font_conv/lv_font_conv.js");
+    let configured_converter = env::var_os("XILA_LV_FONT_CONV_DIR").map(PathBuf::from);
+    let converter_dir = generate::converter_directory(&root, configured_converter.as_deref());
+    let converter = converter_dir.join("lv_font_conv.js");
     assert!(
         converter.is_file(),
         "Font converter not found at {}. Install workspace dependencies with `npm ci`.",
@@ -66,7 +76,8 @@ fn main() {
     );
     let node =
         generate::node_path(&env::var_os("PATH").unwrap_or_default()).expect("Node.js executable");
-    let (identity, inputs) = generate::common_inputs(&root, &node).expect("font generation inputs");
+    let (identity, inputs) =
+        generate::common_inputs(&root, &node, &converter_dir).expect("font generation inputs");
     for path in inputs {
         println!("cargo:rerun-if-changed={}", path.display());
     }

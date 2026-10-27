@@ -12,8 +12,8 @@ This implements the research/native-prototype portion of [#526](https://github.c
 - `subsystems/virtual_file_system/src/synchronous_file.rs`: async, synchronous typed and raw control paths now reject **Write-directed** commands on read-only handles with `InvalidMode`. Queries remain available on write handles, matching existing device conventions. A writable descriptor is a capability: native callers are trusted and must not pass it to an untrusted task.
 - `BaseOperations::open` does not receive open flags. Firmware enforces one opening of any mode, without relying on `CreateFlags::Exclusive` (the latter primarily means exclusive creation in current VFS). A second open returns `RessourceBusy`; duplication returns `UnsupportedOperation`. No unbounded handle table is added.
 - `executables/wasm/src/host/wasi/file.rs::fd_control`: already bounds control buffers, checks guest ranges/alignment/overlap, and copies into aligned host scratch before raw VFS dispatch. Firmware checks exact input/output lengths, ABI version and reserved bytes before mutation. This PR checks the portable crate on Wasm; a firmware-specific guest execution test remains a follow-up.
-- `drivers/shared/src/devices/hash.rs`: boxed dynamic hash contexts are intentionally not on this streaming path.
-- `drivers/espressif/Cargo.toml`: no ESP-IDF dependencies; `.cargo/config.toml` supplies Xtensa linker/runner settings but does not establish functioning OTA linkage, partition layout or secure boot. #324 remains the integration prerequisite.
+- [Platforms hash driver](https://github.com/xila-project/platforms/blob/main/drivers/shared/src/devices/hash.rs): boxed dynamic hash contexts are intentionally not on this streaming path.
+- [Platforms Espressif driver](https://github.com/xila-project/platforms/blob/main/drivers/espressif/Cargo.toml): no ESP-IDF dependencies; Platforms’ `.cargo/config.toml` supplies Xtensa linker/runner settings but does not establish functioning OTA linkage, partition layout or secure boot. #324 remains the integration prerequisite.
 - #490 supplies verification primitives. XPK (#402/#491), loader enforcement (#495) and filesystem images (#318) remain separate. The simulator manifest below is deliberately a test-backend format, not another application package schema.
 
 ## Platform decision record
@@ -94,10 +94,10 @@ cargo clippy --locked -p xila-firmware-update --features native --all-targets --
 cargo check --locked -p xila-firmware-update --features simulator --lib --target wasm32-unknown-unknown
 ```
 
-The process tests create public-key/signed synthetic fixtures using a deterministic **test-only** seed and start separate `xila-firmware-sim` processes for staging, trial, revert and confirmation. No private production key is present. For manual use, supply your own **test** public key, manifest and image files:
+The [Platforms firmware simulator](https://github.com/xila-project/platforms) and its process tests create public-key/signed synthetic fixtures using a deterministic **test-only** seed and start separate `xila-firmware-sim` processes for staging, trial, revert and confirmation. No private production key is present. From a Platforms checkout, supply your own **test** public key, manifest and image files:
 
 ```sh
-cargo run -p xila-firmware-update --features native --bin xila-firmware-sim -- \
+cargo run --bin xila-firmware-sim -- \
   init --flash /tmp/fw.img --key test-public-key.bin --target xila-native-test \
   --manifest factory.manifest --image factory.bin
 # Same public key/target options are required for every command below.
@@ -109,7 +109,7 @@ xila-firmware-sim inspect --flash /tmp/fw.img --key test-public-key.bin --target
 
 `cargo run` does not install the binary in PATH; use `target/debug/xila-firmware-sim` or the same `cargo run ... --` prefix. `update --stage-only` closes without activation. `update` or `boot --fault-operation N --fault-byte K` injects a torn operation; rerun without fault flags to simulate reset.
 
-Tests cover positive signed streams; wrong key/target/size/version; malformed metadata; corruption at finish, activation and boot; erase/program geometry and bit rules; every update operation at before/after/selected byte offsets; boot/confirm journal cuts; seeded schedules (`0x526f1a5`, seed and case on failure); root permissions, read-only modes, exclusivity, duplicate rejection and close behavior; file locking and child-process persistence. CI runs the native suite and no_std/Wasm compilation. This is deterministic adversarial testing, not a claim of exhaustive physical hardware validation or a fuzzing campaign.
+Tests cover positive signed streams; wrong key/target/size/version; malformed metadata; corruption at finish, activation and boot; erase/program geometry and bit rules; every update operation at before/after/selected byte offsets; boot/confirm journal cuts; seeded schedules (`0x526f1a5`, seed and case on failure); root permissions, read-only modes, exclusivity, duplicate rejection and close behavior; file locking and child-process persistence. Core CI runs the simulator and device suites and no_std/Wasm compilation; Platforms CI runs the child-process suite. This is deterministic adversarial testing, not a claim of exhaustive physical hardware validation or a fuzzing campaign.
 
 ## Measurements and remaining gates
 

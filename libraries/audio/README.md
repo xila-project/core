@@ -132,7 +132,7 @@ its output slot.
 
 These tests run with normal workspace tests, without enabling
 `drivers_native/audio` or opening an audio device. To test just the headless
-crate, run `cargo test -p xila-drivers-headless`. Native-adapter checks remain opt-in
+crate, run `cargo test --manifest-path ../platforms/drivers/headless/Cargo.toml`. Native-adapter checks remain opt-in
 for work on the native example.
 
 On the x86_64 debug test build, the system is **14,544 bytes**, each stream handle
@@ -175,10 +175,10 @@ the static audio system can register a replacement sink after runner teardown.
 The same native driver targets (Linux, macOS and Windows) are supported; SDL
 is no longer needed.
 
-From the repository development shell:
+From a Core checkout adjacent to the Platforms checkout:
 
 ```sh
-cargo run -p xila-drivers-native --features audio --example audio
+cargo run --manifest-path ../platforms/drivers/native/Cargo.toml --features audio --example audio
 ```
 
 This plays a quiet two-second 440 Hz square-wave tone through the default host
@@ -194,7 +194,7 @@ cargo test -p xila-audio
 ## Later milestones
 
 Web Audio, per-open VFS streams and the bounded generic guest `fd_control`
-bridge are available. See [Synth](../../executables/synth/README.md) for the
+bridge are available. See [Synth](https://github.com/xila-project/applications/tree/main/executables/synth) for the
 native/browser example setup and smoke test. ESP32 I2S and system sounds remain
 follow-up work. Applications can choose
 nanoaudio codecs independently when they need decoding.

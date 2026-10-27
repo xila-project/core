@@ -1,6 +1,0 @@
-{
-  "errors": {
-    "event_handling_failed": "Erro ao processar evento do gerenciador de arquivos: {:?}",
-    "invalid_entered_path": "Caminho informado inválido: {}"
-  }
-}

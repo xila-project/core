@@ -1,4 +1,6 @@
 #![cfg(feature = "host")]
+#[path = "support/applications.rs"]
+mod applications;
 extern crate abi_definitions;
 drivers_std::memory::instantiate_global_allocator!();
 
@@ -152,7 +154,7 @@ async fn install_selects_install_export_and_never_falls_back_to_main() {
             ("xila-synth", "synth"),
             ("xila-text-editor", "text_editor"),
         ] {
-            let binary = executable::build_crate(package).unwrap();
+            let binary = applications::build(package).unwrap();
             let path = format!("/applications/executables/{app}");
             drivers_std::loader::load_to_virtual_file_system(
                 context.task_manager,
@@ -180,7 +182,7 @@ async fn install_selects_install_export_and_never_falls_back_to_main() {
             .await
             .unwrap();
             let shortcut = core::str::from_utf8(&contents).unwrap();
-            assert_eq!(shortcut, application_metadata::shortcut(app).unwrap());
+            assert_eq!(shortcut, application_shortcuts::shortcut(app).unwrap());
             assert!(shortcut.contains(r#""command": "/applications/executables/wasm""#));
             assert!(shortcut.contains(&format!(r#""arguments": ["{path}"]"#)));
         }

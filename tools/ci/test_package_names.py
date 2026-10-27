@@ -13,30 +13,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 EXPECTED_PACKAGE_NAMES = {
     "core/Cargo.toml": "xila",
     "drivers/core/Cargo.toml": "xila-drivers-core",
-    "drivers/espressif/Cargo.toml": "xila-drivers-espressif",
-    "drivers/headless/Cargo.toml": "xila-drivers-headless",
-    "drivers/native/Cargo.toml": "xila-drivers-native",
-    "drivers/shared/Cargo.toml": "xila-drivers-shared",
-    "drivers/std/Cargo.toml": "xila-drivers-std",
-    "drivers/wasm/Cargo.toml": "xila-drivers-wasm",
-    "examples/native/Cargo.toml": "xila-native-example",
-    "examples/wasm/Cargo.toml": "xila-wasm-example",
-    "executables/activity/Cargo.toml": "xila-activity",
-    "executables/calculator/Cargo.toml": "xila-calculator",
-    "executables/clock/Cargo.toml": "xila-clock",
-    "executables/debug/Cargo.toml": "xila-debug-application",
-    "executables/file_manager/Cargo.toml": "xila-file-manager",
-    "executables/pixel_painter/Cargo.toml": "xila-pixel-painter",
-    "executables/settings/Cargo.toml": "xila-settings",
-    "executables/shell/command_line/Cargo.toml": "xila-command-line-shell",
-    "executables/shell/graphical/Cargo.toml": "xila-graphical-shell",
-    "executables/synth/Cargo.toml": "xila-synth",
-    "executables/terminal/Cargo.toml": "xila-terminal",
-    "executables/text_editor/Cargo.toml": "xila-text-editor",
     "executables/wasm/Cargo.toml": "xila-wasm",
     "executables/wasm/tests/translation/Cargo.toml": "xila-wasm-translation-tests",
     "executables/wasm/tests/wasm_test/Cargo.toml": "xila-wasm-wasm-test",
-    "executables/weather/Cargo.toml": "xila-weather",
     "libraries/abi/declarations/Cargo.toml": "xila-abi-declarations",
     "libraries/abi/definitions/Cargo.toml": "xila-abi-definitions",
     "libraries/application_metadata/Cargo.toml": "xila-application-metadata",
@@ -53,7 +32,6 @@ EXPECTED_PACKAGE_NAMES = {
     "libraries/peripherals/Cargo.toml": "xila-peripherals",
     "libraries/shared/Cargo.toml": "xila-shared",
     "libraries/synchronization/Cargo.toml": "xila-synchronization",
-    "libraries/testing/Cargo.toml": "xila-testing",
     "subsystems/graphics/Cargo.toml": "xila-graphics",
     "subsystems/graphics/bindings_generator/Cargo.toml": "xila-graphics-bindgen",
     "subsystems/graphics/tests/font_link/Cargo.toml": "xila-graphics-font-link-test",
@@ -66,28 +44,14 @@ EXPECTED_PACKAGE_NAMES = {
     "subsystems/time/Cargo.toml": "xila-time",
     "subsystems/users/Cargo.toml": "xila-users",
     "subsystems/virtual_file_system/Cargo.toml": "xila-virtual-file-system",
-    "tools/fs_image/Cargo.toml": "xila-fs-image",
-    "tools/profiling/Cargo.toml": "xila-profiling",
     "tools/verification_probe/Cargo.toml": "verification_probe",
 }
 
 EXPECTED_BINARY_TARGETS = {
-    "libraries/firmware_update/Cargo.toml": ["xila-firmware-sim"],
-    "drivers/native/Cargo.toml": ["xila-debug"],
     "executables/wasm/tests/wasm_test/Cargo.toml": ["wasm_wasm_test"],
-    "executables/pixel_painter/Cargo.toml": ["pixel_painter"],
-    "executables/text_editor/Cargo.toml": ["text_editor"],
-    "examples/native/Cargo.toml": ["native_example", "xila-runtime"],
-    "executables/calculator/Cargo.toml": ["calculator"],
-    "examples/wasm/Cargo.toml": ["wasm_example"],
-    "executables/weather/Cargo.toml": ["weather"],
-    "executables/clock/Cargo.toml": ["clock"],
-    "executables/synth/Cargo.toml": ["synth"],
-    "tools/fs_image/Cargo.toml": ["fs_image"],
 }
 
 EXPECTED_LIBRARY_TARGETS = {
-    "executables/activity/Cargo.toml": "activity",
     "libraries/application_metadata/Cargo.toml": "application_metadata",
     "subsystems/task/Cargo.toml": "task",
     "libraries/synchronization/Cargo.toml": "synchronization",
@@ -96,40 +60,23 @@ EXPECTED_LIBRARY_TARGETS = {
     "libraries/shared/Cargo.toml": "shared",
     "subsystems/log/Cargo.toml": "log",
     "subsystems/users/Cargo.toml": "users",
-    "drivers/native/Cargo.toml": "drivers_native",
     "libraries/audio/Cargo.toml": "audio",
     "libraries/debug_protocol/Cargo.toml": "debug_protocol",
     "subsystems/graphics/Cargo.toml": "graphics",
     "libraries/abi/declarations/Cargo.toml": "abi_declarations",
     "subsystems/time/Cargo.toml": "time",
-    "drivers/shared/Cargo.toml": "drivers_shared",
     "libraries/device/Cargo.toml": "device",
     "subsystems/network/Cargo.toml": "network",
     "subsystems/virtual_file_system/Cargo.toml": "virtual_file_system",
     "libraries/abi/definitions/Cargo.toml": "abi_definitions",
     "subsystems/memory/Cargo.toml": "memory",
-    "drivers/std/Cargo.toml": "drivers_std",
     "libraries/little_fs/Cargo.toml": "little_fs",
-    "libraries/testing/Cargo.toml": "testing",
     "libraries/authentication/Cargo.toml": "authentication",
     "libraries/executable/Cargo.toml": "executable",
     "libraries/peripherals/Cargo.toml": "peripherals",
-    "executables/file_manager/Cargo.toml": "file_manager",
     "libraries/bootsplash/Cargo.toml": "bootsplash",
-    "executables/shell/command_line/Cargo.toml": "command_line_shell",
     "executables/wasm/Cargo.toml": "wasm",
     "subsystems/graphics/bindings_generator/Cargo.toml": "graphics_bindgen",
-    "executables/shell/graphical/Cargo.toml": "graphical_shell",
-    "executables/terminal/Cargo.toml": "terminal",
-    "executables/settings/Cargo.toml": "settings",
-    "executables/debug/Cargo.toml": "debug_application",
-    "executables/pixel_painter/Cargo.toml": "pixel_painter",
-    "drivers/headless/Cargo.toml": "drivers_headless",
-    "drivers/wasm/Cargo.toml": "drivers_wasm",
-    "drivers/espressif/Cargo.toml": "drivers_espressif",
-    "executables/weather/Cargo.toml": "weather",
-    "executables/clock/Cargo.toml": "clock",
-    "executables/synth/Cargo.toml": "synth",
 }
 
 
@@ -145,13 +92,14 @@ class CargoPackageNames(unittest.TestCase):
             if ".git" not in path.parts
             and not path.is_relative_to(ROOT / "target")
             and ".superpowers" not in path.parts
+            and ".application-src" not in path.parts
+            and "node_modules" not in path.parts
             and "package" in manifest(path)
         }
 
         self.assertEqual(actual, EXPECTED_PACKAGE_NAMES)
         self.assertEqual(len(set(actual.values())), len(EXPECTED_PACKAGE_NAMES))
         self.assertEqual(actual["core/Cargo.toml"], "xila")
-        self.assertEqual(actual["tools/profiling/Cargo.toml"], "xila-profiling")
         for path, name in actual.items():
             # These crates were added on main after the package migration.
             if path not in {
@@ -226,18 +174,6 @@ class CargoPackageNames(unittest.TestCase):
 
         self.assertEqual(actual, EXPECTED_BINARY_TARGETS)
 
-        native_driver = next(
-            package
-            for package in metadata["packages"]
-            if package["name"] == "xila-drivers-native"
-        )
-        library_names = [
-            target["name"]
-            for target in native_driver["targets"]
-            if "lib" in target["kind"]
-        ]
-        self.assertEqual(library_names, ["drivers_native"])
-
     def test_library_target_names_remain_stable_after_package_rename(self):
         metadata = json.loads(
             subprocess.check_output(
@@ -269,6 +205,8 @@ class CargoPackageNames(unittest.TestCase):
         text_suffixes = {".md", ".toml", ".yml", ".yaml", ".sh", ".py", ".rs"}
 
         for path in ROOT.rglob("*"):
+            if ".application-src" in path.parts or "node_modules" in path.parts:
+                continue
             if (
                 not path.is_file()
                 or (
@@ -290,19 +228,23 @@ class CargoPackageNames(unittest.TestCase):
                         f"stale Cargo package selector {match.group(1)!r} at {path}:{line_number}",
                     )
 
-    def test_ci_feature_selectors_use_selected_package_names(self):
-        tasks = manifest(ROOT / "mise.ci.toml")["tasks"]
-        for task, features in {
-            "ci:wasm-audio-check": ["xila-drivers-wasm/audio"],
-            "ci:profiling-runtime-tests": [
-                "xila-task/test_harness",
-                "xila-drivers-std/profiling",
-                "xila-drivers-std/heaptrack",
-            ],
-        }.items():
-            with self.subTest(task=task):
-                run = tasks[task]["run"]
-                self.assertIn("--features " + ",".join(features), run)
+    def test_core_production_graph_does_not_depend_on_other_repositories(self):
+        tree = subprocess.check_output(
+            ["cargo", "tree", "--locked", "-p", "xila", "-e", "normal"], cwd=ROOT, text=True
+        )
+        self.assertNotIn("xila-project/applications", tree.lower())
+        self.assertNotIn("xila-project/platforms", tree.lower())
+
+    def test_xila_packages_have_one_resolved_identity(self):
+        metadata = json.loads(subprocess.check_output(
+            ["cargo", "metadata", "--locked", "--format-version", "1"], cwd=ROOT, text=True
+        ))
+        ids = {}
+        for package in metadata["packages"]:
+            name = package["name"]
+            if name == "xila" or name.startswith("xila-"):
+                ids.setdefault(name, set()).add(package["id"])
+        self.assertFalse({name: entries for name, entries in ids.items() if len(entries) != 1})
 
 if __name__ == "__main__":
     unittest.main()

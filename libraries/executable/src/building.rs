@@ -2,8 +2,10 @@ extern crate std;
 
 use alloc::format;
 use alloc::string::{String, ToString};
-use std::path::PathBuf;
-use std::process::Command;
+use std::path::{Path, PathBuf};
+
+#[path = "building_command.rs"]
+mod building_command;
 
 fn build_failure_message(stdout: &[u8], stderr: &[u8]) -> String {
     let stdout = String::from_utf8_lossy(stdout);
@@ -24,15 +26,13 @@ fn build_failure_message(stdout: &[u8], stderr: &[u8]) -> String {
 }
 
 pub fn build_crate(name: &str) -> Result<PathBuf, String> {
-    log::information!("Building executable crate {}", name);
+    build_crate_with_manifest(name, None)
+}
 
-    let output = Command::new("cargo")
-        .arg("build")
-        .arg("--profile=release-wasm")
-        .arg("--target=wasm32-wasip1")
-        .arg("-p")
-        .arg(name)
-        .arg("--message-format=json")
+/// Build a guest from an explicitly selected Cargo workspace manifest.
+pub fn build_crate_with_manifest(name: &str, manifest: Option<&Path>) -> Result<PathBuf, String> {
+    log::information!("Building executable crate {}", name);
+    let output = building_command::build_command(name, manifest)
         .output()
         .map_err(|e| format!("Failed to start cargo build: {}", e))?;
 
@@ -85,7 +85,44 @@ pub fn build_crate(name: &str) -> Result<PathBuf, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::build_failure_message;
+    use super::{build_failure_message, std};
+    use alloc::format;
+
+    #[test]
+    fn builds_a_guest_from_an_external_workspace_manifest() {
+        use std::{
+            fs,
+            time::{SystemTime, UNIX_EPOCH},
+        };
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "xila-external-guest-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("Cargo.toml"), "[package]\nname = \"external-guest-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[profile.release-wasm]\ninherits = \"release\"\n").unwrap();
+        fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+        fs::write(
+            root.join("Cargo.lock"),
+            "version = 4\n\n[[package]]\nname = \"external-guest-fixture\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let result = super::build_crate_with_manifest(
+            "external-guest-fixture",
+            Some(&root.join("Cargo.toml")),
+        );
+        match result {
+            Ok(path) => {
+                let wasm = fs::read(path).unwrap();
+                assert!(wasm.starts_with(b"\0asm"));
+            }
+            Err(error) => panic!("external guest failed to build: {error}"),
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn build_failure_includes_json_compiler_diagnostics() {

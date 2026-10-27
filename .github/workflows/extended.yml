@@ -5,6 +5,10 @@ on:
     - cron: "0 3 * * *"
   workflow_dispatch:
   workflow_call:
+    inputs:
+      core_ref:
+        required: false
+        type: string
     secrets:
       CODECOV_TOKEN:
         required: false
@@ -28,8 +32,20 @@ jobs:
       MISE_ENV: ci
       CARGO_LLVM_COV_TARGET_DIR: ${{ github.workspace }}/target/llvm-cov-target
       XILA_MBX: "1"
+      XILA_APPLICATIONS_MANIFEST: ${{ github.workspace }}/.application-src/Cargo.toml
+      XILA_FONT_CATALOG_ROOTS: ${{ github.workspace }}/.application-src
     steps:
       - uses: actions/checkout@v7
+        with:
+          repository: xila-project/core
+          ref: ${{ inputs.core_ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: xila-project/applications
+          ref: 45f27e53fe393860b812674415eb5c9c703c9bdf
+          path: .application-src
+          persist-credentials: false
       - uses: jdx/mise-action@v5.2.2
       - run: mise run deps:npm
       - id: toolchain
@@ -48,30 +64,6 @@ jobs:
           files: lcov.info
           fail_ci_if_error: true
 
-  profiling:
-    name: Profiling feature tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    env:
-      MISE_ENV: ci
-      XILA_MBX: "1"
-    steps:
-      - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v5.2.2
-      - run: mise run deps:npm
-      - id: toolchain
-        run: mise run ci:toolchain
-      - uses: jdx/mr-boxington-action@v1
-        with:
-          toolchain: ${{ steps.toolchain.outputs.version }}
-          github-cache-mode: target
-          cache-generation: v1-extended-profiling
-          save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
-      - name: Test runtime profiling instrumentation
-        run: mise run ci:profiling-runtime-tests
-      - name: Test native profiling configuration
-        run: mise run ci:profiling-native-tests
-
   abi-deep:
     name: ABI coverage and Miri (${{ matrix.memory }})
     runs-on: ubuntu-latest
@@ -86,6 +78,10 @@ jobs:
       XILA_MBX: "1"
     steps:
       - uses: actions/checkout@v7
+        with:
+          repository: xila-project/core
+          ref: ${{ inputs.core_ref || github.sha }}
+          persist-credentials: false
       - uses: jdx/mise-action@v5.2.2
       - id: toolchain
         run: mise run ci:toolchain-nightly
@@ -105,7 +101,7 @@ jobs:
   release-gate:
     name: Deep validation gate
     if: always()
-    needs: [coverage, abi-deep, profiling]
+    needs: [coverage, abi-deep]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -115,10 +111,9 @@ jobs:
         env:
           COVERAGE_RESULT: ${{ needs.coverage.result }}
           ABI_RESULT: ${{ needs.abi-deep.result }}
-          PROFILING_RESULT: ${{ needs.profiling.result }}
         run: |
           set -euo pipefail
-          for result in "$COVERAGE_RESULT" "$ABI_RESULT" "$PROFILING_RESULT"; do
+          for result in "$COVERAGE_RESULT" "$ABI_RESULT"; do
             if [[ "$result" != success ]]; then
               echo "::error::Deep validation finished with result: $result"
               exit 1
@@ -126,4 +121,6 @@ jobs:
           done
       - name: Record validated commit
         id: sha
-        run: echo "validated-sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+        env:
+          VALIDATED_CORE_REF: ${{ inputs.core_ref || github.sha }}
+        run: echo "validated-sha=$VALIDATED_CORE_REF" >> "$GITHUB_OUTPUT"

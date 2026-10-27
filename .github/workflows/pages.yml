@@ -1,6 +1,7 @@
 name: Pages
 
 on:
+  pull_request:
   workflow_run:
     workflows: ["CI"]
     types: [completed]
@@ -12,10 +13,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  demo:
+    if: >-
+      github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
+    permissions:
+      contents: read
+    uses: xila-project/platforms/.github/workflows/demo.yml@c81348d9520640b359ea5fe77a4f881949006c7d
+    with:
+      platform_ref: c81348d9520640b359ea5fe77a4f881949006c7d
   build:
+    needs: demo
     name: Build documentation and demonstrations
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_branch == 'main')
@@ -42,20 +55,25 @@ jobs:
           github-cache-mode: objects
           cache-generation: v1-pages-all-locales
           save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
-      - name: Build Pages content
-        env:
-          CARGO_TARGET_ROOT: ${{ github.workspace }}/target/pages
-        run: mise run pages:build
-      - uses: actions/upload-artifact@v7
+      - name: Build Core documentation
+        run: |
+          set -eu
+          mise run ci:packages-host
+          mkdir -p pages/host pages/guest
+          RUSTDOCFLAGS="--deny warnings" mise run docs:host -- --no-deps
+          RUSTDOCFLAGS="--deny warnings" mise run docs:guest
+          cp -r target/x86_64-unknown-linux-gnu/doc/. pages/host/
+          cp -r target/wasm32-unknown-unknown/doc/. pages/guest/
+      - uses: actions/download-artifact@v7
         with:
-          name: reference-filesystem-images
-          path: target/reference-filesystem-images/
-          if-no-files-found: error
+          name: platform-demonstrations
+          path: pages/demonstrations/
       - uses: actions/upload-pages-artifact@v5
         with:
           path: pages/
 
   deploy:
+    if: github.event_name != 'pull_request'
     name: Deploy to GitHub Pages
     needs: build
     runs-on: ubuntu-latest

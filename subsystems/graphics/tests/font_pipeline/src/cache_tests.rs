@@ -296,3 +296,17 @@ fn chinese_plans_subset_catalogs_and_cache_font_and_symbol_changes() {
     );
     assert_eq!(changed[4..], changed_font[4..]);
 }
+
+#[test]
+fn converter_directory_can_be_supplied_by_a_consuming_workspace() {
+    use std::path::{Path, PathBuf};
+    let root = Path::new("/checkout/core/subsystems/graphics");
+    assert_eq!(
+        generate::converter_directory(root, Some(Path::new("/consumer/node_modules/lv_font_conv"))),
+        PathBuf::from("/consumer/node_modules/lv_font_conv")
+    );
+    assert_eq!(
+        generate::converter_directory(root, None),
+        root.join("../../node_modules/lv_font_conv")
+    );
+}

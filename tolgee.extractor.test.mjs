@@ -15,25 +15,7 @@ test("extracts semantic keys and preserves per-crate namespaces", () => {
   ]);
 });
 
-test("extracts locale-specific CLDR categories without inventing forms", () => {
-  const code = 'embedded_i18n::translate_plural_write!(&mut output, "stopwatch.laps.recorded", count);';
-  assert.deepEqual(extract(code, clock).keys.map(x => x.keyName), [
-    "stopwatch.laps.recorded.few",
-    "stopwatch.laps.recorded.many",
-    "stopwatch.laps.recorded.one",
-    "stopwatch.laps.recorded.other",
-  ]);
-  assert.deepEqual(extract('translate_plural!("not.in.catalog", count)', clock).keys, []);
-});
 
-test("extracts plural forms from the shell namespace", () => {
-  assert.deepEqual(extract(
-    'xila::internationalization::translate_plural!("dns.records.unit", count)', shell
-  ).keys.map(x => x.keyName), [
-    "dns.records.unit.few", "dns.records.unit.many",
-    "dns.records.unit.one", "dns.records.unit.other",
-  ]);
-});
 
 test("handles context arguments and qualified macro paths", () => {
   const source = [
@@ -46,19 +28,6 @@ test("handles context arguments and qualified macro paths", () => {
   ]);
 });
 
-test("supports C-string macros, multiline formatting and write macros", () => {
-  const source = [
-    'translate!(\n  c"tabs.alarm"\n);',
-    'translate_write!(\n  &mut output,\n  "errors.message",\n  code = 42,\n);',
-    'translate_select_write!(&mut output, "tabs", selected);',
-  ].join("\n");
-  const keys = extract(source, clock).keys;
-  assert.equal(keys[0].keyName, "tabs.alarm");
-  assert.equal(keys[0].line, 1);
-  assert.equal(keys[1].keyName, "errors.message");
-  assert.ok(keys.some(x => x.keyName === "tabs.clock"));
-  assert.ok(keys.some(x => x.keyName === "tabs.timer"));
-});
 
 test("ignores nested comments, strings, and unrelated macro names", () => {
   const source = [
@@ -72,12 +41,6 @@ test("ignores nested comments, strings, and unrelated macro names", () => {
   assert.deepEqual(extract(source, clock).keys.map(x => x.keyName), ["tabs.clock"]);
 });
 
-test("select extraction discovers variants that exist in catalogs", () => {
-  const result = extract('translate_select!("tabs", selected)', clock);
-  assert.deepEqual(result.keys.map(x => x.keyName), [
-    "tabs.alarm", "tabs.clock", "tabs.stopwatch", "tabs.timer",
-  ]);
-});
 
 test("non-Rust files are ignored", () => {
   assert.deepEqual(extract('translate!("fake")', "readme.md").keys, []);

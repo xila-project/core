@@ -27,8 +27,15 @@ jobs:
     timeout-minutes: 15
     env:
       MISE_ENV: ci
+      XILA_APPLICATIONS_ROOT: ${{ github.workspace }}/.application-src
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: xila-project/applications
+          ref: 45f27e53fe393860b812674415eb5c9c703c9bdf
+          path: .application-src
+          persist-credentials: false
       - uses: jdx/mise-action@v5.2.2
       - run: mise run deps:npm
       - run: mise run ci:format-rust
@@ -58,8 +65,16 @@ jobs:
       # Keep standalone test crates in the target tree cached by the action.
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       XILA_MBX: "1"
+      XILA_APPLICATIONS_MANIFEST: ${{ github.workspace }}/.application-src/Cargo.toml
+      XILA_FONT_CATALOG_ROOTS: ${{ github.workspace }}/.application-src
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: xila-project/applications
+          ref: 45f27e53fe393860b812674415eb5c9c703c9bdf
+          path: .application-src
+          persist-credentials: false
       - uses: jdx/mise-action@v5.2.2
       - run: mise run deps:npm
       - id: toolchain
@@ -77,8 +92,8 @@ jobs:
         run: mise run ci:host-tests
       - name: Test native firmware simulator
         run: mise run ci:firmware
-      - name: Test profiling tools
-        run: mise run ci:host-profiling-tests
+      - name: Test task profiling
+        run: mise run ci:profiling-task-tests
       - name: Test font linking
         run: mise run ci:host-font-tests
       - name: Upload font-link evidence
@@ -88,8 +103,6 @@ jobs:
           name: font-pipeline-evidence
           path: target/font-pipeline-evidence/
           if-no-files-found: warn
-      - name: Build native example
-        run: mise run ci:host-build
 
   wasm:
     name: WASM
@@ -114,12 +127,6 @@ jobs:
         run: mise run ci:wasm-clippy
       - name: Check browser audio
         run: mise run ci:wasm-audio-check
-      - name: Lint WASI applications
-        run: mise run ci:wasm-apps-clippy
-      - name: Build WASI applications and seed image
-        run: mise run ci:wasm-image
-      - name: Test browser storage
-        run: mise run ci:wasm-browser-tests
 
   abi:
     name: ABI (${{ matrix.memory }})
@@ -156,10 +163,17 @@ jobs:
       MISE_ENV: ci
       CARGO_TERM_COLOR: always
       XILA_MBX: "1"
+      XILA_FONT_CATALOG_ROOTS: ${{ github.workspace }}/.application-src
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - uses: actions/checkout@v7
+        with:
+          repository: xila-project/applications
+          ref: 45f27e53fe393860b812674415eb5c9c703c9bdf
+          path: .application-src
+          persist-credentials: false
       - name: Select locales
         id: locales
         env:

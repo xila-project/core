@@ -1,6 +1,0 @@
-{
-  "errors": {
-    "event_handling_failed": "处理文件管理器事件时出错：{:?}",
-    "invalid_entered_path": "输入的路径无效：{}"
-  }
-}

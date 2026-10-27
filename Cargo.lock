@@ -88,28 +88,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
-name = "alsa"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "812947049edcd670a82cd5c73c3661d2e58468577ba8489de58e1a73c04cbd5d"
-dependencies = [
- "alsa-sys",
- "bitflags 2.13.2",
- "cfg-if",
- "libc",
-]
-
-[[package]]
-name = "alsa-sys"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad7569085a265dd3f607ebecce7458eaab2132a84393534c95b18dcbc3f31e04"
-dependencies = [
- "libc",
- "pkg-config",
-]
-
-[[package]]
 name = "ambient-authority"
 version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -245,17 +223,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bb44936d800fea8f016d7f2311c6a4f97aebd5dc86f09906139ec848cf3a46f"
 dependencies = [
  "libloading",
-]
-
-[[package]]
-name = "async-trait"
-version = "0.1.92"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82f6aeea286b8eb4dd3431a1be1b59d290ace00f5bfd8e2a159bc2a05e2c1667"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.9",
 ]
 
 [[package]]
@@ -507,12 +474,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cast"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
-
-[[package]]
 name = "cbindgen"
 version = "0.29.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -669,26 +630,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "console_error_panic_hook"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
-dependencies = [
- "cfg-if",
- "wasm-bindgen",
-]
-
-[[package]]
-name = "console_log"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86919cef3e37b9356ccf54d4421208c17ecfda01beae61393e7ffd72916c0ef1"
-dependencies = [
- "log",
- "web-sys",
-]
-
-[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -699,27 +640,6 @@ name = "const-oid"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
-
-[[package]]
-name = "const_format"
-version = "0.2.37"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3decb4d6965448659923544a634a0571ba44cede4e11ef15a5a317126840454"
-dependencies = [
- "const_format_proc_macros",
- "konst",
-]
-
-[[package]]
-name = "const_format_proc_macros"
-version = "0.2.37"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "941b570269a642506f08cb5b688c04bfa6cfd41a26f8bcdc49db8fd00c0ab659"
-dependencies = [
- "proc-macro2",
- "quote",
- "unicode-xid",
-]
 
 [[package]]
 name = "cordyceps"
@@ -769,50 +689,6 @@ dependencies = [
  "bitflags 1.3.2",
  "core-foundation",
  "libc",
-]
-
-[[package]]
-name = "coreaudio-rs"
-version = "0.14.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d5d7dca3ebcf65a035582c9ad4385371a9d9ee6537474d2a278f4e1e475bb58"
-dependencies = [
- "bitflags 2.13.2",
- "libc",
- "objc2-audio-toolbox",
- "objc2-core-audio",
- "objc2-core-audio-types",
- "objc2-core-foundation",
-]
-
-[[package]]
-name = "cpal"
-version = "0.18.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f02e8d0327b42d3e2e4ab2119af397344eb9fc54a34bf0ddeaa1277af8681f1"
-dependencies = [
- "alsa",
- "block2 0.6.2",
- "coreaudio-rs",
- "dasp_sample",
- "jni",
- "js-sys",
- "libc",
- "mach2",
- "ndk",
- "ndk-context",
- "num-derive",
- "num-traits",
- "objc2 0.6.5",
- "objc2-audio-toolbox",
- "objc2-avf-audio",
- "objc2-core-audio",
- "objc2-core-audio-types",
- "objc2-core-foundation",
- "objc2-foundation 0.3.2",
- "web-sys",
- "windows",
- "windows-core",
 ]
 
 [[package]]
@@ -1018,12 +894,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dasp_sample"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c87e182de0887fd5361989c677c4e8f5000cd9491d6d563161a8f3a5519fc7f"
-
-[[package]]
 name = "defmt"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1203,8 +1073,6 @@ dependencies = [
  "document-features",
  "embassy-executor-macros",
  "embassy-executor-timer-queue",
- "js-sys",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -1674,11 +1542,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
 dependencies = [
  "cfg-if",
- "js-sys",
  "libc",
  "r-efi 6.0.0",
  "rand_core 0.10.1",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -2076,21 +1942,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
-name = "konst"
-version = "0.2.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "128133ed7824fcd73d6e7b17957c5eb7bacb885649bd8c69708b2331a10bcefb"
-dependencies = [
- "konst_macro_rules",
-]
-
-[[package]]
-name = "konst_macro_rules"
-version = "0.2.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
-
-[[package]]
 name = "lazy_static"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2163,7 +2014,7 @@ checksum = "4744e383959f0db86ede514b809b1c53251889093803c05267acc7d4e7030d70"
 [[package]]
 name = "littlefs2-sys"
 version = "0.4.0"
-source = "git+https://github.com/AlixANNERAUD/littlefs2-sys.git?branch=xila-littlefs-2.11#2c2aab090f7592d79eec991656c03797d1a22c8f"
+source = "git+https://github.com/AlixANNERAUD/littlefs2-sys.git?rev=2c2aab090f7592d79eec991656c03797d1a22c8f#2c2aab090f7592d79eec991656c03797d1a22c8f"
 dependencies = [
  "bindgen 0.70.1",
  "cc",
@@ -2206,12 +2057,6 @@ dependencies = [
  "bindgen 0.72.1",
  "cc",
 ]
-
-[[package]]
-name = "mach2"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
 
 [[package]]
 name = "managed"
@@ -2258,16 +2103,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
-]
-
-[[package]]
-name = "minicov"
-version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4869b6a491569605d66d3952bcdf03df789e5b536e5f0cf7758a7f08a55ae24d"
-dependencies = [
- "cc",
- "walkdir",
 ]
 
 [[package]]
@@ -2364,51 +2199,12 @@ version = "0.1.1"
 source = "git+https://github.com/AlixANNERAUD/nanoaudio.git?rev=596076c64827fd8bf9e8319addc2f215e0cde8be#596076c64827fd8bf9e8319addc2f215e0cde8be"
 
 [[package]]
-name = "nanoaudio-cpal"
-version = "0.1.1"
-source = "git+https://github.com/AlixANNERAUD/nanoaudio.git?rev=596076c64827fd8bf9e8319addc2f215e0cde8be#596076c64827fd8bf9e8319addc2f215e0cde8be"
-dependencies = [
- "cpal",
- "nanoaudio-buffer",
- "nanoaudio-core",
- "nanoaudio-dsp",
-]
-
-[[package]]
 name = "nanoaudio-dsp"
 version = "0.1.1"
 source = "git+https://github.com/AlixANNERAUD/nanoaudio.git?rev=596076c64827fd8bf9e8319addc2f215e0cde8be#596076c64827fd8bf9e8319addc2f215e0cde8be"
 dependencies = [
  "nanoaudio-core",
 ]
-
-[[package]]
-name = "nanoaudio-synth"
-version = "0.1.0"
-source = "git+https://github.com/AlixANNERAUD/nanoaudio.git?rev=596076c64827fd8bf9e8319addc2f215e0cde8be#596076c64827fd8bf9e8319addc2f215e0cde8be"
-dependencies = [
- "nanoaudio-dsp",
-]
-
-[[package]]
-name = "nanoaudio-web"
-version = "0.1.1"
-source = "git+https://github.com/AlixANNERAUD/nanoaudio.git?rev=596076c64827fd8bf9e8319addc2f215e0cde8be#596076c64827fd8bf9e8319addc2f215e0cde8be"
-dependencies = [
- "js-sys",
- "nanoaudio-buffer",
- "nanoaudio-core",
- "nanoaudio-dsp",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
-name = "nanoexpr"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfaa84e46809e61dbcc0689d27f7f2aa754e335c111ec776d9838c839456991f"
 
 [[package]]
 name = "nb"
@@ -2515,17 +2311,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73f88a1307638156682bada9d7604135552957b7818057dcef22705b4d509495"
 dependencies = [
  "num-traits",
-]
-
-[[package]]
-name = "num-derive"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed3955f1a9c7c0c15e092f9c887db08b1fc683305fdf6eb6684f22555355e202"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]
@@ -2644,32 +2429,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "objc2-audio-toolbox"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6948501a91121d6399b79abaa33a8aa4ea7857fe019f341b8c23ad6e81b79b08"
-dependencies = [
- "bitflags 2.13.2",
- "libc",
- "objc2 0.6.5",
- "objc2-core-audio",
- "objc2-core-audio-types",
- "objc2-core-foundation",
- "objc2-foundation 0.3.2",
-]
-
-[[package]]
-name = "objc2-avf-audio"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13a380031deed8e99db00065c45937da434ca987c034e13b87e4441f9e4090be"
-dependencies = [
- "bitflags 2.13.2",
- "objc2 0.6.5",
- "objc2-foundation 0.3.2",
-]
-
-[[package]]
 name = "objc2-cloud-kit"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2694,29 +2453,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "objc2-core-audio"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1eebcea8b0dbff5f7c8504f3107c68fc061a3eb44932051c8cf8a68d969c3b2"
-dependencies = [
- "dispatch2",
- "objc2 0.6.5",
- "objc2-core-audio-types",
- "objc2-core-foundation",
- "objc2-foundation 0.3.2",
-]
-
-[[package]]
-name = "objc2-core-audio-types"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a89f2ec274a0cf4a32642b2991e8b351a404d290da87bb6a9a9d8632490bd1c"
-dependencies = [
- "bitflags 2.13.2",
- "objc2 0.6.5",
-]
-
-[[package]]
 name = "objc2-core-data"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2735,9 +2471,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536"
 dependencies = [
  "bitflags 2.13.2",
- "block2 0.6.2",
  "dispatch2",
- "libc",
  "objc2 0.6.5",
 ]
 
@@ -2804,8 +2538,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3e0adef53c21f888deb4fa59fc59f7eb17404926ee8a6f59f5df0fd7f9f3272"
 dependencies = [
  "bitflags 2.13.2",
- "block2 0.6.2",
- "libc",
  "objc2 0.6.5",
  "objc2-core-foundation",
 ]
@@ -2949,12 +2681,6 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
-
-[[package]]
-name = "oorandom"
-version = "11.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "opaque-debug"
@@ -4136,12 +3862,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
 
 [[package]]
-name = "unicode-xid"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
-
-[[package]]
 name = "universal-hash"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4259,45 +3979,6 @@ checksum = "23f0c9c52aa7cd7d77769a4cfe2a9adb1b331f489a41d912ce14513d5ab995c6"
 dependencies = [
  "unicode-ident",
 ]
-
-[[package]]
-name = "wasm-bindgen-test"
-version = "0.3.79"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae7499dfd45780a0a91d7ee6bb9ac51970a4479a41a89da443fdda5a39547d42"
-dependencies = [
- "async-trait",
- "cast",
- "js-sys",
- "libm",
- "minicov",
- "nu-ansi-term",
- "num-traits",
- "oorandom",
- "serde",
- "serde_json",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "wasm-bindgen-test-macro",
- "wasm-bindgen-test-shared",
-]
-
-[[package]]
-name = "wasm-bindgen-test-macro"
-version = "0.3.79"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b84b5ac638bfb168196a1a461fcc8f46a294a18b1b6be52133b4e0db122cc9f"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.9",
-]
-
-[[package]]
-name = "wasm-bindgen-test-shared"
-version = "0.2.129"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f692aa943ccd88363733b77063f32cfed5bc6cbea8e6e8b251b302f881606fe"
 
 [[package]]
 name = "wasm-encoder"
@@ -5153,21 +4834,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "xila-activity"
-version = "0.1.0"
-dependencies = [
- "critical-section",
- "embassy-futures",
- "xila",
- "xila-drivers-std",
-]
-
-[[package]]
 name = "xila-application-metadata"
 version = "0.1.0"
 dependencies = [
- "embedded-i18n",
  "xila-task",
+]
+
+[[package]]
+name = "xila-application-shortcuts"
+version = "0.1.0"
+source = "git+https://github.com/xila-project/applications?rev=45f27e53fe393860b812674415eb5c9c703c9bdf#45f27e53fe393860b812674415eb5c9c703c9bdf"
+dependencies = [
+ "embedded-i18n",
 ]
 
 [[package]]
@@ -5209,56 +4887,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "xila-calculator"
-version = "0.1.0"
-dependencies = [
- "embedded-i18n",
- "nanoexpr",
- "xila",
- "xila-application-metadata",
- "xila-drivers-core",
- "xila-drivers-native",
- "xila-drivers-shared",
- "xila-drivers-std",
- "xila-task",
- "xila-testing",
- "xila-wasm",
-]
-
-[[package]]
-name = "xila-clock"
-version = "0.1.0"
-dependencies = [
- "embedded-i18n",
- "xila-application-metadata",
- "xila-wasm",
-]
-
-[[package]]
 name = "xila-command-line-shell"
 version = "0.1.0"
+source = "git+https://github.com/xila-project/applications?rev=45f27e53fe393860b812674415eb5c9c703c9bdf#45f27e53fe393860b812674415eb5c9c703c9bdf"
 dependencies = [
  "getargs",
  "getargs-derive",
  "xila",
- "xila-drivers-core",
- "xila-drivers-native",
- "xila-drivers-shared",
- "xila-drivers-std",
- "xila-little-fs",
- "xila-task",
- "xila-testing",
- "xila-time",
-]
-
-[[package]]
-name = "xila-debug-application"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "xila",
- "xila-debug-protocol",
- "xila-log",
 ]
 
 [[package]]
@@ -5283,23 +4918,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "xila-drivers-espressif"
-version = "0.1.0"
-
-[[package]]
-name = "xila-drivers-headless"
-version = "0.1.0"
-dependencies = [
- "critical-section",
- "xila-audio",
- "xila-file-system",
- "xila-graphics",
- "xila-shared",
-]
-
-[[package]]
 name = "xila-drivers-native"
 version = "0.1.0"
+source = "git+https://github.com/xila-project/platforms?rev=c81348d9520640b359ea5fe77a4f881949006c7d#c81348d9520640b359ea5fe77a4f881949006c7d"
 dependencies = [
  "arboard",
  "cap-std",
@@ -5307,19 +4928,13 @@ dependencies = [
  "embassy-executor",
  "embassy-futures",
  "libc",
- "nanoaudio",
- "nanoaudio-cpal",
  "pixels",
  "png",
  "rand",
  "rustix 1.1.5",
  "serde_json",
  "winit",
- "xila-abi-definitions",
- "xila-audio",
  "xila-debug-protocol",
- "xila-drivers-shared",
- "xila-drivers-std",
  "xila-file-system",
  "xila-graphics",
  "xila-log",
@@ -5327,19 +4942,15 @@ dependencies = [
  "xila-shared",
  "xila-synchronization",
  "xila-task",
- "xila-testing",
  "xila-users",
- "xila-virtual-file-system",
 ]
 
 [[package]]
 name = "xila-drivers-shared"
 version = "0.1.0"
+source = "git+https://github.com/xila-project/platforms?rev=c81348d9520640b359ea5fe77a4f881949006c7d#c81348d9520640b359ea5fe77a4f881949006c7d"
 dependencies = [
- "critical-section",
- "embassy-executor",
  "embassy-futures",
- "embassy-time",
  "embedded-io",
  "embedded-io-async",
  "embedded-tls",
@@ -5360,16 +4971,13 @@ dependencies = [
 [[package]]
 name = "xila-drivers-std"
 version = "0.1.0"
+source = "git+https://github.com/xila-project/platforms?rev=c81348d9520640b359ea5fe77a4f881949006c7d#c81348d9520640b359ea5fe77a4f881949006c7d"
 dependencies = [
- "critical-section",
  "embassy-executor",
  "libc",
  "linked_list_allocator",
- "miniserde",
  "smoltcp",
- "xila-abi-definitions",
  "xila-file-system",
- "xila-little-fs",
  "xila-log",
  "xila-memory",
  "xila-network",
@@ -5379,36 +4987,6 @@ dependencies = [
  "xila-time",
  "xila-users",
  "xila-virtual-file-system",
-]
-
-[[package]]
-name = "xila-drivers-wasm"
-version = "0.1.0"
-dependencies = [
- "console_error_panic_hook",
- "console_log",
- "critical-section",
- "embassy-executor",
- "getrandom 0.4.3",
- "js-sys",
- "linked_list_allocator",
- "nanoaudio-web",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "wasm-bindgen-test",
- "web-sys",
- "xila",
- "xila-abi-definitions",
- "xila-audio",
- "xila-file-system",
- "xila-graphics",
- "xila-little-fs",
- "xila-log",
- "xila-memory",
- "xila-shared",
- "xila-synchronization",
- "xila-task",
- "xila-time",
 ]
 
 [[package]]
@@ -5431,23 +5009,6 @@ dependencies = [
  "xila-time",
  "xila-users",
  "xila-virtual-file-system",
-]
-
-[[package]]
-name = "xila-file-manager"
-version = "0.1.0"
-dependencies = [
- "xila",
- "xila-abi-definitions",
- "xila-application-metadata",
- "xila-drivers-core",
- "xila-drivers-native",
- "xila-drivers-shared",
- "xila-drivers-std",
- "xila-little-fs",
- "xila-task",
- "xila-testing",
- "xila-time",
 ]
 
 [[package]]
@@ -5484,39 +5045,6 @@ dependencies = [
  "xila-time",
  "xila-users",
  "xila-virtual-file-system",
-]
-
-[[package]]
-name = "xila-fs-image"
-version = "0.1.0"
-dependencies = [
- "critical-section",
- "libc",
- "xila-abi-definitions",
- "xila-application-metadata",
- "xila-drivers-std",
- "xila-file-system",
- "xila-little-fs",
- "xila-users",
-]
-
-[[package]]
-name = "xila-graphical-shell"
-version = "0.1.0"
-dependencies = [
- "getargs",
- "getargs-derive",
- "miniserde",
- "xila",
- "xila-abi-definitions",
- "xila-drivers-core",
- "xila-drivers-native",
- "xila-drivers-shared",
- "xila-drivers-std",
- "xila-little-fs",
- "xila-task",
- "xila-testing",
- "xila-time",
 ]
 
 [[package]]
@@ -5598,30 +5126,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "xila-native-example"
-version = "0.1.0"
-dependencies = [
- "getargs",
- "getargs-derive",
- "xila",
- "xila-abi-definitions",
- "xila-activity",
- "xila-audio",
- "xila-command-line-shell",
- "xila-debug-application",
- "xila-drivers-core",
- "xila-drivers-headless",
- "xila-drivers-native",
- "xila-drivers-shared",
- "xila-drivers-std",
- "xila-file-manager",
- "xila-graphical-shell",
- "xila-settings",
- "xila-terminal",
- "xila-wasm",
-]
-
-[[package]]
 name = "xila-network"
 version = "0.1.0"
 dependencies = [
@@ -5656,34 +5160,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "xila-pixel-painter"
-version = "0.1.0"
-dependencies = [
- "embedded-i18n",
- "xila-application-metadata",
- "xila-wasm",
-]
-
-[[package]]
-name = "xila-settings"
-version = "0.1.0"
-dependencies = [
- "const_format",
- "embassy-futures",
- "embedded-io",
- "xila",
- "xila-abi-definitions",
- "xila-application-metadata",
- "xila-drivers-core",
- "xila-drivers-native",
- "xila-drivers-shared",
- "xila-drivers-std",
- "xila-little-fs",
- "xila-task",
- "xila-testing",
-]
-
-[[package]]
 name = "xila-shared"
 version = "0.1.0"
 dependencies = [
@@ -5698,18 +5174,6 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
  "embassy-sync",
-]
-
-[[package]]
-name = "xila-synth"
-version = "0.1.0"
-dependencies = [
- "nanoaudio",
- "nanoaudio-synth",
- "xila-application-metadata",
- "xila-audio",
- "xila-file-system",
- "xila-wasm",
 ]
 
 [[package]]
@@ -5746,26 +5210,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "xila-terminal"
-version = "0.1.0"
-dependencies = [
- "xila",
- "xila-abi-definitions",
- "xila-application-metadata",
- "xila-command-line-shell",
- "xila-drivers-core",
- "xila-drivers-native",
- "xila-drivers-shared",
- "xila-drivers-std",
- "xila-little-fs",
- "xila-task",
- "xila-testing",
- "xila-time",
-]
-
-[[package]]
 name = "xila-testing"
 version = "0.1.0"
+source = "git+https://github.com/xila-project/platforms?rev=c81348d9520640b359ea5fe77a4f881949006c7d#c81348d9520640b359ea5fe77a4f881949006c7d"
 dependencies = [
  "xila-abi-definitions",
  "xila-authentication",
@@ -5784,15 +5231,6 @@ dependencies = [
  "xila-time",
  "xila-users",
  "xila-virtual-file-system",
-]
-
-[[package]]
-name = "xila-text-editor"
-version = "0.1.0"
-dependencies = [
- "embedded-i18n",
- "xila-application-metadata",
- "xila-wasm",
 ]
 
 [[package]]
@@ -5862,6 +5300,7 @@ dependencies = [
  "xila",
  "xila-abi-definitions",
  "xila-application-metadata",
+ "xila-application-shortcuts",
  "xila-audio",
  "xila-command-line-shell",
  "xila-drivers-core",
@@ -5874,49 +5313,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "xila-wasm-example"
-version = "0.1.0"
-dependencies = [
- "console_error_panic_hook",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "wasm-bindgen-test",
- "web-sys",
- "xila",
- "xila-command-line-shell",
- "xila-drivers-core",
- "xila-drivers-shared",
- "xila-drivers-wasm",
- "xila-file-manager",
- "xila-graphical-shell",
- "xila-settings",
- "xila-terminal",
- "xila-wasm",
-]
-
-[[package]]
 name = "xila-wasm-wasm-test"
 version = "0.1.0"
-
-[[package]]
-name = "xila-weather"
-version = "0.1.0"
-dependencies = [
- "embedded-i18n",
- "miniserde",
- "xila",
- "xila-application-metadata",
- "xila-drivers-core",
- "xila-drivers-native",
- "xila-drivers-shared",
- "xila-drivers-std",
- "xila-file-system",
- "xila-shared",
- "xila-task",
- "xila-testing",
- "xila-virtual-file-system",
- "xila-wasm",
-]
 
 [[package]]
 name = "xila_http"

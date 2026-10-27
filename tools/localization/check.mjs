@@ -11,6 +11,7 @@ import { execFileSync } from "node:child_process";
 import extract from "../../tolgee.extractor.mjs";
 
 const ROOT = process.cwd();
+const APPLICATIONS_ROOT = process.env.XILA_APPLICATIONS_ROOT || ROOT;
 const mappingRoot = path.join(ROOT, "tools/localization/mappings");
 const args = process.argv.slice(2);
 const baselineIndex = args.indexOf("--baseline");
@@ -146,7 +147,7 @@ const guestUiTests = [
 ];
 for (const { application, file, calls } of guestUiTests) {
   const sourcePath = path.join(ROOT, file);
-  const english = catalog(path.join(ROOT, "executables", application, "locales", "en.json"));
+  const english = catalog(path.join(APPLICATIONS_ROOT, "executables", application, "locales", "en.json"));
   const source = readFileSync(sourcePath, "utf8");
   let count = 0;
   for (const match of source.matchAll(calls)) {

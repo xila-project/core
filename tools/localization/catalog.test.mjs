@@ -60,7 +60,7 @@ test("rejects ambiguous keys which Tolgee could silently merge", () => {
 test("all Xila locale files are nested and round-trip without changing messages", () => {
   const catalogs = ["executables", "libraries", "subsystems", "drivers"]
     .flatMap(directory => findCatalogs(path.join(ROOT, directory)));
-  assert.ok(catalogs.length >= 160, "expected at least 20 namespaces with 8 locales each");
+  assert.ok(catalogs.length >= 88, "expected at least 11 Core namespaces with 8 locales each");
   const unconverted = new Set();
   for (const file of catalogs) {
     const nested = JSON.parse(readFileSync(file, "utf8"));

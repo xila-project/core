@@ -1,7 +1,0 @@
-{
-  "namespace": "executables/file_manager",
-  "old_to_new": {
-    "Error handling file manager event: {:?}": "errors.event_handling_failed",
-    "Invalid path entered: {}": "errors.invalid_entered_path"
-  }
-}

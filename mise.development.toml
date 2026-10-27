@@ -2,14 +2,14 @@
 rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
   "rustfmt",
 ], mr_boxington = true }
-"mr-boxington" = "latest"
+"mr-boxington" = "1.26.0"
 
 [task_templates."dev:rust-lint".tools]
 rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
   "clippy",
   "rustfmt",
 ], mr_boxington = true }
-"mr-boxington" = "latest"
+"mr-boxington" = "1.26.0"
 
 [task_templates."dev:rust-browser".tools]
 rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
@@ -17,7 +17,7 @@ rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = 
 ], targets = [
   "wasm32-unknown-unknown",
 ], mr_boxington = true }
-"mr-boxington" = "latest"
+"mr-boxington" = "1.26.0"
 
 [task_templates."dev:rust-browser-lint".tools]
 rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
@@ -26,7 +26,7 @@ rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = 
 ], targets = [
   "wasm32-unknown-unknown",
 ], mr_boxington = true }
-"mr-boxington" = "latest"
+"mr-boxington" = "1.26.0"
 
 [task_templates."dev:rust-wasi".tools]
 rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
@@ -34,7 +34,7 @@ rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = 
 ], targets = [
   "wasm32-wasip1",
 ], mr_boxington = true }
-"mr-boxington" = "latest"
+"mr-boxington" = "1.26.0"
 
 [task_templates."dev:node".tools]
 node = "{{ vars.node_version }}"
@@ -153,18 +153,6 @@ tools.node = "{{ vars.node_version }}"
 
 [tasks."build:cargo"]
 extends = "dev:rust"
-
-[tasks."build:profiling"]
-extends = "dev:rust"
-
-[tasks."build:applications"]
-extends = "dev:rust-wasi"
-
-[tasks."image:native"]
-extends = "dev:rust-wasi"
-
-[tasks."image:wasm"]
-extends = "dev:rust-wasi"
 
 [tasks."firmware:test"]
 extends = "dev:rust"
