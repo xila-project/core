@@ -96,19 +96,19 @@ jobs:
           cache-generation: v1-ci-host
       - name: "Setup | Locked npm dependencies"
         run: mise run deps:npm
-      - name: Lint host workspace
+      - name: "Lint | Host workspace"
         run: mise run ci:host-clippy
-      - name: Lint host WASM runtime
+      - name: "Lint | Host WASM runtime"
         run: mise run ci:host-wasm-clippy
-      - name: Test host workspace
+      - name: "Test | Host workspace"
         run: mise run ci:host-tests
-      - name: Test native firmware simulator
+      - name: "Test | Native firmware simulator"
         run: mise run ci:firmware
-      - name: Test task profiling
+      - name: "Test | Task profiling"
         run: mise run ci:profiling-task-tests
-      - name: Test font linking
+      - name: "Test | Font linking"
         run: mise run ci:host-font-tests
-      - name: Upload font-link evidence
+      - name: "Report | Upload font-link evidence"
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -141,9 +141,9 @@ jobs:
           cache-generation: v1-ci-wasm
       - name: "Setup | Locked npm dependencies"
         run: mise run deps:npm
-      - name: Lint WASM guests
+      - name: "Lint | WASM guests"
         run: mise run ci:wasm-clippy
-      - name: Check browser audio
+      - name: "Test | Browser audio"
         run: mise run ci:wasm-audio-check
 
   abi:
@@ -200,7 +200,7 @@ jobs:
           ref: 26ee04355c3ddea0f41ee81ece168cec2f9eb376
           path: .application-src
           persist-credentials: false
-      - name: Select locales
+      - name: "Setup | Select changed locales"
         id: locales
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -256,7 +256,7 @@ jobs:
       - name: "Setup | Locked npm dependencies"
         run: mise run deps:npm
         if: steps.locales.outputs.run-check == 'true'
-      - name: Strict localization validation
+      - name: "Validate | Strict localization catalogs"
         if: steps.locales.outputs.run-check == 'true'
         env:
           CI_LOCALES: ${{ steps.locales.outputs.value }}
@@ -270,7 +270,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Verify required validation results
+      - name: "Gate | Verify required validations"
         env:
           QUALITY_RESULT: ${{ needs.quality.result }}
           VERIFICATION_RESULT: ${{ needs.verification.result }}
