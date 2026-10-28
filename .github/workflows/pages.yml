@@ -31,23 +31,27 @@ jobs:
       XILA_MBX: "1"
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
-      - uses: actions/checkout@v7
+      - name: "Setup | Checkout sources"
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-      - uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
+      - name: "Setup | Rust toolchain and build cache"
+        uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         with:
           cache-mode: objects
           cache-generation: v1-pages-all-locales
           save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
-      - run: mise run deps:npm
-      - name: Build Core documentation
+      - name: "Setup | Locked Node dependencies"
+        run: mise run deps:npm
+      - name: "Build | Core documentation"
         run: |
           set -eu
           mise run ci:packages-host
           mkdir -p pages/host
           RUSTDOCFLAGS="--deny warnings" mise run docs:host -- --no-deps
           cp -r target/x86_64-unknown-linux-gnu/doc/. pages/host/
-      - uses: actions/upload-pages-artifact@v5
+      - name: "Publish | Upload Pages artifact"
+        uses: actions/upload-pages-artifact@v5
         with:
           path: pages/
 
@@ -64,5 +68,6 @@ jobs:
       pages: write
       id-token: write
     steps:
-      - uses: actions/deploy-pages@v5
+      - name: "Publish | Deploy Pages"
+        uses: actions/deploy-pages@v5
         id: deployment
