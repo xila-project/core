@@ -27,7 +27,7 @@ pub unsafe extern "C" fn binding_callback_function(
                     user_data
                         .injected
                         .as_ref()
-                        .map(|queue| queue.current_pointer())
+                        .map(|queue| queue.current_pointer().into())
                 })
                 .flatten()
         })
@@ -38,12 +38,12 @@ pub unsafe extern "C" fn binding_callback_function(
                     .read_sync(data.as_mut(), 0)
                     .expect("Error reading from input device");
             }
-            Some(data)
+            Some(data.into())
         })
         .unwrap_or_default();
 
     unsafe {
-        *data = input_data.into();
+        *data = input_data;
     }
 }
 
