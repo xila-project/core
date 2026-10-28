@@ -47,6 +47,8 @@ pub async fn create_default_hierarchy(
         Path::APPLICATIONS,
         Path::APPLICATION_EXECUTABLES,
         Path::APPLICATION_LIBRARIES,
+        Path::APPLICATION_BUNDLES,
+        Path::APPLICATION_ACTIVE,
         Path::DATA,
         Path::SYSTEM_DATA,
         Path::SYSTEM_LOGS,
