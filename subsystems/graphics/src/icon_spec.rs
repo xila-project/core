@@ -195,6 +195,22 @@ mod tests {
     }
 
     #[test]
+    fn launch_wrapper_rejects_bad_modes_and_roundtrips() {
+        let spec = IconSpec::automatic("app-id", "A", Color::BLACK);
+        let payload = spec.encode();
+        assert_eq!(
+            IconSpec::decode_launch(&format!("auto;{payload}")),
+            Some((spec, false))
+        );
+        assert_eq!(
+            IconSpec::decode_launch(&format!("explicit;{payload}")),
+            Some((spec, true))
+        );
+        assert_eq!(IconSpec::decode_launch(&format!("other;{payload}")), None);
+        assert_eq!(IconSpec::decode_launch("explicit;broken"), None);
+    }
+
+    #[test]
     fn explicitly_chosen_values_are_preserved() {
         let spec = IconSpec::procedural(
             IconMotif::Rings,
