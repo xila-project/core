@@ -10,6 +10,7 @@ mod display;
 mod draw_buffer;
 mod error;
 mod event;
+mod icon_text;
 mod input;
 mod logo;
 pub mod macros;
