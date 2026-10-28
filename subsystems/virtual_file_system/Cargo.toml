@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 file_system = { workspace = true }
 task = { workspace = true }
-application_metadata = { workspace = true }
 users = { workspace = true }
 time = { workspace = true }
 synchronization = { workspace = true }
