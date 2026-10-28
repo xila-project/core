@@ -19,7 +19,6 @@ repository = "https://github.com/xila-project/core"
 xila = { path = "core" }
 xila_http = { path = "libraries/http", default-features = false }
 verification = { git = "https://github.com/xila-project/package_manager", rev = "f5e3f0b323a79a80d106ce2b88b77bfa8667d71b", default-features = false }
-application_metadata = { package = "xila-application-metadata", path = "libraries/application_metadata" }
 application_shortcuts = { package = "xila-application-shortcuts", git = "https://github.com/xila-project/applications", rev = "26ee04355c3ddea0f41ee81ece168cec2f9eb376" }
 audio = { package = "xila-audio", path = "libraries/audio" }
 nanoaudio = { git = "https://github.com/AlixANNERAUD/nanoaudio.git", rev = "596076c64827fd8bf9e8319addc2f215e0cde8be", default-features = false }
@@ -93,7 +92,6 @@ members = [
   "libraries/shared",
   "libraries/http",
   "libraries/firmware_update",
-  "libraries/application_metadata",
   "libraries/audio",
   "libraries/file_system",
   "subsystems/graphics",
@@ -127,7 +125,6 @@ littlefs2-sys = { path = "libraries/littlefs2_sys" }
 xila = { path = "core" }
 xila-abi-declarations = { path = "libraries/abi/declarations" }
 xila-abi-definitions = { path = "libraries/abi/definitions" }
-xila-application-metadata = { path = "libraries/application_metadata" }
 xila-audio = { path = "libraries/audio" }
 xila-authentication = { path = "libraries/authentication" }
 xila-bootsplash = { path = "libraries/bootsplash" }

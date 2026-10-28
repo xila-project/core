@@ -35,7 +35,7 @@ embedded_i18n::track_locales!();
 
 mod error;
 mod seed;
-pub use seed::initialize_seeded;
+pub use seed::{initialize_seeded, SEED_PENDING_CONTENT, SEED_PENDING_PATH};
 mod group;
 mod hash;
 mod user;

@@ -1,5 +1,8 @@
 //! First-install account setup for explicitly marked reference images.
 use crate::{Context, Error, Result};
+/// Marker for an explicitly provisioned reference image. Not application metadata.
+pub const SEED_PENDING_PATH: &str = "/system/accounts/.seed-pending";
+pub const SEED_PENDING_CONTENT: &[u8] = b"xila-seed-v1\n";
 use alloc::vec::Vec;
 use file_system::{AccessFlags, CreateFlags, Flags, Permissions};
 use users::{GroupIdentifier, UserIdentifier};
@@ -13,7 +16,7 @@ pub async fn initialize_seeded(context: &Context<'_>) -> Result<()> {
     let pending = match File::open(
         vfs,
         task,
-        application_metadata::PENDING_PATH,
+        SEED_PENDING_PATH,
         AccessFlags::Read.into(),
     )
     .await
@@ -35,7 +38,7 @@ pub async fn initialize_seeded(context: &Context<'_>) -> Result<()> {
                 length += read;
             }
             file.close(vfs).await.map_err(Error::FailedToCloseFile)?;
-            if &data[..length] != application_metadata::PENDING_CONTENT {
+            if &data[..length] != SEED_PENDING_CONTENT {
                 return Err(invalid());
             }
             true
@@ -102,7 +105,7 @@ pub async fn initialize_seeded(context: &Context<'_>) -> Result<()> {
             .await
             .map_err(Error::FailedToAddUser)?;
     }
-    vfs.remove(task, &application_metadata::PENDING_PATH)
+    vfs.remove(task, &SEED_PENDING_PATH)
         .await
         .map_err(Error::FailedToWriteUserFile)?;
     Ok(())

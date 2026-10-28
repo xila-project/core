@@ -120,19 +120,6 @@ pub async fn execute(
     // - Check if the user can override the user identifier
     let new_user = get_overridden_user(context, &statistics, task).await?;
 
-    let application_name = application_metadata::application_name_for_path(path.as_ref().as_str());
-    let application_identifier =
-        application_metadata::application_identifier_for_path(path.as_ref().as_str());
-    if let Some(application_name) = application_name {
-        let user = match new_user {
-            Some(user) => user,
-            None => context.task_manager.get_user(task).await?,
-        };
-        virtual_file_system
-            .ensure_user_application_directories(task, user, application_name)
-            .await?;
-    }
-
     let file_name = path
         .as_ref()
         .get_file_name()
@@ -143,11 +130,10 @@ pub async fn execute(
     let main = main_function.ok_or(Error::FailedToGetMainFunction)?;
 
     let (join_handle, _) = task_instance
-        .spawn_with_application_identifier(
+        .spawn(
             task,
             file_name,
             spawner,
-            application_identifier,
             async move |task| {
                 if let Some(new_user) = new_user {
                     context.task_manager.set_user(task, new_user).await.unwrap();

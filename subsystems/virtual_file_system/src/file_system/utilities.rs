@@ -605,20 +605,8 @@ impl VirtualFileSystem {
         path: impl AsRef<Path>,
         asked_permissions: Permission,
         current_user: UserIdentifier,
-        task: TaskIdentifier,
+        _task: TaskIdentifier,
     ) -> Result<()> {
-        if current_user != UserIdentifier::ROOT {
-            let task_application = self.task_manager.get_application_identifier(task).await?;
-            if application_scope(path.as_ref()).is_some() {
-                if !application_access_allowed(path.as_ref(), task_application, asked_permissions) {
-                    return Err(Error::PermissionDenied);
-                }
-                // Application identity is the ownership boundary for global app trees;
-                // matching apps share access across user sessions.
-                return Ok(());
-            }
-        }
-
         let mut attributes = Attributes::default()
             .set_mask(AttributeFlags::User | AttributeFlags::Group | AttributeFlags::Permissions);
 
@@ -692,85 +680,6 @@ impl VirtualFileSystem {
         .await?;
 
         Ok(())
-    }
-}
-
-fn application_scope(path: &Path) -> Option<(Option<&str>, bool)> {
-    for (prefix, is_configuration) in [
-        ("/data/applications", false),
-        ("/configuration/applications", true),
-    ] {
-        if let Some(remainder) = path.as_str().strip_prefix(prefix) {
-            if !remainder.is_empty() && !remainder.starts_with('/') {
-                continue;
-            }
-            let remainder = remainder.strip_prefix('/').unwrap_or(remainder);
-            let name = remainder.split('/').next()?;
-            return Some(((!name.is_empty()).then_some(name), is_configuration));
-        }
-    }
-    None
-}
-
-pub(super) fn application_access_allowed(
-    path: &Path,
-    task_application: Option<task::ApplicationIdentifier>,
-    asked_permissions: Permission,
-) -> bool {
-    let Some((application, is_configuration)) = application_scope(path) else {
-        return true;
-    };
-    let Some(application) = application else {
-        // Permit traversal through the common parent, but never listing or mutation.
-        return task_application.is_some() && asked_permissions == Permission::Execute;
-    };
-    let matching_application = application_metadata::application_identifier(application)
-        .is_some_and(|expected| task_application == Some(expected));
-    matching_application && !(is_configuration && asked_permissions.contains(Permission::Write))
-}
-
-#[cfg(test)]
-mod application_scope_tests {
-    use super::*;
-
-    #[test]
-    fn application_scope_uses_exact_component_names() {
-        let clock = task::ApplicationIdentifier::new(2);
-        assert!(application_access_allowed(
-            Path::from_str("/data/applications/clock/settings"),
-            clock,
-            Permission::Read,
-        ));
-        assert!(!application_access_allowed(
-            Path::from_str("/data/applications/clockwork/settings"),
-            clock,
-            Permission::Read,
-        ));
-        assert!(!application_access_allowed(
-            Path::from_str("/data/applications/clock/settings"),
-            None,
-            Permission::Read,
-        ));
-    }
-
-    #[test]
-    fn global_application_configuration_is_read_only_to_its_application() {
-        let clock = task::ApplicationIdentifier::new(2);
-        assert!(application_access_allowed(
-            Path::from_str("/configuration/applications/clock/preferences"),
-            clock,
-            Permission::Read,
-        ));
-        assert!(!application_access_allowed(
-            Path::from_str("/configuration/applications/clock/preferences"),
-            clock,
-            Permission::Write,
-        ));
-        assert!(!application_access_allowed(
-            Path::from_str("/configuration/applications/clock/preferences"),
-            None,
-            Permission::Read,
-        ));
     }
 }
 

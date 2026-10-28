@@ -1,7 +1,6 @@
 // Metadata module - handles task metadata and data structures
 
 use super::*;
-use crate::ApplicationIdentifier;
 use alloc::vec::Vec;
 use smol_str::SmolStr;
 use users::{GroupIdentifier, UserIdentifier};
@@ -19,8 +18,6 @@ pub(crate) struct Metadata {
     pub(crate) user: UserIdentifier,
     /// The identifier of the group that owns the task.
     pub(crate) group: GroupIdentifier,
-    /// Application security identity; `None` denotes a system or untrusted task.
-    pub(crate) application_identifier: Option<ApplicationIdentifier>,
     /// Environment variables of the task.
     pub(crate) environment_variables: Vec<EnvironmentVariable>,
     /// Signals

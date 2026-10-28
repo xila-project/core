@@ -10,7 +10,6 @@ documentation = "README.md"
 readme = "README.md"
 
 [dependencies]
-application_metadata = { workspace = true }
 # Core Xila modules
 virtual_file_system = { workspace = true }
 users = { workspace = true }

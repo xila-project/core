@@ -15,19 +15,12 @@ impl Manager {
         let mut inner = self.0.write().await;
 
         // - Get parent task information if any (inheritance)
-        let (
-            parent_task_identifier,
-            parent_environment_variables,
-            user,
-            group,
-            application_identifier,
-        ) = if inner.tasks.is_empty() {
+        let (parent_task_identifier, parent_environment_variables, user, group) = if inner.tasks.is_empty() {
             (
                 Manager::ROOT_TASK_IDENTIFIER, // Root task is its own parent
                 Vec::new(),
                 UserIdentifier::ROOT,
                 GroupIdentifier::ROOT,
-                None,
             )
         } else if let Ok(metadata) = inner.tasks.get(&parent).ok_or(Error::InvalidTaskIdentifier) {
             (
@@ -35,7 +28,6 @@ impl Manager {
                 metadata.environment_variables.clone(),
                 metadata.user,
                 metadata.group,
-                metadata.application_identifier,
             )
         } else {
             (
@@ -43,7 +35,6 @@ impl Manager {
                 Vec::new(),
                 UserIdentifier::ROOT,
                 GroupIdentifier::ROOT,
-                None,
             )
         };
 
@@ -69,7 +60,6 @@ impl Manager {
             parent: parent_task_identifier,
             user,
             group,
-            application_identifier,
             environment_variables: parent_environment_variables,
             signals: SignalAccumulator::new(),
             spawner_identifier: 0, // Will be set later
