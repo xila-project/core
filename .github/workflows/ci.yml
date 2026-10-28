@@ -29,20 +29,29 @@ jobs:
       MISE_ENV: ci
       XILA_APPLICATIONS_ROOT: ${{ github.workspace }}/.application-src
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/checkout@v7
+      - name: "Setup | Checkout pinned applications"
+        uses: actions/checkout@v7
+      - name: "Setup | Checkout pinned applications"
+        uses: actions/checkout@v7
         with:
           repository: xila-project/applications
           ref: 26ee04355c3ddea0f41ee81ece168cec2f9eb376
           path: .application-src
           persist-credentials: false
-      - uses: jdx/mise-action@v5.2.2
-      - run: mise run deps:npm
-      - run: mise run ci:format-rust
-      - run: mise run ci:format-toml
-      - run: mise run ci:quality-js
-      - run: python3 -m unittest discover -s tools/ci -v
-      - run: mise run ci:lint-workflows
+      - name: "Setup | Activate mise"
+        uses: jdx/mise-action@v5.2.2
+      - name: "Setup | Locked npm dependencies"
+        run: mise run deps:npm
+      - name: "Lint | Rust formatting"
+        run: mise run ci:format-rust
+      - name: "Lint | TOML formatting"
+        run: mise run ci:format-toml
+      - name: "Lint | JavaScript and translation assets"
+        run: mise run ci:quality-js
+      - name: "Test | CI policy regressions"
+        run: python3 -m unittest discover -s tools/ci -v
+      - name: "Lint | GitHub Actions"
+        run: mise run ci:lint-workflows
 
   verification:
     name: Verification
@@ -51,9 +60,12 @@ jobs:
     env:
       MISE_ENV: ci
     steps:
-      - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v5.2.2
-      - run: mise run ci:verification
+      - name: "Setup | Checkout sources"
+        uses: actions/checkout@v7
+      - name: "Setup | Activate mise"
+        uses: jdx/mise-action@v5.2.2
+      - name: "Verify | Subsystem invariants"
+        run: mise run ci:verification
 
   host:
     name: Host
@@ -68,22 +80,22 @@ jobs:
       XILA_APPLICATIONS_MANIFEST: ${{ github.workspace }}/.application-src/Cargo.toml
       XILA_FONT_CATALOG_ROOTS: ${{ github.workspace }}/.application-src
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/checkout@v7
+      - name: "Setup | Checkout pinned applications"
+        uses: actions/checkout@v7
+      - name: "Setup | Checkout pinned applications"
+        uses: actions/checkout@v7
         with:
           repository: xila-project/applications
           ref: 26ee04355c3ddea0f41ee81ece168cec2f9eb376
           path: .application-src
           persist-credentials: false
-      - uses: jdx/mise-action@v5.2.2
-      - run: mise run deps:npm
-      - id: toolchain
-        run: mise run ci:toolchain
-      - uses: jdx/mr-boxington-action@v1
+      - name: "Setup | Rust toolchain and build cache"
+        uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         with:
-          toolchain: ${{ steps.toolchain.outputs.version }}
-          github-cache-mode: target
+          cache-mode: target
           cache-generation: v1-ci-host
+      - name: "Setup | Locked npm dependencies"
+        run: mise run deps:npm
       - name: Lint host workspace
         run: mise run ci:host-clippy
       - name: Lint host WASM runtime
@@ -113,22 +125,22 @@ jobs:
       CARGO_TERM_COLOR: always
       XILA_MBX: "1"
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/checkout@v7
+      - name: "Setup | Checkout pinned applications"
+        uses: actions/checkout@v7
+      - name: "Setup | Checkout pinned applications"
+        uses: actions/checkout@v7
         with:
           repository: xila-project/applications
           ref: 26ee04355c3ddea0f41ee81ece168cec2f9eb376
           path: .application-src
           persist-credentials: false
-      - uses: jdx/mise-action@v5.2.2
-      - run: mise run deps:npm
-      - id: toolchain
-        run: mise run ci:toolchain
-      - uses: jdx/mr-boxington-action@v1
+      - name: "Setup | Rust toolchain and build cache"
+        uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         with:
-          toolchain: ${{ steps.toolchain.outputs.version }}
-          github-cache-mode: target
+          cache-mode: target
           cache-generation: v1-ci-wasm
+      - name: "Setup | Locked npm dependencies"
+        run: mise run deps:npm
       - name: Lint WASM guests
         run: mise run ci:wasm-clippy
       - name: Check browser audio
@@ -147,23 +159,23 @@ jobs:
       CI_ABI_MEMORY: ${{ matrix.memory }}
       XILA_MBX: "1"
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/checkout@v7
+      - name: "Setup | Checkout pinned applications"
+        uses: actions/checkout@v7
+      - name: "Setup | Checkout pinned applications"
+        uses: actions/checkout@v7
         with:
           repository: xila-project/applications
           ref: 26ee04355c3ddea0f41ee81ece168cec2f9eb376
           path: .application-src
           persist-credentials: false
-      - uses: jdx/mise-action@v5.2.2
-      - id: toolchain
-        run: mise run ci:toolchain
-      - uses: jdx/mr-boxington-action@v1
+      - name: "Setup | Rust toolchain and build cache"
+        uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         with:
-          toolchain: ${{ steps.toolchain.outputs.version }}
-          github-cache-mode: target
+          cache-mode: target
           cache-generation: v1-ci-abi-${{ matrix.memory }}
           working-directory: .application-src/executables/wasm/tests/translation
-      - run: mise run ci:abi
+      - name: "Test | ABI compatibility"
+        run: mise run ci:abi
 
   localization:
     name: Localization
@@ -177,10 +189,12 @@ jobs:
       XILA_MBX: "1"
       XILA_FONT_CATALOG_ROOTS: ${{ github.workspace }}/.application-src
     steps:
-      - uses: actions/checkout@v7
+      - name: "Setup | Checkout pinned applications"
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/checkout@v7
+      - name: "Setup | Checkout pinned applications"
+        uses: actions/checkout@v7
         with:
           repository: xila-project/applications
           ref: 26ee04355c3ddea0f41ee81ece168cec2f9eb376
@@ -233,19 +247,15 @@ jobs:
             echo 'run-check=false' >> "$GITHUB_OUTPUT"
             echo 'No localization-relevant files changed; checks are intentionally skipped.'
           fi
-      - uses: jdx/mise-action@v5.2.2
-        if: steps.locales.outputs.run-check == 'true'
-      - run: mise run deps:npm
-        if: steps.locales.outputs.run-check == 'true'
-      - id: toolchain
-        run: mise run ci:toolchain
-        if: steps.locales.outputs.run-check == 'true'
-      - uses: jdx/mr-boxington-action@v1
+      - name: "Setup | Rust toolchain and build cache"
+        uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         if: steps.locales.outputs.run-check == 'true'
         with:
-          toolchain: ${{ steps.toolchain.outputs.version }}
-          github-cache-mode: objects
+          cache-mode: objects
           cache-generation: v1-ci-localization
+      - name: "Setup | Locked npm dependencies"
+        run: mise run deps:npm
+        if: steps.locales.outputs.run-check == 'true'
       - name: Strict localization validation
         if: steps.locales.outputs.run-check == 'true'
         env:

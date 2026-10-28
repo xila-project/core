@@ -34,16 +34,12 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-      - uses: jdx/mise-action@v5.2.2
-      - run: mise run deps:npm
-      - id: toolchain
-        run: mise run ci:toolchain
-      - uses: jdx/mr-boxington-action@v1
+      - uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         with:
-          toolchain: ${{ steps.toolchain.outputs.version }}
-          github-cache-mode: objects
+          cache-mode: objects
           cache-generation: v1-pages-all-locales
           save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
+      - run: mise run deps:npm
       - name: Build Core documentation
         run: |
           set -eu

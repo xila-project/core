@@ -46,16 +46,12 @@ jobs:
           ref: 26ee04355c3ddea0f41ee81ece168cec2f9eb376
           path: .application-src
           persist-credentials: false
-      - uses: jdx/mise-action@v5.2.2
-      - run: mise run deps:npm
-      - id: toolchain
-        run: mise run ci:toolchain
-      - uses: jdx/mr-boxington-action@v1
+      - uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         with:
-          toolchain: ${{ steps.toolchain.outputs.version }}
-          github-cache-mode: objects
+          cache-mode: objects
           cache-generation: v1-extended-coverage
           save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
+      - run: mise run deps:npm
       - run: mise run ci:coverage
       - uses: codecov/codecov-action@v7
         with:
@@ -88,13 +84,10 @@ jobs:
           ref: 26ee04355c3ddea0f41ee81ece168cec2f9eb376
           path: .application-src
           persist-credentials: false
-      - uses: jdx/mise-action@v5.2.2
-      - id: toolchain
-        run: mise run ci:toolchain-nightly
-      - uses: jdx/mr-boxington-action@v1
+      - uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         with:
-          toolchain: ${{ steps.toolchain.outputs.version }}
-          github-cache-mode: objects
+          toolchain-task: ci:toolchain-nightly
+          cache-mode: objects
           cache-generation: v1-extended-abi-${{ matrix.memory }}
           save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
       - name: Enforce ABI coverage thresholds
