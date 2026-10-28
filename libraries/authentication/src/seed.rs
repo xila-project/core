@@ -13,14 +13,7 @@ use virtual_file_system::{Error as FsError, File};
 pub async fn initialize_seeded(context: &Context<'_>) -> Result<()> {
     let vfs = context.virtual_file_system;
     let task = context.task;
-    let pending = match File::open(
-        vfs,
-        task,
-        SEED_PENDING_PATH,
-        AccessFlags::Read.into(),
-    )
-    .await
-    {
+    let pending = match File::open(vfs, task, SEED_PENDING_PATH, AccessFlags::Read.into()).await {
         Ok(mut file) => {
             let mut data = [0; 32];
             let mut length = 0;

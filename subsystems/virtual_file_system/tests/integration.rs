@@ -533,7 +533,8 @@ async fn global_application_storage_follows_posix_and_user_app_storage_is_separa
             task,
             "/data/applications/clock/state",
             AccessFlags::Read.into()
-        ).await,
+        )
+        .await,
         Err(virtual_file_system::Error::PermissionDenied)
     ));
 

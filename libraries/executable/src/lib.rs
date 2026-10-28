@@ -130,21 +130,16 @@ pub async fn execute(
     let main = main_function.ok_or(Error::FailedToGetMainFunction)?;
 
     let (join_handle, _) = task_instance
-        .spawn(
-            task,
-            file_name,
-            spawner,
-            async move |task| {
-                if let Some(new_user) = new_user {
-                    context.task_manager.set_user(task, new_user).await.unwrap();
-                }
+        .spawn(task, file_name, spawner, async move |task| {
+            if let Some(new_user) = new_user {
+                context.task_manager.set_user(task, new_user).await.unwrap();
+            }
 
-                match main(context, standard, inputs).await {
-                    Ok(_) => 0_isize,
-                    Err(error) => -(error.get() as isize),
-                }
-            },
-        )
+            match main(context, standard, inputs).await {
+                Ok(_) => 0_isize,
+                Err(error) => -(error.get() as isize),
+            }
+        })
         .await?;
 
     Ok(join_handle)

@@ -15,7 +15,10 @@ impl Manager {
         let mut inner = self.0.write().await;
 
         // - Get parent task information if any (inheritance)
-        let (parent_task_identifier, parent_environment_variables, user, group) = if inner.tasks.is_empty() {
+        let (parent_task_identifier, parent_environment_variables, user, group) = if inner
+            .tasks
+            .is_empty()
+        {
             (
                 Manager::ROOT_TASK_IDENTIFIER, // Root task is its own parent
                 Vec::new(),
