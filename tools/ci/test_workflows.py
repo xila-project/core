@@ -135,7 +135,7 @@ class WorkflowPolicy(unittest.TestCase):
                 wrapper = tasks[f"ci:{group}"]["run"]
                 self.assertEqual(re.findall(r"^mise run ([\w:-]+)$", wrapper, re.M), leaves)
                 self.assertNotIn("cargo ", wrapper)
-                steps = re.findall(r"^      - name: .+\n        run: mise run ([\w:-]+)$", job(workflow, group), re.M)
+                steps = re.findall(r"^      - name: .+\n        run: mise run (ci:[\w:-]+)$", job(workflow, group), re.M)
                 self.assertEqual(steps, leaves)
                 for leaf in leaves:
                     task = tasks[leaf]
@@ -291,6 +291,12 @@ class WorkflowPolicy(unittest.TestCase):
             text = workflow.read_text()
             self.assertNotIn("sccache", text.lower(), workflow.name)
             self.assertNotIn("Swatinem/rust-cache", text, workflow.name)
+
+    def test_primary_ci_has_named_setup_and_test_steps(self):
+        ci = (ROOT / '.github/workflows/ci.yml').read_text()
+        for line in ci.splitlines():
+            self.assertNotRegex(line, r'^      - (uses|run|env):')
+        self.assertIn('name: Required', ci)
 
     def test_primary_ci_jobs_are_parallel_and_required_aggregates_results(self):
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
