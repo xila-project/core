@@ -8,13 +8,24 @@ use std::{
     path::{Path, PathBuf},
 };
 
+fn hex_digest(hash: Sha256) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let digest = hash.finalize();
+    let mut encoded = String::with_capacity(digest.len() * 2);
+    for &byte in digest.iter() {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
+}
+
 pub fn digest(parts: &[&[u8]]) -> String {
     let mut hash = Sha256::new();
     for part in parts {
         hash.update((part.len() as u64).to_be_bytes());
         hash.update(part);
     }
-    format!("{:x}", hash.finalize())
+    hex_digest(hash)
 }
 
 fn hash_file(hash: &mut Sha256, path: &Path) -> io::Result<()> {
@@ -34,7 +45,7 @@ fn hash_file(hash: &mut Sha256, path: &Path) -> io::Result<()> {
 pub fn file_digest(path: &Path) -> io::Result<String> {
     let mut hash = Sha256::new();
     hash_file(&mut hash, path)?;
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(hex_digest(hash))
 }
 
 pub fn input_digest(paths: &[PathBuf]) -> io::Result<String> {
@@ -47,7 +58,7 @@ pub fn input_digest(paths: &[PathBuf]) -> io::Result<String> {
             hash_file(&mut hash, path)?;
         }
     }
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(hex_digest(hash))
 }
 
 fn remove(path: &Path) -> io::Result<()> {
