@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-      - uses: xila-project/workspace/.github/actions/setup-rust@f2e0febfa3d12218a5a5a7f675b4a37b880d341d
+      - uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         with:
           cache-mode: objects
           cache-generation: v1-pages-all-locales

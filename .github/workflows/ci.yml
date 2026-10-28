@@ -75,7 +75,7 @@ jobs:
           ref: 26ee04355c3ddea0f41ee81ece168cec2f9eb376
           path: .application-src
           persist-credentials: false
-      - uses: xila-project/workspace/.github/actions/setup-rust@f2e0febfa3d12218a5a5a7f675b4a37b880d341d
+      - uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         with:
           cache-mode: target
           cache-generation: v1-ci-host
@@ -116,7 +116,7 @@ jobs:
           ref: 26ee04355c3ddea0f41ee81ece168cec2f9eb376
           path: .application-src
           persist-credentials: false
-      - uses: xila-project/workspace/.github/actions/setup-rust@f2e0febfa3d12218a5a5a7f675b4a37b880d341d
+      - uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         with:
           cache-mode: target
           cache-generation: v1-ci-wasm
@@ -146,7 +146,7 @@ jobs:
           ref: 26ee04355c3ddea0f41ee81ece168cec2f9eb376
           path: .application-src
           persist-credentials: false
-      - uses: xila-project/workspace/.github/actions/setup-rust@f2e0febfa3d12218a5a5a7f675b4a37b880d341d
+      - uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         with:
           cache-mode: target
           cache-generation: v1-ci-abi-${{ matrix.memory }}
@@ -221,7 +221,7 @@ jobs:
             echo 'run-check=false' >> "$GITHUB_OUTPUT"
             echo 'No localization-relevant files changed; checks are intentionally skipped.'
           fi
-      - uses: xila-project/workspace/.github/actions/setup-rust@f2e0febfa3d12218a5a5a7f675b4a37b880d341d
+      - uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         if: steps.locales.outputs.run-check == 'true'
         with:
           cache-mode: objects
