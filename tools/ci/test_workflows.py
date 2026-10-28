@@ -339,7 +339,7 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn("mise run ci:localization", localization)
         self.assertIn('"$EVENT_NAME" != pull_request', localization)
         self.assertIn("all_locales=true", localization)
-        self.assertIn("locales=(en fr es de pt-BR it pl zh-CN)", localization)
+        self.assertIn("locales=(en fr es de pt-BR it pl zh-CN ja)", localization)
         self.assertIn("locales=(en)", localization)
 
     def test_locale_selection_handles_build_scripts_catalogs_and_unrelated_changes(self):
@@ -349,10 +349,11 @@ class WorkflowPolicy(unittest.TestCase):
             localization,
         )[1])
         for changed, expected in [
-            ("subsystems/graphics/build.rs", "en fr es de pt-BR it pl zh-CN"),
-            ("subsystems/graphics/build/catalogs.rs", "en fr es de pt-BR it pl zh-CN"),
+            ("subsystems/graphics/build.rs", "en fr es de pt-BR it pl zh-CN ja"),
+            ("subsystems/graphics/build/catalogs.rs", "en fr es de pt-BR it pl zh-CN ja"),
             ("executables/clock/locales/fr.json", "en fr"),
             ("executables/clock/locales/zh-CN.json", "en zh-CN"),
+            ("executables/clock/locales/ja.json", "en ja"),
             ("readme.md", ""),
         ]:
             with self.subTest(changed=changed), tempfile.TemporaryDirectory() as directory:

@@ -105,3 +105,12 @@ entries require contextual review rather than automatic deletion. The
 embedded-i18n strict builds validate locale-specific plurals, format arguments
 and fallback conditions. All firmware-size claims require real target builds;
 these changes do not add runtime translation tables or additional locale data.
+
+Japanese (`ja`) is an experimental compile-time locale. Japanese Core and
+Applications catalogs must be built together, and reviewers should check the
+translations and UI layout before release. For graphics, download the pinned
+Source Han Sans JP build input with `bash tools/localization/fetch-japanese-font.sh`.
+When Core is a Git dependency, pass its absolute path in
+`XILA_JAPANESE_FONT_PATH`. Set `XILA_FONT_CATALOG_ROOTS` to the Applications
+checkout so its translated glyphs are included. See
+`subsystems/graphics/fonts/README.md` for coverage and target-size limitations.

@@ -1,0 +1,10 @@
+{
+  "errors": {
+    "device_error": "デバイスエラー: {}",
+    "time_module_already_initialized": "時刻モジュールは既に初期化されています",
+    "time_module_not_initialized": "時刻モジュールが初期化されていません",
+    "utc_unsynchronized": "UTC時計は同期されていません",
+    "timestamp_overflow": "タイムスタンプが範囲外です",
+    "invalid_clock_resolution": "時計の分解能は正の値である必要があります"
+  }
+}

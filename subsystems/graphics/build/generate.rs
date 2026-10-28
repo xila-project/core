@@ -50,19 +50,28 @@ pub struct Source {
     pub inputs: Vec<PathBuf>,
 }
 
-pub fn sources_with_catalogs(
+pub fn sources_with_locale_catalogs(
     root: &Path,
     output: &Path,
     ranges: &[Range<u32>],
     common: &str,
     symbols: Option<&CatalogSymbols>,
+    catalog_font: &Path,
+    japanese: bool,
 ) -> io::Result<Vec<Source>> {
     let variant = variant_id(ranges);
-    // Keep canonical range-based symbol names, but rasterize only catalog Han
-    // characters. The arguments below make the subset part of the cache key.
+    // The locale's ranges are used for stable variant names, but the enormous
+    // CJK and kana ranges must be replaced by only the catalog's used glyphs.
+    // Hiragana and katakana merge into one contiguous range in effective_ranges.
+    let subset_ranges = [embedded_i18n::CJK_UNIFIED_IDEOGRAPHS, 0x3040..0x3100];
     let generated_ranges = ranges
         .iter()
-        .filter(|range| symbols.is_none() || **range != embedded_i18n::CJK_UNIFIED_IDEOGRAPHS)
+        .filter(|range| {
+            symbols.is_none()
+                || !subset_ranges
+                    .iter()
+                    .any(|subset| range.start >= subset.start && range.end <= subset.end)
+        })
         .cloned()
         .collect::<Vec<_>>();
     FONTS
@@ -95,12 +104,17 @@ pub fn sources_with_catalogs(
                     arguments.extend(["--symbols".into(), symbols.other.clone().into()]);
                 }
                 if !symbols.cjk.is_empty() {
-                    if *icons {
-                        let cjk_font = root.join("fonts/SourceHanSansSC-Regular.otf");
+                    if *icons || japanese {
+                        // Japanese kana and kanji need a JP-region glyph source,
+                        // including in the terminal where Unscii coverage is limited.
+                        let cjk_font = if catalog_font.is_absolute() {
+                            catalog_font.to_path_buf()
+                        } else {
+                            root.join("fonts").join(catalog_font)
+                        };
                         inputs.push(cjk_font.clone());
                         arguments.extend(["--font".into(), cjk_font.into_os_string()]);
                     }
-                    // Unscii already supplies terminal CJK glyphs; keep it.
                     arguments.extend(["--symbols".into(), symbols.cjk.clone().into()]);
                 }
             }
@@ -142,6 +156,24 @@ pub fn sources_with_catalogs(
             })
         })
         .collect()
+}
+
+pub fn sources_with_catalogs(
+    root: &Path,
+    output: &Path,
+    ranges: &[Range<u32>],
+    common: &str,
+    symbols: Option<&CatalogSymbols>,
+) -> io::Result<Vec<Source>> {
+    sources_with_locale_catalogs(
+        root,
+        output,
+        ranges,
+        common,
+        symbols,
+        Path::new("SourceHanSansSC-Regular.otf"),
+        false,
+    )
 }
 
 pub fn sources(
