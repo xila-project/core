@@ -345,7 +345,7 @@ class WorkflowPolicy(unittest.TestCase):
     def test_locale_selection_handles_build_scripts_catalogs_and_unrelated_changes(self):
         localization = job("ci.yml", "localization")
         script = textwrap.dedent(re.search(
-            r'(?ms)^      - name: "Setup \\| Select changed locales"\n.*?^        run: \|\n(.*?)(?=^      - )',
+            r'(?ms)^      - name: "Setup \| Select changed locales"\n.*?^        run: \|\n(.*?)(?=^      - )',
             localization,
         )[1])
         for changed, expected in [
