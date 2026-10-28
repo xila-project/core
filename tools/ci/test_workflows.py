@@ -208,8 +208,8 @@ class WorkflowPolicy(unittest.TestCase):
             for name, mode in names.items():
                 with self.subTest(workflow=workflow, job=name):
                     text = job(workflow, name)
-                    self.assertEqual(text.count("jdx/mr-boxington-action@v1"), 1)
-                    self.assertIn(f"github-cache-mode: {mode}", text)
+                    self.assertEqual(text.count("xila-project/workspace/.github/actions/setup-rust@"), 1)
+                    self.assertIn(f"cache-mode: {mode}", text)
                     self.assertIn('XILA_MBX: "1"', text)
                     self.assertIn("cache-generation: v1-", text)
                     self.assertNotIn("cache-key-suffix:", text)
@@ -245,10 +245,10 @@ class WorkflowPolicy(unittest.TestCase):
         }.items():
             for name in names:
                 text = job(workflow, name)
-                self.assertIn('toolchain: ${{ steps.toolchain.outputs.version }}', text)
-                self.assertIn("run: mise run ci:toolchain", text)
-        self.assertIn("run: mise run ci:toolchain-nightly", job("extended.yml", "abi-deep"))
-        self.assertIn('toolchain: ${{ steps.toolchain.outputs.version }}', job("extended.yml", "abi-deep"))
+                self.assertIn("xila-project/workspace/.github/actions/setup-rust@", text)
+                self.assertIn("cache-generation: v1-", text)
+        self.assertIn("toolchain-task: ci:toolchain-nightly", job("extended.yml", "abi-deep"))
+        self.assertIn("xila-project/workspace/.github/actions/setup-rust@", job("extended.yml", "abi-deep"))
         pins = tomllib.loads((ROOT / "mise.toml").read_text())["vars"]
         for task_name, pin in [("ci:toolchain", "rust_version"), ("ci:toolchain-nightly", "nightly_version")]:
             task = configured_tasks("ci")[task_name]
@@ -529,7 +529,8 @@ class WorkflowPolicy(unittest.TestCase):
     def test_github_actions_use_version_tags_instead_of_commit_shas(self):
         for workflow in ACTIVE_WORKFLOWS:
             for line_number, line in enumerate(workflow.read_text().splitlines(), 1):
-                if "uses:" in line and "xila-project/platforms/.github/workflows/" not in line:
+                if ("uses:" in line and "xila-project/platforms/.github/workflows/" not in line
+                        and "xila-project/workspace/.github/actions/setup-rust@" not in line):
                     with self.subTest(workflow=workflow.name, line=line_number):
                         self.assertNotRegex(line, r"uses:\s+[^\s]+@[0-9a-f]{40}\b")
 
