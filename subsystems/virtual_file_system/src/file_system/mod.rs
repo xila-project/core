@@ -1185,15 +1185,6 @@ impl VirtualFileSystem {
         let (file_system, relative_path, _) =
             Self::get_file_system_from_path(&file_systems, &resolved_path)?;
 
-        let user = self.task_manager.get_user(task).await?;
-        if user != users::UserIdentifier::ROOT {
-            let application = self.task_manager.get_application_identifier(task).await?;
-            if !utilities::application_access_allowed(relative_path, application, Permission::Read)
-            {
-                return Err(Error::PermissionDenied);
-            }
-        }
-
         let mut attributes = Attributes::new().set_mask(AttributeFlags::all());
         Self::get_attributes(file_system.file_system, relative_path, &mut attributes).await?;
         Statistics::from_attributes(&attributes).ok_or(Error::MissingAttribute)
