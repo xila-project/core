@@ -47,6 +47,10 @@ impl Path {
     pub const APPLICATIONS: &'static Path = Self::from_str("/applications");
     pub const APPLICATION_EXECUTABLES: &'static Path = Self::from_str("/applications/executables");
     pub const APPLICATION_LIBRARIES: &'static Path = Self::from_str("/applications/libraries");
+    /// Versioned self-contained installed application bundles.
+    pub const APPLICATION_BUNDLES: &'static Path = Self::from_str("/applications/bundles");
+    /// System-owned activation records mapping stable application IDs to versions.
+    pub const APPLICATION_ACTIVE: &'static Path = Self::from_str("/applications/active");
 
     /// Mutable persistent state.
     pub const DATA: &'static Path = Self::from_str("/data");
