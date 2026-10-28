@@ -1,4 +1,4 @@
-use super::{icon_text::IconText, lvgl};
+use super::{icon_spec::IconSpec, lvgl};
 use crate::{Color, Error, EventKind, Key, Result, event::Event};
 use alloc::collections::VecDeque;
 use core::{
@@ -48,8 +48,8 @@ pub fn get_window_class() -> &'static lvgl::lv_obj_class_t {
 pub struct Window {
     object: lvgl::lv_obj_t,
     event_queue: VecDeque<Event>,
-    icon_text: IconText,
-    icon_color: Color,
+    icon_spec: IconSpec,
+    icon_explicit: bool,
     waker: AtomicWaker,
 }
 
@@ -64,8 +64,11 @@ unsafe extern "C" fn window_constructor(
             &mut (*window).event_queue,
             VecDeque::with_capacity(WINDOW_QUEUE_DEFAULT_CAPACITY),
         );
-        ptr::write(&mut (*window).icon_text, IconText::new("Wi"));
-        ptr::write(&mut (*window).icon_color, Color::BLACK);
+        ptr::write(
+            &mut (*window).icon_spec,
+            IconSpec::automatic("Wi", "Wi", Color::BLACK),
+        );
+        ptr::write(&mut (*window).icon_explicit, false);
         ptr::write(&mut (*window).waker, AtomicWaker::new());
 
         lvgl::lv_obj_add_flag(
@@ -224,14 +227,62 @@ impl Window {
     }
 
     pub fn get_icon(&self) -> (&str, Color) {
-        (self.icon_text.as_str(), self.icon_color)
+        (self.icon_spec.text(), self.icon_spec.background)
     }
 
     /// Set the legacy icon using up to two Unicode scalar values.
     /// Text after a NUL is ignored; shorter strings replace the previous text.
     pub fn set_icon(&mut self, icon_string: &str, icon_color: Color) {
-        self.icon_text = IconText::new(icon_string);
-        self.icon_color = icon_color;
+        if !self.icon_explicit {
+            self.icon_spec = IconSpec::automatic(icon_string, icon_string, icon_color);
+            self.notify_icon_changed();
+        }
+    }
+
+    /// Apply launch metadata belonging to this task, if it is well formed.
+    /// An explicit shortcut icon takes precedence over the legacy setter.
+    pub async fn apply_launch_icon(&mut self, tasks: &task::Manager, task: task::TaskIdentifier) {
+        if let Ok(value) = tasks
+            .get_environment_variable(task, crate::ICON_ENVIRONMENT)
+            .await
+        {
+            self.apply_encoded_launch_icon(value.get_value());
+        }
+    }
+
+    /// Apply a bounded launch descriptor copied by the host before entering a
+    /// synchronous guest callback. Malformed descriptors leave the icon intact.
+    pub fn apply_encoded_launch_icon(&mut self, value: &str) {
+        if let Some((icon, explicit)) = IconSpec::decode_launch(value) {
+            self.apply_launch_spec(icon, explicit);
+        }
+    }
+
+    /// Apply a previously validated launch icon without retaining guest data.
+    pub fn apply_launch_spec(&mut self, icon: IconSpec, _explicit: bool) {
+        self.icon_spec = icon;
+        // A launch icon, including automatic fallback, must remain consistent
+        // with the drawer when legacy apps set their usual window shorthand.
+        self.icon_explicit = true;
+        self.notify_icon_changed();
+    }
+
+    /// Set a resolved host-owned icon, including all explicitly supplied values.
+    pub fn set_icon_spec(&mut self, icon: IconSpec) {
+        self.icon_spec = icon;
+        self.icon_explicit = true;
+        self.notify_icon_changed();
+    }
+
+    /// Return the current compact descriptor without allocating.
+    pub fn icon_spec(&self) -> IconSpec {
+        self.icon_spec
+    }
+
+    fn notify_icon_changed(&mut self) {
+        unsafe {
+            lvgl::lv_obj_send_event(&mut self.object, EventKind::Custom4 as u32, ptr::null_mut());
+        }
     }
 
     pub fn wake_up(&mut self) {

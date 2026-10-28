@@ -96,6 +96,31 @@ pub async fn execute(
     standard: Standard<'static>,
     spawner: Option<SpawnerIdentifier>,
 ) -> Result<JoinHandle<isize>> {
+    execute_with_environment(context, path, inputs, standard, spawner, Vec::new()).await
+}
+
+fn validate_environment(environment: &[(String, String)]) -> Result<()> {
+    if environment
+        .iter()
+        .any(|(name, value)| name.is_empty() || name.contains(['=', '\0']) || value.contains('\0'))
+    {
+        return Err(task::Error::InvalidEnvironmentVariable.into());
+    }
+    Ok(())
+}
+
+/// Execute with caller-provided environment overrides installed before
+/// the new program is polled. The overrides are private to the spawned task and
+/// inherited by its children.
+pub async fn execute_with_environment(
+    context: &'static ExecutableContext,
+    path: impl AsRef<Path>,
+    inputs: Vec<String>,
+    standard: Standard<'static>,
+    spawner: Option<SpawnerIdentifier>,
+    environment: Vec<(String, String)>,
+) -> Result<JoinHandle<isize>> {
+    validate_environment(&environment)?;
     let task_instance = &context.task_manager;
 
     let task = task_instance.get_current_task_identifier().await;
@@ -149,6 +174,16 @@ pub async fn execute(
             spawner,
             application_identifier,
             async move |task| {
+                for (name, value) in environment {
+                    if context
+                        .task_manager
+                        .set_environment_variable(task, &name, &value)
+                        .await
+                        .is_err()
+                    {
+                        return -1;
+                    }
+                }
                 if let Some(new_user) = new_user {
                     context.task_manager.set_user(task, new_user).await.unwrap();
                 }

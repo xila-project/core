@@ -1,5 +1,5 @@
 /// At most two Unicode scalar values, stored without allocating.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct IconText([u8; 8]);
 
 impl IconText {

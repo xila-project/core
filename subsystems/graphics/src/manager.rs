@@ -535,6 +535,16 @@ impl Manager {
         Ok(icon)
     }
 
+    /// Return the resolved icon for a window by its current index.
+    pub async fn get_window_icon_spec(&self, index: usize) -> Result<crate::IconSpec> {
+        let window_parent = self.inner.read().await.window_parent;
+        let window = unsafe {
+            let child = lvgl::lv_obj_get_child(window_parent, index as i32);
+            Window::from_raw(child).ok_or(Error::InvalidWindowIdentifier)?
+        };
+        Ok(unsafe { window.as_ref().icon_spec() })
+    }
+
     pub async fn get_window_identifier(&self, index: usize) -> Result<usize> {
         let window_parent = self.inner.read().await.window_parent;
 
