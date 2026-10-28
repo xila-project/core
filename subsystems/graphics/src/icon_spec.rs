@@ -88,6 +88,32 @@ impl IconSpec {
         self.text.as_str()
     }
 
+    /// Resolve a legacy setter while honoring an explicitly customized launch.
+    pub(crate) fn legacy_update(
+        self,
+        explicit: bool,
+        launch_auto: bool,
+        text: &str,
+        background: Color,
+    ) -> Self {
+        if explicit {
+            return self;
+        }
+        let fallback = Self::automatic(text, text, background);
+        if launch_auto {
+            Self::procedural(
+                self.motif,
+                text,
+                background,
+                fallback.foreground,
+                fallback.accent,
+                self.seed,
+            )
+        } else {
+            fallback
+        }
+    }
+
     /// Parse the validated launch wrapper without retaining the input buffer.
     pub fn decode_launch(value: &str) -> Option<(Self, bool)> {
         let (mode, payload) = value.split_once(';')?;
@@ -208,6 +234,29 @@ mod tests {
         );
         assert_eq!(IconSpec::decode_launch(&format!("other;{payload}")), None);
         assert_eq!(IconSpec::decode_launch("explicit;broken"), None);
+    }
+
+    #[test]
+    fn legacy_updates_respect_launch_precedence() {
+        let custom = IconSpec::procedural(
+            IconMotif::Grid,
+            "C",
+            Color::BLACK,
+            Color::WHITE,
+            Color::WHITE,
+            42,
+        );
+        assert_eq!(custom.legacy_update(true, false, "N", Color::WHITE), custom);
+        let auto = IconSpec::automatic("app-id", "A", Color::BLACK);
+        let updated = auto.legacy_update(false, true, "B", Color::WHITE);
+        assert_eq!(updated.text(), "B");
+        assert_eq!(updated.background, Color::WHITE);
+        assert_eq!(updated.motif, auto.motif);
+        assert_eq!(updated.seed, auto.seed);
+        assert_eq!(
+            auto.legacy_update(false, false, "B", Color::WHITE),
+            IconSpec::automatic("B", "B", Color::WHITE)
+        );
     }
 
     #[test]

@@ -236,19 +236,9 @@ impl Window {
     /// Text after a NUL is ignored; shorter strings replace the previous text.
     pub fn set_icon(&mut self, icon_string: &str, icon_color: Color) {
         if !self.icon_explicit {
-            let automatic = IconSpec::automatic(icon_string, icon_string, icon_color);
-            self.icon_spec = if self.icon_launch_auto {
-                IconSpec::procedural(
-                    self.icon_spec.motif,
-                    icon_string,
-                    icon_color,
-                    automatic.foreground,
-                    automatic.accent,
-                    self.icon_spec.seed,
-                )
-            } else {
-                automatic
-            };
+            self.icon_spec =
+                self.icon_spec
+                    .legacy_update(false, self.icon_launch_auto, icon_string, icon_color);
             self.notify_icon_changed();
         }
     }
