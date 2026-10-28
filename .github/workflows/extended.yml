@@ -35,25 +35,31 @@ jobs:
       XILA_APPLICATIONS_MANIFEST: ${{ github.workspace }}/.application-src/Cargo.toml
       XILA_FONT_CATALOG_ROOTS: ${{ github.workspace }}/.application-src
     steps:
-      - uses: actions/checkout@v7
+      - name: "Setup | Checkout pinned applications"
+        uses: actions/checkout@v7
         with:
           repository: xila-project/core
           ref: ${{ inputs.core_ref || github.sha }}
           persist-credentials: false
-      - uses: actions/checkout@v7
+      - name: "Setup | Checkout pinned applications"
+        uses: actions/checkout@v7
         with:
           repository: xila-project/applications
           ref: 26ee04355c3ddea0f41ee81ece168cec2f9eb376
           path: .application-src
           persist-credentials: false
-      - uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
+      - name: "Setup | Rust toolchain and build cache"
+        uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         with:
           cache-mode: objects
           cache-generation: v1-extended-coverage
           save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
-      - run: mise run deps:npm
-      - run: mise run ci:coverage
-      - uses: codecov/codecov-action@v7
+      - name: "Setup | Locked Node dependencies"
+        run: mise run deps:npm
+      - name: "Test | Host coverage"
+        run: mise run ci:coverage
+      - name: "Report | Upload coverage"
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: Xila-Project/Core
@@ -73,28 +79,31 @@ jobs:
       CI_ABI_MEMORY: ${{ matrix.memory }}
       XILA_MBX: "1"
     steps:
-      - uses: actions/checkout@v7
+      - name: "Setup | Checkout pinned applications"
+        uses: actions/checkout@v7
         with:
           repository: xila-project/core
           ref: ${{ inputs.core_ref || github.sha }}
           persist-credentials: false
-      - uses: actions/checkout@v7
+      - name: "Setup | Checkout pinned applications"
+        uses: actions/checkout@v7
         with:
           repository: xila-project/applications
           ref: 26ee04355c3ddea0f41ee81ece168cec2f9eb376
           path: .application-src
           persist-credentials: false
-      - uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
+      - name: "Setup | Rust toolchain and build cache"
+        uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         with:
           toolchain-task: ci:toolchain-nightly
           cache-mode: objects
           cache-generation: v1-extended-abi-${{ matrix.memory }}
           save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/main' }}
-      - name: Enforce ABI coverage thresholds
+      - name: "Validate | ABI coverage thresholds"
         run: mise run ci:abi-coverage
-      - name: Test ABI with host Miri
+      - name: "Test | Host Miri ABI"
         run: mise run ci:abi-miri
-      - name: Test ABI with cross-architecture Miri
+      - name: "Test | Cross-architecture Miri ABI"
         run: mise run ci:abi-miri-cross
 
   release-gate:
@@ -106,7 +115,7 @@ jobs:
     outputs:
       validated-sha: ${{ steps.sha.outputs.validated-sha }}
     steps:
-      - name: Require successful deep checks
+      - name: "Gate | Verify deep validation"
         env:
           COVERAGE_RESULT: ${{ needs.coverage.result }}
           ABI_RESULT: ${{ needs.abi-deep.result }}
@@ -118,7 +127,7 @@ jobs:
               exit 1
             fi
           done
-      - name: Record validated commit
+      - name: "Report | Record validated commit"
         id: sha
         env:
           VALIDATED_CORE_REF: ${{ inputs.core_ref || github.sha }}
