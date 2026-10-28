@@ -68,6 +68,25 @@ fn snapshot_describes_widget_roles_labels_and_explicit_state() {
         let textbox = lvgl::lv_textarea_create(screen);
         lvgl::lv_textarea_set_placeholder_text(textbox, c"Username".as_ptr());
         lvgl::lv_textarea_set_text(textbox, c"Ada".as_ptr());
+        // LVGL expects each key as a native-endian packed UTF-8 sequence.
+        let mut accented = u32::from_ne_bytes([0xc3, 0xa9, 0, 0]);
+        let mut cjk = u32::from_ne_bytes([0xe4, 0xb8, 0xad, 0]);
+        lvgl::lv_obj_send_event(
+            textbox,
+            lvgl::lv_event_code_t_LV_EVENT_KEY,
+            (&mut accented as *mut u32).cast(),
+        );
+        lvgl::lv_obj_send_event(
+            textbox,
+            lvgl::lv_event_code_t_LV_EVENT_KEY,
+            (&mut cjk as *mut u32).cast(),
+        );
+        assert_eq!(
+            std::ffi::CStr::from_ptr(lvgl::lv_textarea_get_text(textbox))
+                .to_str()
+                .unwrap(),
+            "Adaé中"
+        );
         let capped = lvgl::lv_textarea_create(screen);
         let long_placeholder = std::ffi::CString::new("n".repeat(300)).unwrap();
         lvgl::lv_textarea_set_placeholder_text(capped, long_placeholder.as_ptr());
@@ -96,7 +115,7 @@ fn snapshot_describes_widget_roles_labels_and_explicit_state() {
         .find(|element| element.semantic_role == Some("textbox"))
         .unwrap();
     assert_eq!(textbox.name.as_deref(), Some("Username"));
-    assert_eq!(textbox.text.as_deref(), Some("Ada"));
+    assert_eq!(textbox.text.as_deref(), Some("Adaé中"));
     let capped = snapshot
         .elements
         .iter()
