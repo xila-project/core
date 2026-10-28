@@ -1,0 +1,31 @@
+{
+  "errors": {
+    "failed_to_add_group": "グループの追加に失敗しました: {}",
+    "failed_to_add_user": "ユーザーの追加に失敗しました: {}",
+    "failed_to_close_file": "ファイルのクローズに失敗しました: {}",
+    "failed_to_create_group_directory": "グループディレクトリの作成に失敗しました: {}",
+    "failed_to_create_group": "グループの作成に失敗しました: {}",
+    "failed_to_create_user": "ユーザーの作成に失敗しました: {}",
+    "failed_to_create_users_directory": "ユーザーディレクトリの作成に失敗しました: {}",
+    "failed_to_get_current_task_identifier": "現在のタスク識別子の取得に失敗しました: {}",
+    "failed_to_get_group_file_path": "グループファイルのパス取得に失敗しました",
+    "failed_to_get_new_groupe_identifier": "新しいグループ識別子の取得に失敗しました: {}",
+    "failed_to_get_new_user_identifier": "新しいユーザー識別子の取得に失敗しました: {}",
+    "failed_to_get_user_file_path": "ユーザーファイルのパス取得に失敗しました",
+    "failed_to_get_user_identifier": "ユーザー識別子の取得に失敗しました: {}",
+    "failed_to_hash_password": "パスワードのハッシュ化に失敗しました: {}",
+    "failed_to_open_group_file": "グループファイルのオープンに失敗しました: {}",
+    "failed_to_open_random_device": "乱数デバイスのオープンに失敗しました: {}",
+    "failed_to_open_user_file": "ユーザーファイルのオープンに失敗しました: {}",
+    "failed_to_parse_group_file": "グループファイルの解析に失敗しました: {}",
+    "failed_to_parse_user_file": "ユーザーファイルの解析に失敗しました: {}",
+    "failed_to_read_group_directory": "グループディレクトリの読み取りに失敗しました: {}",
+    "failed_to_read_group_file": "グループファイルの読み取りに失敗しました: {}",
+    "failed_to_read_random_device": "乱数デバイスの読み取りに失敗しました: {}",
+    "failed_to_read_user_file": "ユーザーファイルの読み取りに失敗しました: {}",
+    "failed_to_read_users_directory": "ユーザーディレクトリの読み取りに失敗しました: {}",
+    "failed_to_write_group_file": "グループファイルの書き込みに失敗しました: {}",
+    "failed_to_write_user_file": "ユーザーファイルの書き込みに失敗しました: {}",
+    "invalid_password": "無効なパスワード"
+  }
+}

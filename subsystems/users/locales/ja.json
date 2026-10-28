@@ -1,0 +1,15 @@
+{
+  "errors": {
+    "already_initialized": "既に初期化されています",
+    "duplicate_group_identifier": "グループ識別子が重複しています",
+    "duplicate_group_name": "グループ名が重複しています",
+    "duplicate_user_identifier": "ユーザー識別子が重複しています",
+    "duplicate_user_name": "ユーザー名が重複しています",
+    "invalid_group_identifier": "無効なグループ識別子",
+    "invalid_user_identifier": "無効なユーザー識別子",
+    "not_initialized": "初期化されていません",
+    "poisoned_lock": "ロックが破損しています",
+    "too_many_groups": "グループが多すぎます",
+    "too_many_users": "ユーザーが多すぎます"
+  }
+}
