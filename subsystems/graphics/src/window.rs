@@ -50,6 +50,7 @@ pub struct Window {
     event_queue: VecDeque<Event>,
     icon_spec: IconSpec,
     icon_explicit: bool,
+    icon_launch_auto: bool,
     waker: AtomicWaker,
 }
 
@@ -69,6 +70,7 @@ unsafe extern "C" fn window_constructor(
             IconSpec::automatic("Wi", "Wi", Color::BLACK),
         );
         ptr::write(&mut (*window).icon_explicit, false);
+        ptr::write(&mut (*window).icon_launch_auto, false);
         ptr::write(&mut (*window).waker, AtomicWaker::new());
 
         lvgl::lv_obj_add_flag(
@@ -234,7 +236,19 @@ impl Window {
     /// Text after a NUL is ignored; shorter strings replace the previous text.
     pub fn set_icon(&mut self, icon_string: &str, icon_color: Color) {
         if !self.icon_explicit {
-            self.icon_spec = IconSpec::automatic(icon_string, icon_string, icon_color);
+            let automatic = IconSpec::automatic(icon_string, icon_string, icon_color);
+            self.icon_spec = if self.icon_launch_auto {
+                IconSpec::procedural(
+                    self.icon_spec.motif,
+                    icon_string,
+                    icon_color,
+                    automatic.foreground,
+                    automatic.accent,
+                    self.icon_spec.seed,
+                )
+            } else {
+                automatic
+            };
             self.notify_icon_changed();
         }
     }
@@ -259,11 +273,10 @@ impl Window {
     }
 
     /// Apply a previously validated launch icon without retaining guest data.
-    pub fn apply_launch_spec(&mut self, icon: IconSpec, _explicit: bool) {
+    pub fn apply_launch_spec(&mut self, icon: IconSpec, explicit: bool) {
         self.icon_spec = icon;
-        // A launch icon, including automatic fallback, must remain consistent
-        // with the drawer when legacy apps set their usual window shorthand.
-        self.icon_explicit = true;
+        self.icon_explicit = explicit;
+        self.icon_launch_auto = !explicit;
         self.notify_icon_changed();
     }
 
@@ -271,6 +284,7 @@ impl Window {
     pub fn set_icon_spec(&mut self, icon: IconSpec) {
         self.icon_spec = icon;
         self.icon_explicit = true;
+        self.icon_launch_auto = false;
         self.notify_icon_changed();
     }
 
