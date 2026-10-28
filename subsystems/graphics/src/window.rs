@@ -1,11 +1,10 @@
-use super::lvgl;
+use super::{icon_text::IconText, lvgl};
 use crate::{Color, Error, EventKind, Key, Result, event::Event};
 use alloc::collections::VecDeque;
 use core::{
     mem::ManuallyDrop,
     ops::{Deref, DerefMut},
     ptr::{self, NonNull},
-    str,
 };
 use synchronization::{once_lock::OnceLock, waitqueue::AtomicWaker};
 
@@ -49,7 +48,7 @@ pub fn get_window_class() -> &'static lvgl::lv_obj_class_t {
 pub struct Window {
     object: lvgl::lv_obj_t,
     event_queue: VecDeque<Event>,
-    icon_text: [u8; 2],
+    icon_text: IconText,
     icon_color: Color,
     waker: AtomicWaker,
 }
@@ -65,7 +64,7 @@ unsafe extern "C" fn window_constructor(
             &mut (*window).event_queue,
             VecDeque::with_capacity(WINDOW_QUEUE_DEFAULT_CAPACITY),
         );
-        ptr::write(&mut (*window).icon_text, *b"Wi");
+        ptr::write(&mut (*window).icon_text, IconText::new("Wi"));
         ptr::write(&mut (*window).icon_color, Color::BLACK);
         ptr::write(&mut (*window).waker, AtomicWaker::new());
 
@@ -225,24 +224,13 @@ impl Window {
     }
 
     pub fn get_icon(&self) -> (&str, Color) {
-        let icon_string = str::from_utf8(&self.icon_text)
-            .unwrap_or("??")
-            .trim_matches(char::from(0));
-
-        (icon_string, self.icon_color)
+        (self.icon_text.as_str(), self.icon_color)
     }
 
+    /// Set the legacy icon using up to two Unicode scalar values.
+    /// Text after a NUL is ignored; shorter strings replace the previous text.
     pub fn set_icon(&mut self, icon_string: &str, icon_color: Color) {
-        let mut iterator = icon_string.chars();
-
-        if let Some(character) = iterator.next() {
-            self.icon_text[0] = character as u8;
-        }
-
-        if let Some(character) = iterator.next() {
-            self.icon_text[1] = character as u8;
-        }
-
+        self.icon_text = IconText::new(icon_string);
         self.icon_color = icon_color;
     }
 
