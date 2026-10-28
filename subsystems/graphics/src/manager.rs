@@ -196,6 +196,19 @@ impl Manager {
         self.injected_inputs.pointer_move(point)
     }
 
+    /// Atomically queue a pointer move and complete click at a valid display point.
+    pub async fn inject_pointer_click(&self, point: crate::Point) -> Result<()> {
+        let _lock = self.global_lock.lock().await;
+        let inner = self.inner.read().await;
+        let resolution = inner
+            .displays
+            .first()
+            .map(Display::get_resolution)
+            .ok_or(Error::NotAvailable)?;
+        validate_pointer_point(point, resolution)?;
+        self.injected_inputs.pointer_click(point)
+    }
+
     /// Queue a pointer button state at the most recently injected pointer point.
     pub async fn inject_pointer_button(&self, state: State) -> Result<()> {
         let _lock = self.global_lock.lock().await;
@@ -208,10 +221,23 @@ impl Manager {
         self.injected_inputs.key(key, state)
     }
 
+    /// Queue a complete key press and release, or leave the queue unchanged.
+    pub async fn inject_key_press(&self, key: Key) -> Result<()> {
+        let _lock = self.global_lock.lock().await;
+        self.injected_inputs.key_press(key)
+    }
+
     /// Queue printable ASCII text as ordered key press and release events.
     pub async fn inject_text(&self, text: &str) -> Result<usize> {
         let _lock = self.global_lock.lock().await;
         self.injected_inputs.text(text)
+    }
+
+    /// Queue a bounded prefix of printable Unicode text, returning the accepted byte count.
+    /// A queue-full error never enqueues a partial press/release pair.
+    pub async fn inject_text_chunk(&self, text: &str) -> Result<usize> {
+        let _lock = self.global_lock.lock().await;
+        self.injected_inputs.text_chunk(text)
     }
 
     pub fn lock_function_sync<T>(&self, function: impl FnOnce() -> Result<T>) -> Result<T> {
