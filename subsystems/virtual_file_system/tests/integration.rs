@@ -474,7 +474,7 @@ async fn hierarchy_reports_non_directory_conflicts() {
 
 #[cfg(target_os = "linux")]
 #[test]
-async fn global_application_storage_is_private_and_user_app_storage_is_separate() {
+async fn global_application_storage_follows_posix_and_user_app_storage_is_separate() {
     let (task, vfs) = initialize().await;
     virtual_file_system::create_default_hierarchy(vfs, task)
         .await
@@ -520,36 +520,9 @@ async fn global_application_storage_is_private_and_user_app_storage_is_separate(
 
     let task_manager = vfs.task_manager();
     task_manager.set_user(task, user).await.unwrap();
-    let clock = application_metadata::application_identifier("clock").unwrap();
-    task_manager
-        .set_application_identifier(task, Some(clock))
-        .await
-        .unwrap();
-    assert_eq!(
-        task::block_on(vfs.get_statistics_for_task(task, &global_directory))
-            .unwrap()
-            .kind,
-        file_system::Kind::Directory
-    );
-    File::open(
-        vfs,
-        task,
-        "/data/applications/clock/state",
-        AccessFlags::Read.into(),
-    )
-    .await
-    .unwrap()
-    .close(vfs)
-    .await
-    .unwrap();
-
-    task_manager
-        .set_application_identifier(
-            task,
-            application_metadata::application_identifier("terminal"),
-        )
-        .await
-        .unwrap();
+    // POSIX ownership and mode bits are the only filesystem access policy.
+    // The global application data tree is root-owned, so a normal user
+    // cannot read it, irrespective of which binary they are running.
     assert_eq!(
         task::block_on(vfs.get_statistics_for_task(task, &global_directory)),
         Err(virtual_file_system::Error::PermissionDenied)
@@ -564,6 +537,19 @@ async fn global_application_storage_is_private_and_user_app_storage_is_separate(
         .await,
         Err(virtual_file_system::Error::PermissionDenied)
     ));
+
+    // A user-owned private directory remains accessible to its owner.
+    File::open(
+        vfs,
+        task,
+        user_data.append("state").unwrap().as_str(),
+        Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
+    )
+    .await
+    .unwrap()
+    .close(vfs)
+    .await
+    .unwrap();
 }
 
 #[cfg(target_os = "linux")]

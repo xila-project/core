@@ -11,7 +11,6 @@ users = { workspace = true }
 shared = { workspace = true }
 log = { workspace = true }
 embedded-i18n = { workspace = true }
-application_metadata = { workspace = true }
 graphics = { workspace = true, optional = true }
 network = { workspace = true }
 time = { workspace = true }

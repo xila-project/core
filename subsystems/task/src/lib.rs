@@ -10,7 +10,6 @@ extern crate std;
 #[cfg(all(feature = "profiling", target_os = "linux"))]
 pub mod profiling;
 
-mod application_identifier;
 mod environment_variable;
 mod error;
 mod join_handle;
@@ -21,7 +20,6 @@ mod task;
 use core::{future::poll_fn, task::Poll, time::Duration};
 use embassy_time::Timer;
 
-pub use application_identifier::*;
 pub use embassy_executor;
 pub use environment_variable::*;
 pub use error::*;
