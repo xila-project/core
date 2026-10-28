@@ -15,6 +15,14 @@ mod tests {
     use super::fonts::{effective_ranges, supported_variants};
 
     #[test]
+    fn cache_digest_retains_sha256_hex_encoding() {
+        assert_eq!(
+            super::cache::digest(&[b"abc"]),
+            "c3494ca1a2cf8eeb8a11ded316fb55b83c3bbbedb6313cd50415251e5d09e12f"
+        );
+    }
+
+    #[test]
     fn english_includes_required_extras() {
         assert_eq!(
             effective_ranges("en", "en").unwrap(),
