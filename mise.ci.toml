@@ -192,6 +192,11 @@ for locale in "${locales[@]}"; do
   if [[ "$locale" == ja ]]; then
     bash tools/localization/fetch-japanese-font.sh
     export XILA_JAPANESE_FONT_PATH="$PWD/subsystems/graphics/fonts/SourceHanSansJP-Regular.otf"
+    mkdir -p "$CARGO_TARGET_DIR"
+    export XILA_GUEST_CARGO_CONFIG="$CARGO_TARGET_DIR/ja-core-patches.toml"
+    python3 tools/localization/write-core-patches.py "$XILA_GUEST_CARGO_CONFIG"
+  else
+    unset XILA_GUEST_CARGO_CONFIG
   fi
   mise run localization:check
   if [[ "$locale" == zh-CN || "$locale" == ja ]]; then
