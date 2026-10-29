@@ -109,6 +109,25 @@ fn validate_environment(environment: &[(String, String)]) -> Result<()> {
     Ok(())
 }
 
+async fn prepare_launch_environment(
+    tasks: &task::Manager,
+    identifier: task::TaskIdentifier,
+    environment: &[(String, String)],
+) -> task::Result<()> {
+    // Child tasks inherit environment values, but a new executable has its own
+    // identity and must not accidentally inherit the launching app's icon.
+    #[cfg(feature = "graphics")]
+    tasks
+        .remove_environment_variable(identifier, graphics::ICON_ENVIRONMENT)
+        .await?;
+    for (name, value) in environment {
+        tasks
+            .set_environment_variable(identifier, name, value)
+            .await?;
+    }
+    Ok(())
+}
+
 /// Execute with caller-provided environment overrides installed before
 /// the new program is polled. The overrides are private to the spawned task and
 /// inherited by its children.
@@ -174,16 +193,13 @@ pub async fn execute_with_environment(
             spawner,
             application_identifier,
             async move |task| {
-                for (name, value) in environment {
-                    if context
-                        .task_manager
-                        .set_environment_variable(task, &name, &value)
-                        .await
-                        .is_err()
-                    {
-                        return -1;
-                    }
+                if prepare_launch_environment(context.task_manager, task, &environment)
+                    .await
+                    .is_err()
+                {
+                    return -1;
                 }
+                drop(environment);
                 if let Some(new_user) = new_user {
                     context.task_manager.set_user(task, new_user).await.unwrap();
                 }
@@ -209,6 +225,41 @@ mod tests {
     use users::GroupIdentifier;
 
     use super::*;
+
+    #[cfg(feature = "graphics")]
+    #[test]
+    async fn executable_launch_clears_inherited_icon_without_an_override() {
+        let manager = task::get_instance();
+        let current = manager.get_current_task_identifier().await;
+        manager
+            .set_environment_variable(current, graphics::ICON_ENVIRONMENT, "parent-icon")
+            .await
+            .unwrap();
+        prepare_launch_environment(manager, current, &[])
+            .await
+            .unwrap();
+        assert!(
+            manager
+                .get_environment_variable(current, graphics::ICON_ENVIRONMENT)
+                .await
+                .is_err()
+        );
+        prepare_launch_environment(
+            manager,
+            current,
+            &[(graphics::ICON_ENVIRONMENT.into(), "child-icon".into())],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            manager
+                .get_environment_variable(current, graphics::ICON_ENVIRONMENT)
+                .await
+                .unwrap()
+                .get_value(),
+            "child-icon"
+        );
+    }
 
     fn get_statistics_with_permissions(permissions: Permissions) -> Statistics {
         Statistics::new(
