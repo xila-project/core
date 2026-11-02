@@ -39,6 +39,9 @@ impl Path {
     /// System and application configuration.
     pub const CONFIGURATION: &'static Path = Self::from_str("/configuration");
     pub const SYSTEM_CONFIGURATION: &'static Path = Self::from_str("/configuration/system");
+    /// Package installation policy, such as the trusted repository key.
+    pub const PACKAGE_CONFIGURATION: &'static Path =
+        Self::from_str("/configuration/system/packages");
     pub const APPLICATION_CONFIGURATION: &'static Path =
         Self::from_str("/configuration/applications");
     pub const SHARED_CONFIGURATION: &'static Path = Self::from_str("/configuration/shared");
@@ -47,6 +50,9 @@ impl Path {
     pub const APPLICATIONS: &'static Path = Self::from_str("/applications");
     pub const APPLICATION_EXECUTABLES: &'static Path = Self::from_str("/applications/executables");
     pub const APPLICATION_LIBRARIES: &'static Path = Self::from_str("/applications/libraries");
+    /// Installed self-contained application bundles: `/applications/bundles/<package-id>/`,
+    /// each the extracted `.xpk` archive (`.xila/`, `executables/`, resources, `shortcut.json`).
+    pub const APPLICATION_BUNDLES: &'static Path = Self::from_str("/applications/bundles");
 
     /// Mutable persistent state.
     pub const DATA: &'static Path = Self::from_str("/data");

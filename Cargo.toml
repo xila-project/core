@@ -53,7 +53,6 @@ drivers_shared = { package = "xila-drivers-shared", git = "https://github.com/xi
 drivers_std = { package = "xila-drivers-std", git = "https://github.com/xila-project/platforms", rev = "5fd89904fbe6da91dabbae6ac52b52bd8ff16220" }
 
 # - Executables
-command_line_shell = { package = "xila-command-line-shell", git = "https://github.com/xila-project/applications", rev = "26ee04355c3ddea0f41ee81ece168cec2f9eb376" }
 
 # - External crates
 embedded-hal = { version = "1", default-features = false }
