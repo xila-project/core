@@ -106,8 +106,22 @@ pub struct UiElement {
     /// Position in the depth-first snapshot, valid only for that snapshot.
     pub id: u32,
     pub parent_id: Option<u32>,
+    /// LVGL class name, retained for compatibility and custom widgets.
     pub role: String,
+    /// Semantic role for supported widgets; absent for unknown classes.
+    pub semantic_role: Option<&'static str>,
+    /// Direct label or placeholder, capped to 128 input bytes.
+    pub name: Option<String>,
+    /// Raw text from labels and text areas, as in the original snapshot API.
     pub text: Option<String>,
+    /// The object or an ancestor is marked hidden (independent of clipping).
+    pub hidden: bool,
+    /// The object is marked disabled by LVGL.
+    pub disabled: bool,
+    pub focused: bool,
+    /// LVGL clickable flag, not a guarantee that the object can be hit.
+    pub clickable: bool,
+    pub checked: Option<bool>,
     /// Inclusive screen coordinates `(x1, y1, x2, y2)`.
     pub bounds: (i32, i32, i32, i32),
 }
@@ -123,6 +137,8 @@ pub struct UiTreeSnapshot {
 pub const UI_TREE_MAX_ELEMENTS: usize = 256;
 pub const UI_TREE_MAX_DEPTH: usize = 24;
 const UI_ELEMENT_MAX_TEXT_BYTES: usize = 512;
+const UI_ELEMENT_MAX_NAME_BYTES: usize = 128;
+const UI_NAME_MAX_CHILDREN: u32 = 16;
 
 impl Manager {
     /// Snapshot a bounded depth-first view of the currently mounted UI tree.
@@ -196,6 +212,19 @@ impl Manager {
         self.injected_inputs.pointer_move(point)
     }
 
+    /// Atomically queue a pointer move and complete click at a valid display point.
+    pub async fn inject_pointer_click(&self, point: crate::Point) -> Result<()> {
+        let _lock = self.global_lock.lock().await;
+        let inner = self.inner.read().await;
+        let resolution = inner
+            .displays
+            .first()
+            .map(Display::get_resolution)
+            .ok_or(Error::NotAvailable)?;
+        validate_pointer_point(point, resolution)?;
+        self.injected_inputs.pointer_click(point)
+    }
+
     /// Queue a pointer button state at the most recently injected pointer point.
     pub async fn inject_pointer_button(&self, state: State) -> Result<()> {
         let _lock = self.global_lock.lock().await;
@@ -208,10 +237,23 @@ impl Manager {
         self.injected_inputs.key(key, state)
     }
 
+    /// Queue a complete key press and release, or leave the queue unchanged.
+    pub async fn inject_key_press(&self, key: Key) -> Result<()> {
+        let _lock = self.global_lock.lock().await;
+        self.injected_inputs.key_press(key)
+    }
+
     /// Queue printable ASCII text as ordered key press and release events.
     pub async fn inject_text(&self, text: &str) -> Result<usize> {
         let _lock = self.global_lock.lock().await;
         self.injected_inputs.text(text)
+    }
+
+    /// Queue a bounded prefix of printable Unicode text, returning the accepted byte count.
+    /// A queue-full error never enqueues a partial press/release pair.
+    pub async fn inject_text_chunk(&self, text: &str) -> Result<usize> {
+        let _lock = self.global_lock.lock().await;
+        self.injected_inputs.text_chunk(text)
     }
 
     pub fn lock_function_sync<T>(&self, function: impl FnOnce() -> Result<T>) -> Result<T> {
@@ -246,6 +288,18 @@ fn validate_ui_tree_limits(max_elements: usize, max_depth: usize) -> Result<()> 
 #[cfg(test)]
 mod ui_tree_tests {
     use super::*;
+
+    #[test]
+    fn semantic_roles_cover_common_widgets_and_preserve_unknown_classes() {
+        assert_eq!(semantic_role("lv_button"), Some("button"));
+        assert_eq!(semantic_role("lv_textarea"), Some("textbox"));
+        assert_eq!(semantic_role("lv_checkbox"), Some("checkbox"));
+        assert_eq!(semantic_role("lv_switch"), Some("switch"));
+        assert_eq!(semantic_role("lv_slider"), Some("slider"));
+        assert_eq!(semantic_role("lv_dropdown"), Some("combobox"));
+        assert_eq!(semantic_role("lv_label"), Some("text"));
+        assert_eq!(semantic_role("my_custom_widget"), None);
+    }
 
     #[test]
     fn tree_limits_are_bounded() {
@@ -284,6 +338,66 @@ mod injected_input_tests {
     }
 }
 
+fn semantic_role(class: &str) -> Option<&'static str> {
+    match class {
+        "lv_button" | "lv_list_button" => Some("button"),
+        "lv_textarea" => Some("textbox"),
+        "lv_checkbox" => Some("checkbox"),
+        "lv_switch" => Some("switch"),
+        "lv_slider" => Some("slider"),
+        "lv_dropdown" => Some("combobox"),
+        "lv_label" | "lv_list_text" => Some("text"),
+        "lv_list" => Some("list"),
+        _ => None,
+    }
+}
+
+/// Flags report explicit LVGL state; they do not assert visibility through
+/// clipping, occlusion, or whether a click would hit this object.
+unsafe fn is_hidden_by_ancestor(mut object: *mut lvgl::lv_obj_t) -> bool {
+    while !object.is_null() {
+        if unsafe { lvgl::lv_obj_has_flag(object, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_HIDDEN) } {
+            return true;
+        }
+        object = unsafe { lvgl::lv_obj_get_parent(object) };
+    }
+    false
+}
+
+/// Use only unambiguous associations: textarea placeholder, checkbox text, or
+/// the first direct label in a button. Never search arbitrary siblings.
+unsafe fn widget_name(object: *mut lvgl::lv_obj_t, semantic_role: Option<&str>) -> Option<String> {
+    unsafe {
+        match semantic_role {
+            Some("textbox") if lvgl::lv_obj_has_class(object, &lvgl::lv_textarea_class) => {
+                bounded_c_string_with_limit(
+                    lvgl::lv_textarea_get_placeholder_text(object),
+                    UI_ELEMENT_MAX_NAME_BYTES,
+                )
+            }
+            Some("checkbox") if lvgl::lv_obj_has_class(object, &lvgl::lv_checkbox_class) => {
+                bounded_c_string_with_limit(
+                    lvgl::lv_checkbox_get_text(object),
+                    UI_ELEMENT_MAX_NAME_BYTES,
+                )
+            }
+            Some("button") if lvgl::lv_obj_has_class(object, &lvgl::lv_button_class) => {
+                for index in 0..lvgl::lv_obj_get_child_count(object).min(UI_NAME_MAX_CHILDREN) {
+                    let child = lvgl::lv_obj_get_child(object, index as i32);
+                    if lvgl::lv_obj_has_class(child, &lvgl::lv_label_class) {
+                        return bounded_c_string_with_limit(
+                            lvgl::lv_label_get_text(child),
+                            UI_ELEMENT_MAX_NAME_BYTES,
+                        );
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+}
+
 unsafe fn inspect_children(
     object: *mut lvgl::lv_obj_t,
     parent_id: Option<u32>,
@@ -313,20 +427,46 @@ unsafe fn inspect_children(
     unsafe { lvgl::lv_obj_get_coords(object, &mut area) };
 
     let text = unsafe {
-        if lvgl::lv_obj_check_type(object, &lvgl::lv_label_class) {
+        if lvgl::lv_obj_has_class(object, &lvgl::lv_label_class) {
             bounded_c_string(lvgl::lv_label_get_text(object))
-        } else if lvgl::lv_obj_check_type(object, &lvgl::lv_textarea_class) {
+        } else if lvgl::lv_obj_has_class(object, &lvgl::lv_textarea_class) {
             bounded_c_string(lvgl::lv_textarea_get_text(object))
         } else {
             None
         }
     };
 
+    let semantic_role = semantic_role(&role);
+    let (name, hidden, disabled, focused, clickable, checked) = unsafe {
+        (
+            widget_name(object, semantic_role),
+            is_hidden_by_ancestor(object),
+            lvgl::lv_obj_has_state(object, lvgl::lv_state_t_LV_STATE_DISABLED),
+            lvgl::lv_obj_has_state(object, lvgl::lv_state_t_LV_STATE_FOCUSED),
+            lvgl::lv_obj_has_flag(object, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_CLICKABLE),
+            if matches!(semantic_role, Some("checkbox" | "switch")) {
+                Some(lvgl::lv_obj_has_state(
+                    object,
+                    lvgl::lv_state_t_LV_STATE_CHECKED,
+                ))
+            } else {
+                None
+            },
+        )
+    };
+
     elements.push(UiElement {
         id,
         parent_id,
         role,
+        semantic_role,
+        name,
         text,
+        hidden,
+        disabled,
+        focused,
+        clickable,
+        checked,
         bounds: (area.x1, area.y1, area.x2, area.y2),
     });
 
@@ -360,13 +500,20 @@ unsafe fn inspect_children(
 
 /// Copy a valid C string with a hard byte cap without scanning past its NUL.
 unsafe fn bounded_c_string(pointer: *const core::ffi::c_char) -> Option<String> {
+    unsafe { bounded_c_string_with_limit(pointer, UI_ELEMENT_MAX_TEXT_BYTES) }
+}
+
+unsafe fn bounded_c_string_with_limit(
+    pointer: *const core::ffi::c_char,
+    limit: usize,
+) -> Option<String> {
     if pointer.is_null() {
         return None;
     }
 
     let bytes = pointer.cast::<u8>();
     let mut length = 0;
-    while length < UI_ELEMENT_MAX_TEXT_BYTES && unsafe { *bytes.add(length) } != 0 {
+    while length < limit && unsafe { *bytes.add(length) } != 0 {
         length += 1;
     }
 
