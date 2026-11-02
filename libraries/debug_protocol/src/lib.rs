@@ -105,6 +105,10 @@ pub enum Request {
         key: String,
         state: InputState,
     },
+    /// Atomically queue a key press followed by release.
+    PressKey {
+        key: String,
+    },
     Text {
         text: String,
     },
