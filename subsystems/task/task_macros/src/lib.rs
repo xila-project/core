@@ -10,8 +10,15 @@ fn default_task_path() -> syn::Expr {
     parse_str("task").unwrap()
 }
 
-fn default_executor() -> syn::Expr {
+/// Default executor for `run`: the platform's std executor.
+fn default_run_executor() -> syn::Expr {
     parse_str("drivers_std::executor::instantiate_static_executor!()").unwrap()
+}
+
+/// Default executor for `test`: `task`'s own test executor (`test_harness`),
+/// so tests do not depend on a platform crate.
+fn default_test_executor(task_path: &syn::Expr) -> syn::Expr {
+    syn::parse_quote!(#task_path::instantiate_test_executor!())
 }
 
 #[derive(Debug, FromMeta, Clone)]
@@ -19,8 +26,8 @@ struct TaskArguments {
     #[darling(default = "default_task_path")]
     pub task_path: syn::Expr,
 
-    #[darling(default = "default_executor")]
-    pub executor: syn::Expr,
+    #[darling(default)]
+    pub executor: Option<syn::Expr>,
 
     #[darling(default)]
     pub manager: Option<syn::Expr>,
@@ -70,8 +77,10 @@ pub fn test(arguments: TokenStream, input: TokenStream) -> TokenStream {
         Err(e) => return e.write_errors().into(),
     };
 
-    let executor = arguments.executor;
     let task_path = arguments.task_path;
+    let executor = arguments
+        .executor
+        .unwrap_or_else(|| default_test_executor(&task_path));
 
     // Extract function details
     let function_name = &input_function.sig.ident;
@@ -212,7 +221,7 @@ pub fn run(arguments: TokenStream, input: TokenStream) -> TokenStream {
     let input_function = parse_macro_input!(input as ItemFn);
 
     let task_path = arguments.task_path;
-    let executor_expression = arguments.executor;
+    let executor_expression = arguments.executor.unwrap_or_else(default_run_executor);
     let Some(manager_expression) = arguments.manager else {
         return syn::Error::new(
             proc_macro2::Span::call_site(),
