@@ -15,7 +15,6 @@ EXPECTED_PACKAGE_NAMES = {
     "drivers/core/Cargo.toml": "xila-drivers-core",
     "libraries/abi/declarations/Cargo.toml": "xila-abi-declarations",
     "libraries/abi/definitions/Cargo.toml": "xila-abi-definitions",
-    "libraries/application_metadata/Cargo.toml": "xila-application-metadata",
     "libraries/audio/Cargo.toml": "xila-audio",
     "libraries/authentication/Cargo.toml": "xila-authentication",
     "libraries/bootsplash/Cargo.toml": "xila-bootsplash",
@@ -49,7 +48,6 @@ EXPECTED_BINARY_TARGETS = {
 }
 
 EXPECTED_LIBRARY_TARGETS = {
-    "libraries/application_metadata/Cargo.toml": "application_metadata",
     "subsystems/task/Cargo.toml": "task",
     "libraries/synchronization/Cargo.toml": "synchronization",
     "drivers/core/Cargo.toml": "drivers_core",

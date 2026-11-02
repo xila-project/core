@@ -3,29 +3,10 @@
 use alloc::string::ToString;
 
 use super::*;
-use crate::ApplicationIdentifier;
 use alloc::{string::String, vec::Vec};
 use users::{GroupIdentifier, UserIdentifier};
 
 impl Manager {
-    pub async fn set_application_identifier(
-        &self,
-        task_identifier: TaskIdentifier,
-        identifier: Option<ApplicationIdentifier>,
-    ) -> Result<()> {
-        Self::get_task_mutable(&mut *self.0.write().await, task_identifier)?
-            .application_identifier = identifier;
-        Ok(())
-    }
-
-    pub async fn get_application_identifier(
-        &self,
-        task_identifier: TaskIdentifier,
-    ) -> Result<Option<ApplicationIdentifier>> {
-        Self::get_task(&*self.0.read().await, task_identifier)
-            .map(|task| task.application_identifier)
-    }
-
     pub async fn set_user(
         &self,
         task_identifier: TaskIdentifier,

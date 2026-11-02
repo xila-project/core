@@ -4707,13 +4707,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "xila-application-metadata"
-version = "0.1.0"
-dependencies = [
- "xila-task",
-]
-
-[[package]]
 name = "xila-audio"
 version = "0.1.0"
 dependencies = [
@@ -4731,7 +4724,6 @@ dependencies = [
  "embedded-i18n",
  "miniserde",
  "xila-abi-definitions",
- "xila-application-metadata",
  "xila-device",
  "xila-drivers-native",
  "xila-drivers-shared",
@@ -4849,7 +4841,6 @@ name = "xila-executable"
 version = "0.1.0"
 dependencies = [
  "embedded-i18n",
- "xila-application-metadata",
  "xila-drivers-core",
  "xila-drivers-native",
  "xila-drivers-shared",
@@ -5122,7 +5113,6 @@ dependencies = [
  "embedded-i18n",
  "embedded-io-async",
  "xila-abi-definitions",
- "xila-application-metadata",
  "xila-drivers-core",
  "xila-drivers-native",
  "xila-drivers-shared",
