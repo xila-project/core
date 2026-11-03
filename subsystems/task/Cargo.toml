@@ -11,6 +11,8 @@ embassy-futures = { workspace = true }
 smol_str = { workspace = true }
 synchronization = { workspace = true }
 embedded-i18n = { workspace = true }
+# std critical sections for test binaries (`test_harness`).
+critical-section = { workspace = true, optional = true, features = ["std"] }
 
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
@@ -40,6 +42,7 @@ test_harness = [
 profiling = ["dep:libc"]
 
 [dev-dependencies]
+critical-section = { workspace = true, features = ["std"] }
 embassy-executor = { workspace = true, default-features = false, features = [
   "platform-std",
   "executor-thread",
