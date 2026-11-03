@@ -23,6 +23,28 @@ pub struct ExecutableContext {
     pub time_manager: &'static time::Manager<'static>,
 }
 
+impl ExecutableContext {
+    /// A context without a graphics manager, whichever features are enabled:
+    /// callers need not know whether the `graphics` field exists.
+    pub fn new(
+        task_manager: &'static task::Manager,
+        users_manager: &'static users::Manager,
+        virtual_file_system: &'static virtual_file_system::VirtualFileSystem,
+        network_manager: Option<&'static network::Manager>,
+        time_manager: &'static time::Manager<'static>,
+    ) -> Self {
+        Self {
+            task_manager,
+            users_manager,
+            virtual_file_system,
+            #[cfg(feature = "graphics")]
+            graphics_manager: None,
+            network_manager,
+            time_manager,
+        }
+    }
+}
+
 pub type MainFuture =
     Pin<Box<dyn Future<Output = core::result::Result<(), NonZeroUsize>> + 'static>>;
 

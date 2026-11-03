@@ -18,9 +18,9 @@ mod logger;
 mod memory_manager;
 #[cfg(feature = "graphics")]
 mod screen;
-/// Deterministic Wi-Fi control-plane mock; it never changes the host's Wi-Fi.
+/// Deterministic Wi-Fi control-plane mock (`drivers_core::wifi`); it never changes the host's Wi-Fi.
 #[cfg(feature = "environment")]
-pub mod wifi;
+pub use drivers_core::wifi;
 
 pub use devices::{ConsoleDevice, RandomDevice, TimeDevice};
 pub use hash::HashDevice;
@@ -152,15 +152,21 @@ pub async fn initialize(graphics_enabled: bool, network_enabled: bool) -> Standa
         )))
     });
 
-    let executable_context: &'static ExecutableContext = Box::leak(Box::new(ExecutableContext {
+    // `executable` may have `graphics` enabled by another crate even when this
+    // crate's `graphics` feature is off, so construct without naming the field.
+    #[allow(unused_mut)]
+    let mut context = ExecutableContext::new(
         task_manager,
-        users_manager: users,
+        users,
         virtual_file_system,
-        #[cfg(feature = "graphics")]
-        graphics_manager,
         network_manager,
-        time_manager: time,
-    }));
+        time,
+    );
+    #[cfg(feature = "graphics")]
+    {
+        context.graphics_manager = graphics_manager;
+    }
+    let executable_context: &'static ExecutableContext = Box::leak(Box::new(context));
 
     let group = GroupIdentifier::new(1000);
     let authentication_context = authentication::Context {
