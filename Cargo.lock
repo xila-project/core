@@ -2223,6 +2223,7 @@ dependencies = [
 name = "xila-testing"
 version = "0.1.0"
 dependencies = [
+ "embassy-futures",
  "getrandom 0.3.4",
  "sha2",
  "xila-abi-definitions",
@@ -2237,6 +2238,7 @@ dependencies = [
  "xila-memory",
  "xila-network",
  "xila-shared",
+ "xila-synchronization",
  "xila-task",
  "xila-time",
  "xila-users",
