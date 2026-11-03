@@ -32,7 +32,11 @@ libc = { version = "0.2", optional = true }
 default = []
 std = []
 # Test executor for `#[task::test]` (std; Embassy provides its std pender).
-test_harness = ["std", "embassy-executor/platform-std", "embassy-executor/executor-thread"]
+test_harness = [
+  "std",
+  "embassy-executor/platform-std",
+  "embassy-executor/executor-thread",
+]
 profiling = ["dep:libc"]
 
 [dev-dependencies]

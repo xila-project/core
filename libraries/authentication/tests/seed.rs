@@ -3,14 +3,12 @@ use abi_definitions as _;
 use authentication::{Context, initialize_seeded};
 use users::{GroupIdentifier, UserIdentifier};
 use virtual_file_system::{File, ItemStatic};
-drivers_std::instantiate_global_allocator!();
+testing::instantiate_global_allocator!();
 
 async fn fixture() -> Context<'static> {
     let task_manager = task::test_manager();
     let users_manager = Box::leak(Box::new(users::Manager::new()));
-    let time = Box::leak(Box::new(
-        time::Manager::new(&drivers_std::devices::TimeDevice).unwrap(),
-    ));
+    let time = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
     let fs = little_fs::FileSystem::new_format(
         file_system::MemoryDevice::<512>::new_static(512 * 1024),
         256,
@@ -26,14 +24,14 @@ async fn fixture() -> Context<'static> {
     vfs.mount_static(
         task,
         &"/devices/random/source",
-        ItemStatic::CharacterDevice(&drivers_shared::devices::RandomDevice),
+        ItemStatic::CharacterDevice(&testing::RandomDevice),
     )
     .await
     .unwrap();
     vfs.mount_static(
         task,
         &"/devices/compute/hasher",
-        ItemStatic::CharacterDevice(&drivers_shared::devices::HashDevice),
+        ItemStatic::CharacterDevice(&testing::HashDevice),
     )
     .await
     .unwrap();

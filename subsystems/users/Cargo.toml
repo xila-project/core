@@ -8,11 +8,9 @@ synchronization = { workspace = true }
 embedded-i18n = { workspace = true }
 
 [dev-dependencies]
+testing = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }
-drivers_native = { workspace = true }
 drivers_core = { workspace = true }
-drivers_shared = { workspace = true }
-drivers_std = { workspace = true }
 
 [lib]
 name = "users"

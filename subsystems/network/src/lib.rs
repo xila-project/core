@@ -30,7 +30,7 @@ pub mod tests {
 
     extern crate abi_definitions;
 
-    drivers_std::memory::instantiate_global_allocator!();
+    testing::instantiate_global_allocator!();
 
     pub(crate) static TEST_TASK_MANAGER: synchronization::once_lock::OnceLock<
         &'static task::Manager,
@@ -47,15 +47,14 @@ pub mod tests {
 
         *initialized = true;
 
-        static RANDOM_DEVICE: drivers_shared::devices::RandomDevice =
-            drivers_shared::devices::RandomDevice;
-        static TIME_DEVICE: drivers_std::devices::TimeDevice = drivers_std::devices::TimeDevice;
+        static RANDOM_DEVICE: testing::RandomDevice = testing::RandomDevice;
+        static TIME_DEVICE: testing::TimeDevice = testing::TimeDevice;
 
         let task_manager = Box::leak(Box::new(task::Manager::new()));
         TEST_TASK_MANAGER.get_or_init(|| task_manager);
         let task = task_manager.get_current_task_identifier().await;
 
-        log::initialize(&drivers_std::log::Logger).unwrap();
+        log::initialize(&testing::Logger).unwrap();
 
         let user_manager = Box::leak(Box::new(users::Manager::new()));
 
@@ -90,7 +89,7 @@ pub mod tests {
 
         let (device, controler_device) = crate::create_loopback_device();
 
-        let spawner = drivers_std::executor::new_thread_executor(task_manager).await;
+        let spawner = testing::new_thread_executor(task_manager).await;
 
         network_manager
             .mount_interface(task, "loopback0", device, controler_device, Some(spawner))

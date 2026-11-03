@@ -10,10 +10,7 @@ darling = { workspace = true }
 proc-macro2 = { workspace = true }
 
 [dev-dependencies]
-drivers_native = { workspace = true }
 drivers_core = { workspace = true }
-drivers_shared = { workspace = true }
-drivers_std = { workspace = true }
 
 [lib]
 proc-macro = true

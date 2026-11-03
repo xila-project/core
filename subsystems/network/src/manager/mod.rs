@@ -388,8 +388,7 @@ mod clock_tests {
     #[test]
     fn smoltcp_uses_monotonic_microseconds_and_saturates_without_rewinding() {
         let clock = Clock(AtomicU64::new(10_123));
-        let manager =
-            time::Manager::with_monotonic_clock(&drivers_std::devices::TimeDevice, &clock).unwrap();
+        let manager = time::Manager::with_monotonic_clock(&testing::TimeDevice, &clock).unwrap();
         assert_eq!(get_smoltcp_time(&manager).total_micros(), 10_123);
         clock.0.store(i64::MAX as u64 + 1, Ordering::Relaxed);
         assert_eq!(get_smoltcp_time(&manager).total_micros(), i64::MAX);

@@ -45,7 +45,7 @@ abi_definitions = { workspace = true, optional = true }
 critical-section = { workspace = true, optional = true, features = ["std"] }
 
 [dev-dependencies]
-drivers_std = { workspace = true }
+testing = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }
 ed25519-dalek = { version = "3.0", default-features = false }
 critical-section = { workspace = true, features = ["std"] }

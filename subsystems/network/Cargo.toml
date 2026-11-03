@@ -38,10 +38,8 @@ smoltcp = { workspace = true, features = [
 heapless = { version = "0.9" }
 
 [dev-dependencies]
-task = { workspace = true, features = ["test_harness"] }
 testing = { workspace = true }
-drivers_std = { workspace = true }
-drivers_shared = { workspace = true }
+task = { workspace = true, features = ["test_harness"] }
 little_fs = { workspace = true }
 abi_definitions = { workspace = true }
 

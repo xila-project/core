@@ -108,7 +108,7 @@ mod tests {
     extern crate abi_definitions;
     use super::*;
 
-    drivers_std::memory::instantiate_global_allocator!();
+    testing::instantiate_global_allocator!();
 
     #[test]
     fn palette_updates_preserve_widget_styles_and_logo_geometry() {

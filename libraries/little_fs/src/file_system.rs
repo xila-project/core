@@ -584,11 +584,11 @@ mod tests {
 
     const CACHE_SIZE: usize = 256;
 
-    drivers_std::memory::instantiate_global_allocator!();
+    testing::instantiate_global_allocator!();
 
     fn initialize() -> FileSystem {
         if !log::is_initialized() {
-            let _ = log::initialize(&drivers_std::log::Logger);
+            let _ = log::initialize(&testing::Logger);
         }
 
         let device = Box::leak(Box::new(MemoryDevice::<512>::new(2048 * 512)));

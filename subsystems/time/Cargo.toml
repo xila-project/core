@@ -12,7 +12,8 @@ synchronization = { workspace = true }
 embedded-i18n = { workspace = true }
 
 [dev-dependencies]
-drivers_std = { workspace = true }
+testing = { workspace = true }
+task = { workspace = true, features = ["test_harness"] }
 log = { workspace = true }
 
 [[test]]

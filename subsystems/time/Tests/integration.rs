@@ -2,8 +2,8 @@
 
 extern crate alloc;
 use core::time::Duration;
-use drivers_std::devices::TimeDevice;
 use log::information;
+use testing::TimeDevice;
 
 #[test]
 fn test_realtime_now() {
