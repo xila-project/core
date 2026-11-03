@@ -24,8 +24,6 @@ little_fs = { workspace = true, optional = true }
 network = { workspace = true, optional = true }
 users = { workspace = true, optional = true }
 virtual_file_system = { workspace = true, optional = true }
-synchronization = { workspace = true, optional = true }
-embassy-futures = { workspace = true, optional = true }
 # `graphics`: headless screen.
 graphics = { workspace = true, optional = true }
 
@@ -42,8 +40,7 @@ environment = [
   "dep:network",
   "dep:users",
   "dep:virtual_file_system",
-  "dep:synchronization",
-  "dep:embassy-futures",
+  "drivers_core/wifi_mock",
 ]
 # Headless screen (no window) for graphics tests.
 graphics = [

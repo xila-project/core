@@ -5,6 +5,23 @@ edition = "2024"
 
 [dependencies]
 file_system = { workspace = true }
+# `wifi_mock`
+embassy-futures = { workspace = true, optional = true }
+network = { workspace = true, optional = true }
+shared = { workspace = true, optional = true }
+synchronization = { workspace = true, optional = true }
+task = { workspace = true, optional = true }
+
+[features]
+default = []
+# Deterministic Wi-Fi control-plane mock (demos and tests); never touches host Wi-Fi.
+wifi_mock = [
+  "dep:embassy-futures",
+  "dep:network",
+  "dep:shared",
+  "dep:synchronization",
+  "dep:task",
+]
 
 [lib]
 name = "drivers_core"

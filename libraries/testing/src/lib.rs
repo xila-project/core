@@ -18,9 +18,9 @@ mod logger;
 mod memory_manager;
 #[cfg(feature = "graphics")]
 mod screen;
-/// Deterministic Wi-Fi control-plane mock; it never changes the host's Wi-Fi.
+/// Deterministic Wi-Fi control-plane mock (`drivers_core::wifi`); it never changes the host's Wi-Fi.
 #[cfg(feature = "environment")]
-pub mod wifi;
+pub use drivers_core::wifi;
 
 pub use devices::{ConsoleDevice, RandomDevice, TimeDevice};
 pub use hash::HashDevice;
