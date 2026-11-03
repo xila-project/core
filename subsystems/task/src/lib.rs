@@ -10,6 +10,9 @@ extern crate std;
 #[cfg(all(feature = "profiling", target_os = "linux"))]
 pub mod profiling;
 
+#[cfg(any(test, feature = "test_harness"))]
+pub mod test_executor;
+
 mod environment_variable;
 mod error;
 mod join_handle;

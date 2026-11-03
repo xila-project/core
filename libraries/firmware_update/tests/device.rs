@@ -7,14 +7,12 @@ use support::*;
 use users::{GroupIdentifier, UserIdentifier};
 use virtual_file_system::{Error, File, ItemStatic, VirtualFileSystem};
 extern crate abi_definitions;
-drivers_std::memory::instantiate_global_allocator!();
+testing::instantiate_global_allocator!();
 
 async fn fixture() -> (task::TaskIdentifier, &'static VirtualFileSystem) {
     let manager = task::test_manager();
     let users = Box::leak(Box::new(users::Manager::new()));
-    let time = Box::leak(Box::new(
-        time::Manager::new(&drivers_std::devices::TimeDevice).unwrap(),
-    ));
+    let time = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
     let disk = MemoryDevice::<512>::new_static(512 * 128);
     little_fs::FileSystem::format(disk, 256).unwrap();
     let fs = little_fs::FileSystem::new(disk, 256).unwrap();

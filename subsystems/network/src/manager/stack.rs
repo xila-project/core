@@ -556,9 +556,7 @@ mod link_tests {
     }
     #[test]
     fn availability_requires_administrative_enable_and_effective_link() {
-        let clock = Box::leak(Box::new(
-            time::Manager::new(&drivers_std::devices::TimeDevice).unwrap(),
-        ));
+        let clock = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
         let (mut packets, _) = crate::create_loopback_device();
         let mut stack = StackInner::new(
             "wifi",

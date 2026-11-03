@@ -2,7 +2,7 @@
 
 extern crate abi_definitions;
 
-drivers_std::instantiate_global_allocator!();
+testing::instantiate_global_allocator!();
 
 use core::task::{Context, Poll};
 use file_system::{
@@ -48,9 +48,7 @@ impl DirectBaseOperations for Screen {
 
 #[test]
 fn snapshot_describes_widget_roles_labels_and_explicit_state() {
-    let time = Box::leak(Box::new(
-        time::Manager::new(&drivers_std::devices::TimeDevice).unwrap(),
-    ));
+    let time = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
     let manager = task::block_on(graphics::initialize_with_input_devices(
         time,
         &Screen,

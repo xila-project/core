@@ -21,10 +21,9 @@ default = []
 allocation_redundancy_check = []
 
 [dev-dependencies]
-drivers_native = { workspace = true }
+testing = { workspace = true }
+task = { workspace = true, features = ["test_harness"] }
 drivers_core = { workspace = true }
-drivers_shared = { workspace = true }
-drivers_std = { workspace = true }
 little_fs = { workspace = true }
 users = { workspace = true }
 

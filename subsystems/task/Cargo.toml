@@ -11,6 +11,8 @@ embassy-futures = { workspace = true }
 smol_str = { workspace = true }
 synchronization = { workspace = true }
 embedded-i18n = { workspace = true }
+# std critical sections for test binaries (`test_harness`).
+critical-section = { workspace = true, optional = true, features = ["std"] }
 
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
@@ -31,14 +33,20 @@ libc = { version = "0.2", optional = true }
 [features]
 default = []
 std = []
-test_harness = ["std"]
+# Test executor for `#[task::test]` (std; Embassy provides its std pender).
+test_harness = [
+  "std",
+  "embassy-executor/platform-std",
+  "embassy-executor/executor-thread",
+]
 profiling = ["dep:libc"]
 
 [dev-dependencies]
-drivers_native = { workspace = true }
-drivers_core = { workspace = true }
-drivers_shared = { workspace = true }
-drivers_std = { workspace = true }
+critical-section = { workspace = true, features = ["std"] }
+embassy-executor = { workspace = true, default-features = false, features = [
+  "platform-std",
+  "executor-thread",
+] }
 
 [lib]
 name = "task"

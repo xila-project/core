@@ -7,8 +7,15 @@ fn empty_arguments_use_default_task_path_and_executor() {
     let arguments = TaskArguments::from_list(&[]).unwrap();
 
     assert_eq!(arguments.task_path.to_token_stream().to_string(), "task");
+    assert!(arguments.executor.is_none());
     assert_eq!(
-        arguments.executor.to_token_stream().to_string(),
+        super::default_test_executor(&arguments.task_path)
+            .to_token_stream()
+            .to_string(),
+        "task :: instantiate_test_executor ! ()"
+    );
+    assert_eq!(
+        super::default_run_executor().to_token_stream().to_string(),
         "drivers_std :: executor :: instantiate_static_executor ! ()"
     );
 }
@@ -23,8 +30,10 @@ fn task_path_override_preserves_default_executor() {
         "xila :: task"
     );
     assert_eq!(
-        arguments.executor.to_token_stream().to_string(),
-        "drivers_std :: executor :: instantiate_static_executor ! ()"
+        super::default_test_executor(&arguments.task_path)
+            .to_token_stream()
+            .to_string(),
+        "xila :: task :: instantiate_test_executor ! ()"
     );
 }
 
@@ -42,7 +51,7 @@ fn executor_override_accepts_macro_expression() {
         "xila :: task"
     );
     assert_eq!(
-        arguments.executor.to_token_stream().to_string(),
+        arguments.executor.unwrap().to_token_stream().to_string(),
         "drivers_wasm :: executor :: instantiate_static_executor ! ()"
     );
 }

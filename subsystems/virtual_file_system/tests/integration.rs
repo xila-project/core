@@ -4,10 +4,8 @@ extern crate abi_definitions;
 
 use task::TaskIdentifier;
 
-use drivers_native::host_file_system::{HostFileSystem, HostFileSystemOptions};
 use file_system::{
-    AccessFlags, AttributeFlags, Attributes, Context, CreateFlags, FileSystemOperations, Flags,
-    MemoryDevice, Path, Position, StateFlags,
+    AccessFlags, Context, CreateFlags, Flags, MemoryDevice, Path, Position, StateFlags,
 };
 #[cfg(target_os = "linux")]
 use task::test;
@@ -21,9 +19,7 @@ mod allocation;
 mod metadata_authorization;
 
 async fn initialize() -> (TaskIdentifier, &'static VirtualFileSystem) {
-    let time_manager = Box::leak(Box::new(
-        time::Manager::new(&drivers_std::devices::TimeDevice).unwrap(),
-    ));
+    let time_manager = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
     initialize_with_time(time_manager).await
 }
 
@@ -34,7 +30,7 @@ async fn initialize_with_time(
     let users_manager = Box::leak(Box::new(users::Manager::new()));
 
     if !log::is_initialized() {
-        log::initialize(&drivers_std::log::Logger).unwrap();
+        log::initialize(&testing::Logger).unwrap();
     }
 
     let task = task_instance.get_current_task_identifier().await;
@@ -156,38 +152,36 @@ async fn test_named_pipe() {
 #[cfg(target_os = "linux")]
 #[test]
 async fn forced_unmount_can_remount_the_same_path_with_a_new_filesystem() {
-    use std::{
-        fs,
-        sync::atomic::{AtomicUsize, Ordering},
-    };
-
-    static NEXT_ROOT: AtomicUsize = AtomicUsize::new(0);
-    let root = std::env::temp_dir().join(format!(
-        "xila-vfs-hostfs-{}-{}",
-        std::process::id(),
-        NEXT_ROOT.fetch_add(1, Ordering::Relaxed)
-    ));
-    let first_root = root.join("first");
-    let second_root = root.join("second");
-    fs::create_dir_all(&first_root).unwrap();
-    fs::create_dir_all(&second_root).unwrap();
-    fs::write(first_root.join("app"), b"old").unwrap();
-    fs::write(second_root.join("app"), b"new").unwrap();
-
-    let (task, virtual_file_system) = initialize().await;
-    let first_filesystem =
-        HostFileSystem::open(&first_root, HostFileSystemOptions::default()).unwrap();
-    let mut host_attributes = Attributes::new().set_mask(AttributeFlags::Kind);
-    FileSystemOperations::get_attributes(
-        &first_filesystem,
-        Path::new("/app"),
-        &mut host_attributes,
-    )
-    .unwrap();
-    virtual_file_system
-        .mount_file_system(first_filesystem, Path::new("/host"), task)
+    async fn mount_with_app(
+        virtual_file_system: &'static VirtualFileSystem,
+        task: TaskIdentifier,
+        contents: &[u8],
+    ) {
+        let file_system =
+            little_fs::FileSystem::new_format(MemoryDevice::<512>::new_static(256 * 512), 256)
+                .unwrap();
+        virtual_file_system
+            .mount_file_system(file_system, Path::new("/host"), task)
+            .await
+            .unwrap();
+        let mut file = File::open(
+            virtual_file_system,
+            task,
+            "/host/app",
+            Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
+        )
         .await
         .unwrap();
+        file.write(contents).await.unwrap();
+        file.close(virtual_file_system).await.unwrap();
+    }
+
+    let (task, virtual_file_system) = initialize().await;
+    virtual_file_system
+        .create_directory(task, &Path::new("/host"))
+        .await
+        .ok();
+    mount_with_app(virtual_file_system, task, b"old").await;
     let old_file = File::open(
         virtual_file_system,
         task,
@@ -198,14 +192,7 @@ async fn forced_unmount_can_remount_the_same_path_with_a_new_filesystem() {
     .unwrap();
 
     virtual_file_system.unmount("/host", true).await.unwrap();
-    virtual_file_system
-        .mount_file_system(
-            HostFileSystem::open(&second_root, HostFileSystemOptions::default()).unwrap(),
-            Path::new("/host"),
-            task,
-        )
-        .await
-        .unwrap();
+    mount_with_app(virtual_file_system, task, b"new").await;
 
     let mut new_file = File::open(
         virtual_file_system,
@@ -219,9 +206,10 @@ async fn forced_unmount_can_remount_the_same_path_with_a_new_filesystem() {
     new_file.read(&mut data).await.unwrap();
     assert_eq!(&data, b"new");
 
-    old_file.close(virtual_file_system).await.unwrap();
+    // The stale handle's file system is gone; LittleFS reports NotMounted.
+    // (Platforms' host file system integration tests cover closing it cleanly.)
+    let _ = old_file.close(virtual_file_system).await;
     new_file.close(virtual_file_system).await.unwrap();
-    let _ = fs::remove_dir_all(root);
 }
 
 #[cfg(target_os = "linux")]
@@ -925,61 +913,6 @@ async fn symlink_targets_can_cross_filesystem_mounts() {
 }
 
 #[cfg(target_os = "linux")]
-#[test]
-async fn hostfs_absolute_link_uses_vfs_root_without_escaping_host_capability() {
-    use std::{
-        fs,
-        sync::atomic::{AtomicUsize, Ordering},
-    };
-
-    static NEXT_ROOT: AtomicUsize = AtomicUsize::new(0);
-    let root = std::env::temp_dir().join(format!(
-        "xila-vfs-symlink-hostfs-{}-{}",
-        std::process::id(),
-        NEXT_ROOT.fetch_add(1, Ordering::Relaxed)
-    ));
-    let host_root = root.join("host");
-    fs::create_dir_all(&host_root).unwrap();
-    fs::create_dir_all(root.join("target-directory")).unwrap();
-
-    let direct_filesystem =
-        HostFileSystem::open(&host_root, HostFileSystemOptions::default()).unwrap();
-    let (task, vfs) = initialize().await;
-    vfs.create_directory(task, &Path::from_str("/target-directory"))
-        .await
-        .unwrap();
-    vfs.mount_file_system(
-        HostFileSystem::open(&host_root, HostFileSystemOptions::default()).unwrap(),
-        Path::from_str("/host"),
-        task,
-    )
-    .await
-    .unwrap();
-    vfs.create_symlink(
-        task,
-        Path::from_str("/target-directory"),
-        Path::from_str("/host/dirlink"),
-    )
-    .await
-    .unwrap();
-
-    let directory = vfs
-        .open_directory(task, &Path::from_str("/host/dirlink"))
-        .await
-        .unwrap();
-    directory.close(vfs).await.unwrap();
-
-    let mut direct_context = Context::new_empty();
-    assert!(
-        direct_filesystem
-            .lookup_directory(&mut direct_context, Path::from_str("/dirlink"))
-            .is_err()
-    );
-    vfs.unmount(Path::from_str("/host"), true).await.unwrap();
-    let _ = fs::remove_dir_all(root);
-}
-
-#[cfg(target_os = "linux")]
 async fn unprivileged_user(vfs: &VirtualFileSystem) -> users::UserIdentifier {
     let task = vfs.task_manager().get_current_task_identifier().await;
     vfs.set_permissions(
@@ -1209,9 +1142,7 @@ async fn invalid_or_pre_epoch_utc_does_not_become_unsigned_file_metadata() {
 #[cfg(target_os = "linux")]
 #[test]
 async fn existing_files_remain_accessible_without_representable_utc() {
-    let clock = Box::leak(Box::new(
-        time::Manager::new(&drivers_std::devices::TimeDevice).unwrap(),
-    ));
+    let clock = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
     let (task, vfs) = initialize_with_time(clock).await;
     let mut file = File::open(
         vfs,

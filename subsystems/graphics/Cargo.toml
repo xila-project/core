@@ -20,12 +20,12 @@ embedded-i18n = { workspace = true }
 task = { workspace = true }
 
 [dev-dependencies]
+# Tests render in XRGB8888; production builds still select a format explicitly.
+graphics = { workspace = true, features = ["rendering_xrgb8888"] }
+testing = { workspace = true }
 little_fs = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }
-drivers_native = { workspace = true }
 drivers_core = { workspace = true }
-drivers_shared = { workspace = true }
-drivers_std = { workspace = true }
 users = { workspace = true }
 
 abi_definitions = { workspace = true }
@@ -40,10 +40,6 @@ sha2 = "0.11"
 default = []
 rendering_rgb565 = ["lvgl_rust_sys/color_depth_16"]
 rendering_xrgb8888 = ["lvgl_rust_sys/color_depth_32"]
-
-[[test]]
-name = "graphics"
-path = "tests/graphics.rs"
 
 [lib]
 name = "graphics"

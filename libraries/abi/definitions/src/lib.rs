@@ -39,5 +39,5 @@ pub use user::*;
 #[cfg(test)]
 mod tests {
     #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-    drivers_std::memory::instantiate_global_allocator!();
+    testing::instantiate_global_allocator!();
 }

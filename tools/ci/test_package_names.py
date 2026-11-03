@@ -29,6 +29,7 @@ EXPECTED_PACKAGE_NAMES = {
     "libraries/peripherals/Cargo.toml": "xila-peripherals",
     "libraries/shared/Cargo.toml": "xila-shared",
     "libraries/synchronization/Cargo.toml": "xila-synchronization",
+    "libraries/testing/Cargo.toml": "xila-testing",
     "subsystems/graphics/Cargo.toml": "xila-graphics",
     "subsystems/graphics/bindings_generator/Cargo.toml": "xila-graphics-bindgen",
     "subsystems/graphics/tests/font_link/Cargo.toml": "xila-graphics-font-link-test",
@@ -50,6 +51,7 @@ EXPECTED_BINARY_TARGETS = {
 EXPECTED_LIBRARY_TARGETS = {
     "subsystems/task/Cargo.toml": "task",
     "libraries/synchronization/Cargo.toml": "synchronization",
+    "libraries/testing/Cargo.toml": "testing",
     "drivers/core/Cargo.toml": "drivers_core",
     "libraries/file_system/Cargo.toml": "file_system",
     "libraries/shared/Cargo.toml": "shared",

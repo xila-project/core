@@ -14,10 +14,8 @@ embedded-i18n = { workspace = true }
 embedded-io-async = { workspace = true }
 
 [dev-dependencies]
-drivers_native = { workspace = true }
+task = { workspace = true, features = ["test_harness"] }
 drivers_core = { workspace = true }
-drivers_shared = { workspace = true }
-drivers_std = { workspace = true }
 
 [features]
 std = []
