@@ -264,7 +264,7 @@ jobs:
         run: mise run ci:localization
 
   required:
-    name: Required
+    name: required
     if: always()
     needs: [quality, verification, host, wasm, abi, localization]
     runs-on: ubuntu-latest
