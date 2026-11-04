@@ -4,7 +4,9 @@ version.workspace = true
 edition = "2024"
 
 [dependencies]
+embedded-io = { workspace = true, optional = true }
 file_system = { workspace = true }
+peripherals = { workspace = true, optional = true }
 shared = { workspace = true }
 synchronization = { workspace = true }
 task = { workspace = true, optional = true }
@@ -14,6 +16,7 @@ virtual_file_system = { workspace = true, optional = true }
 task = { workspace = true, features = ["test_harness"] }
 virtual_file_system = { workspace = true }
 testing = { workspace = true }
+peripherals = { workspace = true, features = ["mock"] }
 little_fs = { workspace = true }
 time = { workspace = true }
 users = { workspace = true }
@@ -25,6 +28,8 @@ abi_definitions = { workspace = true }
 default = ["vfs"]
 # Mount helper for the virtual file system.
 vfs = ["dep:task", "dep:virtual_file_system"]
+# UART device node adapter. `mount_uart` is available with the `vfs` feature.
+uart = ["dep:peripherals", "dep:embedded-io", "peripherals/uart"]
 
 [lib]
 name = "peripheral_devices"

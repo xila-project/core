@@ -2178,10 +2178,12 @@ name = "xila-peripheral-devices"
 version = "0.1.0"
 dependencies = [
  "critical-section",
+ "embedded-io",
  "xila-abi-definitions",
  "xila-file-system",
  "xila-little-fs",
  "xila-log",
+ "xila-peripherals",
  "xila-shared",
  "xila-synchronization",
  "xila-task",
