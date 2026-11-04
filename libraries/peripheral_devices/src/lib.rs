@@ -8,12 +8,15 @@
 //!
 //! The base defines no control commands. Each class defines its own commands
 //! with `file_system::define_command!` using a distinct kind byte (for example
-//! `b'u'` for UART, `b'i'` for I2C and `b's'` for SPI). Command input and output
-//! structs must be versioned, `#[repr(C)]`, and live in the class module.
+//! `b'u'` for UART, `b'i'` for I2C, `b's'` for SPI and `b'a'` for ADC). Command
+//! input and output structs must be versioned, `#[repr(C)]`, and live in the
+//! class module.
 #![no_std]
 
 extern crate alloc;
 
+#[cfg(feature = "adc")]
+pub mod adc;
 mod device;
 #[cfg(feature = "i2c")]
 pub mod i2c;
