@@ -296,7 +296,7 @@ class WorkflowPolicy(unittest.TestCase):
         ci = (ROOT / '.github/workflows/ci.yml').read_text()
         for line in ci.splitlines():
             self.assertNotRegex(line, r'^      - (uses|run|env):')
-        self.assertIn('name: Required', ci)
+        self.assertIn('name: required', ci)
 
     def test_primary_ci_jobs_are_parallel_and_required_aggregates_results(self):
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
