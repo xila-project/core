@@ -17,6 +17,8 @@ extern crate alloc;
 mod device;
 #[cfg(feature = "vfs")]
 mod mount;
+#[cfg(feature = "uart")]
+pub mod uart;
 
 pub use device::*;
 #[cfg(feature = "vfs")]
