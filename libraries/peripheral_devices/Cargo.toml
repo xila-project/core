@@ -1,0 +1,30 @@
+[package]
+name = "xila-peripheral-devices"
+version.workspace = true
+edition = "2024"
+
+[dependencies]
+file_system = { workspace = true }
+shared = { workspace = true }
+synchronization = { workspace = true }
+task = { workspace = true, optional = true }
+virtual_file_system = { workspace = true, optional = true }
+
+[dev-dependencies]
+task = { workspace = true, features = ["test_harness"] }
+virtual_file_system = { workspace = true }
+testing = { workspace = true }
+little_fs = { workspace = true }
+time = { workspace = true }
+users = { workspace = true }
+log = { workspace = true }
+critical-section = { workspace = true, features = ["std"] }
+abi_definitions = { workspace = true }
+
+[features]
+default = ["vfs"]
+# Mount helper for the virtual file system.
+vfs = ["dep:task", "dep:virtual_file_system"]
+
+[lib]
+name = "peripheral_devices"
