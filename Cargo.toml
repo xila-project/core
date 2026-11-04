@@ -53,6 +53,7 @@ drivers_core = { package = "xila-drivers-core", path = "drivers/core" }
 
 # - External crates
 embedded-hal = { version = "1", default-features = false }
+embedded-hal-async = { version = "1", default-features = false }
 miniserde = { version = "0.1" }
 bindgen = { version = "0.73" }
 cbindgen = { version = "0.29" }

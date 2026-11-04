@@ -2177,7 +2177,12 @@ dependencies = [
 name = "xila-peripherals"
 version = "0.1.0"
 dependencies = [
+ "critical-section",
  "embedded-hal 1.0.0",
+ "embedded-hal-async",
+ "embedded-io",
+ "embedded-io-async",
+ "xila-synchronization",
 ]
 
 [[package]]

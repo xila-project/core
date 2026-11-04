@@ -1,4 +1,7 @@
-use core::cell::RefCell;
+use synchronization::{
+    blocking_mutex::raw::CriticalSectionRawMutex,
+    mutex::{Mutex, MutexGuard},
+};
 
 use embedded_hal::digital::{ErrorKind, ErrorType, InputPin, OutputPin, StatefulOutputPin};
 
@@ -37,14 +40,14 @@ impl MockLineState {
 
 pub struct GpioMock<const N: usize> {
     capabilities: [LineCapabilities; N],
-    lines: RefCell<[MockLineState; N]>,
+    lines: Mutex<CriticalSectionRawMutex, [MockLineState; N]>,
 }
 
 impl<const N: usize> GpioMock<N> {
     pub const fn new(capabilities: [LineCapabilities; N]) -> Self {
         Self {
             capabilities,
-            lines: RefCell::new([const { MockLineState::new() }; N]),
+            lines: Mutex::new([const { MockLineState::new() }; N]),
         }
     }
 
@@ -53,12 +56,18 @@ impl<const N: usize> GpioMock<N> {
         if !self.capabilities[index].input {
             return Err(MockError::Unsupported);
         }
-        let mut lines = self.lines.borrow_mut();
+        let mut lines = self.lines();
         if lines[index].reserved && lines[index].output {
             return Err(MockError::Unsupported);
         }
         lines[index].level = level;
         Ok(())
+    }
+
+    fn lines(&self) -> MutexGuard<'_, CriticalSectionRawMutex, [MockLineState; N]> {
+        self.lines
+            .try_lock()
+            .expect("GPIO mock lines are already locked")
     }
 
     fn index(&self, line: LineId) -> Result<usize, MockError> {
@@ -81,7 +90,7 @@ impl<const N: usize> GpioMock<N> {
 
     fn release(&self, line: LineId) {
         if let Ok(index) = self.index(line) {
-            self.lines.borrow_mut()[index].reserved = false;
+            self.lines()[index].reserved = false;
         }
     }
 }
@@ -112,7 +121,7 @@ impl<const N: usize> GpioController for GpioMock<N> {
             return Err(MockError::Unsupported);
         }
         self.validate_pull(capabilities, config.pull)?;
-        let mut lines = self.lines.borrow_mut();
+        let mut lines = self.lines();
         let state = &mut lines[index];
         if state.reserved {
             return Err(MockError::AlreadyReserved);
@@ -139,7 +148,7 @@ impl<const N: usize> GpioController for GpioMock<N> {
         if config.drive_mode == DriveMode::OpenDrain && !capabilities.open_drain {
             return Err(MockError::Unsupported);
         }
-        let mut lines = self.lines.borrow_mut();
+        let mut lines = self.lines();
         let state = &mut lines[index];
         if state.reserved {
             return Err(MockError::AlreadyReserved);
@@ -166,7 +175,7 @@ impl<const N: usize> ErrorType for MockInput<'_, N> {
 impl<const N: usize> InputPin for MockInput<'_, N> {
     fn is_high(&mut self) -> Result<bool, Self::Error> {
         let index = self.controller.index(self.line)?;
-        Ok(self.controller.lines.borrow()[index].level.is_high())
+        Ok(self.controller.lines()[index].level.is_high())
     }
 
     fn is_low(&mut self) -> Result<bool, Self::Error> {
@@ -192,13 +201,13 @@ impl<const N: usize> ErrorType for MockOutput<'_, N> {
 impl<const N: usize> OutputPin for MockOutput<'_, N> {
     fn set_low(&mut self) -> Result<(), Self::Error> {
         let index = self.controller.index(self.line)?;
-        self.controller.lines.borrow_mut()[index].level = PinState::Low;
+        self.controller.lines()[index].level = PinState::Low;
         Ok(())
     }
 
     fn set_high(&mut self) -> Result<(), Self::Error> {
         let index = self.controller.index(self.line)?;
-        self.controller.lines.borrow_mut()[index].level = PinState::High;
+        self.controller.lines()[index].level = PinState::High;
         Ok(())
     }
 }
@@ -206,7 +215,7 @@ impl<const N: usize> OutputPin for MockOutput<'_, N> {
 impl<const N: usize> StatefulOutputPin for MockOutput<'_, N> {
     fn is_set_high(&mut self) -> Result<bool, Self::Error> {
         let index = self.controller.index(self.line)?;
-        Ok(self.controller.lines.borrow()[index].level.is_high())
+        Ok(self.controller.lines()[index].level.is_high())
     }
 
     fn is_set_low(&mut self) -> Result<bool, Self::Error> {
