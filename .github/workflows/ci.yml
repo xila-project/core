@@ -39,7 +39,7 @@ jobs:
           path: .application-src
           persist-credentials: false
       - name: "Setup | Activate mise"
-        uses: jdx/mise-action@v5.2.2
+        uses: jdx/mise-action@v5.2.4
       - name: "Setup | Locked npm dependencies"
         run: mise run deps:npm
       - name: "Lint | Rust formatting"
@@ -63,7 +63,7 @@ jobs:
       - name: "Setup | Checkout sources"
         uses: actions/checkout@v7
       - name: "Setup | Activate mise"
-        uses: jdx/mise-action@v5.2.2
+        uses: jdx/mise-action@v5.2.4
       - name: "Verify | Subsystem invariants"
         run: mise run ci:verification
 
