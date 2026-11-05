@@ -15,8 +15,12 @@
 extern crate alloc;
 
 mod device;
+#[cfg(feature = "i2c")]
+pub mod i2c;
 #[cfg(feature = "vfs")]
 mod mount;
+#[cfg(feature = "uart")]
+pub mod uart;
 
 pub use device::*;
 #[cfg(feature = "vfs")]
