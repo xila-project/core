@@ -15,11 +15,13 @@ critical-section = { workspace = true, features = ["std"] }
 
 [features]
 default = []
+# Xila-owned one-shot ADC contract.
+adc = []
 gpio = ["dep:embedded-hal"]
 i2c = ["dep:embedded-hal", "dep:embedded-hal-async"]
 spi = ["dep:embedded-hal", "dep:embedded-hal-async"]
 uart = ["dep:embedded-io", "dep:embedded-io-async"]
-mock = ["gpio", "i2c", "spi", "uart", "dep:synchronization"]
+mock = ["adc", "gpio", "i2c", "spi", "uart", "dep:synchronization"]
 
 [lib]
 name = "peripherals"

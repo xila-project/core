@@ -39,6 +39,7 @@ impl Path {
     pub const UART_DEVICES: &'static Path = Self::from_str("/devices/uart");
     pub const I2C_DEVICES: &'static Path = Self::from_str("/devices/i2c");
     pub const SPI_DEVICES: &'static Path = Self::from_str("/devices/spi");
+    pub const ADC_DEVICES: &'static Path = Self::from_str("/devices/adc");
 
     /// System and application configuration.
     pub const CONFIGURATION: &'static Path = Self::from_str("/configuration");

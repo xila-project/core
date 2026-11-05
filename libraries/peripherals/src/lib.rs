@@ -1,5 +1,8 @@
 #![no_std]
 
+#[cfg(feature = "adc")]
+pub mod adc;
+
 #[cfg(feature = "gpio")]
 pub mod gpio;
 
