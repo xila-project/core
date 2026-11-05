@@ -34,6 +34,8 @@ vfs = ["dep:task", "dep:virtual_file_system"]
 uart = ["dep:peripherals", "dep:embedded-io", "peripherals/uart"]
 # I2C device nodes over `peripherals::i2c`.
 i2c = ["dep:embedded-hal", "dep:peripherals", "peripherals/i2c"]
+# SPI device node over `peripherals::spi` (adapter, control commands, mount helper).
+spi = ["dep:embedded-hal", "dep:peripherals", "peripherals/spi"]
 
 [lib]
 name = "peripheral_devices"
