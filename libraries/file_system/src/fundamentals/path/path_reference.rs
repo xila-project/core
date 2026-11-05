@@ -35,6 +35,10 @@ impl Path {
     pub const STANDARD_IO_DEVICES: &'static Path = Self::from_str("/devices/standard_io");
     pub const STORAGE_DEVICES: &'static Path = Self::from_str("/devices/storage");
     pub const TIME_DEVICES: &'static Path = Self::from_str("/devices/time");
+    /// Peripheral device nodes: `/devices/<class>/<name>`, e.g. `/devices/uart/uart0`.
+    pub const UART_DEVICES: &'static Path = Self::from_str("/devices/uart");
+    pub const I2C_DEVICES: &'static Path = Self::from_str("/devices/i2c");
+    pub const SPI_DEVICES: &'static Path = Self::from_str("/devices/spi");
 
     /// System and application configuration.
     pub const CONFIGURATION: &'static Path = Self::from_str("/configuration");
