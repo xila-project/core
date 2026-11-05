@@ -22,6 +22,8 @@ mod device;
 pub mod i2c;
 #[cfg(feature = "vfs")]
 mod mount;
+#[cfg(feature = "pwm")]
+pub mod pwm;
 #[cfg(feature = "spi")]
 pub mod spi;
 #[cfg(feature = "uart")]
