@@ -38,6 +38,8 @@ i2c = ["dep:embedded-hal", "dep:peripherals", "peripherals/i2c"]
 adc = ["dep:peripherals", "peripherals/adc"]
 # SPI device node over `peripherals::spi` (adapter, control commands, mount helper).
 spi = ["dep:embedded-hal", "dep:peripherals", "peripherals/spi"]
+# PWM device node over `peripherals::pwm` (adapter, control commands, mount helper).
+pwm = ["dep:embedded-hal", "dep:peripherals", "peripherals/pwm"]
 
 [lib]
 name = "peripheral_devices"
