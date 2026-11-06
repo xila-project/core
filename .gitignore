@@ -13,3 +13,6 @@ node_modules
 /docs/
 
 /tools/profiling/target/
+
+# Optional Japanese source font (downloaded and verified explicitly).
+/subsystems/graphics/fonts/SourceHanSansJP-Regular.otf

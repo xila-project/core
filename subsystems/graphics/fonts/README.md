@@ -3,6 +3,45 @@
 Montserrat Regular supplies proportional Latin text at 10/14/18/28px, and
 Unscii supplies terminal text at 8/16px. Font Awesome supplies UI icons.
 
+## CJK catalog subsetting
+
+Chinese and Japanese build variants include only glyphs found in the selected
+translation values (including plurals and fallbacks). The broad CJK, hiragana
+and katakana Unicode ranges are **not** rasterized. The full OpenType sources
+are build inputs only: no font file is copied to the filesystem image and no
+runtime locale registry is required.
+
+The Japanese variant uses Source Han Sans JP for region-appropriate kanji
+shapes and for kana. It also fills in the terminal's glyph subset where Unscii
+is insufficient; Latin UI text continues to use Montserrat.
+
+Japanese support is experimental. To install the JP source font locally:
+
+```sh
+bash tools/localization/fetch-japanese-font.sh
+EMBEDDED_I18N_LOCALE=ja EMBEDDED_I18N_STRICT=1 \
+  CARGO_TARGET_DIR="$PWD/target/localization/ja" \
+  cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml
+EMBEDDED_I18N_LOCALE=ja EMBEDDED_I18N_STRICT=1 \
+  CARGO_TARGET_DIR=target/localization/ja mise run localization:check
+```
+
+The helper downloads Adobe's unmodified Source Han Sans JP Regular 2.005 OTF
+from a pinned upstream source revision, only when explicitly invoked; normal
+Cargo builds never download assets. The file is ignored by Git. Its license
+is SIL OFL 1.1 (the existing `SourceHanSans-LICENSE.txt`), and is retained
+locally as a build input. CI installs it only when validating `ja`.
+Chinese remains backed by the separately vendored SC font. When Core is used
+as a Cargo Git dependency, set `XILA_JAPANESE_FONT_PATH` to the absolute path
+of the verified OTF, since its Git checkout does not contain the downloaded file.
+Set `XILA_FONT_CATALOG_ROOTS` to the Applications checkout so its translated
+glyphs are included in the subset.
+
+As with Chinese, translated catalog coverage does not guarantee arbitrary
+Japanese user-generated text can be displayed. Validate glyph coverage,
+legibility at 10px, line wrapping and flash on the target before deployment.
+Japanese input methods (IME) are a separate feature.
+
 ## Simplified Chinese
 
 `SourceHanSansSC-Regular.otf` is the unmodified Source Han Sans SC Regular 2.005

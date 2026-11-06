@@ -1,0 +1,30 @@
+{
+  "errors": {
+    "already_exists": "既に存在します",
+    "already_initialized": "既に初期化されています",
+    "delimiter_not_found": "区切り文字が見つかりません",
+    "failed_to_get_task_informations": "タスク情報を取得できませんでした",
+    "failed_to_write": "書き込みできませんでした",
+    "file_system_error": "ファイルシステムエラー: {}",
+    "invalid_file_system": "無効なファイルシステム",
+    "invalid_identifier": "無効な識別子",
+    "invalid_inode": "無効な inode",
+    "invalid_mode": "無効なモード",
+    "invalid_open": "無効なオープン操作",
+    "invalid_parameter": "無効なパラメーター",
+    "invalid_path": "無効なパス",
+    "missing_attribute": "属性がありません",
+    "not_a_directory": "ディレクトリではありません",
+    "not_a_file": "ファイルではありません",
+    "orphaned": "孤立しています",
+    "permission_denied": "アクセスが拒否されました",
+    "ressource_busy": "リソースが使用中です",
+    "task_error": "タスクエラー: {}",
+    "time_error": "時刻エラー: {}",
+    "too_many_inodes": "inode が多すぎます",
+    "too_many_open_files": "開いているファイルが多すぎます",
+    "unavailable_driver": "ドライバーを利用できません",
+    "unsupported_operation": "サポートされていない操作",
+    "users_error": "ユーザーエラー: {}"
+  }
+}

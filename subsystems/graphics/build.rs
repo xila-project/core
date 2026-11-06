@@ -23,6 +23,7 @@ fn main() {
         "NODE_PATH",
         "XILA_LV_FONT_CONV_DIR",
         "XILA_FONT_CATALOG_ROOTS",
+        "XILA_JAPANESE_FONT_PATH",
         "DEP_LV_CONFIG_PATH",
         "DEP_LVGL_RUST_SYS_INCLUDE_PATHS",
         "DEP_LVGL_RUST_SYS_DEFINES",
@@ -44,7 +45,30 @@ fn main() {
     let fallback = embedded_i18n::get_fallback_locale_build();
     let active =
         fonts::effective_ranges(&locale, &fallback).unwrap_or_else(|error| panic!("{error}"));
-    let symbols = fonts::uses_chinese(&locale, &fallback).then(|| {
+    let japanese = fonts::catalog_font(&locale, &fallback) == Some("SourceHanSansJP-Regular.otf");
+    let catalog_font = fonts::catalog_font(&locale, &fallback).map(|name| {
+        if name == "SourceHanSansJP-Regular.otf" {
+            env::var_os("XILA_JAPANESE_FONT_PATH")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(name))
+        } else {
+            PathBuf::from(name)
+        }
+    });
+    if japanese {
+        let font = catalog_font.as_ref().expect("Japanese font");
+        let font = if font.is_absolute() {
+            font.clone()
+        } else {
+            root.join("fonts").join(font)
+        };
+        assert!(
+            font.is_file(),
+            "Japanese font not found at {}. Run tools/localization/fetch-japanese-font.sh in a Core checkout or set XILA_JAPANESE_FONT_PATH to the downloaded font.",
+            font.display()
+        );
+    }
+    let symbols = catalog_font.as_ref().map(|_| {
         println!(
             "cargo:rerun-if-changed={}",
             root.join("../../Cargo.toml").display()
@@ -56,7 +80,7 @@ fn main() {
         }
         let roots: Vec<&Path> = roots.iter().map(PathBuf::as_path).collect();
         let symbols = catalogs::collect_multiple(&roots, &[&locale, &fallback])
-            .expect("Chinese catalog font symbols");
+            .expect("CJK catalog font symbols");
         for directory in &symbols.directories {
             println!("cargo:rerun-if-changed={}", directory.display());
         }
@@ -86,12 +110,14 @@ fn main() {
     let mut reused = 0;
     for ranges in &variants {
         let plan = if ranges == &active && symbols.is_some() {
-            generate::sources_with_catalogs(
+            generate::sources_with_locale_catalogs(
                 &root,
                 &out.join("generated_fonts"),
                 ranges,
                 &identity,
                 symbols.as_ref(),
+                catalog_font.as_deref().expect("active CJK font"),
+                japanese,
             )
         } else {
             generate::sources(&root, &out.join("generated_fonts"), ranges, &identity)
