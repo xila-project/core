@@ -1,3 +1,5 @@
+#![cfg(all(target_os = "linux", feature = "gpio"))]
+
 use file_system::{ControlCommand, Error};
 use peripheral_devices::{
     PeripheralHandle,
