@@ -1,4 +1,9 @@
-use std::os::raw::c_void;
+#![no_std]
+
+extern crate alloc;
+
+use alloc::boxed::Box;
+use core::ffi::c_void;
 
 use graphics::{
     Color, Logo,
