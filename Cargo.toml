@@ -71,7 +71,7 @@ smoltcp = { version = "0.14" }
 linked_list_allocator = { version = "0.10", default-features = false, features = [
   "const_mut_refs",
 ] }
-smol_str = { version = "0.3" }
+smol_str = { version = "0.3", default-features = false }
 darling = { version = "0.24" }
 regex = { version = "1" }
 embedded-io-async = { version = "0.7", features = ["alloc"] }

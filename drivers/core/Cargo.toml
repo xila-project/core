@@ -4,13 +4,19 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+embedded-hal = { workspace = true }
 file_system = { workspace = true }
+peripherals = { workspace = true, features = ["gpio"] }
+shared = { workspace = true }
+synchronization = { workspace = true }
 # `wifi_mock`
 embassy-futures = { workspace = true, optional = true }
 network = { workspace = true, optional = true }
-shared = { workspace = true, optional = true }
-synchronization = { workspace = true, optional = true }
 task = { workspace = true, optional = true }
+
+[dev-dependencies]
+peripherals = { workspace = true, features = ["gpio", "mock"] }
+critical-section = { workspace = true, features = ["std"] }
 
 [features]
 default = []
@@ -18,8 +24,6 @@ default = []
 wifi_mock = [
   "dep:embassy-futures",
   "dep:network",
-  "dep:shared",
-  "dep:synchronization",
   "dep:task",
 ]
 

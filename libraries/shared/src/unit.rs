@@ -54,6 +54,19 @@ pub struct Unit<'a, T> {
     pub suffix: &'a str,
 }
 
+/// Exact power of ten for prefix exponents. Multiplication is exact for the
+/// prefix range, and one division rounds to the nearest double, unlike a
+/// libm `powi`, which can shift a boundary comparison such as `0.001`.
+fn power_of_ten(exponent: i32) -> f64 {
+    let mut result = 1.0;
+
+    for _ in 0..exponent.unsigned_abs() {
+        result *= 10.0;
+    }
+
+    if exponent < 0 { 1.0 / result } else { result }
+}
+
 fn get_prefix<T>(value: T) -> PrefixTuple
 where
     T: Copy + PartialOrd + TryInto<f64>,
@@ -62,7 +75,7 @@ where
 
     // Find the largest prefix where the value is >= prefix_value
     for &prefix @ (exponent, _, _) in PREFIXES {
-        let prefix_value: f64 = 10f64.powi(exponent);
+        let prefix_value: f64 = power_of_ten(exponent);
 
         if target_value >= prefix_value {
             return prefix;
@@ -101,10 +114,10 @@ where
     pub fn format(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (exponent, _, symbol) = self.prefix;
 
-        let scaled_value: f64 = self.value.try_into().ok().unwrap_or(0.0) / 10f64.powi(exponent);
+        let scaled_value: f64 = self.value.try_into().ok().unwrap_or(0.0) / power_of_ten(exponent);
 
         // Check if the value has a fractional part
-        if scaled_value.fract() == 0.0 {
+        if scaled_value % 1.0 == 0.0 {
             write!(fmt, "{} {}{}", scaled_value, symbol, self.suffix)
         } else {
             write!(fmt, "{:.2} {}{}", scaled_value, symbol, self.suffix)
@@ -114,10 +127,10 @@ where
     pub fn format_full_name(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (exponent, name, _) = self.prefix;
 
-        let scaled_value: f64 = self.value.try_into().ok().unwrap_or(0.0) / 10f64.powi(exponent);
+        let scaled_value: f64 = self.value.try_into().ok().unwrap_or(0.0) / power_of_ten(exponent);
 
         // Check if the value has a fractional part
-        if scaled_value.fract() == 0.0 {
+        if scaled_value % 1.0 == 0.0 {
             write!(fmt, "{} {}{}", scaled_value, name, self.suffix)
         } else {
             write!(fmt, "{:.2} {}{}", scaled_value, name, self.suffix)
