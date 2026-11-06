@@ -21,11 +21,7 @@ critical-section = { workspace = true, features = ["std"] }
 [features]
 default = []
 # Deterministic Wi-Fi control-plane mock (demos and tests); never touches host Wi-Fi.
-wifi_mock = [
-  "dep:embassy-futures",
-  "dep:network",
-  "dep:task",
-]
+wifi_mock = ["dep:embassy-futures", "dep:network", "dep:task"]
 
 [lib]
 name = "drivers_core"
