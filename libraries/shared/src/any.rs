@@ -249,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_roundtrip_conversion() {
-        let original: f64 = 3.141592653589793;
+        let original: f64 = core::f64::consts::PI;
         let any = AnyByLayout::from(&original);
         let cast_back = any.cast::<f64>().unwrap();
 

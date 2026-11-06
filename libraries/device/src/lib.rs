@@ -1,3 +1,5 @@
+#![no_std]
+
 pub mod hash;
 pub mod neural_network;
 pub use neural_network::{

@@ -7,7 +7,7 @@ edition = "2024"
 
 [dependencies]
 xila_http = { workspace = true, features = ["alloc"] }
-num = { version = "0.4" }
+num = { version = "0.4", default-features = false }
 log = { workspace = true }
 
 [lib]
