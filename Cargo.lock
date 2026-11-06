@@ -1975,12 +1975,9 @@ dependencies = [
 name = "xila-drivers-core"
 version = "0.1.0"
 dependencies = [
- "critical-section",
  "embassy-futures",
- "embedded-hal 1.0.0",
  "xila-file-system",
  "xila-network",
- "xila-peripherals",
  "xila-shared",
  "xila-synchronization",
  "xila-task",

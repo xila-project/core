@@ -4,24 +4,24 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-embedded-hal = { workspace = true }
 file_system = { workspace = true }
-peripherals = { workspace = true, features = ["gpio"] }
-shared = { workspace = true }
-synchronization = { workspace = true }
 # `wifi_mock`
 embassy-futures = { workspace = true, optional = true }
 network = { workspace = true, optional = true }
+shared = { workspace = true, optional = true }
+synchronization = { workspace = true, optional = true }
 task = { workspace = true, optional = true }
-
-[dev-dependencies]
-peripherals = { workspace = true, features = ["gpio", "mock"] }
-critical-section = { workspace = true, features = ["std"] }
 
 [features]
 default = []
 # Deterministic Wi-Fi control-plane mock (demos and tests); never touches host Wi-Fi.
-wifi_mock = ["dep:embassy-futures", "dep:network", "dep:task"]
+wifi_mock = [
+  "dep:embassy-futures",
+  "dep:network",
+  "dep:shared",
+  "dep:synchronization",
+  "dep:task",
+]
 
 [lib]
 name = "drivers_core"

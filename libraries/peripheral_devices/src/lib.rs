@@ -18,6 +18,8 @@ extern crate alloc;
 #[cfg(feature = "adc")]
 pub mod adc;
 mod device;
+#[cfg(feature = "gpio")]
+pub mod gpio;
 #[cfg(feature = "i2c")]
 pub mod i2c;
 #[cfg(feature = "vfs")]
