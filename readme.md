@@ -185,4 +185,6 @@ Part of **[Xila](https://www.xila.dev/)** ·
 [Repositories](https://github.com/xila-project) ·
 [Community](https://matrix.to/#/#xila:anneraud.fr)
 
+Special thanks to [Martin Legand](https://www.behance.net/martinlegand) for generously designing the Xila logo.
+
 <!-- xila:footer:end -->
