@@ -1,19 +1,18 @@
-# Xila — Rust embedded operating system with WebAssembly apps
-
+<h1>
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/xila-horizontal-white.svg">
-  <img src="assets/brand/xila-horizontal-ink.svg" alt="Xila" width="300">
+  <source media="(prefers-color-scheme: dark)" srcset=".github/brand/header-dark.svg">
+  <img src=".github/brand/header-light.svg" alt="Xila Core — Kernel subsystems and reusable libraries." width="1280">
 </picture>
+</h1>
+
+[Documentation](https://www.xila.dev/docs/) ·
+[Try Xila](https://platforms.xila.dev/) ·
+[Community](https://matrix.to/#/#xila:anneraud.fr)
 
 Build embedded experiences with **Xila**, a modular, open-source operating system
 written in Rust. Xila brings together WebAssembly (Wasm) applications, an LVGL
 graphical interface, task management, networking, and storage for
 resource-constrained devices.
-
-[Documentation](https://www.xila.dev/docs/) ·
-[Run Xila natively](https://www.xila.dev/tutorials/native) ·
-[Try the browser example](https://platforms.xila.dev/) ·
-[Community](https://matrix.to/#/#xila:anneraud.fr)
 
 [![codecov](https://codecov.io/github/Xila-Project/Core/graph/badge.svg?token=01M6GQFBEC)](https://codecov.io/github/Xila-Project/Core)
 [![Translation status](https://translate.anneraud.fr/widget/xila-core/svg-badge.svg)](https://translate.anneraud.fr/engage/xila-core/)
@@ -177,3 +176,13 @@ ideas or ask for help.
 ## License
 
 This project is under the [Apache License 2.0](license.md).
+
+<!-- xila:footer:start -->
+
+---
+
+Part of **[Xila](https://www.xila.dev/)** ·
+[Repositories](https://github.com/xila-project) ·
+[Community](https://matrix.to/#/#xila:anneraud.fr)
+
+<!-- xila:footer:end -->
