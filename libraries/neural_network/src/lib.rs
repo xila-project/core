@@ -2,9 +2,9 @@
 
 extern crate alloc;
 
+mod backend;
 mod command;
 mod device;
-mod session;
 
+pub use backend::{Backend, NeuralNetworkDevice};
 pub use command::*;
-pub use session::NeuralNetworkDevice;

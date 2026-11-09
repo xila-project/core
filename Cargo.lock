@@ -1912,6 +1912,7 @@ dependencies = [
  "xila-log",
  "xila-memory",
  "xila-network",
+ "xila-neural-network",
  "xila-shared",
  "xila-synchronization",
  "xila-task",
@@ -2157,6 +2158,15 @@ dependencies = [
  "xila-time",
  "xila-users",
  "xila-virtual-file-system",
+]
+
+[[package]]
+name = "xila-neural-network"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+ "xila-file-system",
+ "xila-shared",
 ]
 
 [[package]]

@@ -1,21 +1,25 @@
 # Neural network VFS device
 
-An optional `xila::neural_network` device backed by Nanoglia. Applications use ordinary
-VFS open/write/control/read/close operations; no NN-specific VFS API is needed.
+A portable VFS adapter, exported by the optional `xila::neural_network` feature.
+Applications use ordinary VFS open/write/control/read/close operations. This crate has
+no inference-engine or accelerator dependency.
 
-## Model ownership
+## Backend and ownership
 
-`NeuralNetworkDevice::new(model, target)` borrows aligned ROM (`&'static [u8]` when mounted).
-`NeuralNetworkDevice::from_owned_model(block, target)` takes an aligned
-`nanoglia::core::Block<nanoglia::Global>` without copying its model bytes. Allocate the block
-from the file size, then read the file directly into `block.as_mut_slice()` before loading.
-Both constructors verify the model before it can be mounted. The device and open contexts
-share one immutable graph through Xila's shared pointer, including on targets without pointer
-atomics. The standard mounted-device lifecycle remains responsible for device cleanup.
+Implement `Backend` for a prepared immutable model and wrap it with
+`NeuralNetworkDevice::new(backend)`. The backend owns model lifetimes and creates independent
+execution storage per open. Input and output associated views access the execution/model
+storage directly. The adapter stores its concrete backend and execution type by value;
+there is no additional backend box, vtable, model copy or staging tensor buffer.
 
-Each open allocates an execution arena, input-completeness counters and the ordinary VFS
-context object. Inference does not allocate; input/output tensors have no staging buffers.
-ROM weights are not copied to RAM. Heap weights stay alive until their last graph owner drops.
+The Nanoglia implementation lives in Platforms' `drivers/shared`, behind its optional
+`neural-network` feature. Runtime assemblies choose accelerator features, construct ROM or
+owned-file models, and register devices there. Core owns only this protocol and adapter.
+
+Per open, this adapter allocates its ordinary VFS context box and input-completeness counters.
+The backend allocates its execution arena once. Repeated write/compute/read calls do not
+allocate in the adapter. Backend methods must preserve that property if required by a target.
+Model retention and shared ownership are backend responsibilities.
 
 ## VFS protocol
 
@@ -34,5 +38,6 @@ Selection does not reset the VFS cursor. Duplicate is unsupported; open the devi
 an independent execution arena. CPU inference is synchronous and returns `Poll::Ready`;
 it does not claim to yield between operators or to validate hardware accelerator execution.
 
-`cmsis-nn` and `esp-nn` enable Nanoglia backends. The device always requires heap allocation;
-`--no-default-features` disables the default Rust kernels/float/int16 features, not allocation.
+The version-one `TensorInfo` layout supports up to six dimensions and retains the
+TensorFlow Lite numeric tensor-type codes for compatibility. Backends translate their
+metadata into that layout. The protocol and command identifiers remain stable across engines.

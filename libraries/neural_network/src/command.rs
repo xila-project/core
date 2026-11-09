@@ -27,16 +27,19 @@ define_command!(
     QuantizationEntry
 );
 
+/// Maximum rank in the version-one VFS tensor metadata layout.
+pub const MAX_TENSOR_RANK: usize = 6;
+
 /// Metadata returned by `GET_INPUT_INFO` and `GET_OUTPUT_INFO`.
 ///
 /// `data_type` uses the TensorFlow Lite tensor type value. `dimensions` contains
-/// the first `rank` dimensions; `rank` cannot exceed Nanoglia's `MAX_RANK`.
+/// the first `rank` dimensions; `rank` cannot exceed `MAX_TENSOR_RANK`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TensorInfo {
     pub data_type: u32,
     pub rank: u32,
-    pub dimensions: [i32; nanoglia::core::MAX_RANK],
+    pub dimensions: [i32; MAX_TENSOR_RANK],
     pub byte_len: u32,
     /// `-1` when the tensor is not quantized.
     pub quantization_axis: i32,
