@@ -5,7 +5,7 @@
     "delimiter_not_found": "Nie znaleziono separatora",
     "failed_to_get_task_informations": "Nie udało się uzyskać informacji o zadaniu",
     "failed_to_write": "Nie udało się zapisać",
-    "file_system_error": "Błąd systemu plików: {}",
+    "file_system_error": "Błąd systemu plików: {arg0}",
     "invalid_file_system": "Nieprawidłowy system plików",
     "invalid_identifier": "Nieprawidłowy identyfikator",
     "invalid_inode": "Nieprawidłowy inode",
@@ -19,12 +19,12 @@
     "orphaned": "Osierocony",
     "permission_denied": "Odmowa dostępu",
     "ressource_busy": "Zasób zajęty",
-    "task_error": "Błąd zadania: {}",
-    "time_error": "Błąd czasu: {}",
+    "task_error": "Błąd zadania: {arg0}",
+    "time_error": "Błąd czasu: {arg0}",
     "too_many_inodes": "Za dużo węzłów inode",
     "too_many_open_files": "Za dużo otwartych plików",
     "unavailable_driver": "Sterownik niedostępny",
     "unsupported_operation": "Nieobsługiwana operacja",
-    "users_error": "Błąd użytkowników: {}"
+    "users_error": "Błąd użytkowników: {arg0}"
   }
 }

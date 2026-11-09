@@ -25,12 +25,10 @@ run = "cargo check --manifest-path \"${XILA_APPLICATIONS_ROOT:-.application-src}
 
 [tasks."localization:host-check"]
 description = "Strictly check host localization"
-env = { EMBEDDED_I18N_STRICT = "1" }
 run = "cargo check --workspace --all-targets --target x86_64-unknown-linux-gnu --features xila/graphics,xila/abi_definitions,xila/graphics_rendering_xrgb8888"
 
 [tasks."localization:guest-check"]
 description = "Strictly check Wasm guest API localization"
-env = { EMBEDDED_I18N_STRICT = "1" }
 run = "cargo check --manifest-path \"${XILA_APPLICATIONS_ROOT:-.application-src}/Cargo.toml\" --target wasm32-unknown-unknown --package xila-wasm --no-default-features --features default_guest"
 
 [tasks."localization:lint"]

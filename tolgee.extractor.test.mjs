@@ -70,3 +70,16 @@ test("covers semantic translation keys in inline and separate Rust tests", () =>
     ["errors.line_too_long"],
   );
 });
+
+
+test("extracts 0.2 translations with named arguments, count and trailing context", () => {
+  const result = extract([
+    'embedded_i18n::t!("tabs.clock");',
+    't!(c"timer.controls.start");',
+    't!("file.open", context = "menu");',
+    't!("stopwatch.laps.recorded", count = count);',
+  ].join("\n"), "executables/clock/src/main.rs");
+  assert.deepEqual(result.keys.map(key => key.keyName), [
+    "tabs.clock", "timer.controls.start", "menu.file.open", "stopwatch.laps.recorded",
+  ]);
+});

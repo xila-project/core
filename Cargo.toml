@@ -41,7 +41,7 @@ debug_protocol = { package = "xila-debug-protocol", path = "libraries/debug_prot
 peripherals = { package = "xila-peripherals", path = "libraries/peripherals" }
 bootsplash = { package = "xila-bootsplash", path = "libraries/bootsplash" }
 peripheral_devices = { package = "xila-peripheral-devices", path = "libraries/peripheral_devices" }
-embedded-i18n = { version = "=0.1.3", default-features = false, features = [
+embedded-i18n = { version = "=0.2.0", default-features = false, features = [
   "backend-json",
 ] }
 testing = { package = "xila-testing", path = "libraries/testing" }

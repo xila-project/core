@@ -1,5 +1,5 @@
 use core::fmt::Display;
-use embedded_i18n::translate;
+use embedded_i18n::t;
 
 pub type Result<T> = core::result::Result<T, Error>;
 
@@ -18,10 +18,10 @@ impl Display for Error {
             Error::FileSystem(error) => write!(formatter, "{error}"),
             Error::Task(error) => write!(formatter, "{error}"),
             Error::FailedToGetMainFunction => {
-                write!(formatter, translate!("errors.failed_to_get_main_function"))
+                write!(formatter, "{}", t!("errors.failed_to_get_main_function"))
             }
-            Error::InvalidStackSize => write!(formatter, translate!("errors.invalid_stack_size")),
-            Error::PermissionDenied => write!(formatter, translate!("errors.permission_denied")),
+            Error::InvalidStackSize => write!(formatter, "{}", t!("errors.invalid_stack_size")),
+            Error::PermissionDenied => write!(formatter, "{}", t!("errors.permission_denied")),
         }
     }
 }

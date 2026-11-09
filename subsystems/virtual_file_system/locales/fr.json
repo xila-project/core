@@ -5,7 +5,7 @@
     "delimiter_not_found": "Délimiteur non trouvé",
     "failed_to_get_task_informations": "Impossible d'obtenir les informations de la tâche",
     "failed_to_write": "Impossible d'écrire",
-    "file_system_error": "Erreur du système de fichiers : {}",
+    "file_system_error": "Erreur du système de fichiers : {arg0}",
     "invalid_file_system": "Système de fichiers invalide",
     "invalid_identifier": "Identifiant invalide",
     "invalid_inode": "Inode invalide",
@@ -19,12 +19,12 @@
     "orphaned": "Orphelin",
     "permission_denied": "Permission refusée",
     "ressource_busy": "Ressource occupée",
-    "task_error": "Erreur tâche : {}",
-    "time_error": "Erreur de temps : {}",
+    "task_error": "Erreur tâche : {arg0}",
+    "time_error": "Erreur de temps : {arg0}",
     "too_many_inodes": "Trop d'inodes",
     "too_many_open_files": "Trop de fichiers ouverts",
     "unavailable_driver": "Pilote indisponible",
     "unsupported_operation": "Opération non supportée",
-    "users_error": "Erreur utilisateurs : {}"
+    "users_error": "Erreur utilisateurs : {arg0}"
   }
 }

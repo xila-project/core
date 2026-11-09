@@ -187,7 +187,6 @@ read -r -a locales <<< "${CI_LOCALES:-en fr es de pt-BR it pl zh-CN}"
 export CARGO_TARGET_DIR="${CARGO_TARGET_ROOT:-target/localization}"
 for locale in "${locales[@]}"; do
   echo "::group::Localization ($locale)"
-  export EMBEDDED_I18N_STRICT=1
   export EMBEDDED_I18N_LOCALE="$locale"
   mise run localization:check
   if [[ "$locale" == zh-CN ]]; then

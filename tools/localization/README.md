@@ -20,7 +20,7 @@ action (for example, 'open' as a verb versus an adjective).
   both extraction and synchronization.
 - Do not localize protocol commands, machine-readable identifiers, file
   formats, environment-variable names or wire-level errors.
-- C-string keys using 'translate!(c"...")' must continue returning a
+- C-string keys using 't!(c"...")' must continue returning a
   statically allocated CStr; avoid converting them to runtime strings.
 - Context-dependent strings should not share translation keys by default.
 
@@ -53,7 +53,7 @@ Group translations by their dotted semantic identifiers:
 ```
 
 A key such as `alarm.controls.delete` is **still** accessed with
-`translate!("alarm.controls.delete")`. Both embedded-i18n and Tolgee flatten
+`t!("alarm.controls.delete")`. Both embedded-i18n and Tolgee flatten
 nested groups to dotted IDs; nesting changes source representation, not runtime
 lookups, translation keys or firmware tables. CLDR plural suffixes are leaves.
 
@@ -93,7 +93,7 @@ validate the resulting catalogs, and inspect `tolgee compare` first.
     node --test tolgee.extractor.test.mjs tools/localization/catalog.test.mjs
     node tools/localization/check.mjs
     node tools/localization/check.mjs --baseline <PRE_MIGRATION_SHA>
-    EMBEDDED_I18N_STRICT=1 mise run localization:check
+    mise run localization:check
 
 The optional baseline mode compares **every translation value** in each
 pre-migration catalog to its new mapped destination and checks duplicated

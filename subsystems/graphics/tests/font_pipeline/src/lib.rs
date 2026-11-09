@@ -1,3 +1,5 @@
+#[path = "../../../build/config.rs"]
+pub mod config;
 #[path = "../../../build/cache.rs"]
 pub mod cache;
 #[path = "../../../build/catalogs.rs"]

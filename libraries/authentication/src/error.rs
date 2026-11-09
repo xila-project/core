@@ -4,7 +4,7 @@
 //! including user and group management, file I/O, and password validation.
 
 use core::fmt::Display;
-use embedded_i18n::translate;
+use embedded_i18n::t;
 
 /// Result type alias for authentication operations.
 ///
@@ -84,165 +84,178 @@ impl Display for Error {
             Self::FailedToGetCurrentTaskIdentifier(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_get_current_task_identifier"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_get_current_task_identifier", arg0 = error)
                 )
             }
             Self::FailedToReadUsersDirectory(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_read_users_directory"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_read_users_directory", arg0 = error)
                 )
             }
             Self::FailedToGetUserFilePath => {
-                write!(formatter, translate!("errors.failed_to_get_user_file_path"))
+                write!(formatter, "{}", t!("errors.failed_to_get_user_file_path"))
             }
             Self::FailedToReadUserFile(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_read_user_file"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_read_user_file", arg0 = error)
                 )
             }
             Self::FailedToOpenUserFile(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_open_user_file"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_open_user_file", arg0 = error)
                 )
             }
             Self::FailedToParseUserFile(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_parse_user_file"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_parse_user_file", arg0 = error)
                 )
             }
             Self::FailedToAddUser(error) => {
-                write!(formatter, translate!("errors.failed_to_add_user"), error)
+                write!(
+                    formatter,
+                    "{}",
+                    t!("errors.failed_to_add_user", arg0 = error)
+                )
             }
             Self::FailedToCreateUsersDirectory(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_create_users_directory"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_create_users_directory", arg0 = error)
                 )
             }
             Self::FailedToReadGroupDirectory(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_read_group_directory"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_read_group_directory", arg0 = error)
                 )
             }
             Self::FailedToGetGroupFilePath => {
-                write!(
-                    formatter,
-                    translate!("errors.failed_to_get_group_file_path")
-                )
+                write!(formatter, "{}", t!("errors.failed_to_get_group_file_path"))
             }
             Self::FailedToOpenGroupFile(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_open_group_file"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_open_group_file", arg0 = error)
                 )
             }
             Self::FailedToReadGroupFile(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_read_group_file"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_read_group_file", arg0 = error)
                 )
             }
             Self::FailedToParseGroupFile(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_parse_group_file"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_parse_group_file", arg0 = error)
                 )
             }
             Self::FailedToAddGroup(error) => {
-                write!(formatter, translate!("errors.failed_to_add_group"), error)
+                write!(
+                    formatter,
+                    "{}",
+                    t!("errors.failed_to_add_group", arg0 = error)
+                )
             }
             Self::FailedToCreateGroupsDirectory(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_create_group_directory"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_create_group_directory", arg0 = error)
                 )
             }
             Self::InvalidPassword => {
-                write!(formatter, translate!("errors.invalid_password"))
+                write!(formatter, "{}", t!("errors.invalid_password"))
             }
             Self::FailedToOpenRandomDevice(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_open_random_device"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_open_random_device", arg0 = error)
                 )
             }
             Self::FailedToReadRandomDevice(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_read_random_device"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_read_random_device", arg0 = error)
                 )
             }
             Self::FailedToCreateUser(error) => {
-                write!(formatter, translate!("errors.failed_to_create_user"), error)
+                write!(
+                    formatter,
+                    "{}",
+                    t!("errors.failed_to_create_user", arg0 = error)
+                )
             }
             Self::FailedToGetNewUserIdentifier(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_get_new_user_identifier"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_get_new_user_identifier", arg0 = error)
                 )
             }
             Self::FailedToWriteUserFile(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_write_user_file"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_write_user_file", arg0 = error)
                 )
             }
             Self::FailedToGetNewGroupIdentifier(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_get_new_groupe_identifier"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_get_new_groupe_identifier", arg0 = error)
                 )
             }
             Self::FailedToCreateGroup(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_create_group"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_create_group", arg0 = error)
                 )
             }
             Self::FailedToWriteGroupFile(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_write_group_file"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_write_group_file", arg0 = error)
                 )
             }
             Self::FailedToGetUserIdentifier(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_get_user_identifier"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_get_user_identifier", arg0 = error)
                 )
             }
             Self::FailedToCloseFile(error) => {
-                write!(formatter, translate!("errors.failed_to_close_file"), error)
+                write!(
+                    formatter,
+                    "{}",
+                    t!("errors.failed_to_close_file", arg0 = error)
+                )
             }
             Self::FailedToHashPassword(error) => {
                 write!(
                     formatter,
-                    translate!("errors.failed_to_hash_password"),
-                    error
+                    "{}",
+                    t!("errors.failed_to_hash_password", arg0 = error)
                 )
             }
         }

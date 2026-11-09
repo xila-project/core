@@ -23,3 +23,9 @@ default = []
 
 [lib]
 name = "file_system"
+
+[package.metadata.i18n]
+load-path = "locales"
+default-locale = "en"
+fallback = ["en"]
+strict = true

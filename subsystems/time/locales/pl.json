@@ -1,6 +1,6 @@
 {
   "errors": {
-    "device_error": "Błąd urządzenia: {}",
+    "device_error": "Błąd urządzenia: {arg0}",
     "time_module_already_initialized": "Moduł czasu już zainicjalizowano",
     "time_module_not_initialized": "Moduł czasu nie jest zainicjalizowany",
     "utc_unsynchronized": "Zegar UTC nie jest zsynchronizowany",

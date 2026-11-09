@@ -5,7 +5,7 @@
     "delimiter_not_found": "No se encontró el delimitador",
     "failed_to_get_task_informations": "No se pudo obtener la información de la tarea",
     "failed_to_write": "No se pudo escribir",
-    "file_system_error": "Error del sistema de archivos: {}",
+    "file_system_error": "Error del sistema de archivos: {arg0}",
     "invalid_file_system": "Sistema de archivos no válido",
     "invalid_identifier": "Identificador no válido",
     "invalid_inode": "Inodo no válido",
@@ -19,12 +19,12 @@
     "orphaned": "Huérfano",
     "permission_denied": "Permiso denegado",
     "ressource_busy": "Recurso ocupado",
-    "task_error": "Error de tarea: {}",
-    "time_error": "Error de tiempo: {}",
+    "task_error": "Error de tarea: {arg0}",
+    "time_error": "Error de tiempo: {arg0}",
     "too_many_inodes": "Demasiados inodos",
     "too_many_open_files": "Demasiados archivos abiertos",
     "unavailable_driver": "Controlador no disponible",
     "unsupported_operation": "Operación no admitida",
-    "users_error": "Error de usuarios: {}"
+    "users_error": "Error de usuarios: {arg0}"
   }
 }

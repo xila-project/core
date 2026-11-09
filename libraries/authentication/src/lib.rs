@@ -31,7 +31,7 @@
 
 extern crate alloc;
 
-embedded_i18n::track_locales!();
+embedded_i18n::i18n!("locales");
 
 mod error;
 mod seed;

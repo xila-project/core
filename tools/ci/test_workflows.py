@@ -53,7 +53,7 @@ class WorkflowPolicy(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             mise = root / "mise"
-            mise.write_text('#!/bin/sh\nprintf "%s|%s|%s|%s\\n" "$EMBEDDED_I18N_LOCALE" "$CARGO_TARGET_DIR" "$EMBEDDED_I18N_STRICT" "$*" >> "$CALLS"\n')
+            mise.write_text('#!/bin/sh\nprintf "%s|%s|%s\\n" "$EMBEDDED_I18N_LOCALE" "$CARGO_TARGET_DIR" "$*" >> "$CALLS"\n')
             mise.chmod(0o755)
             calls = root / "calls"
             env = os.environ | {
@@ -65,8 +65,7 @@ class WorkflowPolicy(unittest.TestCase):
             records = [line.split('|') for line in calls.read_text().splitlines()]
             self.assertEqual([row[0] for row in records], ["en", "fr", "pl"])
             self.assertEqual({row[1] for row in records}, {str(root / "target/localization")})
-            self.assertEqual({row[2] for row in records}, {"1"})
-            self.assertEqual({row[3] for row in records}, {"run localization:check"})
+            self.assertEqual({row[2] for row in records}, {"run localization:check"})
 
     def test_font_regressions_have_pinned_rust_and_node_tools(self):
         for environment in ["ci", "development"]:
