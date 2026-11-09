@@ -26,6 +26,7 @@ EXPECTED_PACKAGE_NAMES = {
     "libraries/http/Cargo.toml": "xila_http",
     "libraries/little_fs/Cargo.toml": "xila-little-fs",
     "libraries/littlefs2_sys/Cargo.toml": "littlefs2-sys",
+    "libraries/neural_network/Cargo.toml": "xila-neural-network",
     "libraries/peripheral_devices/Cargo.toml": "xila-peripheral-devices",
     "libraries/peripherals/Cargo.toml": "xila-peripherals",
     "libraries/shared/Cargo.toml": "xila-shared",
@@ -59,6 +60,7 @@ EXPECTED_LIBRARY_TARGETS = {
     "subsystems/log/Cargo.toml": "log",
     "subsystems/users/Cargo.toml": "users",
     "libraries/audio/Cargo.toml": "audio",
+    "libraries/neural_network/Cargo.toml": "neural_network",
     "libraries/debug_protocol/Cargo.toml": "debug_protocol",
     "subsystems/graphics/Cargo.toml": "graphics",
     "libraries/abi/declarations/Cargo.toml": "abi_declarations",
@@ -89,6 +91,7 @@ class CargoPackageNames(unittest.TestCase):
             for path in ROOT.rglob("Cargo.toml")
             if ".git" not in path.parts
             and not path.is_relative_to(ROOT / "target")
+            and not path.is_relative_to(ROOT / "docs" / "superpowers")
             and ".superpowers" not in path.parts
             and ".application-src" not in path.parts
             and "node_modules" not in path.parts
@@ -215,6 +218,7 @@ class CargoPackageNames(unittest.TestCase):
                 or ".git" in path.parts
                 or ".superpowers" in path.parts
                 or path.is_relative_to(ROOT / "target")
+                or path.is_relative_to(ROOT / "docs" / "superpowers")
             ):
                 continue
             for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):

@@ -1,0 +1,13 @@
+[package]
+name = "xila-neural-network"
+version.workspace = true
+edition = "2024"
+
+[dependencies]
+file_system = { workspace = true }
+shared = { workspace = true }
+[lib]
+name = "neural_network"
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+critical-section = { workspace = true, features = ["std"] }
