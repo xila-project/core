@@ -211,14 +211,13 @@ pub fn validate_request(request: &Request) -> Result<(), ProtocolError> {
         text,
         button,
     } = request
-    {
-        if [role, name, text, button].iter().all(|s| s.is_none())
+        && ([role, name, text, button].iter().all(|s| s.is_none())
             || [role, name, text, button]
                 .iter()
-                .any(|s| s.as_ref().is_some_and(|s| s.is_empty() || s.len() > 512))
-        {
-            return Err(ProtocolError::InvalidSelector);
-        }
+                .any(|s| s.as_ref().is_some_and(|s| s.is_empty() || s.len() > 512)))
+    {
+        return Err(ProtocolError::InvalidSelector);
     }
+
     Ok(())
 }

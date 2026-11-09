@@ -132,12 +132,12 @@ pub(crate) unsafe fn inspect_children(
     object: *mut lvgl::lv_obj_t,
     parent_id: Option<u32>,
     depth: usize,
-    max_depth: usize,
-    max_elements: usize,
+    limits: (usize, usize),
     elements: &mut Vec<UiElement>,
     truncated: &mut bool,
     layer: &'static str,
 ) {
+    let (max_depth, max_elements) = limits;
     if object.is_null() {
         return;
     }
@@ -312,8 +312,7 @@ pub(crate) unsafe fn inspect_children(
                 child,
                 Some(id),
                 depth + 1,
-                max_depth,
-                max_elements,
+                limits,
                 elements,
                 truncated,
                 layer,
