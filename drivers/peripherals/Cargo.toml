@@ -1,5 +1,5 @@
 [package]
-name = "xila-peripheral-devices"
+name = "xila-drivers-peripherals"
 version.workspace = true
 edition = "2024"
 
@@ -45,4 +45,4 @@ spi = ["dep:embedded-hal", "dep:peripherals", "peripherals/spi"]
 pwm = ["dep:embedded-hal", "dep:peripherals", "peripherals/pwm"]
 
 [lib]
-name = "peripheral_devices"
+name = "drivers_peripherals"

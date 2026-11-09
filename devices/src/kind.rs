@@ -12,15 +12,15 @@
 //! | `b'E'`    | `0x45` | Executable          | `executable`                             |
 //! | `b'F'`    | `0x46` | Firmware update     | `firmware_update::device`                |
 //! | `b'H'`    | `0x48` | Hash accelerator    | `device::hash`                           |
-//! | `b'N'`    | `0x4E` | Neural network      | `device::neural_network`                 |
+//! | `b'N'`    | `0x4E` | Neural network      | `device::neural_network` / `drivers_neural_network` |
 //! | `b'T'`    | `0x54` | Terminal / character| `file_system::character_device`          |
-//! | `b'a'`    | `0x61` | ADC                 | `device::adc` / `peripheral_devices::adc`|
-//! | `b'g'`    | `0x67` | GPIO                | `device::gpio` / `peripheral_devices::gpio` |
-//! | `b'i'`    | `0x69` | I2C                 | `device::i2c` / `peripheral_devices::i2c`|
+//! | `b'a'`    | `0x61` | ADC                 | `device::adc` / `drivers_peripherals::adc`|
+//! | `b'g'`    | `0x67` | GPIO                | `device::gpio` / `drivers_peripherals::gpio` |
+//! | `b'i'`    | `0x69` | I2C                 | `device::i2c` / `drivers_peripherals::i2c`|
 //! | `b'n'`    | `0x6E` | Network interface   | `network`                                |
-//! | `b'p'`    | `0x70` | PWM                 | `device::pwm` / `peripheral_devices::pwm`|
-//! | `b's'`    | `0x73` | SPI                 | `device::spi` / `peripheral_devices::spi`|
-//! | `b'u'`    | `0x75` | UART                | `device::uart` / `peripheral_devices::uart` |
+//! | `b'p'`    | `0x70` | PWM                 | `device::pwm` / `drivers_peripherals::pwm`|
+//! | `b's'`    | `0x73` | SPI                 | `device::spi` / `drivers_peripherals::spi`|
+//! | `b'u'`    | `0x75` | UART                | `device::uart` / `drivers_peripherals::uart` |
 //! | `b'w'`    | `0x77` | Wi-Fi               | `network`                                |
 
 /// Audio playback and stream control (`b'A'`).

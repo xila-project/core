@@ -9,11 +9,11 @@ extern crate alloc;
 #[path = "support/allocation.rs"]
 mod allocation;
 
-use file_system::{AccessFlags, Error as FileSystemError, Flags, MemoryDevice};
-use peripheral_devices::i2c::{
+use drivers_peripherals::i2c::{
     FrequencyOutput, GET_FREQUENCY, SELECT_ADDRESS, SET_FREQUENCY, SelectAddressInput,
     SetFrequencyInput, WRITE_READ, WriteReadInput, WriteReadOutput, mount_i2c_device,
 };
+use file_system::{AccessFlags, Error as FileSystemError, Flags, MemoryDevice};
 use peripherals::i2c::{
     BusConfig, Capabilities, I2cController, I2cSlave, MockI2cBus, MockI2cController,
 };

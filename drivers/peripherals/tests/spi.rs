@@ -11,13 +11,13 @@ mod allocation;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use file_system::{AccessFlags, Error as FileSystemError, Flags, MemoryDevice, Position};
-use peripheral_devices::spi::{
+use drivers_peripherals::spi::{
     SPI_ABI_VERSION, SPI_GET_CONFIGURATION, SPI_MAX_SEGMENTS, SPI_MAX_TRANSACTION_BYTES,
     SPI_MAX_TRANSFER_BYTES, SPI_SEGMENT_READ, SPI_SEGMENT_TRANSFER, SPI_SEGMENT_WRITE,
     SPI_SET_CONFIGURATION, SPI_TRANSACTION, SPI_TRANSFER, SpiConfigurationAbi, SpiSegmentAbi,
     SpiTransactionInputAbi, SpiTransferInputAbi, mount_spi_device,
 };
+use file_system::{AccessFlags, Error as FileSystemError, Flags, MemoryDevice, Position};
 use peripherals::spi::{
     BusCapabilities, DeviceConfig, Mode, SimulatedSpiDevice, SpiController, SpiError, SpiMock,
     SpiMockReservation,

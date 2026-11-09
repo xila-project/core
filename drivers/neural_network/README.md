@@ -1,6 +1,6 @@
 # Neural network VFS device
 
-A portable VFS adapter, exported as `xila::neural_network_driver` by the optional `neural_network` feature.
+A portable VFS adapter, exported as `xila::drivers_neural_network` by the optional `neural_network` feature.
 The ABI is defined in `device::neural_network`; the lower-half trait is
 `neural_network::Backend`. Applications use ordinary VFS open/write/control/read/close operations. This crate has
 no inference-engine or accelerator dependency.

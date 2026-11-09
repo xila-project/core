@@ -6,9 +6,9 @@ pub mod about;
 pub use audio;
 
 #[cfg(feature = "neural_network")]
-pub use neural_network;
+pub use drivers_neural_network;
 #[cfg(feature = "neural_network")]
-pub use neural_network_driver;
+pub use neural_network;
 
 pub use abi_declarations;
 pub use authentication;

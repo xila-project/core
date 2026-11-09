@@ -1,5 +1,7 @@
+use drivers_neural_network::{
+    Backend, COMPUTE, NeuralNetworkDevice, QuantizationEntry, TensorInfo,
+};
 use file_system::{BaseOperations, Context, ControlCommand, Error, Result};
-use neural_network_driver::{Backend, COMPUTE, NeuralNetworkDevice, QuantizationEntry, TensorInfo};
 
 struct Model(u32);
 struct Execution {

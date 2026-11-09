@@ -19,7 +19,7 @@ repository = "https://github.com/xila-project/core"
 xila = { path = "core" }
 xila_http = { path = "libraries/http", default-features = false }
 audio = { package = "xila-audio", path = "libraries/audio" }
-neural_network_driver = { package = "xila-neural-network-driver", path = "drivers/neural_network" }
+drivers_neural_network = { package = "xila-drivers-neural-network", path = "drivers/neural_network" }
 neural_network = { package = "xila-neural-network", path = "libraries/neural_network" }
 nanoaudio = { git = "https://github.com/AlixANNERAUD/nanoaudio.git", rev = "596076c64827fd8bf9e8319addc2f215e0cde8be", default-features = false }
 abi_declarations = { package = "xila-abi-declarations", path = "libraries/abi/declarations" }
@@ -49,7 +49,7 @@ device = { package = "xila-device", path = "devices" }
 
 # - Drivers
 drivers_core = { package = "xila-drivers-core", path = "drivers/core" }
-peripheral_devices = { package = "xila-peripheral-devices", path = "drivers/peripherals" }
+drivers_peripherals = { package = "xila-drivers-peripherals", path = "drivers/peripherals" }
 
 # - Executables
 
