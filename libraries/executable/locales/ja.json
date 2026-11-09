@@ -1,0 +1,7 @@
+{
+  "errors": {
+    "failed_to_get_main_function": "メイン関数を取得できませんでした",
+    "invalid_stack_size": "無効なスタックサイズ",
+    "permission_denied": "アクセスが拒否されました"
+  }
+}

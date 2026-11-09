@@ -1,0 +1,9 @@
+{
+  "errors": {
+    "buffer_too_small": "バッファーが小さすぎます",
+    "failed_to_convert_length": "長さを変換できませんでした",
+    "invalid_utf_8_string": "無効な UTF-8 文字列",
+    "invalid_length": "無効な長さ",
+    "invalid_pointer": "無効なポインター"
+  }
+}

@@ -13,3 +13,6 @@ node_modules
 /docs/
 
 /tools/profiling/target/
+
+# Optional Japanese source font, installed by the pinned font setup script.
+/subsystems/graphics/fonts/SourceHanSansJP-Regular.otf

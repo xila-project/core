@@ -1,0 +1,26 @@
+{
+  "errors": {
+    "already_in_use": "既に使用中です",
+    "already_initialized": "既に初期化されています",
+    "failed_to_create_object": "オブジェクトを作成できませんでした",
+    "failed_to_get_resolution": "解像度を取得できませんでした",
+    "failed_to_register": "登録できませんでした",
+    "invalid_reference": "無効な参照",
+    "invalid_parameter": "無効なパラメーター",
+    "invalid_window_identifier": "無効なウィンドウ識別子",
+    "not_available": "利用できません",
+    "not_initialized": "初期化されていません",
+    "not_registered": "登録されていません",
+    "out_of_memory": "メモリが不足しています"
+  },
+  "file_picker": {
+    "parent": "親フォルダー",
+    "previous": "前へ",
+    "next": "次へ",
+    "cancel": "キャンセル",
+    "error": "パスを選択できません",
+    "open": "開く",
+    "save": "保存",
+    "select_directory": "フォルダーを選択"
+  }
+}
