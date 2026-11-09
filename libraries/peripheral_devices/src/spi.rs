@@ -181,7 +181,7 @@ impl Default for SpiTransactionOutputAbi {
 define_command!(
     SPI_GET_CONFIGURATION,
     Read,
-    b's',
+    device::kind::SPI,
     0,
     (),
     SpiConfigurationAbi
@@ -189,7 +189,7 @@ define_command!(
 define_command!(
     SPI_SET_CONFIGURATION,
     Write,
-    b's',
+    device::kind::SPI,
     1,
     SpiConfigurationAbi,
     ()
@@ -198,7 +198,7 @@ define_command!(
 define_command!(
     SPI_TRANSFER,
     ControlDirectionFlags::all(),
-    b's',
+    device::kind::SPI,
     2,
     SpiTransferInputAbi,
     SpiTransferOutputAbi
@@ -207,7 +207,7 @@ define_command!(
 define_command!(
     SPI_TRANSACTION,
     ControlDirectionFlags::all(),
-    b's',
+    device::kind::SPI,
     3,
     SpiTransactionInputAbi,
     SpiTransactionOutputAbi

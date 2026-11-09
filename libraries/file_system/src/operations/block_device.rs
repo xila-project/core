@@ -4,6 +4,7 @@ use crate::{
 };
 use shared::AnyByLayout;
 
+// Kind byte `b'B'` is registered as `device::kind::BLOCK_DEVICE` (kept as a literal here because `device` depends on `file_system`).
 define_command!(GET_BLOCK_SIZE, Read, b'B', 0, (), u32);
 define_command!(GET_BLOCK_COUNT, Read, b'B', 1, (), u32);
 

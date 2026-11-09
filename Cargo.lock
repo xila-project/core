@@ -1864,6 +1864,7 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
  "nanoaudio",
+ "xila-device",
  "xila-file-system",
  "xila-shared",
  "xila-synchronization",
@@ -1924,6 +1925,7 @@ name = "xila-executable"
 version = "0.1.0"
 dependencies = [
  "embedded-i18n",
+ "xila-device",
  "xila-drivers-core",
  "xila-file-system",
  "xila-graphics",
@@ -1958,6 +1960,7 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
  "xila-abi-definitions",
+ "xila-device",
  "xila-file-system",
  "xila-little-fs",
  "xila-shared",
@@ -1982,6 +1985,7 @@ dependencies = [
  "toml 1.1.8+spec-1.1.0",
  "xila-abi-declarations",
  "xila-abi-definitions",
+ "xila-device",
  "xila-drivers-core",
  "xila-file-system",
  "xila-graphics",
@@ -2056,6 +2060,7 @@ dependencies = [
  "smol_str",
  "smoltcp",
  "xila-abi-definitions",
+ "xila-device",
  "xila-file-system",
  "xila-little-fs",
  "xila-log",
@@ -2073,6 +2078,7 @@ name = "xila-neural-network"
 version = "0.1.0"
 dependencies = [
  "critical-section",
+ "xila-device",
  "xila-file-system",
  "xila-shared",
 ]
@@ -2085,6 +2091,7 @@ dependencies = [
  "embedded-hal 1.0.0",
  "embedded-io",
  "xila-abi-definitions",
+ "xila-device",
  "xila-file-system",
  "xila-little-fs",
  "xila-log",

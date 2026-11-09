@@ -20,7 +20,7 @@ use shared::AnyByLayout;
 use task::TaskIdentifier;
 use virtual_file_system::{Error, File, VirtualFileSystem};
 
-file_system::define_command!(BYTES_QUEUED, Read, b'u', 0, (), usize);
+file_system::define_command!(BYTES_QUEUED, Read, device::kind::UART, 0, (), usize);
 
 /// Test-only FIFO: whatever is written is read back in order.
 #[derive(Default)]

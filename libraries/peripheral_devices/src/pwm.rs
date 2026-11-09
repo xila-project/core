@@ -71,11 +71,11 @@ pub struct PwmDutyPermilleAbi {
     pub permille: u16,
 }
 
-define_command!(GET_INFO, Read, b'p', 0x00, PwmVersionAbi, PwmInfoAbi);
+define_command!(GET_INFO, Read, device::kind::PWM, 0x00, PwmVersionAbi, PwmInfoAbi);
 define_command!(
     SET_FREQUENCY,
     Write,
-    b'p',
+    device::kind::PWM,
     0x01,
     PwmFrequencyAbi,
     PwmInfoAbi
@@ -83,7 +83,7 @@ define_command!(
 define_command!(
     SET_DUTY_PERMILLE,
     Write,
-    b'p',
+    device::kind::PWM,
     0x02,
     PwmDutyPermilleAbi,
     PwmInfoAbi

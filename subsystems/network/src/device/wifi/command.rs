@@ -1,15 +1,50 @@
 use super::*;
 use file_system::{ControlCommand, define_command};
 
-define_command!(GET_WIFI_CAPABILITIES, Read, b'w', 0, (), WifiCapabilities);
-define_command!(GET_WIFI_RADIO_STATE, Read, b'w', 1, (), WifiRadioState);
-define_command!(SET_WIFI_RADIO_STATE, Write, b'w', 2, WifiRadioState, ());
-define_command!(START_WIFI_SCAN, Write, b'w', 3, WifiScanConfiguration, ());
-define_command!(GET_WIFI_SCAN_STATE, Read, b'w', 4, (), WifiScanState);
+define_command!(
+    GET_WIFI_CAPABILITIES,
+    Read,
+    device::kind::WIFI,
+    0,
+    (),
+    WifiCapabilities
+);
+define_command!(
+    GET_WIFI_RADIO_STATE,
+    Read,
+    device::kind::WIFI,
+    1,
+    (),
+    WifiRadioState
+);
+define_command!(
+    SET_WIFI_RADIO_STATE,
+    Write,
+    device::kind::WIFI,
+    2,
+    WifiRadioState,
+    ()
+);
+define_command!(
+    START_WIFI_SCAN,
+    Write,
+    device::kind::WIFI,
+    3,
+    WifiScanConfiguration,
+    ()
+);
+define_command!(
+    GET_WIFI_SCAN_STATE,
+    Read,
+    device::kind::WIFI,
+    4,
+    (),
+    WifiScanState
+);
 define_command!(
     GET_WIFI_SCAN_RESULT_COUNT,
     Read,
-    b'w',
+    device::kind::WIFI,
     5,
     (),
     WifiScanResultCount
@@ -18,7 +53,7 @@ define_command!(
 define_command!(
     GET_WIFI_SCAN_RESULT,
     Read,
-    b'w',
+    device::kind::WIFI,
     6,
     WifiScanResultRequest,
     WifiAccessPoint
@@ -26,16 +61,16 @@ define_command!(
 define_command!(
     CONNECT_WIFI_CLIENT,
     Write,
-    b'w',
+    device::kind::WIFI,
     7,
     WifiClientConfiguration,
     ()
 );
-define_command!(DISCONNECT_WIFI_CLIENT, Write, b'w', 8, (), ());
+define_command!(DISCONNECT_WIFI_CLIENT, Write, device::kind::WIFI, 8, (), ());
 define_command!(
     GET_WIFI_CONNECTION_STATE,
     Read,
-    b'w',
+    device::kind::WIFI,
     9,
     (),
     WifiConnectionState
@@ -44,7 +79,7 @@ define_command!(
 define_command!(
     GET_WIFI_CONNECTION_INFO,
     Read,
-    b'w',
+    device::kind::WIFI,
     10,
     (),
     WifiConnectionInfo
@@ -52,7 +87,7 @@ define_command!(
 define_command!(
     GET_WIFI_LAST_CONNECTION_ERROR,
     Read,
-    b'w',
+    device::kind::WIFI,
     11,
     (),
     WifiConnectionErrorKind

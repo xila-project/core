@@ -118,10 +118,10 @@ impl Default for WriteReadOutput {
     }
 }
 
-file_system::define_command!(SELECT_ADDRESS, Write, b'i', 0, SelectAddressInput, ());
-file_system::define_command!(GET_FREQUENCY, Read, b'i', 1, (), FrequencyOutput);
-file_system::define_command!(SET_FREQUENCY, Write, b'i', 2, SetFrequencyInput, ());
-file_system::define_command!(WRITE_READ, Write, b'i', 3, WriteReadInput, WriteReadOutput);
+file_system::define_command!(SELECT_ADDRESS, Write, device::kind::I2C, 0, SelectAddressInput, ());
+file_system::define_command!(GET_FREQUENCY, Read, device::kind::I2C, 1, (), FrequencyOutput);
+file_system::define_command!(SET_FREQUENCY, Write, device::kind::I2C, 2, SetFrequencyInput, ());
+file_system::define_command!(WRITE_READ, Write, device::kind::I2C, 3, WriteReadInput, WriteReadOutput);
 
 /// Handle that exposes an I2C controller through [`PeripheralHandle`].
 ///

@@ -70,12 +70,12 @@ pub struct CapabilitiesAbi {
     pub reserved: u8,
 }
 
-define_command!(CONFIGURE, Write, b'g', 0x00, ConfigureAbi, VersionAbi);
-define_command!(RELEASE, Write, b'g', 0x01, VersionAbi, VersionAbi);
+define_command!(CONFIGURE, Write, device::kind::GPIO, 0x00, ConfigureAbi, VersionAbi);
+define_command!(RELEASE, Write, device::kind::GPIO, 0x01, VersionAbi, VersionAbi);
 define_command!(
     GET_CAPABILITIES,
     Read,
-    b'g',
+    device::kind::GPIO,
     0x02,
     VersionAbi,
     CapabilitiesAbi

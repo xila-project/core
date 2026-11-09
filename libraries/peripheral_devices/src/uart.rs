@@ -71,10 +71,10 @@ pub struct ConfigAbi {
     pub flow_control: u8,
 }
 
-define_command!(GET_CONFIG, Read, b'u', 0x00, VersionAbi, ConfigAbi);
-define_command!(SET_CONFIG, Write, b'u', 0x01, ConfigAbi, VersionAbi);
-define_command!(FLUSH_RX, Write, b'u', 0x02, VersionAbi, VersionAbi);
-define_command!(FLUSH_TX, Write, b'u', 0x03, VersionAbi, VersionAbi);
+define_command!(GET_CONFIG, Read, device::kind::UART, 0x00, VersionAbi, ConfigAbi);
+define_command!(SET_CONFIG, Write, device::kind::UART, 0x01, ConfigAbi, VersionAbi);
+define_command!(FLUSH_RX, Write, device::kind::UART, 0x02, VersionAbi, VersionAbi);
+define_command!(FLUSH_TX, Write, device::kind::UART, 0x03, VersionAbi, VersionAbi);
 
 /// Adapts a UART endpoint to [`PeripheralHandle`].
 ///

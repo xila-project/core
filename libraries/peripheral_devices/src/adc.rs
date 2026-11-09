@@ -68,16 +68,16 @@ pub struct MillivoltsAbi {
     pub millivolts: u32,
 }
 
-define_command!(GET_INFO, Read, b'a', 0x00, VersionAbi, InfoAbi);
+define_command!(GET_INFO, Read, device::kind::ADC, 0x00, VersionAbi, InfoAbi);
 define_command!(
     SELECT_CHANNEL,
     Write,
-    b'a',
+    device::kind::ADC,
     0x01,
     SelectChannelAbi,
     VersionAbi
 );
-define_command!(READ_MILLIVOLTS, Read, b'a', 0x02, VersionAbi, MillivoltsAbi);
+define_command!(READ_MILLIVOLTS, Read, device::kind::ADC, 0x02, VersionAbi, MillivoltsAbi);
 
 /// Adapts an ADC converter to [`PeripheralHandle`]. The selected channel starts at 0.
 pub struct AdcHandle<C> {

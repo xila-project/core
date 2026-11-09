@@ -7,7 +7,7 @@ use file_system::{
 };
 use shared::AnyByLayout;
 
-define_command!(GET_MAIN_FUNCTION, Read, b'E', 1, (), MainFunction);
+define_command!(GET_MAIN_FUNCTION, Read, device::kind::EXECUTABLE, 1, (), MainFunction);
 
 pub trait ExecutableTrait: 'static + Send + Sync {
     fn main(standard: Standard<'static>, arguments: Vec<String>) -> MainFuture;
