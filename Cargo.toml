@@ -22,7 +22,7 @@ verification = { git = "https://github.com/xila-project/package_manager", rev = 
 audio = { package = "xila-audio", path = "libraries/audio" }
 neural_network = { package = "xila-neural-network", path = "libraries/neural_network" }
 nanoaudio = { git = "https://github.com/AlixANNERAUD/nanoaudio.git", rev = "596076c64827fd8bf9e8319addc2f215e0cde8be", default-features = false }
-nanoglia = { git = "https://github.com/AlixANNERAUD/nanoglia", rev = "e817ae30d93f5871772e8dc37f0f5d70ee60b5bd", default-features = false }
+nanoglia = { git = "https://github.com/AlixANNERAUD/nanoglia", rev = "eec3404a606c21c12a498027f51f7bd1d18e198f", default-features = false }
 abi_declarations = { package = "xila-abi-declarations", path = "libraries/abi/declarations" }
 abi_definitions = { package = "xila-abi-definitions", path = "libraries/abi/definitions" }
 little_fs = { package = "xila-little-fs", path = "libraries/little_fs" }
