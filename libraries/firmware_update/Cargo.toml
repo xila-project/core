@@ -4,19 +4,16 @@ version.workspace = true
 edition = "2024"
 rust-version = "1.90"
 license = "Apache-2.0"
-description = "Bounded firmware transactions and experimental native NOR reference backend"
+description = "Bounded firmware update transactions and VFS device adapter"
 
 [lib]
 name = "firmware_update"
 
 [features]
 default = []
-simulator = ["dep:verification"]
-std = ["simulator"]
 device = ["dep:file_system", "dep:shared", "dep:synchronization"]
 
 native = [
-  "std",
   "device",
   "dep:virtual_file_system",
   "dep:task",
@@ -28,10 +25,6 @@ native = [
 ]
 
 [dependencies]
-verification = { workspace = true, optional = true, features = [
-  "sha256",
-  "ed25519",
-] }
 file_system = { workspace = true, optional = true }
 shared = { workspace = true, optional = true }
 synchronization = { workspace = true, optional = true }
@@ -47,7 +40,6 @@ critical-section = { workspace = true, optional = true, features = ["std"] }
 [dev-dependencies]
 testing = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }
-ed25519-dalek = { version = "3.0", default-features = false }
 critical-section = { workspace = true, features = ["std"] }
 
 [[test]]

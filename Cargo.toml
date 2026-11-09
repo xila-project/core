@@ -18,7 +18,6 @@ repository = "https://github.com/xila-project/core"
 [workspace.dependencies]
 xila = { path = "core" }
 xila_http = { path = "libraries/http", default-features = false }
-verification = { git = "https://github.com/xila-project/package_manager", rev = "f5e3f0b323a79a80d106ce2b88b77bfa8667d71b", default-features = false }
 audio = { package = "xila-audio", path = "libraries/audio" }
 neural_network = { package = "xila-neural-network", path = "libraries/neural_network" }
 nanoaudio = { git = "https://github.com/AlixANNERAUD/nanoaudio.git", rev = "596076c64827fd8bf9e8319addc2f215e0cde8be", default-features = false }

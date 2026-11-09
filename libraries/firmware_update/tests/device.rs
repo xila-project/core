@@ -1,13 +1,81 @@
-mod support;
 use file_system::{AccessFlags, MemoryDevice, Permissions};
 use firmware_update::device::*;
-use firmware_update::nor::MemoryNor;
-use firmware_update::simulator::{FLASH_SIZE, Simulator};
-use support::*;
+use firmware_update::{
+    AUTHENTICATED_UPDATE, Capabilities, Error as FirmwareError, FUNCTIONAL_REVERT, FirmwareBackend,
+};
 use users::{GroupIdentifier, UserIdentifier};
 use virtual_file_system::{Error, File, ItemStatic, VirtualFileSystem};
 extern crate abi_definitions;
 testing::instantiate_global_allocator!();
+
+#[derive(Default)]
+struct FakeBackend {
+    generation: u64,
+    staging: Option<u64>,
+    received: u64,
+    activated: bool,
+    confirmed: bool,
+}
+
+impl FirmwareBackend for FakeBackend {
+    type Verified = u64;
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            max_image_size: 3840,
+            max_chunk_size: 64,
+            guarantees: AUTHENTICATED_UPDATE | FUNCTIONAL_REVERT,
+        }
+    }
+    fn begin(&mut self, size: u64, metadata: &[u8]) -> Result<(), FirmwareError> {
+        if self.staging.is_some() {
+            return Err(FirmwareError::InvalidState);
+        }
+        if metadata.is_empty() {
+            return Err(FirmwareError::Encoding);
+        }
+        self.generation += 1;
+        self.staging = Some(size);
+        self.received = 0;
+        Ok(())
+    }
+    fn write(&mut self, bytes: &[u8]) -> Result<usize, FirmwareError> {
+        let expected = self.staging.ok_or(FirmwareError::InvalidState)?;
+        if bytes.len() as u64 > expected - self.received {
+            return Err(FirmwareError::Length);
+        }
+        let n = bytes.len().min(64);
+        self.received += n as u64;
+        Ok(n)
+    }
+    fn finish(&mut self) -> Result<u64, FirmwareError> {
+        let expected = self.staging.ok_or(FirmwareError::InvalidState)?;
+        if self.received != expected {
+            return Err(FirmwareError::Length);
+        }
+        Ok(self.generation)
+    }
+    fn activate(&mut self, verified: u64) -> Result<(), FirmwareError> {
+        self.staging.ok_or(FirmwareError::InvalidState)?;
+        if verified != self.generation {
+            return Err(FirmwareError::InvalidState);
+        }
+        self.staging = None;
+        self.activated = true;
+        Ok(())
+    }
+    fn abort(&mut self) -> Result<(), FirmwareError> {
+        self.staging = None;
+        self.received = 0;
+        Ok(())
+    }
+    fn confirm_running(&mut self) -> Result<(), FirmwareError> {
+        if self.staging.is_some() {
+            return Err(FirmwareError::InvalidState);
+        }
+        self.confirmed = true;
+        Ok(())
+    }
+}
 
 async fn fixture() -> (task::TaskIdentifier, &'static VirtualFileSystem) {
     let manager = task::test_manager();
@@ -22,19 +90,12 @@ async fn fixture() -> (task::TaskIdentifier, &'static VirtualFileSystem) {
     vfs.create_directory(task, &"/devices/system")
         .await
         .unwrap();
-    let bytes = Box::leak(Box::new([255; FLASH_SIZE]));
-    let sim = Simulator::provision(
-        MemoryNor::new(bytes).unwrap(),
-        key().verifying_key().to_bytes(),
-        TARGET,
-        &manifest(b"old", 1),
-        b"old",
-    )
-    .unwrap();
     vfs.mount_static_with_permissions(
         task,
         DEVICE_PATH,
-        ItemStatic::CharacterDevice(Box::leak(Box::new(FirmwareDevice::new(sim)))),
+        ItemStatic::CharacterDevice(Box::leak(Box::new(FirmwareDevice::new(
+            FakeBackend::default(),
+        )))),
         Permissions::USER_READ_WRITE,
     )
     .await
@@ -59,7 +120,7 @@ async fn vfs_stream_is_exclusive_explicit_and_privileged() {
         file.control(ACTIVATE, &header()).await,
         Err(Error::FileSystem(file_system::Error::InvalidParameter))
     );
-    let request = begin_request(137, &manifest(&[0x5a; 137], 2)).unwrap();
+    let request = begin_request(137, b"metadata").unwrap();
     file.control(BEGIN, &request).await.unwrap();
     assert_eq!(file.write(&[0x5a; 137]).await.unwrap(), 64);
     assert_eq!(file.write(&[0x5a; 73]).await.unwrap(), 64);
@@ -109,13 +170,13 @@ async fn readonly_controls_and_malformed_abi_do_not_mutate() {
         f.control(ABORT, &bad).await,
         Err(Error::FileSystem(file_system::Error::InvalidParameter))
     );
-    let mut bad = begin_request(3, &manifest(b"new", 2)).unwrap();
+    let mut bad = begin_request(3, b"metadata").unwrap();
     bad[279] = 1;
     assert_eq!(
         f.control(BEGIN, &bad).await,
         Err(Error::FileSystem(file_system::Error::InvalidParameter))
     );
-    f.control(BEGIN, &begin_request(3, &manifest(b"new", 2)).unwrap())
+    f.control(BEGIN, &begin_request(3, b"metadata").unwrap())
         .await
         .unwrap();
     f.write(b"new").await.unwrap();
@@ -125,7 +186,7 @@ async fn readonly_controls_and_malformed_abi_do_not_mutate() {
         .await
         .unwrap();
     assert_eq!(f.control(GET_STATUS, &header()).await.unwrap()[8], 0);
-    f.control(BEGIN, &begin_request(3, &manifest(b"new", 2)).unwrap())
+    f.control(BEGIN, &begin_request(3, b"metadata").unwrap())
         .await
         .unwrap();
 }
