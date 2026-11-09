@@ -201,7 +201,20 @@ impl Display {
         {
             return Err(crate::Error::InvalidParameter);
         }
-        crate::screenshot::capture_screen(self.get_object())
+        let mut capture = crate::screenshot::capture_screen(self.get_object())?;
+        unsafe {
+            for layer in [
+                lvgl::lv_display_get_layer_top(self.display),
+                lvgl::lv_display_get_layer_sys(self.display),
+            ] {
+                if lvgl::lv_obj_get_child_count(layer) == 0 {
+                    continue;
+                }
+                let overlay = crate::screenshot::capture_screen(layer)?;
+                crate::screenshot::composite(&mut capture, &overlay)?;
+            }
+        }
+        Ok(capture)
     }
 }
 

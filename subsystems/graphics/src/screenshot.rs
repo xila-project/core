@@ -162,3 +162,34 @@ mod tests {
         );
     }
 }
+
+/// Blend straight-alpha layers over the active screen, one bounded layer at a time.
+pub(crate) fn composite(base: &mut ScreenSnapshot, overlay: &ScreenSnapshot) -> Result<()> {
+    if base.width != overlay.width
+        || base.height != overlay.height
+        || base.pixels_rgba.len() != overlay.pixels_rgba.len()
+    {
+        return Err(Error::InvalidParameter);
+    }
+    for (dst, src) in base
+        .pixels_rgba
+        .chunks_exact_mut(4)
+        .zip(overlay.pixels_rgba.chunks_exact(4))
+    {
+        let sa = u32::from(src[3]);
+        let da = u32::from(dst[3]);
+        let alpha = sa * 255 + da * (255 - sa);
+        if alpha == 0 {
+            dst.fill(0);
+            continue;
+        }
+        for channel in 0..3 {
+            dst[channel] = ((u32::from(src[channel]) * sa * 255
+                + u32::from(dst[channel]) * da * (255 - sa)
+                + alpha / 2)
+                / alpha) as u8;
+        }
+        dst[3] = ((alpha + 127) / 255) as u8;
+    }
+    Ok(())
+}
