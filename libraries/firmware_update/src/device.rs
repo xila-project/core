@@ -14,13 +14,48 @@ pub const DEVICE_PATH: &str = "/devices/system/firmware";
 pub const ABI_VERSION: u16 = 1;
 pub const MAX_METADATA: usize = 256;
 pub const BEGIN_SIZE: usize = 280;
-define_command!(GET_CAPABILITIES, Read, b'F', 0, [u8; 8], [u8; 32]);
-define_command!(GET_STATUS, Read, b'F', 1, [u8; 8], [u8; 24]);
-define_command!(BEGIN, Write, b'F', 2, [u8; BEGIN_SIZE], ());
-define_command!(FINISH, Write, b'F', 3, [u8; 8], ());
-define_command!(ACTIVATE, Write, b'F', 4, [u8; 8], ());
-define_command!(ABORT, Write, b'F', 5, [u8; 8], ());
-define_command!(CONFIRM, Write, b'F', 6, [u8; 8], ());
+define_command!(
+    GET_CAPABILITIES,
+    Read,
+    device::kind::FIRMWARE_UPDATE,
+    0,
+    [u8; 8],
+    [u8; 32]
+);
+define_command!(
+    GET_STATUS,
+    Read,
+    device::kind::FIRMWARE_UPDATE,
+    1,
+    [u8; 8],
+    [u8; 24]
+);
+define_command!(
+    BEGIN,
+    Write,
+    device::kind::FIRMWARE_UPDATE,
+    2,
+    [u8; BEGIN_SIZE],
+    ()
+);
+define_command!(FINISH, Write, device::kind::FIRMWARE_UPDATE, 3, [u8; 8], ());
+define_command!(
+    ACTIVATE,
+    Write,
+    device::kind::FIRMWARE_UPDATE,
+    4,
+    [u8; 8],
+    ()
+);
+define_command!(ABORT, Write, device::kind::FIRMWARE_UPDATE, 5, [u8; 8], ());
+define_command!(
+    CONFIRM,
+    Write,
+    device::kind::FIRMWARE_UPDATE,
+    6,
+    [u8; 8],
+    ()
+);
 pub fn header() -> [u8; 8] {
     let mut h = [0; 8];
     h[..2].copy_from_slice(&ABI_VERSION.to_le_bytes());

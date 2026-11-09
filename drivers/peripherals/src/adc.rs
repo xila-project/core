@@ -19,65 +19,16 @@
 //! and `READ_MILLIVOLTS` on a converter without a reference voltage is
 //! `UnsupportedOperation`.
 
-use file_system::{ControlCommand, ControlCommandIdentifier, Error, Result, define_command};
+use file_system::{ControlCommand, ControlCommandIdentifier, Error, Result};
 use peripherals::adc::{AdcController, Error as AdcError, raw_to_millivolts};
 use shared::AnyByLayout;
 
 use crate::PeripheralHandle;
 
-/// Version of every ADC control ABI struct in this module.
-pub const ABI_VERSION: u16 = 1;
-
-/// Carries only the ABI version. Used as input of queries and output of commands
-/// that have no other payload.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct VersionAbi {
-    pub version: u16,
-    pub reserved: u16,
-}
-
-/// Converter geometry. `reference_millivolts` is meaningful only when
-/// `reference_present` is 1.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct InfoAbi {
-    pub version: u16,
-    pub channels: u8,
-    pub resolution_bits: u8,
-    pub reference_millivolts: u32,
-    pub reference_present: u8,
-    pub reserved: [u8; 3],
-}
-
-/// Selects the channel used by plain reads.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SelectChannelAbi {
-    pub version: u16,
-    pub channel: u8,
-    pub reserved: u8,
-}
-
-/// One conversion in millivolts.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct MillivoltsAbi {
-    pub version: u16,
-    pub reserved: u16,
-    pub millivolts: u32,
-}
-
-define_command!(GET_INFO, Read, b'a', 0x00, VersionAbi, InfoAbi);
-define_command!(
-    SELECT_CHANNEL,
-    Write,
-    b'a',
-    0x01,
-    SelectChannelAbi,
-    VersionAbi
-);
-define_command!(READ_MILLIVOLTS, Read, b'a', 0x02, VersionAbi, MillivoltsAbi);
+pub use device::adc::{
+    ABI_VERSION, GET_INFO, InfoAbi, MillivoltsAbi, READ_MILLIVOLTS, SELECT_CHANNEL,
+    SelectChannelAbi, VersionAbi,
+};
 
 /// Adapts an ADC converter to [`PeripheralHandle`]. The selected channel starts at 0.
 pub struct AdcHandle<C> {

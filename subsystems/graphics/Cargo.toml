@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 cstr_core = "0.2.6"
+device = { workspace = true }
 file_system = { workspace = true }
 virtual_file_system = { workspace = true }
 # Runtime graphics needs the C archive; binding generators remain bindgen-only.

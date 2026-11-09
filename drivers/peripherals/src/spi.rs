@@ -18,9 +18,7 @@
 //!   `n` starts at the sum of the lengths of segments `0..n`.
 
 use embedded_hal::spi::Operation;
-use file_system::{
-    ControlCommand, ControlCommandIdentifier, ControlDirectionFlags, Error, Result, define_command,
-};
+use file_system::{ControlCommand, ControlCommandIdentifier, Error, Result};
 use peripherals::spi::{
     BitOrder, ChipSelect, DeviceConfig, Mode, Segment, SpiController, SpiDeviceHandle, SpiError,
 };
@@ -28,190 +26,58 @@ use shared::AnyByLayout;
 
 use crate::PeripheralHandle;
 
-/// ABI version carried by every command input and output struct.
-pub const SPI_ABI_VERSION: u16 = 1;
-/// Maximum bytes moved by one [`SPI_TRANSFER`].
-pub const SPI_MAX_TRANSFER_BYTES: usize = 64;
-/// Maximum segments in one [`SPI_TRANSACTION`].
-pub const SPI_MAX_SEGMENTS: usize = 8;
-/// Maximum sum of segment lengths in one [`SPI_TRANSACTION`].
-pub const SPI_MAX_TRANSACTION_BYTES: usize = 64;
+pub use device::spi::{
+    SPI_ABI_VERSION, SPI_GET_CONFIGURATION, SPI_MAX_SEGMENTS, SPI_MAX_TRANSACTION_BYTES,
+    SPI_MAX_TRANSFER_BYTES, SPI_SEGMENT_READ, SPI_SEGMENT_TRANSFER, SPI_SEGMENT_WRITE,
+    SPI_SET_CONFIGURATION, SPI_TRANSACTION, SPI_TRANSFER, SpiConfigurationAbi, SpiSegmentAbi,
+    SpiTransactionInputAbi, SpiTransactionOutputAbi, SpiTransferInputAbi, SpiTransferOutputAbi,
+};
 
-/// [`SpiSegmentAbi::kind`] value for a write-only segment.
-pub const SPI_SEGMENT_WRITE: u8 = 0;
-/// [`SpiSegmentAbi::kind`] value for a read segment (zeros on MOSI).
-pub const SPI_SEGMENT_READ: u8 = 1;
-/// [`SpiSegmentAbi::kind`] value for a full-duplex segment.
-pub const SPI_SEGMENT_TRANSFER: u8 = 2;
-
-/// Device settings. Mode is 0..=3, bit order is 0 (MSB first) or 1 (LSB first).
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SpiConfigurationAbi {
-    pub version: u16,
-    pub mode: u8,
-    pub bit_order: u8,
-    pub frequency_hz: u32,
-    /// Must be 1..=32.
-    pub bits_per_word: u8,
-    /// Must be zero.
-    pub reserved: [u8; 3],
-}
-
-impl SpiConfigurationAbi {
-    fn from_config(config: DeviceConfig) -> Self {
-        Self {
-            version: SPI_ABI_VERSION,
-            mode: match config.mode {
-                Mode::Mode0 => 0,
-                Mode::Mode1 => 1,
-                Mode::Mode2 => 2,
-                Mode::Mode3 => 3,
-            },
-            bit_order: match config.bit_order {
-                BitOrder::MsbFirst => 0,
-                BitOrder::LsbFirst => 1,
-            },
-            frequency_hz: config.frequency_hz,
-            bits_per_word: config.bits_per_word,
-            reserved: [0; 3],
-        }
-    }
-
-    fn to_config(self) -> Result<DeviceConfig> {
-        if self.version != SPI_ABI_VERSION
-            || self.reserved != [0; 3]
-            || !(1..=32).contains(&self.bits_per_word)
-        {
-            return Err(Error::InvalidParameter);
-        }
-        let mode = match self.mode {
-            0 => Mode::Mode0,
-            1 => Mode::Mode1,
-            2 => Mode::Mode2,
-            3 => Mode::Mode3,
-            _ => return Err(Error::InvalidParameter),
-        };
-        let bit_order = match self.bit_order {
-            0 => BitOrder::MsbFirst,
-            1 => BitOrder::LsbFirst,
-            _ => return Err(Error::InvalidParameter),
-        };
-        Ok(DeviceConfig {
-            mode,
-            frequency_hz: self.frequency_hz,
-            bits_per_word: self.bits_per_word,
-            bit_order,
-        })
+fn configuration_to_abi(config: DeviceConfig) -> SpiConfigurationAbi {
+    SpiConfigurationAbi {
+        version: SPI_ABI_VERSION,
+        mode: match config.mode {
+            Mode::Mode0 => 0,
+            Mode::Mode1 => 1,
+            Mode::Mode2 => 2,
+            Mode::Mode3 => 3,
+        },
+        bit_order: match config.bit_order {
+            BitOrder::MsbFirst => 0,
+            BitOrder::LsbFirst => 1,
+        },
+        frequency_hz: config.frequency_hz,
+        bits_per_word: config.bits_per_word,
+        reserved: [0; 3],
     }
 }
 
-/// Input of [`SPI_TRANSFER`]: `length` bytes of `tx` are sent while the same
-/// number of bytes is received into [`SpiTransferOutputAbi::rx`].
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SpiTransferInputAbi {
-    pub version: u16,
-    pub length: u16,
-    pub tx: [u8; SPI_MAX_TRANSFER_BYTES],
-}
-
-/// Output of [`SPI_TRANSFER`].
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SpiTransferOutputAbi {
-    pub version: u16,
-    pub length: u16,
-    pub rx: [u8; SPI_MAX_TRANSFER_BYTES],
-}
-
-impl Default for SpiTransferOutputAbi {
-    fn default() -> Self {
-        Self {
-            version: 0,
-            length: 0,
-            rx: [0; SPI_MAX_TRANSFER_BYTES],
-        }
+fn configuration_from_abi(abi: SpiConfigurationAbi) -> Result<DeviceConfig> {
+    if abi.version != SPI_ABI_VERSION
+        || abi.reserved != [0; 3]
+        || !(1..=32).contains(&abi.bits_per_word)
+    {
+        return Err(Error::InvalidParameter);
     }
+    let mode = match abi.mode {
+        0 => Mode::Mode0,
+        1 => Mode::Mode1,
+        2 => Mode::Mode2,
+        3 => Mode::Mode3,
+        _ => return Err(Error::InvalidParameter),
+    };
+    let bit_order = match abi.bit_order {
+        0 => BitOrder::MsbFirst,
+        1 => BitOrder::LsbFirst,
+        _ => return Err(Error::InvalidParameter),
+    };
+    Ok(DeviceConfig {
+        mode,
+        frequency_hz: abi.frequency_hz,
+        bits_per_word: abi.bits_per_word,
+        bit_order,
+    })
 }
-
-/// One segment of [`SPI_TRANSACTION`]. `kind` is one of the `SPI_SEGMENT_*`
-/// values and `cs_change` is 0 or 1.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SpiSegmentAbi {
-    pub kind: u8,
-    pub cs_change: u8,
-    pub length: u16,
-}
-
-/// Input of [`SPI_TRANSACTION`]. Only the first `segment_count` segments are
-/// read. `reserved` must be zero.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SpiTransactionInputAbi {
-    pub version: u16,
-    pub segment_count: u8,
-    pub reserved: u8,
-    pub segments: [SpiSegmentAbi; SPI_MAX_SEGMENTS],
-    pub data: [u8; SPI_MAX_TRANSACTION_BYTES],
-}
-
-/// Output of [`SPI_TRANSACTION`]. `length` is the total data length. Bytes of
-/// write-only segments are zero.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SpiTransactionOutputAbi {
-    pub version: u16,
-    pub length: u16,
-    pub data: [u8; SPI_MAX_TRANSACTION_BYTES],
-}
-
-impl Default for SpiTransactionOutputAbi {
-    fn default() -> Self {
-        Self {
-            version: 0,
-            length: 0,
-            data: [0; SPI_MAX_TRANSACTION_BYTES],
-        }
-    }
-}
-
-// Get and set the device configuration. Getting takes no input.
-define_command!(
-    SPI_GET_CONFIGURATION,
-    Read,
-    b's',
-    0,
-    (),
-    SpiConfigurationAbi
-);
-define_command!(
-    SPI_SET_CONFIGURATION,
-    Write,
-    b's',
-    1,
-    SpiConfigurationAbi,
-    ()
-);
-// Full-duplex transfer of up to SPI_MAX_TRANSFER_BYTES in one chip-select cycle.
-define_command!(
-    SPI_TRANSFER,
-    ControlDirectionFlags::all(),
-    b's',
-    2,
-    SpiTransferInputAbi,
-    SpiTransferOutputAbi
-);
-// Atomic multi-segment transaction, honouring cs_change between segments.
-define_command!(
-    SPI_TRANSACTION,
-    ControlDirectionFlags::all(),
-    b's',
-    3,
-    SpiTransactionInputAbi,
-    SpiTransactionOutputAbi
-);
 
 /// Maps a contract error to the closest file system error.
 fn map_error(error: SpiError) -> Error {
@@ -351,10 +217,10 @@ impl<C: SpiController + Sync + 'static> PeripheralHandle for SpiDevice<C> {
         if command == SPI_GET_CONFIGURATION::IDENTIFIER {
             // The input is `()`, so only the output is cast.
             let output = SPI_GET_CONFIGURATION::cast_output(output)?;
-            *output = SpiConfigurationAbi::from_config(self.config);
+            *output = configuration_to_abi(self.config);
             Ok(())
         } else if command == SPI_SET_CONFIGURATION::IDENTIFIER {
-            let config = SPI_SET_CONFIGURATION::cast_input(input)?.to_config()?;
+            let config = configuration_from_abi(*SPI_SET_CONFIGURATION::cast_input(input)?)?;
             self.probe(config)?;
             self.config = config;
             Ok(())

@@ -11,7 +11,7 @@ name = "firmware_update"
 
 [features]
 default = []
-device = ["dep:file_system", "dep:shared", "dep:synchronization"]
+device = ["dep:device", "dep:file_system", "dep:shared", "dep:synchronization"]
 
 native = [
   "device",
@@ -25,6 +25,7 @@ native = [
 ]
 
 [dependencies]
+device = { workspace = true, optional = true }
 file_system = { workspace = true, optional = true }
 shared = { workspace = true, optional = true }
 synchronization = { workspace = true, optional = true }

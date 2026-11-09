@@ -12,14 +12,15 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 EXPECTED_PACKAGE_NAMES = {
     "core/Cargo.toml": "xila",
+    "devices/Cargo.toml": "xila-device",
     "drivers/core/Cargo.toml": "xila-drivers-core",
+    "drivers/peripherals/Cargo.toml": "xila-peripheral-devices",
     "libraries/abi/declarations/Cargo.toml": "xila-abi-declarations",
     "libraries/abi/definitions/Cargo.toml": "xila-abi-definitions",
     "libraries/audio/Cargo.toml": "xila-audio",
     "libraries/authentication/Cargo.toml": "xila-authentication",
     "libraries/bootsplash/Cargo.toml": "xila-bootsplash",
     "libraries/debug_protocol/Cargo.toml": "xila-debug-protocol",
-    "libraries/device/Cargo.toml": "xila-device",
     "libraries/executable/Cargo.toml": "xila-executable",
     "libraries/file_system/Cargo.toml": "xila-file-system",
     "libraries/firmware_update/Cargo.toml": "xila-firmware-update",
@@ -27,7 +28,6 @@ EXPECTED_PACKAGE_NAMES = {
     "libraries/little_fs/Cargo.toml": "xila-little-fs",
     "libraries/littlefs2_sys/Cargo.toml": "littlefs2-sys",
     "libraries/neural_network/Cargo.toml": "xila-neural-network",
-    "libraries/peripheral_devices/Cargo.toml": "xila-peripheral-devices",
     "libraries/peripherals/Cargo.toml": "xila-peripherals",
     "libraries/shared/Cargo.toml": "xila-shared",
     "libraries/synchronization/Cargo.toml": "xila-synchronization",
@@ -65,7 +65,7 @@ EXPECTED_LIBRARY_TARGETS = {
     "subsystems/graphics/Cargo.toml": "graphics",
     "libraries/abi/declarations/Cargo.toml": "abi_declarations",
     "subsystems/time/Cargo.toml": "time",
-    "libraries/device/Cargo.toml": "device",
+    "devices/Cargo.toml": "device",
     "subsystems/network/Cargo.toml": "network",
     "subsystems/virtual_file_system/Cargo.toml": "virtual_file_system",
     "libraries/abi/definitions/Cargo.toml": "abi_definitions",
@@ -73,7 +73,7 @@ EXPECTED_LIBRARY_TARGETS = {
     "libraries/little_fs/Cargo.toml": "little_fs",
     "libraries/authentication/Cargo.toml": "authentication",
     "libraries/executable/Cargo.toml": "executable",
-    "libraries/peripheral_devices/Cargo.toml": "peripheral_devices",
+    "drivers/peripherals/Cargo.toml": "peripheral_devices",
     "libraries/peripherals/Cargo.toml": "peripherals",
     "libraries/bootsplash/Cargo.toml": "bootsplash",
     "subsystems/graphics/bindings_generator/Cargo.toml": "graphics_bindgen",
@@ -132,7 +132,7 @@ class CargoPackageNames(unittest.TestCase):
         ))
         for package in metadata["packages"]:
             path = pathlib.Path(package["manifest_path"]).relative_to(ROOT)
-            if path.parts[0] in {"core", "libraries", "subsystems"}:
+            if path.parts[0] in {"core", "devices", "libraries", "subsystems"}:
                 self.assertEqual(manifest(ROOT / path)["package"]["version"], {"workspace": True}, str(path))
 
     def test_root_workspace_dependency_keys_alias_renamed_packages(self):

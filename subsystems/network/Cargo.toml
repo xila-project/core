@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 bitflags = { version = "2", default-features = false }
+device = { workspace = true }
 file_system = { workspace = true }
 synchronization = { workspace = true }
 time = { workspace = true }

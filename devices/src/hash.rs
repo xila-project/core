@@ -13,5 +13,12 @@ pub enum HashAlgorithm {
     Sha512_256 = 7,
 }
 
-define_command!(RESET, Write, b'H', 0, (), ());
-define_command!(SET_ALGORITHM, Write, b'H', 1, HashAlgorithm, ());
+define_command!(RESET, Write, crate::kind::HASH, 0, (), ());
+define_command!(
+    SET_ALGORITHM,
+    Write,
+    crate::kind::HASH,
+    1,
+    HashAlgorithm,
+    ()
+);
