@@ -1,5 +1,5 @@
 use file_system::{ControlCommand, ControlCommandIdentifier};
-use neural_network::*;
+use neural_network_driver::*;
 
 #[test]
 fn command_identifiers_use_the_nn_prefix_and_stable_numbers() {
@@ -9,7 +9,7 @@ fn command_identifiers_use_the_nn_prefix_and_stable_numbers() {
     );
     assert_eq!(
         GET_INPUT_INFO::IDENTIFIER,
-        ControlCommandIdentifier::new_read::<u32, neural_network::TensorInfo>(b'N', 0x02)
+        ControlCommandIdentifier::new_read::<u32, neural_network_driver::TensorInfo>(b'N', 0x02)
     );
     assert_eq!(
         SET_INPUT_INDEX::IDENTIFIER,
@@ -21,7 +21,7 @@ fn command_identifiers_use_the_nn_prefix_and_stable_numbers() {
     );
     assert_eq!(
         GET_OUTPUT_INFO::IDENTIFIER,
-        ControlCommandIdentifier::new_read::<u32, neural_network::TensorInfo>(b'N', 0x05)
+        ControlCommandIdentifier::new_read::<u32, neural_network_driver::TensorInfo>(b'N', 0x05)
     );
     assert_eq!(
         SET_OUTPUT_INDEX::IDENTIFIER,

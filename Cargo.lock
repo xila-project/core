@@ -1823,6 +1823,7 @@ dependencies = [
  "xila-memory",
  "xila-network",
  "xila-neural-network",
+ "xila-neural-network-driver",
  "xila-shared",
  "xila-synchronization",
  "xila-task",
@@ -2080,6 +2081,16 @@ dependencies = [
  "critical-section",
  "xila-device",
  "xila-file-system",
+]
+
+[[package]]
+name = "xila-neural-network-driver"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+ "xila-device",
+ "xila-file-system",
+ "xila-neural-network",
  "xila-shared",
 ]
 

@@ -32,15 +32,3 @@ pub trait Backend: Send + Sync + 'static {
     fn output<'a>(&self, execution: &'a Self::Execution, index: usize) -> Result<Self::Output<'a>>;
     fn compute(&self, execution: &mut Self::Execution) -> Result<()>;
 }
-
-/// A portable VFS character device backed by a statically selected inference backend.
-///
-/// Contains its backend by value: constructing this adapter adds no allocation or vtable.
-pub struct NeuralNetworkDevice<B> {
-    pub(crate) backend: B,
-}
-impl<B: Backend> NeuralNetworkDevice<B> {
-    pub const fn new(backend: B) -> Self {
-        Self { backend }
-    }
-}

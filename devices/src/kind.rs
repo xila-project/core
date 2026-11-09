@@ -12,7 +12,7 @@
 //! | `b'E'`    | `0x45` | Executable          | `executable`                             |
 //! | `b'F'`    | `0x46` | Firmware update     | `firmware_update::device`                |
 //! | `b'H'`    | `0x48` | Hash accelerator    | `device::hash`                           |
-//! | `b'N'`    | `0x4E` | Neural network      | `neural_network`                         |
+//! | `b'N'`    | `0x4E` | Neural network      | `device::neural_network`                 |
 //! | `b'T'`    | `0x54` | Terminal / character| `file_system::character_device`          |
 //! | `b'a'`    | `0x61` | ADC                 | `device::adc` / `peripheral_devices::adc`|
 //! | `b'g'`    | `0x67` | GPIO                | `device::gpio` / `peripheral_devices::gpio` |

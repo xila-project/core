@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 device = { workspace = true }
 file_system = { workspace = true }
-shared = { workspace = true }
 [lib]
 name = "neural_network"
 

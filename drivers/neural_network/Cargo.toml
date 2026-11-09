@@ -1,0 +1,16 @@
+[package]
+name = "xila-neural-network-driver"
+version.workspace = true
+edition = "2024"
+
+[lib]
+name = "neural_network_driver"
+
+[dependencies]
+neural_network = { workspace = true }
+device = { workspace = true }
+file_system = { workspace = true }
+shared = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+critical-section = { workspace = true, features = ["std"] }
