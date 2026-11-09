@@ -103,6 +103,52 @@ pub unsafe fn set_surface(object: *mut lvgl::lv_obj_t, surface: Surface) {
     unsafe { lvgl::lv_theme_shadcn_set_surface(object, surface) };
 }
 
+/// A palette role, for drawings that LVGL styles cannot color through the theme.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(usize)]
+pub enum PaletteColor {
+    Foreground,
+    MutedForeground,
+    Primary,
+    Border,
+    Input,
+}
+
+impl PaletteColor {
+    const ALL: [Self; 5] = [
+        Self::Foreground,
+        Self::MutedForeground,
+        Self::Primary,
+        Self::Border,
+        Self::Input,
+    ];
+
+    /// Inverse of `color as usize`, used to carry a role through LVGL user data.
+    pub fn from_index(index: usize) -> Self {
+        Self::ALL.get(index).copied().unwrap_or(Self::Foreground)
+    }
+}
+
+/// Current palette color of the display showing `object`, or `None` when the
+/// theme is not active there.
+///
+/// # Safety
+/// `object` must be live and the caller must hold the LVGL lock.
+pub unsafe fn get_palette_color(object: *mut lvgl::lv_obj_t, color: PaletteColor) -> Option<Color> {
+    unsafe {
+        let palette = lvgl::lv_theme_shadcn_get_palette(lvgl::lv_obj_get_display(object));
+        let palette = palette.as_ref()?;
+        let value = match color {
+            PaletteColor::Foreground => palette.foreground,
+            PaletteColor::MutedForeground => palette.muted_fg,
+            PaletteColor::Primary => palette.primary,
+            PaletteColor::Border => palette.border,
+            PaletteColor::Input => palette.input,
+        };
+        Some(Color::from_lvgl_color(value))
+    }
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     extern crate abi_definitions;
@@ -125,23 +171,17 @@ mod tests {
             });
             for (logo, factor) in &logos {
                 assert_logo_geometry(logo, *factor);
-                // Desktop uses outline bars; bootsplash uses filled bars.
-                if *factor == 4 {
-                    for index in 0..4 {
-                        let part = lvgl::lv_obj_get_child(logo.get_inner_object(), index);
-                        lvgl::lv_obj_remove_local_style_prop(
-                            part,
-                            lvgl::_lv_style_id_t_LV_STYLE_BORDER_WIDTH as lvgl::lv_style_prop_t,
-                            0,
-                        );
-                        lvgl::lv_theme_shadcn_set_variant(
-                            part,
-                            lvgl::lv_theme_shadcn_variant_t_LV_THEME_SHADCN_VARIANT_OUTLINE,
-                        );
-                    }
-                    assert_logo_geometry(logo, *factor);
-                }
             }
+            // The desktop watermark follows the palette instead of a fixed color.
+            let themed = &logos[2].0;
+            themed.follow_palette_color(PaletteColor::Input);
+            let arm_color = |logo: &crate::Logo| {
+                lvgl::lv_obj_get_style_image_recolor(logo.get_arm(0), lvgl::LV_PART_MAIN)
+            };
+            assert!(lvgl::lv_color_eq(
+                arm_color(themed),
+                (*lvgl::lv_theme_shadcn_get_palette(display)).input
+            ));
             let button = lvgl::lv_button_create(screen);
             let surface = lvgl::lv_obj_create(screen);
             set_surface(surface, Surface::Muted);
@@ -183,6 +223,13 @@ mod tests {
                 light.muted
             ));
 
+            assert!(lvgl::lv_color_eq(arm_color(&logos[2].0), light.input));
+            assert!(!lvgl::lv_color_eq(arm_color(&logos[2].0), dark.input));
+            // Fixed-color logos keep their color.
+            assert!(lvgl::lv_color_eq(
+                arm_color(&logos[0].0),
+                Color::WHITE.into_lvgl_color()
+            ));
             for (logo, factor) in &logos {
                 assert_logo_geometry(logo, *factor);
             }
@@ -196,30 +243,46 @@ mod tests {
     unsafe fn assert_logo_geometry(logo: &crate::Logo, factor: u8) {
         unsafe {
             let object = logo.get_inner_object();
+            let size = 32 * i32::from(factor);
             lvgl::lv_obj_update_layout(object);
-            assert_eq!(lvgl::lv_obj_get_width(object), 32 * i32::from(factor));
-            assert_eq!(lvgl::lv_obj_get_height(object), 32 * i32::from(factor));
+            assert_eq!(lvgl::lv_obj_get_width(object), size);
+            assert_eq!(lvgl::lv_obj_get_height(object), size);
+            assert_eq!(
+                lvgl::lv_obj_get_child_count(object),
+                crate::Logo::ARM_COUNT as u32 + 1
+            );
             let mut bounds = lvgl::lv_area_t::default();
             lvgl::lv_obj_get_coords(object, &mut bounds);
-            for index in 0..4 {
-                let part = lvgl::lv_obj_get_child(object, index);
-                let (width, height) = if index % 2 == 0 { (10, 21) } else { (21, 10) };
-                assert_eq!(lvgl::lv_obj_get_width(part), width * i32::from(factor));
-                assert_eq!(lvgl::lv_obj_get_height(part), height * i32::from(factor));
+            let mut arm_side = None;
+            for index in 0..crate::Logo::ARM_COUNT {
+                let arm = logo.get_arm(index);
+                let side = lvgl::lv_obj_get_width(arm);
+                assert_eq!(lvgl::lv_obj_get_height(arm), side);
+                assert_eq!(*arm_side.get_or_insert(side), side);
+                // Arms are separated by a transparent cross through the center.
+                assert!(side < size / 2);
                 let mut coordinates = lvgl::lv_area_t::default();
-                lvgl::lv_obj_get_coords(part, &mut coordinates);
+                lvgl::lv_obj_get_coords(arm, &mut coordinates);
                 let expected_x = if index < 2 {
                     bounds.x1
                 } else {
-                    bounds.x2 - width * i32::from(factor) + 1
+                    bounds.x2 - side + 1
                 };
                 let expected_y = if index == 0 || index == 3 {
                     bounds.y1
                 } else {
-                    bounds.y2 - height * i32::from(factor) + 1
+                    bounds.y2 - side + 1
                 };
                 assert_eq!((coordinates.x1, coordinates.y1), (expected_x, expected_y));
             }
+            let center = logo.get_center();
+            let mut coordinates = lvgl::lv_area_t::default();
+            lvgl::lv_obj_get_coords(center, &mut coordinates);
+            assert_eq!(
+                coordinates.x1 + coordinates.x2 + 1,
+                bounds.x1 + bounds.x2 + 1,
+                "center square must be centered"
+            );
         }
     }
 }
