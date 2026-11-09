@@ -62,3 +62,15 @@ its selected characters and font contents participate in the cache key. Rust
 selects the active symbols at compile time, so unselected font objects are not
 linked. Locale builds may share `CARGO_TARGET_DIR=target/localization`; only
 `lv_font_conv` runs JavaScript, never catalog discovery.
+
+## Japanese builds
+
+Run `bash tools/localization/fetch-japanese-font.sh` from Core before a Japanese
+build. This explicit setup downloads and verifies the public Source Han Sans JP
+2.005 subset; font generation itself stays offline. Consumer builds may set
+`XILA_JAPANESE_FONT_PATH` to the downloaded font. Only catalog glyphs are rasterized,
+including kana, and the terminal also uses the JP source for those glyphs.
+
+Japanese catalogs and font support were carried forward from companion revision
+`c656f83b6cfd019ed469332182166bdaf6188ca9`; catalog placeholders now use named arguments
+for embedded-i18n 0.2.0. Japanese wording is preserved.
