@@ -1,6 +1,7 @@
 #![no_std]
 
 pub mod adc;
+pub mod audio;
 pub mod gpio;
 pub mod hash;
 pub mod i2c;

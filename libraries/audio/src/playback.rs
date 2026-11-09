@@ -98,7 +98,7 @@ impl<const N: usize> PlaybackBuffer<N> {
                 consumer,
                 configuration,
                 frame_size,
-                format: configuration.sample_format()?.native(),
+                format: crate::configuration::native_format(configuration.sample_format()?),
                 state: &self.state,
             },
         ))
