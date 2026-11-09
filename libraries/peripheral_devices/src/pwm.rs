@@ -20,74 +20,16 @@
 //! cannot express, or a fixed-period controller, is `UnsupportedOperation`.
 
 use embedded_hal::pwm::SetDutyCycle;
-use file_system::{ControlCommand, ControlCommandIdentifier, Error, Result, define_command};
+use file_system::{ControlCommand, ControlCommandIdentifier, Error, Result};
 use peripherals::pwm::{ChannelId, Error as PwmError, PwmController};
 use shared::AnyByLayout;
 
 use crate::PeripheralHandle;
 
-/// Version of every PWM control ABI struct in this module.
-pub const ABI_VERSION: u16 = 1;
-
-/// Largest value accepted by [`SET_DUTY_PERMILLE`].
-pub const PERMILLE_FULL_SCALE: u16 = 1_000;
-
-/// Carries only the ABI version and a reserved field. Input of [`GET_INFO`].
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct PwmVersionAbi {
-    pub version: u16,
-    pub reserved: u16,
-}
-
-/// Channel description returned by every PWM command.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct PwmInfoAbi {
-    pub version: u16,
-    /// Number of channels on the controller.
-    pub channel_count: u16,
-    /// Duty value that means 100 percent on this channel.
-    pub max_duty_cycle: u16,
-    pub reserved: u16,
-    /// Current period of this channel in hertz.
-    pub frequency_hz: u32,
-}
-
-/// Input of [`SET_FREQUENCY`].
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct PwmFrequencyAbi {
-    pub version: u16,
-    pub reserved: u16,
-    pub frequency_hz: u32,
-}
-
-/// Input of [`SET_DUTY_PERMILLE`]. `permille` is 0..=[`PERMILLE_FULL_SCALE`].
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct PwmDutyPermilleAbi {
-    pub version: u16,
-    pub permille: u16,
-}
-
-define_command!(GET_INFO, Read, device::kind::PWM, 0x00, PwmVersionAbi, PwmInfoAbi);
-define_command!(
-    SET_FREQUENCY,
-    Write,
-    device::kind::PWM,
-    0x01,
-    PwmFrequencyAbi,
-    PwmInfoAbi
-);
-define_command!(
-    SET_DUTY_PERMILLE,
-    Write,
-    device::kind::PWM,
-    0x02,
-    PwmDutyPermilleAbi,
-    PwmInfoAbi
-);
+pub use device::pwm::{
+    ABI_VERSION, GET_INFO, PERMILLE_FULL_SCALE, PwmDutyPermilleAbi, PwmFrequencyAbi, PwmInfoAbi,
+    PwmVersionAbi, SET_DUTY_PERMILLE, SET_FREQUENCY,
+};
 
 /// One opened PWM channel adapted to [`PeripheralHandle`].
 ///

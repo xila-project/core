@@ -26,7 +26,7 @@
 //! discards queued output, which an application's `flush` must not do. The
 //! discarding behaviour is exposed explicitly as `FLUSH_TX`.
 
-use file_system::{ControlCommand, ControlCommandIdentifier, Error, Result, define_command};
+use file_system::{ControlCommand, ControlCommandIdentifier, Error, Result};
 use peripherals::uart::{
     Config, DataBits, Error as UartError, FlowControl, Parity, StopBits, UartControl,
 };
@@ -34,47 +34,10 @@ use shared::AnyByLayout;
 
 use crate::PeripheralHandle;
 
-/// Version of every UART control ABI struct in this module.
-pub const ABI_VERSION: u32 = 1;
-
-/// Parity codes in [`ConfigAbi::parity`].
-pub const PARITY_NONE: u8 = 0;
-pub const PARITY_EVEN: u8 = 1;
-pub const PARITY_ODD: u8 = 2;
-
-/// Flow control codes in [`ConfigAbi::flow_control`].
-pub const FLOW_CONTROL_NONE: u8 = 0;
-pub const FLOW_CONTROL_RTS_CTS: u8 = 1;
-pub const FLOW_CONTROL_XON_XOFF: u8 = 2;
-
-/// Carries only the ABI version. Used as input and output of commands that
-/// have no other payload.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct VersionAbi {
-    pub version: u32,
-}
-
-/// UART line configuration.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ConfigAbi {
-    pub version: u32,
-    pub baud_rate: u32,
-    /// 5, 6, 7 or 8.
-    pub data_bits: u8,
-    /// 1 or 2.
-    pub stop_bits: u8,
-    /// One of `PARITY_NONE`, `PARITY_EVEN`, `PARITY_ODD`.
-    pub parity: u8,
-    /// One of `FLOW_CONTROL_NONE`, `FLOW_CONTROL_RTS_CTS`, `FLOW_CONTROL_XON_XOFF`.
-    pub flow_control: u8,
-}
-
-define_command!(GET_CONFIG, Read, device::kind::UART, 0x00, VersionAbi, ConfigAbi);
-define_command!(SET_CONFIG, Write, device::kind::UART, 0x01, ConfigAbi, VersionAbi);
-define_command!(FLUSH_RX, Write, device::kind::UART, 0x02, VersionAbi, VersionAbi);
-define_command!(FLUSH_TX, Write, device::kind::UART, 0x03, VersionAbi, VersionAbi);
+pub use device::uart::{
+    ABI_VERSION, ConfigAbi, FLOW_CONTROL_NONE, FLOW_CONTROL_RTS_CTS, FLOW_CONTROL_XON_XOFF,
+    FLUSH_RX, FLUSH_TX, GET_CONFIG, PARITY_EVEN, PARITY_NONE, PARITY_ODD, SET_CONFIG, VersionAbi,
+};
 
 /// Adapts a UART endpoint to [`PeripheralHandle`].
 ///

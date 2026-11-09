@@ -20,7 +20,7 @@
 //! `InvalidParameter`. A controller refusal to take the line (unsupported
 //! option, line already in use) is reported as `InputOutput`.
 
-use file_system::{ControlCommand, ControlCommandIdentifier, Error, Result, define_command};
+use file_system::{ControlCommand, ControlCommandIdentifier, Error, Result};
 use peripherals::gpio::{
     DriveMode, GpioController, InputConfig, LineCapabilities, LineId, OutputConfig, PinState, Pull,
 };
@@ -28,58 +28,9 @@ use shared::AnyByLayout;
 
 use crate::PeripheralHandle;
 
-/// Version of every GPIO control ABI struct in this module.
-pub const ABI_VERSION: u16 = 1;
-
-/// Carries only the ABI version. Used as input of commands without payload and
-/// as output of commands that report success.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct VersionAbi {
-    pub version: u16,
-    pub reserved: u16,
-}
-
-/// Requested configuration of the line.
-///
-/// - `direction`: `0` input, `1` output.
-/// - `pull`: `0` none, `1` pull up, `2` pull down.
-/// - `drive_mode`: `0` push-pull, `1` open-drain. Outputs only.
-/// - `initial_level`: `0` low, `1` high. Outputs only.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ConfigureAbi {
-    pub version: u16,
-    pub direction: u8,
-    pub pull: u8,
-    pub drive_mode: u8,
-    pub initial_level: u8,
-    pub reserved: u16,
-}
-
-/// Line capabilities; each flag is `0` or `1`.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct CapabilitiesAbi {
-    pub version: u16,
-    pub input: u8,
-    pub output: u8,
-    pub pull_up: u8,
-    pub pull_down: u8,
-    pub open_drain: u8,
-    pub reserved: u8,
-}
-
-define_command!(CONFIGURE, Write, device::kind::GPIO, 0x00, ConfigureAbi, VersionAbi);
-define_command!(RELEASE, Write, device::kind::GPIO, 0x01, VersionAbi, VersionAbi);
-define_command!(
-    GET_CAPABILITIES,
-    Read,
-    device::kind::GPIO,
-    0x02,
-    VersionAbi,
-    CapabilitiesAbi
-);
+pub use device::gpio::{
+    ABI_VERSION, CONFIGURE, CapabilitiesAbi, ConfigureAbi, GET_CAPABILITIES, RELEASE, VersionAbi,
+};
 
 /// Owned line handle. Dropping a configured handle releases the line through
 /// the controller's own handle drop.
