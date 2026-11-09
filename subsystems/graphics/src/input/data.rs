@@ -109,7 +109,11 @@ impl From<InputData> for lvgl::lv_indev_data_t {
 
         let state = value.get_touch();
 
-        input_device_data.point = (*value.get_point()).into();
+        let point = value.get_point();
+        input_device_data.point = lvgl::lv_point_t {
+            x: point.x as i32,
+            y: point.y as i32,
+        };
 
         input_device_data.state = (*state).into();
         input_device_data.key = value.key.into();

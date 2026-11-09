@@ -34,7 +34,11 @@ unsafe extern "C" fn binding_callback_function(
     area: *const lvgl::lv_area_t,
     data: *mut u8,
 ) {
-    let mut area: Area = unsafe { *area }.into();
+    let lv_area = unsafe { *area };
+    let mut area = Area::new(
+        Point::new(lv_area.x1 as i16, lv_area.y1 as i16),
+        Point::new(lv_area.x2 as i16, lv_area.y2 as i16),
+    );
 
     let buffer_size: usize =
         (area.get_width()) as usize * (area.get_height()) as usize * size_of::<RenderingColor>();
