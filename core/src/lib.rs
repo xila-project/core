@@ -5,6 +5,9 @@ pub mod about;
 #[cfg(feature = "audio")]
 pub use audio;
 
+#[cfg(feature = "neural_network")]
+pub use neural_network;
+
 pub use abi_declarations;
 pub use authentication;
 pub use embedded_i18n as internationalization;
