@@ -1,6 +1,6 @@
 # Project Overview
 
-Xila is an embedded operating system written in Rust for low-power microcontrollers, including ESP32, nRF, and STM32 targets. The root Cargo manifest is a virtual workspace; `core/` contains the public `xila` façade and is the default member. This workspace separates runtime-owned services into `subsystems/`, reusable contracts and implementations into `libraries/`, generic devices into `drivers/core/`; the Wasm host and guest API live in Applications; code must account for constrained RAM, flash, and target capabilities.
+Xila is an embedded operating system written in Rust for low-power microcontrollers, including ESP32, nRF, and STM32 targets. The root Cargo manifest is a virtual workspace; `core/` contains the public `xila` façade and is the default member. This workspace separates runtime-owned services into `subsystems/`, VFS device class contracts into `devices/`, reusable contracts and implementations into `libraries/`, and generic VFS device adapters into `drivers/`; the Wasm host and guest API live in Applications; code must account for constrained RAM, flash, and target capabilities.
 
 # Build & Test Commands
 
@@ -25,7 +25,7 @@ Shared tasks are defined in `mise.toml`, developer-only tasks and tools in `mise
 - Keep reusable libraries portable: preserve `no_std` operation and isolate host-only code and dependencies behind target-specific Cargo sections or conditional compilation.
 - Check a crate's `Cargo.toml`, features, and consumers before changing dependencies or enabling features. Preserve intentional `default-features = false`, optional dependencies, and target-specific dependency boundaries.
 - Treat every byte as important: consider RAM, flash, stack, and peak allocation costs. Prefer bounded or caller-provided storage where appropriate; account for capacity, lifetime, and allocation behavior when using `Vec`, `String`, or `Box`. Avoid unnecessary allocations, copies, buffers, large static data, and dependencies.
-- Classify crates by runtime ownership and lifecycle, not mere statefulness; see `subsystems/README.md` and `libraries/README.md`.
+- Classify crates by runtime ownership and lifecycle, not mere statefulness; see `devices/README.md`, `subsystems/README.md`, and `libraries/README.md`.
 - Preserve the VFS polling I/O contract (`Poll<Result<usize>>` with task context): register wakeups, handle cancellation and avoid spinning on `Pending`; synchronous adapters probe once and return `RessourceBusy` if pending.
 - Preserve per-crate Tolgee namespaces, Rust placeholders and CLDR plural categories. Do not translate machine-readable interfaces.
 - Use stable dotted semantic translation IDs with lowercase snake_case segments (`feature.component.purpose`), not English copy as keys. Wording-only changes keep the ID; changes in meaning or placeholders require a new ID or explicit review. Avoid sharing one key across contexts with different translation requirements. Maintain mapping files under `tools/localization/mappings/` and run `node tools/localization/check.mjs` plus `node --test tolgee.extractor.test.mjs`. For historical migration verification, run `node tools/localization/check.mjs --baseline <pre-migration-commit>`. The `modules/` migration changed file-derived namespaces: leave `removeOtherKeys` disabled and do not perform destructive Tolgee sync without approval.

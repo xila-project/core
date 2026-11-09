@@ -56,9 +56,10 @@ const config: TolgeeConfig = {
   extractor: "./tolgee.extractor.mjs",
   patterns: [
     "./src/**/*.rs",
+    "./devices/**/src/**/*.rs",
     "./subsystems/**/src/**/*.rs",
     "./libraries/**/src/**/*.rs",
-    "./drivers/core/**/src/**/*.rs",
+    "./drivers/**/src/**/*.rs",
   ],
   push: {
     files: pushFiles, // Use the dynamically generated list

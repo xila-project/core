@@ -150,9 +150,10 @@ are maintained in [Platforms](https://github.com/xila-project/platforms/tree/mai
 | Directory                      | Contents                                                                     |
 | ------------------------------ | ---------------------------------------------------------------------------- |
 | [`core/`](core/)               | Public `xila` façade and re-exports.                                         |
+| [`devices/`](devices/)         | VFS device class contracts (`File::control` commands and ABI payloads).      |
 | [`subsystems/`](subsystems/)   | Runtime-owned services: tasks, VFS, networking, graphics, memory, and time.   |
 | [`libraries/`](libraries/)     | Reusable contracts, algorithms, adapters, and concrete implementations.      |
-| [`drivers/core/`](drivers/core/) | Generic portable device implementations.                                   |
+| [`drivers/`](drivers/)         | Generic portable VFS device implementations and adapters.                    |
 | [Applications](https://github.com/xila-project/applications) | Wasm host runtime, guest API, and ABI tests. |
 | [`tools/`](tools/)             | Core verification and localization tools.                                    |
 

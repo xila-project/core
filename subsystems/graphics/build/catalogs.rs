@@ -34,7 +34,7 @@ pub fn collect_multiple(roots: &[&Path], locales: &[&str]) -> io::Result<Catalog
     let mut characters = BTreeSet::new();
     let mut symbols = CatalogSymbols::default();
     for path in roots.iter().flat_map(|root| {
-        ["executables", "libraries", "subsystems", "drivers"].map(|owner| root.join(owner))
+        ["executables", "devices", "libraries", "subsystems", "drivers"].map(|owner| root.join(owner))
     }) {
         match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.is_dir() => {
