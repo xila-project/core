@@ -53,6 +53,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn selectors_are_nonempty_and_bounded_and_old_requests_still_validate() {
+        assert_eq!(
+            validate_request(&Request::Click {
+                role: None,
+                name: None,
+                text: None,
+                button: None
+            }),
+            Err(ProtocolError::InvalidSelector)
+        );
+        assert_eq!(
+            validate_request(&Request::Click {
+                role: None,
+                name: Some(String::new()),
+                text: None,
+                button: None
+            }),
+            Err(ProtocolError::InvalidSelector)
+        );
+        assert_eq!(
+            validate_request(&Request::Click {
+                role: None,
+                name: Some(String::from("Login")),
+                text: None,
+                button: None
+            }),
+            Ok(())
+        );
+        assert_eq!(validate_request(&Request::Resolution), Ok(()));
+    }
+
+    #[test]
     fn screenshot_metadata_checks_dimensions_and_exact_payload_length() {
         let valid = ScreenshotMetadata {
             width: 2,
@@ -84,6 +116,23 @@ mod tests {
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum Request {
     Diagnostics,
+    Capabilities,
+    /// Match a unique visible control, then hit-test and queue one complete click.
+    Click {
+        #[serde(default)]
+        role: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        text: Option<String>,
+        /// Exact virtual button label within a matrix or keyboard.
+        #[serde(default)]
+        button: Option<String>,
+    },
+    PointerClick {
+        x: u32,
+        y: u32,
+    },
     Resolution,
     Screenshot {
         path: String,
@@ -129,6 +178,7 @@ pub enum ProtocolError {
     TextTooLarge,
     EmptyScreenshotPath,
     InvalidScreenshotFrame,
+    InvalidSelector,
 }
 
 impl ProtocolError {
@@ -139,6 +189,7 @@ impl ProtocolError {
             Self::TextTooLarge => "text_too_large",
             Self::EmptyScreenshotPath => "empty_screenshot_path",
             Self::InvalidScreenshotFrame => "invalid_screenshot_frame",
+            Self::InvalidSelector => "invalid_selector",
         }
     }
 }
@@ -154,5 +205,19 @@ pub fn validate_request(request: &Request) -> Result<(), ProtocolError> {
     {
         return Err(ProtocolError::EmptyScreenshotPath);
     }
+    if let Request::Click {
+        role,
+        name,
+        text,
+        button,
+    } = request
+        && ([role, name, text, button].iter().all(|s| s.is_none())
+            || [role, name, text, button]
+                .iter()
+                .any(|s| s.as_ref().is_some_and(|s| s.is_empty() || s.len() > 512)))
+    {
+        return Err(ProtocolError::InvalidSelector);
+    }
+
     Ok(())
 }

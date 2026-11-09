@@ -3,7 +3,6 @@ use alloc::{
     vec,
     vec::Vec,
 };
-use core::str;
 use file_system::DirectCharacterDevice;
 use synchronization::blocking_mutex::raw::CriticalSectionRawMutex;
 use synchronization::mutex::{Mutex, MutexGuard};
@@ -100,45 +99,13 @@ pub struct Manager {
     injected_inputs: synchronization::Arc<InputQueue>,
 }
 
-/// A bounded, pointer-free description of one LVGL object.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct UiElement {
-    /// Position in the depth-first snapshot, valid only for that snapshot.
-    pub id: u32,
-    pub parent_id: Option<u32>,
-    /// LVGL class name, retained for compatibility and custom widgets.
-    pub role: String,
-    /// Semantic role for supported widgets; absent for unknown classes.
-    pub semantic_role: Option<&'static str>,
-    /// Direct label or placeholder, capped to 128 input bytes.
-    pub name: Option<String>,
-    /// Raw text from labels and text areas, as in the original snapshot API.
-    pub text: Option<String>,
-    /// The object or an ancestor is marked hidden (independent of clipping).
-    pub hidden: bool,
-    /// The object is marked disabled by LVGL.
-    pub disabled: bool,
-    pub focused: bool,
-    /// LVGL clickable flag, not a guarantee that the object can be hit.
-    pub clickable: bool,
-    pub checked: Option<bool>,
-    /// Inclusive screen coordinates `(x1, y1, x2, y2)`.
-    pub bounds: (i32, i32, i32, i32),
-}
-
-/// One bounded UI-tree snapshot and whether additional objects were omitted.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct UiTreeSnapshot {
-    pub elements: Vec<UiElement>,
-    pub truncated: bool,
-}
-
 /// Bounds for UI tree snapshots. These limits keep diagnostics safe on small targets.
 pub const UI_TREE_MAX_ELEMENTS: usize = 256;
 pub const UI_TREE_MAX_DEPTH: usize = 24;
-const UI_ELEMENT_MAX_TEXT_BYTES: usize = 512;
-const UI_ELEMENT_MAX_NAME_BYTES: usize = 128;
-const UI_NAME_MAX_CHILDREN: u32 = 16;
+use crate::UiTreeSnapshot;
+use crate::inspection::inspect_children;
+#[cfg(test)]
+use crate::inspection::semantic_role;
 
 impl Manager {
     /// Snapshot a bounded depth-first view of the currently mounted UI tree.
@@ -154,27 +121,192 @@ impl Manager {
 
         let _lock = self.global_lock.lock().await;
         let inner = self.inner.read().await;
-        if inner.window_parent.is_null() {
+        if inner.displays.is_empty() {
             return Err(Error::NotAvailable);
         }
 
         let mut elements = Vec::with_capacity(max_elements);
         let mut truncated = false;
         unsafe {
-            inspect_children(
-                inner.window_parent,
-                None,
-                0,
-                max_depth,
-                max_elements,
-                &mut elements,
-                &mut truncated,
-            );
+            let screen = inner.displays[0].get_object();
+            let display = lvgl::lv_obj_get_display(screen);
+            for (root, layer) in [
+                (screen, "screen"),
+                (lvgl::lv_display_get_layer_top(display), "top"),
+                (lvgl::lv_display_get_layer_sys(display), "system"),
+            ] {
+                lvgl::lv_obj_update_layout(root);
+                inspect_children(
+                    root,
+                    None,
+                    0,
+                    (max_depth, max_elements),
+                    &mut elements,
+                    &mut truncated,
+                    layer,
+                );
+            }
         }
         Ok(UiTreeSnapshot {
             elements,
             truncated,
         })
+    }
+
+    /// Resolve and hit-test a unique control while holding the graphics lock.
+    /// Coordinates and raw object pointers never survive the operation.
+    pub async fn click_ui(
+        &self,
+        role: Option<&str>,
+        name: Option<&str>,
+        text: Option<&str>,
+        button: Option<&str>,
+    ) -> core::result::Result<(i32, i32), &'static str> {
+        if [role, name, text, button].iter().all(Option::is_none) {
+            return Err("invalid_selector");
+        }
+        let _lock = self.global_lock.lock().await;
+        let inner = self.inner.read().await;
+        let screen = inner.displays.first().ok_or("not_available")?.get_object();
+        let display = unsafe { lvgl::lv_obj_get_display(screen) };
+        let roots = unsafe {
+            [
+                (screen, "screen"),
+                (lvgl::lv_display_get_layer_top(display), "top"),
+                (lvgl::lv_display_get_layer_sys(display), "system"),
+            ]
+        };
+        let mut elements = Vec::with_capacity(UI_TREE_MAX_ELEMENTS);
+        let mut truncated = false;
+        for (root, layer) in roots {
+            unsafe {
+                lvgl::lv_obj_update_layout(root);
+                inspect_children(
+                    root,
+                    None,
+                    0,
+                    (UI_TREE_MAX_DEPTH, UI_TREE_MAX_ELEMENTS),
+                    &mut elements,
+                    &mut truncated,
+                    layer,
+                );
+            }
+        }
+        if truncated {
+            return Err("tree_truncated");
+        }
+        let mut found = None;
+        for e in &elements {
+            if !e.visible
+                || e.disabled
+                || role.is_some_and(|r| e.role != r && e.semantic_role != Some(r))
+            {
+                continue;
+            }
+            // A capped prefix may conceal another exact match. Refuse to claim
+            // uniqueness rather than silently skipping that possible target.
+            if name.is_some_and(|n| {
+                e.name_truncated
+                    && e.name
+                        .as_deref()
+                        .is_some_and(|prefix| n.starts_with(prefix))
+            }) || text.is_some_and(|t| {
+                e.text_truncated
+                    && e.text
+                        .as_deref()
+                        .is_some_and(|prefix| t.starts_with(prefix))
+            }) {
+                return Err("text_truncated");
+            }
+            if name.is_some_and(|n| e.name.as_deref() != Some(n))
+                || text.is_some_and(|t| e.text.as_deref() != Some(t))
+            {
+                continue;
+            }
+            let candidates: Vec<_> = if let Some(label) = button {
+                if e.buttons_truncated {
+                    return Err("buttons_truncated");
+                }
+                if e.buttons.iter().any(|b| {
+                    b.text_truncated
+                        && b.text
+                            .as_deref()
+                            .is_some_and(|prefix| label.starts_with(prefix))
+                }) {
+                    return Err("text_truncated");
+                }
+
+                e.buttons
+                    .iter()
+                    .filter(|b| {
+                        !b.hidden
+                            && !b.disabled
+                            && !b.text_truncated
+                            && b.text.as_deref() == Some(label)
+                    })
+                    .map(|b| b.bounds)
+                    .collect()
+            } else {
+                if !e.clickable {
+                    continue;
+                }
+                e.clipped_bounds.into_iter().collect()
+            };
+            for bounds in candidates {
+                if found.is_some() {
+                    return Err("ambiguous_target");
+                }
+                let Some(clip) = e.clipped_bounds else {
+                    continue;
+                };
+                let bounds = (
+                    bounds.0.max(clip.0),
+                    bounds.1.max(clip.1),
+                    bounds.2.min(clip.2),
+                    bounds.3.min(clip.3),
+                );
+                if bounds.0 > bounds.2 || bounds.1 > bounds.3 {
+                    continue;
+                }
+                found = Some((e.id, ((bounds.0 + bounds.2) / 2, (bounds.1 + bounds.3) / 2)));
+            }
+        }
+        let (id, (x, y)) = found.ok_or("target_not_found")?;
+        let mut remaining = id;
+        let mut target = None;
+        for (root, _) in roots {
+            if let Some(obj) = unsafe { crate::inspection::object_at(root, &mut remaining, 0) } {
+                target = Some(obj);
+                break;
+            }
+        }
+        let target = target.ok_or("target_not_found")?;
+        let mut point = lvgl::lv_point_t { x, y };
+        let mut hit = core::ptr::null_mut();
+        for (root, _) in roots.into_iter().rev() {
+            hit = unsafe { lvgl::lv_indev_search_obj(root, &mut point) };
+            if !hit.is_null() {
+                break;
+            }
+        }
+        // A labelled child may receive the pointer. Require it to belong to the target.
+        let mut owner = hit;
+        while !owner.is_null() && owner != target {
+            owner = unsafe { lvgl::lv_obj_get_parent(owner) };
+        }
+        if owner != target {
+            return Err("target_obscured");
+        }
+        let point = crate::Point::new(
+            i16::try_from(x).map_err(|_| "invalid_coordinates")?,
+            i16::try_from(y).map_err(|_| "invalid_coordinates")?,
+        );
+        validate_pointer_point(point, inner.displays[0].get_resolution())
+            .map_err(|_| "invalid_coordinates")?;
+        self.injected_inputs
+            .pointer_click(point)
+            .map_err(|_| "busy")?;
+        Ok((x, y))
     }
 
     /// Capture the active LVGL screen into an owned, bounded RGBA8888 buffer.
@@ -336,192 +468,6 @@ mod injected_input_tests {
             Err(Error::InvalidParameter)
         );
     }
-}
-
-fn semantic_role(class: &str) -> Option<&'static str> {
-    match class {
-        "lv_button" | "lv_list_button" => Some("button"),
-        "lv_textarea" => Some("textbox"),
-        "lv_checkbox" => Some("checkbox"),
-        "lv_switch" => Some("switch"),
-        "lv_slider" => Some("slider"),
-        "lv_dropdown" => Some("combobox"),
-        "lv_label" | "lv_list_text" => Some("text"),
-        "lv_list" => Some("list"),
-        _ => None,
-    }
-}
-
-/// Flags report explicit LVGL state; they do not assert visibility through
-/// clipping, occlusion, or whether a click would hit this object.
-unsafe fn is_hidden_by_ancestor(mut object: *mut lvgl::lv_obj_t) -> bool {
-    while !object.is_null() {
-        if unsafe { lvgl::lv_obj_has_flag(object, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_HIDDEN) } {
-            return true;
-        }
-        object = unsafe { lvgl::lv_obj_get_parent(object) };
-    }
-    false
-}
-
-/// Use only unambiguous associations: textarea placeholder, checkbox text, or
-/// the first direct label in a button. Never search arbitrary siblings.
-unsafe fn widget_name(object: *mut lvgl::lv_obj_t, semantic_role: Option<&str>) -> Option<String> {
-    unsafe {
-        match semantic_role {
-            Some("textbox") if lvgl::lv_obj_has_class(object, &lvgl::lv_textarea_class) => {
-                bounded_c_string_with_limit(
-                    lvgl::lv_textarea_get_placeholder_text(object),
-                    UI_ELEMENT_MAX_NAME_BYTES,
-                )
-            }
-            Some("checkbox") if lvgl::lv_obj_has_class(object, &lvgl::lv_checkbox_class) => {
-                bounded_c_string_with_limit(
-                    lvgl::lv_checkbox_get_text(object),
-                    UI_ELEMENT_MAX_NAME_BYTES,
-                )
-            }
-            Some("button") if lvgl::lv_obj_has_class(object, &lvgl::lv_button_class) => {
-                for index in 0..lvgl::lv_obj_get_child_count(object).min(UI_NAME_MAX_CHILDREN) {
-                    let child = lvgl::lv_obj_get_child(object, index as i32);
-                    if lvgl::lv_obj_has_class(child, &lvgl::lv_label_class) {
-                        return bounded_c_string_with_limit(
-                            lvgl::lv_label_get_text(child),
-                            UI_ELEMENT_MAX_NAME_BYTES,
-                        );
-                    }
-                }
-                None
-            }
-            _ => None,
-        }
-    }
-}
-
-unsafe fn inspect_children(
-    object: *mut lvgl::lv_obj_t,
-    parent_id: Option<u32>,
-    depth: usize,
-    max_depth: usize,
-    max_elements: usize,
-    elements: &mut Vec<UiElement>,
-    truncated: &mut bool,
-) {
-    if object.is_null() {
-        return;
-    }
-    if depth >= max_depth || elements.len() >= max_elements {
-        *truncated = true;
-        return;
-    }
-
-    let id = elements.len() as u32;
-    let class = unsafe { lvgl::lv_obj_get_class(object) };
-    let role = if class.is_null() {
-        String::from("unknown")
-    } else {
-        unsafe { bounded_c_string((*class).name) }.unwrap_or_else(|| String::from("unknown"))
-    };
-
-    let mut area = lvgl::lv_area_t::default();
-    unsafe { lvgl::lv_obj_get_coords(object, &mut area) };
-
-    let text = unsafe {
-        if lvgl::lv_obj_has_class(object, &lvgl::lv_label_class) {
-            bounded_c_string(lvgl::lv_label_get_text(object))
-        } else if lvgl::lv_obj_has_class(object, &lvgl::lv_textarea_class) {
-            bounded_c_string(lvgl::lv_textarea_get_text(object))
-        } else {
-            None
-        }
-    };
-
-    let semantic_role = semantic_role(&role);
-    let (name, hidden, disabled, focused, clickable, checked) = unsafe {
-        (
-            widget_name(object, semantic_role),
-            is_hidden_by_ancestor(object),
-            lvgl::lv_obj_has_state(object, lvgl::lv_state_t_LV_STATE_DISABLED),
-            lvgl::lv_obj_has_state(object, lvgl::lv_state_t_LV_STATE_FOCUSED),
-            lvgl::lv_obj_has_flag(object, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_CLICKABLE),
-            if matches!(semantic_role, Some("checkbox" | "switch")) {
-                Some(lvgl::lv_obj_has_state(
-                    object,
-                    lvgl::lv_state_t_LV_STATE_CHECKED,
-                ))
-            } else {
-                None
-            },
-        )
-    };
-
-    elements.push(UiElement {
-        id,
-        parent_id,
-        role,
-        semantic_role,
-        name,
-        text,
-        hidden,
-        disabled,
-        focused,
-        clickable,
-        checked,
-        bounds: (area.x1, area.y1, area.x2, area.y2),
-    });
-
-    let child_count = unsafe { lvgl::lv_obj_get_child_count(object) };
-    if child_count == 0 {
-        return;
-    }
-    if depth + 1 >= max_depth || elements.len() >= max_elements {
-        *truncated = true;
-        return;
-    }
-    for index in 0..child_count {
-        if elements.len() >= max_elements {
-            *truncated = true;
-            break;
-        }
-        let child = unsafe { lvgl::lv_obj_get_child(object, index as i32) };
-        unsafe {
-            inspect_children(
-                child,
-                Some(id),
-                depth + 1,
-                max_depth,
-                max_elements,
-                elements,
-                truncated,
-            );
-        }
-    }
-}
-
-/// Copy a valid C string with a hard byte cap without scanning past its NUL.
-unsafe fn bounded_c_string(pointer: *const core::ffi::c_char) -> Option<String> {
-    unsafe { bounded_c_string_with_limit(pointer, UI_ELEMENT_MAX_TEXT_BYTES) }
-}
-
-unsafe fn bounded_c_string_with_limit(
-    pointer: *const core::ffi::c_char,
-    limit: usize,
-) -> Option<String> {
-    if pointer.is_null() {
-        return None;
-    }
-
-    let bytes = pointer.cast::<u8>();
-    let mut length = 0;
-    while length < limit && unsafe { *bytes.add(length) } != 0 {
-        length += 1;
-    }
-
-    let slice = unsafe { core::slice::from_raw_parts(bytes, length) };
-    Some(match str::from_utf8(slice) {
-        Ok(text) => text.into(),
-        Err(_) => String::from_utf8_lossy(slice).into_owned(),
-    })
 }
 
 impl Drop for Manager {
