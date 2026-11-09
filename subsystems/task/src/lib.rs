@@ -2,7 +2,7 @@
 
 extern crate alloc;
 
-embedded_i18n::track_locales!();
+embedded_i18n::i18n!("locales");
 
 #[cfg(any(test, feature = "std", all(feature = "profiling", target_os = "linux")))]
 extern crate std;

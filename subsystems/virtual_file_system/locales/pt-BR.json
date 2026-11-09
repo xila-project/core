@@ -5,7 +5,7 @@
     "delimiter_not_found": "Delimitador não encontrado",
     "failed_to_get_task_informations": "Não foi possível obter informações da tarefa",
     "failed_to_write": "Não foi possível gravar",
-    "file_system_error": "Erro no sistema de arquivos: {}",
+    "file_system_error": "Erro no sistema de arquivos: {arg0}",
     "invalid_file_system": "Sistema de arquivos inválido",
     "invalid_identifier": "Identificador inválido",
     "invalid_inode": "Inode inválido",
@@ -19,12 +19,12 @@
     "orphaned": "Órfão",
     "permission_denied": "Permissão negada",
     "ressource_busy": "Recurso ocupado",
-    "task_error": "Erro na tarefa: {}",
-    "time_error": "Erro de horário: {}",
+    "task_error": "Erro na tarefa: {arg0}",
+    "time_error": "Erro de horário: {arg0}",
     "too_many_inodes": "Inodes demais",
     "too_many_open_files": "Arquivos abertos demais",
     "unavailable_driver": "Driver indisponível",
     "unsupported_operation": "Operação não suportada",
-    "users_error": "Erro de usuários: {}"
+    "users_error": "Erro de usuários: {arg0}"
   }
 }

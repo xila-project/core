@@ -7,7 +7,7 @@ use core::{
     ffi::CStr,
     ptr::{self, NonNull},
 };
-use embedded_i18n::translate;
+use embedded_i18n::t;
 use model::{Browser, MAX_PATH, Model, PAGE_SIZE};
 use synchronization::once_lock::OnceLock;
 use task::TaskIdentifier;
@@ -232,19 +232,19 @@ impl FilePicker {
             let toolbar = lvgl::lv_obj_create(object);
             lvgl::lv_obj_set_size(toolbar, lvgl::lv_pct(100), lvgl::LV_SIZE_CONTENT as _);
             lvgl::lv_obj_set_flex_flow(toolbar, lvgl::lv_flex_flow_t_LV_FLEX_FLOW_ROW_WRAP);
-            let up = button(toolbar, translate!("file_picker.parent"), picker.as_ptr());
-            let previous = button(toolbar, translate!("file_picker.previous"), picker.as_ptr());
-            let next = button(toolbar, translate!("file_picker.next"), picker.as_ptr());
+            let up = button(toolbar, t!("file_picker.parent"), picker.as_ptr());
+            let previous = button(toolbar, t!("file_picker.previous"), picker.as_ptr());
+            let next = button(toolbar, t!("file_picker.next"), picker.as_ptr());
             let confirm = button(
                 toolbar,
                 match mode {
-                    FilePickerMode::OpenFile => translate!("file_picker.open"),
-                    FilePickerMode::SaveFile => translate!("file_picker.save"),
-                    FilePickerMode::Directory => translate!("file_picker.select_directory"),
+                    FilePickerMode::OpenFile => t!("file_picker.open"),
+                    FilePickerMode::SaveFile => t!("file_picker.save"),
+                    FilePickerMode::Directory => t!("file_picker.select_directory"),
                 },
                 picker.as_ptr(),
             );
-            let cancel = button(toolbar, translate!("file_picker.cancel"), picker.as_ptr());
+            let cancel = button(toolbar, t!("file_picker.cancel"), picker.as_ptr());
             let error = lvgl::lv_label_create(object);
             lvgl::lv_obj_set_width(error, lvgl::lv_pct(100));
             let list = lvgl::lv_obj_create(object);
@@ -333,9 +333,9 @@ impl FilePicker {
             text(
                 lvgl::lv_obj_get_child(state.confirm, 0),
                 match mode {
-                    FilePickerMode::OpenFile => translate!("file_picker.open"),
-                    FilePickerMode::SaveFile => translate!("file_picker.save"),
-                    FilePickerMode::Directory => translate!("file_picker.select_directory"),
+                    FilePickerMode::OpenFile => t!("file_picker.open"),
+                    FilePickerMode::SaveFile => t!("file_picker.save"),
+                    FilePickerMode::Directory => t!("file_picker.select_directory"),
                 },
             );
             state._modal.activate();
@@ -375,7 +375,7 @@ impl FilePicker {
         if let Some(state) = &self.state {
             let message = result
                 .err()
-                .map(|error| format!("{}: {}", translate!("file_picker.error"), error))
+                .map(|error| format!("{}: {}", t!("file_picker.error"), error))
                 .unwrap_or_default();
             unsafe {
                 text(state.error, &message);

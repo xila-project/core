@@ -42,10 +42,10 @@ Check extraction and actual LVGL glyph lookup:
 
 ```sh
 cargo test --manifest-path subsystems/graphics/tests/font_pipeline/Cargo.toml
-EMBEDDED_I18N_LOCALE=zh-CN EMBEDDED_I18N_STRICT=1 \
+EMBEDDED_I18N_LOCALE=zh-CN \
   CARGO_TARGET_DIR="$PWD/target/localization/zh-CN" \
   cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml
-EMBEDDED_I18N_LOCALE=zh-CN EMBEDDED_I18N_STRICT=1 \
+EMBEDDED_I18N_LOCALE=zh-CN \
   CARGO_TARGET_DIR=target/localization/zh-CN mise run localization:check
 ```
 

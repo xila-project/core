@@ -2,6 +2,8 @@
 mod cache;
 #[path = "build/catalogs.rs"]
 mod catalogs;
+#[path = "build/config.rs"]
+mod config;
 #[path = "build/fonts.rs"]
 mod fonts;
 #[path = "build/generate.rs"]
@@ -17,7 +19,6 @@ fn main() {
     println!("cargo:rerun-if-changed=build");
     for variable in [
         "EMBEDDED_I18N_LOCALE",
-        "EMBEDDED_I18N_FALLBACK",
         "PATH",
         "NODE_OPTIONS",
         "NODE_PATH",
@@ -40,8 +41,14 @@ fn main() {
 
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir"));
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo OUT_DIR"));
-    let locale = embedded_i18n::get_locale_build();
-    let fallback = embedded_i18n::get_fallback_locale_build();
+    println!(
+        "cargo:rerun-if-changed={}",
+        root.join("Cargo.toml").display()
+    );
+    let (locale, fallback) = config::read(
+        &root.join("Cargo.toml"),
+        env::var("EMBEDDED_I18N_LOCALE").ok(),
+    );
     let active =
         fonts::effective_ranges(&locale, &fallback).unwrap_or_else(|error| panic!("{error}"));
     let symbols = fonts::uses_chinese(&locale, &fallback).then(|| {

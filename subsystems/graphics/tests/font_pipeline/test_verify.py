@@ -8,6 +8,18 @@ import verify
 
 
 class VerifierTests(unittest.TestCase):
+    def test_fallback_probe_restores_translation_metadata_after_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "Cargo.toml"
+            source = '[package.metadata.i18n]\nfallback = ["en"]\nstrict = true\n'
+            manifest.write_text(source)
+            with self.assertRaises(RuntimeError):
+                with verify.restore_manifest(manifest):
+                    verify.set_fallback(manifest, "fr")
+                    self.assertIn('fallback = ["fr"]', manifest.read_text())
+                    raise RuntimeError("probe failed")
+            self.assertEqual(manifest.read_text(), source)
+
     def test_lvgl_evidence_uses_current_dependency_not_historical_outputs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

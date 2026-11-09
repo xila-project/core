@@ -5,6 +5,7 @@ All build products stay in Cargo target/OUT_DIR; evidence goes in --report.
 Run from the repository root. Never cleans or removes a target directory.
 """
 
+from contextlib import contextmanager
 import argparse
 import hashlib
 import json
@@ -31,7 +32,29 @@ def lvgl_outputs(messages):
     return [outputs[0] / "liblvgl.a", outputs[0] / "bindings.rs"]
 
 
-def main():
+@contextmanager
+def restore_manifest(manifest):
+    original = manifest.read_bytes()
+    try:
+        yield
+    finally:
+        if manifest.read_bytes() != original:
+            manifest.write_bytes(original)
+
+
+def set_fallback(manifest, locale):
+    # 0.2 moves fallback configuration from the environment into crate metadata.
+    source = manifest.read_text()
+    prefix, section, metadata = source.partition("[package.metadata.i18n]")
+    updated, count = re.subn(r"(?m)^fallback\s*=.*$", "fallback = " + json.dumps([locale]), metadata, count=1)
+    if not section or count != 1:
+        raise ValueError("missing i18n fallback metadata")
+    result = prefix + section + updated
+    if source != result:
+        manifest.write_text(result)
+
+
+def verify():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", type=Path, default=Path("target/font-pipeline"))
     parser.add_argument("--report", type=Path, default=Path("target/font-pipeline-evidence"))
@@ -59,8 +82,9 @@ def main():
     phases += [("en", "fr")] * 3 + [("en", "en")]
     for index, (locale, fallback) in enumerate(phases):
         name = f"{index}-{locale}-{fallback}"
+        set_fallback(Path("subsystems/graphics/Cargo.toml"), fallback)
         env = dict(os.environ, CARGO_TARGET_DIR=str(target),
-                   EMBEDDED_I18N_LOCALE=locale, EMBEDDED_I18N_FALLBACK=fallback)
+                   EMBEDDED_I18N_LOCALE=locale)
         output = command([
             "cargo", "rustc", "--manifest-path", "subsystems/graphics/tests/font_link/Cargo.toml",
             "--tests", "--message-format=json", "-vv", "--", "-C",
@@ -178,4 +202,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Restore the checked-in defaults even if a Cargo/linker probe fails.
+    with restore_manifest(Path("subsystems/graphics/Cargo.toml")):
+        verify()

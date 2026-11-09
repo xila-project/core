@@ -5,7 +5,7 @@
     "delimiter_not_found": "未找到分隔符",
     "failed_to_get_task_informations": "获取任务信息失败",
     "failed_to_write": "写入失败",
-    "file_system_error": "文件系统错误：{}",
+    "file_system_error": "文件系统错误：{arg0}",
     "invalid_file_system": "文件系统无效",
     "invalid_identifier": "标识符无效",
     "invalid_inode": "inode 无效",
@@ -19,12 +19,12 @@
     "orphaned": "已失去关联",
     "permission_denied": "权限不足",
     "ressource_busy": "资源正忙",
-    "task_error": "任务错误：{}",
-    "time_error": "时间错误：{}",
+    "task_error": "任务错误：{arg0}",
+    "time_error": "时间错误：{arg0}",
     "too_many_inodes": "inode 过多",
     "too_many_open_files": "打开的文件过多",
     "unavailable_driver": "驱动程序不可用",
     "unsupported_operation": "不支持此操作",
-    "users_error": "用户管理错误：{}"
+    "users_error": "用户管理错误：{arg0}"
   }
 }

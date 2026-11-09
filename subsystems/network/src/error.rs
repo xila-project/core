@@ -1,5 +1,5 @@
 use core::{fmt::Display, num::NonZeroU8};
-use embedded_i18n::translate;
+use embedded_i18n::t;
 use smoltcp::socket::{dns, icmp, udp};
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -76,74 +76,74 @@ impl From<Error> for NonZeroU8 {
 impl Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Error::NotFound => write!(f, translate!("errors.not_found")),
-            Error::PermissionDenied => write!(f, translate!("errors.permission_denied")),
-            Error::ConnectionRefused => write!(f, translate!("errors.connection_refused")),
-            Error::ConnectionReset => write!(f, translate!("errors.connection_reset")),
-            Error::HostUnreachable => write!(f, translate!("errors.host_unreachable")),
-            Error::NetworkUnreachable => write!(f, translate!("errors.network_unreachable")),
-            Error::ConnectionAborted => write!(f, translate!("errors.connection_aborted")),
-            Error::NotConnected => write!(f, translate!("errors.not_connected")),
-            Error::AddressInUse => write!(f, translate!("errors.address_in_use")),
-            Error::AddressNotAvailable => write!(f, translate!("errors.address_not_available")),
-            Error::NetworkDown => write!(f, translate!("errors.network_down")),
-            Error::BrokenPipe => write!(f, translate!("errors.broken_pipe")),
-            Error::AlreadyExists => write!(f, translate!("errors.already_exists")),
-            Error::WouldBlock => write!(f, translate!("errors.would_block")),
-            Error::InvalidInput => write!(f, translate!("errors.invalid_input")),
-            Error::InvalidData => write!(f, translate!("errors.invalid_data")),
-            Error::TimedOut => write!(f, translate!("errors.timed_out")),
-            Error::WriteZero => write!(f, translate!("errors.write_zero")),
-            Error::StorageFull => write!(f, translate!("errors.storage_full")),
-            Error::ResourceBusy => write!(f, translate!("errors.resource_busy")),
-            Error::Deadlock => write!(f, translate!("errors.deadlock")),
-            Error::Interrupted => write!(f, translate!("errors.interrupted")),
-            Error::Unsupported => write!(f, translate!("errors.unsupported_operation")),
-            Error::UnexpectedEndOfFile => write!(f, translate!("errors.unexpected_end_of_file")),
-            Error::OutOfMemory => write!(f, translate!("errors.out_of_memory")),
+            Error::NotFound => write!(f, "{}", t!("errors.not_found")),
+            Error::PermissionDenied => write!(f, "{}", t!("errors.permission_denied")),
+            Error::ConnectionRefused => write!(f, "{}", t!("errors.connection_refused")),
+            Error::ConnectionReset => write!(f, "{}", t!("errors.connection_reset")),
+            Error::HostUnreachable => write!(f, "{}", t!("errors.host_unreachable")),
+            Error::NetworkUnreachable => write!(f, "{}", t!("errors.network_unreachable")),
+            Error::ConnectionAborted => write!(f, "{}", t!("errors.connection_aborted")),
+            Error::NotConnected => write!(f, "{}", t!("errors.not_connected")),
+            Error::AddressInUse => write!(f, "{}", t!("errors.address_in_use")),
+            Error::AddressNotAvailable => write!(f, "{}", t!("errors.address_not_available")),
+            Error::NetworkDown => write!(f, "{}", t!("errors.network_down")),
+            Error::BrokenPipe => write!(f, "{}", t!("errors.broken_pipe")),
+            Error::AlreadyExists => write!(f, "{}", t!("errors.already_exists")),
+            Error::WouldBlock => write!(f, "{}", t!("errors.would_block")),
+            Error::InvalidInput => write!(f, "{}", t!("errors.invalid_input")),
+            Error::InvalidData => write!(f, "{}", t!("errors.invalid_data")),
+            Error::TimedOut => write!(f, "{}", t!("errors.timed_out")),
+            Error::WriteZero => write!(f, "{}", t!("errors.write_zero")),
+            Error::StorageFull => write!(f, "{}", t!("errors.storage_full")),
+            Error::ResourceBusy => write!(f, "{}", t!("errors.resource_busy")),
+            Error::Deadlock => write!(f, "{}", t!("errors.deadlock")),
+            Error::Interrupted => write!(f, "{}", t!("errors.interrupted")),
+            Error::Unsupported => write!(f, "{}", t!("errors.unsupported_operation")),
+            Error::UnexpectedEndOfFile => write!(f, "{}", t!("errors.unexpected_end_of_file")),
+            Error::OutOfMemory => write!(f, "{}", t!("errors.out_of_memory")),
             Error::Pending => write!(
                 f,
-                translate!("errors.in_progress_operation_not_completed_yet")
+                "{}",
+                t!("errors.in_progress_operation_not_completed_yet")
             ),
             Error::UnsupportedProtocol => {
-                write!(
-                    f,
-                    translate!("errors.unsupported_protocol_used_in_operation")
-                )
+                write!(f, "{}", t!("errors.unsupported_protocol_used_in_operation"))
             }
             Error::InvalidIdentifier => {
                 write!(
                     f,
-                    translate!("errors.invalid_identifier_provided_for_operation")
+                    "{}",
+                    t!("errors.invalid_identifier_provided_for_operation")
                 )
             }
             Error::DuplicateIdentifier => {
                 write!(
                     f,
-                    translate!("errors.duplicate_identifier_found_in_operation")
+                    "{}",
+                    t!("errors.duplicate_identifier_found_in_operation")
                 )
             }
             Error::FailedToGenerateSeed(e) => {
-                write!(f, translate!("errors.failed_to_generate_seed"), e)
+                write!(f, "{}", t!("errors.failed_to_generate_seed", arg0 = e))
             }
             Error::FailedToSpawnNetworkTask(e) => {
-                write!(f, translate!("errors.failed_to_spawn_network_task"), e)
+                write!(f, "{}", t!("errors.failed_to_spawn_network_task", arg0 = e))
             }
-            Error::InvalidName => write!(f, translate!("errors.invalid_name")),
-            Error::NameTooLong => write!(f, translate!("errors.name_too_long")),
-            Error::Failed => write!(f, translate!("errors.failed")),
-            Error::InvalidState => write!(f, translate!("errors.invalid_state_for_operation")),
-            Error::InvalidPort => write!(f, translate!("errors.invalid_port_specified")),
-            Error::NoRoute => write!(f, translate!("errors.no_route_to_host")),
-            Error::Truncated => write!(f, translate!("errors.truncated_packet_received")),
-            Error::SocketNotBound => write!(f, translate!("errors.socket_not_bound")),
-            Error::PacketTooLarge => write!(f, translate!("errors.packet_too_large_to_send")),
-            Error::InvalidEndpoint => write!(f, translate!("errors.invalid_endpoint_specified")),
+            Error::InvalidName => write!(f, "{}", t!("errors.invalid_name")),
+            Error::NameTooLong => write!(f, "{}", t!("errors.name_too_long")),
+            Error::Failed => write!(f, "{}", t!("errors.failed")),
+            Error::InvalidState => write!(f, "{}", t!("errors.invalid_state_for_operation")),
+            Error::InvalidPort => write!(f, "{}", t!("errors.invalid_port_specified")),
+            Error::NoRoute => write!(f, "{}", t!("errors.no_route_to_host")),
+            Error::Truncated => write!(f, "{}", t!("errors.truncated_packet_received")),
+            Error::SocketNotBound => write!(f, "{}", t!("errors.socket_not_bound")),
+            Error::PacketTooLarge => write!(f, "{}", t!("errors.packet_too_large_to_send")),
+            Error::InvalidEndpoint => write!(f, "{}", t!("errors.invalid_endpoint_specified")),
             Error::FailedToMountDevice(e) => {
-                write!(f, translate!("errors.failed_to_mount_device"), e)
+                write!(f, "{}", t!("errors.failed_to_mount_device", arg0 = e))
             }
-            Error::NoFreeSlot => write!(f, translate!("errors.no_free_slot_available")),
-            Error::Other => write!(f, translate!("errors.other_error_occurred")),
+            Error::NoFreeSlot => write!(f, "{}", t!("errors.no_free_slot_available")),
+            Error::Other => write!(f, "{}", t!("errors.other_error_occurred")),
         }
     }
 }

@@ -5,7 +5,7 @@
     "delimiter_not_found": "Trennzeichen nicht gefunden",
     "failed_to_get_task_informations": "Aufgabeninformationen konnten nicht abgerufen werden",
     "failed_to_write": "Schreiben fehlgeschlagen",
-    "file_system_error": "Dateisystemfehler: {}",
+    "file_system_error": "Dateisystemfehler: {arg0}",
     "invalid_file_system": "Ungültiges Dateisystem",
     "invalid_identifier": "Ungültige Kennung",
     "invalid_inode": "Ungültige Inode",
@@ -19,12 +19,12 @@
     "orphaned": "Verwaist",
     "permission_denied": "Zugriff verweigert",
     "ressource_busy": "Ressource belegt",
-    "task_error": "Aufgabenfehler: {}",
-    "time_error": "Zeitfehler: {}",
+    "task_error": "Aufgabenfehler: {arg0}",
+    "time_error": "Zeitfehler: {arg0}",
     "too_many_inodes": "Zu viele Inodes",
     "too_many_open_files": "Zu viele geöffnete Dateien",
     "unavailable_driver": "Treiber nicht verfügbar",
     "unsupported_operation": "Nicht unterstützte Operation",
-    "users_error": "Benutzerfehler: {}"
+    "users_error": "Benutzerfehler: {arg0}"
   }
 }

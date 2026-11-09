@@ -29,6 +29,7 @@ users = { workspace = true }
 abi_definitions = { workspace = true }
 
 [build-dependencies]
+toml = "1"
 cc = "1"
 embedded-i18n = { workspace = true, features = ["std"] }
 serde_json = "1"
@@ -41,3 +42,9 @@ rendering_xrgb8888 = ["lvgl_rust_sys/color_depth_32"]
 
 [lib]
 name = "graphics"
+
+[package.metadata.i18n]
+load-path = "locales"
+default-locale = "en"
+fallback = ["en"]
+strict = true

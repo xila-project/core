@@ -100,7 +100,7 @@
 
 extern crate alloc;
 
-embedded_i18n::track_locales!();
+embedded_i18n::i18n!("locales");
 
 #[cfg(feature = "std")]
 extern crate std;

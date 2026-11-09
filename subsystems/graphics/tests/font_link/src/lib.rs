@@ -16,9 +16,10 @@ mod tests {
     #[test]
     fn selected_coverage_is_present_without_unrequested_accents() {
         let locale = option_env!("EMBEDDED_I18N_LOCALE").unwrap_or("en");
-        let fallback = option_env!("EMBEDDED_I18N_FALLBACK").unwrap_or("en");
+        let (_, fallback) = graphics_font_pipeline_test::config::read(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml"), None);
         let ranges =
-            graphics_font_pipeline_test::fonts::effective_ranges(locale, fallback).unwrap();
+            graphics_font_pipeline_test::fonts::effective_ranges(locale, &fallback).unwrap();
         let accented = ranges.iter().any(|range| range.contains(&u32::from('é')));
         for font in [
             graphics::fonts::get_font_small(),
@@ -67,8 +68,9 @@ mod tests {
     #[test]
     fn localized_fonts_contain_chinese_and_punctuation() {
         let locale = option_env!("EMBEDDED_I18N_LOCALE").unwrap_or("en");
-        let fallback = option_env!("EMBEDDED_I18N_FALLBACK").unwrap_or("en");
-        if !graphics_font_pipeline_test::fonts::uses_chinese(locale, fallback) {
+        let (_, fallback) = graphics_font_pipeline_test::config::read(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml"), None);
+        if !graphics_font_pipeline_test::fonts::uses_chinese(locale, &fallback) {
             return;
         }
         let mut roots = vec![std::path::PathBuf::from(concat!(
@@ -80,7 +82,7 @@ mod tests {
         }
         let roots: Vec<&std::path::Path> = roots.iter().map(std::path::PathBuf::as_path).collect();
         let symbols =
-            graphics_font_pipeline_test::catalogs::collect_multiple(&roots, &[locale, fallback])
+            graphics_font_pipeline_test::catalogs::collect_multiple(&roots, &[locale, &fallback])
                 .unwrap();
         assert!(symbols.cjk.contains('清') && symbols.cjk.contains('：'));
         for font in [

@@ -9,7 +9,7 @@ import { flattenCatalog } from "./tools/localization/catalog.mjs";
 
 const PLURAL = new Set(["zero", "one", "two", "few", "many", "other"]);
 const MACROS = new Set([
-  "translate", "translation", "translate_args", "translate_write",
+  "t", "translate", "translation", "translate_args", "translate_write",
   "translate_plural", "translate_plural_write", "translate_select",
   "translate_select_write",
 ]);
@@ -158,14 +158,21 @@ export default function extractRustTranslations(code, fileName) {
         && args[0]?.[2]?.type === "string") {
       context = args.shift()[2].value;
     }
+    if (macro === "t") {
+      const option = args.find(arg => arg[0]?.value === "context" && arg[1]?.value === "=" && arg[2]?.type === "string");
+      if (option) context = option[2].value;
+    }
     const literal = args[WRITE.has(macro) ? 1 : 0];
     if (literal?.length !== 1 || literal[0].type !== "string") continue;
     const name = (context ? context + "." : "") + literal[0].value;
-    const derived = macro.includes("plural")
-      ? formsInCatalogs(namespace, name, true)
-      : macro.includes("select")
-        ? formsInCatalogs(namespace, name, false)
-        : [name];
+    const plural = macro.includes("plural") || (macro === "t" && args.some(arg => arg[0]?.value === "count" && arg[1]?.value === "="));
+    const select = macro.includes("select") || (macro === "t" && args.some(arg => arg[0]?.value === "select" && arg[1]?.value === "="));
+    let derived = [name];
+    if (plural || select) {
+      const forms = formsInCatalogs(namespace, name, plural);
+      // In 0.2 count is also an ordinary named argument on nonplural messages.
+      derived = forms.length || macro !== "t" ? forms : [name];
+    }
     for (const keyName of derived) {
       keys.push({
         keyName,
