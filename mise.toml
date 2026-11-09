@@ -87,8 +87,8 @@ description = "Build Cargo packages"
 run = "cargo build"
 
 [tasks."firmware:test"]
-description = "Test bounded firmware transactions and NOR power-loss simulation"
-run = "cargo test --locked -p xila-firmware-update --features simulator"
+description = "Test bounded firmware transactions"
+run = "cargo test --locked -p xila-firmware-update"
 
 [tasks."firmware:integration"]
 description = "Test firmware VFS permissions"

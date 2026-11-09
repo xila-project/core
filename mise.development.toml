@@ -156,7 +156,7 @@ extends = "dev:rust"
 
 [tasks."firmware:test"]
 extends = "dev:rust"
-run = "cargo test --locked -p xila-firmware-update --features simulator"
+run = "cargo test --locked -p xila-firmware-update"
 
 [tasks."firmware:integration"]
 extends = "dev:rust"

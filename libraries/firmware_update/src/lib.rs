@@ -3,15 +3,9 @@
 
 #[cfg(feature = "device")]
 extern crate alloc;
-#[cfg(feature = "std")]
-extern crate std;
 
 #[cfg(feature = "device")]
 pub mod device;
-#[cfg(feature = "simulator")]
-pub mod nor;
-#[cfg(feature = "simulator")]
-pub mod simulator;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error {
