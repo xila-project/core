@@ -9,11 +9,11 @@ extern crate alloc;
 #[path = "support/allocation.rs"]
 mod allocation;
 
-use file_system::{AccessFlags, Error as FileSystemError, Flags, MemoryDevice};
-use peripheral_devices::pwm::{
+use drivers_peripherals::pwm::{
     GET_INFO, PwmDutyPermilleAbi, PwmFrequencyAbi, PwmInfoAbi, PwmVersionAbi, SET_DUTY_PERMILLE,
     SET_FREQUENCY, mount_pwm,
 };
+use file_system::{AccessFlags, Error as FileSystemError, Flags, MemoryDevice};
 use peripherals::pwm::{ChannelId, PwmController, PwmMock};
 use task::TaskIdentifier;
 use virtual_file_system::{Error, File, VirtualFileSystem};

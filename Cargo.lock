@@ -1815,6 +1815,7 @@ dependencies = [
  "xila-audio",
  "xila-authentication",
  "xila-bootsplash",
+ "xila-drivers-neural-network",
  "xila-executable",
  "xila-file-system",
  "xila-graphics",
@@ -1918,6 +1919,39 @@ dependencies = [
  "xila-shared",
  "xila-synchronization",
  "xila-task",
+]
+
+[[package]]
+name = "xila-drivers-neural-network"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+ "xila-device",
+ "xila-file-system",
+ "xila-neural-network",
+ "xila-shared",
+]
+
+[[package]]
+name = "xila-drivers-peripherals"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+ "embedded-hal 1.0.0",
+ "embedded-io",
+ "xila-abi-definitions",
+ "xila-device",
+ "xila-file-system",
+ "xila-little-fs",
+ "xila-log",
+ "xila-peripherals",
+ "xila-shared",
+ "xila-synchronization",
+ "xila-task",
+ "xila-testing",
+ "xila-time",
+ "xila-users",
+ "xila-virtual-file-system",
 ]
 
 [[package]]
@@ -2080,29 +2114,6 @@ dependencies = [
  "critical-section",
  "xila-device",
  "xila-file-system",
- "xila-shared",
-]
-
-[[package]]
-name = "xila-peripheral-devices"
-version = "0.1.0"
-dependencies = [
- "critical-section",
- "embedded-hal 1.0.0",
- "embedded-io",
- "xila-abi-definitions",
- "xila-device",
- "xila-file-system",
- "xila-little-fs",
- "xila-log",
- "xila-peripherals",
- "xila-shared",
- "xila-synchronization",
- "xila-task",
- "xila-testing",
- "xila-time",
- "xila-users",
- "xila-virtual-file-system",
 ]
 
 [[package]]

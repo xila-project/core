@@ -1,13 +1,13 @@
 #![cfg(all(target_os = "linux", feature = "gpio"))]
 
-use file_system::{ControlCommand, Error};
-use peripheral_devices::{
+use drivers_peripherals::{
     PeripheralHandle,
     gpio::{
         ABI_VERSION, CONFIGURE, CapabilitiesAbi, ConfigureAbi, GET_CAPABILITIES, GpioHandle,
         RELEASE, VersionAbi,
     },
 };
+use file_system::{ControlCommand, Error};
 use peripherals::gpio::{GpioMock, LineCapabilities, LineId, PinState};
 use shared::AnyByLayout;
 

@@ -9,11 +9,11 @@ extern crate alloc;
 #[path = "support/allocation.rs"]
 mod allocation;
 
-use file_system::{AccessFlags, Error as FileSystemError, Flags, MemoryDevice};
-use peripheral_devices::adc::{
+use drivers_peripherals::adc::{
     ABI_VERSION, GET_INFO, InfoAbi, MillivoltsAbi, READ_MILLIVOLTS, SELECT_CHANNEL,
     SelectChannelAbi, VersionAbi, mount_adc,
 };
+use file_system::{AccessFlags, Error as FileSystemError, Flags, MemoryDevice};
 use peripherals::adc::AdcMock;
 use task::TaskIdentifier;
 use virtual_file_system::{Error, File, VirtualFileSystem};

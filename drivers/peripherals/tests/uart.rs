@@ -15,11 +15,11 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use file_system::{AccessFlags, Error as FileSystemError, Flags, MemoryDevice};
-use peripheral_devices::uart::{
+use drivers_peripherals::uart::{
     ConfigAbi, FLOW_CONTROL_RTS_CTS, FLOW_CONTROL_XON_XOFF, FLUSH_RX, FLUSH_TX, GET_CONFIG,
     PARITY_EVEN, SET_CONFIG, VersionAbi, mount_uart,
 };
+use file_system::{AccessFlags, Error as FileSystemError, Flags, MemoryDevice};
 use peripherals::uart::{Capabilities, Config, Error as UartError, UartControl};
 use task::TaskIdentifier;
 use virtual_file_system::{Error, File, VirtualFileSystem};

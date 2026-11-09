@@ -11,11 +11,11 @@ mod allocation;
 
 use alloc::vec::Vec;
 
+use drivers_peripherals::{PeripheralHandle, mount_peripheral};
 use file_system::{
     AccessFlags, ControlCommand, ControlCommandIdentifier, Error as FileSystemError, Flags,
     MemoryDevice, Position,
 };
-use peripheral_devices::{PeripheralHandle, mount_peripheral};
 use shared::AnyByLayout;
 use task::TaskIdentifier;
 use virtual_file_system::{Error, File, VirtualFileSystem};

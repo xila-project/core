@@ -11,7 +11,7 @@ KIND = ROOT / "devices/src/kind.rs"
 # `device` depends on `file_system`, so its generic commands cannot use the registry.
 LITERAL_KIND_ALLOWED = {"libraries/file_system"}
 DEFINE_COMMAND = re.compile(r"define_command!\s*\(\s*\w+\s*,\s*(?:Read|Write)\s*,\s*([^,]+?)\s*,", re.S)
-SKIPPED_PARTS = {"target", "node_modules", "tests"}
+SKIPPED_PARTS = {"target", "node_modules", "tests", "docs", ".superpowers"}
 
 
 def sources():

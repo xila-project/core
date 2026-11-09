@@ -15,6 +15,7 @@ embedded-i18n = { workspace = true }
 
 # - Host
 audio = { workspace = true, optional = true }
+drivers_neural_network = { workspace = true, optional = true }
 neural_network = { workspace = true, optional = true }
 abi_declarations = { workspace = true }
 abi_definitions = { workspace = true, optional = true }
@@ -39,7 +40,7 @@ default = ["abi_definitions"]
 
 executable_building = ["executable/building"]
 audio = ["dep:audio"]
-neural_network = ["dep:neural_network"]
+neural_network = ["dep:neural_network", "dep:drivers_neural_network"]
 abi_definitions = ["dep:abi_definitions"]
 bootsplash = ["dep:bootsplash"]
 graphics = ["dep:graphics", "executable/graphics"]
