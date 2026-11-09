@@ -12,8 +12,10 @@ impl<G> Clone for SharedGraph<G> {
 }
 // SAFETY: cloning shares the same immutable graph owner. This wrapper never replaces or
 // mutates its owner, and all views borrow the owner for their full lifetime.
-unsafe impl<G: nanoglia::GraphHandle<Global>> nanoglia::GraphHandle<Global> for SharedGraph<G> {
-    fn graph(&self) -> &Graph<'_, Global> {
+unsafe impl<G: nanoglia::GraphHandle> nanoglia::GraphHandle for SharedGraph<G> {
+    type Allocator = G::Allocator;
+
+    fn graph(&self) -> &Graph<'_, Self::Allocator> {
         self.0.graph()
     }
 }

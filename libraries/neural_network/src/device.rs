@@ -17,15 +17,15 @@ use crate::{
     session::{NeuralNetworkDevice, map_error, tensor_info},
 };
 
-struct DeviceContext<G: GraphHandle<Global>> {
-    execution: GraphExecutionContext<super::session::SharedGraph<G>, Global, Global>,
+struct DeviceContext<G: GraphHandle<Allocator = Global>> {
+    execution: GraphExecutionContext<super::session::SharedGraph<G>, Global>,
     input_filled: Vec<usize>,
     input_index: usize,
     output_index: usize,
     computed: bool,
 }
 
-impl<G: GraphHandle<Global> + Send + Sync + 'static> NeuralNetworkDevice<G> {
+impl<G: GraphHandle<Allocator = Global> + Send + Sync + 'static> NeuralNetworkDevice<G> {
     fn state<'context>(&self, context: &'context Context) -> Result<&'context DeviceContext<G>> {
         context
             .get_private_data_of_type::<DeviceContext<G>>()
@@ -62,7 +62,9 @@ impl<G: GraphHandle<Global> + Send + Sync + 'static> NeuralNetworkDevice<G> {
     }
 }
 
-impl<G: GraphHandle<Global> + Send + Sync + 'static> BaseOperations for NeuralNetworkDevice<G> {
+impl<G: GraphHandle<Allocator = Global> + Send + Sync + 'static> BaseOperations
+    for NeuralNetworkDevice<G>
+{
     fn open(&self, context: &mut Context) -> Result<()> {
         if context.get_private_data().is_some() {
             return Err(Error::InvalidContext);
@@ -242,12 +244,17 @@ impl<G: GraphHandle<Global> + Send + Sync + 'static> BaseOperations for NeuralNe
     }
 }
 
-impl<G: GraphHandle<Global> + Send + Sync + 'static> MountOperations for NeuralNetworkDevice<G> {
+impl<G: GraphHandle<Allocator = Global> + Send + Sync + 'static> MountOperations
+    for NeuralNetworkDevice<G>
+{
     fn unmount(&self) -> Result<()> {
         Ok(())
     }
 }
-impl<G: GraphHandle<Global> + Send + Sync + 'static> CharacterDevice for NeuralNetworkDevice<G> {}
+impl<G: GraphHandle<Allocator = Global> + Send + Sync + 'static> CharacterDevice
+    for NeuralNetworkDevice<G>
+{
+}
 
 fn write_quantization(
     quantization: nanoglia::Quantization<'_>,
