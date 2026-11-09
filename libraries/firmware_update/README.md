@@ -14,7 +14,7 @@ This implements the research/native-prototype portion of [#526](https://github.c
 - `xila-wasm` in Applications (`src/host/wasi/file.rs::fd_control`): already bounds control buffers, checks guest ranges/alignment/overlap, and copies into aligned host scratch before raw VFS dispatch. Firmware checks exact input/output lengths, ABI version and reserved bytes before mutation. This PR checks the portable crate on Wasm; a firmware-specific guest execution test remains a follow-up.
 - [Platforms hash driver](https://github.com/xila-project/platforms/blob/main/drivers/shared/src/devices/hash.rs): boxed dynamic hash contexts are intentionally not on this streaming path.
 - [Platforms Espressif driver](https://github.com/xila-project/platforms/blob/main/drivers/espressif/Cargo.toml): no ESP-IDF dependencies; Platforms’ `.cargo/config.toml` supplies Xtensa linker/runner settings but does not establish functioning OTA linkage, partition layout or secure boot. #324 remains the integration prerequisite.
-- #490 supplies verification primitives. XPK (#402/#491), loader enforcement (#495) and filesystem images (#318) remain separate. The simulator manifest below is deliberately a test-backend format, not another application package schema.
+- #490 supplies verification primitives. XPK (#402/#491), loader enforcement (#495) and filesystem images (#318) remain separate. The native simulator manifest (documented in Platforms `tools/firmware_sim`) is deliberately a test-backend format, not another application package schema.
 
 ## Platform decision record
 
@@ -68,22 +68,9 @@ All integers are explicitly little-endian; alignment of these byte arrays is one
 
 Errors map to existing Xila codes: authentication/target/security version → `PermissionDenied`; storage/recovery → `InputOutput`; unsupported → `UnsupportedOperation`; state/length/encoding/geometry → `InvalidParameter`. VFS read-only mutation → `InvalidMode`; second open → `RessourceBusy`. Tests assert these typed codes; their existing file-system ABI discriminants are reused.
 
-## Reference flash and image formats
+## Native reference backend
 
-NOR geometry is intentionally small for exhaustive tests: 256-byte erase sectors, 64-byte program pages, minimum write one byte, erased value FF, program only 1→0, no program crossing a page. This is simulation geometry, not an ESP partition table. Durable write counts include only successfully completed page programs; on any program error the transaction is invalid even if a prefix reached flash.
-
-| Region | Offset | Bytes |
-| --- | --- | --- |
-| Boot record 0 / 1 | 0 / 256 | 256 each, first 64 used |
-| Slot A / B | 512 / 4608 | 4096 each |
-| Per-slot signed metadata | slot start | 144 in reserved 256-byte header sector |
-| Per-slot image | slot start + 256 | at most 3840 |
-
-Total flash backing: **8704 bytes**. Each 64-byte journal record has magic `FWJ1`, generation u64, confirmed/pending slot bytes, trial byte, software security floor u64, reserved zeros and SHA-256 over its first 32 bytes. `BEGIN` first commits a fresh generation, invalidating proofs retained across abort or backend reconstruction. Write the other record's sector while keeping the newest valid record untouched. Select the largest valid generation; ties/no valid record require recovery. The checksum detects torn/corrupt metadata; it does not authenticate metadata against a malicious host.
-
-The simulator-only manifest is 144 bytes: exact 16-byte domain `XILA-FW-SIM-v1\0\0`, target bytes 16–31, logical size LE u64 at 32, security version LE u64 at 40, SHA-256 at 48–79, strict ordinary Ed25519 signature over **exactly bytes 0–79** at 80–143. No public key comes from this manifest. This format is not accepted by ESP-IDF or MCUboot.
-
-`MemoryNor` borrows caller storage; `FileNor` streams raw file I/O with fixed scratch and holds an exclusive OS file lock. It writes/syncs an injected prefix before returning failure; no whole-image buffer, rename or host journal is used to stand in for NOR atomicity. Host `sync_data` is a persistence aid for process tests, not proof of physical flash/cache/brownout behavior. Repeated zero-progress I/O is not treated as success. Faults select zero-based erase/program operation and a byte prefix (0 = before; operation length or larger = after). The medium rejects further mutation after the cut; reconstruct it to model reboot.
+The native NOR reference backend (geometry, flash layout, simulator manifest format, `xila-firmware-sim` CLI and allocation measurements) lives with its implementation in [Platforms `tools/firmware_sim`](https://github.com/xila-project/platforms/tree/main/tools/firmware_sim).
 
 ## Reproduce
 
@@ -94,25 +81,8 @@ cargo clippy --locked -p xila-firmware-update --features native --all-targets --
 cargo check --locked -p xila-firmware-update --no-default-features --lib --target wasm32-unknown-unknown
 ```
 
-The [Platforms firmware simulator](https://github.com/xila-project/platforms/tree/main/tools/firmware_sim) and its tests create public-key/signed synthetic fixtures using a deterministic **test-only** seed and start separate `xila-firmware-sim` processes for staging, trial, revert and confirmation. No private production key is present. From a Platforms checkout, supply your own **test** public key, manifest and image files:
-
-```sh
-cargo run --bin xila-firmware-sim -- \
-  init --flash /tmp/fw.img --key test-public-key.bin --target xila-native-test \
-  --manifest factory.manifest --image factory.bin
-# Same public key/target options are required for every command below.
-xila-firmware-sim update --flash /tmp/fw.img --key test-public-key.bin --target xila-native-test \
-  --manifest next.manifest --image next.bin
-xila-firmware-sim boot --flash /tmp/fw.img --key test-public-key.bin --target xila-native-test --confirm
-xila-firmware-sim inspect --flash /tmp/fw.img --key test-public-key.bin --target xila-native-test
-```
-
-`cargo run` does not install the binary in PATH; use `target/debug/xila-firmware-sim` or the same `cargo run ... --` prefix. `update --stage-only` closes without activation. `update` or `boot --fault-operation N --fault-byte K` injects a torn operation; rerun without fault flags to simulate reset.
-
 Tests cover positive signed streams; wrong key/target/size/version; malformed metadata; corruption at finish, activation and boot; erase/program geometry and bit rules; every update operation at before/after/selected byte offsets; boot/confirm journal cuts; seeded schedules (`0x526f1a5`, seed and case on failure); root permissions, read-only modes, exclusivity, duplicate rejection and close behavior; file locking and child-process persistence. Core CI runs the transaction and device suites and no_std/Wasm compilation; Platforms CI runs the simulator, allocation, device and child-process suites. This is deterministic adversarial testing, not a claim of exhaustive physical hardware validation or a fuzzing campaign.
 
 ## Measurements and remaining gates
-
-The allocation regression instruments the Rust allocator with a positive control and measures provision, begin/write, strict signature/readback, activate, boot and confirm: **zero heap allocation requests** in the core and in-memory backend path. The VFS/runtime/harness allocates separately (one bounded context marker per open, namespace/runtime state and a 64 KiB test filesystem); the native file backend uses OS resources. Flash storage is not RAM. On the native x86_64 build the simulator is 368 bytes and its transaction owner is 608 bytes; these figures include bounded state, not the backing medium. The test prints native `size_of` values for the backend/transaction and backing flash; these are not peak stack, linked flash or target ABI results.
 
 Before any board implementation is accepted: produce actual signed boot/provisioning and recovery builds, a partition map, before/after linked flash and `.data/.bss`, peak signature/OTA stack, SDK/driver heap, caller/alignment buffers, reset and fault evidence, watchdog/brownout and flash-encryption behavior, monotonic-counter ordering and filesystem compatibility. Validate one ESP32-S3 and the chosen MCUboot board; assess single-bank, XIP, multicore and read-only capabilities explicitly. Do not burn eFuses or change irreversible protection on ordinary development boards automatically. Keep #526 open until those acceptance criteria have evidence.
