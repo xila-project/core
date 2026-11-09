@@ -40,7 +40,6 @@ network = { package = "xila-network", path = "subsystems/network" }
 debug_protocol = { package = "xila-debug-protocol", path = "libraries/debug_protocol" }
 peripherals = { package = "xila-peripherals", path = "libraries/peripherals" }
 bootsplash = { package = "xila-bootsplash", path = "libraries/bootsplash" }
-peripheral_devices = { package = "xila-peripheral-devices", path = "libraries/peripheral_devices" }
 embedded-i18n = { version = "=0.2.0", default-features = false, features = [
   "backend-json",
 ] }
@@ -49,6 +48,7 @@ device = { package = "xila-device", path = "devices" }
 
 # - Drivers
 drivers_core = { package = "xila-drivers-core", path = "drivers/core" }
+peripheral_devices = { package = "xila-peripheral-devices", path = "drivers/peripherals" }
 
 # - Executables
 
@@ -97,7 +97,7 @@ members = [
   "subsystems/task",
   "subsystems/users",
   "libraries/peripherals",
-  "libraries/peripheral_devices",
+  "drivers/peripherals",
   "subsystems/memory",
   "subsystems/time",
   "libraries/abi/definitions",
