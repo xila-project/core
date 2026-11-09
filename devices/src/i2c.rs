@@ -100,7 +100,14 @@ define_command!(
     SelectAddressInput,
     ()
 );
-define_command!(GET_FREQUENCY, Read, crate::kind::I2C, 1, (), FrequencyOutput);
+define_command!(
+    GET_FREQUENCY,
+    Read,
+    crate::kind::I2C,
+    1,
+    (),
+    FrequencyOutput
+);
 define_command!(
     SET_FREQUENCY,
     Write,

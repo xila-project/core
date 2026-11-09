@@ -14,4 +14,11 @@ pub enum HashAlgorithm {
 }
 
 define_command!(RESET, Write, crate::kind::HASH, 0, (), ());
-define_command!(SET_ALGORITHM, Write, crate::kind::HASH, 1, HashAlgorithm, ());
+define_command!(
+    SET_ALGORITHM,
+    Write,
+    crate::kind::HASH,
+    1,
+    HashAlgorithm,
+    ()
+);

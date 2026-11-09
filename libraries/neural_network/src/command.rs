@@ -3,12 +3,54 @@ use core::mem::{align_of, size_of};
 use file_system::{ControlCommand, Error, Result, define_command};
 use shared::AnyByLayout;
 
-define_command!(GET_INPUT_COUNT, Read, device::kind::NEURAL_NETWORK, 0x01, (), u32);
-define_command!(GET_INPUT_INFO, Read, device::kind::NEURAL_NETWORK, 0x02, u32, TensorInfo);
-define_command!(SET_INPUT_INDEX, Write, device::kind::NEURAL_NETWORK, 0x03, u32, ());
-define_command!(GET_OUTPUT_COUNT, Read, device::kind::NEURAL_NETWORK, 0x04, (), u32);
-define_command!(GET_OUTPUT_INFO, Read, device::kind::NEURAL_NETWORK, 0x05, u32, TensorInfo);
-define_command!(SET_OUTPUT_INDEX, Write, device::kind::NEURAL_NETWORK, 0x06, u32, ());
+define_command!(
+    GET_INPUT_COUNT,
+    Read,
+    device::kind::NEURAL_NETWORK,
+    0x01,
+    (),
+    u32
+);
+define_command!(
+    GET_INPUT_INFO,
+    Read,
+    device::kind::NEURAL_NETWORK,
+    0x02,
+    u32,
+    TensorInfo
+);
+define_command!(
+    SET_INPUT_INDEX,
+    Write,
+    device::kind::NEURAL_NETWORK,
+    0x03,
+    u32,
+    ()
+);
+define_command!(
+    GET_OUTPUT_COUNT,
+    Read,
+    device::kind::NEURAL_NETWORK,
+    0x04,
+    (),
+    u32
+);
+define_command!(
+    GET_OUTPUT_INFO,
+    Read,
+    device::kind::NEURAL_NETWORK,
+    0x05,
+    u32,
+    TensorInfo
+);
+define_command!(
+    SET_OUTPUT_INDEX,
+    Write,
+    device::kind::NEURAL_NETWORK,
+    0x06,
+    u32,
+    ()
+);
 define_command!(COMPUTE, Write, device::kind::NEURAL_NETWORK, 0x07, (), ());
 define_command!(
     GET_INPUT_QUANTIZATION,
