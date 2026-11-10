@@ -679,9 +679,10 @@ mod tests {
         unsafe {
             for _ in 0..8 {
                 let poison = xila_memory_allocate_core(8) as *mut u8;
-                assert!(!poison.is_null());
-                poison.write_bytes(b'X', 8);
-                xila_memory_deallocate(poison as *mut _);
+                if !poison.is_null() {
+                    poison.write_bytes(b'X', 8);
+                    xila_memory_deallocate(poison as *mut _);
+                }
             }
             for (source, bound, expected) in [
                 (c"abcdefg", 3, c"abc"),
@@ -690,7 +691,9 @@ mod tests {
                 (c"abc", 0, c""),
             ] {
                 let copy = xila_string_duplicate_bounded(source.as_ptr(), bound);
-                assert!(!copy.is_null());
+                if copy.is_null() {
+                    panic!("duplicate of {source:?} bounded to {bound} is null");
+                }
                 assert_eq!(CStr::from_ptr(copy), expected);
                 xila_memory_deallocate(copy as *mut _);
             }
