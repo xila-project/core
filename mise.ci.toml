@@ -349,7 +349,7 @@ rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = 
 ] }
 
 [tasks."docs:guest"]
-extends = "ci:rust-browser"
+extends = "ci:rust-wasi"
 
 [tasks."ci:firmware"]
 extends = "ci:rust-lint"

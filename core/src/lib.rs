@@ -1,3 +1,17 @@
+//! Xila Core façade crate.
+//!
+//! This crate re-exports the core subsystems, libraries, and drivers that form
+//! the Xila host runtime:
+//!
+//! - **Subsystems**: [`task`], [`virtual_file_system`], [`network`], [`users`],
+//!   [`time`], [`log`], [`memory`], and (with the `graphics` feature) [`graphics`].
+//! - **System libraries & storage**: [`authentication`], [`executable`],
+//!   [`file_system`], [`little_fs`], [`internationalization`], [`shared`], and
+//!   [`synchronization`].
+//! - **Optional capabilities**: [`audio`] (`audio`), [`neural_network`] and
+//!   [`drivers_neural_network`] (`neural_network`), [`bootsplash`] (`bootsplash`),
+//!   and [`abi_definitions`] (`abi_definitions`).
+
 #![no_std]
 
 pub mod about;
