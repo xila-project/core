@@ -53,11 +53,11 @@ depends = ["clippy:host", "clippy:guest"]
 
 [tasks."docs:host"]
 description = "Build host documentation"
-run = "cargo doc --features graphics,abi_definitions,graphics_rendering_xrgb8888 --target x86_64-unknown-linux-gnu"
+run = "cargo doc --workspace --features xila/graphics,xila/abi_definitions,xila/graphics_rendering_xrgb8888,xila/audio,xila/neural_network,xila/bootsplash,xila-testing/graphics --target x86_64-unknown-linux-gnu"
 
 [tasks."docs:guest"]
 description = "Build guest documentation"
-run = "cargo doc --manifest-path \"${XILA_APPLICATIONS_ROOT:-.application-src}/Cargo.toml\" --package xila-wasm --no-default-features --features default_guest --target wasm32-unknown-unknown"
+run = "cargo doc --manifest-path \"${XILA_APPLICATIONS_ROOT:-.application-src}/Cargo.toml\" --package xila-wasm --no-default-features --features default_guest --target wasm32-wasip1"
 
 [tasks."docs:all"]
 description = "Build host and guest documentation"

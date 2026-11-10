@@ -1,9 +1,10 @@
 //! Minimal std test support for Xila, without platform drivers.
 //!
 //! Provides the abstractions tests need (allocator, time, randomness,
-//! console, hashing, a headless screen) and [`initialize`], which sets up a
-//! complete in-memory environment. Real drivers (windows, network interfaces,
-//! host file systems) belong to platform crates and their integration tests.
+//! console, hashing, a headless screen) and `initialize` (with the
+//! `environment` feature enabled), which sets up a complete in-memory
+//! environment. Real drivers (windows, network interfaces, host file systems)
+//! belong to platform crates and their integration tests.
 
 extern crate alloc;
 extern crate std;
