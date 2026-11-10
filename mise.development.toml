@@ -142,7 +142,7 @@ extends = "dev:rust-browser-lint"
 extends = "dev:rust"
 
 [tasks."docs:guest"]
-extends = "dev:rust-browser"
+extends = "dev:rust-wasi"
 
 [tasks."test:workspace"]
 extends = "dev:rust"
