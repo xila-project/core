@@ -404,9 +404,15 @@ impl Logo {
                 self.buffers[index] = buffer;
             }
 
-            let stride = (*self.buffers[0]).header.stride() as usize;
+            // Every buffer was allocated above with the same geometry; keep the
+            // accesses checked so no raw pointer is dereferenced unproven.
+            let source_buffer = self.buffers[3].as_mut().ok_or(Error::OutOfMemory)?;
+            if source_buffer.data.is_null() {
+                return Err(Error::OutOfMemory);
+            }
+            let stride = source_buffer.header.stride() as usize;
             let length = stride * side as usize;
-            let source = core::slice::from_raw_parts_mut((*self.buffers[3]).data, length);
+            let source = core::slice::from_raw_parts_mut(source_buffer.data, length);
             source.fill(0);
             rasterize_arm(metrics, source, stride);
             if style == LogoStyle::Outline {
@@ -422,7 +428,11 @@ impl Logo {
                     lvgl::lv_align_t_LV_ALIGN_BOTTOM_LEFT => (true, true),
                     _ => (false, true),
                 };
-                let target = core::slice::from_raw_parts_mut((*self.buffers[index]).data, length);
+                let target_buffer = self.buffers[index].as_mut().ok_or(Error::OutOfMemory)?;
+                if target_buffer.data.is_null() {
+                    return Err(Error::OutOfMemory);
+                }
+                let target = core::slice::from_raw_parts_mut(target_buffer.data, length);
                 for y in 0..side {
                     let source_y = if mirror_y { side - 1 - y } else { y };
                     for x in 0..side {
