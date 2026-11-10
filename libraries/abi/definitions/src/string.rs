@@ -586,23 +586,26 @@ pub unsafe extern "C" fn xila_string_duplicate_bounded(
     string: *const c_char,
     max_length: usize,
 ) -> *mut c_char {
-    if string.is_null() || max_length == 0 {
+    if string.is_null() {
         return null_mut();
     }
 
+    // Like `strndup`, a zero bound yields an empty string, not a null pointer.
     let length = unsafe { xila_string_get_length_bounded(string, max_length) };
-    let new_string = unsafe { xila_memory_allocate_core(length + 1) };
+    let new_string = unsafe { xila_memory_allocate_core(length + 1) } as *mut c_char;
 
     if new_string.is_null() {
         return null_mut();
     }
 
-    // Copy the string into the newly allocated memory
+    // The bounded copy stops after `length` bytes without a terminator when
+    // the source is longer, so the terminator is always written here.
     unsafe {
-        xila_string_copy_bounded(new_string as *mut c_char, string, length);
+        xila_string_copy_bounded(new_string, string, length);
+        *new_string.add(length) = 0;
     }
 
-    new_string as *mut c_char
+    new_string
 }
 
 /// Parse integer from string
@@ -661,4 +664,40 @@ pub unsafe extern "C" fn xila_string_concatenate(
     }
 
     destination
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::xila_memory_deallocate;
+    use core::ffi::CStr;
+
+    #[test]
+    fn bounded_duplicate_is_always_terminated() {
+        // Poison the heap so that a missing terminator cannot hide behind
+        // freshly zeroed memory.
+        unsafe {
+            for _ in 0..8 {
+                let poison = xila_memory_allocate_core(8) as *mut u8;
+                if !poison.is_null() {
+                    poison.write_bytes(b'X', 8);
+                    xila_memory_deallocate(poison as *mut _);
+                }
+            }
+            for (source, bound, expected) in [
+                (c"abcdefg", 3, c"abc"),
+                (c"abcdefg", 7, c"abcdefg"),
+                (c"abc", 16, c"abc"),
+                (c"abc", 0, c""),
+            ] {
+                let copy = xila_string_duplicate_bounded(source.as_ptr(), bound);
+                if copy.is_null() {
+                    panic!("duplicate of {source:?} bounded to {bound} is null");
+                }
+                assert_eq!(CStr::from_ptr(copy), expected);
+                xila_memory_deallocate(copy as *mut _);
+            }
+            assert!(xila_string_duplicate_bounded(core::ptr::null(), 4).is_null());
+        }
+    }
 }
