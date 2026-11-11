@@ -10,6 +10,7 @@ users = { workspace = true }
 shared = { workspace = true }
 synchronization = { workspace = true }
 embedded-i18n = { workspace = true }
+mbrman = { workspace = true }
 
 embedded-io-async = { workspace = true }
 

@@ -74,15 +74,12 @@
 //! // Create a device and format it with MBR
 //! let device = MemoryDevice::<512>::new(4 * 1024 * 1024);
 //!
-//! // Create MBR and add a partition
-//! let mut mbr = Mbr::new_with_signature(0x12345678);
-//! mbr.add_partition(PartitionKind::Fat32Lba, 2048, 8192, true).unwrap();
-//!
-//! // Write MBR to device
-//! mbr.write_to_device(&device).unwrap();
-//!
-//! // Create a partition device
-//! let partition = create_partition_device(&device, &mbr.partitions[0]).unwrap();
+//! // Format disk with a partition
+//! let partition = Mbr::format_disk_with_signature_and_partition(
+//!     &device,
+//!     0x12345678,
+//!     PartitionKind::Xila,
+//! ).unwrap();
 //! ```
 //!
 //! ## Safety and Concurrency

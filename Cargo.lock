@@ -938,6 +938,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "mbrman"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f218900724d0a49bcd9322febf774e4fb0703a2b3c65cd7570568c4e6647ee43"
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1946,6 +1952,7 @@ dependencies = [
  "bitflags 2.13.2",
  "embedded-i18n",
  "embedded-io-async",
+ "mbrman",
  "xila-drivers-core",
  "xila-shared",
  "xila-synchronization",

@@ -40,6 +40,7 @@ std = []
 # Test executor for `#[task::test]` (std; Embassy provides its std pender).
 test_harness = [
   "std",
+  "dep:critical-section",
   "embassy-executor/platform-std",
   "embassy-executor/executor-thread",
 ]
