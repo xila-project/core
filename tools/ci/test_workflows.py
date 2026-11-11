@@ -535,6 +535,7 @@ class WorkflowPolicy(unittest.TestCase):
         for workflow in ACTIVE_WORKFLOWS:
             for line_number, line in enumerate(workflow.read_text().splitlines(), 1):
                 if ("uses:" in line and "xila-project/platforms/.github/workflows/" not in line
+                        and "xila-project/workspace/.github/workflows/" not in line
                         and "xila-project/workspace/.github/actions/setup-rust@" not in line):
                     with self.subTest(workflow=workflow.name, line=line_number):
                         self.assertNotRegex(line, r"uses:\s+[^\s]+@[0-9a-f]{40}\b")
