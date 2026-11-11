@@ -145,6 +145,7 @@ mise run ci:host-clippy
 mise run ci:host-wasm-clippy
 mise run ci:host-tests
 mise run ci:firmware
+mise run ci:bare-metal
 mise run ci:profiling-task-tests
 mise run ci:host-font-tests
 """
