@@ -42,3 +42,12 @@ impl From<crate::Error> for Error {
         Error::Device(value)
     }
 }
+
+impl From<mbrman::Error> for Error {
+    fn from(value: mbrman::Error) -> Self {
+        match value {
+            mbrman::Error::InvalidSignature => Error::InvalidSignature,
+            _ => Error::InvalidPartition,
+        }
+    }
+}

@@ -81,6 +81,7 @@ embedded-tls = { version = "0.19", default-features = false, features = [
   "alloc",
 ] }
 getargs-derive = { git = "https://github.com/AlixANNERAUD/getargs-derive.git", rev = "65b20961504ad5ba387ea13f0e9501036941ab17" } # v0.1.0
+mbrman = { version = "0.7", default-features = false }
 
 [workspace]
 resolver = "3"
