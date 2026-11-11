@@ -1,6 +1,7 @@
 use core::mem::{align_of, size_of};
 use file_system::{ControlCommand, Error, Result};
 use shared::AnyByLayout;
+
 pub fn validate_command<C: ControlCommand>(
     input: &AnyByLayout,
     output: &AnyByLayout,
@@ -49,6 +50,14 @@ mod tests {
                 AnyByLayout::from(&request),
                 AnyByLayout::from(&wrong_output),
             ),
+            Err(Error::InvalidParameter)
+        );
+
+        let load_req = LoadRequest::tensorflow_lite();
+        assert!(validate_command::<LOAD>(AnyByLayout::from(&load_req), AnyByLayout::NONE,).is_ok());
+        let wrong_load_input = 0u32;
+        assert_eq!(
+            validate_command::<LOAD>(AnyByLayout::from(&wrong_load_input), AnyByLayout::NONE,),
             Err(Error::InvalidParameter)
         );
     }

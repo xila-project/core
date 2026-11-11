@@ -39,4 +39,8 @@ fn command_identifiers_use_the_nn_prefix_and_stable_numbers() {
         GET_OUTPUT_QUANTIZATION::IDENTIFIER,
         ControlCommandIdentifier::new_read::<QuantizationRequest, QuantizationEntry>(b'N', 0x09)
     );
+    assert_eq!(
+        LOAD::IDENTIFIER,
+        ControlCommandIdentifier::new_write::<LoadRequest, ()>(b'N', 0x0A)
+    );
 }
