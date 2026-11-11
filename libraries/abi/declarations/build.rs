@@ -80,6 +80,11 @@ pub fn main() {
         .wrap_unsafe_ops(true)
         .generate_comments(true); // preserve comments
 
+    // Bare-metal targets have no C library: use the compiler's own headers.
+    if env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "none") {
+        bindings = bindings.clang_arg("-ffreestanding");
+    }
+
     if let Ok(target) = env::var("TARGET")
         && target == "wasm32-unknown-unknown"
     {

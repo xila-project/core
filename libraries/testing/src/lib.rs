@@ -155,14 +155,8 @@ pub async fn initialize(graphics_enabled: bool, network_enabled: bool) -> Standa
 
     // `executable` may have `graphics` enabled by another crate even when this
     // crate's `graphics` feature is off, so construct without naming the field.
-    #[allow(unused_mut)]
-    let mut context = ExecutableContext::new(
-        task_manager,
-        users,
-        virtual_file_system,
-        network_manager,
-        time,
-    );
+    let mut context = ExecutableContext::new(task_manager, users, virtual_file_system, time);
+    context.network_manager = network_manager;
     #[cfg(feature = "graphics")]
     {
         context.graphics_manager = graphics_manager;

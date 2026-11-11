@@ -3,8 +3,9 @@
 //! This crate re-exports the core subsystems, libraries, and drivers that form
 //! the Xila host runtime:
 //!
-//! - **Subsystems**: [`task`], [`virtual_file_system`], [`network`], [`users`],
-//!   [`time`], [`log`], [`memory`], and (with the `graphics` feature) [`graphics`].
+//! - **Subsystems**: [`task`], [`virtual_file_system`], [`users`], [`time`],
+//!   [`log`], [`memory`], and (with the `network` and `graphics` features)
+//!   [`network`] and [`graphics`].
 //! - **System libraries & storage**: [`authentication`], [`executable`],
 //!   [`file_system`], [`little_fs`], [`internationalization`], [`shared`], and
 //!   [`synchronization`].
@@ -32,6 +33,7 @@ pub use file_system;
 pub use little_fs;
 pub use log;
 pub use memory;
+#[cfg(feature = "network")]
 pub use network;
 pub use shared;
 pub use synchronization;

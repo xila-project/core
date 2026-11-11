@@ -147,7 +147,10 @@ impl StackInner {
                 iface::Config::new(EthernetAddress([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]).into())
             }
             Medium::Ip => iface::Config::new(smoltcp::wire::HardwareAddress::Ip),
-            Medium::Ieee802154 => todo!(),
+            // Another crate of the build may enable a smoltcp medium this
+            // subsystem does not drive, such as IEEE 802.15.4.
+            #[allow(unreachable_patterns)]
+            _ => unimplemented!("unsupported network medium"),
         };
         config.random_seed = random_seed;
 

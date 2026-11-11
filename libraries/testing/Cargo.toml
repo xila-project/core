@@ -41,6 +41,7 @@ environment = [
   "dep:users",
   "dep:virtual_file_system",
   "drivers_core/wifi_mock",
+  "executable/network",
 ]
 # Headless screen (no window) for graphics tests.
 graphics = [

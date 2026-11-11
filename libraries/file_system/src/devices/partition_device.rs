@@ -12,7 +12,7 @@ use shared::AnyByLayout;
 use crate::{
     BaseOperations, ControlCommand, ControlCommandIdentifier, DirectBaseOperations,
     DirectBlockDevice, Error, MountOperations, Position, Result, Size,
-    block_device::{self, GET_BLOCK_COUNT, GET_BLOCK_SIZE},
+    block_device::{self, ERASE, EraseRange, GET_BLOCK_COUNT, GET_BLOCK_SIZE},
 };
 
 /// A device implementation that represents a partition within a larger storage device.
@@ -225,6 +225,32 @@ impl<'a, D: DirectBaseOperations> DirectBaseOperations for PartitionDevice<'a, D
                 *GET_BLOCK_COUNT::cast_output(output)? = self.get_block_count();
                 core::task::Poll::Ready(Ok(()))
             }
+            ERASE::IDENTIFIER => {
+                // Ranges are relative to the partition, never to the base device.
+                let range = match ERASE::cast_input(input) {
+                    Ok(range) => *range,
+                    Err(error) => return core::task::Poll::Ready(Err(error)),
+                };
+                let Some(position) = range
+                    .position
+                    .checked_add(range.size)
+                    .filter(|end| *end <= self.size)
+                    .and_then(|_| self.offset.checked_add(range.position))
+                else {
+                    return core::task::Poll::Ready(Err(Error::InvalidParameter));
+                };
+                let range = EraseRange {
+                    position,
+                    size: range.size,
+                };
+                DirectBaseOperations::control(
+                    self.base_device,
+                    cx,
+                    command,
+                    AnyByLayout::from(&range),
+                    output,
+                )
+            }
             _ => DirectBaseOperations::control(self.base_device, cx, command, input, output),
         }
     }
@@ -278,6 +304,71 @@ mod tests {
             self.0.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         }
     }
+    /// Records the last erased range of the base device.
+    struct Erasable(core::cell::Cell<Option<EraseRange>>);
+    // SAFETY: tests are single-threaded.
+    unsafe impl Sync for Erasable {}
+    impl DirectBaseOperations for Erasable {
+        fn read(
+            &self,
+            _: &mut core::task::Context<'_>,
+            _: &mut [u8],
+            _: Size,
+        ) -> core::task::Poll<Result<usize>> {
+            core::task::Poll::Ready(Ok(0))
+        }
+        fn write(
+            &self,
+            _: &mut core::task::Context<'_>,
+            _: &[u8],
+            _: Size,
+        ) -> core::task::Poll<Result<usize>> {
+            core::task::Poll::Ready(Ok(0))
+        }
+        fn control(
+            &self,
+            _: &mut core::task::Context<'_>,
+            command: ControlCommandIdentifier,
+            input: &AnyByLayout,
+            _: &mut AnyByLayout,
+        ) -> core::task::Poll<Result<()>> {
+            crate::ready(|| match command {
+                ERASE::IDENTIFIER => {
+                    self.0.set(Some(*ERASE::cast_input(input)?));
+                    Ok(())
+                }
+                _ => Err(Error::UnsupportedOperation),
+            })
+        }
+    }
+    impl MountOperations for Erasable {}
+    impl DirectBlockDevice for Erasable {}
+
+    #[test]
+    fn partition_erases_only_inside_its_own_range() {
+        let base = Erasable(core::cell::Cell::new(None));
+        let partition = PartitionDevice::new(&base, 4, 2, 512);
+
+        partition.erase(512, 512).unwrap();
+        assert_eq!(
+            base.0.take(),
+            Some(EraseRange {
+                position: 5 * 512,
+                size: 512
+            })
+        );
+
+        assert_eq!(partition.erase(512, 1024), Err(Error::InvalidParameter));
+        assert_eq!(partition.erase(u64::MAX, 2), Err(Error::InvalidParameter));
+        assert_eq!(base.0.take(), None);
+    }
+
+    #[test]
+    fn rewritable_device_reports_erase_as_unsupported() {
+        let base = MemoryDevice::<512>::new(4096);
+        assert_eq!(base.erase(0, 512), Err(Error::UnsupportedOperation));
+    }
+
     #[test]
     fn partition_forwards_pending_and_cancellation_to_its_device() {
         let device = Deferred(core::sync::atomic::AtomicUsize::new(0));

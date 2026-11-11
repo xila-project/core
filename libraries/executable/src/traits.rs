@@ -26,18 +26,18 @@ pub struct ExecutableContext {
     pub virtual_file_system: &'static virtual_file_system::VirtualFileSystem,
     #[cfg(feature = "graphics")]
     pub graphics_manager: Option<&'static graphics::Manager>,
+    #[cfg(feature = "network")]
     pub network_manager: Option<&'static network::Manager>,
     pub time_manager: &'static time::Manager<'static>,
 }
 
 impl ExecutableContext {
-    /// A context without a graphics manager, whichever features are enabled:
-    /// callers need not know whether the `graphics` field exists.
+    /// A context without a graphics or network manager, whichever features are
+    /// enabled: callers need not know whether those fields exist.
     pub fn new(
         task_manager: &'static task::Manager,
         users_manager: &'static users::Manager,
         virtual_file_system: &'static virtual_file_system::VirtualFileSystem,
-        network_manager: Option<&'static network::Manager>,
         time_manager: &'static time::Manager<'static>,
     ) -> Self {
         Self {
@@ -46,7 +46,8 @@ impl ExecutableContext {
             virtual_file_system,
             #[cfg(feature = "graphics")]
             graphics_manager: None,
-            network_manager,
+            #[cfg(feature = "network")]
+            network_manager: None,
             time_manager,
         }
     }

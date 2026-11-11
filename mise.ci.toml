@@ -145,6 +145,7 @@ mise run ci:host-clippy
 mise run ci:host-wasm-clippy
 mise run ci:host-tests
 mise run ci:firmware
+mise run ci:bare-metal
 mise run ci:profiling-task-tests
 mise run ci:host-font-tests
 """
@@ -369,6 +370,21 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", compone
 ], targets = [
   "wasm32-unknown-unknown",
   "thumbv7em-none-eabi",
+] }
+
+[tasks."ci:bare-metal"]
+description = "Check the façade for a bare-metal Cortex-M target, with and without network"
+shell = "bash -c"
+depends = ["ci:packages-host"]
+# No C library on bare metal: build LittleFS with clang's freestanding headers.
+env = { CC_thumbv7em_none_eabihf = "clang" }
+run = """
+set -eu
+cargo check --locked -p xila --target thumbv7em-none-eabihf
+cargo check --locked -p xila --no-default-features --features abi_definitions --target thumbv7em-none-eabihf
+"""
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", targets = [
+  "thumbv7em-none-eabihf",
 ] }
 
 [tasks."ci:profiling-task-tests"]

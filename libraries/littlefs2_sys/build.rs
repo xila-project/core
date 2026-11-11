@@ -39,6 +39,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .file(format!("{littlefs_path}/lfs.c"))
         .file(format!("{littlefs_path}/lfs_util.c"));
 
+    // Bare-metal targets have no C library: use the compiler's own headers.
+    let freestanding = env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "none");
+    if freestanding {
+        builder.flag("-ffreestanding");
+    }
+
     #[cfg(feature = "software-intrinsics")]
     let builder = builder.flag("-DLFS_NO_INTRINSICS");
 
@@ -83,6 +89,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .use_core()
         .allowlist_item("lfs_.*")
         .allowlist_item("LFS_.*");
+
+    if freestanding {
+        bindings_builder = bindings_builder.clang_arg("-ffreestanding");
+    }
 
     if let Ok(target) = env::var("TARGET") {
         if target == "wasm32-unknown-unknown" {

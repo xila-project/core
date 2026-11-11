@@ -13,7 +13,7 @@ shared = { workspace = true }
 log = { workspace = true }
 embedded-i18n = { workspace = true }
 graphics = { workspace = true, optional = true }
-network = { workspace = true }
+network = { workspace = true, optional = true }
 time = { workspace = true }
 synchronization = { workspace = true }
 
@@ -26,6 +26,7 @@ drivers_core = { workspace = true }
 default = []
 building = []
 graphics = ["dep:graphics"]
+network = ["dep:network"]
 
 [lib]
 name = "executable"

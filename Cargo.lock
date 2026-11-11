@@ -1380,7 +1380,6 @@ dependencies = [
  "cfg-if",
  "defmt",
  "heapless",
- "libc",
  "log",
  "managed",
 ]
@@ -1816,7 +1815,6 @@ dependencies = [
  "xila-little-fs",
  "xila-log",
  "xila-memory",
- "xila-network",
  "xila-shared",
  "xila-synchronization",
  "xila-task",
@@ -2021,6 +2019,7 @@ dependencies = [
  "xila-drivers-core",
  "xila-file-system",
  "xila-log",
+ "xila-shared",
  "xila-synchronization",
  "xila-task",
  "xila-testing",

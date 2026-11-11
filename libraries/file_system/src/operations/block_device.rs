@@ -7,6 +7,15 @@ use shared::AnyByLayout;
 // Kind byte `b'B'` is registered as `device::kind::BLOCK_DEVICE` (kept as a literal here because `device` depends on `file_system`).
 define_command!(GET_BLOCK_SIZE, Read, b'B', 0, (), u32);
 define_command!(GET_BLOCK_COUNT, Read, b'B', 1, (), u32);
+define_command!(ERASE, Write, b'B', 2, EraseRange, ());
+
+/// Byte range of a block device, relative to its start.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EraseRange {
+    pub position: Size,
+    pub size: Size,
+}
 
 pub trait BlockDevice: BaseOperations + MountOperations {}
 
@@ -31,6 +40,19 @@ pub trait DirectBlockDevice: DirectBaseOperations + MountOperations {
             AnyByLayout::from_mutable(&mut total_size),
         )?;
         Ok(total_size)
+    }
+
+    /// Prepare a byte range for writing, as raw flash requires before programming.
+    ///
+    /// The range reads back unspecified data afterwards, and any write to it then
+    /// succeeds. Devices that can rewrite in place need not implement `ERASE`:
+    /// callers treat [`Error::UnsupportedOperation`] as "nothing to do".
+    fn erase(&self, position: Size, size: Size) -> Result<()> {
+        self.control_sync(
+            ERASE::IDENTIFIER,
+            AnyByLayout::from(&EraseRange { position, size }),
+            AnyByLayout::NONE,
+        )
     }
 }
 
