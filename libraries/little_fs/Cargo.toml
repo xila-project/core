@@ -22,6 +22,7 @@ abi_declarations = { workspace = true }
 testing = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }
 drivers_core = { workspace = true }
+shared = { workspace = true }
 
 abi_definitions = { workspace = true }
 

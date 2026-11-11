@@ -33,15 +33,16 @@ log = { workspace = true }
 shared = { workspace = true }
 synchronization = { workspace = true }
 bootsplash = { workspace = true, optional = true }
-network = { workspace = true }
+network = { workspace = true, optional = true }
 
 [features]
-default = ["abi_definitions"]
+default = ["abi_definitions", "network"]
 
 executable_building = ["executable/building"]
 audio = ["dep:audio"]
 neural_network = ["dep:neural_network", "dep:drivers_neural_network"]
 abi_definitions = ["dep:abi_definitions"]
+network = ["dep:network", "executable/network"]
 bootsplash = ["dep:bootsplash"]
 graphics = ["dep:graphics", "executable/graphics"]
 graphics_rendering_rgb565 = ["graphics", "graphics/rendering_rgb565"]

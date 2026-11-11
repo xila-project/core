@@ -104,6 +104,8 @@ jobs:
         run: mise run ci:host-tests
       - name: "Test | Native firmware simulator"
         run: mise run ci:firmware
+      - name: "Test | Bare-metal façade"
+        run: mise run ci:bare-metal
       - name: "Test | Task profiling"
         run: mise run ci:profiling-task-tests
       - name: "Test | Font linking"

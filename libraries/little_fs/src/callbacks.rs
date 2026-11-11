@@ -71,18 +71,21 @@ pub unsafe extern "C" fn erase_callback(
 
     let position = block as u64 * block_size as u64;
 
-    {
-        match context
-            .device
-            .write_pattern_sync(&[0x00], block_size as usize, position)
-        {
-            Ok(count) if count == block_size as usize => (),
-
-            _ => return littlefs::lfs_error_LFS_ERR_IO,
-        }
+    match context.device.erase(position, block_size as u64) {
+        Ok(()) => return 0,
+        // Rewritable storage has no erase: clear the block instead.
+        Err(file_system::Error::UnsupportedOperation) => (),
+        Err(_) => return littlefs::lfs_error_LFS_ERR_IO,
     }
 
-    0
+    match context
+        .device
+        .write_pattern_sync(&[0x00], block_size as usize, position)
+    {
+        Ok(count) if count == block_size as usize => 0,
+
+        _ => littlefs::lfs_error_LFS_ERR_IO,
+    }
 }
 
 pub unsafe extern "C" fn flush_callback(configuration: *const littlefs::lfs_config) -> c_int {
@@ -148,5 +151,79 @@ mod tests {
         );
         assert_eq!(device.probes.load(Ordering::SeqCst), 1);
         assert_eq!(device.cancellations.load(Ordering::SeqCst), 1);
+    }
+
+    /// Counts erases and pattern writes; `erasable` selects raw-flash behaviour.
+    struct Flash {
+        erasable: bool,
+        erases: AtomicUsize,
+        patterns: AtomicUsize,
+    }
+    impl DirectBaseOperations for Flash {
+        fn read(&self, _: &mut TaskContext<'_>, _: &mut [u8], _: Size) -> Poll<Result<usize>> {
+            Poll::Ready(Ok(0))
+        }
+        fn write(&self, _: &mut TaskContext<'_>, _: &[u8], _: Size) -> Poll<Result<usize>> {
+            Poll::Ready(Ok(0))
+        }
+        fn write_pattern(
+            &self,
+            _: &mut TaskContext<'_>,
+            pattern: &[u8],
+            count: usize,
+            _: Size,
+        ) -> Poll<Result<usize>> {
+            self.patterns.fetch_add(1, Ordering::SeqCst);
+            Poll::Ready(Ok(pattern.len() * count))
+        }
+        fn control(
+            &self,
+            _: &mut TaskContext<'_>,
+            command: file_system::ControlCommandIdentifier,
+            input: &shared::AnyByLayout,
+            _: &mut shared::AnyByLayout,
+        ) -> Poll<Result<()>> {
+            use file_system::{ControlCommand, block_device::ERASE};
+            file_system::ready(|| match command {
+                ERASE::IDENTIFIER if self.erasable => {
+                    let range = ERASE::cast_input(input)?;
+                    assert_eq!((range.position, range.size), (3 * 512, 512));
+                    self.erases.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                }
+                _ => Err(file_system::Error::UnsupportedOperation),
+            })
+        }
+    }
+    impl MountOperations for Flash {}
+    impl DirectBlockDevice for Flash {}
+
+    fn erase_block_3(erasable: bool) -> (usize, usize) {
+        let device = Box::leak(Box::new(Flash {
+            erasable,
+            erases: AtomicUsize::new(0),
+            patterns: AtomicUsize::new(0),
+        }));
+        let mut context = Context { device };
+        let configuration = littlefs::lfs_config {
+            context: (&mut context as *mut Context).cast(),
+            block_size: 512,
+            ..crate::configuration::Configuration::DEFAULT_RAW
+        };
+        assert_eq!(unsafe { erase_callback(&configuration, 3) }, 0);
+        (
+            device.erases.load(Ordering::SeqCst),
+            device.patterns.load(Ordering::SeqCst),
+        )
+    }
+
+    #[test]
+    fn erase_uses_the_device_erase_when_it_has_one() {
+        assert_eq!(erase_block_3(true), (1, 0));
+    }
+
+    #[test]
+    fn erase_clears_the_block_on_rewritable_storage() {
+        assert_eq!(erase_block_3(false), (0, 1));
     }
 }

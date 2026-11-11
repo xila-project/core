@@ -35,6 +35,12 @@ smoltcp = { workspace = true, features = [
   "socket-dns",
   "socket-icmp",
   "socket-dhcpv4",
+  "proto-dhcpv4",
+  "proto-dns",
+  "proto-ipv6-slaac",
+  "proto-ipv4-fragmentation",
+  "multicast",
+  "auto-icmp-echo-reply",
 ] }
 heapless = { version = "0.9" }
 

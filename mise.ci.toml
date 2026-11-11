@@ -371,6 +371,21 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", compone
   "thumbv7em-none-eabi",
 ] }
 
+[tasks."ci:bare-metal"]
+description = "Check the façade for a bare-metal Cortex-M target, with and without network"
+shell = "bash -c"
+depends = ["ci:packages-host"]
+# No C library on bare metal: build LittleFS with clang's freestanding headers.
+env = { CC_thumbv7em_none_eabihf = "clang" }
+run = """
+set -eu
+cargo check --locked -p xila --target thumbv7em-none-eabihf
+cargo check --locked -p xila --no-default-features --features abi_definitions --target thumbv7em-none-eabihf
+"""
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", targets = [
+  "thumbv7em-none-eabihf",
+] }
+
 [tasks."ci:profiling-task-tests"]
 extends = "ci:rust-lint"
 depends = ["ci:packages-host"]
