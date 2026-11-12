@@ -1234,6 +1234,35 @@ async fn beneath_resolution_confines_links_and_all_namespace_operations() {
             .await
             .unwrap();
     }
+    vfs.set_times_beneath(
+        task,
+        &Path::new("sub"),
+        true,
+        root,
+        Some(file_system::Time::new(2)),
+        Some(file_system::Time::new(3)),
+    )
+    .await
+    .unwrap();
+    let stats = vfs
+        .get_statistics_beneath(task, &Path::new("sub"), true, root)
+        .await
+        .unwrap();
+    assert_eq!(stats.modification, file_system::Time::new(3));
+    for path in ["absolute", "parent", "../outside", "chain/file"] {
+        assert_eq!(
+            vfs.set_times_beneath(
+                task,
+                &Path::new(path),
+                true,
+                root,
+                Some(file_system::Time::new(4)),
+                None
+            )
+            .await,
+            Err(Error::PathEscapesRoot)
+        );
+    }
     for path in [
         "absolute",
         "parent",
@@ -1376,4 +1405,127 @@ async fn beneath_resolution_confines_links_and_all_namespace_operations() {
     });
     std::println!("confined handle allocator requests: read={reads}, write={writes}");
     assert_eq!((reads, writes), (0, 0));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn hard_links_stay_beneath_their_roots_and_report_missing_backend_support() {
+    use virtual_file_system::Error;
+    let (task, vfs) = initialize().await;
+    let root = Path::new("/sandbox");
+    for path in ["/sandbox", "/sandbox/dir", "/outside"] {
+        vfs.create_directory(task, &path).await.unwrap();
+    }
+    File::write_to_path(vfs, task, "/sandbox/file", b"data")
+        .await
+        .unwrap();
+    for (name, target) in [("absolute", "/outside"), ("parent", "../outside")] {
+        let link = format!("/sandbox/{name}");
+        vfs.create_symlink(task, Path::new(target), Path::new(&link))
+            .await
+            .unwrap();
+    }
+    for (existing, new) in [
+        ("absolute/file", "new"),
+        ("parent/file", "new"),
+        ("../outside", "new"),
+        ("/outside", "new"),
+        ("file", "absolute/new"),
+        ("file", "../new"),
+        ("file", "/new"),
+    ] {
+        assert_eq!(
+            vfs.link_beneath(
+                task,
+                &Path::new(existing),
+                true,
+                &Path::new(new),
+                root,
+                root
+            )
+            .await,
+            Err(Error::PathEscapesRoot),
+            "{existing} -> {new}"
+        );
+    }
+    assert!(matches!(
+        vfs.link_beneath(
+            task,
+            &Path::new("missing"),
+            true,
+            &Path::new("new"),
+            root,
+            root
+        )
+        .await,
+        Err(Error::FileSystem(file_system::Error::NotFound))
+    ));
+    assert!(matches!(
+        vfs.link_beneath(task, &Path::new("dir"), true, &Path::new("new"), root, root)
+            .await,
+        Err(Error::FileSystem(file_system::Error::IsDirectory))
+    ));
+    assert_eq!(
+        vfs.link_beneath(
+            task,
+            &Path::new("file"),
+            true,
+            &Path::new("dir"),
+            root,
+            root
+        )
+        .await,
+        Err(Error::AlreadyExists)
+    );
+    // LittleFS has no hard links: a valid request must say so instead of
+    // pretending to succeed or silently copying.
+    assert_eq!(
+        vfs.link_beneath(
+            task,
+            &Path::new("file"),
+            true,
+            &Path::new("new"),
+            root,
+            root
+        )
+        .await,
+        Err(Error::FileSystem(file_system::Error::UnsupportedOperation))
+    );
+    assert!(
+        vfs.get_statistics_beneath(task, &Path::new("new"), false, root)
+            .await
+            .is_err()
+    );
+    // Neither a rename nor a link may cross a mount boundary.
+    mount_test_filesystem(vfs, task, "/sandbox/mounted").await;
+    assert_eq!(
+        vfs.link_beneath(
+            task,
+            &Path::new("file"),
+            true,
+            &Path::new("mounted/new"),
+            root,
+            root
+        )
+        .await,
+        Err(Error::CrossDevice)
+    );
+    assert_eq!(
+        vfs.rename_beneath(
+            task,
+            &Path::new("file"),
+            &Path::new("mounted/new"),
+            root,
+            root
+        )
+        .await,
+        Err(Error::CrossDevice)
+    );
+    assert_eq!(
+        vfs.get_statistics_beneath(task, &Path::new("file"), false, root)
+            .await
+            .unwrap()
+            .size,
+        4
+    );
 }

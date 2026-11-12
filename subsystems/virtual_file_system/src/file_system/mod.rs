@@ -1271,7 +1271,7 @@ impl VirtualFileSystem {
             Self::get_file_system_from_path(&file_systems, &new_path)?; // Get the file system identifier and the relative path
 
         if !ptr::eq(old_file_system, new_file_system) {
-            return Err(Error::InvalidPath);
+            return Err(Error::CrossDevice);
         }
 
         for parent_path in [
@@ -1296,6 +1296,121 @@ impl VirtualFileSystem {
         .await?;
 
         Ok(())
+    }
+
+    /// Create `new_path` as a hard link to the non-directory object at `existing`.
+    pub async fn link(
+        &self,
+        task: TaskIdentifier,
+        existing: &impl AsRef<Path>,
+        follow_existing: bool,
+        new_path: &impl AsRef<Path>,
+    ) -> Result<()> {
+        self.link_with_root(task, existing, follow_existing, new_path, None, None)
+            .await
+    }
+
+    /// Resolve both paths beneath their supplied root directories.
+    pub async fn link_beneath(
+        &self,
+        task: TaskIdentifier,
+        existing: &impl AsRef<Path>,
+        follow_existing: bool,
+        new_path: &impl AsRef<Path>,
+        existing_root: &Path,
+        new_root: &Path,
+    ) -> Result<()> {
+        self.link_with_root(
+            task,
+            existing,
+            follow_existing,
+            new_path,
+            Some(existing_root),
+            Some(new_root),
+        )
+        .await
+    }
+
+    async fn link_with_root(
+        &self,
+        task: TaskIdentifier,
+        existing: &impl AsRef<Path>,
+        follow_existing: bool,
+        new_path: &impl AsRef<Path>,
+        existing_root: Option<&Path>,
+        new_root: Option<&Path>,
+    ) -> Result<()> {
+        let file_systems = self.file_systems.write().await; // Serialize source/destination resolution with the link.
+        let user = self.task_manager.get_user(task).await?;
+        let existing = self
+            .resolve_path_with_root(
+                &file_systems,
+                existing.as_ref(),
+                follow_existing,
+                false,
+                user,
+                task,
+                existing_root,
+            )
+            .await?;
+        let new_path = self
+            .resolve_path_with_root(
+                &file_systems,
+                new_path.as_ref(),
+                false,
+                true,
+                user,
+                task,
+                new_root,
+            )
+            .await?;
+        let existing: &Path = &existing;
+        let new_path: &Path = &new_path;
+        if Self::protects_mount(&file_systems, new_path, true) {
+            return Err(Error::RessourceBusy);
+        }
+
+        let (existing_file_system, existing_relative, _) =
+            Self::get_file_system_from_path(&file_systems, &existing)?;
+        let (new_file_system, new_relative, _) =
+            Self::get_file_system_from_path(&file_systems, &new_path)?;
+        if !ptr::eq(existing_file_system, new_file_system) {
+            return Err(Error::CrossDevice);
+        }
+
+        let mut kind = Attributes::new().set_mask(AttributeFlags::Kind);
+        Self::get_attributes(
+            existing_file_system.file_system,
+            existing_relative,
+            &mut kind,
+        )
+        .await?;
+        if kind.get_kind() == Some(&Kind::Directory) {
+            return Err(Error::FileSystem(file_system::Error::IsDirectory));
+        }
+        let mut destination = Attributes::new().set_mask(AttributeFlags::Kind);
+        match Self::get_attributes(new_file_system.file_system, new_relative, &mut destination)
+            .await
+        {
+            Ok(()) => return Err(Error::AlreadyExists),
+            Err(Error::FileSystem(file_system::Error::NotFound)) => {}
+            Err(error) => return Err(error),
+        }
+        self.check_permissions(
+            new_file_system.file_system,
+            new_relative.go_parent().ok_or(Error::InvalidPath)?,
+            Permission::Write | Permission::Execute,
+            user,
+            task,
+        )
+        .await?;
+
+        poll(|| {
+            Ok(new_file_system
+                .file_system
+                .link(existing_relative, new_relative)?)
+        })
+        .await
     }
 
     pub async fn get_statistics(&self, path: &impl AsRef<Path>) -> Result<Statistics> {
@@ -1545,6 +1660,47 @@ impl VirtualFileSystem {
         }
         operations.set_attributes(context, attributes)?;
         Ok(())
+    }
+
+    /// Update timestamps after resolving beneath an immutable preopen authority.
+    pub async fn set_times_beneath(
+        &self,
+        task: TaskIdentifier,
+        path: &impl AsRef<Path>,
+        follow_final: bool,
+        root: &Path,
+        access: Option<file_system::Time>,
+        modification: Option<file_system::Time>,
+    ) -> Result<()> {
+        let file_systems = self.file_systems.write().await;
+        let user = self.task_manager.get_user(task).await?;
+        let resolved = self
+            .resolve_path_with_root(
+                &file_systems,
+                path.as_ref(),
+                follow_final,
+                false,
+                user,
+                task,
+                Some(root),
+            )
+            .await?;
+        let (fs, relative, _) = Self::get_file_system_from_path(&file_systems, &resolved)?;
+        let mut attributes = Attributes::new();
+        if let Some(time) = access {
+            attributes = attributes.set_access(time);
+        }
+        if let Some(time) = modification {
+            attributes = attributes.set_modification(time);
+        }
+        let mut owner = Attributes::new().set_mask(AttributeFlags::User);
+        Self::get_attributes(fs.file_system, relative, &mut owner).await?;
+        Self::authorize_metadata_change(
+            user,
+            *owner.get_user().ok_or(Error::MissingAttribute)?,
+            &attributes,
+        )?;
+        Self::set_attributes(fs.file_system, relative, &attributes).await
     }
 
     pub async fn set_ownership(
