@@ -17,7 +17,7 @@ pub const XILA_SEEK_END: u32 = 2;
 
 /// Opaque owned file. No handle lookup or buffer allocation is required for I/O.
 pub struct File {
-    inner: SynchronousFile<'static>,
+    pub(crate) inner: SynchronousFile<'static>,
 }
 impl File {
     pub fn new(inner: SynchronousFile<'static>) -> Self {
@@ -226,5 +226,19 @@ pub unsafe extern "C" fn xila_file_close(file: *mut File) -> Status {
     let File { inner } = *unsafe { File::from_raw(file) };
     inner
         .close_owned()
+        .map_or_else(Status::from, |()| Status::Ok)
+}
+
+/// Resize a writable file without changing its cursor.
+/// # Safety
+/// File must be live and exclusively accessed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn xila_file_set_size(file: *mut File, size: u64) -> Status {
+    if file.is_null() {
+        return Status::InvalidArgument;
+    }
+    unsafe { &mut *file }
+        .inner
+        .set_size(size)
         .map_or_else(Status::from, |()| Status::Ok)
 }

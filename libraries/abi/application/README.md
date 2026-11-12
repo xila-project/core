@@ -34,11 +34,16 @@ OutOfMemory.
 
 ## Functions
 
-- `xila_abi_version`: packed major/minor version, initially 0.1.
+- `xila_abi_version`: packed major/minor version, currently 0.2.
 - `xila_directory_open`, `xila_directory_close`: attenuated path capabilities.
 - `xila_file_open`, `xila_file_close`: typed owned file objects.
 - `xila_file_read`, `xila_file_write`: direct buffer I/O.
 - `xila_file_seek`, `xila_file_flush`: cursor and persistence operations.
+- `xila_file_get_statistics`, `xila_directory_get_statistics`: readable metadata.
+- `xila_directory_iterator_open`, `xila_directory_iterator_next`,
+  `xila_directory_iterator_rewind`, `xila_directory_iterator_close`: owned listings.
+- `xila_directory_create`, `xila_directory_remove`, `xila_directory_rename`: namespace changes.
+- `xila_file_set_size`: resize writable files without changing their cursor.
 - `xila_time_monotonic`, `xila_time_realtime`: checked nanosecond clock reads.
 
 The host constructs capabilities with `Directory::new` and wraps existing streams
@@ -61,7 +66,42 @@ are private and must never be inspected or allocated by C callers.
 
 ## Future scope
 
-Directory listing, statistics, rename/remove, tasks/threads, networking and graphics
-are not included. Program entry and handing initial capabilities to an application
+Tasks/threads, networking and graphics are not included. Program entry and handing initial capabilities to an application
 belong to the future native loader ([Core issue #334](https://github.com/xila-project/core/issues/334)).
 A POSIX compatibility layer can be built above this native interface later.
+
+## Filesystem metadata and listings
+
+Metadata and listing require READ; namespace changes and resize require WRITE.
+File metadata requires a readable open; resize requires a writable open.
+`XILA_STATISTICS_NO_FOLLOW` inspects a final symlink; empty metadata/listing paths
+refer to the supplied directory. Symlink creation is deliberately not exposed.
+`XILA_REMOVE_DIRECTORY` permits directories in addition to files; without it,
+directory removal returns IsADirectory. Removal does not follow the final link.
+Rename requires the same VFS and task for both capabilities and follows backend
+replacement semantics. Namespace capabilities remain subject to the concurrent
+namespace and symlink limitations described above.
+
+`XilaStatistics` is a 72-byte `repr(C)` struct. Its fields in order are six
+`uint32_t` values (`size`, `kind`, `permissions`, `owner_user`, `owner_group`,
+`reserved`), three `uint64_t` values (`file_size`, `link_count`, `inode`), and
+three `int64_t` Unix nanosecond times (`access_nanoseconds`,
+`modification_nanoseconds`, `status_change_nanoseconds`). Permissions are Unix
+mode bits; reserved is zero. Kind constants cover file, directory, block device,
+character device, pipe, socket and symlink. VFS timestamps currently have second
+precision; conversion returns Overflow when signed nanoseconds cannot represent them.
+
+Before every metadata call, the caller sets `size = sizeof(XilaStatistics)`.
+The first published version requires at least 72 bytes; smaller sizes are rejected
+without writing outputs. The callee writes only `min(size, its own size)` bytes;
+larger callers' trailing bytes are untouched. The returned size identifies the
+callee's layout. Future fields will preserve the 72-byte prefix and minimum size.
+
+Listing copies UTF-8 names without a trailing NUL and skips `.` and `..`.
+End (14) leaves outputs unchanged. BufferTooSmall (15) is the sole exception to
+success-only outputs: it writes the required `name_length`, leaves kind and buffer
+unchanged, and retains the entry for retry. A null buffer is allowed at zero
+capacity. Rewind resets the listing and any pending entry only on success.
+DirectoryNotEmpty (16) reports removal of a nonempty directory. Closing always
+consumes an iterator, even on error; closing null succeeds. The VFS supplies owned
+String names, so one allocation per entry is unavoidable; retries add none.

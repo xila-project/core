@@ -9,6 +9,7 @@ mod tests {
     #[allow(improper_ctypes)]
     unsafe extern "C" {
         fn application_c_round_trip(directory: *const Directory) -> i32;
+        fn application_c_file_system(directory: *const Directory) -> i32;
     }
 
     #[task::test]
@@ -40,9 +41,31 @@ mod tests {
             assert_eq!(xila_time_realtime(&mut real), Status::Overflow);
             assert_eq!(real, 17);
         }
+        time.set_realtime(time::RealtimeSample {
+            timestamp: time::Timestamp::from_nanos(1_700_000_000_000_000_000),
+            resolution: core::time::Duration::from_secs(1),
+            source: time::ClockSource::Manual,
+            accuracy: None,
+        })
+        .unwrap();
         let directory = Directory::new(vfs, task, "/./", 3).unwrap().into_raw();
         unsafe {
             assert_eq!(application_c_round_trip(directory), 0);
+            assert_eq!(application_c_file_system(directory), 0);
+            // Validate conversion independently from the C client, including overflow.
+            let mut source = vfs
+                .get_statistics_for_task(task, &file_system::Path::ROOT)
+                .await
+                .unwrap();
+            source.access = file_system::Time::new(1);
+            source.modification = file_system::Time::new(2);
+            source.status = file_system::Time::new(3);
+            let statistics = Statistics::try_from(source.clone()).unwrap();
+            assert_eq!(statistics.access_nanoseconds, 1_000_000_000);
+            assert_eq!(statistics.modification_nanoseconds, 2_000_000_000);
+            assert_eq!(statistics.status_change_nanoseconds, 3_000_000_000);
+            source.access = file_system::Time::new(u64::MAX);
+            assert_eq!(Statistics::try_from(source), Err(Status::Overflow));
             let mut file = ptr::null_mut();
             for (path, length) in [
                 (c"/outside".as_ptr(), 8),

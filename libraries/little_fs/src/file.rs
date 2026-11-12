@@ -125,7 +125,7 @@ impl File {
         if mask.is_empty() {
             return Ok(());
         }
-        InternalAttributes::validate_attribute_mask(mask)?;
+        InternalAttributes::validate_attribute_mask(mask.difference(AttributeFlags::Size))?;
 
         // Read-only opens cannot persist configured attributes. Never report a
         // successful chmod that disappears when the descriptor closes.
@@ -139,6 +139,13 @@ impl File {
         }
         if self.file.flags & littlefs::lfs_open_flags_LFS_F_DUSTY != 0 {
             return Err(Error::RessourceBusy);
+        }
+        if let Some(size) = attributes.get_size() {
+            // LittleFS uses signed 32-bit offsets and limits file sizes accordingly.
+            let size = i32::try_from(*size).map_err(|_| Error::FileTooLarge)?;
+            convert_result(unsafe {
+                littlefs::lfs_file_truncate(file_system, &mut self.file, size as u32)
+            })?;
         }
         let previous = self.internal_attributes.clone();
         self.internal_attributes

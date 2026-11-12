@@ -319,6 +319,18 @@ impl<'a> SynchronousFile<'a> {
         Statistics::from_attributes(&attributes).ok_or(Error::MissingAttribute)
     }
 
+    /// Resize through an already opened writable file without changing its cursor.
+    pub fn set_size(&mut self, size: Size) -> Result<()> {
+        if !self.flags.get_access().contains(AccessFlags::Write) {
+            return Err(Error::InvalidMode);
+        }
+        self.item
+            .as_attributes_operations()
+            .ok_or(Error::UnsupportedOperation)?
+            .set_attributes(&mut self.context, &Attributes::new().set_size(size))?;
+        Ok(())
+    }
+
     pub fn set_owner(
         &mut self,
         user: Option<UserIdentifier>,
