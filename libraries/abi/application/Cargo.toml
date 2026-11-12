@@ -7,7 +7,14 @@ links = "xila_abi_application"
 [lib]
 name = "abi_application"
 
+[features]
+default = []
+network = ["dep:network", "dep:smoltcp", "dep:embassy-futures"]
+
 [dependencies]
+network = { workspace = true, optional = true }
+smoltcp = { workspace = true, optional = true }
+embassy-futures = { workspace = true, optional = true }
 virtual_file_system.workspace = true
 file_system.workspace = true
 task.workspace = true

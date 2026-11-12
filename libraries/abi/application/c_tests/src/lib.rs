@@ -5,6 +5,11 @@ mod tests {
     use core::ptr;
     testing::instantiate_global_allocator!();
 
+    #[unsafe(no_mangle)]
+    pub extern "C" fn application_c_pause() {
+        std::thread::sleep(core::time::Duration::from_millis(1));
+    }
+
     // C only passes this opaque object through; it never reads the Rust layout.
     #[allow(improper_ctypes)]
     unsafe extern "C" {
@@ -12,6 +17,11 @@ mod tests {
         fn application_c_file_system(directory: *const Directory) -> i32;
         fn startup_test_main(startup: *const XilaStartup) -> i32;
         fn startup_empty_main(startup: *const XilaStartup) -> i32;
+        fn application_c_network(
+            network: *const Network,
+            denied: *const Network,
+            listen_only: *const Network,
+        ) -> i32;
     }
 
     #[task::test]
@@ -26,6 +36,48 @@ mod tests {
             virtual_file_system::initialize(tasks, users, time, fs).unwrap(),
         ));
         abi_application::initialize(time);
+        virtual_file_system::create_default_hierarchy(vfs, task)
+            .await
+            .unwrap();
+        let network = Box::leak(Box::new(network::Manager::new(
+            tasks,
+            vfs,
+            time,
+            &testing::RandomDevice,
+        )));
+        let (device, controller) = network::create_loopback_device();
+        let spawner = testing::new_thread_executor(tasks).await;
+        network
+            .mount_interface(task, "loopback0", device, controller, Some(spawner))
+            .await
+            .unwrap();
+        let mut interface = virtual_file_system::File::open(
+            vfs,
+            task,
+            "/devices/network/loopback0",
+            file_system::AccessFlags::Write.into(),
+        )
+        .await
+        .unwrap();
+        interface
+            .control(
+                network::ADD_IP_ADDRESS,
+                &network::IpCidr::new_ipv4([127, 0, 0, 1], 8),
+            )
+            .await
+            .unwrap();
+        interface.close(vfs).await.unwrap();
+        assert!(matches!(
+            Network::new(network, 8),
+            Err(Status::InvalidArgument)
+        ));
+        let authority = Network::new(network, 7).unwrap();
+        let denied = Network::new(network, 0).unwrap();
+        let listen_only = Network::new(network, XILA_NETWORK_LISTEN).unwrap();
+        unsafe {
+            assert_eq!(application_c_network(&authority, &denied, &listen_only), 0);
+        }
+
         unsafe {
             let mut mono = 0;
             let mut real = 17;

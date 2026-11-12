@@ -7,7 +7,7 @@
 
 #define XILA_ABI_VERSION_MAJOR 0
 
-#define XILA_ABI_VERSION_MINOR 3
+#define XILA_ABI_VERSION_MINOR 1
 
 #define XILA_RIGHT_READ 1
 
@@ -54,6 +54,18 @@
 
 #define XILA_KIND_SYMLINK 7
 
+#define XILA_NETWORK_CONNECT 1
+
+#define XILA_NETWORK_LISTEN 2
+
+#define XILA_NETWORK_RESOLVE 4
+
+#define XILA_ADDRESS_IPV4 4
+
+#define XILA_ADDRESS_IPV6 6
+
+#define XILA_SHUTDOWN_WRITE 1
+
 /**
  * Stable error values; outputs change only on success except the documented
  * BufferTooSmall required listing length.
@@ -80,6 +92,16 @@ enum XilaStatus
   XILA_STATUS_END = 14,
   XILA_STATUS_BUFFER_TOO_SMALL = 15,
   XILA_STATUS_DIRECTORY_NOT_EMPTY = 16,
+  XILA_STATUS_CONNECTION_REFUSED = 26,
+  XILA_STATUS_CONNECTION_RESET = 27,
+  XILA_STATUS_TIMED_OUT = 28,
+  XILA_STATUS_HOST_UNREACHABLE = 29,
+  XILA_STATUS_NETWORK_UNREACHABLE = 30,
+  XILA_STATUS_ADDRESS_IN_USE = 31,
+  XILA_STATUS_ADDRESS_NOT_AVAILABLE = 32,
+  XILA_STATUS_NOT_CONNECTED = 33,
+  XILA_STATUS_CONNECTION_ABORTED = 34,
+  XILA_STATUS_BROKEN_PIPE = 35,
 };
 #if __STDC_VERSION__ >= 202311L
 typedef enum XilaStatus XilaStatus;
@@ -103,6 +125,26 @@ typedef struct XilaDirectoryIterator XilaDirectoryIterator;
 typedef struct XilaFile XilaFile;
 
 /**
+ * Host-granted network authority. Future host/port restrictions belong here.
+ */
+typedef struct XilaNetwork XilaNetwork;
+
+/**
+ * Owned TCP connection. Its creation grants bidirectional I/O authority.
+ */
+typedef struct XilaTcp XilaTcp;
+
+/**
+ * One pending connection, with no additional backlog. Accept replenishes the socket.
+ */
+typedef struct XilaTcpListener XilaTcpListener;
+
+/**
+ * Owned UDP socket. Sending additionally requires CONNECT on its parent capability.
+ */
+typedef struct XilaUdp XilaUdp;
+
+/**
  * Versioned output: initialize size to sizeof(XilaStatistics) before each call.
  */
 typedef struct XilaStatistics {
@@ -119,6 +161,19 @@ typedef struct XilaStatistics {
   int64_t modification_nanoseconds;
   int64_t status_change_nanoseconds;
 } XilaStatistics;
+
+/**
+ * Fixed-width address. Bytes are in network order; integer fields are host order.
+ * IPv4 uses the first four bytes and requires the remaining bytes to be zero.
+ * Scope must be zero: Core does not support scoped IPv6 endpoints.
+ */
+typedef struct XilaNetworkAddress {
+  uint32_t family;
+  uint8_t bytes[16];
+  uint16_t port;
+  uint16_t reserved;
+  uint32_t scope_id;
+} XilaNetworkAddress;
 
 /**
  * UTF-8 bytes, not NUL-terminated. A null data pointer is valid only at length zero.
@@ -321,6 +376,170 @@ XilaStatus xila_directory_get_statistics(const struct XilaDirectory *directory,
                                          size_t length,
                                          uint32_t flags,
                                          struct XilaStatistics *output);
+
+/**
+ * Release network authority; existing sockets remain valid. Null succeeds.
+ * # Safety
+ * Objects must be live and calls serialized. Inputs must be readable and outputs
+ * aligned, writable and disjoint from inputs and objects. Buffers must be valid
+ * for their lengths. Owned objects must be released exactly once.
+ */
+XilaStatus xila_network_close(struct XilaNetwork *network);
+
+/**
+ * Connect synchronously; timeout zero waits indefinitely, otherwise milliseconds.
+ * # Safety
+ * Objects must be live and calls serialized. Inputs must be readable and outputs
+ * aligned, writable and disjoint from inputs and objects. Buffers must be valid
+ * for their lengths. Owned objects must be released exactly once.
+ */
+XilaStatus xila_tcp_connect(const struct XilaNetwork *network,
+                            const struct XilaNetworkAddress *address,
+                            uint32_t timeout_ms,
+                            struct XilaTcp **connection);
+
+/**
+ * Bind and start a single-slot TCP listener. Port zero is rejected by Core.
+ * # Safety
+ * Objects must be live and calls serialized. Inputs must be readable and outputs
+ * aligned, writable and disjoint from inputs and objects. Buffers must be valid
+ * for their lengths. Owned objects must be released exactly once.
+ */
+XilaStatus xila_tcp_listen(const struct XilaNetwork *network,
+                           const struct XilaNetworkAddress *address,
+                           struct XilaTcpListener **listener);
+
+/**
+ * Wait for a connection and replenish the listener. Run the interface runner independently.
+ * # Safety
+ * Objects must be live and calls serialized. Inputs must be readable and outputs
+ * aligned, writable and disjoint from inputs and objects. Buffers must be valid
+ * for their lengths. Owned objects must be released exactly once.
+ */
+XilaStatus xila_tcp_accept(struct XilaTcpListener *listener, struct XilaTcp **connection);
+
+/**
+ * Abort and release the socket and its buffers. Null succeeds; queued data may be lost.
+ * # Safety
+ * Objects must be live and calls serialized. Inputs must be readable and outputs
+ * aligned, writable and disjoint from inputs and objects. Buffers must be valid
+ * for their lengths. Owned objects must be released exactly once.
+ */
+XilaStatus xila_tcp_close(struct XilaTcp *socket);
+
+/**
+ * Abort and release the socket and its buffers. Null succeeds; queued data may be lost.
+ * # Safety
+ * Objects must be live and calls serialized. Inputs must be readable and outputs
+ * aligned, writable and disjoint from inputs and objects. Buffers must be valid
+ * for their lengths. Owned objects must be released exactly once.
+ */
+XilaStatus xila_tcp_listener_close(struct XilaTcpListener *socket);
+
+/**
+ * Gracefully shut down writing. Only XILA_SHUTDOWN_WRITE is supported; reads remain valid.
+ * # Safety
+ * Objects must be live and calls serialized. Inputs must be readable and outputs
+ * aligned, writable and disjoint from inputs and objects. Buffers must be valid
+ * for their lengths. Owned objects must be released exactly once.
+ */
+XilaStatus xila_tcp_shutdown(struct XilaTcp *socket, uint32_t direction);
+
+/**
+ * Blocking direct-buffer I/O. Zero size permits null; send may be partial; receive zero means EOF.
+ * # Safety
+ * Objects must be live and calls serialized. Inputs must be readable and outputs
+ * aligned, writable and disjoint from inputs and objects. Buffers must be valid
+ * for their lengths. Owned objects must be released exactly once.
+ */
+XilaStatus xila_tcp_send(struct XilaTcp *socket, const void *buffer, size_t size, size_t *count);
+
+/**
+ * Blocking direct-buffer I/O. Zero size permits null; send may be partial; receive zero means EOF.
+ * # Safety
+ * Objects must be live and calls serialized. Inputs must be readable and outputs
+ * aligned, writable and disjoint from inputs and objects. Buffers must be valid
+ * for their lengths. Owned objects must be released exactly once.
+ */
+XilaStatus xila_tcp_receive(struct XilaTcp *socket, void *buffer, size_t size, size_t *count);
+
+/**
+ * Read the connection endpoint.
+ * # Safety
+ * Objects must be live and calls serialized. Inputs must be readable and outputs
+ * aligned, writable and disjoint from inputs and objects. Buffers must be valid
+ * for their lengths. Owned objects must be released exactly once.
+ */
+XilaStatus xila_tcp_local_address(const struct XilaTcp *socket, struct XilaNetworkAddress *address);
+
+/**
+ * Read the connection endpoint.
+ * # Safety
+ * Objects must be live and calls serialized. Inputs must be readable and outputs
+ * aligned, writable and disjoint from inputs and objects. Buffers must be valid
+ * for their lengths. Owned objects must be released exactly once.
+ */
+XilaStatus xila_tcp_peer_address(const struct XilaTcp *socket, struct XilaNetworkAddress *address);
+
+/**
+ * Bind a UDP socket. Port zero is rejected by Core; one datagram per direction is buffered.
+ * # Safety
+ * Objects must be live and calls serialized. Inputs must be readable and outputs
+ * aligned, writable and disjoint from inputs and objects. Buffers must be valid
+ * for their lengths. Owned objects must be released exactly once.
+ */
+XilaStatus xila_udp_bind(const struct XilaNetwork *network,
+                         const struct XilaNetworkAddress *address,
+                         struct XilaUdp **socket);
+
+/**
+ * Release a UDP socket. Null succeeds.
+ * # Safety
+ * Objects must be live and calls serialized. Inputs must be readable and outputs
+ * aligned, writable and disjoint from inputs and objects. Buffers must be valid
+ * for their lengths. Owned objects must be released exactly once.
+ */
+XilaStatus xila_udp_close(struct XilaUdp *socket);
+
+/**
+ * Nonblocking atomic datagram send, without logging or staging allocation.
+ * # Safety
+ * Objects must be live and calls serialized. Inputs must be readable and outputs
+ * aligned, writable and disjoint from inputs and objects. Buffers must be valid
+ * for their lengths. Owned objects must be released exactly once.
+ */
+XilaStatus xila_udp_send_to(struct XilaUdp *socket,
+                            const void *buffer,
+                            size_t size,
+                            const struct XilaNetworkAddress *address,
+                            size_t *count);
+
+/**
+ * Nonblocking datagram receive. Overflow preserves the datagram; outputs change only on success.
+ * # Safety
+ * Objects must be live and calls serialized. Inputs must be readable and outputs
+ * aligned, writable and disjoint from inputs and objects. Buffers must be valid
+ * for their lengths. Owned objects must be released exactly once.
+ */
+XilaStatus xila_udp_receive_from(struct XilaUdp *socket,
+                                 void *buffer,
+                                 size_t size,
+                                 struct XilaNetworkAddress *address,
+                                 size_t *count);
+
+/**
+ * Resolve one address family synchronously. Count is capacity in/results out; capacity zero queries size. Overflow leaves outputs unchanged. DNS allocates inside Core.
+ * # Safety
+ * Objects must be live and calls serialized. Inputs must be readable and outputs
+ * aligned, writable and disjoint from inputs and objects. Buffers must be valid
+ * for their lengths. Owned objects must be released exactly once.
+ */
+XilaStatus xila_network_resolve(const struct XilaNetwork *network,
+                                const char *host,
+                                size_t host_length,
+                                uint32_t family,
+                                struct XilaNetworkAddress *addresses,
+                                size_t *count);
 
 /**
  * Read monotonic nanoseconds from an arbitrary epoch; may return Overflow.

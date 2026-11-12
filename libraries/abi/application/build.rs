@@ -32,6 +32,12 @@ fn main() {
         .export
         .include
         .extend(["XilaString".into(), "XilaStartup".into()]);
+    for name in ["Network", "NetworkAddress", "Tcp", "TcpListener", "Udp"] {
+        config
+            .export
+            .rename
+            .insert(name.into(), format!("Xila{name}"));
+    }
     config.enumeration.rename_variants = cbindgen::RenameRule::ScreamingSnakeCase;
     config.enumeration.prefix_with_name = true;
     cbindgen::Builder::new()

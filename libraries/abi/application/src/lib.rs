@@ -6,7 +6,11 @@ mod directory;
 mod file;
 mod iterator;
 mod metadata;
+#[cfg(feature = "network")]
+mod network;
 mod startup;
+#[cfg(feature = "network")]
+pub use network::*;
 mod status;
 mod time;
 
@@ -19,7 +23,7 @@ pub use status::*;
 pub use time::*;
 
 pub const XILA_ABI_VERSION_MAJOR: u32 = 0;
-pub const XILA_ABI_VERSION_MINOR: u32 = 3;
+pub const XILA_ABI_VERSION_MINOR: u32 = 1;
 
 /// Return the ABI version as (major << 16) | minor.
 /// # Safety
