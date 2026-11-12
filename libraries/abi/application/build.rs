@@ -28,6 +28,10 @@ fn main() {
     ] {
         config.export.rename.insert(rust.into(), c.into());
     }
+    config
+        .export
+        .include
+        .extend(["XilaString".into(), "XilaStartup".into()]);
     config.enumeration.rename_variants = cbindgen::RenameRule::ScreamingSnakeCase;
     config.enumeration.prefix_with_name = true;
     cbindgen::Builder::new()
