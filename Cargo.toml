@@ -31,6 +31,7 @@ virtual_file_system = { package = "xila-virtual-file-system", path = "subsystems
 graphics = { package = "xila-graphics", path = "subsystems/graphics" }
 time = { package = "xila-time", path = "subsystems/time" }
 task = { package = "xila-task", path = "subsystems/task" }
+lifecycle = { package = "xila-lifecycle", path = "subsystems/lifecycle" }
 users = { package = "xila-users", path = "subsystems/users" }
 memory = { package = "xila-memory", path = "subsystems/memory" }
 executable = { package = "xila-executable", path = "libraries/executable" }
@@ -119,6 +120,7 @@ members = [
   "libraries/synchronization",
   "subsystems/task/task_macros",
   "subsystems/log",
+  "subsystems/lifecycle",
   "libraries/bootsplash",
   "drivers/core",
 

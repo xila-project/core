@@ -47,6 +47,7 @@ EXPECTED_PACKAGE_NAMES = {
     "subsystems/task/task_macros/Cargo.toml": "xila-task-macros",
     "subsystems/time/Cargo.toml": "xila-time",
     "subsystems/users/Cargo.toml": "xila-users",
+    "subsystems/lifecycle/Cargo.toml": "xila-lifecycle",
     "subsystems/virtual_file_system/Cargo.toml": "xila-virtual-file-system",
     "tools/verification_probe/Cargo.toml": "verification_probe",
 }
@@ -57,6 +58,7 @@ EXPECTED_BINARY_TARGETS = {
 EXPECTED_LIBRARY_TARGETS = {
     "libraries/stackful/Cargo.toml": "stackful",
     "subsystems/task/Cargo.toml": "task",
+    "subsystems/lifecycle/Cargo.toml": "lifecycle",
     "libraries/synchronization/Cargo.toml": "synchronization",
     "libraries/testing/Cargo.toml": "testing",
     "drivers/core/Cargo.toml": "drivers_core",
