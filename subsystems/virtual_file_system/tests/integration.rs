@@ -1496,6 +1496,38 @@ async fn hard_links_stay_beneath_their_roots_and_report_missing_backend_support(
             .await
             .is_err()
     );
+    // A directory cannot be renamed into its own subtree, nor onto itself plus a suffix
+    // that merely shares its name prefix.
+    vfs.create_directory_beneath(task, &Path::new("dir/inner"), root)
+        .await
+        .unwrap();
+    assert_eq!(
+        vfs.rename_beneath(
+            task,
+            &Path::new("dir"),
+            &Path::new("dir/inner/moved"),
+            root,
+            root
+        )
+        .await,
+        Err(Error::FileSystem(file_system::Error::InvalidParameter))
+    );
+    assert_eq!(
+        vfs.rename_beneath(task, &Path::new("dir"), &Path::new("dir/moved"), root, root)
+            .await,
+        Err(Error::FileSystem(file_system::Error::InvalidParameter))
+    );
+    vfs.rename_beneath(task, &Path::new("dir"), &Path::new("dir2"), root, root)
+        .await
+        .unwrap();
+    vfs.rename_beneath(task, &Path::new("dir2"), &Path::new("dir"), root, root)
+        .await
+        .unwrap();
+    assert!(
+        vfs.get_statistics_beneath(task, &Path::new("dir/inner"), false, root)
+            .await
+            .is_ok()
+    );
     // Neither a rename nor a link may cross a mount boundary.
     mount_test_filesystem(vfs, task, "/sandbox/mounted").await;
     assert_eq!(

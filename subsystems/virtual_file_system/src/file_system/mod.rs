@@ -1263,6 +1263,15 @@ impl VirtualFileSystem {
         {
             return Err(Error::RessourceBusy);
         }
+        // A directory cannot move beneath itself. The backends do not check:
+        // LittleFS would detach the whole subtree from the hierarchy.
+        let source = old_path.as_str().trim_end_matches('/');
+        if new_path.as_str().len() > source.len()
+            && new_path.as_str().starts_with(source)
+            && new_path.as_str().as_bytes()[source.len()] == b'/'
+        {
+            return Err(Error::FileSystem(file_system::Error::InvalidParameter));
+        }
 
         let (old_file_system, old_relative_path, _) =
             Self::get_file_system_from_path(&file_systems, &old_path)?; // Get the file system identifier and the relative path
