@@ -20,9 +20,19 @@ adc = []
 gpio = ["dep:embedded-hal"]
 i2c = ["dep:embedded-hal", "dep:embedded-hal-async"]
 spi = ["dep:embedded-hal", "dep:embedded-hal-async"]
+power = []
 pwm = ["dep:embedded-hal"]
 uart = ["dep:embedded-io", "dep:embedded-io-async"]
-mock = ["adc", "gpio", "i2c", "pwm", "spi", "uart", "dep:synchronization"]
+mock = [
+  "adc",
+  "gpio",
+  "i2c",
+  "power",
+  "pwm",
+  "spi",
+  "uart",
+  "dep:synchronization",
+]
 
 [lib]
 name = "peripherals"

@@ -24,6 +24,8 @@ pub mod gpio;
 pub mod i2c;
 #[cfg(feature = "vfs")]
 mod mount;
+#[cfg(feature = "power")]
+pub mod power;
 #[cfg(feature = "pwm")]
 pub mod pwm;
 #[cfg(feature = "spi")]
