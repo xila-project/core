@@ -9,6 +9,14 @@ mod tests {
     #[allow(improper_ctypes)]
     unsafe extern "C" {
         fn application_c_round_trip(directory: *const Directory) -> i32;
+        fn application_c_threads() -> i32;
+    }
+
+    #[test]
+    fn native_threads() {
+        unsafe {
+            assert_eq!(application_c_threads(), 0);
+        }
     }
 
     #[task::test]

@@ -16,6 +16,9 @@ pub enum Status {
     Overflow = 11,
     Unavailable = 12,
     InputOutput = 13,
+    TimedOut = 20,
+    Deadlock = 21,
+    Busy = 22,
 }
 
 impl From<file_system::Error> for Status {

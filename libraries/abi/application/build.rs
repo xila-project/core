@@ -22,6 +22,14 @@ fn main() {
         .export
         .rename
         .insert("Status".into(), "XilaStatus".into());
+    for (source, target) in [
+        ("Thread", "XilaThread"),
+        ("ThreadOptions", "XilaThreadOptions"),
+        ("Mutex", "XilaMutex"),
+        ("ConditionVariable", "XilaConditionVariable"),
+    ] {
+        config.export.rename.insert(source.into(), target.into());
+    }
     config.enumeration.rename_variants = cbindgen::RenameRule::ScreamingSnakeCase;
     config.enumeration.prefix_with_name = true;
     cbindgen::Builder::new()
