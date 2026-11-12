@@ -23,6 +23,7 @@ drivers_neural_network = { package = "xila-drivers-neural-network", path = "driv
 neural_network = { package = "xila-neural-network", path = "libraries/neural_network" }
 nanoaudio = { git = "https://github.com/AlixANNERAUD/nanoaudio.git", rev = "596076c64827fd8bf9e8319addc2f215e0cde8be", default-features = false }
 abi_declarations = { package = "xila-abi-declarations", path = "libraries/abi/declarations" }
+abi_application = { package = "xila-abi-application", path = "libraries/abi/application" }
 abi_definitions = { package = "xila-abi-definitions", path = "libraries/abi/definitions" }
 little_fs = { package = "xila-little-fs", path = "libraries/little_fs" }
 virtual_file_system = { package = "xila-virtual-file-system", path = "subsystems/virtual_file_system" }
@@ -103,6 +104,8 @@ members = [
   "drivers/peripherals",
   "subsystems/memory",
   "subsystems/time",
+  "libraries/abi/application",
+  "libraries/abi/application/c_tests",
   "libraries/abi/definitions",
   "libraries/abi/declarations",
   "subsystems/virtual_file_system",

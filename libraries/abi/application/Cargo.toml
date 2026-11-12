@@ -1,0 +1,22 @@
+[package]
+name = "xila-abi-application"
+version.workspace = true
+edition = "2024"
+links = "xila_abi_application"
+
+[lib]
+name = "abi_application"
+
+[dependencies]
+virtual_file_system.workspace = true
+file_system.workspace = true
+task.workspace = true
+time.workspace = true
+synchronization.workspace = true
+
+[build-dependencies]
+cbindgen.workspace = true
+
+[dev-dependencies]
+testing.workspace = true
+task = { workspace = true, features = ["test_harness"] }

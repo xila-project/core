@@ -424,6 +424,11 @@ impl<'a> SynchronousFile<'a> {
         block_on(virtual_file_system.close(&self.item, &mut self.context))
     }
 
+    /// Close using the VFS retained by this file, reporting any close error.
+    pub fn close_owned(mut self) -> crate::Result<()> {
+        self.close_internal(self.virtual_file_system)
+    }
+
     pub fn close(mut self, virtual_file_system: &VirtualFileSystem) -> crate::Result<()> {
         self.close_internal(virtual_file_system)
     }
