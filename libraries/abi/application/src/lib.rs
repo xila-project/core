@@ -192,18 +192,44 @@ unsafe fn path_input<'a>(path: *const c_char, length: usize) -> Result<&'a str, 
     str::from_utf8(unsafe { slice::from_raw_parts(path.cast(), length) })
         .map_err(|_| Status::InvalidArgument)
 }
+const XILA_OPEN_ALL: u32 = XILA_OPEN_READ
+    | XILA_OPEN_WRITE
+    | XILA_OPEN_CREATE
+    | XILA_OPEN_EXCLUSIVE
+    | XILA_OPEN_TRUNCATE
+    | XILA_OPEN_APPEND
+    | XILA_OPEN_NON_BLOCKING;
+/// Flags that modify file contents and therefore need the WRITE right.
+const XILA_OPEN_MODIFYING: u32 =
+    XILA_OPEN_WRITE | XILA_OPEN_CREATE | XILA_OPEN_TRUNCATE | XILA_OPEN_APPEND;
+
 fn open_flags(flags: u32, rights: u8) -> Result<Flags, Status> {
-    if flags & !127 != 0 || flags & 3 == 0 || (flags & 8 != 0 && flags & 4 == 0) {
+    let has = |flag: u32| flags & flag != 0;
+    if flags & !XILA_OPEN_ALL != 0
+        || !has(XILA_OPEN_READ | XILA_OPEN_WRITE)
+        || (has(XILA_OPEN_EXCLUSIVE) && !has(XILA_OPEN_CREATE))
+        // Truncating or appending through a read-only file has no defined meaning.
+        || (has(XILA_OPEN_TRUNCATE | XILA_OPEN_APPEND) && !has(XILA_OPEN_WRITE))
+    {
         return Err(Status::InvalidArgument);
     }
-    if (flags & 1 != 0 && rights & 1 == 0) || (flags & (2 | 4 | 16 | 32) != 0 && rights & 2 == 0) {
+    let rights = u32::from(rights);
+    if (has(XILA_OPEN_READ) && rights & XILA_RIGHT_READ == 0)
+        || (has(XILA_OPEN_MODIFYING) && rights & XILA_RIGHT_WRITE == 0)
+    {
         return Err(Status::PermissionDenied);
     }
-    Ok(Flags::new(
-        AccessFlags::from_bits_retain((flags & 3) as u8),
-        Some(CreateFlags::from_bits_retain(((flags >> 2) & 7) as u8)),
-        Some(StateFlags::from_bits_retain(((flags >> 5) & 3) as u8)),
-    ))
+    let mut access = AccessFlags::empty();
+    access.set(AccessFlags::Read, has(XILA_OPEN_READ));
+    access.set(AccessFlags::Write, has(XILA_OPEN_WRITE));
+    let mut create = CreateFlags::empty();
+    create.set(CreateFlags::Create, has(XILA_OPEN_CREATE));
+    create.set(CreateFlags::Exclusive, has(XILA_OPEN_EXCLUSIVE));
+    create.set(CreateFlags::Truncate, has(XILA_OPEN_TRUNCATE));
+    let mut state = StateFlags::empty();
+    state.set(StateFlags::Append, has(XILA_OPEN_APPEND));
+    state.set(StateFlags::NonBlocking, has(XILA_OPEN_NON_BLOCKING));
+    Ok(Flags::new(access, Some(create), Some(state)))
 }
 
 /// Return the ABI version as (major << 16) | minor.
@@ -494,14 +520,24 @@ mod tests {
             "/root/a/b"
         );
         assert_eq!(validate_rights(4), Err(Status::InvalidArgument));
-        for flags in [0, 8, 9, 128, u32::MAX] {
+        for flags in [0, 8, 9, 128, u32::MAX, 1 | 16, 1 | 32] {
             assert_eq!(open_flags(flags, 3), Err(Status::InvalidArgument));
         }
         assert_eq!(open_flags(1, 2), Err(Status::PermissionDenied));
-        for flags in [2, 5, 17, 33] {
+        for flags in [2, 5, 2 | 16, 2 | 32] {
             assert_eq!(open_flags(flags, 1), Err(Status::PermissionDenied));
         }
-        assert!(open_flags(127, 3).is_ok());
+        let flags = open_flags(127, 3).unwrap();
+        assert_eq!(flags.get_access(), AccessFlags::READ_WRITE);
+        assert_eq!(flags.get_create(), CreateFlags::all());
+        assert_eq!(
+            flags.get_state(),
+            StateFlags::Append | StateFlags::NonBlocking
+        );
+        let flags = open_flags(XILA_OPEN_READ, 1).unwrap();
+        assert_eq!(flags.get_access(), AccessFlags::Read);
+        assert_eq!(flags.get_create(), CreateFlags::empty());
+        assert_eq!(flags.get_state(), StateFlags::empty());
         unsafe {
             assert_eq!(
                 path_input([255u8].as_ptr().cast(), 1),
