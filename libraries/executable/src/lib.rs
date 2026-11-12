@@ -96,6 +96,11 @@ pub async fn execute(
     standard: Standard<'static>,
     spawner: Option<SpawnerIdentifier>,
 ) -> Result<JoinHandle<isize>> {
+    // Admission barrier: once a lifecycle request is accepted, no new
+    // executable may start and race the shutdown pipeline.
+    if !lifecycle::SYSTEM.is_running() {
+        return Err(virtual_file_system::Error::RessourceBusy.into());
+    }
     let task_instance = &context.task_manager;
 
     let task = task_instance.try_get_current_task_identifier().await?;
