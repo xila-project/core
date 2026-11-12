@@ -7,18 +7,32 @@ use smol_str::SmolStr;
 use users::{GroupIdentifier, UserIdentifier};
 
 impl Manager {
+    #[cfg(test)]
     pub(crate) async fn register(
         &self,
         parent: TaskIdentifier,
         name: &str,
     ) -> Result<TaskIdentifier> {
         let mut inner = self.0.write().await;
+        Self::register_inner(&mut inner, parent, name)
+    }
 
+    pub(super) fn register_inner(
+        inner: &mut Inner,
+        parent: TaskIdentifier,
+        name: &str,
+    ) -> Result<TaskIdentifier> {
+        if inner.tasks.len() >= inner.maximum_tasks {
+            return Err(Error::TooManyTasks);
+        }
         // - Get parent task information if any (inheritance)
         let (parent_task_identifier, parent_environment_variables, user, group) = if inner
             .tasks
             .is_empty()
         {
+            if inner.root_established || parent != Self::ROOT_TASK_IDENTIFIER {
+                return Err(Error::InvalidTaskIdentifier);
+            }
             (
                 Manager::ROOT_TASK_IDENTIFIER, // Root task is its own parent
                 Vec::new(),
@@ -33,21 +47,15 @@ impl Manager {
                 metadata.group,
             )
         } else {
-            (
-                Manager::ROOT_TASK_IDENTIFIER, // If parent task not found, use root task
-                Vec::new(),
-                UserIdentifier::ROOT,
-                GroupIdentifier::ROOT,
-            )
+            return Err(Error::InvalidTaskIdentifier);
         };
 
-        // Truncate the name if it's too long
-        let name = if name.len() > 23 {
-            // Truncate the name to 32 characters if it's too long
-            &name[..23]
-        } else {
-            name
-        };
+        // SmolStr's inline capacity is 23 bytes, not characters.
+        let mut end = name.len().min(23);
+        while !name.is_char_boundary(end) {
+            end -= 1;
+        }
+        let name = &name[..end];
 
         let name = SmolStr::new_inline(name);
 
@@ -65,29 +73,26 @@ impl Manager {
             group,
             environment_variables: parent_environment_variables,
             signals: SignalAccumulator::new(),
-            spawner_identifier: 0, // Will be set later
+            spawner_identifier: usize::MAX, // No spawner until enqueued
         };
 
-        let identifier = Self::find_first_available_identifier(
-            &inner.tasks,
-            (TaskIdentifierInner::MIN..TaskIdentifierInner::MAX).step_by(1),
-        )
-        .ok_or(Error::TooManyTasks)?;
-
-        // Find the first available task identifier
-        //let Expected = TaskIdentifier::new(Identifier);
-
-        // Populate the identifier with the first available one
-        if inner
-            .tasks
-            .insert(
-                identifier, metadata, // We insert None to reserve the identifier
-            )
-            .is_some()
-        {
-            unreachable!("Task identifier already exists");
+        let mut candidate = TaskIdentifierInner::from(inner.root_established);
+        for identifier in inner.tasks.keys() {
+            let used = identifier.into_inner();
+            if used < candidate {
+                continue;
+            }
+            if used > candidate {
+                break;
+            }
+            candidate = candidate.checked_add(1).ok_or(Error::TooManyTasks)?;
         }
+        let identifier = TaskIdentifier::new(candidate);
 
+        // Numeric zero remains reserved after root exit.
+        inner.tasks.insert(identifier, metadata);
+
+        inner.root_established = true;
         Ok(identifier)
     }
 
@@ -110,7 +115,14 @@ impl Manager {
             .ok_or(Error::InvalidTaskIdentifier)?;
 
         // Remove the internal identifier of the task
-        inner.identifiers.remove(&metadata.internal_identifier);
+        if inner.identifiers.get(&metadata.internal_identifier) == Some(&identifier) {
+            inner.identifiers.remove(&metadata.internal_identifier);
+            self.1.lock(|spawners| {
+                if let Some(spawner) = spawners.borrow_mut().get_mut(&metadata.spawner_identifier) {
+                    spawner.tasks -= 1;
+                }
+            });
+        }
 
         Ok(metadata)
     }

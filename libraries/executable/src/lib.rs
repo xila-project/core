@@ -98,7 +98,7 @@ pub async fn execute(
 ) -> Result<JoinHandle<isize>> {
     let task_instance = &context.task_manager;
 
-    let task = task_instance.get_current_task_identifier().await;
+    let task = task_instance.try_get_current_task_identifier().await?;
 
     let virtual_file_system = &context.virtual_file_system;
 

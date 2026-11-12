@@ -89,7 +89,7 @@ mod tests {
     #[test]
     fn test_error_type_clone() {
         let error1 = Error::FailedToCreateThread;
-        let error2 = error1.clone();
+        let error2 = error1;
 
         assert_eq!(format!("{error1:?}"), format!("{:?}", error2));
     }

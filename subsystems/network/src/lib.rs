@@ -52,7 +52,18 @@ pub mod tests {
 
         let task_manager = Box::leak(Box::new(task::Manager::new()));
         TEST_TASK_MANAGER.get_or_init(|| task_manager);
-        let task = task_manager.get_current_task_identifier().await;
+        // Tests run on separate test-harness executors, unknown to this manager.
+        // Its root and the stack runner live on one shared executor thread.
+        let spawner = testing::new_thread_executor(task_manager).await;
+        let (_, task) = task_manager
+            .spawn_send(
+                task::Manager::ROOT_TASK_IDENTIFIER,
+                "Network tests",
+                Some(spawner),
+                |_| core::future::pending::<()>(),
+            )
+            .await
+            .unwrap();
 
         log::initialize(&testing::Logger).unwrap();
 
@@ -87,12 +98,18 @@ pub mod tests {
             )
         });
 
-        let (device, controler_device) = crate::create_loopback_device();
-
-        let spawner = testing::new_thread_executor(task_manager).await;
-
-        network_manager
-            .mount_interface(task, "loopback0", device, controler_device, Some(spawner))
+        // `mount_interface` spawns its runner on the calling executor.
+        task_manager
+            .spawn_send(task, "Mount loopback", Some(spawner), move |_| async move {
+                let (device, controller_device) = crate::create_loopback_device();
+                network_manager
+                    .mount_interface(task, "loopback0", device, controller_device, None)
+                    .await
+            })
+            .await
+            .unwrap()
+            .0
+            .join()
             .await
             .unwrap();
 

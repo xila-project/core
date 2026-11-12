@@ -164,7 +164,8 @@ pub fn test(arguments: TokenStream, input: TokenStream) -> TokenStream {
                     }
 
                     #task_path::block_on(async move {
-                        manager.spawn(
+                        manager.spawn_on(
+                            Spawner,
                             #task_path::Manager::ROOT_TASK_IDENTIFIER,
                             #function_name_string,
                             Some(__SPAWNER),
@@ -309,7 +310,8 @@ pub fn run(arguments: TokenStream, input: TokenStream) -> TokenStream {
                     }
 
                     #task_path::block_on(async move {
-                        manager.spawn(
+                        manager.spawn_on(
+                            Spawner,
                             #task_path::Manager::ROOT_TASK_IDENTIFIER,
                             #function_name_string,
                             Some(__SPAWNER),
