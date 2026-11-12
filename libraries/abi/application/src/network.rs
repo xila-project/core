@@ -217,12 +217,16 @@ pub unsafe extern "C" fn xila_tcp_connect(
             let start = time::MonotonicClock::now(&time::EmbassyClock);
             match select(
                 inner.connect(endpoint.address, endpoint.port),
-                core::future::poll_fn(|_| {
+                // A plain deadline check: embassy-time timers need an Embassy executor
+                // waker, which `block_on` does not provide. Waking itself keeps the
+                // deadline live under executors that sleep until woken.
+                core::future::poll_fn(|context| {
                     if time::MonotonicClock::now(&time::EmbassyClock).saturating_sub(start)
                         >= core::time::Duration::from_millis(u64::from(timeout_ms))
                     {
                         core::task::Poll::Ready(())
                     } else {
+                        context.waker().wake_by_ref();
                         core::task::Poll::Pending
                     }
                 }),
