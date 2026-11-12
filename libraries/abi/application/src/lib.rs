@@ -23,7 +23,7 @@ pub use status::*;
 pub use time::*;
 
 pub const XILA_ABI_VERSION_MAJOR: u32 = 0;
-pub const XILA_ABI_VERSION_MINOR: u32 = 4;
+pub const XILA_ABI_VERSION_MINOR: u32 = 1;
 
 /// Return the ABI version as (major << 16) | minor.
 /// # Safety

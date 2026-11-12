@@ -34,7 +34,7 @@ OutOfMemory.
 
 ## Functions
 
-- `xila_abi_version`: packed major/minor version, currently 0.4.
+- `xila_abi_version`: packed major/minor version, currently 0.1.
 - `xila_directory_open`, `xila_directory_close`: attenuated path capabilities.
 - `xila_file_open`, `xila_file_close`: typed owned file objects.
 - `xila_file_read`, `xila_file_write`: direct buffer I/O.
@@ -60,7 +60,7 @@ refresh it; normal tests require an exact match. The separate unpublished
 `xila-abi-application-c-tests` member compiles and executes a strict C11 client,
 so ordinary consumers do not need a C compiler for this crate's header generation.
 
-Additive ABI changes bump the minor version; breaking changes bump the major
+Until the first release the ABI stays at 0.1. After it, additive changes bump the minor version; breaking changes bump the major
 version. Never reuse or renumber constants or status values. Rust object layouts
 are private and must never be inspected or allocated by C callers.
 
@@ -169,4 +169,4 @@ The generated header always declares networking, independent of Cargo features;
 linking those functions requires `network`. cbindgen parses the unexpanded source,
 so the committed header is identical with and without the feature. The C test
 member explicitly enables it and exercises smoltcp loopback TCP echo, UDP round
-trip, capability failures and numeric DNS. ABI version 0.4 adds networking.
+trip, capability failures and numeric DNS.
