@@ -131,13 +131,6 @@ unsafe fn input<'a, T>(p: *const T) -> Result<&'a T, Status> {
 unsafe fn object<'a, T>(p: *mut T) -> Result<&'a mut T, Status> {
     unsafe { p.as_mut() }.ok_or(Status::InvalidArgument)
 }
-unsafe fn output<T>(p: *mut T) -> Result<(), Status> {
-    if p.is_null() {
-        Err(Status::InvalidArgument)
-    } else {
-        Ok(())
-    }
-}
 unsafe fn read_buffer<'a>(p: *const c_void, size: usize) -> Result<&'a [u8], Status> {
     if size > isize::MAX as usize || (size != 0 && p.is_null()) {
         return Err(Status::InvalidArgument);
@@ -203,8 +196,11 @@ pub unsafe extern "C" fn xila_tcp_connect(
     timeout_ms: u32,
     connection: *mut *mut Tcp,
 ) -> Status {
+    // Checked here, outside the closure, so the null guard is visible to analysis.
+    if connection.is_null() {
+        return Status::InvalidArgument;
+    }
     status((|| unsafe {
-        output(connection)?;
         let network = input(network)?;
         let endpoint = input(address)?.endpoint()?;
         network.require(XILA_NETWORK_CONNECT)?;
@@ -257,8 +253,11 @@ pub unsafe extern "C" fn xila_tcp_listen(
     address: *const NetworkAddress,
     listener: *mut *mut TcpListener,
 ) -> Status {
+    // Checked here, outside the closure, so the null guard is visible to analysis.
+    if listener.is_null() {
+        return Status::InvalidArgument;
+    }
     status((|| unsafe {
-        output(listener)?;
         let network = input(network)?;
         let address = *input(address)?;
         address.endpoint()?;
@@ -290,8 +289,11 @@ pub unsafe extern "C" fn xila_tcp_accept(
     listener: *mut TcpListener,
     connection: *mut *mut Tcp,
 ) -> Status {
+    // Checked here, outside the closure, so the null guard is visible to analysis.
+    if connection.is_null() {
+        return Status::InvalidArgument;
+    }
     status((|| unsafe {
-        output(connection)?;
         let listener = object(listener)?;
         listener.network.require(XILA_NETWORK_LISTEN)?;
         let endpoint = listener.address.endpoint()?;
@@ -375,8 +377,11 @@ pub unsafe extern "C" fn xila_tcp_send(
     size: usize,
     count: *mut usize,
 ) -> Status {
+    // Checked here, outside the closure, so the null guard is visible to analysis.
+    if count.is_null() {
+        return Status::InvalidArgument;
+    }
     status((|| unsafe {
-        output(count)?;
         let socket = object(socket)?;
         let buffer = read_buffer(buffer, size)?;
         let n = if size == 0 {
@@ -401,8 +406,11 @@ pub unsafe extern "C" fn xila_tcp_receive(
     size: usize,
     count: *mut usize,
 ) -> Status {
+    // Checked here, outside the closure, so the null guard is visible to analysis.
+    if count.is_null() {
+        return Status::InvalidArgument;
+    }
     status((|| unsafe {
-        output(count)?;
         let socket = object(socket)?;
         let buffer = write_buffer(buffer, size)?;
         let n = if size == 0 {
@@ -425,8 +433,11 @@ pub unsafe extern "C" fn xila_tcp_local_address(
     socket: *const Tcp,
     address: *mut NetworkAddress,
 ) -> Status {
+    // Checked here, outside the closure, so the null guard is visible to analysis.
+    if address.is_null() {
+        return Status::InvalidArgument;
+    }
     status((|| unsafe {
-        output(address)?;
         let socket = input(socket)?;
         let (ip, port) = block_on(socket.inner.get_local_endpoint())
             .map_err(Status::from)?
@@ -446,8 +457,11 @@ pub unsafe extern "C" fn xila_tcp_peer_address(
     socket: *const Tcp,
     address: *mut NetworkAddress,
 ) -> Status {
+    // Checked here, outside the closure, so the null guard is visible to analysis.
+    if address.is_null() {
+        return Status::InvalidArgument;
+    }
     status((|| unsafe {
-        output(address)?;
         let socket = input(socket)?;
         let (ip, port) = block_on(socket.inner.get_remote_endpoint())
             .map_err(Status::from)?
@@ -468,8 +482,11 @@ pub unsafe extern "C" fn xila_udp_bind(
     address: *const NetworkAddress,
     socket: *mut *mut Udp,
 ) -> Status {
+    // Checked here, outside the closure, so the null guard is visible to analysis.
+    if socket.is_null() {
+        return Status::InvalidArgument;
+    }
     status((|| unsafe {
-        output(socket)?;
         let network = input(network)?;
         let endpoint = input(address)?.endpoint()?;
         network.require(XILA_NETWORK_LISTEN)?;
@@ -526,8 +543,11 @@ pub unsafe extern "C" fn xila_udp_send_to(
     address: *const NetworkAddress,
     count: *mut usize,
 ) -> Status {
+    // Checked here, outside the closure, so the null guard is visible to analysis.
+    if count.is_null() {
+        return Status::InvalidArgument;
+    }
     status((|| unsafe {
-        output(count)?;
         let socket = object(socket)?;
         let endpoint = input(address)?.endpoint()?;
         let buffer = read_buffer(buffer, size)?;
@@ -562,10 +582,12 @@ pub unsafe extern "C" fn xila_udp_receive_from(
     address: *mut NetworkAddress,
     count: *mut usize,
 ) -> Status {
+    // Checked here, outside the closure, so the null guards are visible to analysis.
+    if count.is_null() || address.is_null() {
+        return Status::InvalidArgument;
+    }
     status((|| {
         unsafe {
-            output(count)?;
-            output(address)?;
             let socket = object(socket)?;
             let buffer = write_buffer(buffer, size)?;
             let (n, endpoint) = block_on(socket.inner.with_mutable(|s| {
