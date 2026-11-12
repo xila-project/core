@@ -34,6 +34,7 @@ pub enum Error {
     FailedToWrite,
     DelimiterNotFound,
     Orphaned,
+    PathEscapesRoot,
 }
 
 impl Error {
@@ -115,6 +116,7 @@ impl Display for Error {
             Error::UnsupportedOperation => write!(f, "{}", t!("errors.unsupported_operation")),
             Error::FailedToWrite => write!(f, "{}", t!("errors.failed_to_write")),
             Error::DelimiterNotFound => write!(f, "{}", t!("errors.delimiter_not_found")),
+            Error::PathEscapesRoot => write!(f, "Path escapes its root"),
             Error::Orphaned => write!(f, "{}", t!("errors.orphaned")),
         }
     }

@@ -1211,3 +1211,169 @@ async fn existing_files_remain_accessible_without_representable_utc() {
     vfs.remove(task, "/link").await.unwrap();
     vfs.remove(task, "/existing").await.unwrap();
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn beneath_resolution_confines_links_and_all_namespace_operations() {
+    use virtual_file_system::Error;
+    let (task, vfs) = initialize().await;
+    let root = Path::new("/sandbox");
+    for path in ["/sandbox", "/sandbox/sub", "/outside"] {
+        vfs.create_directory(task, &path).await.unwrap();
+    }
+    for (name, target) in [
+        ("absolute", "/outside"),
+        ("parent", "../outside"),
+        ("chain", "absolute"),
+        ("inside", "sub"),
+        ("sub/up", ".."),
+        ("loop", "loop"),
+    ] {
+        let link = format!("/sandbox/{name}");
+        vfs.create_symlink(task, Path::new(target), Path::new(&link))
+            .await
+            .unwrap();
+    }
+    for path in [
+        "absolute",
+        "parent",
+        "chain",
+        "../outside",
+        "sub/up/../outside",
+        "inside/../../outside",
+    ] {
+        assert_eq!(
+            vfs.get_statistics_beneath(task, &Path::new(path), true, root)
+                .await,
+            Err(Error::PathEscapesRoot),
+            "{path}"
+        );
+    }
+    for path in ["inside", "sub/up/sub", "inside/../sub"] {
+        assert_eq!(
+            vfs.get_statistics_beneath(task, &Path::new(path), true, root)
+                .await
+                .unwrap()
+                .kind,
+            file_system::Kind::Directory
+        );
+    }
+    assert_eq!(
+        vfs.get_statistics_beneath(task, &Path::new("absolute"), false, root)
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::SymbolicLink
+    );
+    assert!(matches!(
+        vfs.get_statistics_beneath(task, &Path::new("loop"), true, root)
+            .await,
+        Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink))
+    ));
+    assert!(
+        vfs.get_statistics_for_task(task, &"/sandbox/absolute")
+            .await
+            .is_ok()
+    );
+    assert!(
+        vfs.get_statistics_for_task(task, &"/sandbox/parent")
+            .await
+            .is_ok()
+    );
+    assert!(matches!(
+        vfs.open_beneath(
+            &Path::new("absolute/file"),
+            Flags::from(AccessFlags::Read),
+            task,
+            root
+        )
+        .await,
+        Err(Error::PathEscapesRoot)
+    ));
+    assert!(matches!(
+        vfs.open_directory_beneath(task, &Path::new("absolute"), root)
+            .await,
+        Err(Error::PathEscapesRoot)
+    ));
+    assert_eq!(
+        vfs.create_directory_beneath(task, &Path::new("absolute/new"), root)
+            .await,
+        Err(Error::PathEscapesRoot)
+    );
+    assert_eq!(
+        vfs.remove_beneath(task, Path::new("absolute/file"), root)
+            .await,
+        Err(Error::PathEscapesRoot)
+    );
+    assert_eq!(
+        vfs.rename_beneath(
+            task,
+            &Path::new("sub"),
+            &Path::new("absolute/new"),
+            root,
+            root
+        )
+        .await,
+        Err(Error::PathEscapesRoot)
+    );
+    assert_eq!(
+        vfs.rename_beneath(
+            task,
+            &Path::new("absolute/file"),
+            &Path::new("new"),
+            root,
+            root
+        )
+        .await,
+        Err(Error::PathEscapesRoot)
+    );
+    vfs.create_symlink_beneath(task, Path::new("sub"), Path::new("newlink"), root)
+        .await
+        .unwrap();
+    let mut target = [0; 16];
+    assert_eq!(
+        vfs.read_symlink_beneath(task, Path::new("newlink"), &mut target, root)
+            .await
+            .unwrap(),
+        3
+    );
+    mount_test_filesystem(vfs, task, "/sandbox/mounted").await;
+    vfs.create_directory_beneath(task, &Path::new("mounted/dir"), root)
+        .await
+        .unwrap();
+    vfs.create_symlink_beneath(task, Path::new("mounted/dir"), Path::new("mountlink"), root)
+        .await
+        .unwrap();
+    assert!(
+        vfs.open_directory_beneath(task, &Path::new("mountlink"), root)
+            .await
+            .is_ok()
+    );
+    let allocations = allocation::measure(|| {
+        task::block_on(vfs.get_statistics_beneath(task, &Path::new("sub"), true, root)).unwrap();
+    });
+    let baseline = allocation::measure(|| {
+        task::block_on(vfs.get_statistics_for_task(task, &"/sandbox/sub")).unwrap();
+    });
+    std::println!(
+        "canonical statistics allocator requests: beneath={allocations}, unconfined={baseline}"
+    );
+    let mut file = vfs
+        .open_beneath(
+            &Path::new("file"),
+            Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None),
+            task,
+            root,
+        )
+        .await
+        .unwrap();
+    let writes = allocation::measure(|| {
+        task::block_on(file.write(b"x")).unwrap();
+    });
+    let mut byte = [0];
+    let reads = allocation::measure(|| {
+        task::block_on(file.read(&mut byte)).unwrap();
+    });
+    std::println!("confined handle allocator requests: read={reads}, write={writes}");
+    assert_eq!((reads, writes), (0, 0));
+}

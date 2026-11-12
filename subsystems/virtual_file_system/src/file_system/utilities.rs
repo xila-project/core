@@ -128,6 +128,7 @@ impl VirtualFileSystem {
                     allow_missing_final,
                     user,
                     task,
+                    None,
                 )
                 .await?;
             ResolvedPath::Owned(
@@ -141,6 +142,7 @@ impl VirtualFileSystem {
                 allow_missing_final,
                 user,
                 task,
+                None,
             )
             .await?
         };
@@ -164,6 +166,79 @@ impl VirtualFileSystem {
         Ok(resolved)
     }
 
+    /// Resolve a relative path beneath a trusted directory while the caller holds
+    /// the mount table guard. Absolute link targets never acquire ambient authority.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn resolve_path_with_root<'a>(
+        &self,
+        file_systems: &FileSystemsArray,
+        path: &'a Path,
+        follow_final: bool,
+        allow_missing_final: bool,
+        user: UserIdentifier,
+        task: TaskIdentifier,
+        root: Option<&Path>,
+    ) -> Result<ResolvedPath<'a>> {
+        let Some(root) = root else {
+            return self
+                .resolve_path(
+                    file_systems,
+                    path,
+                    follow_final,
+                    allow_missing_final,
+                    user,
+                    task,
+                )
+                .await;
+        };
+        if path.is_absolute() {
+            return Err(Error::PathEscapesRoot);
+        }
+        let root = self
+            .resolve_path(file_systems, root, true, false, user, task)
+            .await?;
+        let (fs, relative, _) = Self::get_file_system_from_path(file_systems, &root)?;
+        let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
+        Self::get_attributes(fs.file_system, relative, &mut attributes).await?;
+        if attributes.get_kind() != Some(&Kind::Directory) {
+            return Err(Error::NotADirectory);
+        }
+        let mut joined = String::with_capacity(root.get_length() + 1 + path.get_length());
+        joined.push_str(root.as_str().trim_end_matches('/'));
+        joined.push('/');
+        joined.push_str(path.as_str());
+        let joined = PathOwned::new(joined).ok_or(Error::InvalidPath)?;
+        let require_directory = path.as_str().ends_with('/');
+        let resolved = self
+            .resolve_path_inner(
+                file_systems,
+                &joined,
+                follow_final,
+                allow_missing_final,
+                user,
+                task,
+                Some(&root),
+            )
+            .await?;
+        if require_directory {
+            let (fs, relative, _) = Self::get_file_system_from_path(file_systems, &resolved)?;
+            let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
+            match Self::get_attributes(fs.file_system, relative, &mut attributes).await {
+                Err(Error::FileSystem(file_system::Error::NotFound)) if allow_missing_final => {}
+                Err(error) => return Err(error),
+                Ok(()) if attributes.get_kind() != Some(&Kind::Directory) => {
+                    return Err(Error::NotADirectory);
+                }
+                Ok(()) => {}
+            }
+        }
+        Ok(ResolvedPath::Owned(match resolved {
+            ResolvedPath::Borrowed(_) => joined,
+            ResolvedPath::Owned(path) => path,
+        }))
+    }
+
+    #[allow(clippy::too_many_arguments)]
     async fn resolve_path_inner<'a>(
         &self,
         file_systems: &FileSystemsArray,
@@ -172,6 +247,7 @@ impl VirtualFileSystem {
         allow_missing_final: bool,
         user: UserIdentifier,
         task: TaskIdentifier,
+        root: Option<&Path>,
     ) -> Result<ResolvedPath<'a>> {
         const MAX_PATH_LENGTH: usize = 4096;
         if !path.is_valid() || !path.is_absolute() || path.get_length() > MAX_PATH_LENGTH {
@@ -181,8 +257,9 @@ impl VirtualFileSystem {
         // Fast path: walk borrowed prefixes first. This avoids allocating a
         // String/PathOwned and a target buffer for ordinary paths.
         let text = path.as_str();
-        let mut component_start = 1;
-        let mut parent_end = 1;
+        let mut parent_end =
+            root.map_or(1, |root| root.as_str().trim_end_matches('/').len().max(1));
+        let mut component_start = if parent_end > 1 { parent_end + 1 } else { 1 };
         let mut target_buffer = Vec::new();
         while component_start < text.len() {
             let component_end = text[component_start..]
@@ -234,6 +311,9 @@ impl VirtualFileSystem {
                     return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
                 }
 
+                if root.is_some() && target.starts_with('/') {
+                    return Err(Error::PathEscapesRoot);
+                }
                 let mut pending = String::with_capacity(target.len() + text.len() - component_end);
                 pending.push_str(target);
                 pending.push_str(&text[component_end..]);
@@ -255,6 +335,7 @@ impl VirtualFileSystem {
                         allow_missing_final,
                         user,
                         task,
+                        root,
                     )
                     .await;
             }
@@ -271,11 +352,15 @@ impl VirtualFileSystem {
 
         // Dot components and repeated separators need a normalized working
         // path. This allocation is outside the common canonical-path flow.
-        let pending = String::from(text.strip_prefix('/').unwrap_or(text));
+        let pending = String::from(if let Some(root) = root {
+            text[root.as_str().trim_end_matches('/').len()..].trim_start_matches('/')
+        } else {
+            text.strip_prefix('/').unwrap_or(text)
+        });
         self.resolve_pending(
             file_systems,
             ResolutionState {
-                resolved: PathOwned::root(),
+                resolved: root.map_or_else(PathOwned::root, |root| root.to_owned()),
                 pending,
                 links_followed: 0,
                 target_buffer,
@@ -284,10 +369,12 @@ impl VirtualFileSystem {
             allow_missing_final,
             user,
             task,
+            root,
         )
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn resolve_pending<'a>(
         &self,
         file_systems: &FileSystemsArray,
@@ -296,6 +383,7 @@ impl VirtualFileSystem {
         allow_missing_final: bool,
         user: UserIdentifier,
         task: TaskIdentifier,
+        root: Option<&Path>,
     ) -> Result<ResolvedPath<'a>> {
         const MAX_PATH_LENGTH: usize = 4096;
         const MAX_SYMLINKS: usize = 40;
@@ -333,6 +421,9 @@ impl VirtualFileSystem {
             .await?;
 
             if component == ".." {
+                if root.is_some_and(|root| resolved.as_str() == root.as_str()) {
+                    return Err(Error::PathEscapesRoot);
+                }
                 if let Some(parent) = resolved.go_parent() {
                     resolved = parent.to_owned();
                 }
@@ -380,6 +471,9 @@ impl VirtualFileSystem {
                     return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
                 }
 
+                if root.is_some() && target.starts_with('/') {
+                    return Err(Error::PathEscapesRoot);
+                }
                 if target.starts_with('/') {
                     resolved = PathOwned::root();
                 }
