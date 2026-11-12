@@ -1,0 +1,27 @@
+[package]
+name = "xila-stackful"
+version.workspace = true
+edition.workspace = true
+
+[features]
+# Preserve FP callee state for native soft-float/softfp callers using an FPU.
+fpu = []
+
+[lib]
+name = "stackful"
+
+[dependencies]
+embassy-futures = { workspace = true }
+critical-section = { workspace = true }
+
+[dev-dependencies]
+embassy-sync = { workspace = true }
+embassy-futures = { workspace = true }
+critical-section = { workspace = true, features = ["std"] }
+
+# Core task manager currently needs pointer atomics (smol_str/Arc).
+[target.'cfg(all(target_has_atomic = "ptr", not(any(target_arch = "xtensa", target_arch = "wasm32"))))'.dependencies]
+task = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+task = { workspace = true, features = ["test_harness"] }

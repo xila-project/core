@@ -16,6 +16,7 @@ rust-version = "1.90.0"
 repository = "https://github.com/xila-project/core"
 
 [workspace.dependencies]
+stackful = { package = "xila-stackful", path = "libraries/stackful" }
 xila = { path = "core" }
 xila_http = { path = "libraries/http", default-features = false }
 audio = { package = "xila-audio", path = "libraries/audio" }
@@ -88,6 +89,7 @@ mbrman = { version = "0.7", default-features = false }
 resolver = "3"
 default-members = ["core"]
 members = [
+  "libraries/stackful",
   "core",
   "libraries/testing",
   "libraries/shared",

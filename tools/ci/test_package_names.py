@@ -11,6 +11,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 EXPECTED_PACKAGE_NAMES = {
+    "libraries/stackful/Cargo.toml": "xila-stackful",
     "core/Cargo.toml": "xila",
     "devices/Cargo.toml": "xila-device",
     "drivers/core/Cargo.toml": "xila-drivers-core",
@@ -54,6 +55,7 @@ EXPECTED_BINARY_TARGETS = {
 }
 
 EXPECTED_LIBRARY_TARGETS = {
+    "libraries/stackful/Cargo.toml": "stackful",
     "subsystems/task/Cargo.toml": "task",
     "libraries/synchronization/Cargo.toml": "synchronization",
     "libraries/testing/Cargo.toml": "testing",
