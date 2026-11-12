@@ -26,6 +26,17 @@ fn main() {
             float = false;
         }
     }
+    // The RISC-V float frame saves single-precision registers. With the D
+    // extension they are 64 bits wide and `fsw` would drop their upper halves.
+    let double = features.split(',').any(|f| f == "d")
+        || flags.split(['\x1f', ',', '=']).any(|f| f == "+d")
+        || target.starts_with("riscv32imafd")
+        || target.starts_with("riscv32gc");
+    if arch == "riscv32" && double {
+        panic!(
+            "stackful: RISC-V double-precision (D extension) float registers are not supported yet"
+        );
+    }
     if arch == "arm"
         && !(target.starts_with("thumbv6m-")
             || target.starts_with("thumbv7em-")
