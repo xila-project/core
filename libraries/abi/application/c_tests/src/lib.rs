@@ -10,6 +10,8 @@ mod tests {
     unsafe extern "C" {
         fn application_c_round_trip(directory: *const Directory) -> i32;
         fn application_c_file_system(directory: *const Directory) -> i32;
+        fn startup_test_main(startup: *const XilaStartup) -> i32;
+        fn startup_empty_main(startup: *const XilaStartup) -> i32;
     }
 
     #[task::test]
@@ -48,6 +50,53 @@ mod tests {
             accuracy: None,
         })
         .unwrap();
+        unsafe {
+            assert_eq!(
+                run_main(startup_empty_main, &[], None, None, None, None),
+                -7
+            );
+            let path = file_system::Path::from_str("/startup-output");
+            let output = virtual_file_system::SynchronousFile::open(
+                vfs,
+                task,
+                path,
+                file_system::Flags::new(
+                    file_system::AccessFlags::READ_WRITE,
+                    Some(file_system::CreateFlags::Create),
+                    None,
+                ),
+            )
+            .unwrap();
+            assert_eq!(
+                run_main(
+                    startup_test_main,
+                    &["", "héllo"],
+                    None,
+                    Some(File::new(output)),
+                    None,
+                    Some(Directory::new(vfs, task, "/", 3).unwrap())
+                ),
+                23
+            );
+            let mut output = virtual_file_system::SynchronousFile::open(
+                vfs,
+                task,
+                path,
+                file_system::AccessFlags::Read.into(),
+            )
+            .unwrap();
+            let mut bytes = [0; 7];
+            assert_eq!(output.read(&mut bytes).unwrap(), 7);
+            assert_eq!(&bytes, b"startup");
+            let home_file = virtual_file_system::SynchronousFile::open(
+                vfs,
+                task,
+                file_system::Path::from_str("/startup-home"),
+                file_system::AccessFlags::Read.into(),
+            )
+            .unwrap();
+            drop(home_file);
+        }
         let directory = Directory::new(vfs, task, "/./", 3).unwrap().into_raw();
         unsafe {
             assert_eq!(application_c_round_trip(directory), 0);

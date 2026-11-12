@@ -1,6 +1,7 @@
 fn main() {
     cc::Build::new()
         .file("src/round_trip.c")
+        .file("src/startup.c")
         .include(std::env::var("DEP_XILA_ABI_APPLICATION_INCLUDE").unwrap())
         .flag("-std=c11")
         .flag("-Wall")
@@ -8,5 +9,5 @@ fn main() {
         .flag("-Werror")
         .flag("-pedantic")
         .compile("application_c_test");
-    println!("cargo:rerun-if-changed=src/round_trip.c");
+    println!("cargo:rerun-if-changed=src");
 }

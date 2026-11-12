@@ -7,7 +7,7 @@
 
 #define XILA_ABI_VERSION_MAJOR 0
 
-#define XILA_ABI_VERSION_MINOR 2
+#define XILA_ABI_VERSION_MINOR 3
 
 #define XILA_RIGHT_READ 1
 
@@ -119,6 +119,30 @@ typedef struct XilaStatistics {
   int64_t modification_nanoseconds;
   int64_t status_change_nanoseconds;
 } XilaStatistics;
+
+/**
+ * UTF-8 bytes, not NUL-terminated. A null data pointer is valid only at length zero.
+ */
+typedef struct XilaString {
+  const char *data;
+  size_t length;
+} XilaString;
+
+/**
+ * Host-owned startup data, valid only for the duration of the entry call.
+ * Any pointer may be null when not granted (with zero argument_count for arguments).
+ * Applications must not close, retain or transfer these objects; closing them is
+ * undefined behavior. Objects opened by the application must still be closed.
+ */
+typedef struct XilaStartup {
+  uint32_t size;
+  const struct XilaString *arguments;
+  size_t argument_count;
+  struct XilaFile *standard_input;
+  struct XilaFile *standard_output;
+  struct XilaFile *standard_error;
+  struct XilaDirectory *home;
+} XilaStartup;
 
 /**
  * Return the ABI version as (major << 16) | minor.

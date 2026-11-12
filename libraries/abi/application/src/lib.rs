@@ -6,6 +6,7 @@ mod directory;
 mod file;
 mod iterator;
 mod metadata;
+mod startup;
 mod status;
 mod time;
 
@@ -13,11 +14,12 @@ pub use directory::*;
 pub use file::*;
 pub use iterator::*;
 pub use metadata::*;
+pub use startup::*;
 pub use status::*;
 pub use time::*;
 
 pub const XILA_ABI_VERSION_MAJOR: u32 = 0;
-pub const XILA_ABI_VERSION_MINOR: u32 = 2;
+pub const XILA_ABI_VERSION_MINOR: u32 = 3;
 
 /// Return the ABI version as (major << 16) | minor.
 /// # Safety

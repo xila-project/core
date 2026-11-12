@@ -34,7 +34,7 @@ OutOfMemory.
 
 ## Functions
 
-- `xila_abi_version`: packed major/minor version, currently 0.2.
+- `xila_abi_version`: packed major/minor version, currently 0.3.
 - `xila_directory_open`, `xila_directory_close`: attenuated path capabilities.
 - `xila_file_open`, `xila_file_close`: typed owned file objects.
 - `xila_file_read`, `xila_file_write`: direct buffer I/O.
@@ -66,14 +66,13 @@ are private and must never be inspected or allocated by C callers.
 
 ## Future scope
 
-Tasks/threads, networking and graphics are not included. Program entry and handing initial capabilities to an application
-belong to the future native loader ([Core issue #334](https://github.com/xila-project/core/issues/334)).
+Tasks/threads, networking and graphics are not included. Dynamic loading belongs to the future native loader ([Core issue #334](https://github.com/xila-project/core/issues/334)).
 A POSIX compatibility layer can be built above this native interface later.
 
 ## Filesystem metadata and listings
 
 Metadata and listing require READ; namespace changes and resize require WRITE.
-File metadata requires a readable open; resize requires a writable open.
+File metadata works on any open file, like POSIX `fstat`; resize requires a writable open.
 `XILA_STATISTICS_NO_FOLLOW` inspects a final symlink; empty metadata/listing paths
 refer to the supplied directory. Symlink creation is deliberately not exposed.
 `XILA_REMOVE_DIRECTORY` permits directories in addition to files; without it,
@@ -105,3 +104,21 @@ capacity. Rewind resets the listing and any pending entry only on success.
 DirectoryNotEmpty (16) reports removal of a nonempty directory. Closing always
 consumes an iterator, even on error; closing null succeeds. The VFS supplies owned
 String names, so one allocation per entry is unavoidable; retries add none.
+
+## Linked application startup
+
+The C entry convention is `int32_t xila_main(const XilaStartup *startup)`.
+Firmware links applications statically today. Each application therefore exports
+its own unique entry name (for example `c_demo_main`), and the Rust host passes
+that function pointer to `run_main`; there is no required global `xila_main` symbol.
+Wasm remains the installable application format; this convention adds no loader.
+
+`XilaStartup.size` is the structure size in bytes; check it before reading fields.
+Arguments are UTF-8 `XilaString` pointer/length pairs, without NUL terminators.
+Any pointer may be null when not granted; a null argument array has count zero.
+The host owns the startup structure, strings and initial file/directory objects.
+They are borrowed only until the entry returns: do not retain or close them.
+Closing a startup object is undefined behavior. Close objects opened by the app.
+The Rust-only unsafe `run_main` helper consumes optional capabilities, lends them
+to the entry, and drops them after return (closing streams). It allocates only the
+argument descriptor array; no capability boxes or global handle table are needed.
