@@ -50,8 +50,22 @@ mod tests {
     }
     #[test]
     fn validation() {
-        for path in ["/absolute", "..", "a/../b", "x\0y", ""] {
+        for path in [
+            "/absolute",
+            "..",
+            "a/../b",
+            "x\0y",
+            "",
+            ".",
+            "./",
+            "./.",
+            "//",
+        ] {
             assert_eq!(canonical("/root", path, true), Err(Status::InvalidArgument));
+        }
+        // Without `entry`, the capability itself may be named (directory open, statistics).
+        for path in ["", ".", "./"] {
+            assert_eq!(canonical("/root", path, false).unwrap().as_str(), "/root");
         }
         assert_eq!(
             canonical("/root", "./a//./b/", true).unwrap().as_str(),
@@ -152,6 +166,21 @@ mod tests {
             core::mem::size_of::<DirectoryIterator>(),
             core::mem::size_of::<Statistics>()
         );
+    }
+    #[test]
+    fn kind_values_are_explicit() {
+        use file_system::Kind;
+        for (kind, value) in [
+            (Kind::File, XILA_KIND_FILE),
+            (Kind::Directory, XILA_KIND_DIRECTORY),
+            (Kind::BlockDevice, XILA_KIND_BLOCK_DEVICE),
+            (Kind::CharacterDevice, XILA_KIND_CHARACTER_DEVICE),
+            (Kind::Pipe, XILA_KIND_PIPE),
+            (Kind::Socket, XILA_KIND_SOCKET),
+            (Kind::SymbolicLink, XILA_KIND_SYMLINK),
+        ] {
+            assert_eq!(kind_value(kind), value);
+        }
     }
     #[test]
     fn mapping() {

@@ -24,8 +24,9 @@ pub unsafe extern "C" fn xila_directory_iterator_open(
     if directory.is_null() || output.is_null() {
         return Status::InvalidArgument;
     }
+    // SAFETY: checked non-null above; the caller guarantees the object is live.
+    let directory = unsafe { &*directory };
     let result = (|| {
-        let directory = unsafe { &*directory };
         let path = unsafe { directory.resolve(path, length, XILA_RIGHT_READ, false)? };
         let inner = SynchronousDirectory::open(directory.vfs, directory.task, &path)?;
         Ok::<_, Status>(DirectoryIterator {
@@ -93,7 +94,7 @@ pub unsafe extern "C" fn xila_directory_iterator_next(
     }
     unsafe {
         name_length.write(entry.name.len());
-        kind.write(entry.kind as u32);
+        kind.write(crate::kind_value(entry.kind));
     }
     iterator.pending = None;
     Status::Ok

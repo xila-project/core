@@ -15,7 +15,7 @@ only the joined path and returned object, in addition to underlying VFS costs.
 Directory capabilities bound filesystem authority: paths are UTF-8 pointer/length
 pairs, relative to the supplied capability. Absolute paths, parent components,
 embedded NUL and invalid UTF-8 are rejected; dot and empty components are
-canonicalized. Empty file paths are invalid. Child rights can only decrease.
+canonicalized. Where an entry is required (file open, create, remove, rename), a path naming the capability itself (`""`, `"."`) is invalid. Child rights can only decrease.
 Read needs the READ right; write, create, truncate and append need the WRITE
 right, and truncate or append are only valid with `XILA_OPEN_WRITE`. Native code remains trusted: pointers must be live, calls on each object serialized,
 and a path capability does not pin an inode against concurrent namespace changes.

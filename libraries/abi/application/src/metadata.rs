@@ -28,6 +28,20 @@ pub struct Statistics {
     pub status_change_nanoseconds: i64,
 }
 
+/// Map the internal kind to its published value; never rely on enum order.
+pub(crate) const fn kind_value(kind: file_system::Kind) -> u32 {
+    use file_system::Kind;
+    match kind {
+        Kind::File => XILA_KIND_FILE,
+        Kind::Directory => XILA_KIND_DIRECTORY,
+        Kind::BlockDevice => XILA_KIND_BLOCK_DEVICE,
+        Kind::CharacterDevice => XILA_KIND_CHARACTER_DEVICE,
+        Kind::Pipe => XILA_KIND_PIPE,
+        Kind::Socket => XILA_KIND_SOCKET,
+        Kind::SymbolicLink => XILA_KIND_SYMLINK,
+    }
+}
+
 impl TryFrom<file_system::Statistics> for Statistics {
     type Error = Status;
     fn try_from(value: file_system::Statistics) -> Result<Self, Status> {
@@ -39,7 +53,7 @@ impl TryFrom<file_system::Statistics> for Statistics {
         };
         Ok(Self {
             size: size_of::<Self>() as u32,
-            kind: value.kind as u32,
+            kind: kind_value(value.kind),
             permissions: u32::from(value.permissions.as_u16()),
             owner_user: u32::from(value.user.as_u16()),
             owner_group: u32::from(value.group.as_u16()),
@@ -90,18 +104,13 @@ pub unsafe extern "C" fn xila_file_get_statistics(
     if file.is_null() {
         return Status::InvalidArgument;
     }
+    // SAFETY: checked non-null above; the caller guarantees the object is live.
+    let file = unsafe { &mut *file };
     let result = (|| {
         unsafe {
             validate_output(output)?;
         }
-        let file = unsafe { &mut *file };
-        if !file
-            .inner
-            .get_access()?
-            .contains(file_system::AccessFlags::Read)
-        {
-            return Err(Status::PermissionDenied);
-        }
+        // Metadata is not file content: like POSIX fstat, any open file may be queried.
         Statistics::try_from(file.inner.get_statistics()?)
     })();
     match result {
@@ -131,11 +140,12 @@ pub unsafe extern "C" fn xila_directory_get_statistics(
     if directory.is_null() || flags & !XILA_STATISTICS_NO_FOLLOW != 0 {
         return Status::InvalidArgument;
     }
+    // SAFETY: checked non-null above; the caller guarantees the object is live.
+    let directory = unsafe { &*directory };
     let result = (|| {
         unsafe {
             validate_output(output)?;
         }
-        let directory = unsafe { &*directory };
         let path = unsafe { directory.resolve(path, length, XILA_RIGHT_READ, false)? };
         let value = if flags & XILA_STATISTICS_NO_FOLLOW != 0 {
             task::block_on(

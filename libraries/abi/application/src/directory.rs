@@ -64,11 +64,14 @@ pub(crate) fn validate_rights(rights: u32) -> Result<(), Status> {
         Ok(())
     }
 }
-pub(crate) fn canonical(base: &str, path: &str, file: bool) -> Result<PathOwned, Status> {
+/// Join `path` below `base`. With `entry`, the path must name an entry below the
+/// capability, never the capability itself (`""`, `"."`, `"./"`), so that it cannot
+/// be opened as a file, removed or renamed.
+pub(crate) fn canonical(base: &str, path: &str, entry: bool) -> Result<PathOwned, Status> {
     if path.starts_with('/')
         || path.contains('\0')
-        || (file && path.is_empty())
         || path.split('/').any(|part| part == "..")
+        || (entry && path.split('/').all(|part| part.is_empty() || part == "."))
     {
         return Err(Status::InvalidArgument);
     }
@@ -175,8 +178,9 @@ pub unsafe extern "C" fn xila_directory_create(
     if directory.is_null() {
         return Status::InvalidArgument;
     }
+    // SAFETY: checked non-null above; the caller guarantees the object is live.
+    let directory = unsafe { &*directory };
     let result = (|| {
-        let directory = unsafe { &*directory };
         let path = unsafe { directory.resolve(path, length, XILA_RIGHT_WRITE, true)? };
         task::block_on(directory.vfs.create_directory(directory.task, &path)).map_err(Status::from)
     })();
@@ -199,8 +203,9 @@ pub unsafe extern "C" fn xila_directory_remove(
     if directory.is_null() || flags & !XILA_REMOVE_DIRECTORY != 0 {
         return Status::InvalidArgument;
     }
+    // SAFETY: checked non-null above; the caller guarantees the object is live.
+    let directory = unsafe { &*directory };
     let result = (|| {
-        let directory = unsafe { &*directory };
         let path = unsafe { directory.resolve(path, length, XILA_RIGHT_WRITE, true)? };
         // The VFS has a single remove primitive. A caller must explicitly permit directories.
         if flags & XILA_REMOVE_DIRECTORY == 0
@@ -235,8 +240,9 @@ pub unsafe extern "C" fn xila_directory_rename(
     if from.is_null() || to.is_null() {
         return Status::InvalidArgument;
     }
+    // SAFETY: checked non-null above; the caller guarantees the objects are live.
+    let (from, to) = unsafe { (&*from, &*to) };
     let result = (|| {
-        let (from, to) = unsafe { (&*from, &*to) };
         let from_path = unsafe { from.resolve(from_path, from_length, XILA_RIGHT_WRITE, true)? };
         let to_path = unsafe { to.resolve(to_path, to_length, XILA_RIGHT_WRITE, true)? };
         if !core::ptr::eq(from.vfs, to.vfs) || from.task != to.task {
