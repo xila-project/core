@@ -45,7 +45,7 @@ pub fn main() {
         enumeration: enumeration_configuration,
         parse: cbindgen::ParseConfig {
             expand: cbindgen::ParseExpandConfig {
-                crates: vec!["abi_definitions".to_string()],
+                crates: vec!["xila-abi-definitions".to_string()],
                 ..Default::default()
             },
             ..Default::default()
