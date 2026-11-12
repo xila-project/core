@@ -200,7 +200,7 @@ pub unsafe extern "C" fn xila_tcp_connect(
     if connection.is_null() {
         return Status::InvalidArgument;
     }
-    status((|| unsafe {
+    let result = (|| unsafe {
         let network = input(network)?;
         let endpoint = input(address)?.endpoint()?;
         network.require(XILA_NETWORK_CONNECT)?;
@@ -237,9 +237,16 @@ pub unsafe extern "C" fn xila_tcp_connect(
             block_on(inner.close_forced());
             return Err(error.into());
         }
-        connection.write(Tcp { inner }.into_raw());
-        Ok(())
-    })())
+        Ok(Tcp { inner }.into_raw())
+    })();
+    match result {
+        Ok(value) => {
+            // SAFETY: checked non-null at the top of this function.
+            unsafe { connection.write(value) };
+            Status::Ok
+        }
+        Err(error) => error,
+    }
 }
 
 /// Bind and start a single-slot TCP listener. Port zero is rejected by Core.
@@ -257,7 +264,7 @@ pub unsafe extern "C" fn xila_tcp_listen(
     if listener.is_null() {
         return Status::InvalidArgument;
     }
-    status((|| unsafe {
+    let result = (|| unsafe {
         let network = input(network)?;
         let address = *input(address)?;
         address.endpoint()?;
@@ -267,16 +274,21 @@ pub unsafe extern "C" fn xila_tcp_listen(
             block_on(inner.close_forced());
             return Err(error);
         }
-        listener.write(
-            TcpListener {
-                network: Network::new(network.manager, u32::from(network.rights))?,
-                address,
-                inner,
-            }
-            .into_raw(),
-        );
-        Ok(())
-    })())
+        Ok(TcpListener {
+            network: Network::new(network.manager, u32::from(network.rights))?,
+            address,
+            inner,
+        }
+        .into_raw())
+    })();
+    match result {
+        Ok(value) => {
+            // SAFETY: checked non-null at the top of this function.
+            unsafe { listener.write(value) };
+            Status::Ok
+        }
+        Err(error) => error,
+    }
 }
 
 /// Wait for a connection and replenish the listener. Run the interface runner independently.
@@ -293,7 +305,7 @@ pub unsafe extern "C" fn xila_tcp_accept(
     if connection.is_null() {
         return Status::InvalidArgument;
     }
-    status((|| unsafe {
+    let result = (|| unsafe {
         let listener = object(listener)?;
         listener.network.require(XILA_NETWORK_LISTEN)?;
         let endpoint = listener.address.endpoint()?;
@@ -311,9 +323,16 @@ pub unsafe extern "C" fn xila_tcp_accept(
             return Err(error);
         }
         let inner = core::mem::replace(&mut listener.inner, replacement);
-        connection.write(Tcp { inner }.into_raw());
-        Ok(())
-    })())
+        Ok(Tcp { inner }.into_raw())
+    })();
+    match result {
+        Ok(value) => {
+            // SAFETY: checked non-null at the top of this function.
+            unsafe { connection.write(value) };
+            Status::Ok
+        }
+        Err(error) => error,
+    }
 }
 
 /// Abort and release the socket and its buffers. Null succeeds; queued data may be lost.
@@ -381,7 +400,7 @@ pub unsafe extern "C" fn xila_tcp_send(
     if count.is_null() {
         return Status::InvalidArgument;
     }
-    status((|| unsafe {
+    let result = (|| unsafe {
         let socket = object(socket)?;
         let buffer = read_buffer(buffer, size)?;
         let n = if size == 0 {
@@ -389,9 +408,16 @@ pub unsafe extern "C" fn xila_tcp_send(
         } else {
             block_on(socket.inner.write(buffer)).map_err(Status::from)?
         };
-        count.write(n);
-        Ok(())
-    })())
+        Ok(n)
+    })();
+    match result {
+        Ok(value) => {
+            // SAFETY: checked non-null at the top of this function.
+            unsafe { count.write(value) };
+            Status::Ok
+        }
+        Err(error) => error,
+    }
 }
 
 /// Blocking direct-buffer I/O. Zero size permits null; send may be partial; receive zero means EOF.
@@ -410,7 +436,7 @@ pub unsafe extern "C" fn xila_tcp_receive(
     if count.is_null() {
         return Status::InvalidArgument;
     }
-    status((|| unsafe {
+    let result = (|| unsafe {
         let socket = object(socket)?;
         let buffer = write_buffer(buffer, size)?;
         let n = if size == 0 {
@@ -418,9 +444,16 @@ pub unsafe extern "C" fn xila_tcp_receive(
         } else {
             block_on(socket.inner.read(buffer)).map_err(Status::from)?
         };
-        count.write(n);
-        Ok(())
-    })())
+        Ok(n)
+    })();
+    match result {
+        Ok(value) => {
+            // SAFETY: checked non-null at the top of this function.
+            unsafe { count.write(value) };
+            Status::Ok
+        }
+        Err(error) => error,
+    }
 }
 
 /// Read the connection endpoint.
@@ -437,14 +470,21 @@ pub unsafe extern "C" fn xila_tcp_local_address(
     if address.is_null() {
         return Status::InvalidArgument;
     }
-    status((|| unsafe {
+    let result = (|| unsafe {
         let socket = input(socket)?;
         let (ip, port) = block_on(socket.inner.get_local_endpoint())
             .map_err(Status::from)?
             .ok_or(Status::NotConnected)?;
-        address.write(NetworkAddress::new(ip, port));
-        Ok(())
-    })())
+        Ok(NetworkAddress::new(ip, port))
+    })();
+    match result {
+        Ok(value) => {
+            // SAFETY: checked non-null at the top of this function.
+            unsafe { address.write(value) };
+            Status::Ok
+        }
+        Err(error) => error,
+    }
 }
 
 /// Read the connection endpoint.
@@ -461,14 +501,21 @@ pub unsafe extern "C" fn xila_tcp_peer_address(
     if address.is_null() {
         return Status::InvalidArgument;
     }
-    status((|| unsafe {
+    let result = (|| unsafe {
         let socket = input(socket)?;
         let (ip, port) = block_on(socket.inner.get_remote_endpoint())
             .map_err(Status::from)?
             .ok_or(Status::NotConnected)?;
-        address.write(NetworkAddress::new(ip, port));
-        Ok(())
-    })())
+        Ok(NetworkAddress::new(ip, port))
+    })();
+    match result {
+        Ok(value) => {
+            // SAFETY: checked non-null at the top of this function.
+            unsafe { address.write(value) };
+            Status::Ok
+        }
+        Err(error) => error,
+    }
 }
 
 /// Bind a UDP socket. Port zero is rejected by Core; one datagram per direction is buffered.
@@ -486,7 +533,7 @@ pub unsafe extern "C" fn xila_udp_bind(
     if socket.is_null() {
         return Status::InvalidArgument;
     }
-    status((|| unsafe {
+    let result = (|| unsafe {
         let network = input(network)?;
         let endpoint = input(address)?.endpoint()?;
         network.require(XILA_NETWORK_LISTEN)?;
@@ -503,15 +550,20 @@ pub unsafe extern "C" fn xila_udp_bind(
             block_on(inner.close());
             return Err(Status::InvalidArgument);
         }
-        socket.write(
-            Udp {
-                inner,
-                rights: network.rights,
-            }
-            .into_raw(),
-        );
-        Ok(())
-    })())
+        Ok(Udp {
+            inner,
+            rights: network.rights,
+        }
+        .into_raw())
+    })();
+    match result {
+        Ok(value) => {
+            // SAFETY: checked non-null at the top of this function.
+            unsafe { socket.write(value) };
+            Status::Ok
+        }
+        Err(error) => error,
+    }
 }
 
 /// Release a UDP socket. Null succeeds.
@@ -547,7 +599,7 @@ pub unsafe extern "C" fn xila_udp_send_to(
     if count.is_null() {
         return Status::InvalidArgument;
     }
-    status((|| unsafe {
+    let result = (|| unsafe {
         let socket = object(socket)?;
         let endpoint = input(address)?.endpoint()?;
         let buffer = read_buffer(buffer, size)?;
@@ -564,9 +616,16 @@ pub unsafe extern "C" fn xila_udp_send_to(
                     smoltcp::socket::udp::SendError::Unaddressable => Status::HostUnreachable,
                 })
         }))?;
-        count.write(size);
-        Ok(())
-    })())
+        Ok(size)
+    })();
+    match result {
+        Ok(value) => {
+            // SAFETY: checked non-null at the top of this function.
+            unsafe { count.write(value) };
+            Status::Ok
+        }
+        Err(error) => error,
+    }
 }
 
 /// Nonblocking datagram receive. Overflow preserves the datagram; outputs change only on success.
@@ -586,7 +645,7 @@ pub unsafe extern "C" fn xila_udp_receive_from(
     if count.is_null() || address.is_null() {
         return Status::InvalidArgument;
     }
-    status((|| {
+    let result = (|| {
         unsafe {
             let socket = object(socket)?;
             let buffer = write_buffer(buffer, size)?;
@@ -598,14 +657,26 @@ pub unsafe extern "C" fn xila_udp_receive_from(
                 }
                 s.recv_slice(buffer).map_err(|_| Status::InputOutput)
             }))?;
-            address.write(NetworkAddress::new(
-                IpAddress::from_smoltcp(&endpoint.endpoint.addr),
-                Port::new(endpoint.endpoint.port),
-            ));
-            count.write(n);
-            Ok(())
+            Ok((
+                n,
+                NetworkAddress::new(
+                    IpAddress::from_smoltcp(&endpoint.endpoint.addr),
+                    Port::new(endpoint.endpoint.port),
+                ),
+            ))
         }
-    })())
+    })();
+    match result {
+        Ok((n, endpoint)) => {
+            // SAFETY: both outputs were checked non-null at the top of this function.
+            unsafe {
+                address.write(endpoint);
+                count.write(n);
+            }
+            Status::Ok
+        }
+        Err(error) => error,
+    }
 }
 
 /// Resolve one address family synchronously. Count is capacity in/results out; capacity zero queries size. Overflow leaves outputs unchanged. DNS allocates inside Core.
@@ -622,9 +693,13 @@ pub unsafe extern "C" fn xila_network_resolve(
     addresses: *mut NetworkAddress,
     count: *mut usize,
 ) -> Status {
-    status((|| unsafe {
+    // Checked here, outside the closure, so the null guard is visible to analysis.
+    if count.is_null() {
+        return Status::InvalidArgument;
+    }
+    let result = (|| unsafe {
         let network = input(network)?;
-        let capacity = *input(count)?;
+        let capacity = *count;
         if capacity > isize::MAX as usize / core::mem::size_of::<NetworkAddress>()
             || (capacity != 0 && addresses.is_null())
         {
@@ -650,8 +725,7 @@ pub unsafe extern "C" fn xila_network_resolve(
         };
         let needed = resolved.iter().filter(matches).count();
         if capacity == 0 {
-            count.write(needed);
-            return Ok(());
+            return Ok(needed);
         }
         if needed > capacity {
             return Err(Status::Overflow);
@@ -661,9 +735,16 @@ pub unsafe extern "C" fn xila_network_resolve(
                 .add(index)
                 .write(NetworkAddress::new(ip.clone(), Port::new(0)));
         }
-        count.write(needed);
-        Ok(())
-    })())
+        Ok(needed)
+    })();
+    match result {
+        Ok(value) => {
+            // SAFETY: checked non-null at the top of this function.
+            unsafe { count.write(value) };
+            Status::Ok
+        }
+        Err(error) => error,
+    }
 }
 
 #[cfg(test)]
