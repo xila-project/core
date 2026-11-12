@@ -35,6 +35,8 @@ pub enum Error {
     DelimiterNotFound,
     Orphaned,
     PathEscapesRoot,
+    /// A rename or link would cross a mount boundary.
+    CrossDevice,
 }
 
 impl Error {
@@ -117,6 +119,7 @@ impl Display for Error {
             Error::FailedToWrite => write!(f, "{}", t!("errors.failed_to_write")),
             Error::DelimiterNotFound => write!(f, "{}", t!("errors.delimiter_not_found")),
             Error::PathEscapesRoot => write!(f, "Path escapes its root"),
+            Error::CrossDevice => write!(f, "Operation crosses file systems"),
             Error::Orphaned => write!(f, "{}", t!("errors.orphaned")),
         }
     }

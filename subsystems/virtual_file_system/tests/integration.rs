@@ -1234,6 +1234,35 @@ async fn beneath_resolution_confines_links_and_all_namespace_operations() {
             .await
             .unwrap();
     }
+    vfs.set_times_beneath(
+        task,
+        &Path::new("sub"),
+        true,
+        root,
+        Some(file_system::Time::new(2)),
+        Some(file_system::Time::new(3)),
+    )
+    .await
+    .unwrap();
+    let stats = vfs
+        .get_statistics_beneath(task, &Path::new("sub"), true, root)
+        .await
+        .unwrap();
+    assert_eq!(stats.modification, file_system::Time::new(3));
+    for path in ["absolute", "parent", "../outside", "chain/file"] {
+        assert_eq!(
+            vfs.set_times_beneath(
+                task,
+                &Path::new(path),
+                true,
+                root,
+                Some(file_system::Time::new(4)),
+                None
+            )
+            .await,
+            Err(Error::PathEscapesRoot)
+        );
+    }
     for path in [
         "absolute",
         "parent",
@@ -1376,4 +1405,212 @@ async fn beneath_resolution_confines_links_and_all_namespace_operations() {
     });
     std::println!("confined handle allocator requests: read={reads}, write={writes}");
     assert_eq!((reads, writes), (0, 0));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn hard_links_stay_beneath_their_roots_and_report_missing_backend_support() {
+    use virtual_file_system::Error;
+    let (task, vfs) = initialize().await;
+    let root = Path::new("/sandbox");
+    for path in ["/sandbox", "/sandbox/dir", "/outside"] {
+        vfs.create_directory(task, &path).await.unwrap();
+    }
+    File::write_to_path(vfs, task, "/sandbox/file", b"data")
+        .await
+        .unwrap();
+    for (name, target) in [("absolute", "/outside"), ("parent", "../outside")] {
+        let link = format!("/sandbox/{name}");
+        vfs.create_symlink(task, Path::new(target), Path::new(&link))
+            .await
+            .unwrap();
+    }
+    for (existing, new) in [
+        ("absolute/file", "new"),
+        ("parent/file", "new"),
+        ("../outside", "new"),
+        ("/outside", "new"),
+        ("file", "absolute/new"),
+        ("file", "../new"),
+        ("file", "/new"),
+    ] {
+        assert_eq!(
+            vfs.link_beneath(
+                task,
+                &Path::new(existing),
+                true,
+                &Path::new(new),
+                root,
+                root
+            )
+            .await,
+            Err(Error::PathEscapesRoot),
+            "{existing} -> {new}"
+        );
+    }
+    assert!(matches!(
+        vfs.link_beneath(
+            task,
+            &Path::new("missing"),
+            true,
+            &Path::new("new"),
+            root,
+            root
+        )
+        .await,
+        Err(Error::FileSystem(file_system::Error::NotFound))
+    ));
+    assert!(matches!(
+        vfs.link_beneath(task, &Path::new("dir"), true, &Path::new("new"), root, root)
+            .await,
+        Err(Error::FileSystem(file_system::Error::IsDirectory))
+    ));
+    assert_eq!(
+        vfs.link_beneath(
+            task,
+            &Path::new("file"),
+            true,
+            &Path::new("dir"),
+            root,
+            root
+        )
+        .await,
+        Err(Error::AlreadyExists)
+    );
+    // LittleFS has no hard links: a valid request must say so instead of
+    // pretending to succeed or silently copying.
+    assert_eq!(
+        vfs.link_beneath(
+            task,
+            &Path::new("file"),
+            true,
+            &Path::new("new"),
+            root,
+            root
+        )
+        .await,
+        Err(Error::FileSystem(file_system::Error::UnsupportedOperation))
+    );
+    assert!(
+        vfs.get_statistics_beneath(task, &Path::new("new"), false, root)
+            .await
+            .is_err()
+    );
+    // A directory cannot be renamed into its own subtree, nor onto itself plus a suffix
+    // that merely shares its name prefix.
+    vfs.create_directory_beneath(task, &Path::new("dir/inner"), root)
+        .await
+        .unwrap();
+    assert_eq!(
+        vfs.rename_beneath(
+            task,
+            &Path::new("dir"),
+            &Path::new("dir/inner/moved"),
+            root,
+            root
+        )
+        .await,
+        Err(Error::FileSystem(file_system::Error::InvalidParameter))
+    );
+    assert_eq!(
+        vfs.rename_beneath(task, &Path::new("dir"), &Path::new("dir/moved"), root, root)
+            .await,
+        Err(Error::FileSystem(file_system::Error::InvalidParameter))
+    );
+    vfs.rename_beneath(task, &Path::new("dir"), &Path::new("dir2"), root, root)
+        .await
+        .unwrap();
+    vfs.rename_beneath(task, &Path::new("dir2"), &Path::new("dir"), root, root)
+        .await
+        .unwrap();
+    assert!(
+        vfs.get_statistics_beneath(task, &Path::new("dir/inner"), false, root)
+            .await
+            .is_ok()
+    );
+    // Neither a rename nor a link may cross a mount boundary.
+    mount_test_filesystem(vfs, task, "/sandbox/mounted").await;
+    assert_eq!(
+        vfs.link_beneath(
+            task,
+            &Path::new("file"),
+            true,
+            &Path::new("mounted/new"),
+            root,
+            root
+        )
+        .await,
+        Err(Error::CrossDevice)
+    );
+    assert_eq!(
+        vfs.rename_beneath(
+            task,
+            &Path::new("file"),
+            &Path::new("mounted/new"),
+            root,
+            root
+        )
+        .await,
+        Err(Error::CrossDevice)
+    );
+    assert_eq!(
+        vfs.get_statistics_beneath(task, &Path::new("file"), false, root)
+            .await
+            .unwrap()
+            .size,
+        4
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn synchronous_handles_support_offset_io_timestamps_and_status_flags() {
+    let (task, vfs) = initialize().await;
+    let mut file = vfs
+        .open(
+            &"/file",
+            Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None),
+            task,
+        )
+        .await
+        .unwrap()
+        .into_synchronous_file();
+    assert_eq!(file.write(b"0123456789").unwrap(), 10);
+    file.set_position(&Position::Start(2)).unwrap();
+
+    // Offset I/O must neither use nor move the shared cursor, and the cursor
+    // reported afterwards must not be the backend's private position.
+    assert_eq!(file.write_at(b"ab", 8).unwrap(), 2);
+    assert_eq!(file.set_position(&Position::Current(0)).unwrap(), 2);
+    let mut bytes = [0; 4];
+    assert_eq!(file.read_at(&mut bytes, 6).unwrap(), 4);
+    assert_eq!(&bytes, b"67ab");
+    assert_eq!(file.set_position(&Position::Current(0)).unwrap(), 2);
+    assert_eq!(file.set_position(&Position::Current(3)).unwrap(), 5);
+    assert_eq!(file.set_position(&Position::Current(-5)).unwrap(), 0);
+    assert!(file.set_position(&Position::Current(-1)).is_err());
+    assert_eq!(file.set_position(&Position::Current(0)).unwrap(), 0);
+
+    // Handle timestamps: None leaves a field untouched.
+    file.set_times(Some(file_system::Time::new(7)), None)
+        .unwrap();
+    let statistics = file.get_statistics().unwrap();
+    assert_eq!(statistics.access, file_system::Time::new(7));
+    file.set_times(None, Some(file_system::Time::new(9)))
+        .unwrap();
+    let statistics = file.get_statistics().unwrap();
+    assert_eq!(statistics.access, file_system::Time::new(7));
+    assert_eq!(statistics.modification, file_system::Time::new(9));
+
+    // Status flags: append moves every write to the end of the file.
+    file.set_state(StateFlags::Append).unwrap();
+    assert_eq!(file.get_state().unwrap(), StateFlags::Append);
+    file.set_position(&Position::Start(0)).unwrap();
+    assert_eq!(file.write(b"Z").unwrap(), 1);
+    assert_eq!(file.get_statistics().unwrap().size, 11);
+    file.set_state(StateFlags::empty()).unwrap();
+    file.set_position(&Position::Start(0)).unwrap();
+    file.write(b"Y").unwrap();
+    assert_eq!(file.get_statistics().unwrap().size, 11);
+    assert!(file.set_state(StateFlags::Synchronous).is_err());
 }

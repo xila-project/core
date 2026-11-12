@@ -74,6 +74,17 @@ impl<'a> SynchronousFile<'a> {
             .ok_or(Error::UnsupportedOperation)?;
         let context = &mut self.context;
         self.cursor.update(|current| {
+            let absolute;
+            let position = if let Position::Current(delta) = position {
+                absolute = Position::Start(
+                    current
+                        .checked_add_signed(*delta)
+                        .ok_or(Error::InvalidParameter)?,
+                );
+                &absolute
+            } else {
+                position
+            };
             let next = operations.set_position(context, current, position)?;
             Ok((next, next))
         })
@@ -196,12 +207,21 @@ impl<'a> SynchronousFile<'a> {
         if !self.flags.get_access().contains(AccessFlags::Write) {
             return Err(Error::InvalidMode);
         }
+        // Backends opened with `Append` position writes themselves. A status
+        // flag set later has to be honored here; devices that cannot report a
+        // size have no end to append to and keep the cursor.
+        let append_position = if self.flags.get_state().contains(StateFlags::Append) {
+            self.get_statistics().ok().map(|statistics| statistics.size)
+        } else {
+            None
+        };
         let operations = self
             .item
             .as_base_operations()
             .ok_or(Error::UnsupportedOperation)?;
         let context = &mut self.context;
         self.cursor.update(|position| {
+            let position = append_position.unwrap_or(position);
             let count = operations.write_sync(context, buffer, position)?;
             Ok((count, position + count as Size))
         })
@@ -331,6 +351,46 @@ impl<'a> SynchronousFile<'a> {
         Ok(())
     }
 
+    /// Update timestamps through retained handle authority.
+    pub fn set_times(
+        &mut self,
+        access: Option<file_system::Time>,
+        modification: Option<file_system::Time>,
+    ) -> Result<()> {
+        let mut attributes = Attributes::new();
+        if let Some(time) = access {
+            attributes = attributes.set_access(time);
+        }
+        if let Some(time) = modification {
+            attributes = attributes.set_modification(time);
+        }
+        self.set_metadata(&attributes)
+    }
+
+    /// Read at an explicit offset, leaving the shared cursor unchanged.
+    pub fn read_at(&mut self, buffer: &mut [u8], offset: Size) -> Result<usize> {
+        if !self.flags.get_access().contains(AccessFlags::Read) {
+            return Err(Error::InvalidMode);
+        }
+        Ok(self
+            .item
+            .as_base_operations()
+            .ok_or(Error::UnsupportedOperation)?
+            .read_sync(&mut self.context, buffer, offset)?)
+    }
+
+    /// Write at an explicit offset, leaving the shared cursor unchanged.
+    pub fn write_at(&mut self, buffer: &[u8], offset: Size) -> Result<usize> {
+        if !self.flags.get_access().contains(AccessFlags::Write) {
+            return Err(Error::InvalidMode);
+        }
+        Ok(self
+            .item
+            .as_base_operations()
+            .ok_or(Error::UnsupportedOperation)?
+            .write_sync(&mut self.context, buffer, offset)?)
+    }
+
     pub fn set_owner(
         &mut self,
         user: Option<UserIdentifier>,
@@ -422,6 +482,15 @@ impl<'a> SynchronousFile<'a> {
 
     pub fn get_access(&self) -> Result<AccessFlags> {
         Ok(self.flags.get_access())
+    }
+
+    /// Set status flags supported by synchronous handles.
+    pub fn set_state(&mut self, state: StateFlags) -> Result<()> {
+        if state.intersects(StateFlags::Synchronous | StateFlags::SynchronousDataOnly) {
+            return Err(Error::UnsupportedOperation);
+        }
+        self.flags = self.flags.set_status(state);
+        Ok(())
     }
 
     pub fn get_state(&self) -> Result<StateFlags> {

@@ -10,6 +10,14 @@ pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOper
         Err(crate::Error::UnsupportedOperation)
     }
 
+    /// Create `new` as an additional directory entry for the existing,
+    /// non-directory object at `existing`, sharing its data. Backends without
+    /// hard links (including LittleFS) keep the default implementation, which
+    /// reports [`crate::Error::UnsupportedOperation`].
+    fn link(&self, _existing: &Path, _new: &Path) -> Result<()> {
+        Err(crate::Error::UnsupportedOperation)
+    }
+
     /// Copy the stored target of a symbolic link into a caller-owned buffer.
     /// This operation must inspect the final directory entry without following it.
     fn read_symlink(&self, _link: &Path, _buffer: &mut [u8]) -> Result<usize> {
