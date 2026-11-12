@@ -7,11 +7,16 @@
 
 #define XILA_ABI_VERSION_MAJOR 0
 
-#define XILA_ABI_VERSION_MINOR 1
+#define XILA_ABI_VERSION_MINOR 2
 
 #define XILA_RIGHT_READ 1
 
 #define XILA_RIGHT_WRITE 2
+
+/**
+ * Allow removing directories as well as files. Removal never follows the final link.
+ */
+#define XILA_REMOVE_DIRECTORY 1
 
 #define XILA_OPEN_READ 1
 
@@ -33,8 +38,25 @@
 
 #define XILA_SEEK_END 2
 
+#define XILA_STATISTICS_NO_FOLLOW 1
+
+#define XILA_KIND_FILE 1
+
+#define XILA_KIND_DIRECTORY 2
+
+#define XILA_KIND_BLOCK_DEVICE 3
+
+#define XILA_KIND_CHARACTER_DEVICE 4
+
+#define XILA_KIND_PIPE 5
+
+#define XILA_KIND_SOCKET 6
+
+#define XILA_KIND_SYMLINK 7
+
 /**
- * Stable error values; output arguments are written only on success.
+ * Stable error values; outputs change only on success except the documented
+ * BufferTooSmall required listing length.
  */
 enum XilaStatus
 #if __STDC_VERSION__ >= 202311L
@@ -55,6 +77,9 @@ enum XilaStatus
   XILA_STATUS_OVERFLOW = 11,
   XILA_STATUS_UNAVAILABLE = 12,
   XILA_STATUS_INPUT_OUTPUT = 13,
+  XILA_STATUS_END = 14,
+  XILA_STATUS_BUFFER_TOO_SMALL = 15,
+  XILA_STATUS_DIRECTORY_NOT_EMPTY = 16,
 };
 #if __STDC_VERSION__ >= 202311L
 typedef enum XilaStatus XilaStatus;
@@ -68,9 +93,32 @@ typedef uint32_t XilaStatus;
 typedef struct XilaDirectory XilaDirectory;
 
 /**
+ * Opaque owned listing with at most one pending VFS entry for buffer retries.
+ */
+typedef struct XilaDirectoryIterator XilaDirectoryIterator;
+
+/**
  * Opaque owned file. No handle lookup or buffer allocation is required for I/O.
  */
 typedef struct XilaFile XilaFile;
+
+/**
+ * Versioned output: initialize size to sizeof(XilaStatistics) before each call.
+ */
+typedef struct XilaStatistics {
+  uint32_t size;
+  uint32_t kind;
+  uint32_t permissions;
+  uint32_t owner_user;
+  uint32_t owner_group;
+  uint32_t reserved;
+  uint64_t file_size;
+  uint64_t link_count;
+  uint64_t inode;
+  int64_t access_nanoseconds;
+  int64_t modification_nanoseconds;
+  int64_t status_change_nanoseconds;
+} XilaStatistics;
 
 /**
  * Return the ABI version as (major << 16) | minor.
@@ -97,6 +145,38 @@ XilaStatus xila_directory_open(const struct XilaDirectory *parent,
  * Non-null pointer must be owned, live, and released exactly once; no concurrent calls.
  */
 void xila_directory_close(struct XilaDirectory *directory);
+
+/**
+ * Create a relative directory with the WRITE right.
+ * # Safety
+ * Directory must be live; path readable for length. Calls must be serialized.
+ */
+XilaStatus xila_directory_create(const struct XilaDirectory *directory,
+                                 const char *path,
+                                 size_t length);
+
+/**
+ * Remove a relative entry; XILA_REMOVE_DIRECTORY permits directory removal.
+ * # Safety
+ * Directory must be live; path readable for length. Calls must be serialized.
+ */
+XilaStatus xila_directory_remove(const struct XilaDirectory *directory,
+                                 const char *path,
+                                 size_t length,
+                                 uint32_t flags);
+
+/**
+ * Rename an entry using two WRITE capabilities with the same VFS and task.
+ * Existing destinations follow the underlying filesystem's replacement semantics.
+ * # Safety
+ * Objects must be live and paths readable for their lengths. Calls must be serialized.
+ */
+XilaStatus xila_directory_rename(const struct XilaDirectory *from,
+                                 const char *from_path,
+                                 size_t from_length,
+                                 const struct XilaDirectory *to,
+                                 const char *to_path,
+                                 size_t to_length);
 
 /**
  * Open a file relative to a directory with validated XILA_OPEN flags.
@@ -150,6 +230,73 @@ XilaStatus xila_file_flush(struct XilaFile *file);
  * Non-null file must be owned and released exactly once, with no concurrent calls.
  */
 XilaStatus xila_file_close(struct XilaFile *file);
+
+/**
+ * Resize a writable file without changing its cursor.
+ * # Safety
+ * File must be live and exclusively accessed.
+ */
+XilaStatus xila_file_set_size(struct XilaFile *file, uint64_t size);
+
+/**
+ * Open a relative directory for listing with READ authority; empty means itself.
+ * # Safety
+ * Directory must be live; path readable for length. Output must be aligned,
+ * writable and disjoint from inputs. Calls must be serialized.
+ */
+XilaStatus xila_directory_iterator_open(const struct XilaDirectory *directory,
+                                        const char *path,
+                                        size_t length,
+                                        struct XilaDirectoryIterator **output);
+
+/**
+ * Copy a name without a trailing NUL, skipping dot entries. End leaves outputs
+ * unchanged. BufferTooSmall writes only required name_length and retains the entry.
+ * # Safety
+ * Iterator must be live and exclusively accessed. Buffer must be writable for
+ * capacity bytes (null allowed only at zero capacity). Outputs must be aligned,
+ * writable and disjoint from each other, the buffer and iterator.
+ */
+XilaStatus xila_directory_iterator_next(struct XilaDirectoryIterator *iterator,
+                                        char *name_buffer,
+                                        size_t capacity,
+                                        size_t *name_length,
+                                        uint32_t *kind);
+
+/**
+ * Rewind, discarding a pending entry only on success.
+ * # Safety
+ * Iterator must be live and exclusively accessed.
+ */
+XilaStatus xila_directory_iterator_rewind(struct XilaDirectoryIterator *iterator);
+
+/**
+ * Close and free the iterator even on close error; null succeeds.
+ * # Safety
+ * Non-null iterator must be owned, live and released once; no concurrent calls.
+ */
+XilaStatus xila_directory_iterator_close(struct XilaDirectoryIterator *iterator);
+
+/**
+ * Read metadata of an opened readable file.
+ * # Safety
+ * File must be live and exclusively accessed. Output must be aligned, writable
+ * for its declared size, initialized with size, and disjoint from the file.
+ */
+XilaStatus xila_file_get_statistics(struct XilaFile *file, struct XilaStatistics *output);
+
+/**
+ * Read relative path metadata; an empty path means the capability itself.
+ * # Safety
+ * Directory must be live; path readable for length. Output must be aligned,
+ * writable for its declared size, initialized with size and disjoint from inputs.
+ * Calls must be serialized.
+ */
+XilaStatus xila_directory_get_statistics(const struct XilaDirectory *directory,
+                                         const char *path,
+                                         size_t length,
+                                         uint32_t flags,
+                                         struct XilaStatistics *output);
 
 /**
  * Read monotonic nanoseconds from an arbitrary epoch; may return Overflow.

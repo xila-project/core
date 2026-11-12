@@ -127,6 +127,12 @@ impl<'a> SynchronousDirectory<'a> {
         )
     }
 
+    /// Close using the retained VFS, reporting any close error.
+    pub fn close_owned(self) -> Result<()> {
+        let virtual_file_system = self.virtual_file_system;
+        self.close(virtual_file_system)
+    }
+
     pub fn close(mut self, virtual_file_system: &VirtualFileSystem) -> Result<()> {
         let result = self.close_internal(virtual_file_system);
         forget(self);

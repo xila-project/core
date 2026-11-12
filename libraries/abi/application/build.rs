@@ -22,6 +22,12 @@ fn main() {
         .export
         .rename
         .insert("Status".into(), "XilaStatus".into());
+    for (rust, c) in [
+        ("Statistics", "XilaStatistics"),
+        ("DirectoryIterator", "XilaDirectoryIterator"),
+    ] {
+        config.export.rename.insert(rust.into(), c.into());
+    }
     config.enumeration.rename_variants = cbindgen::RenameRule::ScreamingSnakeCase;
     config.enumeration.prefix_with_name = true;
     cbindgen::Builder::new()

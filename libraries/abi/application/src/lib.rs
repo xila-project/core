@@ -4,16 +4,20 @@ extern crate alloc;
 
 mod directory;
 mod file;
+mod iterator;
+mod metadata;
 mod status;
 mod time;
 
 pub use directory::*;
 pub use file::*;
+pub use iterator::*;
+pub use metadata::*;
 pub use status::*;
 pub use time::*;
 
 pub const XILA_ABI_VERSION_MAJOR: u32 = 0;
-pub const XILA_ABI_VERSION_MINOR: u32 = 1;
+pub const XILA_ABI_VERSION_MINOR: u32 = 2;
 
 /// Return the ABI version as (major << 16) | minor.
 /// # Safety
@@ -46,8 +50,22 @@ mod tests {
     }
     #[test]
     fn validation() {
-        for path in ["/absolute", "..", "a/../b", "x\0y", ""] {
+        for path in [
+            "/absolute",
+            "..",
+            "a/../b",
+            "x\0y",
+            "",
+            ".",
+            "./",
+            "./.",
+            "//",
+        ] {
             assert_eq!(canonical("/root", path, true), Err(Status::InvalidArgument));
+        }
+        // Without `entry`, the capability itself may be named (directory open, statistics).
+        for path in ["", ".", "./"] {
+            assert_eq!(canonical("/root", path, false).unwrap().as_str(), "/root");
         }
         assert_eq!(
             canonical("/root", "./a//./b/", true).unwrap().as_str(),
@@ -77,6 +95,91 @@ mod tests {
                 path_input([255u8].as_ptr().cast(), 1),
                 Err(Status::InvalidArgument)
             );
+        }
+    }
+    #[test]
+    fn filesystem_validation() {
+        unsafe {
+            let mut stats = Statistics {
+                size: 72,
+                kind: 99,
+                ..Statistics::default()
+            };
+            assert_eq!(
+                xila_file_get_statistics(ptr::null_mut(), &mut stats),
+                Status::InvalidArgument
+            );
+            assert_eq!(stats.kind, 99);
+            assert_eq!(
+                xila_file_set_size(ptr::null_mut(), 0),
+                Status::InvalidArgument
+            );
+            assert_eq!(
+                xila_directory_get_statistics(ptr::null(), c"".as_ptr(), 0, 0, &mut stats),
+                Status::InvalidArgument
+            );
+            assert_eq!(
+                xila_directory_create(ptr::null(), c"a".as_ptr(), 1),
+                Status::InvalidArgument
+            );
+            assert_eq!(
+                xila_directory_remove(ptr::null(), c"a".as_ptr(), 1, 0),
+                Status::InvalidArgument
+            );
+            assert_eq!(
+                xila_directory_rename(ptr::null(), c"a".as_ptr(), 1, ptr::null(), c"b".as_ptr(), 1),
+                Status::InvalidArgument
+            );
+            assert_eq!(
+                xila_directory_iterator_open(ptr::null(), c"".as_ptr(), 0, ptr::null_mut()),
+                Status::InvalidArgument
+            );
+            assert_eq!(
+                xila_directory_iterator_next(
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                    0,
+                    ptr::null_mut(),
+                    ptr::null_mut()
+                ),
+                Status::InvalidArgument
+            );
+            assert_eq!(
+                xila_directory_iterator_rewind(ptr::null_mut()),
+                Status::InvalidArgument
+            );
+            assert_eq!(xila_directory_iterator_close(ptr::null_mut()), Status::Ok);
+            assert_eq!(crate::metadata::validate_output(&mut stats), Ok(()));
+            stats.size = 71;
+            assert_eq!(
+                crate::metadata::validate_output(&mut stats),
+                Err(Status::InvalidArgument)
+            );
+        }
+        assert_eq!(core::mem::size_of::<Statistics>(), 72);
+        assert_eq!(core::mem::offset_of!(Statistics, file_size), 24);
+        assert_eq!(core::mem::offset_of!(Statistics, access_nanoseconds), 48);
+        std::println!(
+            "File={} Directory={} DirectoryIterator={} Statistics={}",
+            core::mem::size_of::<File>(),
+            core::mem::size_of::<Directory>(),
+            core::mem::size_of::<DirectoryIterator>(),
+            core::mem::size_of::<Statistics>()
+        );
+    }
+    #[test]
+    fn kind_values_are_explicit() {
+        use file_system::Kind;
+        for (kind, value) in [
+            (Kind::File, XILA_KIND_FILE),
+            (Kind::Directory, XILA_KIND_DIRECTORY),
+            (Kind::BlockDevice, XILA_KIND_BLOCK_DEVICE),
+            (Kind::CharacterDevice, XILA_KIND_CHARACTER_DEVICE),
+            (Kind::Pipe, XILA_KIND_PIPE),
+            (Kind::Socket, XILA_KIND_SOCKET),
+            (Kind::SymbolicLink, XILA_KIND_SYMLINK),
+        ] {
+            assert_eq!(kind_value(kind), value);
         }
     }
     #[test]

@@ -1,4 +1,5 @@
-/// Stable error values; output arguments are written only on success.
+/// Stable error values; outputs change only on success except the documented
+/// BufferTooSmall required listing length.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum Status {
@@ -16,6 +17,9 @@ pub enum Status {
     Overflow = 11,
     Unavailable = 12,
     InputOutput = 13,
+    End = 14,
+    BufferTooSmall = 15,
+    DirectoryNotEmpty = 16,
 }
 
 impl From<file_system::Error> for Status {
@@ -24,6 +28,7 @@ impl From<file_system::Error> for Status {
         match error {
             PermissionDenied | InvalidMode => Self::PermissionDenied,
             NotFound => Self::NotFound,
+            DirectoryNotEmpty => Self::DirectoryNotEmpty,
             AlreadyExists | DirectoryAlreadyExists => Self::AlreadyExists,
             NotDirectory => Self::NotADirectory,
             IsDirectory => Self::IsADirectory,
