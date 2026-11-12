@@ -88,8 +88,9 @@ pub unsafe extern "C" fn xila_file_open(
     if directory.is_null() || file.is_null() {
         return Status::InvalidArgument;
     }
+    // SAFETY: checked non-null above; the caller guarantees the object is live.
+    let directory = unsafe { &*directory };
     let result = (|| {
-        let directory = unsafe { &*directory };
         let flags = open_flags(flags, directory.rights)?;
         let path = canonical(
             directory.path.as_str(),

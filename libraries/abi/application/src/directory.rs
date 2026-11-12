@@ -109,9 +109,10 @@ pub unsafe extern "C" fn xila_directory_open(
     if parent.is_null() || directory.is_null() {
         return Status::InvalidArgument;
     }
+    // SAFETY: checked non-null above; the caller guarantees the object is live.
+    let parent = unsafe { &*parent };
     let result = (|| {
         validate_rights(rights)?;
-        let parent = unsafe { &*parent };
         if rights & !(parent.rights as u32) != 0 {
             return Err(Status::PermissionDenied);
         }
