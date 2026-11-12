@@ -1299,7 +1299,7 @@ impl VirtualFileSystem {
     }
 
     pub async fn get_statistics(&self, path: &impl AsRef<Path>) -> Result<Statistics> {
-        let task = self.task_manager.get_current_task_identifier().await;
+        let task = self.task_manager.try_get_current_task_identifier().await?;
         self.get_statistics_for_task(task, path).await
     }
 
@@ -1326,7 +1326,7 @@ impl VirtualFileSystem {
 
     /// Return metadata for the directory entry itself without following a final symbolic link.
     pub async fn get_link_statistics(&self, path: &impl AsRef<Path>) -> Result<Statistics> {
-        let task = self.task_manager.get_current_task_identifier().await;
+        let task = self.task_manager.try_get_current_task_identifier().await?;
         self.get_link_statistics_for_task(task, path).await
     }
 

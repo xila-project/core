@@ -272,7 +272,7 @@ mod tests {
         let stack = listener.context.stack.clone();
         let before = stack.with(|s| s.sockets.iter().count()).await;
         let (client, _) = crate::tests::task_manager()
-            .spawn(
+            .spawn_send(
                 task::Manager::ROOT_TASK_IDENTIFIER,
                 "close regression",
                 None,
@@ -355,9 +355,9 @@ mod tests {
             .await
             .expect("Failed to create listener socket");
         let task_manager = crate::tests::task_manager();
-        let current_task = task_manager.get_current_task_identifier().await;
+        let current_task = task::Manager::ROOT_TASK_IDENTIFIER;
         let (listen_task, _) = task_manager
-            .spawn(current_task, "TCP Listen Task", None, move |_| async move {
+            .spawn_send(current_task, "TCP Listen Task", None, move |_| async move {
                 server_ready_clone.signal(());
                 let accept_result = listener.accept(Some([127, 0, 0, 1]), port).await;
                 if accept_result.is_err() {
@@ -403,9 +403,9 @@ mod tests {
         let server_ready = Arc::new(Signal::<CriticalSectionRawMutex, ()>::new());
         let server_ready_clone = server_ready.clone();
         let task_manager = crate::tests::task_manager();
-        let current_task = task_manager.get_current_task_identifier().await;
+        let current_task = task::Manager::ROOT_TASK_IDENTIFIER;
         let (_server_task, _) = task_manager
-            .spawn(current_task, "TCP Server Task", None, move |_| async move {
+            .spawn_send(current_task, "TCP Server Task", None, move |_| async move {
                 server_ready_clone.signal(());
                 let accept_result = listener.accept(Some([127, 0, 0, 1]), port).await;
                 if accept_result.is_err() {
@@ -501,9 +501,9 @@ mod tests {
         let connection_ready_clone = connection_ready.clone();
         let endpoints_checked_clone = endpoints_checked.clone();
         let task_manager = crate::tests::task_manager();
-        let current_task = task_manager.get_current_task_identifier().await;
+        let current_task = task::Manager::ROOT_TASK_IDENTIFIER;
         let (listen_task, _) = task_manager
-            .spawn(
+            .spawn_send(
                 current_task,
                 "TCP Endpoint Listen",
                 None,
@@ -594,9 +594,9 @@ mod tests {
             .await
             .expect("Failed to create listener");
         let task_manager = crate::tests::task_manager();
-        let current_task = task_manager.get_current_task_identifier().await;
+        let current_task = task::Manager::ROOT_TASK_IDENTIFIER;
         let (_server_task, _) = task_manager
-            .spawn(
+            .spawn_send(
                 current_task,
                 "TCP Flush Server",
                 None,

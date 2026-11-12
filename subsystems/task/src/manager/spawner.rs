@@ -1,10 +1,12 @@
 use super::*;
-use embassy_executor::Spawner;
+use embassy_executor::{SendSpawner, Spawner};
 
 pub type SpawnerIdentifier = usize;
 
 pub(super) struct SpawnerState {
     pub executor: usize,
+    /// Embassy's thread-safe enqueue handle, used only by `spawn_send`.
+    pub send: SendSpawner,
     pub tasks: usize,
 }
 
@@ -29,6 +31,7 @@ impl Manager {
                 identifier,
                 SpawnerState {
                     executor: spawner.executor_id(),
+                    send: spawner.make_send(),
                     tasks: 0,
                 },
             );
@@ -74,29 +77,44 @@ impl Manager {
         Err(Error::ThreadNotRegistered)
     }
 
-    /// Select only among registrations belonging to this executor. Non-Send
-    /// futures must never be transferred to another executor thread.
-    pub(super) fn select_best_spawner(
+    /// Select and reserve a registration in one critical section. `executor`
+    /// restricts the choice to the caller's executor; non-Send futures must
+    /// never be transferred to another executor thread. Without a request,
+    /// the least-loaded registration wins. Unregistering a reserved
+    /// registration fails until `release_spawner` or task exit.
+    pub(super) fn reserve_spawner(
         &self,
-        executor: usize,
-        requested: Option<usize>,
-    ) -> Result<usize> {
+        executor: Option<usize>,
+        requested: Option<SpawnerIdentifier>,
+    ) -> Result<(SpawnerIdentifier, SendSpawner)> {
         self.1.lock(|spawners| {
-            let spawners = spawners.borrow();
-            if let Some(id) = requested {
-                return spawners
-                    .get(&id)
-                    .filter(|state| state.executor == executor)
-                    .map(|_| id)
-                    .ok_or(Error::InvalidSpawnerIdentifier);
-            }
-            spawners
-                .iter()
-                .filter(|(_, state)| state.executor == executor)
-                .min_by_key(|(_, state)| state.tasks)
-                .map(|(id, _)| *id)
-                .ok_or(Error::NoSpawnerAvailable)
+            let mut spawners = spawners.borrow_mut();
+            let eligible = |state: &SpawnerState| executor.is_none_or(|e| state.executor == e);
+            let (identifier, state) = match requested {
+                Some(identifier) => spawners
+                    .get_mut(&identifier)
+                    .filter(|state| eligible(state))
+                    .map(|state| (identifier, state))
+                    .ok_or(Error::InvalidSpawnerIdentifier)?,
+                None => spawners
+                    .iter_mut()
+                    .filter(|(_, state)| eligible(state))
+                    .min_by_key(|(_, state)| state.tasks)
+                    .map(|(identifier, state)| (*identifier, state))
+                    .ok_or(Error::NoSpawnerAvailable)?,
+            };
+            state.tasks += 1;
+            Ok((identifier, state.send))
         })
+    }
+
+    /// Undo a reservation whose task was never enqueued.
+    pub(super) fn release_spawner(&self, identifier: SpawnerIdentifier) {
+        self.1.lock(|spawners| {
+            if let Some(state) = spawners.borrow_mut().get_mut(&identifier) {
+                state.tasks -= 1;
+            }
+        });
     }
 
     pub async fn get_spawner(&self, task: TaskIdentifier) -> Result<SpawnerIdentifier> {

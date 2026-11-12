@@ -3,24 +3,44 @@
 `Manager::spawn` keeps its existing signature and accepts non-Send futures.
 It selects only registrations for the calling executor. Explicit selection of
 another executor returns `InvalidSpawnerIdentifier`; it never transfers an
-unconstrained future between executor threads. The shared manager stores
-executor identifiers and counters, without storing non-Send spawners. On desktop
-and browser targets, registration also remembers a spawner in thread-local
-storage for synchronous `block_on` adapters. Bare-metal bootstrap and synchronous
-adapters can instead use `spawn_on` with a caller-owned local `Spawner`.
-The `run` and `test` macros do this automatically.
+unconstrained future between executor threads. On desktop and browser targets,
+registration also remembers a spawner in thread-local storage for synchronous
+`block_on` adapters. Bare-metal bootstrap and synchronous adapters can instead
+use `spawn_on` with a caller-owned local `Spawner`. The `run` and `test` macros
+do this automatically.
 
-Callers needing another executor must arrange for the spawn operation to run on
-that executor. In particular, Core's network test initialization currently passes
-a newly created thread's identifier to `mount_interface`; that setup needs an
-executor-owned bootstrap operation rather than passing its identifier across
-threads. The network tests consequently fail closed with this implementation.
-No audited Platforms or Applications runtime call explicitly requests a foreign
-executor. Bare-metal synchronous HTTP/HTTPS adapters in Platforms' shared driver
-must pass a local spawner to `spawn_on` instead of calling `spawn` under `block_on`.
+`spawn_send` targets any registered executor: an explicit identifier, or the
+registration with the fewest live tasks (lowest identifier on ties). It needs
+neither an Embassy waker nor a local spawner, so it also works under `block_on`.
+Its closure and result must be `Send`; the closure runs on the target executor,
+so the future it returns may be `!Send`, as with Embassy's `#[task]` functions
+and tokio-util's `spawn_pinned`. The shared manager stores, per registration,
+the executor identifier, a live-task counter and Embassy's `SendSpawner`; it
+never stores a non-Send `Spawner`.
+
+Both paths share one task storage pool. Embassy allows a finished
+`TaskStorage` to be spawned again on a different executor. Claiming atomically
+requires a slot that is neither spawned nor run-queued: the executor that ran
+the previous future has dropped it and dequeued any pending wake. Later stale
+wakers and timer entries cause at most a spurious poll on the slot's current
+executor; slots are never freed, so the headers they touch stay valid. A separate `Send` pool would duplicate the poll code and retain
+peaks of both kinds of task separately. Embassy requires `Send` on the stored
+type only to enqueue through `SendSpawner`, so the private storage future
+asserts it: local futures never leave their executor thread, and `spawn_send`
+futures cross threads once, before their first poll, holding only the checked
+`Send` closure, result signal, manager reference, identifiers and name.
+
+Core's network tests use this: their root and loopback runner live on a
+dedicated executor thread, and test-harness tasks start socket tasks there with
+`spawn_send`. `mount_interface` still spawns its runner on the calling
+executor, so its bootstrap runs on the target executor through `spawn_send`.
 
 `try_get_current_task_identifier` returns `ThreadNotRegistered` for unknown tasks.
-The compatible infallible lookup panics instead of granting root authority.
+The compatible infallible lookup panics instead of granting root authority;
+Core's production callers use the fallible lookup. Tasks spawned directly with
+an Embassy spawner, `#[embassy_executor::task]` functions and interrupt
+executors are unknown, except as a fresh manager's first lookup once any
+managed task has been polled in the process (which records Embassy's waker vtable).
 An independent manager can adopt its first managed Embassy task as root; root
 cannot be recreated after exit. `get_current_internal_identifier` now returns
 `Result<usize>` and rejects foreign wakers, including `block_on`'s no-op waker.

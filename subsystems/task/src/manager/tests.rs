@@ -1165,3 +1165,71 @@ async fn storage_grows_only_when_busy_and_respects_peak_limit() {
     assert_eq!(manager.0.read().await.slots.len(), 6);
     manager.unregister_spawner(spawner).unwrap();
 }
+
+#[test(task_path = crate)]
+async fn send_spawn_balances_executors_and_keeps_non_send_state_remote() {
+    let manager = initialize();
+    let root = manager.get_current_task_identifier().await;
+    let local = manager.get_spawner(root).await.unwrap();
+    let remote = crate::test_executor::new_thread_executor(manager).await;
+    let caller = std::thread::current().id();
+    // The idle remote registration is least loaded; the root occupies `local`.
+    let (release, wait) = JoinHandle::<()>::new();
+    let (held, held_id) = manager
+        .spawn_send(root, "held", None, move |id| async move {
+            // Rc makes this future !Send: it must be created and dropped remotely.
+            let identity = alloc::rc::Rc::new(id);
+            wait.join().await;
+            assert_eq!(manager.get_current_task_identifier().await, *identity);
+            (std::thread::current().id(), *identity)
+        })
+        .await
+        .unwrap();
+    assert_eq!(manager.get_spawner(held_id).await, Ok(remote));
+    // Equal loads choose the lowest identifier, here the caller's executor.
+    let (balanced, balanced_id) = manager
+        .spawn_send(root, "balanced", None, |_| async {
+            std::thread::current().id()
+        })
+        .await
+        .unwrap();
+    assert_eq!(manager.get_spawner(balanced_id).await, Ok(local));
+    assert_eq!(balanced.join().await, caller);
+    release.signal(());
+    let (thread, observed) = held.join().await;
+    assert_ne!(thread, caller);
+    assert_eq!(observed, held_id);
+    // Local and Send tasks share the same bounded storage.
+    let before = manager.0.read().await.slots.len().max(4);
+    for _ in 0..100 {
+        let remote_task = manager
+            .spawn_send(root, "remote", Some(remote), |_| async {})
+            .await
+            .unwrap();
+        remote_task.0.join().await;
+        manager
+            .spawn(root, "local", None, async |_| {})
+            .await
+            .unwrap()
+            .0
+            .join()
+            .await;
+    }
+    let slots = manager.0.read().await.slots.len();
+    assert!(
+        slots <= before,
+        "alternating executors grew storage to {slots}"
+    );
+    assert!(matches!(
+        manager
+            .spawn_send(root, "missing", Some(usize::MAX), |_| async {})
+            .await,
+        Err(Error::InvalidSpawnerIdentifier)
+    ));
+    assert_eq!(manager.get_task_count().await, 1);
+    manager.1.lock(|spawners| {
+        let spawners = spawners.borrow();
+        assert_eq!(spawners[&local].tasks, 1);
+        assert_eq!(spawners[&remote].tasks, 0);
+    });
+}
