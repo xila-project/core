@@ -1,0 +1,21 @@
+[package]
+name = "xila-abi-application-c-tests"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[dependencies]
+abi_application.workspace = true
+
+[build-dependencies]
+cc = "1"
+
+[dev-dependencies]
+testing.workspace = true
+task = { workspace = true, features = ["test_harness"] }
+file_system.workspace = true
+virtual_file_system.workspace = true
+little_fs.workspace = true
+time.workspace = true
+users.workspace = true
+abi_definitions.workspace = true

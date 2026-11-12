@@ -1805,6 +1805,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "xila-abi-application"
+version = "0.1.0"
+dependencies = [
+ "cbindgen",
+ "xila-file-system",
+ "xila-synchronization",
+ "xila-task",
+ "xila-testing",
+ "xila-time",
+ "xila-virtual-file-system",
+]
+
+[[package]]
+name = "xila-abi-application-c-tests"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "xila-abi-application",
+ "xila-abi-definitions",
+ "xila-file-system",
+ "xila-little-fs",
+ "xila-task",
+ "xila-testing",
+ "xila-time",
+ "xila-users",
+ "xila-virtual-file-system",
+]
+
+[[package]]
 name = "xila-abi-declarations"
 version = "0.1.0"
 dependencies = [
