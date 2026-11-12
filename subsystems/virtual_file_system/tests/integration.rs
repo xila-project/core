@@ -1529,3 +1529,56 @@ async fn hard_links_stay_beneath_their_roots_and_report_missing_backend_support(
         4
     );
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn synchronous_handles_support_offset_io_timestamps_and_status_flags() {
+    let (task, vfs) = initialize().await;
+    let mut file = vfs
+        .open(
+            &"/file",
+            Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None),
+            task,
+        )
+        .await
+        .unwrap()
+        .into_synchronous_file();
+    assert_eq!(file.write(b"0123456789").unwrap(), 10);
+    file.set_position(&Position::Start(2)).unwrap();
+
+    // Offset I/O must neither use nor move the shared cursor, and the cursor
+    // reported afterwards must not be the backend's private position.
+    assert_eq!(file.write_at(b"ab", 8).unwrap(), 2);
+    assert_eq!(file.set_position(&Position::Current(0)).unwrap(), 2);
+    let mut bytes = [0; 4];
+    assert_eq!(file.read_at(&mut bytes, 6).unwrap(), 4);
+    assert_eq!(&bytes, b"67ab");
+    assert_eq!(file.set_position(&Position::Current(0)).unwrap(), 2);
+    assert_eq!(file.set_position(&Position::Current(3)).unwrap(), 5);
+    assert_eq!(file.set_position(&Position::Current(-5)).unwrap(), 0);
+    assert!(file.set_position(&Position::Current(-1)).is_err());
+    assert_eq!(file.set_position(&Position::Current(0)).unwrap(), 0);
+
+    // Handle timestamps: None leaves a field untouched.
+    file.set_times(Some(file_system::Time::new(7)), None)
+        .unwrap();
+    let statistics = file.get_statistics().unwrap();
+    assert_eq!(statistics.access, file_system::Time::new(7));
+    file.set_times(None, Some(file_system::Time::new(9)))
+        .unwrap();
+    let statistics = file.get_statistics().unwrap();
+    assert_eq!(statistics.access, file_system::Time::new(7));
+    assert_eq!(statistics.modification, file_system::Time::new(9));
+
+    // Status flags: append moves every write to the end of the file.
+    file.set_state(StateFlags::Append).unwrap();
+    assert_eq!(file.get_state().unwrap(), StateFlags::Append);
+    file.set_position(&Position::Start(0)).unwrap();
+    assert_eq!(file.write(b"Z").unwrap(), 1);
+    assert_eq!(file.get_statistics().unwrap().size, 11);
+    file.set_state(StateFlags::empty()).unwrap();
+    file.set_position(&Position::Start(0)).unwrap();
+    file.write(b"Y").unwrap();
+    assert_eq!(file.get_statistics().unwrap().size, 11);
+    assert!(file.set_state(StateFlags::Synchronous).is_err());
+}
