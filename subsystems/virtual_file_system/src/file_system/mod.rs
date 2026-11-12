@@ -226,13 +226,32 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         path: &impl AsRef<Path>,
     ) -> Result<Directory<'a>> {
+        self.open_directory_with_root(task, path, None).await
+    }
+
+    /// Resolve relative paths beneath the supplied root directory.
+    pub async fn open_directory_beneath<'a>(
+        &'a self,
+        task: TaskIdentifier,
+        path: &impl AsRef<Path>,
+        root: &Path,
+    ) -> Result<Directory<'a>> {
+        self.open_directory_with_root(task, path, Some(root)).await
+    }
+
+    async fn open_directory_with_root<'a>(
+        &'a self,
+        task: TaskIdentifier,
+        path: &impl AsRef<Path>,
+        root: Option<&Path>,
+    ) -> Result<Directory<'a>> {
         let requested_path = path.as_ref();
 
         let mut file_systems = self.file_systems.write().await; // Get the file systems
 
         let user = self.task_manager.get_user(task).await?;
         let resolved_path = self
-            .resolve_path(&file_systems, requested_path, true, false, user, task)
+            .resolve_path_with_root(&file_systems, requested_path, true, false, user, task, root)
             .await?;
         let path: &Path = &resolved_path;
 
@@ -328,6 +347,27 @@ impl VirtualFileSystem {
         flags: Flags,
         task: TaskIdentifier,
     ) -> Result<File<'a>> {
+        self.open_with_root(path, flags, task, None).await
+    }
+
+    /// Resolve relative paths beneath the supplied root directory.
+    pub async fn open_beneath<'a>(
+        &'a self,
+        path: &impl AsRef<Path>,
+        flags: Flags,
+        task: TaskIdentifier,
+        root: &Path,
+    ) -> Result<File<'a>> {
+        self.open_with_root(path, flags, task, Some(root)).await
+    }
+
+    async fn open_with_root<'a>(
+        &'a self,
+        path: &impl AsRef<Path>,
+        flags: Flags,
+        task: TaskIdentifier,
+        root: Option<&Path>,
+    ) -> Result<File<'a>> {
         let requested_path = path.as_ref();
         let authority = self.task_manager.authority(task).await?;
 
@@ -346,13 +386,14 @@ impl VirtualFileSystem {
         let exclusive_create =
             open.contains(CreateFlags::Create) && open.contains(CreateFlags::Exclusive);
         let resolved_path = self
-            .resolve_path(
+            .resolve_path_with_root(
                 &file_systems,
                 requested_path,
                 !exclusive_create,
                 open.contains(CreateFlags::Create),
                 user,
                 task,
+                root,
             )
             .await?;
         let path: &Path = &resolved_path;
@@ -737,10 +778,29 @@ impl VirtualFileSystem {
     }
 
     pub async fn remove(&self, task: TaskIdentifier, path: impl AsRef<Path>) -> Result<()> {
+        self.remove_with_root(task, path, None).await
+    }
+
+    /// Resolve relative paths beneath the supplied root directory.
+    pub async fn remove_beneath(
+        &self,
+        task: TaskIdentifier,
+        path: impl AsRef<Path>,
+        root: &Path,
+    ) -> Result<()> {
+        self.remove_with_root(task, path, Some(root)).await
+    }
+
+    async fn remove_with_root(
+        &self,
+        task: TaskIdentifier,
+        path: impl AsRef<Path>,
+        root: Option<&Path>,
+    ) -> Result<()> {
         let file_systems = self.file_systems.write().await; // Serialize path resolution with removal.
         let user = self.task_manager.get_user(task).await?;
         let resolved_path = self
-            .resolve_path(&file_systems, path.as_ref(), false, false, user, task)
+            .resolve_path_with_root(&file_systems, path.as_ref(), false, false, user, task, root)
             .await?;
         let path: &Path = &resolved_path;
         if Self::protects_mount(&file_systems, path, true) {
@@ -783,10 +843,30 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         path: &impl AsRef<Path>,
     ) -> Result<()> {
+        self.create_directory_with_root(task, path, None).await
+    }
+
+    /// Resolve relative paths beneath the supplied root directory.
+    pub async fn create_directory_beneath(
+        &self,
+        task: TaskIdentifier,
+        path: &impl AsRef<Path>,
+        root: &Path,
+    ) -> Result<()> {
+        self.create_directory_with_root(task, path, Some(root))
+            .await
+    }
+
+    async fn create_directory_with_root(
+        &self,
+        task: TaskIdentifier,
+        path: &impl AsRef<Path>,
+        root: Option<&Path>,
+    ) -> Result<()> {
         let file_systems = self.file_systems.write().await; // Serialize path resolution with creation.
         let (time, user, group) = self.get_time_user_group(task).await?;
         let resolved_path = self
-            .resolve_path(&file_systems, path.as_ref(), false, true, user, task)
+            .resolve_path_with_root(&file_systems, path.as_ref(), false, true, user, task, root)
             .await?;
         let path: &Path = &resolved_path;
         let (file_system, relative_path, _) =
@@ -841,11 +921,34 @@ impl VirtualFileSystem {
         target: &Path,
         link: &Path,
     ) -> Result<()> {
+        self.create_symlink_with_root(task, target, link, None)
+            .await
+    }
+
+    /// Resolve relative paths beneath the supplied root directory.
+    pub async fn create_symlink_beneath(
+        &self,
+        task: TaskIdentifier,
+        target: &Path,
+        link: &Path,
+        root: &Path,
+    ) -> Result<()> {
+        self.create_symlink_with_root(task, target, link, Some(root))
+            .await
+    }
+
+    async fn create_symlink_with_root(
+        &self,
+        task: TaskIdentifier,
+        target: &Path,
+        link: &Path,
+        root: Option<&Path>,
+    ) -> Result<()> {
         if !target.is_valid()
             || target.is_empty()
             || target.get_length() > MAX_SYMLINK_TARGET_LENGTH
             || !link.is_valid()
-            || !link.is_absolute()
+            || (root.is_none() && !link.is_absolute())
             || link.is_root()
             || link.as_str().ends_with('/')
         {
@@ -857,7 +960,7 @@ impl VirtualFileSystem {
         // mutations, so temporary entries are never opened through the VFS.
         let file_systems = self.file_systems.write().await;
         let resolved_link = self
-            .resolve_path(&file_systems, link, false, true, user, task)
+            .resolve_path_with_root(&file_systems, link, false, true, user, task, root)
             .await?;
         let link: &Path = &resolved_link;
         let (file_system, relative_link, _) =
@@ -1010,14 +1113,36 @@ impl VirtualFileSystem {
         link: &Path,
         buffer: &mut [u8],
     ) -> Result<usize> {
-        if !link.is_valid() || !link.is_absolute() || link.is_root() {
+        self.read_symlink_with_root(task, link, buffer, None).await
+    }
+
+    /// Resolve relative paths beneath the supplied root directory.
+    pub async fn read_symlink_beneath(
+        &self,
+        task: TaskIdentifier,
+        link: &Path,
+        buffer: &mut [u8],
+        root: &Path,
+    ) -> Result<usize> {
+        self.read_symlink_with_root(task, link, buffer, Some(root))
+            .await
+    }
+
+    async fn read_symlink_with_root(
+        &self,
+        task: TaskIdentifier,
+        link: &Path,
+        buffer: &mut [u8],
+        root: Option<&Path>,
+    ) -> Result<usize> {
+        if !link.is_valid() || (root.is_none() && !link.is_absolute()) || link.is_root() {
             return Err(Error::InvalidPath);
         }
 
         let user = self.task_manager.get_user(task).await?;
         let file_systems = self.file_systems.read().await;
         let resolved_link = self
-            .resolve_path(&file_systems, link, false, false, user, task)
+            .resolve_path_with_root(&file_systems, link, false, false, user, task, root)
             .await?;
         let link: &Path = &resolved_link;
         let (file_system, relative_link, _) =
@@ -1082,13 +1207,54 @@ impl VirtualFileSystem {
         old_path: &impl AsRef<Path>,
         new_path: &impl AsRef<Path>,
     ) -> Result<()> {
+        self.rename_with_root(task, old_path, new_path, None, None)
+            .await
+    }
+
+    /// Resolve relative paths beneath the supplied root directory.
+    pub async fn rename_beneath(
+        &self,
+        task: TaskIdentifier,
+        old_path: &impl AsRef<Path>,
+        new_path: &impl AsRef<Path>,
+        old_root: &Path,
+        new_root: &Path,
+    ) -> Result<()> {
+        self.rename_with_root(task, old_path, new_path, Some(old_root), Some(new_root))
+            .await
+    }
+
+    async fn rename_with_root(
+        &self,
+        task: TaskIdentifier,
+        old_path: &impl AsRef<Path>,
+        new_path: &impl AsRef<Path>,
+        old_root: Option<&Path>,
+        new_root: Option<&Path>,
+    ) -> Result<()> {
         let file_systems = self.file_systems.write().await; // Serialize source/destination resolution with rename.
         let user = self.task_manager.get_user(task).await?;
         let old_path = self
-            .resolve_path(&file_systems, old_path.as_ref(), false, false, user, task)
+            .resolve_path_with_root(
+                &file_systems,
+                old_path.as_ref(),
+                false,
+                false,
+                user,
+                task,
+                old_root,
+            )
             .await?;
         let new_path = self
-            .resolve_path(&file_systems, new_path.as_ref(), false, true, user, task)
+            .resolve_path_with_root(
+                &file_systems,
+                new_path.as_ref(),
+                false,
+                true,
+                user,
+                task,
+                new_root,
+            )
             .await?;
         let old_path: &Path = &old_path;
         let new_path: &Path = &new_path;
@@ -1170,16 +1336,40 @@ impl VirtualFileSystem {
         path: &impl AsRef<Path>,
         follow_final: bool,
     ) -> Result<Statistics> {
+        self.get_statistics_for_task_with_follow_with_root(task, path, follow_final, None)
+            .await
+    }
+
+    /// Resolve relative paths beneath the supplied root directory.
+    pub async fn get_statistics_beneath(
+        &self,
+        task: TaskIdentifier,
+        path: &impl AsRef<Path>,
+        follow_final: bool,
+        root: &Path,
+    ) -> Result<Statistics> {
+        self.get_statistics_for_task_with_follow_with_root(task, path, follow_final, Some(root))
+            .await
+    }
+
+    async fn get_statistics_for_task_with_follow_with_root(
+        &self,
+        task: TaskIdentifier,
+        path: &impl AsRef<Path>,
+        follow_final: bool,
+        root: Option<&Path>,
+    ) -> Result<Statistics> {
         let file_systems = self.file_systems.read().await;
         let user = self.task_manager.get_user(task).await?;
         let resolved_path = self
-            .resolve_path(
+            .resolve_path_with_root(
                 &file_systems,
                 path.as_ref(),
                 follow_final,
                 false,
                 user,
                 task,
+                root,
             )
             .await?;
         let (file_system, relative_path, _) =
