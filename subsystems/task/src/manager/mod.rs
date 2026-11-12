@@ -29,15 +29,21 @@ use synchronization::{blocking_mutex::raw::CriticalSectionRawMutex, rwlock::RwLo
 
 pub(crate) struct Inner {
     next_generation: u64,
+    root_established: bool,
     pub(crate) tasks: BTreeMap<TaskIdentifier, Metadata>,
     pub(crate) identifiers: BTreeMap<usize, TaskIdentifier>,
-    pub(crate) spawners: BTreeMap<usize, ::embassy_executor::Spawner>,
+    slots: alloc::vec::Vec<&'static embassy_executor::raw::TaskStorage<lifecycle::TaskFuture>>,
+    maximum_tasks: usize,
 }
 
-unsafe impl Send for Manager {}
-
 /// A manager for tasks.
-pub struct Manager(pub(crate) RwLock<CriticalSectionRawMutex, Inner>);
+pub struct Manager(
+    pub(crate) RwLock<CriticalSectionRawMutex, Inner>,
+    synchronization::blocking_mutex::Mutex<
+        CriticalSectionRawMutex,
+        core::cell::RefCell<BTreeMap<usize, spawner::SpawnerState>>,
+    >,
+);
 
 #[cfg(any(test, feature = "test_harness"))]
 static TEST_MANAGER: synchronization::once_lock::OnceLock<&'static Manager> =
@@ -63,8 +69,9 @@ pub fn reset_test_manager() -> &'static Manager {
     let manager = test_manager();
     let mut inner = embassy_futures::block_on(manager.0.write());
     inner.tasks.clear();
+    inner.root_established = false;
     inner.identifiers.clear();
-    inner.spawners.clear();
+    manager.1.lock(|spawners| spawners.borrow_mut().clear());
     drop(inner);
     manager
 }
@@ -79,8 +86,6 @@ pub fn get_instance() -> &'static Manager {
     test_manager()
 }
 
-unsafe impl Sync for Manager {}
-
 impl Default for Manager {
     fn default() -> Self {
         Self::new()
@@ -93,11 +98,21 @@ impl Manager {
     /// Create a new task manager instance,
     /// create a root task and register current thread as the root task main thread.
     pub const fn new() -> Self {
-        Manager(RwLock::new(Inner {
-            next_generation: 0,
-            tasks: BTreeMap::new(),
-            identifiers: BTreeMap::new(),
-            spawners: BTreeMap::new(),
-        }))
+        Self::with_maximum_tasks(256)
+    }
+
+    /// Bound retained Embassy storage by peak concurrency (including the root).
+    pub const fn with_maximum_tasks(maximum_tasks: usize) -> Self {
+        Manager(
+            RwLock::new(Inner {
+                next_generation: 0,
+                root_established: false,
+                tasks: BTreeMap::new(),
+                identifiers: BTreeMap::new(),
+                slots: alloc::vec::Vec::new(),
+                maximum_tasks,
+            }),
+            synchronization::blocking_mutex::Mutex::new(core::cell::RefCell::new(BTreeMap::new())),
+        )
     }
 }

@@ -1,3 +1,5 @@
+mod allocation;
+
 // Tests module - contains all Manager tests
 extern crate std;
 
@@ -931,4 +933,235 @@ async fn task_count_tracks_registration_and_completion() {
         crate::sleep(Duration::from_millis(1)).await;
     }
     assert_eq!(manager.get_task_count().await, before);
+}
+
+#[test(task_path = crate)]
+async fn utf8_names_and_failed_spawn_are_transactional() {
+    let manager = initialize();
+    let root = manager.get_current_task_identifier().await;
+    let before = manager.get_task_count().await;
+    assert!(
+        manager
+            .spawn(root, "invalid", Some(usize::MAX), async |_| {})
+            .await
+            .is_err()
+    );
+    assert_eq!(manager.get_task_count().await, before);
+    let name = "abcdefghijklmnopqrstuvé終";
+    let child = manager.register(root, name).await.unwrap();
+    assert_eq!(
+        manager.get_name(child).await.unwrap(),
+        "abcdefghijklmnopqrstuv"
+    );
+    manager.unregister(child).await.unwrap();
+}
+
+#[std::prelude::v1::test]
+fn identity_outside_embassy_is_fallible() {
+    assert_eq!(
+        crate::block_on(Manager::get_current_internal_identifier()),
+        Err(Error::ThreadNotRegistered)
+    );
+    assert_eq!(
+        crate::block_on(Manager::new().try_get_current_task_identifier()),
+        Err(Error::ThreadNotRegistered)
+    );
+    fn assert_traits<T: Send + Sync>() {}
+    assert_traits::<Manager>();
+    assert_traits::<JoinHandle<core::cell::Cell<u32>>>();
+}
+
+#[test(task_path = crate)]
+async fn unknown_embassy_task_cannot_replace_root() {
+    let manager = initialize();
+    let root = manager.get_current_task_identifier().await;
+    let authority = manager.authority(root).await.unwrap();
+    manager
+        .set_environment_variable(root, "root", "preserved")
+        .await
+        .unwrap();
+    let (done, signal) = JoinHandle::new();
+    let pool = alloc::boxed::Box::leak(alloc::boxed::Box::new(embassy_executor::raw::TaskPool::<
+        _,
+        1,
+    >::new()));
+    let token = pool
+        .spawn(move || async move {
+            assert_eq!(
+                manager.try_get_current_task_identifier().await,
+                Err(Error::ThreadNotRegistered)
+            );
+            signal.signal(());
+        })
+        .unwrap();
+    // This test's waker has already been checked by the manager.
+    unsafe { embassy_executor::Spawner::for_current_executor().await }.spawn(token);
+    done.join().await;
+    assert_eq!(authority.user().await.unwrap(), UserIdentifier::ROOT);
+    assert_eq!(
+        manager
+            .get_environment_variable(root, "root")
+            .await
+            .unwrap()
+            .get_value(),
+        "preserved"
+    );
+    assert_eq!(manager.get_current_task_identifier().await, root);
+}
+
+#[test(task_path = crate)]
+async fn storage_is_reused_and_future_captures_are_dropped() {
+    let manager = initialize();
+    let root = manager.get_current_task_identifier().await;
+    let capture = alloc::sync::Arc::new(());
+    // Warm the slot vector and BTreeMap nodes before counting steady state.
+    manager
+        .spawn(root, "warm", None, async |_| {})
+        .await
+        .unwrap()
+        .0
+        .join()
+        .await;
+    let before = manager.0.read().await.slots.len();
+    allocation::start();
+    for _ in 0..1000 {
+        let capture = capture.clone();
+        manager
+            .spawn(root, "reused", None, move |id| async move {
+                assert_eq!(manager.get_current_task_identifier().await, id);
+                drop(capture);
+            })
+            .await
+            .unwrap()
+            .0
+            .join()
+            .await;
+    }
+    let (allocations, retained) = allocation::finish();
+    assert_eq!(retained, 0, "completed tasks retained heap bytes");
+    assert_eq!(alloc::sync::Arc::strong_count(&capture), 1);
+    let slots = manager.0.read().await.slots.len();
+    assert_eq!(slots, before);
+    assert!(slots <= 4, "sequential spawning grew storage to {slots}");
+    std::println!(
+        "slot_size={} retained_slots={slots} sequential_spawns=1000 allocations={allocations} retained_bytes={retained}",
+        core::mem::size_of::<embassy_executor::raw::TaskStorage<super::lifecycle::TaskFuture>>()
+    );
+}
+
+#[test(task_path = crate)]
+async fn configured_limit_and_parent_failure_roll_back() {
+    let manager = alloc::boxed::Box::leak(alloc::boxed::Box::new(Manager::with_maximum_tasks(1)));
+    let local = unsafe { embassy_executor::Spawner::for_current_executor().await };
+    manager.register_spawner(local).unwrap();
+    let root = manager.get_current_task_identifier().await;
+    for parent in [root, TaskIdentifier::new(123)] {
+        assert!(
+            manager
+                .spawn(parent, "limited", None, async |_| {})
+                .await
+                .is_err()
+        );
+    }
+    assert_eq!(manager.get_task_count().await, 1);
+    assert!(manager.0.read().await.slots.is_empty());
+    manager
+        .1
+        .lock(|spawners| assert_eq!(spawners.borrow()[&0].tasks, 0));
+}
+
+#[test(task_path = crate)]
+async fn foreign_executor_is_rejected_without_running_non_send_future() {
+    let manager = initialize();
+    let root = manager.get_current_task_identifier().await;
+    let foreign = std::thread::spawn(move || {
+        let executor = alloc::boxed::Box::leak(alloc::boxed::Box::new(
+            embassy_executor::raw::Executor::new(core::ptr::null_mut()),
+        ));
+        manager.register_spawner(executor.spawner()).unwrap()
+    })
+    .join()
+    .unwrap();
+    let rc = alloc::rc::Rc::new(());
+    let result = manager
+        .spawn(root, "foreign", Some(foreign), move |_| async move {
+            drop(rc);
+        })
+        .await;
+    assert!(matches!(result, Err(Error::InvalidSpawnerIdentifier)));
+    assert_eq!(manager.get_task_count().await, 1);
+    manager.unregister_spawner(foreign).unwrap();
+}
+
+#[test(task_path = crate)]
+async fn spawner_failure_and_metadata_contention_do_not_leak_or_spin() {
+    let manager = alloc::boxed::Box::leak(alloc::boxed::Box::new(Manager::new()));
+    assert!(matches!(
+        manager
+            .spawn(Manager::ROOT_TASK_IDENTIFIER, "missing", None, async |_| {})
+            .await,
+        Err(Error::NoSpawnerAvailable)
+    ));
+    assert_eq!(manager.get_task_count().await, 0);
+    let local = unsafe { embassy_executor::Spawner::for_current_executor().await };
+    let guard = manager.0.write().await;
+    let id = manager.register_spawner(local).unwrap();
+    manager.unregister_spawner(id).unwrap();
+    drop(guard);
+    manager.register_spawner(local).unwrap();
+    let root = manager.get_current_task_identifier().await;
+    assert!(matches!(
+        manager
+            .spawn(TaskIdentifier::new(123), "bad parent", None, async |_| {})
+            .await,
+        Err(Error::InvalidTaskIdentifier)
+    ));
+    assert_eq!(manager.get_task_count().await, 1);
+    manager
+        .1
+        .lock(|spawners| assert_eq!(spawners.borrow()[&0].tasks, 0));
+    manager.unregister(root).await.unwrap();
+    assert_eq!(
+        manager.try_get_current_task_identifier().await,
+        Err(Error::ThreadNotRegistered)
+    );
+}
+
+#[test(task_path = crate)]
+async fn storage_grows_only_when_busy_and_respects_peak_limit() {
+    let manager = alloc::boxed::Box::leak(alloc::boxed::Box::new(Manager::with_maximum_tasks(7)));
+    let local = unsafe { embassy_executor::Spawner::for_current_executor().await };
+    let spawner = manager.register_spawner(local).unwrap();
+    let root = manager.get_current_task_identifier().await;
+    let mut running = Vec::new();
+    for index in 0..6 {
+        let (release, wait) = JoinHandle::new();
+        let (handle, id) = manager
+            .spawn(
+                root,
+                "held",
+                None,
+                move |_| async move { wait.join().await },
+            )
+            .await
+            .unwrap();
+        let inner = manager.0.read().await;
+        assert_eq!(inner.slots.len(), (index / 2 + 1) * 2);
+        // The child has not run yet, but both sides of the identity map exist.
+        assert_eq!(inner.identifiers[&inner.tasks[&id].internal_identifier], id);
+        drop(inner);
+        running.push((release, handle));
+    }
+    assert!(matches!(
+        manager.spawn(root, "overflow", None, async |_| {}).await,
+        Err(Error::TooManyTasks)
+    ));
+    assert_eq!(manager.unregister_spawner(spawner), Err(Error::AlreadySet));
+    for (release, handle) in running {
+        release.signal(());
+        handle.join().await;
+    }
+    assert_eq!(manager.get_task_count().await, 1);
+    assert_eq!(manager.0.read().await.slots.len(), 6);
+    manager.unregister_spawner(spawner).unwrap();
 }

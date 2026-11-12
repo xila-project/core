@@ -4,7 +4,14 @@ extern crate alloc;
 
 embedded_i18n::i18n!("locales");
 
-#[cfg(any(test, feature = "std", all(feature = "profiling", target_os = "linux")))]
+#[cfg(any(
+    test,
+    feature = "std",
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "windows",
+    target_arch = "wasm32"
+))]
 extern crate std;
 
 #[cfg(all(feature = "profiling", target_os = "linux"))]
@@ -42,7 +49,12 @@ pub async fn sleep(duration: impl Into<Duration>) {
 /// Yield the current thread, allowing other tasks to run.
 pub async fn yield_now() {
     #[cfg(target_arch = "wasm32")]
-    sleep(Duration::from_millis(10)).await; // Weird behavior in wasm, where the task is not properly yielded without a delay
+    // Embassy 0.10's wasm pender uses Promise.then (a microtask). A
+    // self-waking yield repeatedly schedules microtasks, starving browser
+    // rendering, input and timer macrotasks. Keep a timer-backed yield until
+    // the platform executor provides a macrotask scheduling primitive. The
+    // 10 ms policy is retained pending browser latency/fairness validation.
+    sleep(Duration::from_millis(10)).await;
 
     #[cfg(not(target_arch = "wasm32"))]
     embassy_futures::yield_now().await;

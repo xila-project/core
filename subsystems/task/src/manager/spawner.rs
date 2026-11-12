@@ -1,75 +1,105 @@
-// Spawner module - handles spawner registration and selection
-
 use super::*;
-
-use alloc::collections::BTreeMap;
 use embassy_executor::Spawner;
 
 pub type SpawnerIdentifier = usize;
 
+pub(super) struct SpawnerState {
+    pub executor: usize,
+    pub tasks: usize,
+}
+
+// Spawner is deliberately !Send. Never store it in the shared manager.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "windows",
+    target_arch = "wasm32"
+))]
+std::thread_local! {
+    static LOCAL_SPAWNER: core::cell::Cell<Option<Spawner>> = const { core::cell::Cell::new(None) };
+}
+
 impl Manager {
     pub fn register_spawner(&'static self, spawner: Spawner) -> Result<SpawnerIdentifier> {
-        let mut inner = embassy_futures::block_on(self.0.write());
-
-        let identifier = Self::find_first_available_identifier(
-            &inner.spawners,
-            (usize::MIN..usize::MAX).step_by(1),
-        )
-        .ok_or(Error::TooManySpawners)?;
-
-        if inner.spawners.insert(identifier, spawner).is_some() {
-            unreachable!("Spawner identifier already exists");
-        }
-
+        let identifier = self.1.lock(|spawners| {
+            let mut spawners = spawners.borrow_mut();
+            let identifier = Self::find_first_available_identifier(&spawners, 0..usize::MAX)
+                .ok_or(Error::TooManySpawners)?;
+            spawners.insert(
+                identifier,
+                SpawnerState {
+                    executor: spawner.executor_id(),
+                    tasks: 0,
+                },
+            );
+            Ok(identifier)
+        })?;
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "macos",
+            target_os = "windows",
+            target_arch = "wasm32"
+        ))]
+        LOCAL_SPAWNER.set(Some(spawner));
         Ok(identifier)
     }
 
+    /// Remove an idle registration; active registrations return `AlreadySet`.
     pub fn unregister_spawner(&'static self, identifier: SpawnerIdentifier) -> Result<()> {
-        let mut inner = embassy_futures::block_on(self.0.write());
-
-        inner
-            .spawners
-            .remove(&identifier)
-            .ok_or(Error::NoSpawnerAvailable)?;
-
-        Ok(())
+        self.1.lock(|spawners| {
+            let mut spawners = spawners.borrow_mut();
+            let state = spawners.get(&identifier).ok_or(Error::NoSpawnerAvailable)?;
+            if state.tasks != 0 {
+                return Err(Error::AlreadySet);
+            }
+            spawners.remove(&identifier);
+            Ok(())
+        })
     }
 
-    /// Select the best spawner for a new task using load balancing algorithm
-    pub(crate) fn select_best_spawner(inner: &Inner) -> Result<SpawnerIdentifier> {
-        if inner.spawners.is_empty() {
-            return Err(Error::NoSpawnerAvailable);
+    pub(super) async fn local_spawner() -> Result<Spawner> {
+        // The checked waker guarantees the unsafe Embassy API's context contract.
+        if Self::get_current_internal_identifier().await.is_ok() {
+            return Ok(unsafe { Spawner::for_current_executor().await });
         }
-
-        let mut map = BTreeMap::new();
-
-        for identifier in inner.spawners.keys() {
-            map.insert(*identifier, 0); // Initialize all spawners with a load of 0
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "macos",
+            target_os = "windows",
+            target_arch = "wasm32"
+        ))]
+        if let Some(spawner) = LOCAL_SPAWNER.get() {
+            return Ok(spawner);
         }
+        Err(Error::ThreadNotRegistered)
+    }
 
-        for metadata in inner.tasks.values() {
-            if let Some(load) = map.get_mut(&metadata.spawner_identifier) {
-                *load += 1; // Increment the load for the spawner
+    /// Select only among registrations belonging to this executor. Non-Send
+    /// futures must never be transferred to another executor thread.
+    pub(super) fn select_best_spawner(
+        &self,
+        executor: usize,
+        requested: Option<usize>,
+    ) -> Result<usize> {
+        self.1.lock(|spawners| {
+            let spawners = spawners.borrow();
+            if let Some(id) = requested {
+                return spawners
+                    .get(&id)
+                    .filter(|state| state.executor == executor)
+                    .map(|_| id)
+                    .ok_or(Error::InvalidSpawnerIdentifier);
             }
-        }
-
-        // Find the spawner with the lowest load score
-        let mut best_index = 0;
-        let mut best_score = usize::MAX;
-
-        for (identifier, spawner) in map.iter() {
-            if *spawner < best_score {
-                best_score = *spawner;
-                best_index = *identifier;
-            }
-        }
-
-        Ok(best_index)
+            spawners
+                .iter()
+                .filter(|(_, state)| state.executor == executor)
+                .min_by_key(|(_, state)| state.tasks)
+                .map(|(id, _)| *id)
+                .ok_or(Error::NoSpawnerAvailable)
+        })
     }
 
     pub async fn get_spawner(&self, task: TaskIdentifier) -> Result<SpawnerIdentifier> {
-        Self::get_task(&*self.0.read().await, task)
-            .map(|task| task.spawner_identifier)
-            .map_err(|_| Error::InvalidTaskIdentifier)
+        Self::get_task(&*self.0.read().await, task).map(|task| task.spawner_identifier)
     }
 }
