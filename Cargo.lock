@@ -1809,7 +1809,10 @@ name = "xila-abi-application"
 version = "0.1.0"
 dependencies = [
  "cbindgen",
+ "embassy-futures",
+ "smoltcp",
  "xila-file-system",
+ "xila-network",
  "xila-synchronization",
  "xila-task",
  "xila-testing",
@@ -1826,6 +1829,7 @@ dependencies = [
  "xila-abi-definitions",
  "xila-file-system",
  "xila-little-fs",
+ "xila-network",
  "xila-task",
  "xila-testing",
  "xila-time",

@@ -34,7 +34,7 @@ OutOfMemory.
 
 ## Functions
 
-- `xila_abi_version`: packed major/minor version, currently 0.3.
+- `xila_abi_version`: packed major/minor version, currently 0.4.
 - `xila_directory_open`, `xila_directory_close`: attenuated path capabilities.
 - `xila_file_open`, `xila_file_close`: typed owned file objects.
 - `xila_file_read`, `xila_file_write`: direct buffer I/O.
@@ -122,3 +122,51 @@ Closing a startup object is undefined behavior. Close objects opened by the app.
 The Rust-only unsafe `run_main` helper consumes optional capabilities, lends them
 to the entry, and drops them after return (closing streams). It allocates only the
 argument descriptor array; no capability boxes or global handle table are needed.
+Directory listing, statistics, rename/remove, tasks/threads and graphics
+are not included. Program entry and handing initial capabilities to an application
+belong to the future native loader ([Core issue #334](https://github.com/xila-project/core/issues/334)).
+A POSIX compatibility layer can be built above this native interface later.
+
+## Optional networking (`network`)
+
+Networking is disabled by default. The host constructs `Network::new(manager,
+rights)` and grants its opaque pointer; no call obtains ambient authority.
+CONNECT authorizes TCP connect and UDP send, LISTEN authorizes TCP listen/accept
+and UDP bind, RESOLVE authorizes DNS. Accepted and connected TCP objects grant
+bidirectional I/O; UDP retains the original rights. Closing a capability does not
+revoke its sockets. Host/port restrictions can later be added to the capability's
+Rust representation and checked at connect, bind, send and resolve.
+
+The ABI uses Core's smoltcp network manager, not OS sockets. The host must mount
+and configure an interface and keep its runner on an independent executor/thread:
+synchronous calls use `task::block_on`, like synchronous VFS calls (the current
+adapter spins while pending). Do not call blocking operations on the runner's
+thread. TCP connect waits indefinitely when timeout_ms is zero; a nonzero value
+bounds the handshake in milliseconds. TCP read/write and accept block, TCP sends
+may be partial, receive zero means EOF, and zero-length I/O succeeds immediately.
+Only write shutdown is supported (FIN); close aborts and may discard queued data.
+A listener holds one socket, then replenishes it on accept; there is no backlog.
+If replenishment fails the accepted connection remains in the listener for retry.
+Core does not currently detect duplicate endpoint binds like an OS would.
+
+UDP I/O probes once and returns WouldBlock if pending. It accesses the underlying
+socket through Core's accessors to avoid the logging in Core's UDP convenience
+methods. Datagrams are atomic; overflow preserves the received datagram and caller
+buffer. Each socket uses 1024-byte transmit and receive buffers; UDP additionally
+uses one metadata slot per direction. These buffers are allocated by Core at
+creation. Send/receive add no allocation, logging or staging buffer. IPv4 occupies
+the first four network-order bytes, the other bytes must be zero; IPv6 uses all
+16. Ports and other integer fields are host order. Reserved fields and scope_id
+must be zero; scoped IPv6 is unsupported. Core rejects port zero for binding.
+
+DNS selects IPv4 or IPv6 explicitly and returns port zero. Core allocates a vector
+for DNS results. Count is capacity on input, number returned on success. Capacity
+zero queries the required size; an undersized nonempty array returns Overflow
+without changing outputs. A second query may yield a different count. Network
+errors have dedicated status numbers 26–35; existing values are unchanged.
+
+The generated header always declares networking, independent of Cargo features;
+linking those functions requires `network`. cbindgen parses the unexpanded source,
+so the committed header is identical with and without the feature. The C test
+member explicitly enables it and exercises smoltcp loopback TCP echo, UDP round
+trip, capability failures and numeric DNS. ABI version 0.4 adds networking.

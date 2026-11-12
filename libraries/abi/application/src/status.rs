@@ -20,6 +20,16 @@ pub enum Status {
     End = 14,
     BufferTooSmall = 15,
     DirectoryNotEmpty = 16,
+    ConnectionRefused = 26,
+    ConnectionReset = 27,
+    TimedOut = 28,
+    HostUnreachable = 29,
+    NetworkUnreachable = 30,
+    AddressInUse = 31,
+    AddressNotAvailable = 32,
+    NotConnected = 33,
+    ConnectionAborted = 34,
+    BrokenPipe = 35,
 }
 
 impl From<file_system::Error> for Status {
@@ -64,6 +74,36 @@ impl From<virtual_file_system::Error> for Status {
                 Self::InvalidArgument
             }
             UnavailableDriver | Orphaned => Self::Unavailable,
+            _ => Self::InputOutput,
+        }
+    }
+}
+
+#[cfg(feature = "network")]
+impl From<::network::Error> for Status {
+    fn from(error: ::network::Error) -> Self {
+        use ::network::Error::*;
+        match error {
+            PermissionDenied => Self::PermissionDenied,
+            ConnectionRefused => Self::ConnectionRefused,
+            ConnectionReset => Self::ConnectionReset,
+            TimedOut => Self::TimedOut,
+            HostUnreachable | NoRoute => Self::HostUnreachable,
+            NetworkUnreachable => Self::NetworkUnreachable,
+            AddressInUse => Self::AddressInUse,
+            AddressNotAvailable => Self::AddressNotAvailable,
+            NotConnected | SocketNotBound => Self::NotConnected,
+            ConnectionAborted => Self::ConnectionAborted,
+            BrokenPipe => Self::BrokenPipe,
+            NotFound => Self::NotFound,
+            WouldBlock | Pending | ResourceBusy => Self::WouldBlock,
+            InvalidInput | InvalidData | InvalidName | InvalidPort | InvalidEndpoint
+            | InvalidState => Self::InvalidArgument,
+            Unsupported | UnsupportedProtocol => Self::Unsupported,
+            OutOfMemory => Self::OutOfMemory,
+            StorageFull | NoFreeSlot => Self::NoSpace,
+            PacketTooLarge | Truncated | NameTooLong => Self::Overflow,
+            NetworkDown => Self::Unavailable,
             _ => Self::InputOutput,
         }
     }
