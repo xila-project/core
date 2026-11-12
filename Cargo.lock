@@ -2140,6 +2140,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "xila-stackful"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+ "embassy-futures",
+ "embassy-sync",
+ "xila-task",
+]
+
+[[package]]
 name = "xila-synchronization"
 version = "0.1.0"
 dependencies = [
