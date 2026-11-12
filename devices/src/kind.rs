@@ -13,6 +13,7 @@
 //! | `b'F'`    | `0x46` | Firmware update     | `firmware_update::device`                |
 //! | `b'H'`    | `0x48` | Hash accelerator    | `device::hash`                           |
 //! | `b'N'`    | `0x4E` | Neural network      | `device::neural_network` / `drivers_neural_network` |
+//! | `b'P'`    | `0x50` | System power        | `device::power` / `drivers_peripherals::power` |
 //! | `b'T'`    | `0x54` | Terminal / character| `file_system::character_device`          |
 //! | `b'a'`    | `0x61` | ADC                 | `device::adc` / `drivers_peripherals::adc`|
 //! | `b'g'`    | `0x67` | GPIO                | `device::gpio` / `drivers_peripherals::gpio` |
@@ -46,6 +47,9 @@ pub const HASH: u8 = b'H';
 
 /// Neural network inference device (`b'N'`).
 pub const NEURAL_NETWORK: u8 = b'N';
+
+/// System power actions: power off, restart, sleep (`b'P'`).
+pub const POWER: u8 = b'P';
 
 /// Terminal capability query on character devices (`b'T'`).
 ///
@@ -86,6 +90,7 @@ pub const ALL: &[u8] = &[
     FIRMWARE_UPDATE,
     HASH,
     NEURAL_NETWORK,
+    POWER,
     TERMINAL,
     ADC,
     GPIO,
