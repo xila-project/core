@@ -42,6 +42,7 @@ EXPECTED_PACKAGE_NAMES = {
     "subsystems/graphics/tests/font_pipeline/Cargo.toml": "xila-graphics-font-pipeline-test",
     "subsystems/log/Cargo.toml": "xila-log",
     "subsystems/memory/Cargo.toml": "xila-memory",
+    "subsystems/memory/bench-size/Cargo.toml": "xila-memory-allocator-size",
     "subsystems/network/Cargo.toml": "xila-network",
     "subsystems/task/Cargo.toml": "xila-task",
     "subsystems/task/task_macros/Cargo.toml": "xila-task-macros",

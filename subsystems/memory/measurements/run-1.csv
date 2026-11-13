@@ -1,0 +1,5 @@
+allocator,heap,failures,free,largest,alloc_avg_ns,alloc_p99_ns,alloc_max_ns,free_avg_ns,free_p99_ns,free_max_ns
+first-fit,65536,10102,7296,256,104,208,3895,95,202,5469
+tlsf,65536,16179,4256,272,28,50,4146,23,42,103100
+first-fit,262144,0,112320,74832,106,230,4627,107,233,9508
+tlsf,262144,0,99968,40944,28,50,4900,24,49,133

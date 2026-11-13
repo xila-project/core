@@ -1,0 +1,20 @@
+[package]
+name = "xila-memory-allocator-size"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[features]
+first-fit = []
+
+[dependencies]
+linked_list_allocator = { version = "0.10.6", default-features = false }
+rlsf = { version = "=0.2.3", default-features = false }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
