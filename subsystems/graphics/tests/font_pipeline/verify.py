@@ -27,7 +27,7 @@ def snapshot(paths):
 def lvgl_outputs(messages):
     outputs = [Path(message["out_dir"]) for message in messages
                if message.get("reason") == "build-script-executed"
-               and "lvgl_rust_sys" in message.get("package_id", "")]
+               and "#lvgl-rust-sys@" in message.get("package_id", "")]
     assert len(outputs) == 1, f"Expected one current LVGL build, got {outputs}"
     return [outputs[0] / "liblvgl.a", outputs[0] / "bindings.rs"]
 

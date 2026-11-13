@@ -472,11 +472,48 @@ mod injected_input_tests {
 
 impl Drop for Manager {
     fn drop(&mut self) {
-        unsafe {
-            lvgl::lv_deinit();
+        // `Lvgl::deinit` also tells the safe layer that LVGL is gone.
+        let deinitialized = self.try_lock_lvgl().is_some_and(|mut guard| {
+            lvgl_rust::Lvgl::enter(&mut guard)
+                .and_then(lvgl_rust::Lvgl::deinit)
+                .is_ok()
+        });
+        if !deinitialized {
+            unsafe {
+                lvgl::lv_deinit();
+            }
         }
     }
 }
+
+/// The graphics lock, held for the safe `lvgl_rust` API: proof of exclusive
+/// access to LVGL ([`lvgl_rust::LvglAccess`]). Private: values live on the
+/// stack of the manager's methods, so none can be leaked for `'static`.
+struct LvglGuard<'a>(#[allow(dead_code)] MutexGuard<'a, CriticalSectionRawMutex, ()>);
+
+// SAFETY: built only from the manager's `global_lock`, the mutex that
+// serializes every LVGL call, and dedicated to it. Releasing the mutex
+// synchronizes-with the next acquisition on any thread. Values never leave
+// the manager's methods, so no session can be borrowed for `'static`.
+unsafe impl lvgl_rust::LvglAccess for LvglGuard<'_> {}
+
+impl LvglGuard<'_> {
+    /// Starts a session of the safe API ([`lvgl_rust::Lvgl::enter`]): fails
+    /// if LVGL was not initialized through the manager, or if a session or
+    /// a Rust callback is active.
+    fn session(&mut self) -> Result<lvgl_rust::Session<'_>> {
+        lvgl_rust::Lvgl::enter(self).map_err(Error::from)
+    }
+}
+
+/// Proof that the caller of [`Manager::with_lvgl_locked`] holds the graphics
+/// lock. `!Send`, and local to that method.
+struct Held(core::marker::PhantomData<*mut ()>);
+
+// SAFETY: `with_lvgl_locked`'s contract: the caller holds `global_lock` while
+// the value exists, so the mutex orders successive holders. The value is a
+// local of that method and is never borrowed for `'static`.
+unsafe impl lvgl_rust::LvglAccess for Held {}
 
 extern "C" fn binding_tick_callback_function() -> u32 {
     let manager = TICK_TIME_MANAGER.load(Ordering::Acquire);
@@ -497,18 +534,24 @@ impl Manager {
         double_buffered: bool,
     ) -> Result<Self> {
         let injected_inputs = InputQueue::new()?;
-        unsafe {
-            lvgl::lv_init();
-
-            if !lvgl::lv_is_initialized() {
-                panic!("Failed to initialize lvgl");
+        let global_lock = Mutex::new(());
+        {
+            // `lvgl_rust::init` runs `lv_init` and starts the safe layer's
+            // registry; nothing else can reach LVGL before `Self` exists.
+            let mut guard = LvglGuard(
+                global_lock
+                    .try_lock()
+                    .map_err(|_| Error::AlreadyInitialized)?,
+            );
+            let mut session = lvgl_rust::init(&mut guard).map_err(Error::from)?;
+            session.set_tick_cb(binding_tick_callback_function);
+            unsafe {
+                // LVGL assigns newly created keypads to the default group.
+                // Create it before display creation also creates the
+                // virtual keypad.
+                let group = lvgl::lv_group_create();
+                lvgl::lv_group_set_default(group);
             }
-
-            lvgl::lv_tick_set_cb(Some(binding_tick_callback_function));
-            // LVGL assigns newly created keypads to the default group. Create
-            // it before display creation also creates the virtual keypad.
-            let group = lvgl::lv_group_create();
-            lvgl::lv_group_set_default(group);
         }
 
         let (display, inputs) = Self::create_display(
@@ -529,7 +572,7 @@ impl Manager {
                 displays: vec![display],
                 window_parent: screen,
             }),
-            global_lock: Mutex::new(()),
+            global_lock,
             injected_inputs,
         })
     }
@@ -541,11 +584,13 @@ impl Manager {
         let mut call_count: u8 = 0;
 
         loop {
-            let time_until_next = unsafe {
-                let _lock = self.global_lock.lock().await;
+            let time_until_next = {
+                let mut guard = self.lock_lvgl().await;
                 let inner = self.inner.read().await;
 
-                let time_until_next = lvgl::lv_timer_handler();
+                // Through the session: requests recorded by the safe layer
+                // (dropped `Owned` values, `delete_later`) run right after.
+                let time_until_next = guard.session()?.timer_handler();
 
                 if call_count >= 30 {
                     for display in &inner.displays {
@@ -700,6 +745,50 @@ impl Manager {
 
     pub fn try_lock(&self) -> Option<MutexGuard<'_, CriticalSectionRawMutex, ()>> {
         self.global_lock.try_lock().ok()
+    }
+
+    async fn lock_lvgl(&self) -> LvglGuard<'_> {
+        LvglGuard(self.global_lock.lock().await)
+    }
+
+    fn try_lock_lvgl(&self) -> Option<LvglGuard<'_>> {
+        self.global_lock.try_lock().ok().map(LvglGuard)
+    }
+
+    /// Runs `function` with the safe LVGL API ([`lvgl_rust`]), under the
+    /// graphics lock (the one [`Manager::lock`] takes). Do not call from
+    /// callbacks or while holding that lock: acquiring it again would deadlock.
+    pub async fn with_lvgl<T>(
+        &self,
+        function: impl FnOnce(&mut lvgl_rust::Lvgl) -> Result<T>,
+    ) -> Result<T> {
+        let mut guard = self.lock_lvgl().await;
+        let mut session = guard.session()?;
+        function(&mut session)
+    }
+
+    /// [`Manager::with_lvgl`] from synchronous code.
+    pub fn with_lvgl_sync<T>(
+        &self,
+        function: impl FnOnce(&mut lvgl_rust::Lvgl) -> Result<T>,
+    ) -> Result<T> {
+        block_on(self.with_lvgl(function))
+    }
+
+    /// [`Manager::with_lvgl`] for code that already holds the graphics lock
+    /// (a guard of [`Manager::lock`]), such as a dispatcher that mixes raw
+    /// calls and the safe API.
+    ///
+    /// # Safety
+    ///
+    /// The caller must hold this manager's graphics lock for the whole call.
+    pub unsafe fn with_lvgl_locked<T>(
+        &self,
+        function: impl FnOnce(&mut lvgl_rust::Lvgl) -> Result<T>,
+    ) -> Result<T> {
+        let mut held = Held(core::marker::PhantomData);
+        let mut session = lvgl_rust::Lvgl::enter(&mut held).map_err(Error::from)?;
+        function(&mut session)
     }
 
     pub fn get_current_screen(&self) -> Result<*mut lvgl::lv_obj_t> {

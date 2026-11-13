@@ -76,6 +76,16 @@ impl LvglContext {
 
     pub fn filter_function(signature: &Signature) -> bool {
         let unauthorized_functions = [
+            // Object IDs now belong exclusively to lvgl-rust's registry. These
+            // declarations were absent from the legacy ABI (LV_USE_OBJ_ID=0);
+            // exposing them would both corrupt the registry and shift call IDs.
+            "lv_obj_assign_id",
+            "lv_obj_free_id",
+            "lv_obj_set_id",
+            "lv_obj_get_id",
+            "lv_obj_find_by_id",
+            "lv_obj_id_compare",
+            "lv_obj_stringify_id",
             "lv_obj_delete",
             "lv_obj_get_display",
             "lv_obj_delete_delayed",

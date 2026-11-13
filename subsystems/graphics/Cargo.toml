@@ -10,6 +10,10 @@ file_system = { workspace = true }
 virtual_file_system = { workspace = true }
 # Runtime graphics needs the C archive; binding generators remain bindgen-only.
 lvgl_rust_sys = { workspace = true, features = ["build-lvgl", "shadcn-theme"] }
+# The safe layer and its handle registry. Registry chunks come from the global
+# allocator (never LVGL's pool); owner tags let the Wasm host keep each VM's
+# handles apart. Core provides LVGL's string functions itself.
+lvgl-rust = { workspace = true, features = ["growable-registry", "owners"] }
 time = { workspace = true }
 shared = { workspace = true }
 synchronization = { workspace = true }
