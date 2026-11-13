@@ -178,7 +178,11 @@ pub fn test(arguments: TokenStream, input: TokenStream) -> TokenStream {
                 });
             }
             unsafe {
-                manager.unregister_spawner(__SPAWNER).expect("Failed to unregister spawner");
+                // The executor has stopped: tasks the test left running are
+                // abandoned, and the test manager is reset before the next test.
+                // Unregistering is cleanup only, so a spawner still counting
+                // those tasks (`AlreadySet`) must not fail the test.
+                let _ = manager.unregister_spawner(__SPAWNER);
             }
 
         }
