@@ -268,7 +268,14 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", compone
 extends = "ci:rust-wasi"
 description = "Test the host workspace"
 depends = ["ci:packages-host"]
-run = "cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888"
+run = """
+set -eu
+cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888
+mise run test:graphics-pool
+"""
+
+[tasks."test:graphics-pool"]
+extends = "ci:rust-wasi"
 
 [tasks."ci:host-font-tests"]
 extends = "ci:rust-format"

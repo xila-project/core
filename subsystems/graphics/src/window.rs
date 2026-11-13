@@ -1,14 +1,11 @@
 use super::{icon_text::IconText, lvgl};
-use crate::{Color, Error, EventKind, Key, Result, event::Event};
-use alloc::collections::VecDeque;
+use crate::{Color, Error, EventKind, Key, Result, event::Event, event_queue::EventQueue};
 use core::{
     mem::ManuallyDrop,
     ops::{Deref, DerefMut},
     ptr::{self, NonNull},
 };
 use synchronization::{once_lock::OnceLock, waitqueue::AtomicWaker};
-
-const WINDOW_QUEUE_DEFAULT_CAPACITY: usize = 10;
 
 #[repr(transparent)]
 pub struct ClassWrapper(lvgl::lv_obj_class_t);
@@ -47,7 +44,7 @@ pub fn get_window_class() -> &'static lvgl::lv_obj_class_t {
 #[repr(C)]
 pub struct Window {
     object: lvgl::lv_obj_t,
-    event_queue: VecDeque<Event>,
+    event_queue: EventQueue,
     icon_text: IconText,
     icon_color: Color,
     waker: AtomicWaker,
@@ -60,10 +57,7 @@ unsafe extern "C" fn window_constructor(
     unsafe {
         let window = object as *mut Window;
 
-        ptr::write(
-            &mut (*window).event_queue,
-            VecDeque::with_capacity(WINDOW_QUEUE_DEFAULT_CAPACITY),
-        );
+        ptr::write(&mut (*window).event_queue, EventQueue::new());
         ptr::write(&mut (*window).icon_text, IconText::new("Wi"));
         ptr::write(&mut (*window).icon_color, Color::BLACK);
         ptr::write(&mut (*window).waker, AtomicWaker::new());
@@ -153,7 +147,7 @@ unsafe extern "C" fn window_event_callback(
                 ]);
             }
         }
-        (*window).event_queue.push_back(queued);
+        (*window).event_queue.push(queued);
         (*window).waker.wake();
     }
 }
@@ -198,21 +192,22 @@ impl Window {
         self.event_queue.pop_front()
     }
 
+    /// Number of events lost to queue overflow since the window was created.
+    pub fn dropped_event_count(&self) -> u32 {
+        self.event_queue.dropped()
+    }
+
     /// Forget queued targets before their LVGL storage can be reused. This only
     /// compares addresses; it never dereferences the potentially deleted target.
     pub fn discard_events_for_target(&mut self, target: *mut lvgl::lv_obj_t) {
-        self.event_queue.retain(|event| event.target != target);
+        self.event_queue.discard_target(target);
     }
 
     /// Preserve event codes while preventing queued addresses from acquiring a
     /// newly registered capability when native object storage is recycled.
     /// Only compares addresses; it does not dereference event targets.
     pub fn clear_event_targets_for(&mut self, target: *mut lvgl::lv_obj_t) {
-        for event in &mut self.event_queue {
-            if event.target == target {
-                event.target = ptr::null_mut();
-            }
-        }
+        self.event_queue.clear_target(target);
     }
 
     pub fn as_object(&self) -> &lvgl::lv_obj_t {

@@ -26,6 +26,30 @@
  * MEMORY AND STANDARD LIBRARY
  *============================================================================*/
 
+/** Xila: where LVGL allocates from.
+ *
+ *  - 0: Xila's system allocator (`LV_STDLIB_CUSTOM`, implemented in
+ *       `src/stubs.rs`). Default on hosts (Linux, macOS, BSD, Windows, WebAssembly).
+ *  - 1: LVGL's own TLSF allocator over one fixed pool (`LV_STDLIB_BUILTIN`), so UI
+ *       churn can neither fragment nor starve the system heap. Default on every
+ *       other target, i.e. microcontrollers.
+ *
+ *  Override it with `LVGL_CFLAGS=XILA_LVGL_MEM_POOL=0|1`. The Rust side
+ *  (`build.rs`) queries the selected C configuration to enable matching hooks.
+ */
+#ifndef XILA_LVGL_MEM_POOL
+#if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || \
+    defined(__OpenBSD__) || defined(_WIN32) || defined(__wasm__)
+#define XILA_LVGL_MEM_POOL 0
+#else
+#define XILA_LVGL_MEM_POOL 1
+#endif
+#endif
+
+#if XILA_LVGL_MEM_POOL != 0 && XILA_LVGL_MEM_POOL != 1
+#error "XILA_LVGL_MEM_POOL must be 0 or 1"
+#endif
+
 /** Malloc functions source
  *  Possible values:
  *  - LV_STDLIB_BUILTIN: LVGL built-in
@@ -34,7 +58,11 @@
  *  - LV_STDLIB_RTTHREAD
  *  - LV_STDLIB_CUSTOM: Custom (implemented externally)
  */
+#if XILA_LVGL_MEM_POOL
+#define LV_USE_STDLIB_MALLOC LV_STDLIB_BUILTIN
+#else
 #define LV_USE_STDLIB_MALLOC LV_STDLIB_CUSTOM
+#endif
 
 /** String functions source
  *  Possible values:
@@ -55,13 +83,35 @@
 #define LV_USE_STDLIB_SPRINTF LV_STDLIB_CUSTOM
 
 #if LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN
-/** Size of the pool `lv_malloc()` allocates from. Needs to be at least 2kB (2048). */
-#define LV_MEM_SIZE 65536
+/** Xila: size in bytes of the fixed pool `lv_malloc()` allocates from. Override per
+ *  board with `LVGL_CFLAGS=XILA_LVGL_MEM_SIZE=<bytes>`; see the graphics README for how
+ *  to size it. Needs to be at least 2 KiB, and a multiple of 8.
+ */
+#ifndef XILA_LVGL_MEM_SIZE
+#define XILA_LVGL_MEM_SIZE (128 * 1024)
+#endif
+#if XILA_LVGL_MEM_SIZE < 2048 || (XILA_LVGL_MEM_SIZE % 8) != 0
+#error "XILA_LVGL_MEM_SIZE must be at least 2048 and a multiple of 8"
+#endif
+#define LV_MEM_SIZE XILA_LVGL_MEM_SIZE
 
 /** Place the pool at a fixed address instead of allocating it as a normal array.
- *  0: unused.
+ *  0: unused (the pool is a static array in the `.bss` section).
  */
+#ifndef LV_MEM_ADR
 #define LV_MEM_ADR 0x0
+#endif
+
+/** To place the pool elsewhere (e.g. in PSRAM) with `LV_MEM_ADR` left at 0, let the
+ *  platform allocate it once, when LVGL initializes. In the board's own copy of this
+ *  file (or through `LVGL_CFLAGS`), define:
+ *
+ *  #define LV_MEM_POOL_INCLUDE "board_memory.h"
+ *  #define LV_MEM_POOL_ALLOC(size) board_lvgl_pool_allocate(size)
+ *
+ *  `LV_MEM_POOL_ALLOC` must return `LV_MEM_SIZE` bytes, aligned to 8, that live for
+ *  the whole run. Alternatively set `LV_MEM_ADR` to the pool's fixed address.
+ */
 
 #endif /*LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN*/
 
