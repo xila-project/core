@@ -1,0 +1,29 @@
+[package]
+name = "xila-lifecycle"
+version.workspace = true
+edition = "2024"
+
+[dependencies]
+device = { workspace = true }
+file_system = { workspace = true }
+task = { workspace = true }
+time = { workspace = true }
+virtual_file_system = { workspace = true }
+
+[dev-dependencies]
+task = { workspace = true, features = ["test_harness"] }
+abi_definitions = { workspace = true }
+drivers_peripherals = { workspace = true, features = ["power"] }
+little_fs = { workspace = true }
+log = { workspace = true }
+peripherals = { workspace = true, features = ["power"] }
+shared = { workspace = true }
+testing = { workspace = true }
+users = { workspace = true }
+
+[[test]]
+name = "pipeline"
+path = "tests/pipeline.rs"
+
+[lib]
+name = "lifecycle"

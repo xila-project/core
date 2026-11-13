@@ -701,6 +701,13 @@ impl VirtualFileSystem {
         current_user: UserIdentifier,
         _task: TaskIdentifier,
     ) -> Result<()> {
+        if asked_permissions.contains(Permission::Write)
+            && self
+                .writes_frozen
+                .load(core::sync::atomic::Ordering::Acquire)
+        {
+            return Err(Error::RessourceBusy);
+        }
         let mut attributes = Attributes::default()
             .set_mask(AttributeFlags::User | AttributeFlags::Group | AttributeFlags::Permissions);
 

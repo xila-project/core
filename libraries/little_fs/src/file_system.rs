@@ -149,7 +149,28 @@ unsafe impl Send for FileSystem {}
 unsafe impl Sync for FileSystem {}
 
 impl MountOperations for FileSystem {
+    /// Without open handles, sync the backing device, then `lfs_unmount` and
+    /// release the configuration; a failed sync leaves the filesystem mounted.
+    /// With open handles (a forced detach), only stop serving: their caches
+    /// stay allocated and their unsynchronized data is not committed.
     fn unmount(&self) -> Result<()> {
+        self.operation(|file_system| {
+            if !file_system.mlist.is_null() {
+                return Ok(());
+            }
+            // Directory updates are committed immediately; `lfs_unmount` only
+            // frees caches, so the backing device is synced explicitly first.
+            if unsafe { super::callbacks::flush_callback(file_system.cfg) } != 0 {
+                return Err(Error::InputOutput);
+            }
+            convert_result(unsafe { littlefs::lfs_unmount(file_system) })?;
+            let mut configuration =
+                unsafe { Box::from_raw(file_system.cfg as *mut littlefs::lfs_config) };
+            unsafe {
+                configuration::Context::take_from_configuration(&mut *configuration);
+            }
+            Ok(())
+        })?;
         self.file_system.unmount()
     }
 }

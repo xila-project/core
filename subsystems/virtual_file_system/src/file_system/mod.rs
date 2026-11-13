@@ -47,6 +47,8 @@ pub struct VirtualFileSystem {
     block_device: RwLock<CriticalSectionRawMutex, BlockDevicesMap>,
     /// Pipes.
     pipes: RwLock<CriticalSectionRawMutex, PipeMap>,
+    /// Set by [`Self::shutdown_storage`]; never cleared.
+    writes_frozen: core::sync::atomic::AtomicBool,
 }
 
 impl VirtualFileSystem {
@@ -79,6 +81,7 @@ impl VirtualFileSystem {
             character_device: RwLock::new(BTreeMap::new()),
             block_device: RwLock::new(BTreeMap::new()),
             pipes: RwLock::new(BTreeMap::new()),
+            writes_frozen: core::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -89,6 +92,40 @@ impl VirtualFileSystem {
             let _: Box<dyn FileSystemOperations> =
                 unsafe { Box::from_raw(internal_file_system.file_system as *const _ as *mut _) };
         }
+    }
+
+    /// Commit and unmount every mounted filesystem for a system shutdown.
+    ///
+    /// Requires quiescence: if any filesystem still has an open file or
+    /// directory, nothing changes and `RessourceBusy` is returned. Otherwise
+    /// new writes are frozen for good, then mounts are unmounted deepest first
+    /// with the root last; each filesystem flushes its backing device. The
+    /// first failure is returned and the remaining mounts stay mounted (and
+    /// readable) for diagnosis. Nothing is deallocated: tasks that still hold
+    /// static references keep valid memory.
+    pub async fn shutdown_storage(&self) -> Result<()> {
+        let mut file_systems = self.file_systems.write().await;
+        if file_systems
+            .iter()
+            .any(|file_system| file_system.reference_count > 1)
+        {
+            return Err(Error::RessourceBusy);
+        }
+        self.writes_frozen
+            .store(true, core::sync::atomic::Ordering::Release);
+        // A nested mount point is always longer than the mount containing it.
+        let mut order: alloc::vec::Vec<usize> = (0..file_systems.len()).collect();
+        order.sort_by_key(|&index| {
+            core::cmp::Reverse(file_systems[index].mount_point.as_str().len())
+        });
+        for index in order {
+            let file_system = &mut file_systems[index];
+            if file_system.is_mounted {
+                file_system.file_system.unmount()?;
+                file_system.is_mounted = false;
+            }
+        }
+        Ok(())
     }
 
     /// Mount a file system at a given mount point.

@@ -1791,6 +1791,7 @@ dependencies = [
  "xila-executable",
  "xila-file-system",
  "xila-graphics",
+ "xila-lifecycle",
  "xila-little-fs",
  "xila-log",
  "xila-memory",
@@ -1967,6 +1968,7 @@ dependencies = [
  "xila-drivers-core",
  "xila-file-system",
  "xila-graphics",
+ "xila-lifecycle",
  "xila-log",
  "xila-network",
  "xila-shared",
@@ -2047,6 +2049,25 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "xila-lifecycle"
+version = "0.1.0"
+dependencies = [
+ "xila-abi-definitions",
+ "xila-device",
+ "xila-drivers-peripherals",
+ "xila-file-system",
+ "xila-little-fs",
+ "xila-log",
+ "xila-peripherals",
+ "xila-shared",
+ "xila-task",
+ "xila-testing",
+ "xila-time",
+ "xila-users",
+ "xila-virtual-file-system",
 ]
 
 [[package]]

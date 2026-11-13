@@ -1562,6 +1562,120 @@ async fn hard_links_stay_beneath_their_roots_and_report_missing_backend_support(
     );
 }
 
+/// Memory block device whose flush can be made to fail.
+struct FlakyDevice {
+    inner: &'static MemoryDevice<512>,
+    fail_flush: core::sync::atomic::AtomicBool,
+}
+
+impl file_system::DirectBaseOperations for FlakyDevice {
+    fn read(
+        &self,
+        cx: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        position: file_system::Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        self.inner.read(cx, buffer, position)
+    }
+
+    fn write(
+        &self,
+        cx: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        position: file_system::Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        self.inner.write(cx, buffer, position)
+    }
+
+    fn flush(&self, cx: &mut core::task::Context<'_>) -> core::task::Poll<file_system::Result<()>> {
+        if self.fail_flush.load(core::sync::atomic::Ordering::SeqCst) {
+            return core::task::Poll::Ready(Err(file_system::Error::InputOutput));
+        }
+        self.inner.flush(cx)
+    }
+
+    fn control(
+        &self,
+        cx: &mut core::task::Context<'_>,
+        command: file_system::ControlCommandIdentifier,
+        input: &shared::AnyByLayout,
+        output: &mut shared::AnyByLayout,
+    ) -> core::task::Poll<file_system::Result<()>> {
+        self.inner.control(cx, command, input, output)
+    }
+}
+
+impl file_system::MountOperations for FlakyDevice {}
+impl file_system::DirectBlockDevice for FlakyDevice {}
+
+async fn initialize_on(
+    device: &'static FlakyDevice,
+) -> (TaskIdentifier, &'static VirtualFileSystem) {
+    let time_manager = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+    let task_manager = Box::leak(Box::new(task::Manager::new()));
+    let users_manager = Box::leak(Box::new(users::Manager::new()));
+    if !log::is_initialized() {
+        log::initialize(&testing::Logger).unwrap();
+    }
+    let task = task_manager.get_current_task_identifier().await;
+    let file_system = little_fs::FileSystem::get_or_format(device, 256).unwrap();
+    let vfs = Box::leak(Box::new(
+        virtual_file_system::initialize(task_manager, users_manager, time_manager, file_system)
+            .unwrap(),
+    ));
+    (task, vfs)
+}
+
+fn flaky_device() -> &'static FlakyDevice {
+    Box::leak(Box::new(FlakyDevice {
+        inner: MemoryDevice::<512>::new_static(1024 * 512),
+        fail_flush: core::sync::atomic::AtomicBool::new(false),
+    }))
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn storage_shutdown_requires_closed_handles_and_freezes_io() {
+    let (task, vfs) = initialize().await;
+    let mut file = File::open(
+        vfs,
+        task,
+        "/data",
+        Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
+    )
+    .await
+    .unwrap();
+    file.write(b"durable").await.unwrap();
+    assert!(matches!(
+        vfs.shutdown_storage().await,
+        Err(virtual_file_system::Error::RessourceBusy)
+    ));
+    // A refused shutdown leaves storage fully usable.
+    file.write(b" data").await.unwrap();
+    file.close(vfs).await.unwrap();
+
+    vfs.shutdown_storage().await.unwrap();
+    assert!(
+        File::write_to_path(vfs, task, "/late", b"forbidden")
+            .await
+            .is_err()
+    );
+    assert!(
+        File::open(vfs, task, "/data", AccessFlags::Write.into())
+            .await
+            .is_err()
+    );
+    assert!(vfs.create_directory(task, &"/late").await.is_err());
+    assert!(vfs.remove(task, "/data").await.is_err());
+    assert!(
+        File::open(vfs, task, "/data", AccessFlags::Read.into())
+            .await
+            .is_err()
+    );
+    // Shutdown runs once; a second attempt does not unmount again.
+    assert!(vfs.shutdown_storage().await.is_ok());
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 async fn synchronous_handles_support_offset_io_timestamps_and_status_flags() {
@@ -1613,4 +1727,54 @@ async fn synchronous_handles_support_offset_io_timestamps_and_status_flags() {
     file.write(b"Y").unwrap();
     assert_eq!(file.get_statistics().unwrap().size, 11);
     assert!(file.set_state(StateFlags::Synchronous).is_err());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn little_fs_data_survives_storage_shutdown_and_remount() {
+    let device = flaky_device();
+    {
+        let (task, vfs) = initialize_on(device).await;
+        vfs.create_directory(task, &"/configuration").await.unwrap();
+        File::write_to_path(vfs, task, "/configuration/settings", b"kept")
+            .await
+            .unwrap();
+        vfs.shutdown_storage().await.unwrap();
+    }
+
+    let (task, vfs) = initialize_on(device).await;
+    let mut buffer = Vec::new();
+    File::read_from_path(vfs, task, "/configuration/settings", &mut buffer)
+        .await
+        .unwrap();
+    assert_eq!(buffer, b"kept");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn storage_flush_failure_is_surfaced_and_keeps_the_mount() {
+    let device = flaky_device();
+    let (task, vfs) = initialize_on(device).await;
+    File::write_to_path(vfs, task, "/pending", b"data")
+        .await
+        .unwrap();
+    device
+        .fail_flush
+        .store(true, core::sync::atomic::Ordering::SeqCst);
+    assert!(vfs.shutdown_storage().await.is_err());
+    // Writes stay frozen, but the filesystem was not torn down: once the
+    // device recovers, committed data is still readable for diagnosis.
+    assert!(
+        File::write_to_path(vfs, task, "/after", b"x")
+            .await
+            .is_err()
+    );
+    device
+        .fail_flush
+        .store(false, core::sync::atomic::Ordering::SeqCst);
+    let mut buffer = Vec::new();
+    File::read_from_path(vfs, task, "/pending", &mut buffer)
+        .await
+        .unwrap();
+    assert_eq!(buffer, b"data");
 }

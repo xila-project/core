@@ -16,7 +16,7 @@ upper-half / lower-half driver model:
   owning subsystem provides the device nodes, as Linux does in `net/`, `sound/` and
   `drivers/gpu/drm`.
 - **Otherwise**: `drivers/<class>`, one crate per class or family (`drivers/peripherals` for
-  GPIO, I2C, SPI, UART, ADC and PWM).
+  GPIO, I2C, SPI, UART, ADC, PWM and system power).
 
 Platform-independent lower-half implementations that need no target choice (null device,
 deterministic mocks, pure-software fallbacks) also live in `drivers/`; anything that selects

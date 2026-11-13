@@ -23,6 +23,7 @@ little_fs = { workspace = true }
 virtual_file_system = { workspace = true }
 graphics = { workspace = true, optional = true }
 task = { workspace = true }
+lifecycle = { workspace = true }
 time = { workspace = true }
 users = { workspace = true }
 memory = { workspace = true }
