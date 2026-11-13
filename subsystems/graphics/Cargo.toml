@@ -15,6 +15,7 @@ shared = { workspace = true }
 synchronization = { workspace = true }
 log = { workspace = true }
 abi_declarations = { workspace = true }
+memory = { workspace = true }
 embedded-i18n = { workspace = true }
 task = { workspace = true }
 

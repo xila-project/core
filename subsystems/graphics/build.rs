@@ -40,6 +40,8 @@ fn main() {
         );
     }
 
+    emit_lvgl_heap_cfg();
+
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir"));
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo OUT_DIR"));
     println!(
@@ -146,6 +148,30 @@ fn main() {
 }
 
 fn compile_font_archive(out: &Path, sources: &[PathBuf]) {
+    let mut build = lvgl_build();
+    let target = required_metadata("DEP_LVGL_RUST_SYS_TARGET");
+    // Archivers may replace named members without removing old, differently
+    // named ones. Always recreate the archive from the explicit current plan.
+    let archive = out.join(if target.contains("msvc") {
+        "font_assets.lib"
+    } else {
+        "libfont_assets.a"
+    });
+    match fs::remove_file(&archive) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("Could not replace {}: {error}", archive.display()),
+    }
+    build.files(sources).compile("font_assets");
+}
+
+fn required_metadata(name: &str) -> String {
+    env::var(name)
+        .unwrap_or_else(|_| panic!("Required {name} metadata is missing from lvgl_rust_sys build"))
+}
+
+/// Use exactly the same includes, defines and target as LVGL and the fonts.
+fn lvgl_build() -> cc::Build {
     let include_paths = required_metadata("DEP_LVGL_RUST_SYS_INCLUDE_PATHS");
     let defines = required_metadata("DEP_LVGL_RUST_SYS_DEFINES");
     let cflags = required_metadata("DEP_LVGL_RUST_SYS_CFLAGS");
@@ -165,22 +191,31 @@ fn compile_font_archive(out: &Path, sources: &[PathBuf]) {
         let name = parts.next().expect("non-empty define");
         build.define(name, parts.next());
     }
-    // Archivers may replace named members without removing old, differently
-    // named ones. Always recreate the archive from the explicit current plan.
-    let archive = out.join(if target.contains("msvc") {
-        "font_assets.lib"
-    } else {
-        "libfont_assets.a"
-    });
-    match fs::remove_file(&archive) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => panic!("Could not replace {}: {error}", archive.display()),
-    }
-    build.files(sources).compile("font_assets");
+    build
 }
 
-fn required_metadata(name: &str) -> String {
-    env::var(name)
-        .unwrap_or_else(|_| panic!("Required {name} metadata is missing from lvgl_rust_sys build"))
+/// Query the selected C configuration, including a consumer's replacement
+/// lv_conf.h. Target inference would disagree with board-specific headers.
+fn emit_lvgl_heap_cfg() {
+    println!("cargo:rustc-check-cfg=cfg(lvgl_system_heap)");
+    let probe = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo OUT_DIR")).join("lvgl_heap.c");
+    fs::write(
+        &probe,
+        r#"#include <lvgl.h>
+#if LV_USE_STDLIB_MALLOC == LV_STDLIB_CUSTOM
+XILA_SELECTED_SYSTEM_HEAP
+#elif LV_USE_STDLIB_MALLOC != LV_STDLIB_BUILTIN
+#error Unsupported LVGL allocator
+#endif
+"#,
+    )
+    .expect("write LVGL allocator probe");
+    let expanded = lvgl_build().file(probe).expand();
+    let expanded = String::from_utf8(expanded).expect("C preprocessor output");
+    if expanded
+        .lines()
+        .any(|line| line.trim() == "XILA_SELECTED_SYSTEM_HEAP")
+    {
+        println!("cargo:rustc-cfg=lvgl_system_heap");
+    }
 }

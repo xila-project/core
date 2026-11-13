@@ -71,6 +71,11 @@ depends = ["check:host", "check:guest"]
 description = "Test the Cargo workspace"
 run = "cargo test --workspace"
 
+[tasks."test:graphics-pool"]
+description = "Test graphics against LVGL's fixed memory pool instead of the system allocator"
+# The pool is forced on for the host and enlarged to fit the full-screen capture test; it needs its own target directory because it changes the LVGL build.
+run = "LVGL_CFLAGS=XILA_LVGL_MEM_POOL=1,XILA_LVGL_MEM_SIZE=4194304 CARGO_TARGET_DIR=\"${CARGO_TARGET_DIR:-target}/lvgl-pool\" cargo test --locked -p xila-graphics --features rendering_xrgb8888"
+
 [tasks."test:fonts"]
 description = "Test font caching, compile-time selection, and linked archive exclusion"
 run = """

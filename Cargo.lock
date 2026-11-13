@@ -2032,6 +2032,7 @@ dependencies = [
  "xila-graphics",
  "xila-little-fs",
  "xila-log",
+ "xila-memory",
  "xila-shared",
  "xila-synchronization",
  "xila-task",
