@@ -88,7 +88,7 @@
  *  to size it. Needs to be at least 2 KiB, and a multiple of 8.
  */
 #ifndef XILA_LVGL_MEM_SIZE
-#define XILA_LVGL_MEM_SIZE (128 * 1024)
+#define XILA_LVGL_MEM_SIZE (64 * 1024)
 #endif
 #if XILA_LVGL_MEM_SIZE < 2048 || (XILA_LVGL_MEM_SIZE % 8) != 0
 #error "XILA_LVGL_MEM_SIZE must be at least 2048 and a multiple of 8"

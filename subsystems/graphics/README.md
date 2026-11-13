@@ -23,7 +23,7 @@ LVGL_CFLAGS = "XILA_LVGL_MEM_SIZE=196608"
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `XILA_LVGL_MEM_POOL` | `0` on hosts, `1` elsewhere | `0` selects the system allocator, `1` the fixed pool. Force `1` on a host to measure LVGL's own usage or to run the tests against the pool. |
-| `XILA_LVGL_MEM_SIZE` | `131072` (128 KiB) | Pool size in bytes, at least 2048 and a multiple of 8. By default the pool is a static array in `.bss`. |
+| `XILA_LVGL_MEM_SIZE` | `65536` (64 KiB) | Pool size in bytes, at least 2048 and a multiple of 8. By default the pool is a static array in `.bss`. |
 
 `build.rs` preprocesses the selected C configuration with LVGL's exported compiler settings and enables `lvgl_system_heap` only for `LV_STDLIB_CUSTOM`. A compile-time assertion in `stubs.rs` checks this against the generated bindings. Overrides in a consumer header are respected too.
 

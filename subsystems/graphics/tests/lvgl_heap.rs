@@ -9,7 +9,7 @@ testing::instantiate_global_allocator!();
 
 use graphics::lvgl;
 
-const BLOCK: usize = 64 * 1024;
+const BLOCK: usize = 16 * 1024;
 
 fn system_used() -> usize {
     testing::memory_crate::global_manager().get_used()
@@ -28,7 +28,7 @@ fn configured_pool_size() -> usize {
         .unwrap_or_default()
         .split(',')
         .find_map(|flag| flag.trim().strip_prefix("XILA_LVGL_MEM_SIZE="))
-        .map_or(128 * 1024, |size| size.parse().unwrap())
+        .map_or(64 * 1024, |size| size.parse().unwrap())
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn lvgl_allocations_come_from_the_selected_allocator() {
         );
         assert_eq!(after.used_cnt, before.used_cnt + 1);
         assert!(after.max_used >= BLOCK);
-        // Configured by `XILA_LVGL_MEM_SIZE` (128 KiB by default), minus allocator overhead.
+        // Configured by `XILA_LVGL_MEM_SIZE` (64 KiB by default), minus allocator overhead.
         let configured = configured_pool_size();
         assert!(
             (configured - 4096..=configured).contains(&before.total_size),
