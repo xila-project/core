@@ -39,16 +39,27 @@ mod tests {
         virtual_file_system::create_default_hierarchy(vfs, task)
             .await
             .unwrap();
-        let network = Box::leak(Box::new(network::Manager::new(
+        let network: &'static network::Manager = Box::leak(Box::new(network::Manager::new(
             tasks,
             vfs,
             time,
             &testing::RandomDevice,
         )));
-        let (device, controller) = network::create_loopback_device();
+        // The C client blocks its thread, so the interface runner needs its own
+        // executor. `mount_interface` spawns the runner on the calling executor:
+        // mount from a task sent to that thread.
         let spawner = testing::new_thread_executor(tasks).await;
-        network
-            .mount_interface(task, "loopback0", device, controller, Some(spawner))
+        tasks
+            .spawn_send(task, "Mount loopback", Some(spawner), move |_| async move {
+                let (device, controller) = network::create_loopback_device();
+                network
+                    .mount_interface(task, "loopback0", device, controller, None)
+                    .await
+            })
+            .await
+            .unwrap()
+            .0
+            .join()
             .await
             .unwrap();
         let mut interface = virtual_file_system::File::open(
