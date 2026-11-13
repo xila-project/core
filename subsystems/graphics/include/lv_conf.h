@@ -28,22 +28,19 @@
 
 /** Xila: where LVGL allocates from.
  *
- *  - 0: Xila's system allocator (`LV_STDLIB_CUSTOM`, implemented in
- *       `src/stubs.rs`). Default on hosts (Linux, macOS, BSD, Windows, WebAssembly).
- *  - 1: LVGL's own TLSF allocator over one fixed pool (`LV_STDLIB_BUILTIN`), so UI
- *       churn can neither fragment nor starve the system heap. Default on every
- *       other target, i.e. microcontrollers.
+ *  - 0 (default, every target): Xila's system allocator (`LV_STDLIB_CUSTOM`,
+ *       implemented in `src/stubs.rs`). LVGL takes only the memory it uses and can
+ *       grow with the UI.
+ *  - 1 (opt-in): LVGL's own TLSF allocator over one fixed pool (`LV_STDLIB_BUILTIN`).
+ *       Useful when a board can dedicate a memory region to the UI (PSRAM, a separate
+ *       SRAM bank): UI churn then stays out of the system heap. The pool is reserved
+ *       even when no UI runs, so it is not the default.
  *
  *  Override it with `LVGL_CFLAGS=XILA_LVGL_MEM_POOL=0|1`. The Rust side
  *  (`build.rs`) queries the selected C configuration to enable matching hooks.
  */
 #ifndef XILA_LVGL_MEM_POOL
-#if defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || \
-    defined(__OpenBSD__) || defined(_WIN32) || defined(__wasm__)
 #define XILA_LVGL_MEM_POOL 0
-#else
-#define XILA_LVGL_MEM_POOL 1
-#endif
 #endif
 
 #if XILA_LVGL_MEM_POOL != 0 && XILA_LVGL_MEM_POOL != 1

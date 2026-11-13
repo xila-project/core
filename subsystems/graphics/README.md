@@ -6,18 +6,18 @@ Xila's graphics subsystem: it owns LVGL, the displays and input devices, the win
 
 LVGL allocates a lot of small, long-lived blocks (objects, styles, event descriptors, text). Where they come from is selected by `XILA_LVGL_MEM_POOL` in [`include/lv_conf.h`](include/lv_conf.h):
 
-| Targets | Default | LVGL allocates from | `lv_mem_monitor()` reports |
-| --- | --- | --- | --- |
-| Hosts: Linux, macOS, BSD, Windows, WebAssembly | `XILA_LVGL_MEM_POOL=0` | Xila's system allocator (`LV_STDLIB_CUSTOM`, hooks in [`src/stubs.rs`](src/stubs.rs)) | the whole system heap: total, free and used percentage only |
-| Everything else, i.e. microcontrollers | `XILA_LVGL_MEM_POOL=1` | LVGL's own TLSF allocator over one fixed pool (`LV_STDLIB_BUILTIN`) | the pool: totals, block counts, biggest free block, fragmentation and `max_used` |
+| Setting | LVGL allocates from | `lv_mem_monitor()` reports |
+| --- | --- | --- |
+| `XILA_LVGL_MEM_POOL=0` (default, every target) | Xila's system allocator (`LV_STDLIB_CUSTOM`, hooks in [`src/stubs.rs`](src/stubs.rs)) | the whole system heap: total, free and used percentage only |
+| `XILA_LVGL_MEM_POOL=1` (opt-in) | LVGL's own TLSF allocator over one fixed pool (`LV_STDLIB_BUILTIN`) | the pool: totals, block counts, biggest free block, fragmentation and `max_used` |
 
-With the pool, UI churn can neither fragment nor starve the system heap, and a UI that outgrows its pool fails in LVGL (`lv_malloc()` returns null) instead of taking memory from the rest of the system. Window event queues (see below) live inside LVGL objects, so they are part of the pool too.
+The system allocator is the default: LVGL takes only what it uses, nothing is reserved on boards without a UI, and the UI can grow at peaks. The pool is for boards that can dedicate a memory region to the UI, for example PSRAM or a separate SRAM bank (place it with `LV_MEM_POOL_INCLUDE`/`LV_MEM_POOL_ALLOC` or `LV_MEM_ADR`): UI churn then neither fragments nor starves the system heap, and a UI that outgrows its pool fails in LVGL (`lv_malloc()` returns null) instead of taking memory from the rest of the system. Window event queues (see below) live inside LVGL objects, so they are part of the pool too.
 
 Both settings are passed to the LVGL build through `LVGL_CFLAGS` (comma-separated `NAME=VALUE`), for example in the `[env]` table of a board's `.cargo/config.toml`:
 
 ```toml
 [env]
-LVGL_CFLAGS = "XILA_LVGL_MEM_SIZE=196608"
+LVGL_CFLAGS = "XILA_LVGL_MEM_POOL=1,XILA_LVGL_MEM_SIZE=196608"
 ```
 
 | Setting | Default | Meaning |
@@ -27,7 +27,7 @@ LVGL_CFLAGS = "XILA_LVGL_MEM_SIZE=196608"
 
 `build.rs` preprocesses the selected C configuration with LVGL's exported compiler settings and enables `lvgl_system_heap` only for `LV_STDLIB_CUSTOM`. A compile-time assertion in `stubs.rs` checks this against the generated bindings. Overrides in a consumer header are respected too.
 
-Cargo reads `DEP_LV_CONFIG_PATH` from the invoking workspace's `.cargo/config.toml`: Core selects `subsystems/graphics/include`, while Platforms and Applications select their respective `config/lvgl` directories. The latter headers currently select `LV_STDLIB_CUSTOM` unconditionally; they must adopt this memory section in their own repositories to enable the MCU pool. Core cannot override those consumer headers. `LVGL_CFLAGS` reaches both C compilation and bindgen through `lvgl_rust_sys`; the same exported settings compile Core's fonts.
+Cargo reads `DEP_LV_CONFIG_PATH` from the invoking workspace's `.cargo/config.toml`: Core selects `subsystems/graphics/include`, while Platforms and Applications select their respective `config/lvgl` directories. The latter headers currently select `LV_STDLIB_CUSTOM` unconditionally; to offer the optional pool, they must adopt this memory section in their own repositories. Core cannot override those consumer headers. `LVGL_CFLAGS` reaches both C compilation and bindgen through `lvgl_rust_sys`; the same exported settings compile Core's fonts.
 
 ### Placing the pool
 
