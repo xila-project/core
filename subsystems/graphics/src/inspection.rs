@@ -480,7 +480,7 @@ unsafe fn widget_value(obj: *mut lvgl::lv_obj_t, role: &str) -> WidgetValue {
             }
             "lv_spinbox" => data.value = Some(lvgl::lv_spinbox_get_value(obj)),
             "lv_dropdown" | "lv_roller" => {
-                let mut buffer = [0i8; UI_ELEMENT_MAX_TEXT_BYTES + 4];
+                let mut buffer = [0 as core::ffi::c_char; UI_ELEMENT_MAX_TEXT_BYTES + 4];
                 data.selected = Some(if role == "lv_dropdown" {
                     lvgl::lv_dropdown_get_selected_str(
                         obj,

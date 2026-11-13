@@ -56,6 +56,23 @@ fn snapshot_describes_widget_roles_labels_and_explicit_state() {
         1024,
         false,
     ));
+    // The safe session and raw compatibility API share one LVGL and lock.
+    use graphics::lvgl_rust::{Obj, Owner, WidgetExt};
+    let owner = Owner::new(1).unwrap();
+    let handle = manager
+        .with_lvgl_sync(|lv| {
+            let mut screen = lv.screen_active_mut().unwrap();
+            Ok(Obj::create(&mut screen)?.handle_for(owner)?)
+        })
+        .unwrap();
+    manager
+        .with_lvgl_sync(|lv| {
+            assert!(lv.resolve_for::<Obj>(handle.into_raw(), owner).is_ok());
+            assert_eq!(lv.delete_owner(owner), 1);
+            assert!(lv.resolve_for::<Obj>(handle.into_raw(), owner).is_err());
+            Ok(())
+        })
+        .unwrap();
     let screen = manager.get_current_screen().unwrap();
     unsafe {
         let button = lvgl::lv_button_create(screen);

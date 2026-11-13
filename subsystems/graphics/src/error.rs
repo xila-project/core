@@ -20,6 +20,19 @@ pub enum Error {
     InvalidParameter,
 }
 
+impl From<lvgl_rust::Error> for Error {
+    fn from(error: lvgl_rust::Error) -> Self {
+        match error {
+            lvgl_rust::Error::Dead => Error::InvalidReference,
+            lvgl_rust::Error::RegistryFull | lvgl_rust::Error::OutOfMemory => Error::OutOfMemory,
+            lvgl_rust::Error::Reentrant | lvgl_rust::Error::Busy => Error::AlreadyInUse,
+            lvgl_rust::Error::NotInitialized => Error::NotInitialized,
+            lvgl_rust::Error::AlreadyOwned | lvgl_rust::Error::OtherOwner => Error::AlreadyInUse,
+            _ => Error::InvalidParameter,
+        }
+    }
+}
+
 impl Display for Error {
     fn fmt(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
         let string = match self {

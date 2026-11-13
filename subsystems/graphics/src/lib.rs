@@ -25,6 +25,9 @@ pub mod symbol;
 mod window;
 
 pub mod lvgl;
+/// The safe LVGL layer (sessions, views, generational handles). Enter it with
+/// [`Manager::with_lvgl`]; see the README.
+pub use lvgl_rust;
 
 pub use area::*;
 pub use color::*;

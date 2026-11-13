@@ -89,3 +89,66 @@ capacity, with no separate allocation or growth. The whole host `Window` is
 16 + 280 bytes before, 456 bytes after; verify target layouts when budgeting
 board RAM. This trades a slightly larger initial reservation for a fixed
 upper bound and fewer heap blocks.
+
+## LVGL bindings (lvgl-rust)
+
+Graphics builds LVGL 9.6 through `lvgl-rust-sys`, using `include/lv_conf.h`.
+The existing `graphics::lvgl` module keeps the raw API and Xila helpers.
+Allocator hooks, locale fonts and the shadcn theme remain owned by Core.
+The safe API is re-exported as `graphics::lvgl_rust`.
+
+### Safe sessions
+
+Use `manager.with_lvgl(|lv| { /* safe LVGL calls */ Ok(()) }).await?`,
+or `with_lvgl_sync` in synchronous code. The private guard implements
+`LvglAccess` using the same mutex as `Manager::lock`; views cannot escape
+this closure. Store a `Handle<W>` across calls and resolve it in each session.
+Code already holding the graphics lock can use unsafe `with_lvgl_locked`:
+it must hold that lock throughout and must not overlap another session.
+Raw calls that delete or move objects must never overlap safe views.
+Do not call raw `lv_init`, `lv_deinit`, or change object IDs.
+
+### Future Wasm host integration
+
+Assign each live VM a distinct `Owner::new(id)` (default: 1..=15).
+Mint `WidgetExt::handle_for(owner)` only for objects created by that VM;
+use `Lvgl::resolve_for::<Obj>(raw, owner)` on every guest-provided handle.
+A raw handle alone is not an authority: the dispatcher must supply the VM's
+trusted owner. Shared windows and display layers must stay host-owned.
+
+Install the single `Lvgl::set_free_observer(Some(callback))` to release
+retained side-table data by `Freed::handle().into_raw()`. It runs at the end
+of LVGL destruction, including cascading raw deletions. It must not call
+LVGL or re-enter graphics. Pointer-to-handle lookup through a live object's
+`handle_for` uses its object ID in O(1), without a per-object callback.
+At teardown call `Lvgl::delete_owner(owner)` under the graphics lock.
+This deletes tagged roots and their descendants; structurally protected
+objects are untracked rather than deleted. Keep VM objects beneath a private,
+deletable root and delete it before reusing the owner ID. Retained resources
+for refused deletions need explicit host cleanup.
+
+The registry starts with 32 static slots and grows in non-moving doubling
+chunks from the global allocator; published chunks remain allocated for the
+process lifetime so deferred drops can address them safely. A handle is 4
+bytes, a slot 8 bytes on 32-bit targets (16 on 64-bit), plus LVGL's object-ID
+pointer (4/8 bytes). Owner tags use four generation bits at no extra slot
+cost: 12 bits remain for reuse detection. Handle values can repeat after
+4096 reuses of the same slot; do not treat them as cryptographic capabilities.
+The safe crate's default remains allocation-free; Core explicitly enables
+`growable-registry` and `owners`, without `heap`.
+
+### Updating consumers
+
+Consumers with a direct sys dependency must use `package = "lvgl-rust-sys"`
+with the same git source and branch as Core's `lvgl_rust_sys` dependency.
+The old package `lvgl_rust_sys` cannot coexist with the new one: both link
+LVGL. Keep the dependency key to preserve `use lvgl_rust_sys` statements.
+Their own `lv_conf.h` must enable `LV_USE_OBJ_ID=1`, `LV_OBJ_ID_AUTO_ASSIGN=1`, and
+`LV_USE_OBJ_ID_BUILTIN=0`,
+or builds must set `DEP_LV_CONFIG_PATH` to Core's `include` directory. There
+must be exactly one matching config for raw bindings, LVGL, safe wrappers,
+fonts, and the guest/host generator.
+
+The guest catalog excludes the seven object-ID functions newly enabled by
+this migration. Its fixture records every legacy ID from the prior sys
+revision with Core's configuration; Xila helpers retain their `0xf000+` IDs.
