@@ -1,0 +1,20 @@
+[package]
+name = "xila-host-network-prototype"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Deliberately excluded from product/embedded dependency resolution.
+[workspace]
+
+[dependencies]
+async-io = "2.6"
+futures-lite = "2.6"
+network = { path = "../../../subsystems/network" }
+
+[dev-dependencies]
+critical-section = { version = "1.2", features = ["std"] }
+embassy-executor = { version = "0.10", features = [
+  "platform-std",
+  "executor-thread",
+] }
