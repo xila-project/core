@@ -27,7 +27,7 @@ impl From<lvgl_rust::Error> for Error {
             lvgl_rust::Error::RegistryFull | lvgl_rust::Error::OutOfMemory => Error::OutOfMemory,
             lvgl_rust::Error::Reentrant | lvgl_rust::Error::Busy => Error::AlreadyInUse,
             lvgl_rust::Error::NotInitialized => Error::NotInitialized,
-            lvgl_rust::Error::AlreadyOwned | lvgl_rust::Error::OtherOwner => Error::AlreadyInUse,
+            lvgl_rust::Error::AlreadyOwned => Error::AlreadyInUse,
             _ => Error::InvalidParameter,
         }
     }

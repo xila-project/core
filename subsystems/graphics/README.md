@@ -108,34 +108,33 @@ it must hold that lock throughout and must not overlap another session.
 Raw calls that delete or move objects must never overlap safe views.
 Do not call raw `lv_init`, `lv_deinit`, or change object IDs.
 
-### Future Wasm host integration
+### Wasm host integration
 
-Assign each live VM a distinct `Owner::new(id)` (default: 1..=15).
-Mint `WidgetExt::handle_for(owner)` only for objects created by that VM;
-use `Lvgl::resolve_for::<Obj>(raw, owner)` on every guest-provided handle.
-A raw handle alone is not an authority: the dispatcher must supply the VM's
-trusted owner. Shared windows and display layers must stay host-owned.
+Each VM keeps its own table of handles and gives the guest indices into it,
+never raw handles, like file descriptors (see lvgl-rust's
+`host-several-clients` guide). Resolve every guest index through the table of
+the VM that sent it; an index from another VM, or of a deleted object, fails
+as `Dead`. Insert only objects the VM created beneath its own private root;
+shared windows and display layers stay host-owned and out of the table.
 
-Install the single `Lvgl::set_free_observer(Some(callback))` to release
-retained side-table data by `Freed::handle().into_raw()`. It runs at the end
-of LVGL destruction, including cascading raw deletions. It must not call
-LVGL or re-enter graphics. Pointer-to-handle lookup through a live object's
-`handle_for` uses its object ID in O(1), without a per-object callback.
-At teardown call `Lvgl::delete_owner(owner)` under the graphics lock.
-This deletes tagged roots and their descendants; structurally protected
-objects are untracked rather than deleted. Keep VM objects beneath a private,
-deletable root and delete it before reusing the owner ID. Retained resources
-for refused deletions need explicit host cleanup.
+Install the single `Lvgl::set_free_observer(Some(callback))` (`free-observer`
+feature) to learn about objects LVGL deletes on its own, such as children
+deleted with their parent. It runs at the end of LVGL destruction, including
+cascading raw deletions, and must not call LVGL or re-enter graphics: record
+`Freed::handle().into_raw()` and release retained side-table data after the
+LVGL work. `WidgetExt::find_handle` maps a live object back to its handle via
+its object ID in O(1), without a per-object callback. At teardown, delete the
+VM's root under the graphics lock and drop its table.
 
 The registry starts with 32 static slots and grows in non-moving doubling
 chunks from the global allocator; published chunks remain allocated for the
 process lifetime so deferred drops can address them safely. A handle is 4
 bytes, a slot 8 bytes on 32-bit targets (16 on 64-bit), plus LVGL's object-ID
-pointer (4/8 bytes). Owner tags use four generation bits at no extra slot
-cost: 12 bits remain for reuse detection. Handle values can repeat after
-4096 reuses of the same slot; do not treat them as cryptographic capabilities.
-The safe crate's default remains allocation-free; Core explicitly enables
-`growable-registry` and `owners`, without `heap`.
+pointer (4/8 bytes). Its 16-bit generation detects a stale handle until 65,536
+reuses of the same slot; handles are not cryptographic capabilities. A VM's
+table adds about 4 bytes per object in its own memory. The safe crate's
+default remains allocation-free; Core explicitly enables `growable-registry`
+and `free-observer`, without `heap`.
 
 ### Updating consumers
 
