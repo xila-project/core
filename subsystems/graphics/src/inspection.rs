@@ -597,8 +597,10 @@ mod tests {
     use super::*;
     #[test]
     fn matrix_with_unallocated_arrays_is_incomplete_not_dereferenced() {
-        let mut matrix = lvgl::lv_buttonmatrix_t::default();
-        matrix.btn_cnt = 1;
+        let mut matrix = lvgl::lv_buttonmatrix_t {
+            btn_cnt: 1,
+            ..Default::default()
+        };
         let (buttons, truncated) = unsafe {
             matrix_buttons(
                 (&mut matrix as *mut lvgl::lv_buttonmatrix_t).cast(),

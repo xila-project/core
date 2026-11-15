@@ -391,7 +391,7 @@ impl Logo {
         let side = metrics.arm_size() as u32;
 
         unsafe {
-            for index in 0..Self::ARM_COUNT {
+            for slot in &mut self.buffers {
                 let buffer = lvgl::lv_draw_buf_create(
                     side,
                     side,
@@ -401,7 +401,7 @@ impl Logo {
                 if buffer.is_null() {
                     return Err(Error::OutOfMemory);
                 }
-                self.buffers[index] = buffer;
+                *slot = buffer;
             }
 
             // Every buffer was allocated above with the same geometry; keep the
