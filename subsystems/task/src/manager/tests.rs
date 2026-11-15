@@ -1038,9 +1038,14 @@ async fn storage_is_reused_and_future_captures_are_dropped() {
             .await;
     }
     let (allocations, retained) = allocation::finish();
-    // Profiling deliberately keeps one record per task ever spawned.
     #[cfg(not(all(feature = "profiling", target_os = "linux")))]
     assert_eq!(retained, 0, "completed tasks retained heap bytes");
+    // Profiling keeps a bounded history of finished tasks, not one per spawn.
+    #[cfg(all(feature = "profiling", target_os = "linux"))]
+    assert!(
+        retained < 32 * 1024,
+        "profiling retained {retained} bytes for 1000 completed tasks"
+    );
     assert_eq!(alloc::sync::Arc::strong_count(&capture), 1);
     let slots = manager.0.read().await.slots.len();
     assert_eq!(slots, before);
