@@ -1,13 +1,13 @@
 //! In-RAM file system for device nodes, named pipes, and directory hierarchies.
 //!
-//! `memory_file_system` implements [`file_system::FileSystemOperations`] entirely in RAM
+//! `memory_file_system` implements [`::file_system::FileSystemOperations`] entirely in RAM
 //! without touching persistent flash storage. It is designed to be mounted at `/devices`
 //! so that device nodes, pipes, and sub-directories created at boot do not cause flash
 //! writes or persist stale inode mappings across reboots.
 //!
-//! Regular file contents are not supported: [`file_system::FileSystemOperations::lookup_file`]
-//! and [`file_system::BaseOperations`] I/O methods return
-//! [`file_system::Error::UnsupportedOperation`].
+//! Regular file contents are not supported: [`::file_system::FileSystemOperations::lookup_file`]
+//! and [`::file_system::BaseOperations`] I/O methods return
+//! [`::file_system::Error::UnsupportedOperation`].
 //!
 //! # Memory Layout and Per-Node Cost
 //!
