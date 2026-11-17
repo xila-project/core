@@ -1,4 +1,4 @@
-use crate::{Error, Result, VirtualFileSystem, pipe::Pipe, poll};
+use crate::{AccessTimePolicy, Error, Result, VirtualFileSystem, pipe::Pipe, poll};
 use alloc::{borrow::ToOwned, collections::btree_map::BTreeMap, string::String, vec::Vec};
 use exported_file_system::{
     AccessFlags, AttributeFlags, Attributes, BlockDevice, CharacterDevice, Context,
@@ -13,6 +13,7 @@ pub(super) struct InternalFileSystem {
     /// entries remain here while open contexts still hold its static handle.
     pub is_mounted: bool,
     pub mount_point: PathOwned,
+    pub access_time_policy: AccessTimePolicy,
     pub file_system: &'static dyn FileSystemOperations,
 }
 
@@ -663,15 +664,73 @@ impl VirtualFileSystem {
         (1..Inode::MAX).find(|&inode| !devices.contains_key(&inode))
     }
 
+    pub(super) async fn update_read_access_time(
+        file_system: &dyn FileSystemOperations,
+        policy: AccessTimePolicy,
+        path: &Path,
+        time: Time,
+    ) -> Result<()> {
+        const SECONDS_PER_DAY: u64 = 24 * 60 * 60;
+
+        if !file_system
+            .writable_attributes()
+            .contains(AttributeFlags::AccessTime)
+        {
+            return Ok(());
+        }
+
+        let should_update = match policy {
+            AccessTimePolicy::Never => false,
+            AccessTimePolicy::Always => true,
+            AccessTimePolicy::Relative => {
+                let mut current = Attributes::new().set_mask(
+                    AttributeFlags::AccessTime
+                        | AttributeFlags::ModificationTime
+                        | AttributeFlags::StatusTime,
+                );
+                Self::get_attributes(file_system, path, &mut current).await?;
+                if let Some(&access) = current.get_access() {
+                    let older_than_modification = current
+                        .get_modification()
+                        .is_some_and(|modification| access < *modification);
+                    let older_than_status =
+                        current.get_status().is_some_and(|status| access < *status);
+                    let older_than_one_day =
+                        time.as_u64().saturating_sub(access.as_u64()) >= SECONDS_PER_DAY;
+                    older_than_modification || older_than_status || older_than_one_day
+                } else {
+                    false
+                }
+            }
+        };
+
+        if should_update {
+            let attributes = Attributes::new().set_access(time);
+            Self::set_attributes(file_system, path, &attributes).await?;
+        }
+
+        Ok(())
+    }
+
     pub(super) async fn set_attributes(
         file_system: &dyn FileSystemOperations,
         path: impl AsRef<Path>,
         attributes: &Attributes,
     ) -> Result<()> {
+        let mask = attributes.get_mask();
+        if mask.is_empty() {
+            return Ok(());
+        }
+        let path = path.as_ref();
+        let mut current = Attributes::new().set_mask(mask);
+        Self::get_attributes(file_system, path, &mut current).await?;
+        if attributes_equal(&current, attributes) {
+            return Ok(());
+        }
         poll(|| {
             Ok(FileSystemOperations::set_attributes(
                 file_system,
-                path.as_ref(),
+                path,
                 attributes,
             )?)
         })
@@ -784,6 +843,35 @@ impl VirtualFileSystem {
     }
 }
 
+pub(super) fn attributes_equal(current: &Attributes, desired: &Attributes) -> bool {
+    let mask = desired.get_mask();
+    if !mask.difference(AttributeFlags::all()).is_empty() || current.get_mask() != mask {
+        return false;
+    }
+
+    macro_rules! check_field {
+        ($flag:expr, $getter:ident) => {
+            if mask.contains($flag) && current.$getter() != desired.$getter() {
+                return false;
+            }
+        };
+    }
+
+    check_field!(AttributeFlags::Inode, get_inode);
+    check_field!(AttributeFlags::Kind, get_kind);
+    check_field!(AttributeFlags::Size, get_size);
+    check_field!(AttributeFlags::Links, get_links);
+    check_field!(AttributeFlags::CreationTime, get_creation);
+    check_field!(AttributeFlags::ModificationTime, get_modification);
+    check_field!(AttributeFlags::AccessTime, get_access);
+    check_field!(AttributeFlags::StatusTime, get_status);
+    check_field!(AttributeFlags::Permissions, get_permissions);
+    check_field!(AttributeFlags::User, get_user);
+    check_field!(AttributeFlags::Group, get_group);
+
+    true
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -799,18 +887,21 @@ mod tests {
                 reference_count: 1,
                 is_mounted: true,
                 mount_point: PathOwned::new("/".to_string()).unwrap(),
+                access_time_policy: AccessTimePolicy::default(),
                 file_system: Box::leak(Box::new(DummyFileSystem)),
             },
             InternalFileSystem {
                 reference_count: 1,
                 is_mounted: true,
                 mount_point: PathOwned::new("/Foo".to_string()).unwrap(),
+                access_time_policy: AccessTimePolicy::default(),
                 file_system: Box::leak(Box::new(DummyFileSystem)),
             },
             InternalFileSystem {
                 reference_count: 1,
                 is_mounted: true,
                 mount_point: PathOwned::new("/Foo/Bar".to_string()).unwrap(),
+                access_time_policy: AccessTimePolicy::default(),
                 file_system: Box::leak(Box::new(DummyFileSystem)),
             },
         ];
@@ -849,26 +940,29 @@ mod tests {
                 reference_count: 1,
                 is_mounted: true,
                 mount_point: PathOwned::new("/".to_string()).unwrap(),
+                access_time_policy: AccessTimePolicy::default(),
                 file_system: Box::leak(Box::new(DummyFileSystem)),
             },
             InternalFileSystem {
                 reference_count: 2,
                 is_mounted: false,
                 mount_point: PathOwned::new("/Foo".to_string()).unwrap(),
+                access_time_policy: AccessTimePolicy::default(),
                 file_system: old,
             },
             InternalFileSystem {
                 reference_count: 1,
                 is_mounted: true,
                 mount_point: PathOwned::new("/Foo".to_string()).unwrap(),
+                access_time_policy: AccessTimePolicy::default(),
                 file_system: replacement,
             },
         ];
 
-        let (filesystem, relative_path, index) =
+        let (file_system, relative_path, index) =
             VirtualFileSystem::get_file_system_from_path(&file_systems, &"/Foo/app").unwrap();
         assert_eq!(index, 2);
-        assert!(core::ptr::eq(filesystem.file_system, replacement));
+        assert!(core::ptr::eq(file_system.file_system, replacement));
         assert_eq!(relative_path.as_str(), "/app");
     }
 }

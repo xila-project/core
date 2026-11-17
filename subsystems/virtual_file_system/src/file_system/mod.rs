@@ -19,17 +19,65 @@ use utilities::*;
 /// Maximum bytes stored in a symbolic-link target.
 const MAX_SYMLINK_TARGET_LENGTH: usize = 4096;
 
+/// Policy controlling when read operations update a mounted file system's access time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AccessTimePolicy {
+    /// Never update the access time on read. Write opens still update modification and access times.
+    Never,
+    /// Update the access time on read only when it is older than the modification or status time, or older than 24 hours.
+    #[default]
+    Relative,
+    /// Always update the access time on read, including directory opens.
+    Always,
+}
+
+/// Mount-time options for a file system.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MountOptions {
+    pub access_time_policy: AccessTimePolicy,
+}
+
+impl MountOptions {
+    pub const fn new() -> Self {
+        Self {
+            access_time_policy: AccessTimePolicy::Relative,
+        }
+    }
+
+    pub const fn with_access_time_policy(mut self, access_time_policy: AccessTimePolicy) -> Self {
+        self.access_time_policy = access_time_policy;
+        self
+    }
+}
+
 pub fn initialize(
     task_manager: &'static task::Manager,
     users_manager: &'static users::Manager,
     time_manager: &'static time::Manager<'static>,
     root_file_system: impl FileSystemOperations + 'static,
 ) -> Result<VirtualFileSystem> {
-    Ok(VirtualFileSystem::new(
+    initialize_with_options(
         task_manager,
         users_manager,
         time_manager,
         root_file_system,
+        MountOptions::default(),
+    )
+}
+
+pub fn initialize_with_options(
+    task_manager: &'static task::Manager,
+    users_manager: &'static users::Manager,
+    time_manager: &'static time::Manager<'static>,
+    root_file_system: impl FileSystemOperations + 'static,
+    options: MountOptions,
+) -> Result<VirtualFileSystem> {
+    Ok(VirtualFileSystem::new_with_options(
+        task_manager,
+        users_manager,
+        time_manager,
+        root_file_system,
+        options,
     ))
 }
 
@@ -66,10 +114,27 @@ impl VirtualFileSystem {
         time_manager: &'static time::Manager<'static>,
         root_file_system: impl FileSystemOperations + 'static,
     ) -> Self {
+        Self::new_with_options(
+            task_manager,
+            users_manager,
+            time_manager,
+            root_file_system,
+            MountOptions::default(),
+        )
+    }
+
+    pub fn new_with_options(
+        task_manager: &'static task::Manager,
+        users_manager: &'static users::Manager,
+        time_manager: &'static time::Manager<'static>,
+        root_file_system: impl FileSystemOperations + 'static,
+        options: MountOptions,
+    ) -> Self {
         let file_systems = vec![InternalFileSystem {
             reference_count: 1,
             is_mounted: true,
             mount_point: Path::ROOT.to_owned(),
+            access_time_policy: options.access_time_policy,
             file_system: Box::leak(Box::new(root_file_system)),
         }];
 
@@ -135,10 +200,24 @@ impl VirtualFileSystem {
         path: impl AsRef<Path>,
         task: TaskIdentifier,
     ) -> Result<()> {
-        self.mount_static(
+        self.mount_file_system_with_options(file_system, path, task, MountOptions::default())
+            .await
+    }
+
+    /// Mount a file system at a given mount point with explicit mount options.
+    pub async fn mount_file_system_with_options(
+        &self,
+        file_system: impl FileSystemOperations + 'static,
+        path: impl AsRef<Path>,
+        task: TaskIdentifier,
+        options: MountOptions,
+    ) -> Result<()> {
+        self.mount_static_with_permissions_and_options(
             task,
             path,
             ItemStatic::FileSystem(Box::leak(Box::new(file_system))),
+            Permissions::DEVICE_DEFAULT,
+            options,
         )
         .await
     }
@@ -318,19 +397,21 @@ impl VirtualFileSystem {
             return Err(Error::NotADirectory);
         }
 
-        // An unsynchronized or unrepresentable UTC must not prevent reading
-        // existing storage. Keep its previous access timestamp in that case.
-        if let Ok(time) = self.get_time() {
-            let attributes = Attributes::new().set_access(time);
-            let mask = attributes
-                .get_mask()
-                .intersection(file_system.file_system.writable_attributes());
-            Self::set_attributes(
-                file_system.file_system,
-                relative_path,
-                &attributes.set_mask(mask),
-            )
-            .await?;
+        if file_system.access_time_policy == AccessTimePolicy::Always {
+            // An unsynchronized or unrepresentable UTC must not prevent reading
+            // existing storage. Keep its previous access timestamp in that case.
+            if let Ok(time) = self.get_time() {
+                let attributes = Attributes::new().set_access(time);
+                let mask = attributes
+                    .get_mask()
+                    .intersection(file_system.file_system.writable_attributes());
+                Self::set_attributes(
+                    file_system.file_system,
+                    relative_path,
+                    &attributes.set_mask(mask),
+                )
+                .await?;
+            }
         }
 
         let mut context = Context::new_empty();
@@ -496,21 +577,27 @@ impl VirtualFileSystem {
 
         // Preserve previous timestamps while UTC is unavailable; never publish
         // uptime or wrap a signed epoch into unsigned filesystem metadata.
-        if let Ok(time) = time {
-            let attributes = if mode.contains(AccessFlags::Write) {
-                Attributes::new().set_modification(time).set_access(time)
+        if exists && let Ok(time) = time {
+            if mode.contains(AccessFlags::Write) {
+                let attributes = Attributes::new().set_modification(time).set_access(time);
+                let mask = attributes
+                    .get_mask()
+                    .intersection(file_system.file_system.writable_attributes());
+                Self::set_attributes(
+                    file_system.file_system,
+                    relative_path,
+                    &attributes.set_mask(mask),
+                )
+                .await?;
             } else {
-                Attributes::new().set_access(time)
-            };
-            let mask = attributes
-                .get_mask()
-                .intersection(file_system.file_system.writable_attributes());
-            Self::set_attributes(
-                file_system.file_system,
-                relative_path,
-                &attributes.set_mask(mask),
-            )
-            .await?;
+                Self::update_read_access_time(
+                    file_system.file_system,
+                    file_system.access_time_policy,
+                    relative_path,
+                    time,
+                )
+                .await?;
+            }
         }
 
         let mut attributes =
@@ -606,6 +693,24 @@ impl VirtualFileSystem {
         path: impl AsRef<Path>,
         item: ItemStatic,
         permissions: Permissions,
+    ) -> Result<()> {
+        self.mount_static_with_permissions_and_options(
+            task,
+            path,
+            item,
+            permissions,
+            MountOptions::default(),
+        )
+        .await
+    }
+
+    async fn mount_static_with_permissions_and_options(
+        &self,
+        task: TaskIdentifier,
+        path: impl AsRef<Path>,
+        item: ItemStatic,
+        permissions: Permissions,
+        options: MountOptions,
     ) -> Result<()> {
         let path: &Path = path.as_ref();
         if !path.is_valid() || !path.is_absolute() || path.is_root() {
@@ -735,6 +840,7 @@ impl VirtualFileSystem {
                 reference_count: 1,
                 is_mounted: true,
                 mount_point: path.to_owned(),
+                access_time_policy: options.access_time_policy,
                 file_system,
             });
         }
@@ -1691,11 +1797,11 @@ impl VirtualFileSystem {
         let operations = item
             .as_attributes_operations()
             .ok_or(Error::UnsupportedOperation)?;
-        let mut owner = Attributes::new().set_mask(AttributeFlags::User);
-        operations.get_attributes(context, &mut owner)?;
+        let mut current = Attributes::new().set_mask(attributes.get_mask() | AttributeFlags::User);
+        operations.get_attributes(context, &mut current)?;
         Self::authorize_metadata_change(
             user,
-            *owner.get_user().ok_or(Error::MissingAttribute)?,
+            *current.get_user().ok_or(Error::MissingAttribute)?,
             attributes,
         )?;
         if attributes
@@ -1703,6 +1809,11 @@ impl VirtualFileSystem {
             .intersects(AttributeFlags::User | AttributeFlags::Group)
         {
             return Err(Error::UnsupportedOperation);
+        }
+        let current_mask = current.get_mask().intersection(attributes.get_mask());
+        let current_for_mask = current.set_mask(current_mask);
+        if attributes_equal(&current_for_mask, attributes) {
+            return Ok(());
         }
         operations.set_attributes(context, attributes)?;
         Ok(())
