@@ -1,6 +1,6 @@
 [vars]
 # Version pins only: these declarations never install or activate a tool.
-rust_version = "1.99.0"
+rust_version = "1.100.0"
 nightly_version = "nightly-2026-10-12"
 node_version = "24.22.0"
 taplo_version = "0.10.0"
