@@ -177,6 +177,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::clone_on_copy)]
     fn test_clone_and_copy() {
         let layout = Layout::from_size_align(32, 4).unwrap();
         let compact = CompactLayout::from_layout(&layout).unwrap();
