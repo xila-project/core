@@ -2064,7 +2064,9 @@ async fn memory_file_system_mounted_on_devices_avoids_little_fs_writes() {
 
     let task = task_manager.get_current_task_identifier().await;
     let counting_device = CountingBlockDevice::new_static();
-    let root_file_system = little_fs::FileSystem::get_or_format(counting_device, 256).unwrap();
+    let root_file_system =
+        little_fs::FileSystem::get_or_format(counting_device, little_fs::Options::new(256))
+            .unwrap();
     let virtual_file_system = Box::leak(Box::new(
         virtual_file_system::initialize(
             task_manager,

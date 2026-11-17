@@ -98,8 +98,8 @@ async fn initialize_counting(
     let task = task_manager.get_current_task_identifier().await;
 
     let device = CountingDevice::new();
-    little_fs::FileSystem::format(device, 256).unwrap();
-    let file_system = little_fs::FileSystem::new(device, 256).unwrap();
+    little_fs::FileSystem::format(device, little_fs::Options::new(256)).unwrap();
+    let file_system = little_fs::FileSystem::new(device, little_fs::Options::new(256)).unwrap();
     let virtual_file_system = Box::leak(Box::new(
         virtual_file_system::initialize_with_options(
             task_manager,
@@ -337,8 +337,9 @@ async fn mounted_file_system_uses_its_own_access_time_policy() {
         .unwrap();
 
     let child_device = CountingDevice::new();
-    little_fs::FileSystem::format(child_device, 256).unwrap();
-    let child_file_system = little_fs::FileSystem::new(child_device, 256).unwrap();
+    little_fs::FileSystem::format(child_device, little_fs::Options::new(256)).unwrap();
+    let child_file_system =
+        little_fs::FileSystem::new(child_device, little_fs::Options::new(256)).unwrap();
     virtual_file_system
         .mount_file_system_with_options(
             child_file_system,
