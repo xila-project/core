@@ -934,6 +934,36 @@ mod tests {
         assert_eq!(&actual, expected);
         BaseOperations::close(&file_system, &mut context).unwrap();
     }
+
+    #[test]
+    fn special_permission_bits_survive_unmount_and_remount() {
+        let device = Box::leak(Box::new(MemoryDevice::<512>::new(2048 * 512)));
+        FileSystem::format(device, CACHE_SIZE).unwrap();
+
+        let file_system = FileSystem::new(device, CACHE_SIZE).unwrap();
+        let directory = Path::new("/shared");
+        FileSystemOperations::create_directory(&file_system, directory).unwrap();
+        FileSystemOperations::set_attributes(
+            &file_system,
+            directory,
+            &Attributes::new().set_permissions(file_system::Permissions::SHARED_DIRECTORY),
+        )
+        .unwrap();
+        MountOperations::unmount(&file_system).unwrap();
+        drop(file_system);
+
+        let file_system = FileSystem::new(device, CACHE_SIZE).unwrap();
+        let mut attributes = Attributes::new().set_mask(AttributeFlags::Permissions);
+        FileSystemOperations::get_attributes(&file_system, directory, &mut attributes).unwrap();
+        assert_eq!(
+            attributes.get_permissions(),
+            Some(&file_system::Permissions::SHARED_DIRECTORY)
+        );
+        assert_eq!(
+            attributes.get_permissions().unwrap().get_special(),
+            file_system::Special::STICKY
+        );
+    }
 }
 
 #[cfg(test)]

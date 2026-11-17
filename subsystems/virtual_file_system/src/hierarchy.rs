@@ -13,14 +13,38 @@ pub fn ignore_already_exists_error<T>(result: Result<T>) -> Result<()> {
     }
 }
 
+async fn set_permissions_if_different(
+    virtual_file_system: &VirtualFileSystem,
+    task: TaskIdentifier,
+    path: &Path,
+    permissions: Permissions,
+) -> Result<()> {
+    if virtual_file_system
+        .get_statistics_for_task(task, &path)
+        .await?
+        .permissions
+        != permissions
+    {
+        virtual_file_system
+            .set_permissions(task, path, permissions)
+            .await?;
+    }
+
+    Ok(())
+}
+
 /// Create the system-owned directory tree. Repeated calls preserve contents.
 pub async fn create_default_hierarchy(
     virtual_file_system: &VirtualFileSystem,
     task: TaskIdentifier,
 ) -> Result<()> {
-    virtual_file_system
-        .set_permissions(task, &Path::ROOT, Permissions::DIRECTORY_DEFAULT)
-        .await?;
+    set_permissions_if_different(
+        virtual_file_system,
+        task,
+        Path::ROOT,
+        Permissions::DIRECTORY_DEFAULT,
+    )
+    .await?;
 
     let paths = [
         Path::SYSTEM,
@@ -77,16 +101,29 @@ pub async fn create_default_hierarchy(
         }
     }
 
-    virtual_file_system
-        .set_permissions(task, &Path::DEVICES, Permissions::ALL_FULL)
-        .await?;
+    set_permissions_if_different(
+        virtual_file_system,
+        task,
+        Path::DEVICES,
+        Permissions::ALL_FULL,
+    )
+    .await?;
 
     // Without per-application identities, global application state is
     // root-only; applications keep data in /users/<uid>/applications/.
     for path in [Path::APPLICATION_DATA, Path::APPLICATION_CONFIGURATION] {
-        virtual_file_system
-            .set_permissions(task, &path, Permissions::USER_FULL)
+        set_permissions_if_different(virtual_file_system, task, path, Permissions::USER_FULL)
             .await?;
+    }
+
+    for path in [Path::SHARED_DATA, Path::TEMPORARY, Path::TEMPORARY_CACHE] {
+        set_permissions_if_different(
+            virtual_file_system,
+            task,
+            path,
+            Permissions::SHARED_DIRECTORY,
+        )
+        .await?;
     }
 
     Ok(())
