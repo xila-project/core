@@ -7,8 +7,8 @@
 //!   [`time`], [`log`], [`memory`], and (with the `network` and `graphics` features)
 //!   [`network`] and [`graphics`].
 //! - **System libraries & storage**: [`authentication`], [`executable`],
-//!   [`file_system`], [`little_fs`], [`internationalization`], [`shared`], and
-//!   [`synchronization`].
+//!   [`file_system`], [`little_fs`], [`memory_file_system`], [`internationalization`],
+//!   [`shared`], and [`synchronization`].
 //! - **Optional capabilities**: [`audio`] (`audio`), [`neural_network`] and
 //!   [`drivers_neural_network`] (`neural_network`), [`bootsplash`] (`bootsplash`),
 //!   and [`abi_definitions`] (`abi_definitions`).
@@ -34,6 +34,7 @@ pub use lifecycle;
 pub use little_fs;
 pub use log;
 pub use memory;
+pub use memory_file_system;
 #[cfg(feature = "network")]
 pub use network;
 pub use shared;

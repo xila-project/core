@@ -1848,6 +1848,7 @@ dependencies = [
  "xila-little-fs",
  "xila-log",
  "xila-memory",
+ "xila-memory-file-system",
  "xila-network",
  "xila-neural-network",
  "xila-shared",
@@ -2163,6 +2164,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "xila-memory-file-system"
+version = "0.1.0"
+dependencies = [
+ "xila-file-system",
+ "xila-synchronization",
+ "xila-testing",
+ "xila-users",
+]
+
+[[package]]
 name = "xila-network"
 version = "0.1.0"
 dependencies = [
@@ -2324,6 +2335,7 @@ dependencies = [
  "xila-file-system",
  "xila-little-fs",
  "xila-log",
+ "xila-memory-file-system",
  "xila-shared",
  "xila-synchronization",
  "xila-task",

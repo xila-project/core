@@ -19,6 +19,7 @@ embedded-io-async = { workspace = true }
 testing = { workspace = true }
 drivers_core = { workspace = true }
 little_fs = { workspace = true }
+memory_file_system = { workspace = true }
 abi_definitions = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }
 
