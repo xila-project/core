@@ -382,6 +382,113 @@ pub mod tests {
         assert_eq!(read_buffer, large_data);
     }
 
+    #[macro_export]
+    macro_rules! implement_block_device_tests {
+        ($device:expr) => {
+            #[test]
+            fn test_open_close() {
+                let device = $device;
+                $crate::block_device::tests::test_open_and_close(&device);
+            }
+
+            #[test]
+            fn test_basic_read_write() {
+                let device = $device;
+                 $crate::block_device::tests::test_basic_read_write(&device);
+            }
+
+            #[test]
+            fn test_write_at_offset() {
+                let device = $device;
+                 $crate::block_device::tests::test_write_at_offset(&device);
+            }
+
+            #[test]
+            fn test_position_management() {
+                let device = $device;
+                 $crate::block_device::tests::test_position_management(&device);
+            }
+
+            #[test]
+            fn test_write_pattern() {
+                let device = $device;
+                 $crate::block_device::tests::test_write_pattern(&device);
+            }
+
+            #[test]
+            fn test_write_vectored() {
+                let device = $device;
+                 $crate::block_device::tests::test_write_vectored(&device);
+            }
+
+            #[test]
+            fn test_read_until_delimiter() {
+                let device = $device;
+                 $crate::block_device::tests::test_read_until_delimiter(&device);
+            }
+
+            #[test]
+            fn test_flush() {
+                let device = $device;
+                 $crate::block_device::tests::test_flush(&device);
+            }
+
+            #[test]
+            fn test_clone_context() {
+                let device = $device;
+                 $crate::block_device::tests::test_clone_context(&device);
+            }
+
+            #[test]
+            fn test_control_commands() {
+                let device = $device;
+                 $crate::block_device::tests::test_control_commands(&device);
+            }
+
+            #[test]
+            fn test_read_until_boundary_conditions() {
+                let device = $device;
+                 $crate::block_device::tests::test_read_until_boundary_conditions(&device);
+            }
+
+            #[test]
+            fn test_write_pattern_edge_cases() {
+                let device = $device;
+                 $crate::block_device::tests::test_write_pattern_edge_cases(&device);
+            }
+
+            #[test]
+            fn test_write_vectored_edge_cases() {
+                let device = $device;
+                 $crate::block_device::tests::test_write_vectored_edge_cases(&device);
+            }
+
+            #[test]
+            fn test_concurrent_operations() {
+                let device = $device;
+                 $crate::block_device::tests::test_concurrent_operations(&device);
+            }
+
+            #[test]
+            fn test_large_read_write() {
+                let device = $device;
+                 $crate::block_device::tests::test_large_read_write(&device);
+            }
+        };
+        (
+            instance: $device:expr,
+            size: $size:expr
+        ) => {
+            implement!(instance: $device);
+
+            #[test]
+            fn test_position_wraparound() {
+                let device = $device;
+                test_position_wraparound(&device, $size);
+            }
+        };
+    }
+
     /// Tests for the set_position function.
     #[cfg(test)]
     mod set_position_tests {
@@ -499,112 +606,5 @@ pub mod tests {
                 size
             );
         }
-    }
-
-    #[macro_export]
-    macro_rules! implement_block_device_tests {
-        ($device:expr) => {
-            #[test]
-            fn test_open_close() {
-                let device = $device;
-                $crate::block_device::tests::test_open_and_close(&device);
-            }
-
-            #[test]
-            fn test_basic_read_write() {
-                let device = $device;
-                 $crate::block_device::tests::test_basic_read_write(&device);
-            }
-
-            #[test]
-            fn test_write_at_offset() {
-                let device = $device;
-                 $crate::block_device::tests::test_write_at_offset(&device);
-            }
-
-            #[test]
-            fn test_position_management() {
-                let device = $device;
-                 $crate::block_device::tests::test_position_management(&device);
-            }
-
-            #[test]
-            fn test_write_pattern() {
-                let device = $device;
-                 $crate::block_device::tests::test_write_pattern(&device);
-            }
-
-            #[test]
-            fn test_write_vectored() {
-                let device = $device;
-                 $crate::block_device::tests::test_write_vectored(&device);
-            }
-
-            #[test]
-            fn test_read_until_delimiter() {
-                let device = $device;
-                 $crate::block_device::tests::test_read_until_delimiter(&device);
-            }
-
-            #[test]
-            fn test_flush() {
-                let device = $device;
-                 $crate::block_device::tests::test_flush(&device);
-            }
-
-            #[test]
-            fn test_clone_context() {
-                let device = $device;
-                 $crate::block_device::tests::test_clone_context(&device);
-            }
-
-            #[test]
-            fn test_control_commands() {
-                let device = $device;
-                 $crate::block_device::tests::test_control_commands(&device);
-            }
-
-            #[test]
-            fn test_read_until_boundary_conditions() {
-                let device = $device;
-                 $crate::block_device::tests::test_read_until_boundary_conditions(&device);
-            }
-
-            #[test]
-            fn test_write_pattern_edge_cases() {
-                let device = $device;
-                 $crate::block_device::tests::test_write_pattern_edge_cases(&device);
-            }
-
-            #[test]
-            fn test_write_vectored_edge_cases() {
-                let device = $device;
-                 $crate::block_device::tests::test_write_vectored_edge_cases(&device);
-            }
-
-            #[test]
-            fn test_concurrent_operations() {
-                let device = $device;
-                 $crate::block_device::tests::test_concurrent_operations(&device);
-            }
-
-            #[test]
-            fn test_large_read_write() {
-                let device = $device;
-                 $crate::block_device::tests::test_large_read_write(&device);
-            }
-        };
-        (
-            instance: $device:expr,
-            size: $size:expr
-        ) => {
-            implement!(instance: $device);
-
-            #[test]
-            fn test_position_wraparound() {
-                let device = $device;
-                test_position_wraparound(&device, $size);
-            }
-        };
     }
 }

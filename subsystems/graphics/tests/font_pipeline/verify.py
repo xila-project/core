@@ -32,6 +32,14 @@ def lvgl_outputs(messages):
     return [outputs[0] / "liblvgl.a", outputs[0] / "bindings.rs"]
 
 
+def build_script_stdout(out_dir):
+    # Cargo 1.100+ stores build script stdout at <unit>/run/stdout instead of <unit>/output.
+    for candidate in (out_dir.parent / "run/stdout", out_dir.parent / "output"):
+        if candidate.is_file():
+            return candidate.read_text()
+    raise FileNotFoundError(f"Missing Cargo build script output under {out_dir.parent}")
+
+
 @contextmanager
 def restore_manifest(manifest):
     original = manifest.read_bytes()
@@ -99,7 +107,7 @@ def verify():
                     if m.get("reason") == "build-script-executed" and "graphics" in m.get("package_id", "")]
         assert len(out_dirs) == 1, out_dirs
         out = out_dirs[0]
-        build_output = (out.parent / "output").read_text()
+        build_output = build_script_stdout(out)
         current_sources = [Path(line.removeprefix("cargo:rerun-if-changed="))
                            for line in build_output.splitlines()
                            if line.startswith("cargo:rerun-if-changed=") and line.endswith(".generated.c")]
@@ -143,7 +151,7 @@ def verify():
         # objects/headers, with typed callback stubs that are never called.
         if index < 4:
             lvgl_output = next(iter(native))
-            metadata = (Path(lvgl_output).parent.parent / "output").read_text()
+            metadata = build_script_stdout(Path(lvgl_output).parent)
             includes = re.search(r"cargo:INCLUDE_PATHS=(.*)", metadata).group(1).split(';')
             defines = re.search(r"cargo:DEFINES=(.*)", metadata).group(1)
             cflags = re.search(r"cargo:CFLAGS=(.*)", metadata).group(1)

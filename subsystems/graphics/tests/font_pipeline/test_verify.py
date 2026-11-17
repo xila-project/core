@@ -36,6 +36,20 @@ class VerifierTests(unittest.TestCase):
             self.assertEqual(set(verify.lvgl_outputs(messages)),
                              {current / "bindings.rs", current / "liblvgl.a"})
 
+    def test_build_script_stdout_supports_new_and_legacy_layouts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            new_out = root / "new/pkg/hash/out"
+            (new_out.parent / "run").mkdir(parents=True)
+            new_out.mkdir()
+            (new_out.parent / "run/stdout").write_text("new layout")
+            self.assertEqual(verify.build_script_stdout(new_out), "new layout")
+
+            legacy_out = root / "legacy/pkg-hash/out"
+            legacy_out.mkdir(parents=True)
+            (legacy_out.parent / "output").write_text("legacy layout")
+            self.assertEqual(verify.build_script_stdout(legacy_out), "legacy layout")
+
 
 if __name__ == "__main__":
     unittest.main()

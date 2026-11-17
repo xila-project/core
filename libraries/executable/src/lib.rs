@@ -53,16 +53,11 @@ pub async fn is_execute_allowed(
 
     let is_in_group =
         users_manager.is_in_group(user, statistics.group).await || user == UserIdentifier::ROOT;
-    if (is_in_group)
+    is_in_group
         && statistics
             .permissions
             .get_group()
             .contains(Permission::Execute)
-    {
-        return true;
-    }
-
-    false
 }
 
 async fn get_overridden_user(
