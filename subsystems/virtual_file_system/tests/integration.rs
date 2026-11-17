@@ -15,6 +15,10 @@ use virtual_file_system::{File, VirtualFileSystem};
 mod allocation;
 
 #[cfg(target_os = "linux")]
+#[path = "support/access_time_policy.rs"]
+mod access_time_policy;
+
+#[cfg(target_os = "linux")]
 #[path = "support/metadata_authorization.rs"]
 mod metadata_authorization;
 
