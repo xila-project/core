@@ -740,6 +740,9 @@ impl VirtualFileSystem {
         )
         .await?;
 
+        // An existing mount point directory keeps its attributes, as on Linux:
+        // rewriting them at every boot would wear flash for nothing.
+        let mut existing_mount_point = false;
         if let ItemStatic::FileSystem(_) = item {
             match parent_file_system
                 .file_system
@@ -747,6 +750,7 @@ impl VirtualFileSystem {
             {
                 Ok(()) => {}
                 Err(file_system::Error::AlreadyExists) => {
+                    existing_mount_point = true;
                     let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
                     Self::get_attributes(
                         parent_file_system.file_system,
@@ -825,7 +829,10 @@ impl VirtualFileSystem {
             .get_mask()
             .intersection(parent_file_system.file_system.writable_attributes());
         let attributes = attributes.set_mask(mask);
-        Self::set_attributes(parent_file_system.file_system, relative_path, &attributes).await?;
+        if !existing_mount_point {
+            Self::set_attributes(parent_file_system.file_system, relative_path, &attributes)
+                .await?;
+        }
 
         poll(|| {
             Ok(item
@@ -1020,10 +1027,15 @@ impl VirtualFileSystem {
         let (file_system, relative_path, _) =
             Self::get_file_system_from_path(&file_systems, &path)?;
 
+        // A mount point is the root of its file system: it always exists.
+        let Some(parent_path) = relative_path.go_parent() else {
+            return Err(Error::AlreadyExists);
+        };
+
         // Get the parent directory attributes
         self.check_permissions(
             file_system.file_system,
-            relative_path.go_parent().ok_or(Error::InvalidPath)?,
+            parent_path,
             Permission::Write | Permission::Execute,
             user,
             task,

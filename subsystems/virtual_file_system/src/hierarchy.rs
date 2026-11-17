@@ -129,18 +129,31 @@ pub async fn create_default_hierarchy(
     Ok(())
 }
 
-/// Remove every entry below `/temporary`, preserving the directory itself.
+/// Remove every entry below `/temporary`, preserving the directory itself and
+/// the subdirectories of the default hierarchy.
 pub async fn clear_temporary(
     virtual_file_system: &VirtualFileSystem,
     task: TaskIdentifier,
 ) -> Result<()> {
-    clear_directory_contents(virtual_file_system, task, Path::TEMPORARY).await
+    // The directories `create_default_hierarchy` owns are emptied but kept:
+    // removing them would recreate them, and write them, at every boot.
+    clear_directory_contents(
+        virtual_file_system,
+        task,
+        Path::TEMPORARY,
+        &[
+            Path::TEMPORARY_CACHE.as_str(),
+            Path::TEMPORARY_SESSIONS.as_str(),
+        ],
+    )
+    .await
 }
 
 async fn clear_directory_contents(
     virtual_file_system: &VirtualFileSystem,
     task: TaskIdentifier,
     path: &Path,
+    kept: &[&str],
 ) -> Result<()> {
     // Post-order traversal: only keep pending siblings and ancestor removals,
     // not the entire tree or a chain of recursively polled futures.
@@ -154,7 +167,7 @@ async fn clear_directory_contents(
         }
 
         let mut directory = Directory::open(virtual_file_system, task, &directory_path).await?;
-        if directory_path.as_str() != path.as_str() {
+        if directory_path.as_str() != path.as_str() && !kept.contains(&directory_path.as_str()) {
             pending.push((directory_path.clone(), true));
         }
         while let Some(entry) = directory.read().await? {
