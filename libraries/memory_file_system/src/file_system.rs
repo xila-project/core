@@ -185,10 +185,9 @@ impl State {
     }
 
     fn validate_path_string(path: &Path) -> Result<&str> {
+        // The virtual file system addresses a mount point's own directory with
+        // an empty relative path: like LittleFS, resolve it to the root.
         let path_string = path.as_str();
-        if path_string.is_empty() {
-            return Err(Error::InvalidPath);
-        }
         if path_string.contains('\0') {
             return Err(Error::InvalidParameter);
         }
@@ -1166,9 +1165,14 @@ mod tests {
             file_system.create_file(Path::new("/folder/node/child")),
             Err(Error::NotDirectory)
         );
+        // An empty path is the root, as for a mount point's own directory.
         assert_eq!(
             file_system.create_file(Path::EMPTY),
-            Err(Error::InvalidPath)
+            Err(Error::IsDirectory)
+        );
+        assert_eq!(
+            file_system.create_directory(Path::EMPTY),
+            Err(Error::AlreadyExists)
         );
         assert_eq!(
             file_system.create_file(Path::new("/bad\0name")),

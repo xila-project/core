@@ -1020,10 +1020,15 @@ impl VirtualFileSystem {
         let (file_system, relative_path, _) =
             Self::get_file_system_from_path(&file_systems, &path)?;
 
+        // A mount point is the root of its file system: it always exists.
+        let Some(parent_path) = relative_path.go_parent() else {
+            return Err(Error::AlreadyExists);
+        };
+
         // Get the parent directory attributes
         self.check_permissions(
             file_system.file_system,
-            relative_path.go_parent().ok_or(Error::InvalidPath)?,
+            parent_path,
             Permission::Write | Permission::Execute,
             user,
             task,

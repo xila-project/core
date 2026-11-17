@@ -2054,6 +2054,56 @@ static STATIC_SERIAL_DEVICE: LoopbackCharacterDevice = LoopbackCharacterDevice::
 
 #[cfg(target_os = "linux")]
 #[test]
+async fn default_hierarchy_over_memory_devices_writes_nothing_on_second_boot() {
+    let time_manager = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+    let task_manager = Box::leak(Box::new(task::Manager::new()));
+    let users_manager = Box::leak(Box::new(users::Manager::new()));
+    if !log::is_initialized() {
+        log::initialize(&testing::Logger).unwrap();
+    }
+
+    let task = task_manager.get_current_task_identifier().await;
+    let counting_device = CountingBlockDevice::new_static();
+    let root_file_system =
+        little_fs::FileSystem::get_or_format(counting_device, little_fs::Options::new(256))
+            .unwrap();
+    let virtual_file_system = Box::leak(Box::new(
+        virtual_file_system::initialize(
+            task_manager,
+            users_manager,
+            time_manager,
+            root_file_system,
+        )
+        .unwrap(),
+    ));
+
+    // The order a platform boots in: devices in memory, then the hierarchy,
+    // which creates the device subdirectories inside the memory file system.
+    virtual_file_system
+        .mount_file_system(memory_file_system::FileSystem::new(), Path::DEVICES, task)
+        .await
+        .unwrap();
+    virtual_file_system::create_default_hierarchy(virtual_file_system, task)
+        .await
+        .unwrap();
+    assert_eq!(
+        virtual_file_system
+            .get_statistics(&Path::STANDARD_IO_DEVICES)
+            .await
+            .unwrap()
+            .kind,
+        file_system::Kind::Directory
+    );
+
+    let writes_after_first_boot = counting_device.write_count();
+    virtual_file_system::create_default_hierarchy(virtual_file_system, task)
+        .await
+        .unwrap();
+    assert_eq!(counting_device.write_count(), writes_after_first_boot);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 async fn memory_file_system_mounted_on_devices_avoids_little_fs_writes() {
     let time_manager = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
     let task_manager = Box::leak(Box::new(task::Manager::new()));
