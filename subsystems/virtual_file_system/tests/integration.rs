@@ -415,14 +415,25 @@ async fn clear_temporary_removes_nested_contents_and_preserves_root() {
             .kind,
         file_system::Kind::Directory
     );
-    let mut directory =
-        virtual_file_system::Directory::open(virtual_file_system, task, Path::TEMPORARY)
+    // Only the default hierarchy's subdirectories remain, emptied.
+    for (path, kept) in [
+        (Path::TEMPORARY, &["cache", "sessions"][..]),
+        (Path::TEMPORARY_CACHE, &[][..]),
+        (Path::TEMPORARY_SESSIONS, &[][..]),
+    ] {
+        let mut directory = virtual_file_system::Directory::open(virtual_file_system, task, path)
             .await
             .unwrap();
-    while let Some(entry) = directory.read().await.unwrap() {
-        assert!(entry.name == "." || entry.name == "..");
+        while let Some(entry) = directory.read().await.unwrap() {
+            assert!(
+                entry.name == "." || entry.name == ".." || kept.contains(&entry.name.as_str()),
+                "{} left in {}",
+                entry.name,
+                path.as_str()
+            );
+        }
+        directory.close(virtual_file_system).await.unwrap();
     }
-    directory.close(virtual_file_system).await.unwrap();
 
     let mut file = File::open(
         virtual_file_system,
@@ -2051,6 +2062,56 @@ impl file_system::MountOperations for LoopbackCharacterDevice {}
 impl file_system::DirectCharacterDevice for LoopbackCharacterDevice {}
 
 static STATIC_SERIAL_DEVICE: LoopbackCharacterDevice = LoopbackCharacterDevice::new();
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn embedded_boot_writes_nothing_after_a_reset() {
+    use virtual_file_system::{AccessTimePolicy, MountOptions};
+
+    let time_manager = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+    let task_manager = Box::leak(Box::new(task::Manager::new()));
+    let users_manager = Box::leak(Box::new(users::Manager::new()));
+    if !log::is_initialized() {
+        log::initialize(&testing::Logger).unwrap();
+    }
+    let task = task_manager.get_current_task_identifier().await;
+    let counting_device = CountingBlockDevice::new_static();
+    little_fs::FileSystem::format(counting_device, little_fs::Options::new(256)).unwrap();
+
+    let mut writes = [0; 3];
+    for writes_this_boot in &mut writes {
+        let before = counting_device.write_count();
+        // A reset: the previous mount is dropped without unmounting.
+        let root = little_fs::FileSystem::new(
+            counting_device,
+            little_fs::Options::new(256).set_block_cycles(500),
+        )
+        .unwrap();
+        let virtual_file_system = Box::leak(Box::new(
+            virtual_file_system::initialize_with_options(
+                task_manager,
+                users_manager,
+                time_manager,
+                root,
+                MountOptions::new().with_access_time_policy(AccessTimePolicy::Never),
+            )
+            .unwrap(),
+        ));
+        virtual_file_system
+            .mount_file_system(memory_file_system::FileSystem::new(), Path::DEVICES, task)
+            .await
+            .unwrap();
+        virtual_file_system::create_default_hierarchy(virtual_file_system, task)
+            .await
+            .unwrap();
+        virtual_file_system::clear_temporary(virtual_file_system, task)
+            .await
+            .unwrap();
+        *writes_this_boot = counting_device.write_count() - before;
+    }
+    assert_eq!(writes[1], 0, "second boot wrote: {writes:?}");
+    assert_eq!(writes[2], 0, "third boot wrote: {writes:?}");
+}
 
 #[cfg(target_os = "linux")]
 #[test]
