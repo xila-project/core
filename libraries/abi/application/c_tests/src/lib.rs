@@ -31,7 +31,7 @@ mod tests {
         let users = Box::leak(Box::new(users::Manager::new()));
         let task = tasks.get_current_task_identifier().await;
         let device = file_system::MemoryDevice::<512>::new_static(1024 * 512);
-        let fs = little_fs::FileSystem::new_format(device, 256).unwrap();
+        let fs = little_fs::FileSystem::new_format(device, little_fs::Options::new(256)).unwrap();
         let vfs = Box::leak(Box::new(
             virtual_file_system::initialize(tasks, users, time, fs).unwrap(),
         ));

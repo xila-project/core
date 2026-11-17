@@ -101,9 +101,11 @@ pub async fn initialize(graphics_enabled: bool, network_enabled: bool) -> Standa
         "enable the `graphics` feature of xila-testing"
     );
 
-    let file_system =
-        little_fs::FileSystem::new_format(MemoryDevice::<512>::new_static(1024 * 512), 256)
-            .unwrap();
+    let file_system = little_fs::FileSystem::new_format(
+        MemoryDevice::<512>::new_static(1024 * 512),
+        little_fs::Options::new(256),
+    )
+    .unwrap();
     let virtual_file_system: &'static VirtualFileSystem = Box::leak(Box::new(
         virtual_file_system::initialize(task_manager, users, time, file_system).unwrap(),
     ));

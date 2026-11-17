@@ -258,7 +258,7 @@ mod tests {
     #[test]
     fn errored_handle_rejects_metadata_without_publishing_cached_changes() {
         let device = file_system::MemoryDevice::<512>::new_static(512 * 128);
-        let fs = crate::FileSystem::new_format(device, 256).unwrap();
+        let fs = crate::FileSystem::new_format(device, crate::Options::new(256)).unwrap();
         fs.operation(|native| {
             let path = Path::new("/errored");
             File::create(native, path)?;

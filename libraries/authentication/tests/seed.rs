@@ -11,7 +11,7 @@ async fn fixture() -> Context<'static> {
     let time = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
     let fs = little_fs::FileSystem::new_format(
         file_system::MemoryDevice::<512>::new_static(512 * 1024),
-        256,
+        little_fs::Options::new(256),
     )
     .unwrap();
     let vfs = Box::leak(Box::new(

@@ -106,7 +106,8 @@ async fn boot(disk: Option<&'static Disk>) -> System {
             fail_flush: AtomicBool::new(false),
         }))
     });
-    let file_system = little_fs::FileSystem::get_or_format(disk, 256).unwrap();
+    let file_system =
+        little_fs::FileSystem::get_or_format(disk, little_fs::Options::new(256)).unwrap();
     let vfs: &'static VirtualFileSystem = Box::leak(Box::new(
         virtual_file_system::initialize(task_manager, users, time, file_system).unwrap(),
     ));

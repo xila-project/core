@@ -16,8 +16,9 @@ async fn privileged_worker_cannot_browse_or_select_for_unprivileged_caller() {
     let users = Box::leak(Box::new(users::Manager::new()));
     let time = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
     let device = MemoryDevice::<512>::new_static(1024 * 512);
-    little_fs::FileSystem::format(device, 256).unwrap();
-    let fs = little_fs::FileSystem::new(device, 256).unwrap();
+    let options = little_fs::Options::new(256);
+    little_fs::FileSystem::format(device, options).unwrap();
+    let fs = little_fs::FileSystem::new(device, options).unwrap();
     let vfs: &'static VirtualFileSystem = Box::leak(Box::new(
         virtual_file_system::initialize(manager, users, time, fs).unwrap(),
     ));

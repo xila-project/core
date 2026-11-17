@@ -41,10 +41,10 @@ async fn initialize_with_time(
 
     let device = MemoryDevice::<512>::new_static(1024 * 512);
 
-    let cache_size = 256;
+    let options = little_fs::Options::new(256);
 
-    little_fs::FileSystem::format(device, cache_size).unwrap();
-    let file_system = little_fs::FileSystem::new(device, cache_size).unwrap();
+    little_fs::FileSystem::format(device, options).unwrap();
+    let file_system = little_fs::FileSystem::new(device, options).unwrap();
 
     let virtual_file_system = Box::leak(Box::new(
         virtual_file_system::initialize(task_instance, users_manager, time_manager, file_system)
@@ -161,9 +161,11 @@ async fn forced_unmount_can_remount_the_same_path_with_a_new_filesystem() {
         task: TaskIdentifier,
         contents: &[u8],
     ) {
-        let file_system =
-            little_fs::FileSystem::new_format(MemoryDevice::<512>::new_static(256 * 512), 256)
-                .unwrap();
+        let file_system = little_fs::FileSystem::new_format(
+            MemoryDevice::<512>::new_static(256 * 512),
+            little_fs::Options::new(256),
+        )
+        .unwrap();
         virtual_file_system
             .mount_file_system(file_system, Path::new("/host"), task)
             .await
@@ -901,9 +903,10 @@ async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
 async fn symlink_targets_can_cross_filesystem_mounts() {
     let (task, vfs) = initialize().await;
     let device = MemoryDevice::<512>::new_static(256 * 512);
-    little_fs::FileSystem::format(device, 256).unwrap();
+    let options = little_fs::Options::new(256);
+    little_fs::FileSystem::format(device, options).unwrap();
     vfs.mount_file_system(
-        little_fs::FileSystem::new(device, 256).unwrap(),
+        little_fs::FileSystem::new(device, options).unwrap(),
         Path::from_str("/other"),
         task,
     )
@@ -1175,9 +1178,10 @@ async fn zero_capacity_named_pipe_is_rejected_without_creating_an_entry() {
 #[cfg(target_os = "linux")]
 async fn mount_test_filesystem(vfs: &'static VirtualFileSystem, task: TaskIdentifier, path: &str) {
     let device = MemoryDevice::<512>::new_static(512 * 128);
-    little_fs::FileSystem::format(device, 256).unwrap();
+    let options = little_fs::Options::new(256);
+    little_fs::FileSystem::format(device, options).unwrap();
     vfs.mount_file_system(
-        little_fs::FileSystem::new(device, 256).unwrap(),
+        little_fs::FileSystem::new(device, options).unwrap(),
         Path::new(path),
         task,
     )
@@ -1770,7 +1774,8 @@ async fn initialize_on(
         log::initialize(&testing::Logger).unwrap();
     }
     let task = task_manager.get_current_task_identifier().await;
-    let file_system = little_fs::FileSystem::get_or_format(device, 256).unwrap();
+    let file_system =
+        little_fs::FileSystem::get_or_format(device, little_fs::Options::new(256)).unwrap();
     let vfs = Box::leak(Box::new(
         virtual_file_system::initialize(task_manager, users_manager, time_manager, file_system)
             .unwrap(),
