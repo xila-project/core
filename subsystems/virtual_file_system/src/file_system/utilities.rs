@@ -744,6 +744,43 @@ impl VirtualFileSystem {
         Ok(())
     }
 
+    pub(super) async fn check_sticky_permissions(
+        &self,
+        file_system: &dyn FileSystemOperations,
+        parent_path: &Path,
+        entry_path: &Path,
+        current_user: UserIdentifier,
+    ) -> Result<()> {
+        if current_user == UserIdentifier::ROOT {
+            return Ok(());
+        }
+
+        let mut parent_attributes = Attributes::default()
+            .set_mask(AttributeFlags::User | AttributeFlags::Group | AttributeFlags::Permissions);
+        Self::get_attributes(file_system, parent_path, &mut parent_attributes).await?;
+
+        let parent_owner = *parent_attributes
+            .get_user()
+            .ok_or(Error::MissingAttribute)?;
+        let parent_permissions = *parent_attributes
+            .get_permissions()
+            .ok_or(Error::MissingAttribute)?;
+
+        if !parent_permissions.get_special().get_sticky() || parent_owner == current_user {
+            return Ok(());
+        }
+
+        let mut entry_attributes = Attributes::default().set_mask(AttributeFlags::User);
+        Self::get_attributes(file_system, entry_path, &mut entry_attributes).await?;
+        let entry_owner = *entry_attributes.get_user().ok_or(Error::MissingAttribute)?;
+
+        if entry_owner != current_user {
+            return Err(Error::PermissionDenied);
+        }
+
+        Ok(())
+    }
+
     pub(super) async fn check_permissions_with_parent(
         &self,
         file_systems: &FileSystemsArray,

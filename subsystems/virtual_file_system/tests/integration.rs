@@ -296,6 +296,26 @@ async fn default_hierarchy_creates_canonical_roots_and_is_idempotent() {
             "{path} must be a directory"
         );
     }
+
+    for path in ["/data/shared", "/temporary", "/temporary/cache"] {
+        assert_eq!(
+            virtual_file_system
+                .get_statistics(&Path::from_str(path))
+                .await
+                .unwrap()
+                .permissions,
+            file_system::Permissions::SHARED_DIRECTORY,
+            "{path} must have shared directory permissions"
+        );
+    }
+    assert_eq!(
+        virtual_file_system
+            .get_statistics(&Path::from_str("/temporary/sessions"))
+            .await
+            .unwrap()
+            .permissions,
+        file_system::Permissions::DIRECTORY_DEFAULT
+    );
 }
 
 #[cfg(target_os = "linux")]
@@ -994,6 +1014,134 @@ async fn owner_can_chmod_path_but_cannot_change_ownership() {
         assert_eq!(
             vfs.set_ownership(task, "/owned", uid, gid).await,
             Err(virtual_file_system::Error::PermissionDenied)
+        );
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn shared_and_temporary_directories_allow_user_writes_and_enforce_sticky_bit() {
+    use file_system::Permissions;
+    use virtual_file_system::Error;
+
+    let (task, vfs) = initialize().await;
+    virtual_file_system::create_default_hierarchy(vfs, task)
+        .await
+        .unwrap();
+
+    let group_a = users::GroupIdentifier::new(1001);
+    let user_a = users::UserIdentifier::new(1001);
+    let group_b = users::GroupIdentifier::new(1002);
+    let user_b = users::UserIdentifier::new(1002);
+    vfs.users_manager()
+        .add_group(group_a, "alice", &[])
+        .await
+        .unwrap();
+    vfs.users_manager()
+        .add_user(user_a, "alice", group_a)
+        .await
+        .unwrap();
+    vfs.users_manager()
+        .add_group(group_b, "bob", &[])
+        .await
+        .unwrap();
+    vfs.users_manager()
+        .add_user(user_b, "bob", group_b)
+        .await
+        .unwrap();
+
+    // Non-root users can create files in /data/shared, /temporary, and /temporary/cache,
+    // while /temporary/sessions stays root-only.
+    vfs.task_manager().set_user(task, user_a).await.unwrap();
+    File::write_to_path(vfs, task, "/data/shared/alice", b"shared")
+        .await
+        .unwrap();
+    File::write_to_path(vfs, task, "/temporary/alice", b"temp")
+        .await
+        .unwrap();
+    File::write_to_path(vfs, task, "/temporary/cache/alice", b"cache")
+        .await
+        .unwrap();
+    assert!(matches!(
+        File::write_to_path(vfs, task, "/temporary/sessions/alice", b"denied").await,
+        Err(Error::PermissionDenied)
+    ));
+
+    // User B can also create files there, but cannot remove, rename, or replace user A's files.
+    vfs.task_manager().set_user(task, user_b).await.unwrap();
+    File::write_to_path(vfs, task, "/temporary/bob", b"bob")
+        .await
+        .unwrap();
+
+    for path in ["/data/shared/alice", "/temporary/alice"] {
+        assert_eq!(vfs.remove(task, path).await, Err(Error::PermissionDenied));
+        assert_eq!(
+            vfs.rename(task, &path, &"/temporary/bob_stolen").await,
+            Err(Error::PermissionDenied)
+        );
+    }
+    assert_eq!(
+        vfs.rename(task, &"/temporary/bob", &"/temporary/alice")
+            .await,
+        Err(Error::PermissionDenied)
+    );
+    assert_eq!(
+        vfs.rename(task, &"/temporary/bob", &"/data/shared/alice")
+            .await,
+        Err(Error::PermissionDenied)
+    );
+
+    // User B can rename their own file to a non-existent destination.
+    vfs.rename(task, &"/temporary/bob", &"/temporary/bob_renamed")
+        .await
+        .unwrap();
+
+    // User A can rename and remove their own files.
+    vfs.task_manager().set_user(task, user_a).await.unwrap();
+    vfs.rename(task, &"/data/shared/alice", &"/data/shared/alice_renamed")
+        .await
+        .unwrap();
+    vfs.remove(task, "/data/shared/alice_renamed")
+        .await
+        .unwrap();
+
+    // Sticky directory owner (non-root) can remove another user's entry inside it.
+    vfs.create_directory(task, &"/temporary/alice_dir")
+        .await
+        .unwrap();
+    vfs.set_permissions(task, "/temporary/alice_dir", Permissions::SHARED_DIRECTORY)
+        .await
+        .unwrap();
+    vfs.task_manager().set_user(task, user_b).await.unwrap();
+    File::write_to_path(vfs, task, "/temporary/alice_dir/bob", b"b")
+        .await
+        .unwrap();
+    vfs.task_manager().set_user(task, user_a).await.unwrap();
+    vfs.remove(task, "/temporary/alice_dir/bob").await.unwrap();
+    vfs.remove(task, "/temporary/alice_dir").await.unwrap();
+
+    // Root bypasses sticky bit and can remove/rename any entry.
+    vfs.task_manager()
+        .set_user(task, users::UserIdentifier::ROOT)
+        .await
+        .unwrap();
+    vfs.rename(task, &"/temporary/bob_renamed", &"/temporary/alice")
+        .await
+        .unwrap();
+    vfs.remove(task, "/temporary/alice").await.unwrap();
+    vfs.remove(task, "/temporary/cache/alice").await.unwrap();
+
+    // Repeated create_default_hierarchy keeps SHARED_DIRECTORY permissions.
+    virtual_file_system::create_default_hierarchy(vfs, task)
+        .await
+        .unwrap();
+    for path in ["/data/shared", "/temporary", "/temporary/cache"] {
+        assert_eq!(
+            vfs.get_statistics(&Path::from_str(path))
+                .await
+                .unwrap()
+                .permissions,
+            Permissions::SHARED_DIRECTORY
         );
     }
 }

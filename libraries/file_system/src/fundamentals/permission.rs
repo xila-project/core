@@ -181,6 +181,13 @@ impl Permissions {
         Permission::READ_EXECUTE,
         Special::NONE,
     );
+    /// World-writable directory where only an entry's owner may remove or rename it, like Unix mode 1777.
+    pub const SHARED_DIRECTORY: Self = Self::new(
+        Permission::all(),
+        Permission::all(),
+        Permission::all(),
+        Special::STICKY,
+    );
     pub const DEVICE_DEFAULT: Self = Self::new(
         Permission::all(),
         Permission::READ_WRITE,
@@ -515,5 +522,16 @@ mod tests {
         assert_eq!(Special::from_bits(1 << 3), None);
         assert_eq!(Special::from_bits_truncate(0b1_1111), Special::all());
         assert_eq!(Special::from_bits_retain(1 << 3).bits(), 1 << 3);
+    }
+
+    #[test]
+    fn test_shared_directory_permissions() {
+        let permissions = Permissions::SHARED_DIRECTORY;
+        assert_eq!(permissions.get_user(), Permission::all());
+        assert_eq!(permissions.get_group(), Permission::all());
+        assert_eq!(permissions.get_others(), Permission::all());
+        assert_eq!(permissions.get_special(), Special::STICKY);
+        assert!(permissions.get_special().get_sticky());
+        assert_eq!(permissions.as_u16(), 0o1777);
     }
 }

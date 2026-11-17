@@ -847,14 +847,19 @@ impl VirtualFileSystem {
         let (file_system, relative_path, _) =
             Self::get_file_system_from_path(&file_systems, &path)?; // Get the file system identifier and the relative path
 
+        let parent_path = relative_path.go_parent().ok_or(Error::InvalidPath)?;
+
         self.check_permissions(
             file_system.file_system,
-            relative_path.go_parent().ok_or(Error::InvalidPath)?,
+            parent_path,
             Permission::Write | Permission::Execute,
             user,
             task,
         )
         .await?;
+
+        self.check_sticky_permissions(file_system.file_system, parent_path, relative_path, user)
+            .await?;
 
         let mut attributes =
             Attributes::new().set_mask(AttributeFlags::Kind | AttributeFlags::Inode);
@@ -1320,10 +1325,10 @@ impl VirtualFileSystem {
             return Err(Error::CrossDevice);
         }
 
-        for parent_path in [
-            old_relative_path.go_parent().ok_or(Error::InvalidPath)?,
-            new_relative_path.go_parent().ok_or(Error::InvalidPath)?,
-        ] {
+        let old_parent = old_relative_path.go_parent().ok_or(Error::InvalidPath)?;
+        let new_parent = new_relative_path.go_parent().ok_or(Error::InvalidPath)?;
+
+        for parent_path in [old_parent, new_parent] {
             self.check_permissions(
                 old_file_system.file_system,
                 parent_path,
@@ -1332,6 +1337,27 @@ impl VirtualFileSystem {
                 task,
             )
             .await?;
+        }
+
+        self.check_sticky_permissions(
+            old_file_system.file_system,
+            old_parent,
+            old_relative_path,
+            user,
+        )
+        .await?;
+
+        match self
+            .check_sticky_permissions(
+                old_file_system.file_system,
+                new_parent,
+                new_relative_path,
+                user,
+            )
+            .await
+        {
+            Ok(()) | Err(Error::FileSystem(file_system::Error::NotFound)) => {}
+            Err(error) => return Err(error),
         }
 
         poll(|| {
