@@ -17,47 +17,94 @@ use synchronization::{Arc, blocking_mutex::raw::CriticalSectionRawMutex, mutex::
 // Duplicate contexts share a stable handle rather than copying native C caches.
 type SharedContext<T> = Arc<Mutex<CriticalSectionRawMutex, Box<T>>>;
 
+/// Mount and format options for [`FileSystem`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Options {
+    /// Size of the read and program caches in bytes.
+    pub cache_size: usize,
+    /// Number of erase cycles before LittleFS evicts a metadata block for wear
+    /// levelling, or `None` for the LittleFS default (`-1`, wear levelling
+    /// disabled).
+    ///
+    /// LittleFS recommends values in the range `100`–`1000`. Flash-backed
+    /// devices should set this (for example, `Some(500)`), while RAM or
+    /// host-file storage can leave it unset.
+    pub block_cycles: Option<u16>,
+}
+
+impl Options {
+    /// Creates options with `cache_size` and `block_cycles` unset (`None`).
+    pub const fn new(cache_size: usize) -> Self {
+        Self {
+            cache_size,
+            block_cycles: None,
+        }
+    }
+
+    /// Sets the read and program cache size in bytes.
+    pub const fn set_cache_size(mut self, cache_size: usize) -> Self {
+        self.cache_size = cache_size;
+        self
+    }
+
+    /// Sets the metadata block wear-levelling cycle count.
+    pub const fn set_block_cycles(mut self, block_cycles: u16) -> Self {
+        self.block_cycles = Some(block_cycles);
+        self
+    }
+}
+
 pub struct FileSystem {
     file_system: MutexMountWrapper<CriticalSectionRawMutex, littlefs::lfs_t>,
 }
 
 impl FileSystem {
-    pub fn new_format(device: &'static dyn DirectBlockDevice, cache_size: usize) -> Result<Self> {
-        Self::format(device, cache_size)?;
+    fn build_configuration(
+        device: &'static dyn DirectBlockDevice,
+        options: Options,
+    ) -> Result<littlefs::lfs_config> {
+        let block_size = device.get_block_size().map_err(|_| Error::InputOutput)?;
+        let block_count = device.get_block_count().map_err(|_| Error::InputOutput)?;
 
-        Self::new(device, cache_size)
+        let mut configuration = Configuration::new(
+            device,
+            block_size as _,
+            block_count as _,
+            options.cache_size,
+            options.cache_size,
+        )
+        .ok_or(Error::InvalidParameter)?;
+
+        if let Some(block_cycles) = options.block_cycles {
+            configuration = configuration.set_block_cycles(block_cycles);
+        }
+
+        configuration
+            .try_into()
+            .map_err(|_| Error::InvalidParameter)
     }
 
-    pub fn get_or_format(
-        device: &'static dyn DirectBlockDevice,
-        cache_size: usize,
-    ) -> Result<Self> {
-        match Self::new(device, cache_size) {
+    pub fn new_format(device: &'static dyn DirectBlockDevice, options: Options) -> Result<Self> {
+        Self::format(device, options)?;
+
+        Self::new(device, options)
+    }
+
+    pub fn get_or_format(device: &'static dyn DirectBlockDevice, options: Options) -> Result<Self> {
+        match Self::new(device, options) {
             Ok(file_system) => Ok(file_system),
             Err(_) => {
                 device.set_position(0, &Position::Start(0))?;
 
-                Self::format(device, cache_size)?;
+                Self::format(device, options)?;
 
-                Self::new(device, cache_size)
+                Self::new(device, options)
             }
         }
     }
 
-    pub fn new(device: &'static dyn DirectBlockDevice, cache_size: usize) -> Result<Self> {
-        let block_size = device.get_block_size().map_err(|_| Error::InputOutput)?;
-        let block_count = device.get_block_count().map_err(|_| Error::InputOutput)?;
-
-        let configuration: littlefs::lfs_config = Configuration::new(
-            device,
-            block_size as _,
-            block_count as _,
-            cache_size,
-            cache_size,
-        )
-        .ok_or(Error::InvalidParameter)?
-        .try_into()
-        .map_err(|_| Error::InvalidParameter)?;
+    pub fn new(device: &'static dyn DirectBlockDevice, options: Options) -> Result<Self> {
+        let configuration = Self::build_configuration(device, options)?;
 
         let configuration = Box::new(configuration);
 
@@ -99,20 +146,8 @@ impl FileSystem {
         })
     }
 
-    pub fn format(device: &'static dyn DirectBlockDevice, cache_size: usize) -> Result<()> {
-        let block_size = device.get_block_size().map_err(|_| Error::InputOutput)?;
-        let block_count = device.get_block_count().map_err(|_| Error::InputOutput)?;
-
-        let configuration: littlefs::lfs_config = Configuration::new(
-            device,
-            block_size as _,
-            block_count as _,
-            cache_size,
-            cache_size,
-        )
-        .ok_or(Error::InvalidParameter)?
-        .try_into()
-        .map_err(|_| Error::InvalidParameter)?;
+    pub fn format(device: &'static dyn DirectBlockDevice, options: Options) -> Result<()> {
+        let configuration = Self::build_configuration(device, options)?;
 
         let mut file_system = littlefs::lfs_t::default();
 
@@ -566,7 +601,7 @@ impl Drop for FileSystem {
 /// extents before overlap arithmetic, including malicious overflowing entries.
 pub fn mount_disk<D: DirectBlockDevice>(
     device: &'static D,
-    cache_size: usize,
+    options: Options,
 ) -> Result<FileSystem> {
     use file_system::{
         XILA_DISK_SIGNATURE,
@@ -589,7 +624,7 @@ pub fn mount_disk<D: DirectBlockDevice>(
         .find(|entry| entry.is_valid() && entry.kind == PartitionKind::Xila)
         .ok_or(Error::InvalidFile)?;
     let partition = create_partition_device(device, entry).map_err(|_| Error::InvalidFile)?;
-    FileSystem::new(Box::leak(Box::new(partition)), cache_size)
+    FileSystem::new(Box::leak(Box::new(partition)), options)
 }
 
 #[cfg(test)]
@@ -614,9 +649,10 @@ mod tests {
 
         let device = Box::leak(Box::new(MemoryDevice::<512>::new(2048 * 512)));
 
-        FileSystem::format(device, CACHE_SIZE).unwrap();
+        let options = Options::new(CACHE_SIZE);
+        FileSystem::format(device, options).unwrap();
 
-        FileSystem::new(device, CACHE_SIZE).unwrap()
+        FileSystem::new(device, options).unwrap()
     }
 
     implement_file_system_tests!(
@@ -900,9 +936,10 @@ mod tests {
     #[test]
     fn filesystem_contents_survive_unmount_and_remount() {
         let device = Box::leak(Box::new(MemoryDevice::<512>::new(2048 * 512)));
-        FileSystem::format(device, CACHE_SIZE).unwrap();
+        let options = Options::new(CACHE_SIZE);
+        FileSystem::format(device, options).unwrap();
 
-        let file_system = FileSystem::new(device, CACHE_SIZE).unwrap();
+        let file_system = FileSystem::new(device, options).unwrap();
         let directory = Path::new("/persistent");
         let file = Path::new("/persistent/data");
         FileSystemOperations::create_directory(&file_system, directory).unwrap();
@@ -921,7 +958,7 @@ mod tests {
 
         drop(file_system);
 
-        let file_system = FileSystem::new(device, CACHE_SIZE).unwrap();
+        let file_system = FileSystem::new(device, options).unwrap();
         let mut context = Context::new_empty();
         file_system
             .lookup_file(&mut context, file, file_system::AccessFlags::Read.into())
@@ -938,9 +975,9 @@ mod tests {
     #[test]
     fn special_permission_bits_survive_unmount_and_remount() {
         let device = Box::leak(Box::new(MemoryDevice::<512>::new(2048 * 512)));
-        FileSystem::format(device, CACHE_SIZE).unwrap();
+        FileSystem::format(device, Options::new(CACHE_SIZE)).unwrap();
 
-        let file_system = FileSystem::new(device, CACHE_SIZE).unwrap();
+        let file_system = FileSystem::new(device, Options::new(CACHE_SIZE)).unwrap();
         let directory = Path::new("/shared");
         FileSystemOperations::create_directory(&file_system, directory).unwrap();
         FileSystemOperations::set_attributes(
@@ -952,7 +989,7 @@ mod tests {
         MountOperations::unmount(&file_system).unwrap();
         drop(file_system);
 
-        let file_system = FileSystem::new(device, CACHE_SIZE).unwrap();
+        let file_system = FileSystem::new(device, Options::new(CACHE_SIZE)).unwrap();
         let mut attributes = Attributes::new().set_mask(AttributeFlags::Permissions);
         FileSystemOperations::get_attributes(&file_system, directory, &mut attributes).unwrap();
         assert_eq!(
@@ -963,6 +1000,31 @@ mod tests {
             attributes.get_permissions().unwrap().get_special(),
             file_system::Special::STICKY
         );
+    }
+
+    #[test]
+    fn options_block_cycles_reaches_c_configuration() {
+        let device = Box::leak(Box::new(MemoryDevice::<512>::new(2048 * 512)));
+        let options = Options::new(CACHE_SIZE).set_block_cycles(500);
+        let file_system = FileSystem::new_format(device, options).unwrap();
+
+        let block_cycles = file_system
+            .operation(|native| Ok(unsafe { (*native.cfg).block_cycles }))
+            .unwrap();
+        assert_eq!(block_cycles, 500);
+    }
+
+    #[test]
+    fn options_none_block_cycles_maps_to_minus_one() {
+        let device = Box::leak(Box::new(MemoryDevice::<512>::new(2048 * 512)));
+        let options = Options::new(CACHE_SIZE);
+        assert_eq!(options.block_cycles, None);
+        let file_system = FileSystem::new_format(device, options).unwrap();
+
+        let block_cycles = file_system
+            .operation(|native| Ok(unsafe { (*native.cfg).block_cycles }))
+            .unwrap();
+        assert_eq!(block_cycles, -1);
     }
 }
 
@@ -976,8 +1038,9 @@ mod symlink_tests {
     #[test]
     fn persisted_link_kind_size_and_directory_entry_survive_remount() {
         let device = file_system::MemoryDevice::<512>::new_static(2048 * 512);
-        FileSystem::format(device, CACHE_SIZE).unwrap();
-        let filesystem = FileSystem::new(device, CACHE_SIZE).unwrap();
+        let options = Options::new(CACHE_SIZE);
+        FileSystem::format(device, options).unwrap();
+        let filesystem = FileSystem::new(device, options).unwrap();
         let link = Path::from_str("/link");
         FileSystemOperations::create_file(&filesystem, link).unwrap();
 
@@ -1027,7 +1090,7 @@ mod symlink_tests {
 
         MountOperations::unmount(&filesystem).unwrap();
         drop(filesystem);
-        let filesystem = FileSystem::new(device, CACHE_SIZE).unwrap();
+        let filesystem = FileSystem::new(device, options).unwrap();
         let mut attributes =
             Attributes::new().set_mask(AttributeFlags::Kind | AttributeFlags::Size);
         FileSystemOperations::get_attributes(&filesystem, link, &mut attributes).unwrap();

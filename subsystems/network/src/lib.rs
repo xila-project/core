@@ -73,7 +73,9 @@ pub mod tests {
 
         let memory_device = file_system::MemoryDevice::<512>::new_static(10 * 1024 * 1024);
 
-        let root_file_system = little_fs::FileSystem::get_or_format(memory_device, 512).unwrap();
+        let root_file_system =
+            little_fs::FileSystem::get_or_format(memory_device, little_fs::Options::new(512))
+                .unwrap();
 
         let virtual_file_system = Box::leak(Box::new(
             virtual_file_system::initialize(
