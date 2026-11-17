@@ -1778,3 +1778,241 @@ async fn storage_flush_failure_is_surfaced_and_keeps_the_mount() {
         .unwrap();
     assert_eq!(buffer, b"data");
 }
+
+struct CountingBlockDevice {
+    inner: &'static MemoryDevice<512>,
+    write_count: core::sync::atomic::AtomicUsize,
+}
+
+impl CountingBlockDevice {
+    fn new_static() -> &'static Self {
+        Box::leak(Box::new(Self {
+            inner: MemoryDevice::<512>::new_static(1024 * 512),
+            write_count: core::sync::atomic::AtomicUsize::new(0),
+        }))
+    }
+
+    fn write_count(&self) -> usize {
+        self.write_count.load(core::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl file_system::DirectBaseOperations for CountingBlockDevice {
+    fn read(
+        &self,
+        task_context: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        absolute_position: file_system::Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        self.inner.read(task_context, buffer, absolute_position)
+    }
+
+    fn write(
+        &self,
+        task_context: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        absolute_position: file_system::Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        self.write_count
+            .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+        self.inner.write(task_context, buffer, absolute_position)
+    }
+
+    fn flush(
+        &self,
+        task_context: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<file_system::Result<()>> {
+        self.inner.flush(task_context)
+    }
+
+    fn control(
+        &self,
+        task_context: &mut core::task::Context<'_>,
+        command: file_system::ControlCommandIdentifier,
+        input: &shared::AnyByLayout,
+        output: &mut shared::AnyByLayout,
+    ) -> core::task::Poll<file_system::Result<()>> {
+        self.inner.control(task_context, command, input, output)
+    }
+}
+
+impl file_system::MountOperations for CountingBlockDevice {}
+impl file_system::DirectBlockDevice for CountingBlockDevice {}
+
+struct LoopbackCharacterDevice {
+    buffer: synchronization::mutex::Mutex<
+        synchronization::blocking_mutex::raw::CriticalSectionRawMutex,
+        Vec<u8>,
+    >,
+}
+
+impl LoopbackCharacterDevice {
+    const fn new() -> Self {
+        Self {
+            buffer: synchronization::mutex::Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl file_system::DirectBaseOperations for LoopbackCharacterDevice {
+    fn read(
+        &self,
+        _task_context: &mut core::task::Context<'_>,
+        buffer: &mut [u8],
+        _absolute_position: file_system::Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            let mut stored = self
+                .buffer
+                .try_lock()
+                .map_err(|_| file_system::Error::RessourceBusy)?;
+            let read_length = buffer.len().min(stored.len());
+            buffer[..read_length].copy_from_slice(&stored[..read_length]);
+            stored.drain(..read_length);
+            Ok(read_length)
+        })
+    }
+
+    fn write(
+        &self,
+        _task_context: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        _absolute_position: file_system::Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        file_system::ready(|| {
+            let mut stored = self
+                .buffer
+                .try_lock()
+                .map_err(|_| file_system::Error::RessourceBusy)?;
+            stored.extend_from_slice(buffer);
+            Ok(buffer.len())
+        })
+    }
+}
+
+impl file_system::MountOperations for LoopbackCharacterDevice {}
+impl file_system::DirectCharacterDevice for LoopbackCharacterDevice {}
+
+static STATIC_SERIAL_DEVICE: LoopbackCharacterDevice = LoopbackCharacterDevice::new();
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn memory_file_system_mounted_on_devices_avoids_little_fs_writes() {
+    let time_manager = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+    let task_manager = Box::leak(Box::new(task::Manager::new()));
+    let users_manager = Box::leak(Box::new(users::Manager::new()));
+    if !log::is_initialized() {
+        log::initialize(&testing::Logger).unwrap();
+    }
+
+    let task = task_manager.get_current_task_identifier().await;
+    let counting_device = CountingBlockDevice::new_static();
+    let root_file_system = little_fs::FileSystem::get_or_format(counting_device, 256).unwrap();
+    let virtual_file_system = Box::leak(Box::new(
+        virtual_file_system::initialize(
+            task_manager,
+            users_manager,
+            time_manager,
+            root_file_system,
+        )
+        .unwrap(),
+    ));
+
+    virtual_file_system
+        .mount_file_system(memory_file_system::FileSystem::new(), Path::DEVICES, task)
+        .await
+        .unwrap();
+
+    let writes_after_mount = counting_device.write_count();
+
+    virtual_file_system
+        .create_directory(task, &Path::UART_DEVICES)
+        .await
+        .unwrap();
+    virtual_file_system
+        .mount_character_device(
+            task,
+            Path::from_str("/devices/uart/uart0"),
+            LoopbackCharacterDevice::new(),
+        )
+        .await
+        .unwrap();
+    virtual_file_system::mount_static!(
+        virtual_file_system,
+        task,
+        &[("/devices/serial", CharacterDevice, STATIC_SERIAL_DEVICE)]
+    )
+    .await
+    .unwrap();
+
+    let mut uart_file = File::open(
+        virtual_file_system,
+        task,
+        "/devices/uart/uart0",
+        AccessFlags::READ_WRITE.into(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(uart_file.write(b"ping").await.unwrap(), 4);
+    let mut uart_buffer = [0u8; 4];
+    assert_eq!(uart_file.read(&mut uart_buffer).await.unwrap(), 4);
+    assert_eq!(&uart_buffer, b"ping");
+    uart_file.close(virtual_file_system).await.unwrap();
+
+    let mut serial_file = File::open(
+        virtual_file_system,
+        task,
+        "/devices/serial",
+        AccessFlags::READ_WRITE.into(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(serial_file.write(b"pong").await.unwrap(), 4);
+    let mut serial_buffer = [0u8; 4];
+    assert_eq!(serial_file.read(&mut serial_buffer).await.unwrap(), 4);
+    assert_eq!(&serial_buffer, b"pong");
+    serial_file.close(virtual_file_system).await.unwrap();
+
+    let mut devices_directory =
+        virtual_file_system::Directory::open(virtual_file_system, task, Path::DEVICES)
+            .await
+            .unwrap();
+    let mut device_entries = Vec::new();
+    while let Some(entry) = devices_directory.read().await.unwrap() {
+        device_entries.push((entry.name, entry.kind));
+    }
+    devices_directory.close(virtual_file_system).await.unwrap();
+    assert_eq!(
+        device_entries,
+        vec![
+            (String::from("."), file_system::Kind::Directory),
+            (String::from(".."), file_system::Kind::Directory),
+            (String::from("uart"), file_system::Kind::Directory),
+            (String::from("serial"), file_system::Kind::CharacterDevice),
+        ]
+    );
+
+    let mut uart_directory =
+        virtual_file_system::Directory::open(virtual_file_system, task, Path::UART_DEVICES)
+            .await
+            .unwrap();
+    let mut uart_entries = Vec::new();
+    while let Some(entry) = uart_directory.read().await.unwrap() {
+        uart_entries.push((entry.name, entry.kind));
+    }
+    uart_directory.close(virtual_file_system).await.unwrap();
+    assert_eq!(
+        uart_entries,
+        vec![
+            (String::from("."), file_system::Kind::Directory),
+            (String::from(".."), file_system::Kind::Directory),
+            (String::from("uart0"), file_system::Kind::CharacterDevice),
+        ]
+    );
+
+    assert_eq!(
+        counting_device.write_count(),
+        writes_after_mount,
+        "LittleFS block device must receive zero writes after mounting memory_file_system"
+    );
+}

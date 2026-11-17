@@ -20,6 +20,7 @@ neural_network = { workspace = true, optional = true }
 abi_declarations = { workspace = true }
 abi_definitions = { workspace = true, optional = true }
 little_fs = { workspace = true }
+memory_file_system = { workspace = true }
 virtual_file_system = { workspace = true }
 graphics = { workspace = true, optional = true }
 task = { workspace = true }

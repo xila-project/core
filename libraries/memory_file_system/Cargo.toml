@@ -1,0 +1,19 @@
+[package]
+name = "xila-memory-file-system"
+version.workspace = true
+edition = "2024"
+
+[features]
+std = ["file_system/std"]
+default = []
+
+[dependencies]
+file_system = { workspace = true }
+users = { workspace = true }
+synchronization = { workspace = true }
+
+[dev-dependencies]
+testing = { workspace = true }
+
+[lib]
+name = "memory_file_system"
