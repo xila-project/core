@@ -66,11 +66,13 @@ mod tests {
     }
 
     #[test]
-    fn localized_fonts_contain_chinese_and_punctuation() {
+    fn localized_fonts_contain_catalog_and_date_time_glyphs() {
         let locale = option_env!("EMBEDDED_I18N_LOCALE").unwrap_or("en");
         let (_, fallback) = graphics_font_pipeline_test::config::read(
-            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml"), None);
-        if !graphics_font_pipeline_test::fonts::uses_chinese(locale, &fallback) {
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml"),
+            None,
+        );
+        if !graphics_font_pipeline_test::fonts::uses_catalog_subset(locale, &fallback) {
             return;
         }
         let mut roots = vec![std::path::PathBuf::from(concat!(
@@ -81,10 +83,17 @@ mod tests {
             roots.extend(std::env::split_paths(&extra));
         }
         let roots: Vec<&std::path::Path> = roots.iter().map(std::path::PathBuf::as_path).collect();
-        let symbols =
+        let mut symbols =
             graphics_font_pipeline_test::catalogs::collect_multiple(&roots, &[locale, &fallback])
                 .unwrap();
-        assert!(symbols.cjk.contains('清') && symbols.cjk.contains('：'));
+        graphics_font_pipeline_test::catalogs::extend_with_date_time(
+            &mut symbols,
+            &[locale, &fallback],
+        );
+        if graphics_font_pipeline_test::fonts::uses_chinese(locale, &fallback) {
+            assert!(symbols.cjk.contains('清') && symbols.cjk.contains('：'));
+        }
+        assert!(symbols.cjk.contains('月') && symbols.cjk.contains('午'));
         for font in [
             graphics::fonts::get_font_small(),
             graphics::fonts::get_font_medium(),

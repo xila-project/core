@@ -75,8 +75,9 @@ fn main() {
             roots.extend(env::split_paths(&extra));
         }
         let roots: Vec<&Path> = roots.iter().map(PathBuf::as_path).collect();
-        let symbols = catalogs::collect_multiple(&roots, &[&locale, &fallback])
+        let mut symbols = catalogs::collect_multiple(&roots, &[&locale, &fallback])
             .expect("CJK catalog font symbols");
+        catalogs::extend_with_date_time(&mut symbols, &[&locale, &fallback]);
         for directory in &symbols.directories {
             println!("cargo:rerun-if-changed={}", directory.display());
         }
