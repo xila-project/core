@@ -1,7 +1,11 @@
+#![allow(
+    clippy::disallowed_types,
+    reason = "host-only test uses std::sync::{Arc, atomic}"
+)]
+
 extern crate alloc;
 
-use alloc::{sync::Arc, vec, vec::Vec};
-use core::sync::atomic::{AtomicBool, Ordering};
+use alloc::{vec, vec::Vec};
 use drivers_neural_network::{
     Backend, COMPUTE, GET_INPUT_COUNT, GET_INPUT_INFO, LOAD, LoadRequest, Loader, LoaderDevice,
     ModelBuffer, ModelEncoding, NeuralNetworkDevice, QuantizationEntry, SET_INPUT_INDEX,
@@ -9,6 +13,10 @@ use drivers_neural_network::{
 };
 use file_system::{BaseOperations, Context, ControlCommand, Error, Result};
 use shared::AnyByLayout;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 struct DropGuard(Arc<AtomicBool>);
 impl Drop for DropGuard {

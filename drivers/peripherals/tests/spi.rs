@@ -1,4 +1,5 @@
 #![cfg(all(target_os = "linux", feature = "spi"))]
+#![allow(clippy::disallowed_types, reason = "host-only test uses std atomics")]
 
 //! SPI device nodes mounted over a bus backed by `peripherals::spi::SpiMock`,
 //! driven through the VFS `File` API and the control commands.

@@ -23,6 +23,7 @@ log = { workspace = true }
 abi_declarations = { workspace = true }
 memory = { workspace = true }
 embedded-i18n = { workspace = true }
+portable-atomic = { workspace = true }
 task = { workspace = true }
 
 [dev-dependencies]

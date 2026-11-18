@@ -1,12 +1,12 @@
 //! System shutdown pipeline against a real VFS, LittleFS and power device.
 #![cfg(target_os = "linux")]
+#![allow(clippy::disallowed_types, reason = "host-only test uses std atomics")]
 
 extern crate abi_definitions;
 
 testing::instantiate_global_allocator!();
 
 use core::{
-    sync::atomic::{AtomicBool, AtomicU16, Ordering},
     task::{Context as TaskContext, Poll},
     time::Duration,
 };
@@ -17,6 +17,7 @@ use file_system::{
 };
 use lifecycle::{Action, Controller, Error, State, Supervisor};
 use peripherals::power::{Error as PowerError, PowerController};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use task::{TaskIdentifier, test};
 use virtual_file_system::{File, VirtualFileSystem};
 

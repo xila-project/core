@@ -757,9 +757,7 @@ impl VirtualFileSystem {
         _task: TaskIdentifier,
     ) -> Result<()> {
         if asked_permissions.contains(Permission::Write)
-            && self
-                .writes_frozen
-                .load(core::sync::atomic::Ordering::Acquire)
+            && self.writes_frozen.load(portable_atomic::Ordering::Acquire)
         {
             return Err(Error::RessourceBusy);
         }

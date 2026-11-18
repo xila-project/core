@@ -273,7 +273,7 @@ async fn vfs_steady_state_poll_wake_and_cancel_allocate_nothing() {
 
 #[task::test]
 async fn external_deadline_cancels_pending_registration() {
-    use core::sync::atomic::AtomicBool;
+    use std::sync::atomic::AtomicBool;
     let (_, vfs) = initialize().await;
     let (mut reader, mut writer) = File::create_unnamed_pipe(vfs, 1, StateFlags::empty())
         .await

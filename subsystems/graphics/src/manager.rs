@@ -10,7 +10,7 @@ use synchronization::rwlock::RwLock;
 use task::block_on;
 
 use core::future::Future;
-use core::sync::atomic::{AtomicPtr, Ordering};
+use portable_atomic::{AtomicPtr, Ordering};
 
 use core::time::Duration;
 

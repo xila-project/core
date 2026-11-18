@@ -1,8 +1,7 @@
 // Metadata module - handles task metadata and data structures
 
 use super::*;
-use alloc::vec::Vec;
-use smol_str::SmolStr;
+use alloc::{string::String, vec::Vec};
 use users::{GroupIdentifier, UserIdentifier};
 
 /// Internal representation of a task.
@@ -11,7 +10,7 @@ pub(crate) struct Metadata {
     /// Internal identifier of the task.
     pub(crate) internal_identifier: usize,
     /// Name of the task.
-    pub(crate) name: SmolStr,
+    pub(crate) name: String,
     /// The children of the task.
     pub(crate) parent: TaskIdentifier,
     /// The identifier of the user that owns the task.

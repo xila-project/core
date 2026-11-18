@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicBool, Ordering};
+use portable_atomic::{AtomicBool, Ordering};
 
 use synchronization::{
     blocking_mutex::raw::CriticalSectionRawMutex,

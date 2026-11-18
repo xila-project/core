@@ -1,12 +1,13 @@
 //! Optional Linux task poll accounting. CPU time excludes time between polls.
 
-use alloc::{collections::VecDeque, format, string::String, sync::Arc, vec::Vec};
+use alloc::{collections::VecDeque, format, string::String, vec::Vec};
 use core::{
     future::{Future, poll_fn},
     pin::pin,
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
+use portable_atomic::{AtomicBool, AtomicU64, Ordering};
 use std::{sync::Mutex, time::Instant};
+use synchronization::Arc;
 
 std::thread_local! { static CURRENT: core::cell::RefCell<Option<Arc<Counters>>> = const { core::cell::RefCell::new(None) }; }
 

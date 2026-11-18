@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 device = { workspace = true }
 file_system = { workspace = true }
+portable-atomic = { workspace = true }
 task = { workspace = true }
 time = { workspace = true }
 virtual_file_system = { workspace = true }
