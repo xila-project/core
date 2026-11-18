@@ -13,6 +13,7 @@ lvgl_rust_sys = { workspace = true, features = ["build-lvgl", "shadcn-theme"] }
 # allocator (never LVGL's pool); owner tags let the Wasm host keep each VM's
 # handles apart. Core provides LVGL's string functions itself.
 lvgl-rust = { workspace = true, features = [
+  "external-containers",
   "growable-registry",
   "free-observer",
 ] }

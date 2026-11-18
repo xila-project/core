@@ -544,6 +544,13 @@ impl Manager {
                     .map_err(|_| Error::AlreadyInitialized)?,
             );
             let mut session = lvgl_rust::init(&mut guard).map_err(Error::from)?;
+            // SAFETY: Window keeps no references to children and never
+            // interprets their positions. Match its exact class only.
+            unsafe {
+                session.register_external_containers(|class| {
+                    core::ptr::eq(class, crate::get_window_class())
+                })?;
+            }
             session.set_tick_cb(binding_tick_callback_function);
             unsafe {
                 // LVGL assigns newly created keypads to the default group.
