@@ -609,18 +609,35 @@ impl Manager {
         }
     }
 
-    pub async fn set_window_parent(&self, window_parent: *mut lvgl::lv_obj_t) -> Result<()> {
+    /// Create the next windows inside `window_parent` instead of the screen.
+    ///
+    /// # Safety
+    ///
+    /// `window_parent` must be a live LVGL object that stays alive while it
+    /// is the window parent and holds windows: their owners delete them, so
+    /// deleting it with a window inside would free that window under its
+    /// owner. It must not be inside a window.
+    ///
+    /// ```compile_fail,E0133
+    /// async fn mount(manager: &graphics::Manager, body: *mut graphics::lvgl::lv_obj_t) {
+    ///     let _ = manager.set_window_parent(body).await;
+    /// }
+    /// ```
+    pub async unsafe fn set_window_parent(&self, window_parent: *mut lvgl::lv_obj_t) -> Result<()> {
         self.inner.write().await.window_parent = window_parent;
 
         Ok(())
     }
 
+    /// Create a window inside the window parent. Its owner, the result,
+    /// deletes it.
     pub async fn create_window(&self) -> Result<OwnedWindow> {
         let parent_object = self.inner.write().await.window_parent;
 
         let window = unsafe { Window::new(parent_object)? };
 
-        Ok(OwnedWindow::new(window))
+        // SAFETY: the window was just created, and nothing else holds it.
+        Ok(unsafe { OwnedWindow::from_raw(window) })
     }
 
     pub async fn add_input_device(
