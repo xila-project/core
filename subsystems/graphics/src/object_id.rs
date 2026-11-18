@@ -11,7 +11,7 @@
 //!   32-bit targets and nothing for any other widget. The array is sized to
 //!   its content, grown and shrunk in small steps, never doubled, and
 //!   looked up with a binary search.
-//! - [`lv_obj_free_id`] runs at the end of the destructor of every object,
+//! - `lv_obj_free_id` runs at the end of the destructor of every object,
 //!   whatever the deletion path, while the object's memory is still valid.
 //!   It tells the registered [`FreeObserver`], which removes the object from
 //!   its table **by pointer**.

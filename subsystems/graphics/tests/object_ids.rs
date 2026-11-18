@@ -110,12 +110,14 @@ fn identifiers_follow_their_objects_through_every_deletion_path() {
     manager
         .with_lvgl_sync(|lv| {
             // Five children of the window's content.
-            let mut content = window.content_mut(lv);
             let mut pointers = Vec::new();
-            for _ in 0..5 {
-                pointers.push(NonNull::new(Obj::create(&mut content).unwrap().as_ptr()).unwrap());
+            {
+                let mut content = window.content_mut(lv);
+                for _ in 0..5 {
+                    pointers
+                        .push(NonNull::new(Obj::create(&mut content).unwrap().as_ptr()).unwrap());
+                }
             }
-            drop(content);
 
             // Each table issues its own ids, starting at 1, and names only the
             // objects it published. Untouched widgets carry no id.
@@ -217,10 +219,13 @@ fn identifiers_follow_their_objects_through_every_deletion_path() {
     // Event targets carry the id read when the event was queued.
     let first_id = manager
         .with_lvgl_sync(|lv| {
-            let mut content = window.content_mut(lv);
-            let target = NonNull::new(Obj::create(&mut content).unwrap().as_ptr()).unwrap();
-            let native = NonNull::new(Obj::create(&mut content).unwrap().as_ptr()).unwrap();
-            drop(content);
+            let (target, native) = {
+                let mut content = window.content_mut(lv);
+                (
+                    NonNull::new(Obj::create(&mut content).unwrap().as_ptr()).unwrap(),
+                    NonNull::new(Obj::create(&mut content).unwrap().as_ptr()).unwrap(),
+                )
+            };
             let id = with_tables(|t| unsafe { t.first.publish(target) }).unwrap();
             while window.pop_event().is_some() {}
             // SAFETY: the graphics lock is held and both objects are live.
