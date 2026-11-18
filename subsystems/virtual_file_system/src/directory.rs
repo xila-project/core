@@ -35,7 +35,9 @@ impl<'a> Directory<'a> {
         task: TaskIdentifier,
         path: impl AsRef<Path>,
     ) -> Result<()> {
-        virtual_file_system.create_directory(task, &path).await
+        virtual_file_system
+            .create_directory(task, &path.as_ref())
+            .await
     }
 
     pub async fn open(
@@ -43,7 +45,9 @@ impl<'a> Directory<'a> {
         task: TaskIdentifier,
         path: impl AsRef<Path>,
     ) -> Result<Self> {
-        virtual_file_system.open_directory(task, &path).await
+        virtual_file_system
+            .open_directory(task, &path.as_ref())
+            .await
     }
 
     pub async fn read(&mut self) -> Result<Option<Entry>> {

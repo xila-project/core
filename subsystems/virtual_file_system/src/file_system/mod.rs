@@ -180,8 +180,12 @@ impl VirtualFileSystem {
             .store(true, core::sync::atomic::Ordering::Release);
         // A nested mount point is always longer than the mount containing it.
         let mut order: alloc::vec::Vec<usize> = (0..file_systems.len()).collect();
-        order.sort_by_key(|&index| {
-            core::cmp::Reverse(file_systems[index].mount_point.as_str().len())
+        // Keep mount order for equal lengths so a failure leaves the same mounts readable.
+        order.sort_unstable_by_key(|&index| {
+            (
+                core::cmp::Reverse(file_systems[index].mount_point.as_str().len()),
+                index,
+            )
         });
         for index in order {
             let file_system = &mut file_systems[index];
@@ -212,10 +216,11 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         options: MountOptions,
     ) -> Result<()> {
+        let item = ItemStatic::FileSystem(Box::leak(Box::new(file_system)));
         self.mount_static_with_permissions_and_options(
             task,
-            path,
-            ItemStatic::FileSystem(Box::leak(Box::new(file_system))),
+            path.as_ref(),
+            item,
             Permissions::DEVICE_DEFAULT,
             options,
         )
@@ -223,8 +228,10 @@ impl VirtualFileSystem {
     }
 
     pub async fn unmount(&self, path: impl AsRef<Path>, force: bool) -> Result<()> {
-        let path = path.as_ref();
+        self.unmount_inner(path.as_ref(), force).await
+    }
 
+    async fn unmount_inner(&self, path: &Path, force: bool) -> Result<()> {
         if !path.is_valid() || !path.is_absolute() || path.is_root() {
             return Err(Error::InvalidPath);
         }
@@ -238,7 +245,7 @@ impl VirtualFileSystem {
         let parent_path = path.go_parent().ok_or(Error::InvalidPath)?;
 
         let (underlying_file_system, _, _) =
-            Self::get_file_system_from_path(&file_systems, &parent_path)?; // Get the file system identifier and the relative path
+            Self::get_file_system_from_path(&file_systems, parent_path)?; // Get the file system identifier and the relative path
         let relative_path = path
             .strip_prefix_absolute(&underlying_file_system.mount_point)
             .ok_or(Error::InvalidPath)?;
@@ -342,7 +349,8 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         path: &impl AsRef<Path>,
     ) -> Result<Directory<'a>> {
-        self.open_directory_with_root(task, path, None).await
+        self.open_directory_with_root(task, path.as_ref(), None)
+            .await
     }
 
     /// Resolve relative paths beneath the supplied root directory.
@@ -352,22 +360,21 @@ impl VirtualFileSystem {
         path: &impl AsRef<Path>,
         root: &Path,
     ) -> Result<Directory<'a>> {
-        self.open_directory_with_root(task, path, Some(root)).await
+        self.open_directory_with_root(task, path.as_ref(), Some(root))
+            .await
     }
 
     async fn open_directory_with_root<'a>(
         &'a self,
         task: TaskIdentifier,
-        path: &impl AsRef<Path>,
+        path: &Path,
         root: Option<&Path>,
     ) -> Result<Directory<'a>> {
-        let requested_path = path.as_ref();
-
         let mut file_systems = self.file_systems.write().await; // Get the file systems
 
         let user = self.task_manager.get_user(task).await?;
         let resolved_path = self
-            .resolve_path_with_root(&file_systems, requested_path, true, false, user, task, root)
+            .resolve_path_with_root(&file_systems, path, true, false, user, task, root)
             .await?;
         let path: &Path = &resolved_path;
 
@@ -382,7 +389,7 @@ impl VirtualFileSystem {
         .await?;
 
         let (file_system, relative_path, _) =
-            Self::get_mutable_file_system_from_path(&mut file_systems, &path)?; // Get the file system identifier and the relative path
+            Self::get_mutable_file_system_from_path(&mut file_systems, path)?; // Get the file system identifier and the relative path
 
         let mut attributes = Attributes::new().set_mask(
             AttributeFlags::Kind
@@ -441,14 +448,23 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         path: &impl AsRef<Path>,
     ) -> Result<()> {
+        self.check_create_file_access_inner(task, path.as_ref())
+            .await
+    }
+
+    async fn check_create_file_access_inner(
+        &self,
+        task: TaskIdentifier,
+        path: &Path,
+    ) -> Result<()> {
         let user = self.task_manager.get_user(task).await?;
         let file_systems = self.file_systems.read().await;
         let resolved = self
-            .resolve_path(&file_systems, path.as_ref(), true, true, user, task)
+            .resolve_path(&file_systems, path, true, true, user, task)
             .await?;
         let parent = resolved.as_ref().go_parent().ok_or(Error::InvalidPath)?;
         let (file_system, relative_path, _) =
-            Self::get_file_system_from_path(&file_systems, &parent)?;
+            Self::get_file_system_from_path(&file_systems, parent)?;
         self.check_permissions(
             file_system.file_system,
             relative_path,
@@ -465,7 +481,7 @@ impl VirtualFileSystem {
         flags: Flags,
         task: TaskIdentifier,
     ) -> Result<File<'a>> {
-        self.open_with_root(path, flags, task, None).await
+        self.open_with_root(path.as_ref(), flags, task, None).await
     }
 
     /// Resolve relative paths beneath the supplied root directory.
@@ -476,17 +492,17 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         root: &Path,
     ) -> Result<File<'a>> {
-        self.open_with_root(path, flags, task, Some(root)).await
+        self.open_with_root(path.as_ref(), flags, task, Some(root))
+            .await
     }
 
     async fn open_with_root<'a>(
         &'a self,
-        path: &impl AsRef<Path>,
+        requested_path: &Path,
         flags: Flags,
         task: TaskIdentifier,
         root: Option<&Path>,
     ) -> Result<File<'a>> {
-        let requested_path = path.as_ref();
         let authority = self.task_manager.authority(task).await?;
 
         let mut file_systems = self.file_systems.write().await; // Get the file systems
@@ -515,8 +531,7 @@ impl VirtualFileSystem {
             )
             .await?;
         let path: &Path = &resolved_path;
-        let (file_system, relative_path, _) =
-            Self::get_file_system_from_path(&file_systems, &path)?;
+        let (file_system, relative_path, _) = Self::get_file_system_from_path(&file_systems, path)?;
         let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
         let exists =
             match Self::get_attributes(file_system.file_system, relative_path, &mut attributes)
@@ -573,7 +588,7 @@ impl VirtualFileSystem {
         }
 
         let (file_system, relative_path, _) =
-            Self::get_mutable_file_system_from_path(&mut file_systems, &path)?; // Get the file system identifier and the relative path
+            Self::get_mutable_file_system_from_path(&mut file_systems, path)?; // Get the file system identifier and the relative path
 
         // Preserve previous timestamps while UTC is unavailable; never publish
         // uptime or wrap a signed epoch into unsigned filesystem metadata.
@@ -696,7 +711,7 @@ impl VirtualFileSystem {
     ) -> Result<()> {
         self.mount_static_with_permissions_and_options(
             task,
-            path,
+            path.as_ref(),
             item,
             permissions,
             MountOptions::default(),
@@ -707,12 +722,11 @@ impl VirtualFileSystem {
     async fn mount_static_with_permissions_and_options(
         &self,
         task: TaskIdentifier,
-        path: impl AsRef<Path>,
+        path: &Path,
         item: ItemStatic,
         permissions: Permissions,
         options: MountOptions,
     ) -> Result<()> {
-        let path: &Path = path.as_ref();
         if !path.is_valid() || !path.is_absolute() || path.is_root() {
             return Err(Error::InvalidPath);
         }
@@ -727,7 +741,7 @@ impl VirtualFileSystem {
         }
 
         let (parent_file_system, relative_path, _) =
-            Self::get_mutable_file_system_from_path(&mut file_systems, &path)?; // Get the file system identifier and the relative path
+            Self::get_mutable_file_system_from_path(&mut file_systems, path)?; // Get the file system identifier and the relative path
 
         let (time, user, group) = self.get_time_user_group(task).await?;
 
@@ -889,6 +903,16 @@ impl VirtualFileSystem {
         size: usize,
         task: TaskIdentifier,
     ) -> Result<()> {
+        self.create_named_pipe_inner(path.as_ref(), size, task)
+            .await
+    }
+
+    async fn create_named_pipe_inner(
+        &self,
+        path: &Path,
+        size: usize,
+        task: TaskIdentifier,
+    ) -> Result<()> {
         if size == 0 {
             return Err(Error::FileSystem(file_system::Error::InvalidParameter));
         }
@@ -928,7 +952,7 @@ impl VirtualFileSystem {
     }
 
     pub async fn remove(&self, task: TaskIdentifier, path: impl AsRef<Path>) -> Result<()> {
-        self.remove_with_root(task, path, None).await
+        self.remove_with_root(task, path.as_ref(), None).await
     }
 
     /// Resolve relative paths beneath the supplied root directory.
@@ -938,27 +962,26 @@ impl VirtualFileSystem {
         path: impl AsRef<Path>,
         root: &Path,
     ) -> Result<()> {
-        self.remove_with_root(task, path, Some(root)).await
+        self.remove_with_root(task, path.as_ref(), Some(root)).await
     }
 
     async fn remove_with_root(
         &self,
         task: TaskIdentifier,
-        path: impl AsRef<Path>,
+        path: &Path,
         root: Option<&Path>,
     ) -> Result<()> {
         let file_systems = self.file_systems.write().await; // Serialize path resolution with removal.
         let user = self.task_manager.get_user(task).await?;
         let resolved_path = self
-            .resolve_path_with_root(&file_systems, path.as_ref(), false, false, user, task, root)
+            .resolve_path_with_root(&file_systems, path, false, false, user, task, root)
             .await?;
         let path: &Path = &resolved_path;
         if Self::protects_mount(&file_systems, path, true) {
             return Err(Error::RessourceBusy);
         }
 
-        let (file_system, relative_path, _) =
-            Self::get_file_system_from_path(&file_systems, &path)?; // Get the file system identifier and the relative path
+        let (file_system, relative_path, _) = Self::get_file_system_from_path(&file_systems, path)?; // Get the file system identifier and the relative path
 
         let parent_path = relative_path.go_parent().ok_or(Error::InvalidPath)?;
 
@@ -998,7 +1021,8 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         path: &impl AsRef<Path>,
     ) -> Result<()> {
-        self.create_directory_with_root(task, path, None).await
+        self.create_directory_with_root(task, path.as_ref(), None)
+            .await
     }
 
     /// Resolve relative paths beneath the supplied root directory.
@@ -1008,24 +1032,23 @@ impl VirtualFileSystem {
         path: &impl AsRef<Path>,
         root: &Path,
     ) -> Result<()> {
-        self.create_directory_with_root(task, path, Some(root))
+        self.create_directory_with_root(task, path.as_ref(), Some(root))
             .await
     }
 
     async fn create_directory_with_root(
         &self,
         task: TaskIdentifier,
-        path: &impl AsRef<Path>,
+        path: &Path,
         root: Option<&Path>,
     ) -> Result<()> {
         let file_systems = self.file_systems.write().await; // Serialize path resolution with creation.
         let (time, user, group) = self.get_time_user_group(task).await?;
         let resolved_path = self
-            .resolve_path_with_root(&file_systems, path.as_ref(), false, true, user, task, root)
+            .resolve_path_with_root(&file_systems, path, false, true, user, task, root)
             .await?;
         let path: &Path = &resolved_path;
-        let (file_system, relative_path, _) =
-            Self::get_file_system_from_path(&file_systems, &path)?;
+        let (file_system, relative_path, _) = Self::get_file_system_from_path(&file_systems, path)?;
 
         // A mount point is the root of its file system: it always exists.
         let Some(parent_path) = relative_path.go_parent() else {
@@ -1123,8 +1146,7 @@ impl VirtualFileSystem {
             .resolve_path_with_root(&file_systems, link, false, true, user, task, root)
             .await?;
         let link: &Path = &resolved_link;
-        let (file_system, relative_link, _) =
-            Self::get_file_system_from_path(&file_systems, &link)?;
+        let (file_system, relative_link, _) = Self::get_file_system_from_path(&file_systems, link)?;
         self.check_permissions(
             file_system.file_system,
             relative_link.go_parent().ok_or(Error::InvalidPath)?,
@@ -1305,8 +1327,7 @@ impl VirtualFileSystem {
             .resolve_path_with_root(&file_systems, link, false, false, user, task, root)
             .await?;
         let link: &Path = &resolved_link;
-        let (file_system, relative_link, _) =
-            Self::get_file_system_from_path(&file_systems, &link)?;
+        let (file_system, relative_link, _) = Self::get_file_system_from_path(&file_systems, link)?;
         self.check_permissions(
             file_system.file_system,
             relative_link.go_parent().ok_or(Error::InvalidPath)?,
@@ -1367,7 +1388,7 @@ impl VirtualFileSystem {
         old_path: &impl AsRef<Path>,
         new_path: &impl AsRef<Path>,
     ) -> Result<()> {
-        self.rename_with_root(task, old_path, new_path, None, None)
+        self.rename_with_root(task, old_path.as_ref(), new_path.as_ref(), None, None)
             .await
     }
 
@@ -1380,41 +1401,31 @@ impl VirtualFileSystem {
         old_root: &Path,
         new_root: &Path,
     ) -> Result<()> {
-        self.rename_with_root(task, old_path, new_path, Some(old_root), Some(new_root))
-            .await
+        self.rename_with_root(
+            task,
+            old_path.as_ref(),
+            new_path.as_ref(),
+            Some(old_root),
+            Some(new_root),
+        )
+        .await
     }
 
     async fn rename_with_root(
         &self,
         task: TaskIdentifier,
-        old_path: &impl AsRef<Path>,
-        new_path: &impl AsRef<Path>,
+        old_path: &Path,
+        new_path: &Path,
         old_root: Option<&Path>,
         new_root: Option<&Path>,
     ) -> Result<()> {
         let file_systems = self.file_systems.write().await; // Serialize source/destination resolution with rename.
         let user = self.task_manager.get_user(task).await?;
         let old_path = self
-            .resolve_path_with_root(
-                &file_systems,
-                old_path.as_ref(),
-                false,
-                false,
-                user,
-                task,
-                old_root,
-            )
+            .resolve_path_with_root(&file_systems, old_path, false, false, user, task, old_root)
             .await?;
         let new_path = self
-            .resolve_path_with_root(
-                &file_systems,
-                new_path.as_ref(),
-                false,
-                true,
-                user,
-                task,
-                new_root,
-            )
+            .resolve_path_with_root(&file_systems, new_path, false, true, user, task, new_root)
             .await?;
         let old_path: &Path = &old_path;
         let new_path: &Path = &new_path;
@@ -1434,10 +1445,10 @@ impl VirtualFileSystem {
         }
 
         let (old_file_system, old_relative_path, _) =
-            Self::get_file_system_from_path(&file_systems, &old_path)?; // Get the file system identifier and the relative path
+            Self::get_file_system_from_path(&file_systems, old_path)?; // Get the file system identifier and the relative path
 
         let (new_file_system, new_relative_path, _) =
-            Self::get_file_system_from_path(&file_systems, &new_path)?; // Get the file system identifier and the relative path
+            Self::get_file_system_from_path(&file_systems, new_path)?; // Get the file system identifier and the relative path
 
         if !ptr::eq(old_file_system, new_file_system) {
             return Err(Error::CrossDevice);
@@ -1496,8 +1507,15 @@ impl VirtualFileSystem {
         follow_existing: bool,
         new_path: &impl AsRef<Path>,
     ) -> Result<()> {
-        self.link_with_root(task, existing, follow_existing, new_path, None, None)
-            .await
+        self.link_with_root(
+            task,
+            existing.as_ref(),
+            follow_existing,
+            new_path.as_ref(),
+            None,
+            None,
+        )
+        .await
     }
 
     /// Resolve both paths beneath their supplied root directories.
@@ -1512,9 +1530,9 @@ impl VirtualFileSystem {
     ) -> Result<()> {
         self.link_with_root(
             task,
-            existing,
+            existing.as_ref(),
             follow_existing,
-            new_path,
+            new_path.as_ref(),
             Some(existing_root),
             Some(new_root),
         )
@@ -1524,9 +1542,9 @@ impl VirtualFileSystem {
     async fn link_with_root(
         &self,
         task: TaskIdentifier,
-        existing: &impl AsRef<Path>,
+        existing: &Path,
         follow_existing: bool,
-        new_path: &impl AsRef<Path>,
+        new_path: &Path,
         existing_root: Option<&Path>,
         new_root: Option<&Path>,
     ) -> Result<()> {
@@ -1535,7 +1553,7 @@ impl VirtualFileSystem {
         let existing = self
             .resolve_path_with_root(
                 &file_systems,
-                existing.as_ref(),
+                existing,
                 follow_existing,
                 false,
                 user,
@@ -1544,15 +1562,7 @@ impl VirtualFileSystem {
             )
             .await?;
         let new_path = self
-            .resolve_path_with_root(
-                &file_systems,
-                new_path.as_ref(),
-                false,
-                true,
-                user,
-                task,
-                new_root,
-            )
+            .resolve_path_with_root(&file_systems, new_path, false, true, user, task, new_root)
             .await?;
         let existing: &Path = &existing;
         let new_path: &Path = &new_path;
@@ -1561,9 +1571,9 @@ impl VirtualFileSystem {
         }
 
         let (existing_file_system, existing_relative, _) =
-            Self::get_file_system_from_path(&file_systems, &existing)?;
+            Self::get_file_system_from_path(&file_systems, existing)?;
         let (new_file_system, new_relative, _) =
-            Self::get_file_system_from_path(&file_systems, &new_path)?;
+            Self::get_file_system_from_path(&file_systems, new_path)?;
         if !ptr::eq(existing_file_system, new_file_system) {
             return Err(Error::CrossDevice);
         }
@@ -1615,7 +1625,7 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         path: &impl AsRef<Path>,
     ) -> Result<Statistics> {
-        self.get_statistics_for_task_with_follow(task, path, true)
+        self.get_statistics_for_task_with_follow_with_root(task, path.as_ref(), true, None)
             .await
     }
 
@@ -1625,7 +1635,7 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         path: &impl AsRef<Path>,
     ) -> Result<Statistics> {
-        self.get_statistics_for_task_with_follow(task, path, false)
+        self.get_statistics_for_task_with_follow_with_root(task, path.as_ref(), false, None)
             .await
     }
 
@@ -1633,16 +1643,6 @@ impl VirtualFileSystem {
     pub async fn get_link_statistics(&self, path: &impl AsRef<Path>) -> Result<Statistics> {
         let task = self.task_manager.try_get_current_task_identifier().await?;
         self.get_link_statistics_for_task(task, path).await
-    }
-
-    async fn get_statistics_for_task_with_follow(
-        &self,
-        task: TaskIdentifier,
-        path: &impl AsRef<Path>,
-        follow_final: bool,
-    ) -> Result<Statistics> {
-        self.get_statistics_for_task_with_follow_with_root(task, path, follow_final, None)
-            .await
     }
 
     /// Resolve relative paths beneath the supplied root directory.
@@ -1653,29 +1653,26 @@ impl VirtualFileSystem {
         follow_final: bool,
         root: &Path,
     ) -> Result<Statistics> {
-        self.get_statistics_for_task_with_follow_with_root(task, path, follow_final, Some(root))
-            .await
+        self.get_statistics_for_task_with_follow_with_root(
+            task,
+            path.as_ref(),
+            follow_final,
+            Some(root),
+        )
+        .await
     }
 
     async fn get_statistics_for_task_with_follow_with_root(
         &self,
         task: TaskIdentifier,
-        path: &impl AsRef<Path>,
+        path: &Path,
         follow_final: bool,
         root: Option<&Path>,
     ) -> Result<Statistics> {
         let file_systems = self.file_systems.read().await;
         let user = self.task_manager.get_user(task).await?;
         let resolved_path = self
-            .resolve_path_with_root(
-                &file_systems,
-                path.as_ref(),
-                follow_final,
-                false,
-                user,
-                task,
-                root,
-            )
+            .resolve_path_with_root(&file_systems, path, follow_final, false, user, task, root)
             .await?;
         let (file_system, relative_path, _) =
             Self::get_file_system_from_path(&file_systems, &resolved_path)?;
@@ -1867,12 +1864,32 @@ impl VirtualFileSystem {
         access: Option<file_system::Time>,
         modification: Option<file_system::Time>,
     ) -> Result<()> {
+        self.set_times_beneath_inner(
+            task,
+            path.as_ref(),
+            follow_final,
+            root,
+            access,
+            modification,
+        )
+        .await
+    }
+
+    async fn set_times_beneath_inner(
+        &self,
+        task: TaskIdentifier,
+        path: &Path,
+        follow_final: bool,
+        root: &Path,
+        access: Option<file_system::Time>,
+        modification: Option<file_system::Time>,
+    ) -> Result<()> {
         let file_systems = self.file_systems.write().await;
         let user = self.task_manager.get_user(task).await?;
         let resolved = self
             .resolve_path_with_root(
                 &file_systems,
-                path.as_ref(),
+                path,
                 follow_final,
                 false,
                 user,
@@ -1880,7 +1897,8 @@ impl VirtualFileSystem {
                 Some(root),
             )
             .await?;
-        let (fs, relative, _) = Self::get_file_system_from_path(&file_systems, &resolved)?;
+        let (file_system, relative_path, _) =
+            Self::get_file_system_from_path(&file_systems, &resolved)?;
         let mut attributes = Attributes::new();
         if let Some(time) = access {
             attributes = attributes.set_access(time);
@@ -1889,13 +1907,13 @@ impl VirtualFileSystem {
             attributes = attributes.set_modification(time);
         }
         let mut owner = Attributes::new().set_mask(AttributeFlags::User);
-        Self::get_attributes(fs.file_system, relative, &mut owner).await?;
+        Self::get_attributes(file_system.file_system, relative_path, &mut owner).await?;
         Self::authorize_metadata_change(
             user,
             *owner.get_user().ok_or(Error::MissingAttribute)?,
             &attributes,
         )?;
-        Self::set_attributes(fs.file_system, relative, &attributes).await
+        Self::set_attributes(file_system.file_system, relative_path, &attributes).await
     }
 
     pub async fn set_ownership(
@@ -1905,15 +1923,24 @@ impl VirtualFileSystem {
         user: Option<UserIdentifier>,
         group: Option<GroupIdentifier>,
     ) -> Result<()> {
-        let path = path.as_ref();
+        self.set_ownership_inner(task, path.as_ref(), user, group)
+            .await
+    }
+
+    async fn set_ownership_inner(
+        &self,
+        task: TaskIdentifier,
+        path: &Path,
+        user: Option<UserIdentifier>,
+        group: Option<GroupIdentifier>,
+    ) -> Result<()> {
         let file_systems = self.file_systems.write().await; // Serialize metadata authority with mutation.
         let current_user = self.task_manager.get_user(task).await?;
         let resolved = self
             .resolve_path(&file_systems, path, true, false, current_user, task)
             .await?;
         let path: &Path = &resolved;
-        let (file_system, relative_path, _) =
-            Self::get_file_system_from_path(&file_systems, &path)?; // Get the file system identifier and the relative path
+        let (file_system, relative_path, _) = Self::get_file_system_from_path(&file_systems, path)?; // Get the file system identifier and the relative path
 
         let mut attributes = Attributes::new();
         if let Some(user) = user {
@@ -1938,15 +1965,23 @@ impl VirtualFileSystem {
         path: impl AsRef<Path>,
         permissions: Permissions,
     ) -> Result<()> {
-        let path = path.as_ref();
+        self.set_permissions_inner(task, path.as_ref(), permissions)
+            .await
+    }
+
+    async fn set_permissions_inner(
+        &self,
+        task: TaskIdentifier,
+        path: &Path,
+        permissions: Permissions,
+    ) -> Result<()> {
         let file_systems = self.file_systems.write().await; // Get the file systems
         let current_user = self.task_manager.get_user(task).await?;
         let resolved = self
             .resolve_path(&file_systems, path, true, false, current_user, task)
             .await?;
         let path: &Path = &resolved;
-        let (file_system, relative_path, _) =
-            Self::get_file_system_from_path(&file_systems, &path)?; // Get the file system identifier and the relative path
+        let (file_system, relative_path, _) = Self::get_file_system_from_path(&file_systems, path)?; // Get the file system identifier and the relative path
 
         let attributes = Attributes::new().set_permissions(permissions);
         let mut owner = Attributes::new().set_mask(AttributeFlags::User);

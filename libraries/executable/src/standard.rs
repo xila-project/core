@@ -23,22 +23,41 @@ impl<'a> Standard<'a> {
         virtual_file_system: &'a VirtualFileSystem,
         context: &'static ExecutableContext,
     ) -> Result<Self> {
-        let standard_in = virtual_file_system
-            .open(standard_in, AccessFlags::Read.into(), task)
+        Self::open_inner(
+            standard_in.as_ref(),
+            standard_out.as_ref(),
+            standard_error.as_ref(),
+            task,
+            virtual_file_system,
+            context,
+        )
+        .await
+    }
+
+    async fn open_inner(
+        standard_input: &Path,
+        standard_output: &Path,
+        standard_error: &Path,
+        task: TaskIdentifier,
+        virtual_file_system: &'a VirtualFileSystem,
+        context: &'static ExecutableContext,
+    ) -> Result<Self> {
+        let standard_input = virtual_file_system
+            .open(&standard_input, AccessFlags::Read.into(), task)
             .await?;
 
-        let standard_out = virtual_file_system
-            .open(standard_out, AccessFlags::Write.into(), task)
+        let standard_output = virtual_file_system
+            .open(&standard_output, AccessFlags::Write.into(), task)
             .await?;
 
         let standard_error = virtual_file_system
-            .open(standard_error, AccessFlags::Write.into(), task)
+            .open(&standard_error, AccessFlags::Write.into(), task)
             .await?;
 
         Ok(Self::new(
             context,
-            standard_in,
-            standard_out,
+            standard_input,
+            standard_output,
             standard_error,
         ))
     }

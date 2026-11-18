@@ -62,7 +62,7 @@ impl<'a> SynchronousFile<'a> {
         path: impl AsRef<Path>,
         flags: Flags,
     ) -> Result<Self> {
-        let file_identifier = block_on(virtual_file_system.open(&path, flags, task))?;
+        let file_identifier = block_on(virtual_file_system.open(&path.as_ref(), flags, task))?;
 
         Ok(file_identifier.into_synchronous_file())
     }

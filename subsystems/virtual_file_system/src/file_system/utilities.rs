@@ -273,7 +273,7 @@ impl VirtualFileSystem {
             let has_remaining = component_end < text.len();
             let parent = Path::from_str(&text[..parent_end]);
             let (parent_file_system, parent_relative, _) =
-                Self::get_file_system_from_path(file_systems, &parent)?;
+                Self::get_file_system_from_path(file_systems, parent)?;
             self.check_permissions(
                 parent_file_system.file_system,
                 parent_relative,
@@ -285,7 +285,7 @@ impl VirtualFileSystem {
 
             let candidate = Path::from_str(&text[..component_end]);
             let (file_system, relative_path, _) =
-                Self::get_file_system_from_path(file_systems, &candidate)?;
+                Self::get_file_system_from_path(file_systems, candidate)?;
             let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
             match Self::get_attributes(file_system.file_system, relative_path, &mut attributes)
                 .await
@@ -563,12 +563,11 @@ impl VirtualFileSystem {
 
     pub(super) fn get_file_system_index_from_path(
         file_systems: &FileSystemsArray,
-        path: &impl AsRef<Path>,
+        path: &Path,
     ) -> usize {
         let mut result_score = 0;
         let mut result: usize = 0;
 
-        let path = path.as_ref();
         let path_components = path.get_components();
 
         for (i, file_system) in file_systems.iter().enumerate() {
@@ -600,20 +599,19 @@ impl VirtualFileSystem {
 
     pub(super) fn get_mutable_file_system_from_path<'b, 'c>(
         file_systems: &'b mut FileSystemsArray,
-        path: &'c impl AsRef<Path>,
+        path: &'c Path,
     ) -> Result<(&'b mut InternalFileSystem, &'c Path, usize)> {
         let i = Self::get_file_system_index_from_path(file_systems, path);
 
         let internal_file_system = &mut file_systems[i];
 
         let relative_path = path
-            .as_ref()
             .strip_prefix_absolute(&internal_file_system.mount_point)
             .ok_or_else(|| {
                 log::error!(
                     "Error stripping prefix {:?} from path {:?}",
                     internal_file_system.mount_point,
-                    path.as_ref()
+                    path
                 );
 
                 Error::InvalidPath
@@ -624,14 +622,13 @@ impl VirtualFileSystem {
 
     pub(super) fn get_file_system_from_path<'b, 'c>(
         file_systems: &'b FileSystemsArray,
-        path: &'c impl AsRef<Path>,
+        path: &'c Path,
     ) -> Result<(&'b InternalFileSystem, &'c Path, usize)> {
         let i = Self::get_file_system_index_from_path(file_systems, path);
 
         let internal_file_system = &file_systems[i];
 
         let relative_path = path
-            .as_ref()
             .strip_prefix_absolute(&internal_file_system.mount_point)
             .ok_or(Error::InvalidPath)?;
 
@@ -714,14 +711,13 @@ impl VirtualFileSystem {
 
     pub(super) async fn set_attributes(
         file_system: &dyn FileSystemOperations,
-        path: impl AsRef<Path>,
+        path: &Path,
         attributes: &Attributes,
     ) -> Result<()> {
         let mask = attributes.get_mask();
         if mask.is_empty() {
             return Ok(());
         }
-        let path = path.as_ref();
         let mut current = Attributes::new().set_mask(mask);
         Self::get_attributes(file_system, path, &mut current).await?;
         if attributes_equal(&current, attributes) {
@@ -739,13 +735,13 @@ impl VirtualFileSystem {
 
     pub(super) async fn get_attributes(
         file_system: &dyn FileSystemOperations,
-        path: impl AsRef<Path>,
+        path: &Path,
         attributes: &mut Attributes,
     ) -> Result<()> {
         poll(|| {
             Ok(FileSystemOperations::get_attributes(
                 file_system,
-                path.as_ref(),
+                path,
                 attributes,
             )?)
         })
@@ -755,7 +751,7 @@ impl VirtualFileSystem {
     pub(super) async fn check_permissions(
         &self,
         file_system: &dyn FileSystemOperations,
-        path: impl AsRef<Path>,
+        path: &Path,
         asked_permissions: Permission,
         current_user: UserIdentifier,
         _task: TaskIdentifier,
@@ -770,7 +766,7 @@ impl VirtualFileSystem {
         let mut attributes = Attributes::default()
             .set_mask(AttributeFlags::User | AttributeFlags::Group | AttributeFlags::Permissions);
 
-        Self::get_attributes(file_system, path.as_ref(), &mut attributes).await?;
+        Self::get_attributes(file_system, path, &mut attributes).await?;
 
         let owner_user = *attributes.get_user().ok_or(Error::MissingAttribute)?;
         let owner_group = *attributes.get_group().ok_or(Error::MissingAttribute)?;
@@ -792,7 +788,7 @@ impl VirtualFileSystem {
                 "Asked permissions {:?} not granted for user {:?} on path {:?} (owner: {:?}, group: {:?}, permissions: {:?})",
                 asked_permissions,
                 owner_user,
-                path.as_ref(),
+                path,
                 owner_user,
                 owner_group,
                 owner_permissions,
@@ -843,17 +839,17 @@ impl VirtualFileSystem {
     pub(super) async fn check_permissions_with_parent(
         &self,
         file_systems: &FileSystemsArray,
-        path: impl AsRef<Path>,
+        path: &Path,
         current_permission: Permission,
         parent_permission: Permission,
         user: UserIdentifier,
         task: TaskIdentifier,
     ) -> Result<()> {
-        if !path.as_ref().is_root() {
-            let parent_path = path.as_ref().go_parent().ok_or(Error::InvalidPath)?;
+        if !path.is_root() {
+            let parent_path = path.go_parent().ok_or(Error::InvalidPath)?;
 
             let (parent_file_system, relative_path, _) =
-                Self::get_file_system_from_path(file_systems, &parent_path)?; // Get the file system identifier and the relative path
+                Self::get_file_system_from_path(file_systems, parent_path)?; // Get the file system identifier and the relative path
 
             self.check_permissions(
                 parent_file_system.file_system,
@@ -865,7 +861,7 @@ impl VirtualFileSystem {
             .await?;
         }
 
-        let (file_system, relative_path, _) = Self::get_file_system_from_path(file_systems, &path)?; // Get the file system identifier and the relative path
+        let (file_system, relative_path, _) = Self::get_file_system_from_path(file_systems, path)?; // Get the file system identifier and the relative path
 
         self.check_permissions(
             file_system.file_system,
@@ -944,25 +940,27 @@ mod tests {
         ];
 
         let (_, relative_path, i) =
-            VirtualFileSystem::get_file_system_from_path(&file_systems, &"/").unwrap();
+            VirtualFileSystem::get_file_system_from_path(&file_systems, "/".as_ref()).unwrap();
 
         assert_eq!(i, 0);
         assert_eq!(relative_path, Path::ROOT);
 
         let (_, relative_path, i) =
-            VirtualFileSystem::get_file_system_from_path(&file_systems, &"/Foo/Bar").unwrap();
+            VirtualFileSystem::get_file_system_from_path(&file_systems, "/Foo/Bar".as_ref())
+                .unwrap();
 
         assert_eq!(i, 2);
         assert_eq!(relative_path, Path::ROOT);
 
         let (_, relative_path, i) =
-            VirtualFileSystem::get_file_system_from_path(&file_systems, &"/Foo/Bar/Baz").unwrap();
+            VirtualFileSystem::get_file_system_from_path(&file_systems, "/Foo/Bar/Baz".as_ref())
+                .unwrap();
 
         assert_eq!(i, 2);
         assert_eq!(relative_path, "/Baz".as_ref());
 
         let (_, relative_path, i) =
-            VirtualFileSystem::get_file_system_from_path(&file_systems, &"/Foo").unwrap();
+            VirtualFileSystem::get_file_system_from_path(&file_systems, "/Foo".as_ref()).unwrap();
 
         assert_eq!(i, 1);
         assert_eq!(relative_path, Path::ROOT);
@@ -997,7 +995,8 @@ mod tests {
         ];
 
         let (file_system, relative_path, index) =
-            VirtualFileSystem::get_file_system_from_path(&file_systems, &"/Foo/app").unwrap();
+            VirtualFileSystem::get_file_system_from_path(&file_systems, "/Foo/app".as_ref())
+                .unwrap();
         assert_eq!(index, 2);
         assert!(core::ptr::eq(file_system.file_system, replacement));
         assert_eq!(relative_path.as_str(), "/app");

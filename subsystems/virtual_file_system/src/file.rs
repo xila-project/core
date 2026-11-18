@@ -76,7 +76,9 @@ impl<'a> File<'a> {
         path: impl AsRef<Path>,
         flags: Flags,
     ) -> Result<Self> {
-        let file_identifier = virtual_file_system.open(&path, flags, task).await?;
+        let file_identifier = virtual_file_system
+            .open(&path.as_ref(), flags, task)
+            .await?;
 
         Ok(file_identifier)
     }
@@ -111,6 +113,15 @@ impl<'a> File<'a> {
         path: impl AsRef<Path>,
         buffer: &mut [u8],
     ) -> Result<()> {
+        Self::read_slice_from_path_inner(virtual_file_system, task, path.as_ref(), buffer).await
+    }
+
+    async fn read_slice_from_path_inner(
+        virtual_file_system: &VirtualFileSystem,
+        task: TaskIdentifier,
+        path: &Path,
+        buffer: &mut [u8],
+    ) -> Result<()> {
         let mut file = File::open(
             virtual_file_system,
             task,
@@ -141,6 +152,15 @@ impl<'a> File<'a> {
         path: impl AsRef<Path>,
         buffer: &mut Vec<u8>,
     ) -> Result<()> {
+        Self::read_from_path_inner(virtual_file_system, task, path.as_ref(), buffer).await
+    }
+
+    async fn read_from_path_inner(
+        virtual_file_system: &VirtualFileSystem,
+        task: TaskIdentifier,
+        path: &Path,
+        buffer: &mut Vec<u8>,
+    ) -> Result<()> {
         buffer.clear();
 
         let mut file = File::open(
@@ -162,6 +182,15 @@ impl<'a> File<'a> {
         virtual_file_system: &VirtualFileSystem,
         task: task::TaskIdentifier,
         path: impl AsRef<Path>,
+        buffer: &[u8],
+    ) -> Result<()> {
+        Self::write_to_path_inner(virtual_file_system, task, path.as_ref(), buffer).await
+    }
+
+    async fn write_to_path_inner(
+        virtual_file_system: &VirtualFileSystem,
+        task: task::TaskIdentifier,
+        path: &Path,
         buffer: &[u8],
     ) -> Result<()> {
         let mut file = File::open(
