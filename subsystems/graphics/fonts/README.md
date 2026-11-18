@@ -17,8 +17,10 @@ release branch, commit `a4f7cf94edfb9d7ffbdfc4841de276358bd7e0f2`, path
 
 For `zh-CN` (or `zh`), `../build/catalogs.rs` gathers the distinct characters in
 translation **values**, including plural entries, across the application,
-library and subsystem catalogs. The selected locale, its base language and the
-configured comma-separated fallbacks contribute characters. Cargo watches the locale directories
+library and subsystem catalogs, plus the localized date and time names from
+`embedded_i18n::date_time_locale` (months, weekdays, AM/PM periods, and date/time
+formats). The selected locale, its base language and the configured
+comma-separated fallbacks contribute characters. Cargo watches the locale directories
 and crates without catalogs so edits and new namespaces regenerate the fonts.
 Only the used Chinese characters and punctuation are merged from Source Han Sans
 into the proportional font tables; Montserrat retains Latin glyphs and metrics.
@@ -68,8 +70,9 @@ linked. Locale builds may share `CARGO_TARGET_DIR=target/localization`; only
 Run `bash tools/localization/fetch-japanese-font.sh` from Core before a Japanese
 build. This explicit setup downloads and verifies the public Source Han Sans JP
 2.005 subset; font generation itself stays offline. Consumer builds may set
-`XILA_JAPANESE_FONT_PATH` to the downloaded font. Only catalog glyphs are rasterized,
-including kana, and the terminal also uses the JP source for those glyphs.
+`XILA_JAPANESE_FONT_PATH` to the downloaded font. Only catalog and localized
+date/time glyphs are rasterized, including kana, and the terminal also uses the
+JP source for those glyphs.
 
 Japanese catalogs and font support were carried forward from companion revision
 `c656f83b6cfd019ed469332182166bdaf6188ca9`; catalog placeholders now use named arguments
