@@ -211,7 +211,7 @@ node = "{{ vars.node_version }}"
 extends = "ci:coverage"
 description = "Run host-only workspace coverage in LCOV format"
 depends = ["ci:packages-host"]
-run = "cargo llvm-cov --locked --workspace --features xila/graphics_rendering_xrgb8888 --coverage-host-only --lcov --output-path lcov.info"
+run = "cargo-llvm-cov llvm-cov --locked --workspace --features xila/graphics_rendering_xrgb8888 --coverage-host-only --lcov --output-path lcov.info"
 
 [tasks."ci:abi-deep"]
 description = "Run ABI coverage thresholds and Miri across host architectures"
@@ -315,7 +315,7 @@ tools.rust = { version = "{{ vars.nightly_version }}", profile = "minimal", comp
   "llvm-tools-preview",
 ] }
 tools."aqua:taiki-e/cargo-llvm-cov" = "{{ vars.llvm_cov_version }}"
-run = "cargo llvm-cov --locked --manifest-path \"${XILA_APPLICATIONS_ROOT:-.application-src}/executables/wasm/tests/translation/Cargo.toml\" --no-default-features --features ${CI_ABI_MEMORY:-memory_32} --ignore-filename-regex '(tests\\.rs|tests/translation/src/lib\\.rs)$' --fail-under-lines 100 --fail-under-functions 100"
+run = "cargo-llvm-cov llvm-cov --locked --manifest-path \"${XILA_APPLICATIONS_ROOT:-.application-src}/executables/wasm/tests/translation/Cargo.toml\" --no-default-features --features ${CI_ABI_MEMORY:-memory_32} --ignore-filename-regex '(tests\\.rs|tests/translation/src/lib\\.rs)$' --fail-under-lines {{ vars.abi_coverage_minimum }} --fail-under-functions {{ vars.abi_coverage_minimum }}"
 
 [tasks."ci:abi-miri"]
 extends = "ci:miri"

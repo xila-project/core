@@ -109,7 +109,7 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", compone
 ], mr_boxington = true }
 tools."aqua:taiki-e/cargo-llvm-cov" = "{{ vars.llvm_cov_version }}"
 description = "Run host-only workspace coverage"
-run = "cargo llvm-cov --workspace --coverage-host-only"
+run = "cargo-llvm-cov llvm-cov --workspace --coverage-host-only"
 
 [tasks."dev:before-commit"]
 description = "Run formatting, checks, docs, and Clippy"

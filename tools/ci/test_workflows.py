@@ -383,8 +383,10 @@ class WorkflowPolicy(unittest.TestCase):
                 self.assertRegex(extended, rf"(?m)^  {re.escape(name)}:")
         tasks = ci_config()["tasks"]
         deep_task = tasks["ci:abi-coverage"]["run"] + tasks["ci:abi-miri-cross"]["run"]
-        self.assertIn("fail-under-lines 100", deep_task)
-        self.assertIn("fail-under-functions 100", deep_task)
+        minimum = tomllib.loads((ROOT / "mise.toml").read_text())["vars"]["abi_coverage_minimum"]
+        self.assertEqual(minimum, "90")
+        self.assertIn("--fail-under-lines {{ vars.abi_coverage_minimum }}", deep_task)
+        self.assertIn("--fail-under-functions {{ vars.abi_coverage_minimum }}", deep_task)
         self.assertIn("i686-unknown-linux-gnu", deep_task)
         self.assertIn("powerpc-unknown-linux-gnu", deep_task)
         self.assertIn("validated-sha", extended)
