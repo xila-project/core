@@ -284,6 +284,13 @@ description = "Test the standalone font-link workspace"
 depends = ["ci:packages-linker"]
 run = "mise run test:fonts && cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml"
 
+[tasks."ci:host-font-tests".env]
+# The verifier invokes Cargo directly. Use the same compiler environment throughout.
+XILA_MBX = "0"
+# Match Cargo's build dependency debug level so Clippy and the linked tests can share native outputs.
+CARGO_PROFILE_DEV_DEBUG = "0"
+CARGO_PROFILE_TEST_DEBUG = "0"
+
 [tasks."test:fonts"]
 extends = "ci:rust-lint"
 tools.node = "{{ vars.node_version }}"
