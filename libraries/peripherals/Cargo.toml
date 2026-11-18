@@ -8,6 +8,7 @@ embedded-hal = { workspace = true, optional = true }
 embedded-hal-async = { workspace = true, optional = true }
 embedded-io = { workspace = true, optional = true }
 embedded-io-async = { workspace = true, optional = true }
+portable-atomic = { workspace = true, optional = true }
 synchronization = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -31,6 +32,7 @@ mock = [
   "pwm",
   "spi",
   "uart",
+  "dep:portable-atomic",
   "dep:synchronization",
 ]
 

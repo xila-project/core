@@ -1,10 +1,10 @@
 extern crate std;
 use super::*;
-use core::{
-    sync::atomic::{AtomicUsize, Ordering},
-    task::{Context as TaskContext, Poll, Waker},
+use core::task::{Context as TaskContext, Poll, Waker};
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
 };
-use std::sync::Arc;
 use std::task::Wake;
 
 #[derive(Default)]

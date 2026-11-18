@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_types,
+    reason = "host-only integration test uses std::sync::{Arc, atomic}"
+)]
+
 extern crate alloc;
 
 extern crate abi_definitions;
@@ -1732,7 +1737,7 @@ async fn hard_links_stay_beneath_their_roots_and_report_missing_backend_support(
 /// Memory block device whose flush can be made to fail.
 struct FlakyDevice {
     inner: &'static MemoryDevice<512>,
-    fail_flush: core::sync::atomic::AtomicBool,
+    fail_flush: std::sync::atomic::AtomicBool,
 }
 
 impl file_system::DirectBaseOperations for FlakyDevice {
@@ -1755,7 +1760,7 @@ impl file_system::DirectBaseOperations for FlakyDevice {
     }
 
     fn flush(&self, cx: &mut core::task::Context<'_>) -> core::task::Poll<file_system::Result<()>> {
-        if self.fail_flush.load(core::sync::atomic::Ordering::SeqCst) {
+        if self.fail_flush.load(std::sync::atomic::Ordering::SeqCst) {
             return core::task::Poll::Ready(Err(file_system::Error::InputOutput));
         }
         self.inner.flush(cx)
@@ -1797,7 +1802,7 @@ async fn initialize_on(
 fn flaky_device() -> &'static FlakyDevice {
     Box::leak(Box::new(FlakyDevice {
         inner: MemoryDevice::<512>::new_static(1024 * 512),
-        fail_flush: core::sync::atomic::AtomicBool::new(false),
+        fail_flush: std::sync::atomic::AtomicBool::new(false),
     }))
 }
 
@@ -1928,7 +1933,7 @@ async fn storage_flush_failure_is_surfaced_and_keeps_the_mount() {
         .unwrap();
     device
         .fail_flush
-        .store(true, core::sync::atomic::Ordering::SeqCst);
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     assert!(vfs.shutdown_storage().await.is_err());
     // Writes stay frozen, but the filesystem was not torn down: once the
     // device recovers, committed data is still readable for diagnosis.
@@ -1939,7 +1944,7 @@ async fn storage_flush_failure_is_surfaced_and_keeps_the_mount() {
     );
     device
         .fail_flush
-        .store(false, core::sync::atomic::Ordering::SeqCst);
+        .store(false, std::sync::atomic::Ordering::SeqCst);
     let mut buffer = Vec::new();
     File::read_from_path(vfs, task, "/pending", &mut buffer)
         .await
@@ -1949,19 +1954,19 @@ async fn storage_flush_failure_is_surfaced_and_keeps_the_mount() {
 
 struct CountingBlockDevice {
     inner: &'static MemoryDevice<512>,
-    write_count: core::sync::atomic::AtomicUsize,
+    write_count: std::sync::atomic::AtomicUsize,
 }
 
 impl CountingBlockDevice {
     fn new_static() -> &'static Self {
         Box::leak(Box::new(Self {
             inner: MemoryDevice::<512>::new_static(1024 * 512),
-            write_count: core::sync::atomic::AtomicUsize::new(0),
+            write_count: std::sync::atomic::AtomicUsize::new(0),
         }))
     }
 
     fn write_count(&self) -> usize {
-        self.write_count.load(core::sync::atomic::Ordering::SeqCst)
+        self.write_count.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -1982,7 +1987,7 @@ impl file_system::DirectBaseOperations for CountingBlockDevice {
         absolute_position: file_system::Size,
     ) -> core::task::Poll<file_system::Result<usize>> {
         self.write_count
-            .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.inner.write(task_context, buffer, absolute_position)
     }
 

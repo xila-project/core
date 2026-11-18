@@ -1,7 +1,7 @@
-use core::{
-    sync::atomic::{AtomicU64, Ordering},
-    time::Duration,
-};
+#![allow(clippy::disallowed_types, reason = "host-only test uses std atomics")]
+
+use core::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
 use time::{
     ClockSource, Error, Manager, MonotonicClock, RealtimeSample, RealtimeSource, Timestamp,
 };

@@ -9,6 +9,7 @@ file_system = { workspace = true }
 shared = { workspace = true }
 synchronization = { workspace = true }
 nanoaudio = { workspace = true, features = ["buffer", "dsp"] }
+portable-atomic = { workspace = true }
 
 [dev-dependencies]
 critical-section = { workspace = true, features = ["std"] }

@@ -911,7 +911,7 @@ async fn task_count_tracks_registration_and_completion() {
     let manager = initialize();
     let parent = manager.get_current_task_identifier().await;
     let before = manager.get_task_count().await;
-    let release = alloc::sync::Arc::new(synchronization::signal::Signal::<
+    let release = synchronization::Arc::new(synchronization::signal::Signal::<
         synchronization::blocking_mutex::raw::CriticalSectionRawMutex,
         (),
     >::new());
@@ -949,10 +949,7 @@ async fn utf8_names_and_failed_spawn_are_transactional() {
     assert_eq!(manager.get_task_count().await, before);
     let name = "abcdefghijklmnopqrstuvé終";
     let child = manager.register(root, name).await.unwrap();
-    assert_eq!(
-        manager.get_name(child).await.unwrap(),
-        "abcdefghijklmnopqrstuv"
-    );
+    assert_eq!(manager.get_name(child).await.unwrap(), name);
     manager.unregister(child).await.unwrap();
 }
 
@@ -1013,7 +1010,7 @@ async fn unknown_embassy_task_cannot_replace_root() {
 async fn storage_is_reused_and_future_captures_are_dropped() {
     let manager = initialize();
     let root = manager.get_current_task_identifier().await;
-    let capture = alloc::sync::Arc::new(());
+    let capture = synchronization::Arc::new(());
     // Warm the slot vector and BTreeMap nodes before counting steady state.
     manager
         .spawn(root, "warm", None, async |_| {})
@@ -1046,7 +1043,7 @@ async fn storage_is_reused_and_future_captures_are_dropped() {
         retained < 32 * 1024,
         "profiling retained {retained} bytes for 1000 completed tasks"
     );
-    assert_eq!(alloc::sync::Arc::strong_count(&capture), 1);
+    assert_eq!(synchronization::Arc::strong_count(&capture), 1);
     let slots = manager.0.read().await.slots.len();
     assert_eq!(slots, before);
     assert!(slots <= 4, "sequential spawning grew storage to {slots}");

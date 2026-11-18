@@ -1,12 +1,10 @@
-use core::{
-    cell::RefCell,
-    sync::atomic::{AtomicBool, AtomicU8, Ordering},
-};
+use core::cell::RefCell;
 use file_system::{
     ControlCommand, ControlCommandIdentifier, DirectBaseOperations, DirectCharacterDevice, Error,
     MountOperations, Result, Size,
 };
 use nanoaudio::{Consumer, Producer, RingBuffer, Sample, Stream, Volume};
+use portable_atomic::{AtomicBool, AtomicU8, Ordering};
 use shared::AnyByLayout;
 use synchronization::blocking_mutex::{Mutex, raw::CriticalSectionRawMutex};
 

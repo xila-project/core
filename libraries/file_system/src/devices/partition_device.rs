@@ -275,6 +275,10 @@ impl<'a, D> fmt::Debug for PartitionDevice<'a, D> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_types,
+    reason = "host-only unit tests count cancellations"
+)]
 mod tests {
     use alloc::boxed::Box;
 

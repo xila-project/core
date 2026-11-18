@@ -93,12 +93,18 @@ pub async fn termination_requested(manager: &Manager, task: TaskIdentifier) -> b
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_types,
+    reason = "host-only unit tests use std atomics"
+)]
 mod tests {
     extern crate std;
 
     use super::*;
-    use core::sync::atomic::{AtomicBool, Ordering};
-    use std::time::Instant;
+    use std::{
+        sync::atomic::{AtomicBool, Ordering},
+        time::Instant,
+    };
 
     fn clock() -> impl Fn() -> Duration {
         let start = Instant::now();
