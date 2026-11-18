@@ -19,8 +19,7 @@ embassy-sync = { workspace = true }
 embassy-futures = { workspace = true }
 critical-section = { workspace = true, features = ["std"] }
 
-# Core task manager currently needs pointer atomics (smol_str/Arc).
-[target.'cfg(all(target_has_atomic = "ptr", not(any(target_arch = "xtensa", target_arch = "wasm32"))))'.dependencies]
+[target.'cfg(not(any(target_arch = "xtensa", target_arch = "wasm32")))'.dependencies]
 task = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]

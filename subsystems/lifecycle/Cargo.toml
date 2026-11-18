@@ -6,13 +6,10 @@ edition = "2024"
 [dependencies]
 device = { workspace = true }
 file_system = { workspace = true }
+portable-atomic = { workspace = true }
 task = { workspace = true }
 time = { workspace = true }
 virtual_file_system = { workspace = true }
-
-# Native 16-bit compare-and-swap is used directly where available.
-[target.'cfg(not(target_has_atomic = "16"))'.dependencies]
-portable-atomic = { workspace = true }
 
 [dev-dependencies]
 task = { workspace = true, features = ["test_harness"] }

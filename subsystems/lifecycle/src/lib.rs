@@ -17,13 +17,10 @@ pub mod tasks;
 
 pub use supervisor::{Drivers, POWER_DEVICE_PATH, Supervisor};
 
-#[cfg(target_has_atomic = "16")]
-use core::sync::atomic::AtomicU16;
-use core::{sync::atomic::Ordering, time::Duration};
+use core::time::Duration;
 use device::power::Capabilities;
 use file_system::AccessFlags;
-#[cfg(not(target_has_atomic = "16"))]
-use portable_atomic::AtomicU16;
+use portable_atomic::{AtomicU16, Ordering};
 use task::TaskIdentifier;
 use virtual_file_system::{File, VirtualFileSystem};
 

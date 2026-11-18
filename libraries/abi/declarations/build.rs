@@ -64,6 +64,10 @@ pub fn main() {
         env::set_var("RUSTC_BOOTSTRAP", "1");
         // Empty also overrides a wrapper configured in .cargo/config.toml.
         env::set_var("RUSTC_WRAPPER", "");
+        // Cross-target flags (such as portable-atomic cfgs for CAS-less
+        // targets) must not leak into cbindgen's host macro expansion build.
+        env::remove_var("CARGO_ENCODED_RUSTFLAGS");
+        env::remove_var("RUSTFLAGS");
     }
 
     cbindgen::Builder::new()

@@ -8,6 +8,10 @@ pub enum Operation {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_types,
+    reason = "host-only unit test counts operation cancellations"
+)]
 mod tests {
     use crate::{BaseOperations, Context, DirectBaseOperations, Error, Operation, Result, Size};
     use core::{
@@ -139,6 +143,10 @@ impl<const N: usize> WaitQueue<N> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_types,
+    reason = "host-only unit test implements std::task::Wake with std::sync::Arc"
+)]
 mod wait_tests {
     extern crate std;
     use crate::{Error, WaitQueue, Waiter};

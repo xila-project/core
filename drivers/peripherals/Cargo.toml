@@ -9,14 +9,11 @@ embedded-io = { workspace = true, optional = true }
 embedded-hal = { workspace = true, optional = true }
 file_system = { workspace = true }
 peripherals = { workspace = true, optional = true }
+portable-atomic = { workspace = true }
 shared = { workspace = true }
 synchronization = { workspace = true }
 task = { workspace = true, optional = true }
 virtual_file_system = { workspace = true, optional = true }
-
-# Native byte compare-and-swap is used directly where available.
-[target.'cfg(not(target_has_atomic = "8"))'.dependencies]
-portable-atomic = { workspace = true }
 
 [dev-dependencies]
 task = { workspace = true, features = ["test_harness"] }

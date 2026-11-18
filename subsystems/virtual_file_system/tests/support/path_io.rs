@@ -5,6 +5,10 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
+#[allow(
+    clippy::disallowed_types,
+    reason = "Host-only test device uses std::sync::{Arc, atomic}."
+)]
 struct ShortDevice {
     bytes: Arc<Mutex<Vec<u8>>>,
     closes: Arc<AtomicUsize>,
@@ -69,6 +73,10 @@ impl BaseOperations for ShortDevice {
         Ok(())
     }
 }
+#[allow(
+    clippy::disallowed_types,
+    reason = "Host-only test helper uses std::sync::{Arc, atomic}."
+)]
 async fn setup(
     bytes: &[u8],
     stop: usize,

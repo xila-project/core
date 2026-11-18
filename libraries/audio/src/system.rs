@@ -1,21 +1,13 @@
 use crate::{Configuration, SampleFormat};
-#[cfg(target_has_atomic = "8")]
-use core::sync::atomic::AtomicBool;
-#[cfg(target_has_atomic = "ptr")]
-use core::sync::atomic::AtomicUsize;
 use core::{
     cell::UnsafeCell,
     marker::PhantomPinned,
     ops::{Deref, DerefMut},
     pin::Pin,
-    sync::atomic::Ordering,
 };
 use file_system::{Error, Result};
 use nanoaudio::{Consumer, Mixer, Producer, RingBuffer, Volume};
-#[cfg(not(target_has_atomic = "8"))]
-use portable_atomic::AtomicBool;
-#[cfg(not(target_has_atomic = "ptr"))]
-use portable_atomic::AtomicUsize;
+use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
 
 const MIX_CONFIGURATION: Configuration = Configuration::new(48_000, 2, SampleFormat::F32);
 const FRAME_BYTES: usize = 2 * size_of::<f32>();

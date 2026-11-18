@@ -8,7 +8,7 @@ task_macros = { package = "xila-task-macros", path = "./task_macros" }
 users = { workspace = true }
 embassy-executor = { workspace = true, default-features = false }
 embassy-futures = { workspace = true }
-heapless = { workspace = true }
+portable-atomic = { workspace = true }
 synchronization = { workspace = true }
 embedded-i18n = { workspace = true }
 # std critical sections for test binaries (`test_harness`).

@@ -1,11 +1,13 @@
-use core::{
-    sync::atomic::{AtomicU64, Ordering},
-    time::Duration,
-};
+use core::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
 use time::{
     ClockSource, Error, Manager, MonotonicClock, RealtimeSample, RealtimeSource, Timestamp,
 };
 
+#[allow(
+    clippy::disallowed_types,
+    reason = "Host-only test clock uses std atomics."
+)]
 struct Clock(AtomicU64);
 impl MonotonicClock for Clock {
     fn now(&self) -> Duration {
@@ -20,6 +22,10 @@ fn sample(nanos: i128) -> RealtimeSample {
         accuracy: None,
     }
 }
+#[allow(
+    clippy::disallowed_types,
+    reason = "Host-only test clock uses std atomics."
+)]
 #[test]
 fn boot_is_invalid_until_explicitly_synchronized() {
     let clock = Clock(AtomicU64::new(500));
@@ -40,6 +46,10 @@ fn boot_is_invalid_until_explicitly_synchronized() {
     assert_eq!(sync.accuracy, None);
     assert_eq!(manager.realtime_resolution(), Duration::from_millis(1));
 }
+#[allow(
+    clippy::disallowed_types,
+    reason = "Host-only test clock uses std atomics."
+)]
 #[test]
 fn repeated_signed_steps_preserve_monotonic_deadlines() {
     let clock = Clock(AtomicU64::new(5000));
@@ -57,6 +67,10 @@ fn repeated_signed_steps_preserve_monotonic_deadlines() {
     assert_eq!(manager.monotonic_now(), deadline);
     assert_eq!(manager.realtime_now().unwrap().as_nanos(), 10_000_000_000);
 }
+#[allow(
+    clippy::disallowed_types,
+    reason = "Host-only test clock uses std atomics."
+)]
 #[test]
 fn overflow_is_reported_without_replacing_previous_synchronization() {
     let clock = Clock(AtomicU64::new(1));
@@ -119,6 +133,10 @@ impl RealtimeSource for Failed {
         Err(Error::DeviceError(file_system::Error::InternalError))
     }
 }
+#[allow(
+    clippy::disallowed_types,
+    reason = "Host-only test clock uses std atomics."
+)]
 #[test]
 fn explicit_source_updates_are_atomic_and_not_polled_by_reads() {
     let clock = Clock(AtomicU64::new(1));
@@ -167,6 +185,10 @@ fn invalid_sample_keeps_clock_state_and_custom_resolution_is_respected() {
     assert!(Manager::with_monotonic_clock(&Failed, &Coarse).is_err());
 }
 
+#[allow(
+    clippy::disallowed_types,
+    reason = "Host-only test clock uses std atomics."
+)]
 #[test]
 fn concurrent_readers_observe_complete_corrections() {
     let clock = Clock(AtomicU64::new(1));

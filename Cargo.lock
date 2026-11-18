@@ -1162,6 +1162,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85"
 
 [[package]]
+name = "portable-atomic-util"
+version = "0.2.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10ab3eb7f3becc3a1cbc4f2c6f20267996cfc1a6467a873763411b136a122715"
+dependencies = [
+ "portable-atomic",
+]
+
+[[package]]
 name = "prettyplease"
 version = "0.2.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2078,6 +2087,7 @@ dependencies = [
  "embedded-i18n",
  "lvgl-rust",
  "lvgl-rust-sys",
+ "portable-atomic",
  "serde_json",
  "sha2",
  "toml 1.2.1+spec-1.1.0",
@@ -2221,6 +2231,7 @@ dependencies = [
  "embedded-hal-async",
  "embedded-io",
  "embedded-io-async",
+ "portable-atomic",
  "xila-synchronization",
 ]
 
@@ -2249,6 +2260,7 @@ version = "0.1.0"
 dependencies = [
  "critical-section",
  "embassy-sync",
+ "portable-atomic-util",
 ]
 
 [[package]]
@@ -2260,8 +2272,8 @@ dependencies = [
  "embassy-futures",
  "embassy-time",
  "embedded-i18n",
- "heapless",
  "libc",
+ "portable-atomic",
  "xila-synchronization",
  "xila-task-macros",
  "xila-users",
@@ -2334,6 +2346,7 @@ version = "0.1.0"
 dependencies = [
  "embedded-i18n",
  "embedded-io-async",
+ "portable-atomic",
  "xila-abi-definitions",
  "xila-drivers-core",
  "xila-executable",

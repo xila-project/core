@@ -129,8 +129,10 @@ fn install(log: &'static Logger) -> Result<(), log_external::SetLoggerError> {
 fn install(log: &'static Logger) -> Result<(), log_external::SetLoggerError> {
     critical_section::with(|_| {
         // SAFETY: the critical section excludes every other `initialize`
-        // call, the only place Xila sets the logger and maximum level. Logging
-        // concurrently with these setters is allowed by `log`.
+        // call, the only place Xila sets the logger and maximum level. Firmware
+        // and HAL crates must not call `log::set_logger_racy` or
+        // `log::set_max_level_racy` themselves outside this critical section.
+        // Logging concurrently with these setters is allowed by `log`.
         unsafe {
             let result = log_external::set_logger_racy(log);
             log_external::set_max_level_racy(log_external::LevelFilter::Trace);

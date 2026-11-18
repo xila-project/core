@@ -97,14 +97,20 @@ mod tests {
     extern crate std;
 
     use super::*;
-    use core::sync::atomic::{AtomicBool, Ordering};
-    use std::time::Instant;
+    use std::{
+        sync::atomic::{AtomicBool, Ordering},
+        time::Instant,
+    };
 
     fn clock() -> impl Fn() -> Duration {
         let start = Instant::now();
         move || start.elapsed()
     }
 
+    #[allow(
+        clippy::disallowed_types,
+        reason = "Host-only test signaling flag uses std atomics."
+    )]
     #[task::test]
     async fn cooperative_tasks_stop_and_unresponsive_ones_time_out() {
         static RELEASED: AtomicBool = AtomicBool::new(false);

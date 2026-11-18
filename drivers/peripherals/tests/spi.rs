@@ -56,6 +56,10 @@ const CAPABILITIES: BusCapabilities = BusCapabilities {
 
 /// A shared bus whose only endpoint is chip select 0, with the responder leaked so the
 /// bus is `'static` and `Send`, as mounting requires.
+#[allow(
+    clippy::disallowed_types,
+    reason = "Host-only test bus uses std atomics."
+)]
 struct SimulatedBus {
     bus: SpiMock<'static, 2>,
     /// Set by the test to model another master holding the bus.
@@ -114,6 +118,10 @@ async fn open<'a>(
     .await
 }
 
+#[allow(
+    clippy::disallowed_types,
+    reason = "Host-only test bus uses std atomics."
+)]
 fn leak_bus() -> &'static SimulatedBus {
     let responder: &'static Mutex<CriticalSectionRawMutex, Responder> =
         Box::leak(Box::new(Mutex::new(Responder::default())));

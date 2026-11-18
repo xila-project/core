@@ -370,12 +370,16 @@ impl Manager {
 
 #[cfg(test)]
 mod clock_tests {
-    use super::*;
-    use core::{
-        sync::atomic::{AtomicU64, Ordering},
-        time::Duration,
-    };
+    extern crate std;
 
+    use super::*;
+    use core::time::Duration;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[allow(
+        clippy::disallowed_types,
+        reason = "Host-only test clock uses std atomics."
+    )]
     struct Clock(AtomicU64);
     impl time::MonotonicClock for Clock {
         fn now(&self) -> Duration {
@@ -383,6 +387,10 @@ mod clock_tests {
         }
     }
 
+    #[allow(
+        clippy::disallowed_types,
+        reason = "Host-only test clock uses std atomics."
+    )]
     #[test]
     fn smoltcp_uses_monotonic_microseconds_and_saturates_without_rewinding() {
         let clock = Clock(AtomicU64::new(10_123));

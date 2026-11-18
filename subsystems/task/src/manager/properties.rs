@@ -1,7 +1,5 @@
 // Properties module - handles task properties like user, group, and environment variables
 
-use alloc::string::ToString;
-
 use super::*;
 use alloc::{string::String, vec::Vec};
 use users::{GroupIdentifier, UserIdentifier};
@@ -113,6 +111,6 @@ impl Manager {
     /// # Arguments
     /// * `Task_identifier` - The identifier of the task.
     pub async fn get_name(&self, task_identifier: TaskIdentifier) -> Result<String> {
-        Self::get_task(&*self.0.read().await, task_identifier).map(|task| task.name.to_string())
+        Self::get_task(&*self.0.read().await, task_identifier).map(|task| task.name.clone())
     }
 }

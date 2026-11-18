@@ -79,11 +79,13 @@ critical-section = { version = "1.2" }
 # pick its backend: the firmware enables `unsafe-assume-single-core` or
 # `critical-section` (esp-hal already does for these chips).
 portable-atomic = { version = "1", default-features = false }
+portable-atomic-util = { version = "0.2", default-features = false, features = [
+  "alloc",
+] }
 smoltcp = { version = "0.14", default-features = false }
 linked_list_allocator = { version = "0.10", default-features = false, features = [
   "const_mut_refs",
 ] }
-heapless = { version = "0.9", default-features = false }
 darling = { version = "0.24" }
 regex = { version = "1" }
 embedded-io-async = { version = "0.7", features = ["alloc"] }

@@ -102,6 +102,10 @@ pub unsafe extern "C" fn flush_callback(configuration: *const littlefs::lfs_conf
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_types,
+    reason = "host-only unit test counts C callback probes and cancellations"
+)]
 mod tests {
     use super::*;
     use alloc::boxed::Box;

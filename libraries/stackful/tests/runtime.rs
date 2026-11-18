@@ -14,7 +14,15 @@ use std::{
     },
 };
 
+#[allow(
+    clippy::disallowed_types,
+    reason = "host test implements std::task::Wake with std::sync::Arc"
+)]
 struct Wake(AtomicUsize);
+#[allow(
+    clippy::disallowed_types,
+    reason = "host test implements std::task::Wake with std::sync::Arc"
+)]
 impl std::task::Wake for Wake {
     fn wake(self: Arc<Self>) {
         self.0.fetch_add(1, Ordering::Relaxed);
@@ -28,6 +36,10 @@ fn coroutine(entry: impl FnOnce() -> i32 + 'static) -> Coroutine {
     unsafe { Coroutine::new(Stack::new(64 * 1024), entry) }
 }
 #[test]
+#[allow(
+    clippy::disallowed_types,
+    reason = "host test implements std::task::Wake with std::sync::Arc"
+)]
 fn signal_uses_real_waker_and_does_not_spin() {
     let signal = Rc::new(Signal::<NoopRawMutex, i32>::new());
     let polls = Rc::new(Cell::new(0));

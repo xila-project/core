@@ -169,6 +169,10 @@ mod tests {
     struct Fixture(PathBuf);
 
     impl Fixture {
+        #[allow(
+            clippy::disallowed_types,
+            reason = "build-script host unit test uses std atomics for unique temp paths"
+        )]
         fn new() -> Self {
             static NEXT: AtomicU64 = AtomicU64::new(0);
             loop {

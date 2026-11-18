@@ -1,7 +1,6 @@
 extern crate alloc;
 
-use alloc::{sync::Arc, vec, vec::Vec};
-use core::sync::atomic::{AtomicBool, Ordering};
+use alloc::{vec, vec::Vec};
 use drivers_neural_network::{
     Backend, COMPUTE, GET_INPUT_COUNT, GET_INPUT_INFO, LOAD, LoadRequest, Loader, LoaderDevice,
     ModelBuffer, ModelEncoding, NeuralNetworkDevice, QuantizationEntry, SET_INPUT_INDEX,
@@ -9,7 +8,15 @@ use drivers_neural_network::{
 };
 use file_system::{BaseOperations, Context, ControlCommand, Error, Result};
 use shared::AnyByLayout;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
+#[allow(
+    clippy::disallowed_types,
+    reason = "Host-only test guard uses std::sync::{Arc, atomic}."
+)]
 struct DropGuard(Arc<AtomicBool>);
 impl Drop for DropGuard {
     fn drop(&mut self) {
@@ -101,6 +108,10 @@ impl Backend for MockBackend {
     }
 }
 
+#[allow(
+    clippy::disallowed_types,
+    reason = "Host-only test loader uses std::sync::{Arc, atomic}."
+)]
 struct MockLoader {
     max_model_size: usize,
     drop_flag: Option<Arc<AtomicBool>>,
@@ -409,6 +420,10 @@ fn two_handles_on_same_node_with_different_models_are_independent() {
     device.close(&mut second).unwrap();
 }
 
+#[allow(
+    clippy::disallowed_types,
+    reason = "Host-only test uses std::sync::{Arc, atomic}."
+)]
 #[test]
 fn close_frees_state() {
     let dropped = Arc::new(AtomicBool::new(false));

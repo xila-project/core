@@ -1,16 +1,8 @@
 // Metadata module - handles task metadata and data structures
 
 use super::*;
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 use users::{GroupIdentifier, UserIdentifier};
-
-/// Maximum task name length in bytes; longer names are truncated on a
-/// character boundary.
-pub(crate) const MAXIMUM_NAME_LENGTH: usize = 23;
-
-/// Inline task name: 23 bytes plus a one-byte length, so it never allocates
-/// and does not need pointer atomics.
-pub(crate) type Name = heapless::String<MAXIMUM_NAME_LENGTH, u8>;
 
 /// Internal representation of a task.
 pub(crate) struct Metadata {
@@ -18,7 +10,7 @@ pub(crate) struct Metadata {
     /// Internal identifier of the task.
     pub(crate) internal_identifier: usize,
     /// Name of the task.
-    pub(crate) name: Name,
+    pub(crate) name: String,
     /// The children of the task.
     pub(crate) parent: TaskIdentifier,
     /// The identifier of the user that owns the task.
