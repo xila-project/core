@@ -45,9 +45,12 @@ Unaligned DMA requests naturally skip high-alignment cached regions (such as PSR
 The Espressif mapping follows [esp-metadata-generated 0.5.3][metadata]
 (`soc_has_psram`, `dma_can_access_psram` and `soc_internal_memory_cached`)
 and [esp-hal 1.2.2's region alignment checks][region-alignment]. The 4-byte
-minimum for uncached SRAM covers word-aligned burst DMA. ESP32-S2 and S3
-PSRAM use the largest configurable [S2][s2-cache] and [S3][s3-cache] data-cache
-line sizes. The P4 limits cover its 64-byte internal line and up to 128-byte
+minimum for uncached SRAM covers word-aligned burst DMA. ESP32-S3 PSRAM uses
+the largest configurable [S3][s3-cache] data-cache line size, and C5/C61 PSRAM
+the largest (64-byte) external burst, since inbound PSRAM transfers must be
+aligned to the burst size. ESP32-S2 PSRAM is not advertised as DMA-capable:
+only SPI2, I2S0 and the crypto DMA can reach it ([S2][s2-cache]), and a
+capability flag cannot name the channel that will use a buffer. The P4 limits cover its 64-byte internal line and up to 128-byte
 external line. DMA reachability and burst alignment still depend on the
 [channel and transfer configuration][dma-engine]. On capable chips, PSRAM
 may work with some channels only. Callers that also require internal data
@@ -57,9 +60,9 @@ RAM during cache-off operations can combine `DirectMemoryAccess` and
 | Platform / Target | Region `0` (Primary / Fast) | Region `1` (Secondary / Large) | `Executable` |
 |---|---|---|---|
 | **ESP32** | Internal SRAM: `DirectMemoryAccess \| AlwaysAccessible` (`dma_alignment = 4`) | Optional PSRAM: `empty()` (esp-hal DMA excludes PSRAM) | Unsupported (`None`) |
-| **ESP32-S2** | Internal SRAM: `DirectMemoryAccess \| AlwaysAccessible` (`dma_alignment = 4`) | Optional PSRAM: `DirectMemoryAccess` (`dma_alignment = 32`) | Unsupported (`None`) |
+| **ESP32-S2** | Internal SRAM: `DirectMemoryAccess \| AlwaysAccessible` (`dma_alignment = 4`) | Optional PSRAM: `empty()` (only SPI2, I2S0 and crypto DMA can reach it) | Unsupported (`None`) |
 | **ESP32-S3, ESP32-S31** | Internal SRAM: `DirectMemoryAccess \| AlwaysAccessible` (`dma_alignment = 4`) | Optional PSRAM: `DirectMemoryAccess` (`dma_alignment = 64`) | Unsupported (`None`) |
-| **ESP32-C5, ESP32-C61** | Internal SRAM: `DirectMemoryAccess \| AlwaysAccessible` (`dma_alignment = 4`) | Optional PSRAM: `DirectMemoryAccess` (`dma_alignment = 32`) | Unsupported (`None`) |
+| **ESP32-C5, ESP32-C61** | Internal SRAM: `DirectMemoryAccess \| AlwaysAccessible` (`dma_alignment = 4`) | Optional PSRAM: `DirectMemoryAccess` (`dma_alignment = 64`, the largest external burst) | Unsupported (`None`) |
 | **ESP32-P4** | Internal SRAM: `DirectMemoryAccess \| AlwaysAccessible` (`dma_alignment = 64`, L1 DCache) | Optional PSRAM: `DirectMemoryAccess` (`dma_alignment = 128`, L2 cache) | Unsupported (`None`) |
 | **ESP32-C2, C3, C6, H2** | Internal SRAM: `DirectMemoryAccess \| AlwaysAccessible` (`dma_alignment = 4`) | None (`REGION_COUNT = 1`, no PSRAM support in esp-hal) | Unsupported (`None`) |
 | **Nordic (nRF52840)** | Internal SRAM: `DirectMemoryAccess \| AlwaysAccessible` | None (single region) | Unsupported (`None`) |
