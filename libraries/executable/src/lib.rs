@@ -91,6 +91,16 @@ pub async fn execute(
     standard: Standard<'static>,
     spawner: Option<SpawnerIdentifier>,
 ) -> Result<JoinHandle<isize>> {
+    execute_inner(context, path.as_ref(), inputs, standard, spawner).await
+}
+
+async fn execute_inner(
+    context: &'static ExecutableContext,
+    path: &Path,
+    inputs: Vec<String>,
+    standard: Standard<'static>,
+    spawner: Option<SpawnerIdentifier>,
+) -> Result<JoinHandle<isize>> {
     // Admission barrier: once a lifecycle request is accepted, no new
     // executable may start and race the shutdown pipeline.
     if !lifecycle::SYSTEM.is_running() {
@@ -102,7 +112,7 @@ pub async fn execute(
 
     let virtual_file_system = &context.virtual_file_system;
 
-    let statistics = virtual_file_system.get_statistics(&path.as_ref()).await?;
+    let statistics = virtual_file_system.get_statistics(&path).await?;
 
     // - Check the executable bit
     if !is_execute_allowed(
@@ -115,13 +125,12 @@ pub async fn execute(
         return Err(Error::PermissionDenied);
     }
 
-    let mut file = File::open(virtual_file_system, task, &path, AccessFlags::Read.into()).await?;
+    let mut file = File::open(virtual_file_system, task, path, AccessFlags::Read.into()).await?;
 
     // - Check if the user can override the user identifier
     let new_user = get_overridden_user(context, &statistics, task).await?;
 
     let file_name = path
-        .as_ref()
         .get_file_name()
         .ok_or(virtual_file_system::Error::InvalidPath)?;
 

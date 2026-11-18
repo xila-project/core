@@ -42,7 +42,7 @@ impl<'a> SynchronousDirectory<'a> {
         task: TaskIdentifier,
         path: impl AsRef<Path>,
     ) -> Result<()> {
-        block_on(virtual_file_system.create_directory(task, &path))
+        block_on(virtual_file_system.create_directory(task, &path.as_ref()))
     }
 
     pub fn open(
@@ -50,8 +50,8 @@ impl<'a> SynchronousDirectory<'a> {
         task: TaskIdentifier,
         path: impl AsRef<Path>,
     ) -> Result<Self> {
-        let mut directory =
-            block_on(virtual_file_system.open_directory(task, &path))?.into_synchronous_directory();
+        let mut directory = block_on(virtual_file_system.open_directory(task, &path.as_ref()))?
+            .into_synchronous_directory();
 
         directory.flags = directory.flags.set_status(StateFlags::empty());
 
