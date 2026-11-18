@@ -1008,7 +1008,11 @@ async fn unknown_embassy_task_cannot_replace_root() {
 
 #[test(task_path = crate)]
 async fn storage_is_reused_and_future_captures_are_dropped() {
-    let manager = initialize();
+    // A private manager: tasks of concurrent tests on the shared manager
+    // would occupy its slots and force new ones to be allocated.
+    let manager: &'static Manager = alloc::boxed::Box::leak(alloc::boxed::Box::new(Manager::new()));
+    let local = unsafe { embassy_executor::Spawner::for_current_executor().await };
+    manager.register_spawner(local).unwrap();
     let root = manager.get_current_task_identifier().await;
     let capture = synchronization::Arc::new(());
     // Warm the slot vector and BTreeMap nodes before counting steady state.
@@ -1296,6 +1300,8 @@ async fn metrics_count_task_polls_and_executor_load() {
     assert!(task.longest_poll_nanoseconds <= task.busy_nanoseconds);
     let spawner = manager.get_spawner(root).await.unwrap();
     assert_eq!(task.spawner, spawner);
+    let executor = unsafe { embassy_executor::Spawner::for_current_executor().await }.executor_id();
+    assert_eq!(task.executor, Some(executor));
 
     let before = first
         .executors
@@ -1311,11 +1317,14 @@ async fn metrics_count_task_polls_and_executor_load() {
     assert!(second.timestamp_nanoseconds > first.timestamp_nanoseconds);
     assert!(after.polls >= before.polls + 4);
     let busy = after.busy_nanoseconds - before.busy_nanoseconds;
-    let idle = after.idle_nanoseconds.unwrap() - before.idle_nanoseconds.unwrap_or(0);
+    let idle = after.idle_nanoseconds.unwrap() - before.idle_nanoseconds.unwrap();
     let elapsed = after.timestamp_nanoseconds - before.timestamp_nanoseconds;
     assert!(after.timestamp_nanoseconds <= second.timestamp_nanoseconds);
     assert!(busy >= 5_900_000, "busy {busy}");
-    assert!(idle >= 4_000_000, "idle {idle}");
+    // A runnable but descheduled thread records no idle time, so under load
+    // the sleep can measure far less than 5 ms of idle time.
+    assert!(idle > 0, "idle {idle}");
+    // Same thread, nanosecond clock: no rounding or cross-core excess.
     assert!(busy + idle <= elapsed, "{busy} + {idle} > {elapsed}");
 
     release.signal(());
@@ -1398,7 +1407,8 @@ async fn executors_on_other_threads_are_reported_separately() {
         .unwrap();
     assert_ne!(local.executor, remote.executor);
     assert!(remote.busy_nanoseconds >= 2_900_000, "{remote:?}");
-    assert!(remote.idle_nanoseconds.is_some());
+    // The remote executor created its idle hook before registering.
+    assert!(remote.idle_nanoseconds.is_some(), "{remote:?}");
 }
 
 #[cfg(feature = "metrics")]
@@ -1448,11 +1458,18 @@ async fn executors_sampled_while_another_thread_writes_never_decrease() {
             current.idle_nanoseconds.unwrap_or(0),
         );
         assert!(current_idle >= previous_idle, "{previous:?} {current:?}");
-        // Per-executor timestamps bound the accounted time exactly.
+        // Per-executor timestamps bound the accounted time exactly on x86
+        // with a nanosecond clock. Weakly ordered hosts can extrapolate a
+        // period in progress by up to the writer's store latency.
+        let tolerance = if cfg!(target_arch = "x86_64") {
+            0
+        } else {
+            10_000
+        };
         let accounted =
             (current.busy_nanoseconds - previous.busy_nanoseconds) + (current_idle - previous_idle);
         assert!(
-            accounted <= current.timestamp_nanoseconds - previous.timestamp_nanoseconds,
+            accounted <= current.timestamp_nanoseconds - previous.timestamp_nanoseconds + tolerance,
             "{previous:?} {current:?}"
         );
         previous = current;

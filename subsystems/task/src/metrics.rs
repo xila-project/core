@@ -8,6 +8,15 @@
 //! per-executor counters are created once per executor, so spawning allocates
 //! nothing more either.
 //!
+//! On Linux, macOS and Windows the metrics clock counts from its own first
+//! read, not from `embassy_time::Instant`'s origin: compare metrics
+//! timestamps only with each other.
+//!
+//! Without the feature, [`Manager::get_metrics`](crate::Manager::get_metrics)
+//! returns `None` and [`ExecutorActivity::measure_idle`] only runs its
+//! closure, so platforms and applications can use the API unconditionally at
+//! no cost.
+//!
 //! # What is measured
 //!
 //! Busy time is wall-clock time spent inside task polls, not processor time:
@@ -22,9 +31,10 @@
 //!
 //! # Computing loads
 //!
-//! All counters only grow. Consumers sample
-//! [`Manager::get_metrics`](crate::Manager::get_metrics) periodically and
-//! divide differences between two snapshots:
+//! Every reported counter and executor timestamp never decreases. Consumers
+//! sample [`Manager::get_metrics`](crate::Manager::get_metrics) periodically
+//! and divide differences between two snapshots, computed with
+//! `saturating_sub`:
 //!
 //! - Match executors between snapshots by [`ExecutorMetrics::executor`], not
 //!   by [`ExecutorMetrics::spawner`]: an executor is reported under its lowest
@@ -34,24 +44,36 @@
 //!   [`ExecutorMetrics::idle_nanoseconds`] is available on both sides, prefer
 //!   `1 − Δidle / Δtimestamp`: it also counts executor bookkeeping and
 //!   foreign work on that core as load. Both include the poll or wait in
-//!   progress, so they are continuous and stay within `[0, 1]`.
+//!   progress, so they are continuous. They are close to, but not strictly
+//!   within, `[0, 1]`: clamp them (see [Precision](#precision)).
 //! - A task's share is `Δbusy / Δ`[`MetricsSnapshot::timestamp_nanoseconds`].
 //!   Task busy time is added when a poll ends, so a long poll counts entirely
-//!   in the window where it ends: clamp per-task shares to `[0, 1]`. Compare
+//!   in the window where it ends, and the shares of one executor's tasks can
+//!   then sum above 1. Normalise per executor, grouping tasks by
+//!   [`TaskMetrics::executor`]: when their sum exceeds 1, divide each of them
+//!   by that sum rather than clamping each task separately. Compare
 //!   [`TaskMetrics::generation`] to detect a reused task identifier.
 //! - Tasks adopted rather than spawned by the manager have no counters, report
-//!   zero polls and have `spawner == usize::MAX`.
+//!   zero polls, have `spawner == usize::MAX` and no executor.
 //!
-//! Without the feature, [`Manager::get_metrics`](crate::Manager::get_metrics)
-//! returns `None` and [`ExecutorActivity::measure_idle`] only runs its
-//! closure, so platforms and applications can use the API unconditionally at
-//! no cost.
+//! # Precision
+//!
+//! Counters are kept in clock ticks and each one is converted to nanoseconds
+//! separately, rounding down. When `TICK_HERTZ` does not divide one billion,
+//! as with a 32,768 Hz counter, the difference of two converted values can
+//! exceed the converted difference by 1 ns, so `Δidle` can exceed
+//! `Δtimestamp` by 1 ns over the same ticks. On multi-core targets, a reader
+//! can also extrapolate a period in progress slightly past the value its
+//! writer finally stores (see [Concurrency](#concurrency)); the excess is
+//! kept rather than reported as a decrease. Use `saturating_sub` for every
+//! difference and clamp ratios to `[0, 1]`.
 //!
 //! # Platform hook
 //!
 //! Executor busy time is derived from task polls and needs no platform code.
 //! Idle time, the time an executor waits for work, can only be measured by the
-//! executor loop. Platforms wrap their wait with
+//! executor loop. Platforms create an [`ExecutorActivity`] on the executor's
+//! thread before its loop, and wrap their wait with
 //! [`ExecutorActivity::measure_idle`], between polls of their executor:
 //!
 //! ```ignore
@@ -62,21 +84,36 @@
 //! }
 //! ```
 //!
-//! Without the hook, [`ExecutorMetrics::idle_nanoseconds`] is `None`.
+//! Once an executor's hook exists, its [`ExecutorMetrics::idle_nanoseconds`]
+//! is `Some`, starting at 0; without the hook, it is `None`. The hook is
+//! `!Send`, like the [`Spawner`](embassy_executor::Spawner) it is created
+//! from:
+//!
+//! ```compile_fail,E0277
+//! fn assert_send<T: Send>() {}
+//! assert_send::<task::metrics::ExecutorActivity>();
+//! ```
 //!
 //! # Concurrency
 //!
 //! Each executor's counters have a single writer, the executor's own thread:
-//! task polls and [`ExecutorActivity::measure_idle`], whose handle is created
-//! from that executor's `!Send` [`Spawner`](embassy_executor::Spawner) and
-//! cannot leave its thread.
-//! Readers use a sequence lock built from 32-bit atomic loads and stores, so
-//! it works without compare-and-swap or 64-bit atomics, and they spin while a
-//! write is in progress. Never read the counters from code that preempts a
-//! writer on the same core: an interrupt handler, or a task of an interrupt
-//! executor that preempts an instrumented thread executor. Executor counters
-//! are read inside the manager's critical section, so such a reader would spin
-//! forever with interrupts disabled.
+//! task polls and [`ExecutorActivity::measure_idle`], whose handle cannot
+//! leave its thread. Readers use a sequence lock built from 32-bit atomic
+//! loads and stores, so it works without compare-and-swap or 64-bit atomics,
+//! and they spin while a write is in progress, outside any critical section.
+//! Never read the counters from code that preempts a writer on the same core:
+//! an interrupt handler, or a task of an interrupt executor that preempts an
+//! instrumented thread executor. Such a reader would spin forever.
+//!
+//! Writers read the clock inside their write section, which keeps a reader
+//! from extrapolating a finished period on a single core and on x86. On
+//! weakly ordered multi-core architectures, such as AArch64 and RISC-V,
+//! fences do not order a system-register clock read after an earlier store,
+//! so a reader on another core can still extrapolate a period in progress by
+//! up to the writer's store latency. Reported values never decrease because
+//! every reader clamps its sample to a per-executor high-water mark of busy
+//! time, idle time and timestamp, updated with plain loads and stores inside a
+//! short critical section.
 
 use crate::{SpawnerIdentifier, TaskIdentifier};
 use alloc::{string::String, vec::Vec};
@@ -90,6 +127,9 @@ pub struct TaskMetrics {
     pub name: String,
     /// Spawner registration running the task; `usize::MAX` for adopted tasks.
     pub spawner: SpawnerIdentifier,
+    /// Executor running the task, as in [`ExecutorMetrics::executor`];
+    /// `None` for adopted tasks.
+    pub executor: Option<usize>,
     pub polls: u64,
     /// Wall-clock time spent in completed polls.
     pub busy_nanoseconds: u64,
@@ -107,15 +147,15 @@ pub struct ExecutorMetrics {
     pub executor: usize,
     pub polls: u64,
     /// Wall-clock time spent polling managed tasks, including a poll in
-    /// progress.
+    /// progress. Never decreases.
     pub busy_nanoseconds: u64,
-    /// Time spent waiting for work, including a wait in progress, when the
-    /// platform executor reports it through [`ExecutorActivity::measure_idle`].
+    /// Time spent waiting for work, including a wait in progress, once the
+    /// platform executor created its [`ExecutorActivity`]. Never decreases.
     pub idle_nanoseconds: Option<u64>,
     /// Clock value when the counters were created.
     pub started_nanoseconds: u64,
     /// Clock value at which these counters were read. Divide busy and idle
-    /// differences by differences of this value.
+    /// differences by differences of this value. Never decreases.
     pub timestamp_nanoseconds: u64,
 }
 
@@ -169,7 +209,10 @@ mod disabled {
 mod enabled {
     use super::ExecutorMetrics;
     use alloc::{boxed::Box, vec::Vec};
-    use core::{cell::RefCell, marker::PhantomData};
+    use core::{
+        cell::{Cell, RefCell},
+        marker::PhantomData,
+    };
     use embassy_executor::Spawner;
     use portable_atomic::{AtomicU32, Ordering, fence};
     use synchronization::blocking_mutex::{Mutex, raw::CriticalSectionRawMutex};
@@ -182,8 +225,9 @@ mod enabled {
         /// The operating system's monotonic clock, in nanoseconds.
         pub const HERTZ: u64 = 1_000_000_000;
 
-        /// Nanoseconds since the first read. Embassy's std clock takes its
-        /// driver's global mutex on every read; this one is lock-free.
+        /// Nanoseconds since the first read, an origin unrelated to
+        /// `embassy_time::Instant`'s. Embassy's std clock takes its driver's
+        /// global mutex on every read; this one is lock-free.
         #[inline(always)]
         pub fn now() -> u64 {
             static ORIGIN: OnceLock<Instant> = OnceLock::new();
@@ -212,12 +256,20 @@ mod enabled {
         clock::now()
     }
 
-    /// Convert clock ticks to nanoseconds, saturating.
+    /// Convert clock ticks to nanoseconds, rounding down and saturating.
+    ///
+    /// When [`TICK_HERTZ`] does not divide one billion, the difference of two
+    /// converted values can exceed the converted difference by 1 ns.
     pub fn ticks_to_nanoseconds(ticks: u64) -> u64 {
-        if 1_000_000_000 % TICK_HERTZ == 0 {
-            ticks.saturating_mul(1_000_000_000 / TICK_HERTZ)
+        convert(ticks, TICK_HERTZ)
+    }
+
+    #[inline(always)]
+    fn convert(ticks: u64, hertz: u64) -> u64 {
+        if 1_000_000_000 % hertz == 0 {
+            ticks.saturating_mul(1_000_000_000 / hertz)
         } else {
-            let nanoseconds = u128::from(ticks) * 1_000_000_000 / u128::from(TICK_HERTZ);
+            let nanoseconds = u128::from(ticks) * 1_000_000_000 / u128::from(hertz);
             u64::try_from(nanoseconds).unwrap_or(u64::MAX)
         }
     }
@@ -256,10 +308,12 @@ mod enabled {
         /// Like [`Self::write`], but read `clock` inside the write section,
         /// pass it to `update` and return it.
         ///
-        /// The clock is read only once the odd sequence is visible. A reader
-        /// whose own clock read is later than this one therefore sees the
-        /// write and retries, so it never extrapolates a period in progress
-        /// past the value this write stores.
+        /// On a single core and on x86, the clock is read only once the odd
+        /// sequence is visible, so a reader whose own clock read is later
+        /// sees the write and retries instead of extrapolating a period in
+        /// progress past the value this write stores. Weakly ordered
+        /// architectures do not order a system-register clock read after the
+        /// fence; readers clamp their samples for those.
         #[inline(always)]
         pub(crate) fn write_at(
             &self,
@@ -269,7 +323,7 @@ mod enabled {
             let sequence = self.sequence.load(Ordering::Relaxed);
             self.sequence
                 .store(sequence.wrapping_add(1), Ordering::Relaxed);
-            // Store-to-clock ordering needs a full fence.
+            // Store-to-load ordering needs a full fence.
             fence(Ordering::SeqCst);
             let at = clock();
             update(self, at);
@@ -337,10 +391,11 @@ mod enabled {
     const TASK_BUSY: usize = 0;
     const TASK_POLLS: usize = 2;
     const TASK_LONGEST: usize = 4;
+    const TASK_WORDS: usize = 6;
 
     /// Per-slot task counters, in ticks. Retained with their storage slot and
     /// reset when the slot is claimed by a new task.
-    pub(crate) struct TaskCounters(Words<5>);
+    pub(crate) struct TaskCounters(Words<TASK_WORDS>);
 
     /// Task counters in ticks.
     #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -357,7 +412,7 @@ mod enabled {
 
         pub(crate) fn reset(&self) {
             self.0
-                .write(|words| (0..5).for_each(|index| words.set(index, 0)));
+                .write(|words| (0..TASK_WORDS).for_each(|index| words.set(index, 0)));
         }
 
         #[inline(always)]
@@ -365,9 +420,8 @@ mod enabled {
             self.0.write(|words| {
                 words.add64(TASK_BUSY, elapsed);
                 words.add64(TASK_POLLS, 1);
-                let elapsed = u32::try_from(elapsed).unwrap_or(u32::MAX);
-                if elapsed > words.get(TASK_LONGEST) {
-                    words.set(TASK_LONGEST, elapsed);
+                if elapsed > words.get64(TASK_LONGEST) {
+                    words.set64(TASK_LONGEST, elapsed);
                 }
             });
         }
@@ -377,9 +431,16 @@ mod enabled {
             TaskSample {
                 polls: get64(&words, TASK_POLLS),
                 busy: get64(&words, TASK_BUSY),
-                longest_poll: u64::from(words[TASK_LONGEST]),
+                longest_poll: get64(&words, TASK_LONGEST),
             }
         }
+    }
+
+    /// Counters of one spawned task and of the executor polling it.
+    #[derive(Clone, Copy)]
+    pub(crate) struct TaskInstrumentation {
+        pub(crate) task: &'static TaskCounters,
+        pub(crate) executor: &'static ExecutorCounters,
     }
 
     const EXECUTOR_BUSY: usize = 0;
@@ -392,8 +453,16 @@ mod enabled {
     const STATE_MASK: u32 = 0b11;
     const STATE_BUSY: u32 = 1;
     const STATE_IDLE: u32 = 2;
-    /// Set once the platform reported an idle period.
+    /// Set once the platform created the executor's idle hook.
     const IDLE_MEASURED: u32 = 0b100;
+
+    /// Highest busy time, idle time and timestamp, in ticks, reported so far.
+    #[derive(Clone, Copy, Default)]
+    struct HighWater {
+        busy: u64,
+        idle: u64,
+        at: u64,
+    }
 
     /// Busy and idle counters of one executor, shared by its spawner
     /// registrations and written only by the executor's thread.
@@ -401,6 +470,9 @@ mod enabled {
         executor: usize,
         started: u64,
         words: Words<9>,
+        /// Shared by readers and updated only inside its critical section,
+        /// so no compare-and-swap is needed.
+        high_water: Mutex<CriticalSectionRawMutex, Cell<HighWater>>,
     }
 
     static EXECUTORS: Mutex<CriticalSectionRawMutex, RefCell<Vec<&'static ExecutorCounters>>> =
@@ -412,6 +484,11 @@ mod enabled {
                 executor,
                 started,
                 words: Words::new(),
+                high_water: Mutex::new(Cell::new(HighWater {
+                    busy: 0,
+                    idle: 0,
+                    at: started,
+                })),
             }
         }
 
@@ -446,6 +523,13 @@ mod enabled {
         #[inline(always)]
         pub(crate) fn end_period(&self) -> u64 {
             self.end(now)
+        }
+
+        /// Report idle time from now on, starting at zero.
+        fn measure_idle(&self) {
+            self.words.write(|words| {
+                words.set(EXECUTOR_STATE, words.get(EXECUTOR_STATE) | IDLE_MEASURED);
+            });
         }
 
         #[inline(always)]
@@ -492,15 +576,27 @@ mod enabled {
                 STATE_IDLE => idle = idle.wrapping_add(current),
                 _ => {}
             }
+            // Never report less than an earlier reader, which may have
+            // extrapolated a period in progress past its final value.
+            let reported = self.high_water.lock(|high_water| {
+                let previous = high_water.get();
+                let reported = HighWater {
+                    busy: busy.max(previous.busy),
+                    idle: idle.max(previous.idle),
+                    at: at.max(previous.at),
+                };
+                high_water.set(reported);
+                reported
+            });
             ExecutorMetrics {
                 spawner,
                 executor: self.executor,
                 polls: get64(&words, EXECUTOR_POLLS),
-                busy_nanoseconds: ticks_to_nanoseconds(busy),
+                busy_nanoseconds: ticks_to_nanoseconds(reported.busy),
                 idle_nanoseconds: (words[EXECUTOR_STATE] & IDLE_MEASURED != 0)
-                    .then(|| ticks_to_nanoseconds(idle)),
+                    .then(|| ticks_to_nanoseconds(reported.idle)),
                 started_nanoseconds: ticks_to_nanoseconds(self.started),
-                timestamp_nanoseconds: ticks_to_nanoseconds(at),
+                timestamp_nanoseconds: ticks_to_nanoseconds(reported.at),
             }
         }
     }
@@ -516,10 +612,14 @@ mod enabled {
     }
 
     impl ExecutorActivity {
-        /// Hook of the executor that owns `spawner`.
+        /// Hook of the executor that owns `spawner`. Create it on the
+        /// executor's thread, outside a poll. From then on, the executor
+        /// reports idle time, starting at zero.
         pub fn new(spawner: Spawner) -> Self {
+            let counters = ExecutorCounters::get(spawner.executor_id());
+            counters.measure_idle();
             Self {
-                counters: ExecutorCounters::get(spawner.executor_id()),
+                counters,
                 not_send: PhantomData,
             }
         }
@@ -570,7 +670,9 @@ mod enabled {
             counters.record_poll(u64::MAX / 4);
             let sample = counters.sample();
             assert_eq!(sample.busy, u64::from(u32::MAX) + 2 + u64::MAX / 4);
-            assert_eq!(sample.longest_poll, u64::from(u32::MAX));
+            // The longest poll is 64 bits wide: nanosecond clocks pass
+            // 32 bits after about 4.3 seconds.
+            assert_eq!(sample.longest_poll, u64::MAX / 4);
         }
 
         #[test]
@@ -611,6 +713,18 @@ mod enabled {
         }
 
         #[test]
+        fn creating_the_hook_reports_idle_from_zero() {
+            let counters = ExecutorCounters::new(1, 0);
+            assert_eq!(counters.sample_at(0, || 10).idle_nanoseconds, None);
+            counters.measure_idle();
+            assert_eq!(counters.sample_at(0, || 20).idle_nanoseconds, Some(0));
+            counters.begin(STATE_BUSY, || 30);
+            counters.end(|| 40);
+            // Polls keep the flag.
+            assert_eq!(counters.sample_at(0, || 50).idle_nanoseconds, Some(0));
+        }
+
+        #[test]
         fn writers_read_the_clock_inside_the_write_section() {
             let counters = ExecutorCounters::new(1, 0);
             let assert_writing = || {
@@ -638,11 +752,41 @@ mod enabled {
             assert_eq!(reads, 2, "the read must retry");
             assert_eq!(sample.idle_nanoseconds, Some(ticks_to_nanoseconds(50)));
             // Without the retry the reader would extrapolate the finished
-            // idle period to 100 ticks, and later samples would decrease.
+            // idle period to 100 ticks.
             assert_eq!(
                 counters.sample_at(0, || 300).idle_nanoseconds,
                 Some(ticks_to_nanoseconds(50))
             );
+        }
+
+        /// On weakly ordered multi-core targets, a reader's clock read can
+        /// land after the writer's final clock read although the reader did
+        /// not see the write start. Simulate it with clocks out of order.
+        #[test]
+        fn readers_clamp_samples_extrapolated_past_the_final_value() {
+            let counters = ExecutorCounters::new(1, 0);
+            counters.measure_idle();
+            counters.begin(STATE_BUSY, || 100);
+            // The reader extrapolates the poll to 150 ticks.
+            let early = counters.sample_at(0, || 150);
+            assert_eq!(early.busy_nanoseconds, ticks_to_nanoseconds(50));
+            // The writer's clock read ends the poll at 140.
+            counters.end(|| 140);
+            counters.begin(STATE_IDLE, || 140);
+            // An unclamped sample would report 40 busy ticks and an earlier
+            // timestamp.
+            let late = counters.sample_at(0, || 145);
+            assert_eq!(late.busy_nanoseconds, early.busy_nanoseconds);
+            assert_eq!(late.timestamp_nanoseconds, early.timestamp_nanoseconds);
+            assert_eq!(late.idle_nanoseconds, Some(ticks_to_nanoseconds(5)));
+            // Once the real values pass the high-water mark they are
+            // reported unchanged.
+            counters.end(|| 160);
+            counters.begin(STATE_BUSY, || 160);
+            let after = counters.sample_at(0, || 175);
+            assert_eq!(after.busy_nanoseconds, ticks_to_nanoseconds(55));
+            assert_eq!(after.idle_nanoseconds, Some(ticks_to_nanoseconds(20)));
+            assert_eq!(after.timestamp_nanoseconds, ticks_to_nanoseconds(175));
         }
 
         #[test]
@@ -662,8 +806,10 @@ mod enabled {
             ));
             let spawner = executor.spawner();
             let activity = ExecutorActivity::new(spawner);
+            let counters = ExecutorCounters::get(spawner.executor_id());
+            assert!(counters.sample(0).idle_nanoseconds.is_some());
             assert_eq!(activity.measure_idle(|| 42), 42);
-            let sample = ExecutorCounters::get(spawner.executor_id()).sample(0);
+            let sample = counters.sample(0);
             assert!(sample.idle_nanoseconds.is_some());
             assert_eq!(sample.executor, spawner.executor_id());
         }
@@ -673,6 +819,35 @@ mod enabled {
             assert_eq!(ticks_to_nanoseconds(0), 0);
             assert_eq!(ticks_to_nanoseconds(TICK_HERTZ), 1_000_000_000);
             assert_eq!(ticks_to_nanoseconds(u64::MAX), u64::MAX);
+        }
+
+        /// At 32,768 Hz a tick is 1953125 / 64 ns, so the rounding pattern
+        /// repeats every 64 ticks: these ranges cover every case.
+        #[test]
+        fn differences_of_32768_hertz_conversions_exceed_by_at_most_one_nanosecond() {
+            const HERTZ: u64 = 32_768;
+            let mut exceeded = false;
+            for offset in [0, 1 << 40] {
+                for start in offset..offset + 128 {
+                    assert!(convert(start + 1, HERTZ) > convert(start, HERTZ));
+                    for ticks in 0..128 {
+                        let difference = convert(start + ticks, HERTZ) - convert(start, HERTZ);
+                        let exact = convert(ticks, HERTZ);
+                        assert!(
+                            difference == exact || difference == exact + 1,
+                            "{start} + {ticks}"
+                        );
+                        exceeded |= difference > exact;
+                    }
+                }
+            }
+            assert!(exceeded);
+            // The same tick count can differ by 1 ns: one tick of idle time
+            // from 1 to 2 measures 30,518 ns, one tick of timestamp from 0 to
+            // 1 measures 30,517 ns. Consumers subtract with saturation.
+            assert_eq!(convert(2, HERTZ) - convert(1, HERTZ), 30_518);
+            assert_eq!(convert(1, HERTZ) - convert(0, HERTZ), 30_517);
+            assert_eq!(convert(HERTZ, HERTZ), 1_000_000_000);
         }
 
         #[test]
@@ -700,6 +875,15 @@ mod enabled {
             writer.join().unwrap();
             assert_eq!(COUNTERS.sample().polls, 200_000);
         }
+
+        /// Time a reader may extrapolate past the writer's final value: none
+        /// on x86, whose fences order clock reads; up to the store latency on
+        /// weakly ordered hosts.
+        const EXTRAPOLATION_TOLERANCE: u64 = if cfg!(target_arch = "x86_64") {
+            0
+        } else {
+            10_000
+        };
 
         /// Regression test: a reader sampling while the executor's thread
         /// alternates polls and waits must never see busy or idle time
@@ -732,7 +916,10 @@ mod enabled {
                     decreases += 1;
                 }
                 let accounted = sample.busy_nanoseconds + sample.idle_nanoseconds.unwrap_or(0);
-                assert!(accounted <= sample.timestamp_nanoseconds, "{sample:?}");
+                assert!(
+                    accounted <= sample.timestamp_nanoseconds + EXTRAPOLATION_TOLERANCE,
+                    "{sample:?}"
+                );
                 previous = sample;
             }
             writer.join().unwrap();

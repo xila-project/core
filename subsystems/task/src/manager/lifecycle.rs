@@ -31,9 +31,7 @@ fn embassy_vtable() -> *const RawWakerVTable {
 pub(super) struct TaskFuture {
     future: Pin<Box<dyn Future<Output = ()>>>,
     #[cfg(feature = "metrics")]
-    counters: &'static crate::metrics::TaskCounters,
-    #[cfg(feature = "metrics")]
-    executor: &'static crate::metrics::ExecutorCounters,
+    instrumentation: crate::metrics::TaskInstrumentation,
 }
 
 // SAFETY: Embassy needs `Send` only to enqueue a token through a `SendSpawner`;
@@ -52,11 +50,12 @@ impl Future for TaskFuture {
         #[cfg(feature = "metrics")]
         {
             // Both times are read inside the executor's write sections, so
-            // concurrent readers never see its busy time decrease.
-            let start = self.executor.begin_poll();
+            // readers rarely extrapolate a finished poll; they clamp the rest.
+            let instrumentation = self.instrumentation;
+            let start = instrumentation.executor.begin_poll();
             let result = self.future.as_mut().poll(cx);
-            let end = self.executor.end_period();
-            self.counters.record_poll(end.saturating_sub(start));
+            let end = instrumentation.executor.end_period();
+            instrumentation.task.record_poll(end.saturating_sub(start));
             result
         }
         #[cfg(not(feature = "metrics"))]
@@ -180,7 +179,7 @@ impl Manager {
             let profiling_name = inner.tasks[&identifier].name.clone();
             let (parent, child) = JoinHandle::new();
             #[cfg(feature = "metrics")]
-            let executor = self.spawner_activity(selected);
+            let executor = self.spawner_counters(selected);
             let mut future = Some(move || -> Pin<Box<dyn Future<Output = ()>>> {
                 Box::pin(async move {
                     #[cfg(all(feature = "profiling", target_os = "linux"))]
@@ -209,19 +208,20 @@ impl Manager {
                     if let Some(available) = AvailableTask::claim(slot) {
                         let future = future.take().unwrap();
                         #[cfg(feature = "metrics")]
-                        let counters = inner.counters[index];
+                        let instrumentation = crate::metrics::TaskInstrumentation {
+                            task: inner.counters[index],
+                            executor,
+                        };
                         // The claim orders this reset after the previous
                         // task's last poll, so the slot has one writer.
                         #[cfg(feature = "metrics")]
-                        counters.reset();
+                        instrumentation.task.reset();
                         #[cfg(not(feature = "metrics"))]
                         let _ = index;
                         let token = available.initialize(move || TaskFuture {
                             future: future(),
                             #[cfg(feature = "metrics")]
-                            counters,
-                            #[cfg(feature = "metrics")]
-                            executor,
+                            instrumentation,
                         });
                         // Embassy's id() truncates pointers to u32 on 64-bit hosts.
                         // Use the full public waker data identity instead; TaskStorage
@@ -232,7 +232,7 @@ impl Manager {
                         metadata.spawner_identifier = selected;
                         #[cfg(feature = "metrics")]
                         {
-                            metadata.counters = Some(counters);
+                            metadata.instrumentation = Some(instrumentation);
                         }
                         inner.identifiers.insert(internal, identifier);
                         start(token);

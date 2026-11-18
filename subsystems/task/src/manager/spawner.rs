@@ -9,7 +9,7 @@ pub(super) struct SpawnerState {
     pub send: SendSpawner,
     pub tasks: usize,
     #[cfg(feature = "metrics")]
-    pub activity: &'static crate::metrics::ExecutorCounters,
+    pub counters: &'static crate::metrics::ExecutorCounters,
 }
 
 // Spawner is deliberately !Send. Never store it in the shared manager.
@@ -26,7 +26,7 @@ std::thread_local! {
 impl Manager {
     pub fn register_spawner(&'static self, spawner: Spawner) -> Result<SpawnerIdentifier> {
         #[cfg(feature = "metrics")]
-        let activity = crate::metrics::ExecutorCounters::get(spawner.executor_id());
+        let counters = crate::metrics::ExecutorCounters::get(spawner.executor_id());
         let identifier = self.1.lock(|spawners| {
             let mut spawners = spawners.borrow_mut();
             let identifier = Self::find_first_available_identifier(&spawners, 0..usize::MAX)
@@ -38,7 +38,7 @@ impl Manager {
                     send: spawner.make_send(),
                     tasks: 0,
                     #[cfg(feature = "metrics")]
-                    activity,
+                    counters,
                 },
             );
             Ok(identifier)
@@ -116,12 +116,12 @@ impl Manager {
 
     /// Executor counters of a registration reserved by `reserve_spawner`.
     #[cfg(feature = "metrics")]
-    pub(super) fn spawner_activity(
+    pub(super) fn spawner_counters(
         &self,
         identifier: SpawnerIdentifier,
     ) -> &'static crate::metrics::ExecutorCounters {
         self.1
-            .lock(|spawners| spawners.borrow()[&identifier].activity)
+            .lock(|spawners| spawners.borrow()[&identifier].counters)
     }
 
     /// Undo a reservation whose task was never enqueued.

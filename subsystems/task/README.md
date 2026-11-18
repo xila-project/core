@@ -86,24 +86,35 @@ differences between two snapshots. Without the feature it returns `None`, and
 the platform hook only runs its closure.
 
 Busy time is wall-clock time inside polls, not processor time: on hosts, time
-a thread is descheduled or blocked during a poll counts as busy.
+a thread is descheduled or blocked during a poll counts as busy. On hosts the
+metrics clock counts from its own first read, not from `embassy_time::Instant`'s
+origin, so compare metrics timestamps only with each other.
 
 Task counters live in a parallel array beside the retained storage slots and
 are reset when a slot is claimed, so spawning and polling allocate nothing.
 Executor counters are allocated once per executor and kept. Writers are
 always the executor that owns the counters; readers use a sequence lock built
 from 32-bit atomic loads and stores only, so it works without compare-and-swap
-or 64-bit atomics (Cortex-M, ESP32 and ESP32-C3). Writers read the clock
-inside the write section and readers read it before confirming their read, so
-a period in progress is never extrapolated past the value its writer stores
-and executor counters never decrease. Readers spin while a write is in
-progress: never read the metrics from an interrupt handler or from an interrupt
-executor that preempts an instrumented executor on the same core.
+or 64-bit atomics (Cortex-M, ESP32 and ESP32-C3). Readers spin while a write
+is in progress, outside any critical section: never read the metrics from an
+interrupt handler or from an interrupt executor that preempts an instrumented
+executor on the same core.
+
+Writers read the clock inside the write section, which keeps readers from
+extrapolating a finished period on one core and on x86. On weakly ordered
+multi-core targets (AArch64, RISC-V), fences do not order a system-register
+clock read after a store, so a reader on another core can still extrapolate a
+period in progress by up to the writer's store latency. Executor busy time,
+idle time and timestamps never decrease because readers clamp each sample to
+a per-executor high-water mark, updated with plain loads and stores in a short
+critical section.
 
 Executor busy time is the sum of its task polls and needs no platform code.
-To measure idle time, executor loops wrap their wait for work. The hook is
-created from the executor's `Spawner` and is `!Send`, so it stays on the
-executor's thread, the counters' only writer:
+To measure idle time, executor loops create the hook on the executor's thread
+before the loop and wrap their wait for work. Once the hook exists the
+executor reports idle time, starting at 0; without it, idle time is `None`.
+The hook is created from the executor's `Spawner` and is `!Send`, so it stays
+on the executor's thread, the counters' only writer:
 
 ```rust,ignore
 let activity = task::metrics::ExecutorActivity::new(executor.spawner());
@@ -113,14 +124,22 @@ loop {
 }
 ```
 
-For a monitoring application such as Activity:
+For a monitoring application such as Activity, compute every difference with
+`saturating_sub`:
 
 - Match executors between snapshots by `executor`, not by `spawner`.
 - Core load is `1 − Δidle / Δtimestamp` when idle time is reported, and
   `Δbusy / Δtimestamp` otherwise, using the executor's own `timestamp_nanoseconds`.
+  Clamp it to `[0, 1]`: each counter is converted to nanoseconds separately,
+  rounding down, so with a clock rate that does not divide one billion, such as
+  32,768 Hz, `Δidle` can exceed `Δtimestamp` by 1 ns over the same ticks, and
+  cross-core extrapolation can add a little more.
 - A task's share is `Δbusy / Δtimestamp` with the snapshot timestamp. Busy time
-  is added when a poll ends, so clamp per-task shares to `[0, 1]`.
-- Adopted tasks have no counters and report `spawner == usize::MAX`.
+  is added when a poll ends, so a long poll counts entirely in the window where
+  it ends. Group tasks by `executor` and, when one executor's shares sum above
+  1, divide them by that sum instead of clamping each task.
+- Adopted tasks have no counters, report `spawner == usize::MAX` and no
+  `executor`.
 
 The remainder, elapsed time minus busy and idle time, is executor bookkeeping
 and, on hosts, time the thread was descheduled outside polls. Core's test

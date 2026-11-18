@@ -51,8 +51,10 @@ impl Executor {
 
     /// Call `init` with a spawner, then poll tasks until [`Self::stop`].
     pub fn run(&'static self, init: impl FnOnce(Spawner, &'static Self)) {
-        init(self.inner.spawner(), self);
+        // Create the hook before registering, so every snapshot that sees
+        // this executor already reports its idle time.
         let activity = self.activity();
+        init(self.inner.spawner(), self);
         while !self.stop.load(Ordering::SeqCst) {
             self.poll_and_wait(&activity);
         }
@@ -60,8 +62,8 @@ impl Executor {
 
     /// Call `init` with a spawner, then poll tasks forever.
     pub fn start(&'static self, init: impl FnOnce(Spawner)) -> ! {
-        init(self.inner.spawner());
         let activity = self.activity();
+        init(self.inner.spawner());
         loop {
             self.poll_and_wait(&activity);
         }
