@@ -9,7 +9,7 @@ pub(super) struct SpawnerState {
     pub send: SendSpawner,
     pub tasks: usize,
     #[cfg(feature = "metrics")]
-    pub activity: &'static crate::metrics::ExecutorActivity,
+    pub activity: &'static crate::metrics::ExecutorCounters,
 }
 
 // Spawner is deliberately !Send. Never store it in the shared manager.
@@ -26,7 +26,7 @@ std::thread_local! {
 impl Manager {
     pub fn register_spawner(&'static self, spawner: Spawner) -> Result<SpawnerIdentifier> {
         #[cfg(feature = "metrics")]
-        let activity = crate::metrics::ExecutorActivity::get(spawner.executor_id());
+        let activity = crate::metrics::ExecutorCounters::get(spawner.executor_id());
         let identifier = self.1.lock(|spawners| {
             let mut spawners = spawners.borrow_mut();
             let identifier = Self::find_first_available_identifier(&spawners, 0..usize::MAX)
@@ -119,7 +119,7 @@ impl Manager {
     pub(super) fn spawner_activity(
         &self,
         identifier: SpawnerIdentifier,
-    ) -> &'static crate::metrics::ExecutorActivity {
+    ) -> &'static crate::metrics::ExecutorCounters {
         self.1
             .lock(|spawners| spawners.borrow()[&identifier].activity)
     }

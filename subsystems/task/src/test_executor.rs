@@ -54,7 +54,7 @@ impl Executor {
         init(self.inner.spawner(), self);
         let activity = self.activity();
         while !self.stop.load(Ordering::SeqCst) {
-            self.poll_and_wait(activity);
+            self.poll_and_wait(&activity);
         }
     }
 
@@ -63,13 +63,13 @@ impl Executor {
         init(self.inner.spawner());
         let activity = self.activity();
         loop {
-            self.poll_and_wait(activity);
+            self.poll_and_wait(&activity);
         }
     }
 
     /// Idle accounting hook, as platform executors should use it.
-    fn activity(&'static self) -> &'static ExecutorActivity {
-        ExecutorActivity::get(self.inner.spawner().executor_id())
+    fn activity(&'static self) -> ExecutorActivity {
+        ExecutorActivity::new(self.inner.spawner())
     }
 
     fn poll_and_wait(&'static self, activity: &ExecutorActivity) {

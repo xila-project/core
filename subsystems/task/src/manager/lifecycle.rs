@@ -33,7 +33,7 @@ pub(super) struct TaskFuture {
     #[cfg(feature = "metrics")]
     counters: &'static crate::metrics::TaskCounters,
     #[cfg(feature = "metrics")]
-    executor: &'static crate::metrics::ExecutorActivity,
+    executor: &'static crate::metrics::ExecutorCounters,
 }
 
 // SAFETY: Embassy needs `Send` only to enqueue a token through a `SendSpawner`;
@@ -51,12 +51,12 @@ impl Future for TaskFuture {
         remember_vtable(cx.waker().vtable());
         #[cfg(feature = "metrics")]
         {
-            let start = crate::metrics::now();
-            self.executor.begin_poll(start);
+            // Both times are read inside the executor's write sections, so
+            // concurrent readers never see its busy time decrease.
+            let start = self.executor.begin_poll();
             let result = self.future.as_mut().poll(cx);
-            let end = crate::metrics::now();
+            let end = self.executor.end_period();
             self.counters.record_poll(end.saturating_sub(start));
-            self.executor.end(end);
             result
         }
         #[cfg(not(feature = "metrics"))]

@@ -74,36 +74,56 @@ and browser fairness/latency validation.
 # Activity metrics
 
 The opt-in `metrics` feature (`xila/task_metrics`) times every poll of a
-managed task with Embassy's monotonic clock, the one each platform already
-provides for `sleep`, so it works under `no_std` on every target. Each task
-records its poll count, busy time and longest poll; each executor (a core or
-an operating system thread) records its busy time, plus its idle time when
-the platform reports it. `Manager::get_metrics` returns a `MetricsSnapshot`
-of these monotonically increasing counters with a timestamp on the same clock;
-applications compute CPU shares from the differences between two snapshots.
-Without the feature it returns `None`, and the platform hook only runs its
-closure.
+managed task with a monotonic clock: the operating system's on Linux, macOS
+and Windows (lock-free, nanosecond resolution), and Embassy's elsewhere, the
+one each platform already provides for `sleep`, so it works under `no_std` on
+every target. Each task records its poll count, busy time and longest poll;
+each executor (a core or an operating system thread) records its busy time,
+plus its idle time when the platform reports it. `Manager::get_metrics`
+returns a `MetricsSnapshot` of these monotonically increasing counters with
+timestamps on the same clock; applications compute CPU shares from the
+differences between two snapshots. Without the feature it returns `None`, and
+the platform hook only runs its closure.
+
+Busy time is wall-clock time inside polls, not processor time: on hosts, time
+a thread is descheduled or blocked during a poll counts as busy.
 
 Task counters live in a parallel array beside the retained storage slots and
 are reset when a slot is claimed, so spawning and polling allocate nothing.
 Executor counters are allocated once per executor and kept. Writers are
 always the executor that owns the counters; readers use a sequence lock built
 from 32-bit atomic loads and stores only, so it works without compare-and-swap
-or 64-bit atomics (Cortex-M, ESP32 and ESP32-C3).
+or 64-bit atomics (Cortex-M, ESP32 and ESP32-C3). Writers read the clock
+inside the write section and readers read it before confirming their read, so
+a period in progress is never extrapolated past the value its writer stores
+and executor counters never decrease. Readers spin while a write is in
+progress: never read the metrics from an interrupt handler or from an interrupt
+executor that preempts an instrumented executor on the same core.
 
 Executor busy time is the sum of its task polls and needs no platform code.
-To measure idle time, executor loops wrap their wait for work:
+To measure idle time, executor loops wrap their wait for work. The hook is
+created from the executor's `Spawner` and is `!Send`, so it stays on the
+executor's thread, the counters' only writer:
 
 ```rust,ignore
-let activity = task::metrics::ExecutorActivity::get(spawner.executor_id());
+let activity = task::metrics::ExecutorActivity::new(executor.spawner());
 loop {
     unsafe { executor.poll() };
     activity.measure_idle(|| cortex_m::asm::wfe());
 }
 ```
 
+For a monitoring application such as Activity:
+
+- Match executors between snapshots by `executor`, not by `spawner`.
+- Core load is `1 − Δidle / Δtimestamp` when idle time is reported, and
+  `Δbusy / Δtimestamp` otherwise, using the executor's own `timestamp_nanoseconds`.
+- A task's share is `Δbusy / Δtimestamp` with the snapshot timestamp. Busy time
+  is added when a poll ends, so clamp per-task shares to `[0, 1]`.
+- Adopted tasks have no counters and report `spawner == usize::MAX`.
+
 The remainder, elapsed time minus busy and idle time, is executor bookkeeping
-and, on hosts, time the thread was descheduled. Core's test executor uses the
-hook. The Linux-only `profiling` feature is unchanged; it adds per-thread CPU
-clocks, allocation attribution and finished-task history for recordings, and
-both features can be enabled together.
+and, on hosts, time the thread was descheduled outside polls. Core's test
+executor uses the hook. The Linux-only `profiling` feature is unchanged; it
+adds per-thread CPU clocks, allocation attribution and finished-task history
+for recordings, and both features can be enabled together.

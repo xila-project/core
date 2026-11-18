@@ -1286,7 +1286,7 @@ async fn metrics_count_task_polls_and_executor_load() {
     let task = second
         .tasks
         .iter()
-        .find(|t| t.identifier == worker_identifier)
+        .find(|task| task.identifier == worker_identifier)
         .unwrap();
     assert_eq!(task.name, "metrics worker");
     assert!(task.polls >= 4, "{task:?}");
@@ -1300,19 +1300,20 @@ async fn metrics_count_task_polls_and_executor_load() {
     let before = first
         .executors
         .iter()
-        .find(|e| e.spawner == spawner)
+        .find(|executor| executor.spawner == spawner)
         .unwrap();
     let after = second
         .executors
         .iter()
-        .find(|e| e.spawner == spawner)
+        .find(|executor| executor.spawner == spawner)
         .unwrap();
     assert_eq!(before.executor, after.executor);
     assert!(second.timestamp_nanoseconds > first.timestamp_nanoseconds);
     assert!(after.polls >= before.polls + 4);
     let busy = after.busy_nanoseconds - before.busy_nanoseconds;
     let idle = after.idle_nanoseconds.unwrap() - before.idle_nanoseconds.unwrap_or(0);
-    let elapsed = second.timestamp_nanoseconds - first.timestamp_nanoseconds;
+    let elapsed = after.timestamp_nanoseconds - before.timestamp_nanoseconds;
+    assert!(after.timestamp_nanoseconds <= second.timestamp_nanoseconds);
     assert!(busy >= 5_900_000, "busy {busy}");
     assert!(idle >= 4_000_000, "idle {idle}");
     assert!(busy + idle <= elapsed, "{busy} + {idle} > {elapsed}");
@@ -1324,12 +1325,12 @@ async fn metrics_count_task_polls_and_executor_load() {
         !third
             .tasks
             .iter()
-            .any(|t| t.identifier == worker_identifier)
+            .any(|task| task.identifier == worker_identifier)
     );
     let last = third
         .executors
         .iter()
-        .find(|e| e.spawner == spawner)
+        .find(|executor| executor.spawner == spawner)
         .unwrap();
     // Executor counters keep the time of finished tasks.
     assert!(last.busy_nanoseconds >= after.busy_nanoseconds);
@@ -1353,7 +1354,7 @@ async fn reused_slots_restart_task_counters() {
         let task = snapshot
             .tasks
             .iter()
-            .find(|t| t.identifier == identifier)
+            .find(|task| task.identifier == identifier)
             .unwrap();
         // Not polled yet: the previous task's counters were reset on claim.
         assert_eq!(task.polls, 0);
@@ -1379,18 +1380,85 @@ async fn executors_on_other_threads_are_reported_separately() {
         .unwrap();
     handle.join().await;
     let snapshot = manager.get_metrics().await.unwrap();
-    assert!(!snapshot.tasks.iter().any(|t| t.identifier == identifier));
+    assert!(
+        !snapshot
+            .tasks
+            .iter()
+            .any(|task| task.identifier == identifier)
+    );
     let local = snapshot
         .executors
         .iter()
-        .find(|e| e.spawner == local)
+        .find(|executor| executor.spawner == local)
         .unwrap();
     let remote = snapshot
         .executors
         .iter()
-        .find(|e| e.spawner == remote)
+        .find(|executor| executor.spawner == remote)
         .unwrap();
     assert_ne!(local.executor, remote.executor);
     assert!(remote.busy_nanoseconds >= 2_900_000, "{remote:?}");
     assert!(remote.idle_nanoseconds.is_some());
+}
+
+#[cfg(feature = "metrics")]
+#[test(task_path = crate)]
+async fn executors_sampled_while_another_thread_writes_never_decrease() {
+    use portable_atomic::{AtomicBool, Ordering};
+    let manager = initialize();
+    let root = manager.get_current_task_identifier().await;
+    let remote = crate::test_executor::new_thread_executor(manager).await;
+    let stop: &'static AtomicBool =
+        alloc::boxed::Box::leak(alloc::boxed::Box::new(AtomicBool::new(false)));
+    // The remote executor alternates short busy polls and short waits.
+    let (handle, _) = manager
+        .spawn_send(root, "metrics load", Some(remote), move |_| async move {
+            while !stop.load(Ordering::Relaxed) {
+                spin(Duration::from_micros(50));
+                crate::sleep(Duration::from_micros(50)).await;
+            }
+        })
+        .await
+        .unwrap();
+    let executor_of = |snapshot: &crate::metrics::MetricsSnapshot| {
+        *snapshot
+            .executors
+            .iter()
+            .find(|executor| executor.spawner == remote)
+            .unwrap()
+    };
+    let mut previous = executor_of(&manager.get_metrics().await.unwrap());
+    // Keep sampling until the remote executor alternated polls and waits
+    // many times, even when both threads share one processor.
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let mut samples = 0;
+    while samples < 2_000 || previous.polls < 50 {
+        assert!(std::time::Instant::now() < deadline, "{previous:?}");
+        samples += 1;
+        let current = executor_of(&manager.get_metrics().await.unwrap());
+        assert_eq!(current.executor, previous.executor);
+        assert!(current.timestamp_nanoseconds >= previous.timestamp_nanoseconds);
+        assert!(current.polls >= previous.polls);
+        assert!(
+            current.busy_nanoseconds >= previous.busy_nanoseconds,
+            "{previous:?} {current:?}"
+        );
+        let (previous_idle, current_idle) = (
+            previous.idle_nanoseconds.unwrap_or(0),
+            current.idle_nanoseconds.unwrap_or(0),
+        );
+        assert!(current_idle >= previous_idle, "{previous:?} {current:?}");
+        // Per-executor timestamps bound the accounted time exactly.
+        let accounted =
+            (current.busy_nanoseconds - previous.busy_nanoseconds) + (current_idle - previous_idle);
+        assert!(
+            accounted <= current.timestamp_nanoseconds - previous.timestamp_nanoseconds,
+            "{previous:?} {current:?}"
+        );
+        previous = current;
+    }
+    stop.store(true, Ordering::Relaxed);
+    handle.join().await;
+    assert!(previous.busy_nanoseconds > 0, "{previous:?}");
+    assert!(previous.idle_nanoseconds.unwrap_or(0) > 0, "{previous:?}");
 }

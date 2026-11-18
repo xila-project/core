@@ -10,8 +10,15 @@ impl Manager {
     ///
     /// Counters only grow (task counters restart with each registration, see
     /// [`crate::metrics::TaskMetrics::generation`]), so callers compute rates
-    /// from the differences between two snapshots. Tasks adopted rather than
-    /// spawned by this manager report zero polls.
+    /// from the differences between two snapshots; see [`crate::metrics`] for
+    /// how to compute executor and task loads. Each executor is read with its
+    /// own timestamp, at the same instant as its counters, so
+    /// `Δbusy + Δidle ≤ Δtimestamp` holds exactly per executor. The snapshot
+    /// timestamp is read last, after every counter.
+    ///
+    /// Executor counters are read inside the manager's critical section.
+    /// Never call this from a task of an interrupt executor that can preempt
+    /// an instrumented executor on the same core.
     pub async fn get_metrics(&self) -> Option<MetricsSnapshot> {
         #[cfg(feature = "metrics")]
         {
@@ -19,12 +26,14 @@ impl Manager {
             use alloc::vec::Vec;
 
             let inner = self.0.read().await;
-            let now = crate::metrics::now();
             let tasks = inner
                 .tasks
                 .iter()
                 .map(|(identifier, metadata)| {
-                    let sample = metadata.counters.map(|c| c.sample()).unwrap_or_default();
+                    let sample = metadata
+                        .counters
+                        .map(|counters| counters.sample())
+                        .unwrap_or_default();
                     TaskMetrics {
                         identifier: *identifier,
                         generation: metadata.generation,
@@ -44,14 +53,14 @@ impl Manager {
                 // each executor is reported under its lowest registration.
                 for (identifier, state) in spawners.iter() {
                     let executor = state.activity.executor();
-                    if !executors.iter().any(|e| e.executor == executor) {
-                        executors.push(state.activity.sample(*identifier, now));
+                    if !executors.iter().any(|metrics| metrics.executor == executor) {
+                        executors.push(state.activity.sample(*identifier));
                     }
                 }
                 executors
             });
             Some(MetricsSnapshot {
-                timestamp_nanoseconds: ticks_to_nanoseconds(now),
+                timestamp_nanoseconds: ticks_to_nanoseconds(crate::metrics::now()),
                 tasks,
                 executors,
             })
