@@ -1,4 +1,4 @@
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegionStatistics {
     /// Total usable size of the heap region in bytes.
     pub size: usize,
@@ -10,10 +10,10 @@ pub struct RegionStatistics {
     pub free: usize,
 }
 
-#[derive(Debug)]
-pub struct Statistics {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Statistics<const N: usize = 3> {
     /// Granular stats for all the configured memory regions.
-    pub region_stats: [Option<RegionStatistics>; 3],
+    pub region_stats: [Option<RegionStatistics>; N],
 
     /// Total size of all combined heap regions in bytes.
     pub size: usize,

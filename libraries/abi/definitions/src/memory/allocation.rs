@@ -81,6 +81,11 @@ pub static XILA_MEMORY_CAPABILITIES_EXECUTE: XilaMemoryCapabilities =
 pub static XILA_MEMORY_CAPABILITIES_DIRECT_MEMORY_ACCESS: XilaMemoryCapabilities =
     memory::CapabilityFlags::DirectMemoryAccess.bits();
 
+/// Always-accessible capability - memory stays accessible when external flash caches are disabled
+#[unsafe(no_mangle)]
+pub static XILA_MEMORY_CAPABILITIES_ALWAYS_ACCESSIBLE: XilaMemoryCapabilities =
+    memory::CapabilityFlags::AlwaysAccessible.bits();
+
 /// No special capabilities required - standard memory allocation
 #[unsafe(no_mangle)]
 pub static XILA_MEMORY_CAPABILITIES_NONE: XilaMemoryCapabilities = 0;
@@ -160,7 +165,8 @@ pub unsafe extern "C" fn xila_memory_deallocate(pointer: *mut c_void) {
 /// This function changes the size of a previously allocated memory block. If the new size
 /// is larger, the additional memory is uninitialized. If the new size is smaller, the
 /// excess memory is freed. The original data is preserved up to the minimum of the old
-/// and new sizes.
+/// and new sizes. Resizing uses the platform's ordinary placement policy. To retain specific
+/// capabilities, allocate a replacement with those flags, copy the data and free the old block.
 ///
 /// # Safety
 ///

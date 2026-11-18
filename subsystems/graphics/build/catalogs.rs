@@ -17,8 +17,7 @@ pub fn collect(root: &Path, locales: &[&str]) -> io::Result<CatalogSymbols> {
     collect_multiple(&[root], locales)
 }
 
-/// Combine catalogs from the Core checkout and explicitly supplied workspaces.
-pub fn collect_multiple(roots: &[&Path], locales: &[&str]) -> io::Result<CatalogSymbols> {
+fn expand_locales(locales: &[&str]) -> BTreeSet<String> {
     let mut expanded = BTreeSet::new();
     for locale in locales.iter().flat_map(|locales| locales.split(',')) {
         let locale = super::fonts::normalize_locale(locale);
@@ -30,6 +29,23 @@ pub fn collect_multiple(roots: &[&Path], locales: &[&str]) -> io::Result<Catalog
         }
         expanded.insert(locale);
     }
+    expanded
+}
+
+fn push_partitioned(symbols: &mut CatalogSymbols, characters: BTreeSet<char>) {
+    symbols.cjk.clear();
+    symbols.other.clear();
+    for character in characters {
+        match character as u32 {
+            0x2e80..=0x9fff | 0xff00..=0xffef => symbols.cjk.push(character),
+            _ => symbols.other.push(character),
+        }
+    }
+}
+
+/// Combine catalogs from the Core checkout and explicitly supplied workspaces.
+pub fn collect_multiple(roots: &[&Path], locales: &[&str]) -> io::Result<CatalogSymbols> {
+    let expanded = expand_locales(locales);
 
     let mut characters = BTreeSet::new();
     let mut symbols = CatalogSymbols::default();
@@ -53,15 +69,32 @@ pub fn collect_multiple(roots: &[&Path], locales: &[&str]) -> io::Result<Catalog
         }
     }
 
-    for character in characters {
-        match character as u32 {
-            0x2e80..=0x9fff | 0xff00..=0xffef => symbols.cjk.push(character),
-            _ => symbols.other.push(character),
-        }
-    }
+    push_partitioned(&mut symbols, characters);
     symbols.directories.sort();
     symbols.directories.dedup();
     Ok(symbols)
+}
+
+/// Include non-ASCII glyphs emitted at runtime by `embedded_i18n::DateTimeFormatter`.
+#[allow(dead_code)]
+pub fn extend_with_date_time(symbols: &mut CatalogSymbols, locales: &[&str]) {
+    let mut characters: BTreeSet<char> = symbols.cjk.chars().chain(symbols.other.chars()).collect();
+    for locale in expand_locales(locales) {
+        let date_time = embedded_i18n::date_time_locale(&locale);
+        for text in date_time
+            .months
+            .iter()
+            .chain(&date_time.months_standalone)
+            .chain(&date_time.months_abbreviated)
+            .chain(&date_time.weekdays)
+            .chain(&date_time.weekdays_abbreviated)
+            .copied()
+            .chain([date_time.am, date_time.pm, date_time.date, date_time.time])
+        {
+            characters.extend(text.chars().filter(|character| *character >= '\u{a0}'));
+        }
+    }
+    push_partitioned(symbols, characters);
 }
 
 fn visit(
@@ -348,5 +381,20 @@ mod tests {
         std::os::unix::fs::symlink(root.0.join("outside"), root.0.join("drivers")).unwrap();
         let symbols = collect(&root.0, &["en"]).unwrap();
         assert!(symbols.directories.is_empty());
+    }
+
+    #[test]
+    fn extend_with_date_time_collects_cjk_month_weekday_and_period_glyphs() {
+        let mut zh = CatalogSymbols::default();
+        extend_with_date_time(&mut zh, &["zh-CN", "en"]);
+        for character in ['月', '星', '期', '周', '上', '午', '下', '一', '十'] {
+            assert!(zh.cjk.contains(character), "missing zh glyph: {character}");
+        }
+
+        let mut ja = CatalogSymbols::default();
+        extend_with_date_time(&mut ja, &["ja", "en"]);
+        for character in ['月', '曜', '日', '午', '前', '後'] {
+            assert!(ja.cjk.contains(character), "missing ja glyph: {character}");
+        }
     }
 }

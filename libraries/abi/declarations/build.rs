@@ -66,9 +66,15 @@ pub fn main() {
         env::set_var("RUSTC_WRAPPER", "");
         // Cross-target flags (such as portable-atomic cfgs for CAS-less
         // targets) must not leak into cbindgen's host macro expansion build.
+        // Set the encoded flags to empty rather than removing them: an unset
+        // variable makes the nested Cargo fall back to the rustflags in the
+        // `.cargo/config.toml` of the checkout it runs in (Core's adds
+        // `-fuse-ld=mold` for the host, which runners without mold reject),
+        // while an empty one overrides every other rustflags source.
         if env::var_os("TARGET") != env::var_os("HOST") {
-            env::remove_var("CARGO_ENCODED_RUSTFLAGS");
+            env::set_var("CARGO_ENCODED_RUSTFLAGS", "");
             env::remove_var("RUSTFLAGS");
+            env::remove_var("CARGO_BUILD_RUSTFLAGS");
         }
     }
 

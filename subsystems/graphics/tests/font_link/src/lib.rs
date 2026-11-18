@@ -17,7 +17,9 @@ mod tests {
     fn selected_coverage_is_present_without_unrequested_accents() {
         let locale = option_env!("EMBEDDED_I18N_LOCALE").unwrap_or("en");
         let (_, fallback) = graphics_font_pipeline_test::config::read(
-            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml"), None);
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml"),
+            None,
+        );
         let ranges =
             graphics_font_pipeline_test::fonts::effective_ranges(locale, &fallback).unwrap();
         let accented = ranges.iter().any(|range| range.contains(&u32::from('é')));
@@ -66,11 +68,13 @@ mod tests {
     }
 
     #[test]
-    fn localized_fonts_contain_chinese_and_punctuation() {
+    fn localized_fonts_contain_catalog_and_date_time_glyphs() {
         let locale = option_env!("EMBEDDED_I18N_LOCALE").unwrap_or("en");
         let (_, fallback) = graphics_font_pipeline_test::config::read(
-            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml"), None);
-        if !graphics_font_pipeline_test::fonts::uses_chinese(locale, &fallback) {
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.toml"),
+            None,
+        );
+        if !graphics_font_pipeline_test::fonts::uses_catalog_subset(locale, &fallback) {
             return;
         }
         let mut roots = vec![std::path::PathBuf::from(concat!(
@@ -81,10 +85,17 @@ mod tests {
             roots.extend(std::env::split_paths(&extra));
         }
         let roots: Vec<&std::path::Path> = roots.iter().map(std::path::PathBuf::as_path).collect();
-        let symbols =
+        let mut symbols =
             graphics_font_pipeline_test::catalogs::collect_multiple(&roots, &[locale, &fallback])
                 .unwrap();
-        assert!(symbols.cjk.contains('清') && symbols.cjk.contains('：'));
+        graphics_font_pipeline_test::catalogs::extend_with_date_time(
+            &mut symbols,
+            &[locale, &fallback],
+        );
+        if graphics_font_pipeline_test::fonts::uses_chinese(locale, &fallback) {
+            assert!(symbols.cjk.contains('清') && symbols.cjk.contains('：'));
+        }
+        assert!(symbols.cjk.contains('月') && symbols.cjk.contains('午'));
         for font in [
             graphics::fonts::get_font_small(),
             graphics::fonts::get_font_medium(),
@@ -104,6 +115,46 @@ mod tests {
                 assert!(
                     unsafe { lookup(font, &mut descriptor, character as u32, 0) },
                     "Missing glyph for {character} at {}px",
+                    font.line_height
+                );
+            }
+        }
+        for font in [
+            graphics::fonts::get_font_monospace_small(),
+            graphics::fonts::get_font_monospace_medium(),
+        ] {
+            let lookup = font.get_glyph_dsc.expect("Font glyph lookup");
+            let mut ascii = Default::default();
+            assert!(unsafe { lookup(font, &mut ascii, u32::from('A'), 0) });
+            for character in ['月', '午'] {
+                let mut descriptor = Default::default();
+                assert!(unsafe { lookup(font, &mut descriptor, character as u32, 0) });
+                assert_eq!(
+                    descriptor.adv_w,
+                    ascii.adv_w * 2,
+                    "expected a double-width advance for {character} at line height {}",
+                    font.line_height,
+                );
+                assert!(descriptor.box_w > 0 && descriptor.box_h > 0);
+            }
+        }
+    }
+
+    #[test]
+    fn terminal_fonts_exclude_unifont_glyphs() {
+        // Code points that only existed in unscii-16-full via GNU Unifont (e.g.
+        // Latin Extended-B glyphs drawn into French's 0xa0..0x250 range).
+        const UNIFONT_ONLY_CODE_POINTS: &[u32] = &[0x01A4, 0x01B4, 0x01F1, 0x01F2, 0x01F3];
+        for font in [
+            graphics::fonts::get_font_monospace_small(),
+            graphics::fonts::get_font_monospace_medium(),
+        ] {
+            let lookup = font.get_glyph_dsc.expect("Font glyph lookup");
+            for &code_point in UNIFONT_ONLY_CODE_POINTS {
+                let mut descriptor = Default::default();
+                assert!(
+                    !unsafe { lookup(font, &mut descriptor, code_point, 0) },
+                    "Terminal font ({}px) unexpectedly contains Unifont-derived U+{code_point:04X}",
                     font.line_height
                 );
             }

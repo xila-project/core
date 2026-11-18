@@ -133,7 +133,7 @@ fn plans_have_unique_variant_symbols_and_font_scoped_inputs() {
     fs::create_dir(root.join("fonts")).unwrap();
     for name in [
         "Montserrat-Regular.ttf",
-        "unscii-16-full.woff",
+        "unscii-16.woff",
         "FontAwesome5-Solid+Brands+Regular.woff",
     ] {
         fs::write(root.join("fonts").join(name), name).unwrap();
@@ -191,7 +191,7 @@ fn plans_have_unique_variant_symbols_and_font_scoped_inputs() {
             .all(|(a, b)| a.path != b.path)
     );
     assert_eq!(before[4..], icons[4..]);
-    fs::write(root.join("fonts/unscii-16-full.woff"), "new unscii").unwrap();
+    fs::write(root.join("fonts/unscii-16.woff"), "new unscii").unwrap();
     let unscii = generate::sources(root, &root.join("out"), &english, "converter-v1").unwrap();
     assert_eq!(icons[..4], unscii[..4]);
     assert!(
@@ -209,7 +209,7 @@ fn chinese_plans_subset_catalogs_and_cache_font_and_symbol_changes() {
     fs::create_dir(root.join("fonts")).unwrap();
     for name in [
         "Montserrat-Regular.ttf",
-        "unscii-16-full.woff",
+        "unscii-16.woff",
         "FontAwesome5-Solid+Brands+Regular.woff",
         "SourceHanSansSC-Regular.otf",
     ] {
@@ -229,7 +229,8 @@ fn chinese_plans_subset_catalogs_and_cache_font_and_symbol_changes() {
         Some(&symbols),
     )
     .unwrap();
-    for (index, source) in before.iter().enumerate() {
+    assert_eq!(before.len(), 6);
+    for source in &before {
         let args: Vec<_> = source
             .arguments
             .iter()
@@ -241,12 +242,13 @@ fn chinese_plans_subset_catalogs_and_cache_font_and_symbol_changes() {
             !args.contains(&"19968-40959"),
             "must not embed the whole Han range"
         );
-        assert_eq!(
+        assert!(
             source
                 .inputs
                 .iter()
                 .any(|path| path.ends_with("SourceHanSansSC-Regular.otf")),
-            index < 4
+            "{} must source CJK glyphs from Source Han Sans SC",
+            source.name
         );
     }
     assert_eq!(
@@ -289,12 +291,11 @@ fn chinese_plans_subset_catalogs_and_cache_font_and_symbol_changes() {
     )
     .unwrap();
     assert!(
-        changed[..4]
+        changed
             .iter()
             .zip(&changed_font)
             .all(|(a, b)| a.path != b.path)
     );
-    assert_eq!(changed[4..], changed_font[4..]);
 }
 
 #[test]
@@ -318,7 +319,7 @@ fn japanese_plans_subset_kana_and_kanji_with_jp_glyphs_in_every_font() {
     fs::create_dir(root.join("fonts")).unwrap();
     for name in [
         "Montserrat-Regular.ttf",
-        "unscii-16-full.woff",
+        "unscii-16.woff",
         "FontAwesome5-Solid+Brands+Regular.woff",
         "SourceHanSansJP-Regular.otf",
     ] {
@@ -343,7 +344,6 @@ fn japanese_plans_subset_kana_and_kanji_with_jp_glyphs_in_every_font() {
         "converter",
         Some(&symbols),
         std::path::Path::new("SourceHanSansJP-Regular.otf"),
-        true,
     )
     .unwrap();
     assert_eq!(sources.len(), 6);
@@ -394,7 +394,7 @@ fn japanese_font_can_be_supplied_from_a_consumer_checkout() {
     fs::create_dir(root.join("fonts")).unwrap();
     for name in [
         "Montserrat-Regular.ttf",
-        "unscii-16-full.woff",
+        "unscii-16.woff",
         "FontAwesome5-Solid+Brands+Regular.woff",
     ] {
         fs::write(root.join("fonts").join(name), name).unwrap();
@@ -413,7 +413,6 @@ fn japanese_font_can_be_supplied_from_a_consumer_checkout() {
         "converter",
         Some(&symbols),
         &supplied,
-        true,
     )
     .unwrap();
     assert!(
