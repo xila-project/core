@@ -84,7 +84,7 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertNotIn("ci:host-audio-tests", tasks)
         self.assertNotIn("host-audio", host)
         lint = tomllib.loads((ROOT / "mise.toml").read_text())["tasks"]["clippy:host"]["run"]
-        self.assertIn("--package xila-audio", lint)
+        self.assertIn("--workspace", lint)
         self.assertNotIn("--package xila-drivers-headless", lint)
         self.assertNotIn("drivers_native/audio", lint)
         self.assertIn("cargo test --locked --workspace", tasks["ci:host-tests"]["run"])
@@ -125,7 +125,7 @@ class WorkflowPolicy(unittest.TestCase):
     def test_validation_jobs_call_the_same_ordered_leaf_tasks_as_local_wrappers(self):
         tasks = ci_config()["tasks"]
         groups = {
-            ("ci.yml", "host"): ["ci:host-clippy", "ci:host-wasm-clippy", "ci:host-tests", "ci:firmware", "ci:bare-metal", "ci:profiling-task-tests", "ci:host-font-tests"],
+            ("ci.yml", "host"): ["ci:host-clippy", "ci:host-wasm-clippy", "ci:host-tests", "ci:firmware", "ci:bare-metal", "ci:bare-metal-no-cas", "ci:profiling-task-tests", "ci:host-font-tests"],
             ("ci.yml", "wasm"): ["ci:wasm-clippy", "ci:wasm-audio-check"],
             ("extended.yml", "abi-deep"): ["ci:abi-coverage", "ci:abi-miri", "ci:abi-miri-cross"],
         }
@@ -383,8 +383,10 @@ class WorkflowPolicy(unittest.TestCase):
                 self.assertRegex(extended, rf"(?m)^  {re.escape(name)}:")
         tasks = ci_config()["tasks"]
         deep_task = tasks["ci:abi-coverage"]["run"] + tasks["ci:abi-miri-cross"]["run"]
-        self.assertIn("fail-under-lines 100", deep_task)
-        self.assertIn("fail-under-functions 100", deep_task)
+        minimum = tomllib.loads((ROOT / "mise.toml").read_text())["vars"]["abi_coverage_minimum"]
+        self.assertEqual(minimum, "90")
+        self.assertIn("--fail-under-lines {{ vars.abi_coverage_minimum }}", deep_task)
+        self.assertIn("--fail-under-functions {{ vars.abi_coverage_minimum }}", deep_task)
         self.assertIn("i686-unknown-linux-gnu", deep_task)
         self.assertIn("powerpc-unknown-linux-gnu", deep_task)
         self.assertIn("validated-sha", extended)

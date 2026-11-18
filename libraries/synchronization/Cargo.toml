@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 embassy-sync = { workspace = true }
+portable-atomic-util = { workspace = true }
 
 [target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))'.dependencies]
 embassy-sync = { workspace = true, features = ["std"] }

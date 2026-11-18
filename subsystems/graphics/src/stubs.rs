@@ -29,7 +29,7 @@ pub unsafe extern "C" fn lv_memset(destination: *mut c_void, value: u8, size: us
 // disagreeing with `lv_conf.h` (which would otherwise surface as duplicate or
 // undefined `lv_mem_*` symbols at link time).
 const _: () = assert!(
-    (crate::lvgl::LV_USE_STDLIB_MALLOC == crate::lvgl::LV_STDLIB_CUSTOM) == cfg!(lvgl_system_heap),
+    (crate::ffi::LV_USE_STDLIB_MALLOC == crate::ffi::LV_STDLIB_CUSTOM) == cfg!(lvgl_system_heap),
     "lv_conf.h and build.rs disagree on LVGL's allocator (XILA_LVGL_MEM_POOL)"
 );
 
@@ -98,7 +98,7 @@ pub unsafe extern "C" fn lv_realloc_core(pointer: *mut c_void, new_size: usize) 
 /// `monitor` must be null or point to a writable `lv_mem_monitor_t`.
 #[cfg(lvgl_system_heap)]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn lv_mem_monitor_core(monitor: *mut crate::lvgl::lv_mem_monitor_t) {
+pub unsafe extern "C" fn lv_mem_monitor_core(monitor: *mut crate::ffi::lv_mem_monitor_t) {
     let Some(monitor) = (unsafe { monitor.as_mut() }) else {
         return;
     };
@@ -116,8 +116,8 @@ pub unsafe extern "C" fn lv_mem_monitor_core(monitor: *mut crate::lvgl::lv_mem_m
 /// Always safe to call.
 #[cfg(lvgl_system_heap)]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn lv_mem_test_core() -> crate::lvgl::lv_result_t {
-    crate::lvgl::lv_result_t_LV_RESULT_OK
+pub unsafe extern "C" fn lv_mem_test_core() -> crate::ffi::lv_result_t {
+    crate::ffi::lv_result_t_LV_RESULT_OK
 }
 
 /// Copy a block of memory from source to destination
@@ -236,7 +236,7 @@ pub unsafe extern "C" fn lv_strdup(string: *const c_char) -> *mut c_char {
 /// `string` must be readable for `length` bytes.
 #[cfg(not(lvgl_system_heap))]
 unsafe fn duplicate_into_pool(string: *const c_char, length: usize) -> *mut c_char {
-    let copy = unsafe { crate::lvgl::lv_malloc(length + 1) } as *mut c_char;
+    let copy = unsafe { crate::ffi::lv_malloc(length + 1) } as *mut c_char;
     if !copy.is_null() {
         unsafe {
             xila_memory_copy(copy.cast(), string.cast(), length);

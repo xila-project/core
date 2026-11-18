@@ -3,14 +3,14 @@
 //! The C theme owns shared styles and follows the display's lifetime. Call theme
 //! helpers while holding the graphics manager's LVGL lock.
 
-use crate::{Color, Display, Error, Result, fonts, lvgl};
+use crate::{Color, Display, Error, Result, ffi, fonts};
 
 pub(crate) fn initialize(display: &Display) -> Result<()> {
     unsafe { initialize_display(display.get_lvgl_display()) }
 }
 
-unsafe fn initialize_display(display: *mut lvgl::lv_display_t) -> Result<()> {
-    let fonts = lvgl::lv_theme_shadcn_fonts_t {
+unsafe fn initialize_display(display: *mut ffi::lv_display_t) -> Result<()> {
+    let fonts = ffi::lv_theme_shadcn_fonts_t {
         small: fonts::get_font_small(),
         normal: fonts::get_font_medium(),
         large: fonts::get_font_large(),
@@ -19,11 +19,11 @@ unsafe fn initialize_display(display: *mut lvgl::lv_display_t) -> Result<()> {
     // The theme copies the palette/fonts and releases its state when the display
     // is deleted. No Rust-owned callback, parent theme or leaked Box is needed.
     let theme = unsafe {
-        lvgl::lv_theme_shadcn_init(
+        ffi::lv_theme_shadcn_init(
             display,
-            lvgl::lv_theme_shadcn_palette_zinc_dark(),
+            ffi::lv_theme_shadcn_palette_zinc_dark(),
             &fonts,
-            lvgl::lv_theme_shadcn_flags_t_LV_THEME_SHADCN_FLAG_NONE,
+            ffi::lv_theme_shadcn_flags_t_LV_THEME_SHADCN_FLAG_NONE,
         )
     };
     if theme.is_null() {
@@ -49,23 +49,23 @@ pub(crate) fn update(
 }
 
 unsafe fn update_display(
-    display: *mut lvgl::lv_display_t,
+    display: *mut ffi::lv_display_t,
     primary_color: Color,
     secondary_color: Color,
     is_dark: bool,
 ) {
     unsafe {
         let mut palette = if is_dark {
-            *lvgl::lv_theme_shadcn_palette_zinc_dark()
+            *ffi::lv_theme_shadcn_palette_zinc_dark()
         } else {
-            *lvgl::lv_theme_shadcn_palette_zinc_light()
+            *ffi::lv_theme_shadcn_palette_zinc_light()
         };
         palette.primary = primary_color.into_lvgl_color();
         palette.primary_fg = contrasting_foreground(primary_color).into_lvgl_color();
         palette.ring = palette.primary;
         palette.secondary = secondary_color.into_lvgl_color();
         palette.secondary_fg = contrasting_foreground(secondary_color).into_lvgl_color();
-        lvgl::lv_theme_shadcn_set_palette(display, &palette);
+        ffi::lv_theme_shadcn_set_palette(display, &palette);
     }
 }
 
@@ -93,14 +93,14 @@ pub enum Surface {
 ///
 /// # Safety
 /// `object` must be live and the caller must hold the LVGL lock.
-pub unsafe fn set_surface(object: *mut lvgl::lv_obj_t, surface: Surface) {
+pub unsafe fn set_surface(object: *mut ffi::lv_obj_t, surface: Surface) {
     let surface = match surface {
-        Surface::Background => lvgl::lv_theme_shadcn_surface_t_LV_THEME_SHADCN_SURFACE_BACKGROUND,
-        Surface::Card => lvgl::lv_theme_shadcn_surface_t_LV_THEME_SHADCN_SURFACE_CARD,
-        Surface::Popover => lvgl::lv_theme_shadcn_surface_t_LV_THEME_SHADCN_SURFACE_POPOVER,
-        Surface::Muted => lvgl::lv_theme_shadcn_surface_t_LV_THEME_SHADCN_SURFACE_MUTED,
+        Surface::Background => ffi::lv_theme_shadcn_surface_t_LV_THEME_SHADCN_SURFACE_BACKGROUND,
+        Surface::Card => ffi::lv_theme_shadcn_surface_t_LV_THEME_SHADCN_SURFACE_CARD,
+        Surface::Popover => ffi::lv_theme_shadcn_surface_t_LV_THEME_SHADCN_SURFACE_POPOVER,
+        Surface::Muted => ffi::lv_theme_shadcn_surface_t_LV_THEME_SHADCN_SURFACE_MUTED,
     };
-    unsafe { lvgl::lv_theme_shadcn_set_surface(object, surface) };
+    unsafe { ffi::lv_theme_shadcn_set_surface(object, surface) };
 }
 
 /// A palette role, for drawings that LVGL styles cannot color through the theme.
@@ -134,9 +134,9 @@ impl PaletteColor {
 ///
 /// # Safety
 /// `object` must be live and the caller must hold the LVGL lock.
-pub unsafe fn get_palette_color(object: *mut lvgl::lv_obj_t, color: PaletteColor) -> Option<Color> {
+pub unsafe fn get_palette_color(object: *mut ffi::lv_obj_t, color: PaletteColor) -> Option<Color> {
     unsafe {
-        let palette = lvgl::lv_theme_shadcn_get_palette(lvgl::lv_obj_get_display(object));
+        let palette = ffi::lv_theme_shadcn_get_palette(ffi::lv_obj_get_display(object));
         let palette = palette.as_ref()?;
         let value = match color {
             PaletteColor::Foreground => palette.foreground,
@@ -159,10 +159,10 @@ mod tests {
     #[test]
     fn palette_updates_preserve_widget_styles_and_logo_geometry() {
         unsafe {
-            lvgl::lv_init();
-            let display = lvgl::lv_display_create(320, 240);
+            ffi::lv_init();
+            let display = ffi::lv_display_create(320, 240);
             initialize_display(display).unwrap();
-            let screen = lvgl::lv_display_get_screen_active(display);
+            let screen = ffi::lv_display_get_screen_active(display);
             let logos = [1, 2, 4].map(|factor| {
                 (
                     crate::Logo::new(screen, factor, Color::WHITE).unwrap(),
@@ -176,57 +176,57 @@ mod tests {
             let themed = &logos[2].0;
             themed.follow_palette_color(PaletteColor::Input);
             let arm_color = |logo: &crate::Logo| {
-                lvgl::lv_obj_get_style_image_recolor(logo.get_arm(0), lvgl::LV_PART_MAIN)
+                ffi::lv_obj_get_style_image_recolor(logo.get_arm(0), ffi::LV_PART_MAIN)
             };
-            assert!(lvgl::lv_color_eq(
+            assert!(ffi::lv_color_eq(
                 arm_color(themed),
-                (*lvgl::lv_theme_shadcn_get_palette(display)).input
+                (*ffi::lv_theme_shadcn_get_palette(display)).input
             ));
-            let button = lvgl::lv_button_create(screen);
-            let surface = lvgl::lv_obj_create(screen);
+            let button = ffi::lv_button_create(screen);
+            let surface = ffi::lv_obj_create(screen);
             set_surface(surface, Surface::Muted);
-            let dark = *lvgl::lv_theme_shadcn_get_palette(display);
+            let dark = *ffi::lv_theme_shadcn_get_palette(display);
             assert!(dark.dark);
-            assert!(lvgl::lv_color_eq(
-                lvgl::lv_obj_get_style_bg_color(button, 0),
+            assert!(ffi::lv_color_eq(
+                ffi::lv_obj_get_style_bg_color(button, 0),
                 dark.primary
             ));
-            assert!(lvgl::lv_color_eq(
-                lvgl::lv_obj_get_style_bg_color(surface, 0),
+            assert!(ffi::lv_color_eq(
+                ffi::lv_obj_get_style_bg_color(surface, 0),
                 dark.muted
             ));
 
             let primary = Color::new(0x25, 0x63, 0xeb);
             let secondary = Color::new(0xf4, 0xf4, 0xf5);
             update_display(display, primary, secondary, false);
-            let light = *lvgl::lv_theme_shadcn_get_palette(display);
+            let light = *ffi::lv_theme_shadcn_get_palette(display);
             assert!(!light.dark);
-            assert!(lvgl::lv_color_eq(light.primary, primary.into_lvgl_color()));
-            assert!(lvgl::lv_color_eq(
+            assert!(ffi::lv_color_eq(light.primary, primary.into_lvgl_color()));
+            assert!(ffi::lv_color_eq(
                 light.secondary,
                 secondary.into_lvgl_color()
             ));
-            assert!(lvgl::lv_color_eq(
+            assert!(ffi::lv_color_eq(
                 light.primary_fg,
                 Color::WHITE.into_lvgl_color()
             ));
-            assert!(lvgl::lv_color_eq(
+            assert!(ffi::lv_color_eq(
                 light.secondary_fg,
                 Color::BLACK.into_lvgl_color()
             ));
-            assert!(lvgl::lv_color_eq(
-                lvgl::lv_obj_get_style_bg_color(button, 0),
+            assert!(ffi::lv_color_eq(
+                ffi::lv_obj_get_style_bg_color(button, 0),
                 light.primary
             ));
-            assert!(lvgl::lv_color_eq(
-                lvgl::lv_obj_get_style_bg_color(surface, 0),
+            assert!(ffi::lv_color_eq(
+                ffi::lv_obj_get_style_bg_color(surface, 0),
                 light.muted
             ));
 
-            assert!(lvgl::lv_color_eq(arm_color(&logos[2].0), light.input));
-            assert!(!lvgl::lv_color_eq(arm_color(&logos[2].0), dark.input));
+            assert!(ffi::lv_color_eq(arm_color(&logos[2].0), light.input));
+            assert!(!ffi::lv_color_eq(arm_color(&logos[2].0), dark.input));
             // Fixed-color logos keep their color.
-            assert!(lvgl::lv_color_eq(
+            assert!(ffi::lv_color_eq(
                 arm_color(&logos[0].0),
                 Color::WHITE.into_lvgl_color()
             ));
@@ -234,35 +234,35 @@ mod tests {
                 assert_logo_geometry(logo, *factor);
             }
             drop(logos);
-            lvgl::lv_display_delete(display);
+            ffi::lv_display_delete(display);
             // Theme state must be gone before display storage can be reused.
-            assert!(!lvgl::lv_theme_shadcn_is_active(display));
-            lvgl::lv_deinit();
+            assert!(!ffi::lv_theme_shadcn_is_active(display));
+            ffi::lv_deinit();
         }
     }
     unsafe fn assert_logo_geometry(logo: &crate::Logo, factor: u8) {
         unsafe {
             let object = logo.get_inner_object();
             let size = 32 * i32::from(factor);
-            lvgl::lv_obj_update_layout(object);
-            assert_eq!(lvgl::lv_obj_get_width(object), size);
-            assert_eq!(lvgl::lv_obj_get_height(object), size);
+            ffi::lv_obj_update_layout(object);
+            assert_eq!(ffi::lv_obj_get_width(object), size);
+            assert_eq!(ffi::lv_obj_get_height(object), size);
             assert_eq!(
-                lvgl::lv_obj_get_child_count(object),
+                ffi::lv_obj_get_child_count(object),
                 crate::Logo::ARM_COUNT as u32 + 1
             );
-            let mut bounds = lvgl::lv_area_t::default();
-            lvgl::lv_obj_get_coords(object, &mut bounds);
+            let mut bounds = ffi::lv_area_t::default();
+            ffi::lv_obj_get_coords(object, &mut bounds);
             let mut arm_side = None;
             for index in 0..crate::Logo::ARM_COUNT {
                 let arm = logo.get_arm(index);
-                let side = lvgl::lv_obj_get_width(arm);
-                assert_eq!(lvgl::lv_obj_get_height(arm), side);
+                let side = ffi::lv_obj_get_width(arm);
+                assert_eq!(ffi::lv_obj_get_height(arm), side);
                 assert_eq!(*arm_side.get_or_insert(side), side);
                 // Arms are separated by a transparent cross through the center.
                 assert!(side < size / 2);
-                let mut coordinates = lvgl::lv_area_t::default();
-                lvgl::lv_obj_get_coords(arm, &mut coordinates);
+                let mut coordinates = ffi::lv_area_t::default();
+                ffi::lv_obj_get_coords(arm, &mut coordinates);
                 let expected_x = if index < 2 {
                     bounds.x1
                 } else {
@@ -276,8 +276,8 @@ mod tests {
                 assert_eq!((coordinates.x1, coordinates.y1), (expected_x, expected_y));
             }
             let center = logo.get_center();
-            let mut coordinates = lvgl::lv_area_t::default();
-            lvgl::lv_obj_get_coords(center, &mut coordinates);
+            let mut coordinates = ffi::lv_area_t::default();
+            ffi::lv_obj_get_coords(center, &mut coordinates);
             assert_eq!(
                 coordinates.x1 + coordinates.x2 + 1,
                 bounds.x1 + bounds.x2 + 1,

@@ -96,7 +96,7 @@ pub struct VirtualFileSystem {
     /// Pipes.
     pipes: RwLock<CriticalSectionRawMutex, PipeMap>,
     /// Set by [`Self::shutdown_storage`]; never cleared.
-    writes_frozen: core::sync::atomic::AtomicBool,
+    writes_frozen: portable_atomic::AtomicBool,
 }
 
 impl VirtualFileSystem {
@@ -146,7 +146,7 @@ impl VirtualFileSystem {
             character_device: RwLock::new(BTreeMap::new()),
             block_device: RwLock::new(BTreeMap::new()),
             pipes: RwLock::new(BTreeMap::new()),
-            writes_frozen: core::sync::atomic::AtomicBool::new(false),
+            writes_frozen: portable_atomic::AtomicBool::new(false),
         }
     }
 
@@ -177,7 +177,7 @@ impl VirtualFileSystem {
             return Err(Error::RessourceBusy);
         }
         self.writes_frozen
-            .store(true, core::sync::atomic::Ordering::Release);
+            .store(true, portable_atomic::Ordering::Release);
         // A nested mount point is always longer than the mount containing it.
         let mut order: alloc::vec::Vec<usize> = (0..file_systems.len()).collect();
         // Keep mount order for equal lengths so a failure leaves the same mounts readable.

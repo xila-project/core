@@ -1,9 +1,7 @@
 //! Generic character-device wrapper around a peripheral handle.
 
-use core::{
-    sync::atomic::{AtomicBool, Ordering},
-    task::Poll,
-};
+use core::task::Poll;
+use portable_atomic::{AtomicBool, Ordering};
 
 use alloc::boxed::Box;
 use file_system::{

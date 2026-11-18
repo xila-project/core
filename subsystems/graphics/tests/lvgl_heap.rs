@@ -7,6 +7,10 @@ extern crate abi_definitions;
 
 testing::instantiate_global_allocator!();
 
+#[expect(
+    deprecated,
+    reason = "the test drives LVGL's heap through the raw bindings"
+)]
 use graphics::lvgl;
 
 const BLOCK: usize = 16 * 1024;

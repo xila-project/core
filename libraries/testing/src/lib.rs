@@ -6,6 +6,8 @@
 //! environment. Real drivers (windows, network interfaces, host file systems)
 //! belong to platform crates and their integration tests.
 
+#![allow(clippy::disallowed_types, reason = "host-only std test support crate")]
+
 extern crate alloc;
 extern crate std;
 

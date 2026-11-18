@@ -786,8 +786,10 @@
 /** Widget names (lv_obj_set_name) */
 #define LV_USE_OBJ_NAME 0
 
-/** Widget id (lv_obj_set_id). lvgl-rust's handle registry stores each tracked
- *  object's slot in it and defines the hooks below (`LV_USE_OBJ_ID_BUILTIN 0`). */
+/** Widget id (lv_obj_set_id). Core's `object_id` module owns the word: each Wasm
+ *  VM stores the ids it issues to guest-visible objects in it, and defines the
+ *  hooks below (`LV_USE_OBJ_ID_BUILTIN 0`). lvgl-rust runs in views-only mode,
+ *  so it defines none of them. */
 #define LV_USE_OBJ_ID 1
 
 #if LV_USE_OBJ_ID

@@ -1,9 +1,11 @@
 //! A memory manager backed by the standard system allocator.
 
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicUsize, Ordering};
 use memory::{CapabilityFlags, Layout, ManagerTrait};
-use std::alloc::{GlobalAlloc, System};
+use std::{
+    alloc::{GlobalAlloc, System},
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 /// Xila memory manager for tests: every capability is served by [`System`].
 pub struct MemoryManager {

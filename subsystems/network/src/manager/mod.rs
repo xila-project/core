@@ -107,9 +107,7 @@ impl Manager {
 
     pub(crate) async fn find_stack(stacks: &StackList, name: &str) -> Option<Stack> {
         for stack in stacks {
-            let stack_name = stack.with(|s| s.name.clone()).await;
-
-            if stack_name.as_str() == name {
+            if stack.with(|s| s.name == name).await {
                 return Some(stack.clone());
             }
         }
@@ -371,12 +369,16 @@ impl Manager {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_types,
+    reason = "host-only unit tests use std atomics"
+)]
 mod clock_tests {
+    extern crate std;
+
     use super::*;
-    use core::{
-        sync::atomic::{AtomicU64, Ordering},
-        time::Duration,
-    };
+    use core::time::Duration;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     struct Clock(AtomicU64);
     impl time::MonotonicClock for Clock {

@@ -7,8 +7,8 @@ extern crate std;
 
 use alloc::boxed::Box;
 use core::marker::PhantomData;
-use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_executor::{Spawner, raw};
+use portable_atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex};
 use synchronization::blocking_mutex::raw::CriticalSectionRawMutex;
 use synchronization::signal::Signal;

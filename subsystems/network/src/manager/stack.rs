@@ -1,14 +1,13 @@
 use crate::{
     DnsQueryKind, Error, IpAddress, IpCidr, Ipv4, Ipv6, MacAddress, Port, Result, Route, WakeSignal,
 };
-use alloc::{boxed::Box, vec, vec::Vec};
+use alloc::{boxed::Box, string::String, vec, vec::Vec};
 use core::{
     task::{Context, Poll, Waker},
     time::Duration,
 };
 use file_system::DirectCharacterDevice;
 use shared::poll_pin_ready;
-use smol_str::SmolStr;
 use smoltcp::{
     config::{DNS_MAX_SERVER_COUNT, IFACE_MAX_ADDR_COUNT},
     iface::{self, SocketHandle, SocketSet},
@@ -19,7 +18,7 @@ use smoltcp::{
 use synchronization::{Arc, blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 
 pub struct StackInner {
-    pub name: SmolStr,
+    pub name: String,
     pub is_up: bool,
     pub enabled: bool,
     pub interface: smoltcp::iface::Interface,

@@ -51,7 +51,8 @@ pub const NEURAL_NETWORK: u8 = b'N';
 /// System power actions: power off, restart, sleep (`b'P'`).
 pub const POWER: u8 = b'P';
 
-/// Terminal capability query on character devices (`b'T'`).
+/// Terminal capability query and line discipline attributes on character
+/// devices (`b'T'`).
 ///
 /// Defined directly in `file_system::character_device` as a literal to avoid a
 /// dependency cycle (`device` depends on `file_system`).

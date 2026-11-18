@@ -4,10 +4,10 @@ use core::{
     marker::PhantomPinned,
     ops::{Deref, DerefMut},
     pin::Pin,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use file_system::{Error, Result};
 use nanoaudio::{Consumer, Mixer, Producer, RingBuffer, Volume};
+use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
 
 const MIX_CONFIGURATION: Configuration = Configuration::new(48_000, 2, SampleFormat::F32);
 const FRAME_BYTES: usize = 2 * size_of::<f32>();

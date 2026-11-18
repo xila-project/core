@@ -10,11 +10,11 @@ use synchronization::rwlock::RwLock;
 use task::block_on;
 
 use core::future::Future;
-use core::sync::atomic::{AtomicPtr, Ordering};
+use portable_atomic::{AtomicPtr, Ordering};
 
 use core::time::Duration;
 
-use super::lvgl;
+use super::ffi;
 
 use crate::input::InputQueue;
 use crate::window::Window;
@@ -90,7 +90,7 @@ pub async fn initialize_with_input_devices(
 struct Inner {
     _inputs: Vec<Input>,
     displays: Vec<Display>,
-    window_parent: *mut lvgl::lv_obj_t,
+    window_parent: *mut ffi::lv_obj_t,
 }
 
 pub struct Manager {
@@ -129,13 +129,13 @@ impl Manager {
         let mut truncated = false;
         unsafe {
             let screen = inner.displays[0].get_object();
-            let display = lvgl::lv_obj_get_display(screen);
+            let display = ffi::lv_obj_get_display(screen);
             for (root, layer) in [
                 (screen, "screen"),
-                (lvgl::lv_display_get_layer_top(display), "top"),
-                (lvgl::lv_display_get_layer_sys(display), "system"),
+                (ffi::lv_display_get_layer_top(display), "top"),
+                (ffi::lv_display_get_layer_sys(display), "system"),
             ] {
-                lvgl::lv_obj_update_layout(root);
+                ffi::lv_obj_update_layout(root);
                 inspect_children(
                     root,
                     None,
@@ -168,19 +168,19 @@ impl Manager {
         let _lock = self.global_lock.lock().await;
         let inner = self.inner.read().await;
         let screen = inner.displays.first().ok_or("not_available")?.get_object();
-        let display = unsafe { lvgl::lv_obj_get_display(screen) };
+        let display = unsafe { ffi::lv_obj_get_display(screen) };
         let roots = unsafe {
             [
                 (screen, "screen"),
-                (lvgl::lv_display_get_layer_top(display), "top"),
-                (lvgl::lv_display_get_layer_sys(display), "system"),
+                (ffi::lv_display_get_layer_top(display), "top"),
+                (ffi::lv_display_get_layer_sys(display), "system"),
             ]
         };
         let mut elements = Vec::with_capacity(UI_TREE_MAX_ELEMENTS);
         let mut truncated = false;
         for (root, layer) in roots {
             unsafe {
-                lvgl::lv_obj_update_layout(root);
+                ffi::lv_obj_update_layout(root);
                 inspect_children(
                     root,
                     None,
@@ -281,10 +281,10 @@ impl Manager {
             }
         }
         let target = target.ok_or("target_not_found")?;
-        let mut point = lvgl::lv_point_t { x, y };
+        let mut point = ffi::lv_point_t { x, y };
         let mut hit = core::ptr::null_mut();
         for (root, _) in roots.into_iter().rev() {
-            hit = unsafe { lvgl::lv_indev_search_obj(root, &mut point) };
+            hit = unsafe { ffi::lv_indev_search_obj(root, &mut point) };
             if !hit.is_null() {
                 break;
             }
@@ -292,7 +292,7 @@ impl Manager {
         // A labelled child may receive the pointer. Require it to belong to the target.
         let mut owner = hit;
         while !owner.is_null() && owner != target {
-            owner = unsafe { lvgl::lv_obj_get_parent(owner) };
+            owner = unsafe { ffi::lv_obj_get_parent(owner) };
         }
         if owner != target {
             return Err("target_obscured");
@@ -480,7 +480,7 @@ impl Drop for Manager {
         });
         if !deinitialized {
             unsafe {
-                lvgl::lv_deinit();
+                ffi::lv_deinit();
             }
         }
     }
@@ -536,28 +536,26 @@ impl Manager {
         let injected_inputs = InputQueue::new()?;
         let global_lock = Mutex::new(());
         {
-            // `lvgl_rust::init` runs `lv_init` and starts the safe layer's
-            // registry; nothing else can reach LVGL before `Self` exists.
+            // The hooks must be linked before `lv_init` creates an object.
+            crate::object_id::keep();
+            // `lvgl_rust::init` runs `lv_init` and starts the safe layer
+            // (views only: no registry); nothing else can reach LVGL before
+            // `Self` exists.
             let mut guard = LvglGuard(
                 global_lock
                     .try_lock()
                     .map_err(|_| Error::AlreadyInitialized)?,
             );
             let mut session = lvgl_rust::init(&mut guard).map_err(Error::from)?;
-            // SAFETY: Window keeps no references to children and never
-            // interprets their positions. Match its exact class only.
-            unsafe {
-                session.register_external_containers(|class| {
-                    core::ptr::eq(class, crate::get_window_class())
-                })?;
-            }
             session.set_tick_cb(binding_tick_callback_function);
+            // Initialize the Window descriptor before any class policy lookup.
+            crate::window::get_window_class();
             unsafe {
                 // LVGL assigns newly created keypads to the default group.
                 // Create it before display creation also creates the
                 // virtual keypad.
-                let group = lvgl::lv_group_create();
-                lvgl::lv_group_set_default(group);
+                let group = ffi::lv_group_create();
+                ffi::lv_group_set_default(group);
             }
         }
 
@@ -614,7 +612,7 @@ impl Manager {
         }
     }
 
-    pub async fn set_window_parent(&self, window_parent: *mut lvgl::lv_obj_t) -> Result<()> {
+    pub async fn set_window_parent(&self, window_parent: *mut ffi::lv_obj_t) -> Result<()> {
         self.inner.write().await.window_parent = window_parent;
 
         Ok(())
@@ -661,14 +659,14 @@ impl Manager {
 
     pub async fn get_window_count(&self) -> Result<usize> {
         let window_parent = self.inner.read().await.window_parent;
-        unsafe { Ok(lvgl::lv_obj_get_child_count(window_parent) as usize) }
+        unsafe { Ok(ffi::lv_obj_get_child_count(window_parent) as usize) }
     }
 
     pub async fn get_window_icon(&self, index: usize) -> Result<(String, Color)> {
         let window_parent = self.inner.read().await.window_parent;
 
         let window = unsafe {
-            let child = lvgl::lv_obj_get_child(window_parent, index as i32);
+            let child = ffi::lv_obj_get_child(window_parent, index as i32);
 
             Window::from_raw(child).ok_or(Error::InvalidWindowIdentifier)?
         };
@@ -683,7 +681,7 @@ impl Manager {
     pub async fn get_window_identifier(&self, index: usize) -> Result<usize> {
         let window_parent = self.inner.read().await.window_parent;
 
-        let window = unsafe { lvgl::lv_obj_get_child(window_parent, index as i32) as usize };
+        let window = unsafe { ffi::lv_obj_get_child(window_parent, index as i32) as usize };
 
         Ok(window)
     }
@@ -694,14 +692,14 @@ impl Manager {
         let window_parent = self.inner.read().await.window_parent;
 
         let found = (0..window_count).find(|index| unsafe {
-            let child = lvgl::lv_obj_get_child(window_parent, *index as i32);
+            let child = ffi::lv_obj_get_child(window_parent, *index as i32);
 
-            child == identifier as *mut lvgl::lv_obj_t
+            child == identifier as *mut ffi::lv_obj_t
         });
 
         if found.is_some() {
             unsafe {
-                lvgl::lv_obj_move_foreground(identifier as *mut lvgl::lv_obj_t);
+                ffi::lv_obj_move_foreground(identifier as *mut ffi::lv_obj_t);
             }
 
             Ok(())
@@ -716,9 +714,9 @@ impl Manager {
         let window_parent = self.inner.read().await.window_parent;
 
         let found = (0..window_count).any(|index| unsafe {
-            let child = lvgl::lv_obj_get_child(window_parent, index as i32);
+            let child = ffi::lv_obj_get_child(window_parent, index as i32);
 
-            child == identifier as *mut lvgl::lv_obj_t
+            child == identifier as *mut ffi::lv_obj_t
         });
 
         if !found {
@@ -726,8 +724,8 @@ impl Manager {
         }
 
         unsafe {
-            lvgl::lv_obj_send_event(
-                identifier as *mut lvgl::lv_obj_t,
+            ffi::lv_obj_send_event(
+                identifier as *mut ffi::lv_obj_t,
                 crate::EventKind::CloseRequested.into_lvgl_code(),
                 core::ptr::null_mut(),
             );
@@ -798,8 +796,8 @@ impl Manager {
         function(&mut session)
     }
 
-    pub fn get_current_screen(&self) -> Result<*mut lvgl::lv_obj_t> {
-        Ok(unsafe { lvgl::lv_screen_active() })
+    pub fn get_current_screen(&self) -> Result<*mut ffi::lv_obj_t> {
+        Ok(unsafe { ffi::lv_screen_active() })
     }
 
     pub async fn update_theme(

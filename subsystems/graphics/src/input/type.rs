@@ -1,4 +1,4 @@
-use crate::lvgl;
+use crate::ffi;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputKind {
@@ -6,11 +6,11 @@ pub enum InputKind {
     Keypad,
 }
 
-impl From<InputKind> for lvgl::lv_indev_type_t {
+impl From<InputKind> for ffi::lv_indev_type_t {
     fn from(value: InputKind) -> Self {
         match value {
-            InputKind::Pointer => lvgl::lv_indev_type_t_LV_INDEV_TYPE_POINTER,
-            InputKind::Keypad => lvgl::lv_indev_type_t_LV_INDEV_TYPE_KEYPAD,
+            InputKind::Pointer => ffi::lv_indev_type_t_LV_INDEV_TYPE_POINTER,
+            InputKind::Keypad => ffi::lv_indev_type_t_LV_INDEV_TYPE_KEYPAD,
         }
     }
 }
