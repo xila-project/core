@@ -2066,10 +2066,23 @@ static STATIC_SERIAL_DEVICE: LoopbackCharacterDevice = LoopbackCharacterDevice::
 #[cfg(target_os = "linux")]
 #[test]
 async fn embedded_boot_writes_nothing_after_a_reset() {
+    use executable::{ExecutableContext, ExecutableTrait, MainFuture, Standard, mount_executables};
     use virtual_file_system::{AccessTimePolicy, MountOptions};
 
+    struct BootExecutable;
+
+    impl ExecutableTrait for BootExecutable {
+        fn main(_standard: Standard<'static>, _arguments: Vec<String>) -> MainFuture {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    const EXECUTABLE_PATH: &str = "/system/executables/boot_executable";
+    const NULL_DEVICE_PATH: &str = "/devices/standard_io/null";
+    const PERSISTENT_EXECUTABLE_PATH: &str = "/applications/executables/persistent.wasm";
+
     let time_manager = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
-    let task_manager = Box::leak(Box::new(task::Manager::new()));
+    let task_manager = task::get_instance();
     let users_manager = Box::leak(Box::new(users::Manager::new()));
     if !log::is_initialized() {
         log::initialize(&testing::Logger).unwrap();
@@ -2079,9 +2092,9 @@ async fn embedded_boot_writes_nothing_after_a_reset() {
     little_fs::FileSystem::format(counting_device, little_fs::Options::new(256)).unwrap();
 
     let mut writes = [0; 3];
-    for writes_this_boot in &mut writes {
+    for (boot, writes_this_boot) in writes.iter_mut().enumerate() {
         let before = counting_device.write_count();
-        // A reset: the previous mount is dropped without unmounting.
+        // A reset starts with fresh mounts over the same block device.
         let root = little_fs::FileSystem::new(
             counting_device,
             little_fs::Options::new(256).set_block_cycles(500),
@@ -2104,9 +2117,71 @@ async fn embedded_boot_writes_nothing_after_a_reset() {
         virtual_file_system::create_default_hierarchy(virtual_file_system, task)
             .await
             .unwrap();
+        virtual_file_system
+            .mount_file_system(
+                memory_file_system::FileSystem::new(),
+                Path::SYSTEM_EXECUTABLES,
+                task,
+            )
+            .await
+            .unwrap();
         virtual_file_system::clear_temporary(virtual_file_system, task)
             .await
             .unwrap();
+        virtual_file_system
+            .mount_character_device(task, NULL_DEVICE_PATH, drivers_core::NullDevice)
+            .await
+            .unwrap();
+        let context = Box::leak(Box::new(ExecutableContext::new(
+            task_manager,
+            users_manager,
+            virtual_file_system,
+            time_manager,
+        )));
+        mount_executables!(
+            context,
+            virtual_file_system,
+            task,
+            &[(EXECUTABLE_PATH, BootExecutable)]
+        )
+        .await
+        .unwrap();
+        let standard = Standard::open(
+            &NULL_DEVICE_PATH,
+            &NULL_DEVICE_PATH,
+            &NULL_DEVICE_PATH,
+            task,
+            virtual_file_system,
+            context,
+        )
+        .await
+        .unwrap();
+        let executable = executable::execute(context, EXECUTABLE_PATH, Vec::new(), standard, None)
+            .await
+            .unwrap();
+        assert_eq!(executable.join().await, 0);
+
+        if boot == 0 {
+            File::write_to_path(
+                virtual_file_system,
+                task,
+                PERSISTENT_EXECUTABLE_PATH,
+                b"persistent executable contents",
+            )
+            .await
+            .unwrap();
+        } else {
+            let mut contents = Vec::new();
+            File::read_from_path(
+                virtual_file_system,
+                task,
+                PERSISTENT_EXECUTABLE_PATH,
+                &mut contents,
+            )
+            .await
+            .unwrap();
+            assert_eq!(contents, b"persistent executable contents");
+        }
         *writes_this_boot = counting_device.write_count() - before;
     }
     assert_eq!(writes[1], 0, "second boot wrote: {writes:?}");
