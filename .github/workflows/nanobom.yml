@@ -10,6 +10,6 @@ permissions:
 jobs:
   inventory:
     name: "Security / Nanobom inventory"
-    uses: xila-project/workspace/.github/workflows/nanobom.yml@7999c0ccd7ea6f89a945551527d574c8590bf0fa
+    uses: xila-project/workspace/.github/workflows/nanobom.yml@004ac99e8f67275c860b1c97fea7fdab28a53c20
     secrets:
       NANOBOM_TOKEN: ${{ secrets.NANOBOM_TOKEN }}
