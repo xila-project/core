@@ -1,0 +1,12 @@
+Unscii 2.1 (unscii-16.woff)
+https://github.com/viznut/unscii/blob/257b4dfeb50651510fe8b9cf4f151a148a4490e4/fontfiles/unscii-16.woff
+
+Viznut released Unscii under a Public Domain / CC0 dedication. The upstream
+source also identifies Fixedsys Excelsior, a source font, as public domain.
+
+This is the base Unscii 16 variant. The GNU Unifont fill and the upstream
+Unifont conversion script are excluded from the distributed assets.
+
+Upstream licensing information:
+https://github.com/viznut/unscii/blob/257b4dfeb50651510fe8b9cf4f151a148a4490e4/README.md
+https://github.com/viznut/unscii/blob/257b4dfeb50651510fe8b9cf4f151a148a4490e4/src/unscii.txt

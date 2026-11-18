@@ -12,13 +12,18 @@ use std::{
     process::Command,
 };
 
+pub const TERMINAL_FONT_FILE: &str = "unscii-16.woff";
+// Cache digest includes the input length before the font bytes.
+pub const TERMINAL_FONT_CACHE_DIGEST: &str =
+    "73130f3a8f04dde862d57f15e86aeeb287146f1676ff6eddb5fb614c05848493";
+
 const FONTS: &[(u8, &str, &str, bool)] = &[
     (10, "Montserrat-Regular.ttf", "montserrat", true),
     (14, "Montserrat-Regular.ttf", "montserrat", true),
     (18, "Montserrat-Regular.ttf", "montserrat", true),
     (28, "Montserrat-Regular.ttf", "montserrat", true),
-    (8, "unscii-16-full.woff", "unscii", false),
-    (16, "unscii-16-full.woff", "unscii", false),
+    (8, TERMINAL_FONT_FILE, "unscii", false),
+    (16, TERMINAL_FONT_FILE, "unscii", false),
 ];
 const ICON_FILE: &str = "FontAwesome5-Solid+Brands+Regular.woff";
 const ICON_RANGES: &[u32] = &[
@@ -57,7 +62,6 @@ pub fn sources_with_locale_catalogs(
     common: &str,
     symbols: Option<&CatalogSymbols>,
     catalog_font: &Path,
-    japanese: bool,
 ) -> io::Result<Vec<Source>> {
     let variant = variant_id(ranges);
     // The locale's ranges are used for stable variant names, but the enormous
@@ -104,18 +108,21 @@ pub fn sources_with_locale_catalogs(
                     arguments.extend(["--symbols".into(), symbols.other.clone().into()]);
                 }
                 if !symbols.cjk.is_empty() {
-                    if *icons || japanese {
-                        // Japanese kana and kanji need a JP-region glyph source,
-                        // including in the terminal where Unscii coverage is limited.
-                        let cjk_font = if catalog_font.is_absolute() {
-                            catalog_font.to_path_buf()
-                        } else {
-                            root.join("fonts").join(catalog_font)
-                        };
-                        inputs.push(cjk_font.clone());
-                        arguments.extend(["--font".into(), cjk_font.into_os_string()]);
-                    }
-                    arguments.extend(["--symbols".into(), symbols.cjk.clone().into()]);
+                    // CJK glyphs come from Source Han Sans for both proportional
+                    // and terminal fonts so Unscii never pulls in Unifont glyphs
+                    // and full-width CJK glyphs retain their native advance.
+                    let cjk_font = if catalog_font.is_absolute() {
+                        catalog_font.to_path_buf()
+                    } else {
+                        root.join("fonts").join(catalog_font)
+                    };
+                    inputs.push(cjk_font.clone());
+                    arguments.extend([
+                        "--font".into(),
+                        cjk_font.into_os_string(),
+                        "--symbols".into(),
+                        symbols.cjk.clone().into(),
+                    ]);
                 }
             }
             if *icons {
@@ -172,7 +179,6 @@ pub fn sources_with_catalogs(
         common,
         symbols,
         Path::new("SourceHanSansSC-Regular.otf"),
-        false,
     )
 }
 

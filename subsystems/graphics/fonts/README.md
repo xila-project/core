@@ -3,6 +3,22 @@
 Montserrat Regular supplies proportional Latin text at 10/14/18/28px, and
 Unscii supplies terminal text at 8/16px. Font Awesome supplies UI icons.
 
+## Terminal font (Unscii)
+
+`unscii-16.woff` is the unmodified Unscii 2.1 font from the
+[official Viznut repository](https://github.com/viznut/unscii), commit
+`257b4dfeb50651510fe8b9cf4f151a148a4490e4`.
+
+- Asset: [fontfiles/unscii-16.woff](https://raw.githubusercontent.com/viznut/unscii/257b4dfeb50651510fe8b9cf4f151a148a4490e4/fontfiles/unscii-16.woff).
+- SHA-256: `8b8144a243c0128f7a6c5b0a387497a39a5574f1881c02d141306a30c2cee06f`
+- License: Public Domain / CC0, see `Unscii-NOTICE.txt`.
+
+The upstream build uses `unscii-16.hex` for this variant. Only the separate
+`unscii-16-full` variant merges the Fixedsys Excelsior and GNU Unifont fill.
+Core uses the plain variant for every terminal font and checks its digest before
+generation. The removed fill includes the extra French range entries
+U+01A4, U+01B4 and U+01F1–U+01F3. No French catalog strings use those characters.
+
 ## Simplified Chinese
 
 `SourceHanSansSC-Regular.otf` is the unmodified Source Han Sans SC Regular 2.005
@@ -17,13 +33,15 @@ release branch, commit `a4f7cf94edfb9d7ffbdfc4841de276358bd7e0f2`, path
 
 For `zh-CN` (or `zh`), `../build/catalogs.rs` gathers the distinct characters in
 translation **values**, including plural entries, across the application,
-library and subsystem catalogs. The selected locale, its base language and the
-configured comma-separated fallbacks contribute characters. Cargo watches the locale directories
+library and subsystem catalogs, plus the localized date and time names from
+`embedded_i18n::date_time_locale` (months, weekdays, AM/PM periods, and date/time
+formats). The selected locale, its base language and the configured
+comma-separated fallbacks contribute characters. Cargo watches the locale directories
 and crates without catalogs so edits and new namespaces regenerate the fonts.
-Only the used Chinese characters and punctuation are merged from Source Han Sans
-into the proportional font tables; Montserrat retains Latin glyphs and metrics.
-Terminal tables keep Unscii, also subsetted to
-catalog characters instead of the entire Han range.
+Only the used Chinese characters and punctuation are merged from Source Han Sans SC
+into both the proportional font tables (retaining Montserrat for Latin glyphs and
+metrics) and the 8/16px terminal font tables (retaining Unscii for ASCII and
+Latin, with full-width 2x monospace advance for CJK cells).
 
 For the initial 450-entry Chinese catalogs (411 distinct non-ASCII characters),
 the six native font objects total 404,970 bytes of text/data, compared with
@@ -68,8 +86,9 @@ linked. Locale builds may share `CARGO_TARGET_DIR=target/localization`; only
 Run `bash tools/localization/fetch-japanese-font.sh` from Core before a Japanese
 build. This explicit setup downloads and verifies the public Source Han Sans JP
 2.005 subset; font generation itself stays offline. Consumer builds may set
-`XILA_JAPANESE_FONT_PATH` to the downloaded font. Only catalog glyphs are rasterized,
-including kana, and the terminal also uses the JP source for those glyphs.
+`XILA_JAPANESE_FONT_PATH` to the downloaded font. Only catalog and localized
+date/time glyphs are rasterized, including kana, and the terminal also uses the
+JP source for those glyphs.
 
 Japanese catalogs and font support were carried forward from companion revision
 `c656f83b6cfd019ed469332182166bdaf6188ca9`; catalog placeholders now use named arguments
