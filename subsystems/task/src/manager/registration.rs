@@ -2,8 +2,7 @@
 
 use super::*;
 use crate::manager::Metadata;
-use alloc::vec::Vec;
-use smol_str::SmolStr;
+use alloc::{string::String, vec::Vec};
 use users::{GroupIdentifier, UserIdentifier};
 
 impl Manager {
@@ -50,15 +49,6 @@ impl Manager {
             return Err(Error::InvalidTaskIdentifier);
         };
 
-        // SmolStr's inline capacity is 23 bytes, not characters.
-        let mut end = name.len().min(23);
-        while !name.is_char_boundary(end) {
-            end -= 1;
-        }
-        let name = &name[..end];
-
-        let name = SmolStr::new_inline(name);
-
         let generation = inner
             .next_generation
             .checked_add(1)
@@ -67,7 +57,7 @@ impl Manager {
         let metadata = Metadata {
             generation,
             internal_identifier: 0, // Will be set later
-            name: name.clone(),
+            name: String::from(name),
             parent: parent_task_identifier,
             user,
             group,

@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_types,
+    reason = "host-only integration test uses std::sync::{Arc, atomic}"
+)]
+
 extern crate alloc;
 
 extern crate abi_definitions;
@@ -1732,7 +1737,7 @@ async fn hard_links_stay_beneath_their_roots_and_report_missing_backend_support(
 /// Memory block device whose flush can be made to fail.
 struct FlakyDevice {
     inner: &'static MemoryDevice<512>,
-    fail_flush: core::sync::atomic::AtomicBool,
+    fail_flush: std::sync::atomic::AtomicBool,
 }
 
 impl file_system::DirectBaseOperations for FlakyDevice {
@@ -1755,7 +1760,7 @@ impl file_system::DirectBaseOperations for FlakyDevice {
     }
 
     fn flush(&self, cx: &mut core::task::Context<'_>) -> core::task::Poll<file_system::Result<()>> {
-        if self.fail_flush.load(core::sync::atomic::Ordering::SeqCst) {
+        if self.fail_flush.load(std::sync::atomic::Ordering::SeqCst) {
             return core::task::Poll::Ready(Err(file_system::Error::InputOutput));
         }
         self.inner.flush(cx)
@@ -1797,7 +1802,7 @@ async fn initialize_on(
 fn flaky_device() -> &'static FlakyDevice {
     Box::leak(Box::new(FlakyDevice {
         inner: MemoryDevice::<512>::new_static(1024 * 512),
-        fail_flush: core::sync::atomic::AtomicBool::new(false),
+        fail_flush: std::sync::atomic::AtomicBool::new(false),
     }))
 }
 
@@ -1928,7 +1933,7 @@ async fn storage_flush_failure_is_surfaced_and_keeps_the_mount() {
         .unwrap();
     device
         .fail_flush
-        .store(true, core::sync::atomic::Ordering::SeqCst);
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     assert!(vfs.shutdown_storage().await.is_err());
     // Writes stay frozen, but the filesystem was not torn down: once the
     // device recovers, committed data is still readable for diagnosis.
@@ -1939,7 +1944,7 @@ async fn storage_flush_failure_is_surfaced_and_keeps_the_mount() {
     );
     device
         .fail_flush
-        .store(false, core::sync::atomic::Ordering::SeqCst);
+        .store(false, std::sync::atomic::Ordering::SeqCst);
     let mut buffer = Vec::new();
     File::read_from_path(vfs, task, "/pending", &mut buffer)
         .await
@@ -1949,19 +1954,19 @@ async fn storage_flush_failure_is_surfaced_and_keeps_the_mount() {
 
 struct CountingBlockDevice {
     inner: &'static MemoryDevice<512>,
-    write_count: core::sync::atomic::AtomicUsize,
+    write_count: std::sync::atomic::AtomicUsize,
 }
 
 impl CountingBlockDevice {
     fn new_static() -> &'static Self {
         Box::leak(Box::new(Self {
             inner: MemoryDevice::<512>::new_static(1024 * 512),
-            write_count: core::sync::atomic::AtomicUsize::new(0),
+            write_count: std::sync::atomic::AtomicUsize::new(0),
         }))
     }
 
     fn write_count(&self) -> usize {
-        self.write_count.load(core::sync::atomic::Ordering::SeqCst)
+        self.write_count.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -1982,7 +1987,7 @@ impl file_system::DirectBaseOperations for CountingBlockDevice {
         absolute_position: file_system::Size,
     ) -> core::task::Poll<file_system::Result<usize>> {
         self.write_count
-            .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.inner.write(task_context, buffer, absolute_position)
     }
 
@@ -2360,4 +2365,124 @@ async fn memory_file_system_mounted_on_devices_avoids_little_fs_writes() {
         writes_after_mount,
         "LittleFS block device must receive zero writes after mounting memory_file_system"
     );
+}
+
+/// Character device keeping only terminal attributes, like a serial console.
+struct AttributesTerminalDevice {
+    attributes: synchronization::blocking_mutex::Mutex<
+        synchronization::blocking_mutex::raw::CriticalSectionRawMutex,
+        core::cell::Cell<file_system::character_device::TerminalAttributes>,
+    >,
+}
+
+impl file_system::DirectBaseOperations for AttributesTerminalDevice {
+    fn read(
+        &self,
+        _task_context: &mut core::task::Context<'_>,
+        _buffer: &mut [u8],
+        _absolute_position: file_system::Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        core::task::Poll::Ready(Ok(0))
+    }
+
+    fn write(
+        &self,
+        _task_context: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        _absolute_position: file_system::Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        core::task::Poll::Ready(Ok(buffer.len()))
+    }
+
+    fn control(
+        &self,
+        _task_context: &mut core::task::Context<'_>,
+        command: file_system::ControlCommandIdentifier,
+        input: &shared::AnyByLayout,
+        output: &mut shared::AnyByLayout,
+    ) -> core::task::Poll<file_system::Result<()>> {
+        use file_system::ControlCommand;
+        use file_system::character_device::{GET_TERMINAL_ATTRIBUTES, SET_TERMINAL_ATTRIBUTES};
+
+        file_system::ready(|| match command {
+            GET_TERMINAL_ATTRIBUTES::IDENTIFIER => {
+                *GET_TERMINAL_ATTRIBUTES::cast_output(output)? =
+                    self.attributes.lock(|attributes| attributes.get());
+                Ok(())
+            }
+            SET_TERMINAL_ATTRIBUTES::IDENTIFIER => {
+                let requested = *SET_TERMINAL_ATTRIBUTES::cast_input(input)?;
+                if !requested.has_only_known_flags() {
+                    return Err(file_system::Error::InvalidParameter);
+                }
+                self.attributes.lock(|attributes| attributes.set(requested));
+                Ok(())
+            }
+            _ => Err(file_system::Error::UnsupportedOperation),
+        })
+    }
+}
+
+impl file_system::MountOperations for AttributesTerminalDevice {}
+impl file_system::DirectCharacterDevice for AttributesTerminalDevice {}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn terminal_attributes_change_through_a_read_only_handle() {
+    use file_system::character_device::{
+        GET_TERMINAL_ATTRIBUTES, SET_TERMINAL_ATTRIBUTES, TerminalAttributes, TerminalFlags,
+    };
+
+    let (task, virtual_file_system) = initialize().await;
+    virtual_file_system
+        .mount_character_device(
+            task,
+            Path::from_str("/terminal"),
+            AttributesTerminalDevice {
+                attributes: synchronization::blocking_mutex::Mutex::new(core::cell::Cell::new(
+                    TerminalAttributes::INTERACTIVE,
+                )),
+            },
+        )
+        .await
+        .unwrap();
+
+    // Programs change the settings of their standard input, opened read-only.
+    let mut input = File::open(
+        virtual_file_system,
+        task,
+        "/terminal",
+        AccessFlags::Read.into(),
+    )
+    .await
+    .unwrap();
+
+    let saved = input.control(GET_TERMINAL_ATTRIBUTES, &()).await.unwrap();
+    assert_eq!(saved, TerminalAttributes::INTERACTIVE);
+
+    input
+        .control(SET_TERMINAL_ATTRIBUTES, &saved.with_echo(false))
+        .await
+        .unwrap();
+    let changed = input.control(GET_TERMINAL_ATTRIBUTES, &()).await.unwrap();
+    assert!(!changed.is_echo_enabled());
+    assert!(changed.is_canonical());
+
+    let unknown = TerminalAttributes::new(TerminalFlags::from_bits_retain(1 << 31));
+    assert!(
+        input
+            .control(SET_TERMINAL_ATTRIBUTES, &unknown)
+            .await
+            .is_err()
+    );
+
+    input
+        .control(SET_TERMINAL_ATTRIBUTES, &saved)
+        .await
+        .unwrap();
+    assert_eq!(
+        input.control(GET_TERMINAL_ATTRIBUTES, &()).await.unwrap(),
+        TerminalAttributes::INTERACTIVE
+    );
+    input.close(virtual_file_system).await.unwrap();
 }

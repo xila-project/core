@@ -1,4 +1,8 @@
 #![no_std]
+#![allow(
+    clippy::disallowed_types,
+    reason = "host-only test uses core atomics under no_std"
+)]
 
 extern crate alloc;
 use core::time::Duration;

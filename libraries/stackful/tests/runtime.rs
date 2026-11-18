@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_types,
+    reason = "host-only test implements std::task::Wake with std::sync::Arc and std atomics"
+)]
+
 use core::{
     future::Future,
     pin::pin,

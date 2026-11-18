@@ -195,6 +195,10 @@ fn path_error(path: &Path, error: io::Error) -> io::Error {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_types,
+    reason = "build-script host unit tests use std atomics for unique temp paths"
+)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};

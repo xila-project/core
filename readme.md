@@ -112,6 +112,17 @@ ESP-IDF, flashing and serial permissions need separate setup: follow the esp-rs
 [RISC-V](https://docs.esp-rs.org/book/installation/riscv.html) guides. Host/WASM
 checks do not prove ESP32, nRF, STM32 or other hardware correctness.
 
+Targets with atomic load/store but no compare-and-swap (ESP32-C2, ESP32-C3 and
+ESP32-S2) are supported via [`portable-atomic`](https://docs.rs/portable-atomic)
+for device atomics and [`portable-atomic-util`](https://docs.rs/portable-atomic-util)
+for `Arc`/`Weak`. Core's crates never select a `portable-atomic` backend: the
+firmware enables `portable-atomic`'s `unsafe-assume-single-core` or
+`critical-section` feature (esp-hal already enables `unsafe-assume-single-core`
+for these chips), or builds with `--cfg portable_atomic_unsafe_assume_single_core`.
+Without one, the build stops with `"dependents require atomic CAS but not
+available on this target by default"`. `MISE_ENV=ci mise run ci:bare-metal-no-cas`
+checks `riscv32imc-unknown-none-elf` with the single-core backend.
+
 ## Localization
 
 Xila embeds each language at compile time and tracks per-crate translations with

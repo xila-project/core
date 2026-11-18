@@ -146,6 +146,7 @@ mise run ci:host-wasm-clippy
 mise run ci:host-tests
 mise run ci:firmware
 mise run ci:bare-metal
+mise run ci:bare-metal-no-cas
 mise run ci:profiling-task-tests
 mise run ci:host-font-tests
 """
@@ -210,7 +211,7 @@ node = "{{ vars.node_version }}"
 extends = "ci:coverage"
 description = "Run host-only workspace coverage in LCOV format"
 depends = ["ci:packages-host"]
-run = "cargo llvm-cov --locked --workspace --features xila/graphics_rendering_xrgb8888 --coverage-host-only --lcov --output-path lcov.info"
+run = "cargo-llvm-cov llvm-cov --locked --workspace --features xila/graphics_rendering_xrgb8888 --coverage-host-only --lcov --output-path lcov.info"
 
 [tasks."ci:abi-deep"]
 description = "Run ABI coverage thresholds and Miri across host architectures"
@@ -284,6 +285,13 @@ description = "Test the standalone font-link workspace"
 depends = ["ci:packages-linker"]
 run = "mise run test:fonts && cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml"
 
+[tasks."ci:host-font-tests".env]
+# The verifier invokes Cargo directly. Use the same compiler environment throughout.
+XILA_MBX = "0"
+# Match Cargo's build dependency debug level so Clippy and the linked tests can share native outputs.
+CARGO_PROFILE_DEV_DEBUG = "0"
+CARGO_PROFILE_TEST_DEBUG = "0"
+
 [tasks."test:fonts"]
 extends = "ci:rust-lint"
 tools.node = "{{ vars.node_version }}"
@@ -307,7 +315,7 @@ tools.rust = { version = "{{ vars.nightly_version }}", profile = "minimal", comp
   "llvm-tools-preview",
 ] }
 tools."aqua:taiki-e/cargo-llvm-cov" = "{{ vars.llvm_cov_version }}"
-run = "cargo llvm-cov --locked --manifest-path \"${XILA_APPLICATIONS_ROOT:-.application-src}/executables/wasm/tests/translation/Cargo.toml\" --no-default-features --features ${CI_ABI_MEMORY:-memory_32} --ignore-filename-regex '(tests\\.rs|tests/translation/src/lib\\.rs)$' --fail-under-lines 100 --fail-under-functions 100"
+run = "cargo-llvm-cov llvm-cov --locked --manifest-path \"${XILA_APPLICATIONS_ROOT:-.application-src}/executables/wasm/tests/translation/Cargo.toml\" --no-default-features --features ${CI_ABI_MEMORY:-memory_32} --ignore-filename-regex '(tests\\.rs|tests/translation/src/lib\\.rs)$' --fail-under-lines {{ vars.abi_coverage_minimum }} --fail-under-functions {{ vars.abi_coverage_minimum }}"
 
 [tasks."ci:abi-miri"]
 extends = "ci:miri"
@@ -392,6 +400,26 @@ cargo check --locked -p xila --no-default-features --features abi_definitions --
 """
 tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", targets = [
   "thumbv7em-none-eabihf",
+] }
+
+[tasks."ci:bare-metal-no-cas"]
+description = "Check the façade and peripheral adapters for a RISC-V target without atomic compare-and-swap"
+shell = "bash -c"
+depends = ["ci:packages-linker"]
+# ESP32-C2/C3 have atomic load/store only. Libraries never choose a
+# portable-atomic backend; the firmware does (esp-hal enables
+# `unsafe-assume-single-core` for these chips). Select the same backend here.
+env = { CC_riscv32imc_unknown_none_elf = "clang", CARGO_TARGET_RISCV32IMC_UNKNOWN_NONE_ELF_RUSTFLAGS = "--cfg portable_atomic_unsafe_assume_single_core" }
+run = """
+set -eu
+cargo check --locked -p xila --target riscv32imc-unknown-none-elf
+cargo check --locked -p xila --no-default-features --features abi_definitions --target riscv32imc-unknown-none-elf
+cargo check --locked -p xila-drivers-peripherals --all-features --target riscv32imc-unknown-none-elf
+cargo check --locked -p xila-peripherals --all-features --target riscv32imc-unknown-none-elf
+cargo check --locked -p xila-audio --target riscv32imc-unknown-none-elf
+"""
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", targets = [
+  "riscv32imc-unknown-none-elf",
 ] }
 
 [tasks."ci:profiling-task-tests"]

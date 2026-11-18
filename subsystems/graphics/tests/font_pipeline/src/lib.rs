@@ -10,6 +10,10 @@ pub mod fonts;
 pub mod generate;
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_types,
+    reason = "host-only test tool uses std atomics"
+)]
 mod cache_tests;
 
 #[cfg(test)]

@@ -1,4 +1,8 @@
 #![cfg(all(target_os = "linux", feature = "uart"))]
+#![allow(
+    clippy::disallowed_types,
+    reason = "host-only test uses std::sync::Arc"
+)]
 
 //! UART device nodes: a loopback pair is mounted as `/devices/uart/loop0` and
 //! `/devices/uart/loop1` and driven through the VFS `File` API and control

@@ -12,35 +12,16 @@ use embassy_executor::{
 };
 use embassy_time::Timer;
 
-// Use the same critical-section primitive on targets without pointer atomics.
-#[cfg(target_has_atomic = "ptr")]
-static EMBASSY_WAKER_VTABLE: core::sync::atomic::AtomicPtr<RawWakerVTable> =
-    core::sync::atomic::AtomicPtr::new(core::ptr::null_mut());
-#[cfg(not(target_has_atomic = "ptr"))]
-static EMBASSY_WAKER_VTABLE: synchronization::blocking_mutex::Mutex<
-    CriticalSectionRawMutex,
-    core::cell::Cell<Option<&'static RawWakerVTable>>,
-> = synchronization::blocking_mutex::Mutex::new(core::cell::Cell::new(None));
+use portable_atomic::{AtomicPtr, Ordering};
+
+static EMBASSY_WAKER_VTABLE: AtomicPtr<RawWakerVTable> = AtomicPtr::new(core::ptr::null_mut());
 
 fn remember_vtable(vtable: &'static RawWakerVTable) {
-    #[cfg(target_has_atomic = "ptr")]
-    EMBASSY_WAKER_VTABLE.store(
-        core::ptr::from_ref(vtable).cast_mut(),
-        core::sync::atomic::Ordering::Relaxed,
-    );
-    #[cfg(not(target_has_atomic = "ptr"))]
-    EMBASSY_WAKER_VTABLE.lock(|cell| cell.set(Some(vtable)));
+    EMBASSY_WAKER_VTABLE.store(core::ptr::from_ref(vtable).cast_mut(), Ordering::Relaxed);
 }
 
 fn embassy_vtable() -> *const RawWakerVTable {
-    #[cfg(target_has_atomic = "ptr")]
-    {
-        EMBASSY_WAKER_VTABLE.load(core::sync::atomic::Ordering::Relaxed)
-    }
-    #[cfg(not(target_has_atomic = "ptr"))]
-    {
-        EMBASSY_WAKER_VTABLE.lock(|cell| cell.get().map_or(core::ptr::null(), core::ptr::from_ref))
-    }
+    EMBASSY_WAKER_VTABLE.load(Ordering::Relaxed)
 }
 
 /// Only TaskStorage polls this wrapper, so its context is an Embassy context.
@@ -114,7 +95,7 @@ impl Manager {
     /// target executor, so its future may be !Send, as with Embassy's tasks.
     /// ```
     /// async fn remote(manager: &'static task::Manager) {
-    ///     let state = std::sync::Arc::new(());
+    ///     let state = synchronization::Arc::new(());
     ///     let root = task::Manager::ROOT_TASK_IDENTIFIER;
     ///     let _ = manager.spawn_send(root, "", None, move |_| async move {
     ///         let local = std::rc::Rc::new(state);

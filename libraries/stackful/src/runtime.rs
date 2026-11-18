@@ -199,11 +199,7 @@ pub async fn drive(coroutine: Coroutine) -> i32 {
 pub fn suspend_on<F: Future>(future: F) -> F::Output {
     let c = current();
     if c.is_null() {
-        #[cfg(target_has_atomic = "ptr")]
         return task::block_on(future);
-        // Identical implementation on targets Core's task manager cannot build yet.
-        #[cfg(not(target_has_atomic = "ptr"))]
-        return embassy_futures::block_on(future);
     }
     let mut output = None;
     {
@@ -249,7 +245,6 @@ extern "C" fn trampoline() -> ! {
 /// # Safety
 /// Same contract as [`Coroutine::new`]. The manager must map the current task to
 /// its actual executor; registering or moving local Spawners across threads is invalid.
-#[cfg(target_has_atomic = "ptr")]
 pub async unsafe fn spawn<F: FnOnce() -> i32 + 'static>(
     manager: &'static task::Manager,
     parent: task::TaskIdentifier,

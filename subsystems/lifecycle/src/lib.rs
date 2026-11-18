@@ -17,12 +17,10 @@ pub mod tasks;
 
 pub use supervisor::{Drivers, POWER_DEVICE_PATH, Supervisor};
 
-use core::{
-    sync::atomic::{AtomicU16, Ordering},
-    time::Duration,
-};
+use core::time::Duration;
 use device::power::Capabilities;
 use file_system::AccessFlags;
+use portable_atomic::{AtomicU16, Ordering};
 use task::TaskIdentifier;
 use virtual_file_system::{File, VirtualFileSystem};
 
@@ -172,8 +170,9 @@ impl Controller {
     /// example host signal handlers). Executables use [`request`] instead.
     ///
     /// A single compare-and-exchange: safe in a POSIX signal handler on
-    /// targets with native 16-bit atomics. It never allocates, locks or wakes;
-    /// the supervisor polls [`Self::state`].
+    /// targets with native 16-bit atomics. Targets without compare-and-swap
+    /// use `portable-atomic`, whose backend the firmware selects. It never
+    /// allocates or wakes; the supervisor polls [`Self::state`].
     pub fn request(&self, action: Action, status: u8) -> Result<(), State> {
         let word = (status as u16) << STATUS_SHIFT
             | (action as u16) << ACTION_SHIFT
