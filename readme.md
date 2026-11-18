@@ -14,7 +14,7 @@ written in Rust. Xila brings together WebAssembly (Wasm) applications, an LVGL
 graphical interface, task management, networking, and storage for
 resource-constrained devices.
 
-[![codecov](https://codecov.io/github/Xila-Project/Core/graph/badge.svg?token=01M6GQFBEC)](https://codecov.io/github/Xila-Project/Core)
+[![codecov](https://codecov.io/github/Xila-Project/Core/graph/badge.svg?token=01M6GQFBEC)](https://codecov.io/github/Xila-Project/Core) [![vulnerabilities](https://vulnerabilities.xila.dev/badges/b619696bc915703800b1166ef3496abc.svg)](https://vulnerabilities.xila.dev/public/77c21accb207ba9e806b97b994d63a3f)
 [![Translation status](https://translate.anneraud.fr/widget/xila-core/svg-badge.svg)](https://translate.anneraud.fr/engage/xila-core/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 
