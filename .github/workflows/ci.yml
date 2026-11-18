@@ -74,14 +74,19 @@ jobs:
     env:
       MISE_ENV: ci
       CARGO_TERM_COLOR: always
+      # Keep source locations in test backtraces while shrinking build artifacts.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
       # Keep standalone test crates in the target tree cached by the action.
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       XILA_MBX: "1"
       XILA_APPLICATIONS_MANIFEST: ${{ github.workspace }}/.application-src/Cargo.toml
       XILA_FONT_CATALOG_ROOTS: ${{ github.workspace }}/.application-src
     steps:
-      - name: "Setup | Checkout pinned applications"
+      - name: "Setup | Checkout sources"
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: "Setup | Checkout pinned applications"
         uses: actions/checkout@v7
         with:
@@ -93,7 +98,7 @@ jobs:
         uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
         with:
           cache-mode: target
-          cache-generation: v1-ci-host
+          cache-generation: v1-ci-host-line-tables
       - name: "Setup | Locked npm dependencies"
         run: mise run deps:npm
       - name: "Lint | Host workspace"
