@@ -289,8 +289,7 @@ fn identifiers_follow_their_objects_through_every_deletion_path() {
             assert_eq!(exhausted.len(), 1);
             // The failed object stays usable and unnamed; another table works.
             assert!(with_tables(|t| unsafe { t.second.publish(b) }).is_ok());
-            // Free the exhausted table's object before the table goes away.
-            let _ = exhausted.take_objects();
+            assert_eq!(exhausted.first(), Some(a));
             let _ = c;
             Ok(())
         })

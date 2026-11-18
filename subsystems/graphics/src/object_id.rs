@@ -207,13 +207,11 @@ impl ObjectTable {
         true
     }
 
-    /// Takes every named object, in identifier order, leaving the table
-    /// empty (its counter keeps running). Used to delete a consumer's
-    /// objects at teardown; the free hook then finds nothing to remove.
-    pub fn take_objects(&mut self) -> Vec<NonNull<ffi::lv_obj_t>> {
-        let objects = self.entries.iter().map(|e| e.1).collect();
-        self.entries = Vec::new();
-        objects
+    /// The object with the smallest identifier. Teardown deletes a consumer's
+    /// objects one at a time through this, since deleting an object frees its
+    /// descendants and the free hook removes their entries.
+    pub fn first(&self) -> Option<NonNull<ffi::lv_obj_t>> {
+        self.entries.first().map(|entry| entry.1)
     }
 }
 
