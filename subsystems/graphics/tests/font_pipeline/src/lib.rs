@@ -1,9 +1,9 @@
-#[path = "../../../build/config.rs"]
-pub mod config;
 #[path = "../../../build/cache.rs"]
 pub mod cache;
 #[path = "../../../build/catalogs.rs"]
 pub mod catalogs;
+#[path = "../../../build/config.rs"]
+pub mod config;
 #[path = "../../../build/fonts.rs"]
 pub mod fonts;
 #[path = "../../../build/generate.rs"]
@@ -78,5 +78,58 @@ mod tests {
             effective_ranges("en", "ru,ru,en").unwrap(),
             vec![0x20..0x7f, 0xb0..0xb1, 0x400..0x530, 0x2022..0x2023]
         );
+    }
+
+    #[test]
+    fn terminal_fonts_use_only_approved_sources() {
+        let graphics_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let fonts_dir = graphics_root.join("fonts");
+        let out = graphics_root.join("unused");
+        let unscii = fonts_dir.join("unscii-16.woff");
+        let terminal_inputs = |plan: Vec<super::generate::Source>,
+                               expected: &[std::path::PathBuf]| {
+            let terminal_fonts = plan
+                .iter()
+                .filter(|source| source.name.starts_with("font_unscii_"))
+                .collect::<Vec<_>>();
+            assert_eq!(terminal_fonts.len(), 2);
+            for source in terminal_fonts {
+                assert_eq!(
+                    source.inputs, expected,
+                    "unexpected inputs for {}",
+                    source.name
+                );
+            }
+        };
+
+        for ranges in supported_variants() {
+            let plan =
+                super::generate::sources(&graphics_root, &out, &ranges, "converter").unwrap();
+            terminal_inputs(plan, std::slice::from_ref(&unscii));
+        }
+
+        for (locale, file) in [
+            ("zh-CN", "SourceHanSansSC-Regular.otf"),
+            ("zh", "SourceHanSansSC-Regular.otf"),
+            ("ja", "SourceHanSansJP-Regular.otf"),
+        ] {
+            let ranges = effective_ranges(locale, "en").unwrap();
+            assert_eq!(super::fonts::catalog_font(locale, "en"), Some(file));
+            let catalog_font = std::path::Path::new(file);
+            let symbols = super::catalogs::CatalogSymbols {
+                cjk: "月午".into(),
+                ..Default::default()
+            };
+            let plan = super::generate::sources_with_locale_catalogs(
+                &graphics_root,
+                &out,
+                &ranges,
+                "converter",
+                Some(&symbols),
+                catalog_font,
+            )
+            .unwrap();
+            terminal_inputs(plan, &[unscii.clone(), fonts_dir.join(catalog_font)]);
+        }
     }
 }

@@ -102,6 +102,16 @@ fn main() {
     for path in inputs {
         println!("cargo:rerun-if-changed={}", path.display());
     }
+    let terminal_font = root.join("fonts").join(generate::TERMINAL_FONT_FILE);
+    let terminal_digest = cache::file_digest(&terminal_font)
+        .unwrap_or_else(|error| panic!("Could not hash {}: {error}", terminal_font.display()));
+    assert_eq!(
+        terminal_digest,
+        generate::TERMINAL_FONT_CACHE_DIGEST,
+        "Unexpected terminal font digest for {} (must be plain Unscii without GNU Unifont)",
+        terminal_font.display()
+    );
+
     let mut sources = Vec::new();
     let mut generated = 0;
     let mut reused = 0;
@@ -114,7 +124,6 @@ fn main() {
                 &identity,
                 symbols.as_ref(),
                 catalog_font.as_deref().expect("active catalog font"),
-                japanese,
             )
         } else {
             generate::sources(&root, &out.join("generated_fonts"), ranges, &identity)
