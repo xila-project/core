@@ -15,6 +15,7 @@ lvgl_rust_sys = { workspace = true, features = ["build-lvgl", "shadcn-theme"] }
 lvgl-rust = { workspace = true, features = [
   "growable-registry",
   "free-observer",
+  "external-class-policy",
 ] }
 time = { workspace = true }
 shared = { workspace = true }

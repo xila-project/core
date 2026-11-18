@@ -49,15 +49,24 @@ impl DirectBaseOperations for Screen {
 #[test]
 fn snapshot_describes_widget_roles_labels_and_explicit_state() {
     let time = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
-    let manager = task::block_on(graphics::initialize_with_input_devices(
-        time,
-        &Screen,
-        &[],
-        1024,
-        false,
-    ));
+    let manager = Box::leak(Box::new(task::block_on(
+        graphics::initialize_with_input_devices(time, &Screen, &[], 1024, false),
+    )));
+    graphics::set_ffi_manager(manager);
     // The safe session and raw compatibility API share one LVGL and lock.
-    use graphics::lvgl_rust::{Obj, WidgetExt};
+    use graphics::lvgl_rust::{Error, Obj, WidgetExt};
+    let window = core::mem::ManuallyDrop::new(task::block_on(manager.create_window()).unwrap());
+    manager
+        .with_lvgl_sync(|lv| {
+            assert_eq!(
+                lv.edit(|lv| lv.screen_active()?.child(0)).unwrap().delete(),
+                Err(Error::Internal),
+            );
+            Ok(())
+        })
+        .unwrap();
+    drop(core::mem::ManuallyDrop::into_inner(window));
+
     let handle = manager
         .with_lvgl_sync(|lv| {
             let mut screen = lv.screen_active_mut().unwrap();
@@ -204,7 +213,6 @@ fn snapshot_describes_widget_roles_labels_and_explicit_state() {
         task::block_on(manager.click_ui(None, None, None, None)),
         Err("invalid_selector")
     );
-    core::mem::forget(manager);
     let offset = (10 * usize::from(capture.width) + 10) * 4;
     assert_eq!(
         &capture.pixels_rgba[offset..offset + 4],

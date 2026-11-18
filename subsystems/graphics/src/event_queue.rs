@@ -150,6 +150,27 @@ impl EventQueue {
         }
     }
 
+    /// Null the target of every event whose target `is_live` rejects, and keep
+    /// the events. `is_live` is called once per distinct run of targets and
+    /// must only compare the address; the targets may already be deleted.
+    pub fn clear_dead_targets(
+        &mut self,
+        mut is_live: impl FnMut(*mut crate::lvgl::lv_obj_t) -> bool,
+    ) {
+        let mut last = (ptr::null_mut(), true);
+        for event in self.slots.iter_mut().flatten() {
+            if event.target.is_null() {
+                continue;
+            }
+            if last.0 != event.target {
+                last = (event.target, is_live(event.target));
+            }
+            if !last.1 {
+                event.target = ptr::null_mut();
+            }
+        }
+    }
+
     fn physical(&self, index: usize) -> usize {
         (self.head as usize + index) % WINDOW_EVENT_QUEUE_CAPACITY
     }
@@ -403,6 +424,32 @@ mod tests {
                 (EventKind::Pressed, 0),
                 (EventKind::Clicked, 2),
                 (EventKind::Released, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn dead_targets_are_cleared_and_live_ones_kept() {
+        let mut queue = EventQueue::new();
+        for target in [1, 1, 2, 3, 2, 1] {
+            queue.push(event(EventKind::Clicked, target));
+        }
+        let mut calls = 0;
+        queue.clear_dead_targets(|target| {
+            calls += 1;
+            target == object(2)
+        });
+        // One call per run of equal targets, not per event.
+        assert_eq!(calls, 5);
+        assert_eq!(
+            drain(&mut queue),
+            [
+                (EventKind::Clicked, 0),
+                (EventKind::Clicked, 0),
+                (EventKind::Clicked, 2),
+                (EventKind::Clicked, 0),
+                (EventKind::Clicked, 2),
+                (EventKind::Clicked, 0),
             ]
         );
     }

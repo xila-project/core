@@ -15,6 +15,22 @@ unsafe impl Sync for ClassWrapper {}
 
 static WINDOW_CLASS: OnceLock<ClassWrapper> = OnceLock::new();
 
+#[unsafe(no_mangle)]
+fn lvgl_rust_external_class_policy(
+    class: *const lvgl::lv_obj_class_t,
+) -> lvgl_rust::ExternalClassPolicy {
+    // The descriptor is initialized under the graphics lock before use. A
+    // policy lookup may only read it; initializing it calls LVGL.
+    if WINDOW_CLASS
+        .try_get()
+        .is_some_and(|window| core::ptr::eq(&window.0, class))
+    {
+        lvgl_rust::ExternalClassPolicy::ChildrenOnly
+    } else {
+        lvgl_rust::ExternalClassPolicy::Protected
+    }
+}
+
 pub fn get_window_class() -> &'static lvgl::lv_obj_class_t {
     let class_ref = WINDOW_CLASS.get_or_init(|| {
         let mut cls = lvgl::lv_obj_class_t {
@@ -83,6 +99,30 @@ unsafe extern "C" fn window_destructor(
     }
 }
 
+/// Whether `target` is `root` or one of its descendants. Compares addresses
+/// with live objects only: `target` itself is never dereferenced.
+unsafe fn is_in_tree(root: *mut lvgl::lv_obj_t, target: *mut lvgl::lv_obj_t) -> bool {
+    unsafe {
+        root == target
+            || (0..lvgl::lv_obj_get_child_count(root) as i32)
+                .any(|index| is_in_tree(lvgl::lv_obj_get_child(root, index), target))
+    }
+}
+
+/// Null the target of every queued event whose widget is no longer below the
+/// window. Costs nothing per object and allocates nothing; the walk runs only
+/// when a descendant goes away and an event is queued.
+unsafe fn forget_dead_targets(window: *mut Window) {
+    unsafe {
+        let queue = &mut (*window).event_queue;
+        if queue.is_empty() {
+            return;
+        }
+        let root = window as *mut lvgl::lv_obj_t;
+        queue.clear_dead_targets(|target| is_in_tree(root, target));
+    }
+}
+
 unsafe extern "C" fn window_event_callback(
     _class_p: *const lvgl::lv_obj_class_t,
     event: *mut lvgl::lv_event_t,
@@ -103,6 +143,19 @@ unsafe extern "C" fn window_event_callback(
             lvgl::lv_event_code_t_LV_EVENT_CHILD_CREATED => {
                 let child = lvgl::lv_event_get_param(event) as *mut lvgl::lv_obj_t;
                 lvgl::lv_obj_add_flag(child, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_EVENT_BUBBLE);
+                (code, None)
+            }
+            lvgl::lv_event_code_t_LV_EVENT_CHILD_DELETED => {
+                // A descendant was deleted or moved out. LVGL sends this to
+                // the direct parent after the object is freed, and it reaches
+                // the window by bubbling. Queued events aimed at it would
+                // otherwise match a widget created later at the same address.
+                // Remaining gap: user code that runs between the free and
+                // this event (a raw CHILD_CHANGED or scroll handler during a
+                // clean, a parent destructor, or a handler that stops
+                // bubbling) could create a widget at the freed address before
+                // the sweep, and that widget would then match a stale event.
+                forget_dead_targets(window);
                 (code, None)
             }
             lvgl::lv_event_code_t_LV_EVENT_KEY => {
@@ -199,6 +252,10 @@ impl Window {
 
     /// Forget queued targets before their LVGL storage can be reused. This only
     /// compares addresses; it never dereferences the potentially deleted target.
+    ///
+    /// Not needed for widgets below the window that LVGL deletes or moves
+    /// away: the window clears those targets itself when LVGL reports the
+    /// deletion.
     pub fn discard_events_for_target(&mut self, target: *mut lvgl::lv_obj_t) {
         self.event_queue.discard_target(target);
     }
