@@ -190,36 +190,29 @@ pub fn test_aligned_allocation(allocator: impl ManagerTrait) {
 /// # Panics
 /// Panics if allocation with capabilities fails.
 pub fn test_allocation_with_capabilities(allocator: impl ManagerTrait) {
-    let manager = Manager::new(&allocator);
+    let layout = Layout::from_size_align(128, 128).unwrap();
+    let expected = CapabilityFlags::Executable | CapabilityFlags::AlwaysAccessible;
+    for capability in expected.iter() {
+        let pointer = unsafe { allocator.allocate(capability, layout) };
+        let pointer = pointer.expect("supported capability");
+        unsafe { allocator.deallocate(pointer, layout) };
+    }
+}
 
-    let layout = Layout::from_size_align(128, 8).unwrap();
-
-    // Test executable capability
-    let caps_exec = CapabilityFlags::Executable;
-    let ptr = unsafe { manager.allocate(caps_exec, layout) };
-    assert!(
-        !ptr.is_null(),
-        "Allocation with executable capability should succeed"
-    );
-    unsafe { manager.deallocate(ptr, layout) };
-
-    // Test DMA capability
-    // let caps_dma = Capabilities::new(false, true);
-    // let ptr = unsafe { manager.allocate(caps_dma, layout) };
-    // assert!(
-    //     !ptr.is_null(),
-    //     "Allocation with DMA capability should succeed"
-    // );
-    // unsafe { manager.deallocate(ptr, layout) };
-
-    // Test both capabilities
-    // let caps_both = Capabilities::new(true, true);
-    // let ptr = unsafe { manager.allocate(caps_both, layout) };
-    // assert!(
-    //     !ptr.is_null(),
-    //     "Allocation with both capabilities should succeed"
-    // );
-    // unsafe { manager.deallocate(ptr, layout) };
+/// Checks which individual capabilities a platform supports for an aligned layout.
+pub fn test_supported_capabilities(allocator: impl ManagerTrait, supported: CapabilityFlags) {
+    let layout = Layout::from_size_align(128, 128).unwrap();
+    for capability in CapabilityFlags::all().iter() {
+        let pointer = unsafe { allocator.allocate(capability, layout) };
+        assert_eq!(
+            pointer.is_some(),
+            supported.contains(capability),
+            "{capability:?}"
+        );
+        if let Some(pointer) = pointer {
+            unsafe { allocator.deallocate(pointer, layout) };
+        }
+    }
 }
 
 /// Tests memory deallocation.
@@ -638,77 +631,93 @@ pub fn test_allocation_pattern(allocator: impl ManagerTrait) {
 /// - test_cache_flush_operations
 /// - test_large_allocation
 /// - test_allocation_pattern
+///
+/// To verify a platform-specific capability set, pass the test attribute and
+/// expected flags as `([#[test]], manager, capabilities = flags)`. The attribute
+/// can also select a target-specific test harness.
 #[macro_export]
 macro_rules! implement_memory_manager_tests {
-    ($manager:expr) => {
-        #[test]
+    ([$($attribute:tt)*], $manager:expr, capabilities = $supported:expr) => {
+        $crate::implement_memory_manager_tests!(
+            @impl, [$($attribute)*], $manager,
+            $crate::test::test_supported_capabilities($manager, $supported)
+        );
+    };
+    (@impl, [$($attribute:tt)*], $manager:expr, $capabilities_test:expr) => {
+        $($attribute)*
         fn test_basic_allocation() {
             $crate::test::test_basic_allocation($manager);
         }
 
-        #[test]
+        $($attribute)*
         fn test_zero_sized_allocation() {
             $crate::test::test_zero_sized_allocation($manager);
         }
 
-        #[test]
+        $($attribute)*
         fn test_aligned_allocation() {
             $crate::test::test_aligned_allocation($manager);
         }
 
-        #[test]
+        $($attribute)*
         fn test_allocation_with_capabilities() {
-            $crate::test::test_allocation_with_capabilities($manager);
+            $capabilities_test;
         }
 
-        #[test]
+        $($attribute)*
         fn test_deallocation() {
             $crate::test::test_deallocation($manager);
         }
 
-        #[test]
+        $($attribute)*
         fn test_reallocation_grow() {
             $crate::test::test_reallocation_grow($manager);
         }
 
-        #[test]
+        $($attribute)*
         fn test_reallocation_shrink() {
             $crate::test::test_reallocation_shrink($manager);
         }
 
-        #[test]
+        $($attribute)*
         fn test_reallocation_same_size() {
             $crate::test::test_reallocation_same_size($manager);
         }
 
-        #[test]
+        $($attribute)*
         fn test_multiple_allocations() {
             $crate::test::test_multiple_allocations($manager);
         }
 
-        #[test]
+        $($attribute)*
         fn test_memory_statistics() {
             $crate::test::test_memory_statistics($manager);
         }
 
-        #[test]
+        $($attribute)*
         fn test_page_size() {
             $crate::test::test_page_size($manager);
         }
 
-        #[test]
+        $($attribute)*
         fn test_cache_flush_operations() {
             $crate::test::test_cache_flush_operations($manager);
         }
 
-        #[test]
+        $($attribute)*
         fn test_large_allocation() {
             $crate::test::test_large_allocation($manager);
         }
 
-        #[test]
+        $($attribute)*
         fn test_allocation_pattern() {
             $crate::test::test_allocation_pattern($manager);
         }
+    };
+    ($manager:expr) => {
+        $crate::implement_memory_manager_tests!(
+            @impl, [#[test]], $manager,
+            $crate::test::test_allocation_with_capabilities($manager)
+        );
     };
 }

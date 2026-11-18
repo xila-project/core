@@ -46,28 +46,19 @@ pub trait ManagerTrait: Send + Sync {
     /// - The memory is not deallocated multiple times
     unsafe fn deallocate(&self, pointer: NonNull<u8>, layout: Layout);
 
-    /// Reallocates memory with a new layout.
+    /// Changes the size or alignment of a previously allocated memory block.
     ///
-    /// This method changes the size or alignment of a previously allocated memory block.
-    /// If the pointer is `None`, this behaves like a normal allocation.
-    /// If reallocation is successful, the contents of the old memory are preserved
-    /// up to the minimum of the old and new sizes.
+    /// On success, the contents are preserved up to the smaller of the two sizes.
+    /// On failure, the original allocation remains valid.
     ///
-    /// # Parameters
-    /// * `Pointer` - Optional pointer to the memory to reallocate. If `None`, acts as a new allocation
-    /// * `Old_layout` - The layout that was used for the original allocation
-    /// * `New_layout` - The new layout requirements for the memory
-    ///
-    /// # Returns
-    /// A pointer to the reallocated memory with the new layout, or `None` if reallocation failed.
-    /// The protection is set to [`crate::Protection::READ`].
+    /// The allocator may move the block according to its ordinary placement policy.
+    /// Callers that need specific capabilities after resizing must allocate a new block
+    /// with those flags, copy the data and free the old block.
     ///
     /// # Safety
-    /// This function is unsafe because the caller must ensure that:
-    /// - If `Pointer` is `Some`, it was allocated by this allocator
-    /// - The `Old_layout` matches the one used for the original allocation
-    /// - The old memory is not used after successful reallocation
-    /// - The returned memory is properly initialized before use
+    ///
+    /// - `old_pointer` must refer to a live allocation from this manager with `old_layout`.
+    /// - On success, access the allocation through the returned pointer and `new_layout`.
     unsafe fn reallocate(
         &self,
         old_pointer: NonNull<u8>,
