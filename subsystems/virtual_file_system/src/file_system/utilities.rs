@@ -783,10 +783,9 @@ impl VirtualFileSystem {
         .await
         {
             log::error!(
-                "Asked permissions {:?} not granted for user {:?} on path {:?} (owner: {:?}, group: {:?}, permissions: {:?})",
+                "Asked permissions {:?} not granted for user {:?} (owner: {:?}, group: {:?}, permissions: {:?})",
                 asked_permissions,
                 current_user,
-                path,
                 owner_user,
                 owner_group,
                 owner_permissions,

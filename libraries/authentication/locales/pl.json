@@ -24,8 +24,14 @@
     "failed_to_read_random_device": "Nie udało się odczytać urządzenia losowego: {arg0}",
     "failed_to_read_user_file": "Nie udało się odczytać pliku użytkownika: {arg0}",
     "failed_to_read_users_directory": "Nie udało się odczytać katalogu użytkowników: {arg0}",
+    "failed_to_rename_user": "Nie udało się zmienić nazwy użytkownika: {arg0}",
     "failed_to_write_group_file": "Nie udało się zapisać pliku grupy: {arg0}",
     "failed_to_write_user_file": "Nie udało się zapisać pliku użytkownika: {arg0}",
-    "invalid_password": "Nieprawidłowe hasło"
+    "invalid_password": "Nieprawidłowe hasło",
+    "invalid_user_home": "Nieprawidłowy katalog domowy użytkownika",
+    "invalid_user_name": "Nieprawidłowa nazwa użytkownika",
+    "invalid_user_record": "Nieprawidłowy rekord użytkownika",
+    "unsupported_user_record_version": "Nieobsługiwana wersja rekordu użytkownika",
+    "user_home_already_used": "Katalog domowy jest już używany"
   }
 }

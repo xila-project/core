@@ -164,7 +164,10 @@ async fn privileged_request_runs_the_pipeline_and_data_survives() {
     let group = users::GroupIdentifier::new(1001);
     users.add_group(group, "users", &[]).await.unwrap();
     let user = users::UserIdentifier::new(1001);
-    users.add_user(user, "user", group).await.unwrap();
+    users
+        .add_user(user, "user", group, "/users/user")
+        .await
+        .unwrap();
     manager.set_user(task, user).await.unwrap();
     assert_eq!(
         lifecycle::request(vfs, task, Action::PowerOff, 0).await,

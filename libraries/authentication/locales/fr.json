@@ -24,8 +24,14 @@
     "failed_to_read_random_device": "Impossible de lire le dispositif aléatoire : {arg0}",
     "failed_to_read_user_file": "Impossible de lire le fichier utilisateur : {arg0}",
     "failed_to_read_users_directory": "Impossible de lire le répertoire des utilisateurs : {arg0}",
+    "failed_to_rename_user": "Impossible de renommer l’utilisateur : {arg0}",
     "failed_to_write_group_file": "Impossible d’écrire le fichier de groupe : {arg0}",
     "failed_to_write_user_file": "Impossible d’écrire le fichier utilisateur : {arg0}",
-    "invalid_password": "Mot de passe invalide"
+    "invalid_password": "Mot de passe invalide",
+    "invalid_user_home": "Dossier personnel de l’utilisateur invalide",
+    "invalid_user_name": "Nom d’utilisateur invalide",
+    "invalid_user_record": "Fiche utilisateur invalide",
+    "unsupported_user_record_version": "Version de fiche utilisateur non prise en charge",
+    "user_home_already_used": "Dossier personnel déjà utilisé"
   }
 }

@@ -1,24 +1,47 @@
-use alloc::format;
 use file_system::{Kind, PathOwned, Permissions};
 use task::TaskIdentifier;
 use users::UserIdentifier;
 
 use crate::{Error, Result, VirtualFileSystem};
 
-/// Stable home path, unaffected by account renaming or untrusted user names.
-pub fn user_home(user: UserIdentifier) -> PathOwned {
-    PathOwned::new(format!("/users/{}", user.as_u16())).expect("numeric user home is a valid path")
-}
-
-pub fn user_application_directory(user: UserIdentifier, application_id: &str) -> PathOwned {
-    PathOwned::new(format!(
-        "/users/{}/applications/{application_id}",
-        user.as_u16()
-    ))
-    .expect("application identifier is a valid path component")
+fn is_valid_application_identifier(application_id: &str) -> bool {
+    !application_id.is_empty()
+        && !matches!(application_id, "." | "..")
+        && !application_id.contains(['/', '\0'])
 }
 
 impl VirtualFileSystem {
+    /// The home recorded in the user's account.
+    ///
+    /// Accounts record their home when they are created (`/users/<user name>`),
+    /// and accounts saved before homes were recorded keep `/users/<identifier>`.
+    /// The home is read from the account, never derived from the current user
+    /// name, so renaming a user does not move or lose their home. Recorded
+    /// homes are always a single entry directly below `/users`.
+    pub async fn get_user_home(&self, user: UserIdentifier) -> Result<PathOwned> {
+        let home = self.users_manager().get_user_home(user).await?;
+        if !users::is_valid_user_home(&home) {
+            return Err(Error::InvalidPath);
+        }
+        PathOwned::new(home).ok_or(Error::InvalidPath)
+    }
+
+    /// The private directory of an application inside the user's recorded home.
+    pub async fn get_user_application_directory(
+        &self,
+        user: UserIdentifier,
+        application_id: &str,
+    ) -> Result<PathOwned> {
+        if !is_valid_application_identifier(application_id) {
+            return Err(Error::InvalidPath);
+        }
+        self.get_user_home(user)
+            .await?
+            .append("applications")
+            .and_then(|path| path.append(application_id))
+            .ok_or(Error::InvalidPath)
+    }
+
     /// Lazily create the user's private application configuration, data and cache directories.
     pub async fn ensure_user_application_directories(
         &self,
@@ -26,23 +49,20 @@ impl VirtualFileSystem {
         user: UserIdentifier,
         application_id: &str,
     ) -> Result<PathOwned> {
-        if application_id.is_empty()
-            || matches!(application_id, "." | "..")
-            || application_id.contains(['/', '\0'])
-        {
+        if !is_valid_application_identifier(application_id) {
             return Err(Error::InvalidPath);
         }
         let current_user = self.task_manager().get_user(task).await?;
         if current_user != user && current_user != UserIdentifier::ROOT {
             return Err(Error::PermissionDenied);
         }
-        self.ensure_user_home(task, user).await?;
+        let home = self.ensure_user_home(task, user).await?;
         let group = self.users_manager().get_user_primary_group(user).await?;
-        let application = user_application_directory(user, application_id);
+        let application = self
+            .get_user_application_directory(user, application_id)
+            .await?;
         let paths = [
-            user_home(user)
-                .append("applications")
-                .ok_or(Error::InvalidPath)?,
+            home.append("applications").ok_or(Error::InvalidPath)?,
             application.clone(),
             application
                 .clone()
@@ -88,7 +108,7 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         user: UserIdentifier,
     ) -> Result<PathOwned> {
-        let path = user_home(user);
+        let path = self.get_user_home(user).await?;
         match self.get_statistics(&path).await {
             Ok(statistics) => {
                 if statistics.kind != Kind::Directory {

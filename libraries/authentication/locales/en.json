@@ -24,8 +24,14 @@
     "failed_to_read_random_device": "Failed to read random device: {arg0}",
     "failed_to_read_user_file": "Failed to read user file: {arg0}",
     "failed_to_read_users_directory": "Failed to read users directory: {arg0}",
+    "failed_to_rename_user": "Failed to rename user: {arg0}",
     "failed_to_write_group_file": "Failed to write group file: {arg0}",
     "failed_to_write_user_file": "Failed to write user file: {arg0}",
-    "invalid_password": "Invalid password"
+    "invalid_password": "Invalid password",
+    "invalid_user_home": "Invalid user home",
+    "invalid_user_name": "Invalid user name",
+    "invalid_user_record": "Invalid user record",
+    "unsupported_user_record_version": "Unsupported user record version",
+    "user_home_already_used": "User home already used"
   }
 }

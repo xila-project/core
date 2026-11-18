@@ -24,8 +24,14 @@
     "failed_to_read_random_device": "Impossibile leggere il dispositivo casuale: {arg0}",
     "failed_to_read_user_file": "Impossibile leggere il file dell'utente: {arg0}",
     "failed_to_read_users_directory": "Impossibile leggere la directory degli utenti: {arg0}",
+    "failed_to_rename_user": "Impossibile rinominare l'utente: {arg0}",
     "failed_to_write_group_file": "Impossibile scrivere il file del gruppo: {arg0}",
     "failed_to_write_user_file": "Impossibile scrivere il file dell'utente: {arg0}",
-    "invalid_password": "Password non valida"
+    "invalid_password": "Password non valida",
+    "invalid_user_home": "Cartella home dell'utente non valida",
+    "invalid_user_name": "Nome utente non valido",
+    "invalid_user_record": "Record utente non valido",
+    "unsupported_user_record_version": "Versione del record utente non supportata",
+    "user_home_already_used": "Cartella home già in uso"
   }
 }

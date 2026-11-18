@@ -110,7 +110,7 @@ pub async fn create_default_hierarchy(
     .await?;
 
     // Without per-application identities, global application state is
-    // root-only; applications keep data in /users/<uid>/applications/.
+    // root-only; applications keep data in <home>/applications/.
     for path in [Path::APPLICATION_DATA, Path::APPLICATION_CONFIGURATION] {
         set_permissions_if_different(virtual_file_system, task, path, Permissions::USER_FULL)
             .await?;

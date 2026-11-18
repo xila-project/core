@@ -24,8 +24,14 @@
     "failed_to_read_random_device": "Zufallsgerät konnte nicht gelesen werden: {arg0}",
     "failed_to_read_user_file": "Benutzerdatei konnte nicht gelesen werden: {arg0}",
     "failed_to_read_users_directory": "Benutzerverzeichnis konnte nicht gelesen werden: {arg0}",
+    "failed_to_rename_user": "Benutzer konnte nicht umbenannt werden: {arg0}",
     "failed_to_write_group_file": "Gruppendatei konnte nicht geschrieben werden: {arg0}",
     "failed_to_write_user_file": "Benutzerdatei konnte nicht geschrieben werden: {arg0}",
-    "invalid_password": "Ungültiges Passwort"
+    "invalid_password": "Ungültiges Passwort",
+    "invalid_user_home": "Ungültiges Benutzerverzeichnis",
+    "invalid_user_name": "Ungültiger Benutzername",
+    "invalid_user_record": "Ungültiger Benutzereintrag",
+    "unsupported_user_record_version": "Nicht unterstützte Version des Benutzereintrags",
+    "user_home_already_used": "Benutzerverzeichnis wird bereits verwendet"
   }
 }

@@ -132,7 +132,12 @@ async fn vfs_stream_is_exclusive_explicit_and_privileged() {
     file.close(vfs).await.unwrap();
     let user = UserIdentifier::new(1001);
     vfs.users_manager()
-        .add_user(user, "unprivileged", GroupIdentifier::ROOT)
+        .add_user(
+            user,
+            "unprivileged",
+            GroupIdentifier::ROOT,
+            "/users/unprivileged",
+        )
         .await
         .unwrap();
     vfs.task_manager().set_user(task, user).await.unwrap();

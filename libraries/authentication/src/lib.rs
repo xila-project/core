@@ -5,27 +5,49 @@
 //!
 //! ## Features
 //!
-//! - **User Management**: Create, authenticate, and manage user accounts
+//! - **User Management**: Create, authenticate, rename and manage user accounts
 //! - **Group Management**: Create and manage user groups
 //! - **Password Security**: Secure password hashing using SHA-512 with salt
 //! - **File-based Storage**: Persistent storage of user and group data in JSON format
 //! - **Async Operations**: All operations are asynchronous for better performance
 //!
-//! ## Usage
-//!
-//! The module provides functionality to:
-//! - Load existing users and groups from the filesystem
-//! - Authenticate users with username/password
-//! - Create new users and groups
-//! - Change user passwords and usernames
-//! - Hash passwords securely with salt generation
-//!
 //! ## File Structure
 //!
-//! - Users are stored in `/System/Users/` directory
-//! - Groups are stored in `/System/Groups/` directory
-//! - Each user/group has their own JSON file containing their data
+//! - Users are stored in `/system/accounts/users/`, one record per user, in a
+//!   file named after the user
+//! - Groups are stored in `/system/accounts/groups/`
 //! - Random salt generation uses `/devices/random/source`
+//!
+//! ## User names
+//!
+//! New and renamed accounts must satisfy [`users::is_valid_user_name`]: an
+//! ASCII letter followed by at most 31 ASCII letters, digits, `_` or `-`.
+//! Existing accounts load whatever their name, but record lookups always
+//! reject names that are not a single ordinary directory entry.
+//!
+//! ## Home directories
+//!
+//! Like the home field of `/etc/passwd`, each account records its home. It is
+//! set to `/users/<user name>` when the account is created and read from the
+//! account afterwards (`VirtualFileSystem::get_user_home`), never recomputed
+//! from the current name. The directory itself is created at the first login.
+//! The built-in root account has no record; its home is [`users::ROOT_HOME`].
+//!
+//! Renaming an account ([`change_user_name`]) keeps its recorded home, as Linux
+//! `usermod --login` does without `--move-home`. Moving a home is a separate,
+//! explicit operation that Xila does not perform implicitly.
+//!
+//! ## Account record versions
+//!
+//! Records carry a `version` field ([`USER_RECORD_VERSION`]). Version 1 adds
+//! the `home` field. Records without a `version` are version 0, written before
+//! homes were recorded: their home is `/users/<identifier>`, the path they
+//! already used. That fallback is applied in memory when the record is read,
+//! so booting never writes to storage; a version 0 record is upgraded only when
+//! it is rewritten anyway (password change or rename), and then records the
+//! same `/users/<identifier>` home. Records of an unknown version, or version 1
+//! records without a valid home, are rejected. Firmware older than version 1
+//! ignores the new fields and falls back to `/users/<identifier>`.
 
 #![no_std]
 
@@ -42,6 +64,7 @@ mod user;
 
 use alloc::{vec, vec::Vec};
 pub use error::*;
+use file_system::{AccessFlags, CreateFlags, Flags, Permissions};
 pub use group::*;
 use task::TaskIdentifier;
 pub use user::*;
@@ -68,8 +91,10 @@ pub struct Context<'a> {
 
 /// Loads all users and groups from the filesystem into memory.
 ///
-/// This function scans the `/System/Users` and `/System/Groups` directories,
-/// reads all user and group files, and adds them to the Users manager.
+/// This function scans the `/system/accounts/groups` and
+/// `/system/accounts/users` directories, reads all group and user files, and
+/// adds them to the Users manager with their recorded homes. It only reads:
+/// version 0 user records get their `/users/<identifier>` home in memory.
 /// It should be called during system initialization.
 ///
 /// # Returns
@@ -150,6 +175,7 @@ pub async fn load_all_users_and_groups(context: &Context<'_>) -> Result<()> {
                     user.get_identifier(),
                     user.get_name(),
                     user.get_primary_group(),
+                    user.get_home(),
                 )
                 .await
                 .map_err(Error::FailedToAddUser)?;
@@ -157,4 +183,44 @@ pub async fn load_all_users_and_groups(context: &Context<'_>) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Write `contents` to `temporary`, then rename it over `destination`, so the
+/// destination holds either its previous or its new contents.
+pub(crate) async fn atomic_write(
+    context: &Context<'_>,
+    temporary: &str,
+    destination: &str,
+    contents: &[u8],
+) -> Result<()> {
+    use virtual_file_system::File;
+
+    let vfs = context.virtual_file_system;
+    let mut file = File::open(
+        vfs,
+        context.task,
+        temporary,
+        Flags::new(AccessFlags::Write, Some(CreateFlags::CREATE_TRUNCATE), None),
+    )
+    .await
+    .map_err(Error::FailedToWriteUserFile)?;
+    file.set_permissions(Permissions::USER_READ_WRITE)
+        .await
+        .map_err(Error::FailedToWriteUserFile)?;
+    let mut offset = 0;
+    while offset < contents.len() {
+        let count = file
+            .write(&contents[offset..])
+            .await
+            .map_err(Error::FailedToWriteUserFile)?;
+        if count == 0 {
+            return Err(seed::invalid());
+        }
+        offset += count;
+    }
+    file.flush().await.map_err(Error::FailedToWriteUserFile)?;
+    file.close(vfs).await.map_err(Error::FailedToCloseFile)?;
+    vfs.rename(context.task, &temporary, &destination)
+        .await
+        .map_err(Error::FailedToWriteUserFile)
 }
