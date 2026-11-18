@@ -631,6 +631,7 @@ pub fn test_allocation_pattern(allocator: impl ManagerTrait) {
 /// - test_cache_flush_operations
 /// - test_large_allocation
 /// - test_allocation_pattern
+///
 /// To verify a platform-specific capability set, pass the test attribute and
 /// expected flags as `([#[test]], manager, capabilities = flags)`. The attribute
 /// can also select a target-specific test harness.
