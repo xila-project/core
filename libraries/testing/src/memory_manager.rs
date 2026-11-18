@@ -8,10 +8,6 @@ use std::{
 };
 
 /// Xila memory manager for tests: every capability is served by [`System`].
-#[allow(
-    clippy::disallowed_types,
-    reason = "host-only std test allocator uses std atomics"
-)]
 pub struct MemoryManager {
     used: AtomicUsize,
 }
@@ -23,10 +19,6 @@ impl Default for MemoryManager {
 }
 
 impl MemoryManager {
-    #[allow(
-        clippy::disallowed_types,
-        reason = "host-only std test allocator uses std atomics"
-    )]
     pub const fn new() -> Self {
         Self {
             used: AtomicUsize::new(0),

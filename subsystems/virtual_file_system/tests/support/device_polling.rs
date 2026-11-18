@@ -16,10 +16,6 @@ use std::sync::{
 
 file_system::define_command!(WAIT_COMMAND, Read, b'P', 1, usize, usize);
 #[derive(Default)]
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only test state uses std atomics."
-)]
 struct State {
     mode: AtomicUsize,
     waker: Mutex<Option<Waker>>,
@@ -52,10 +48,6 @@ impl State {
 struct Opening {
     polls: usize,
 }
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only test device uses std::sync::Arc."
-)]
 struct Device {
     state: Arc<State>,
 }
@@ -131,10 +123,6 @@ impl BaseOperations for Device {
 impl MountOperations for Device {}
 impl CharacterDevice for Device {}
 
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only test helper uses std::sync::Arc."
-)]
 async fn device(flags: StateFlags) -> (Arc<State>, File<'static>) {
     let (task, vfs) = initialize().await;
     let state = Arc::new(State::default());

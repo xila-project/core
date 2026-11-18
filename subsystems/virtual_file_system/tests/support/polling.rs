@@ -13,15 +13,7 @@ use std::{
 };
 
 #[derive(Default)]
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only waker test uses std::task::Wake and std atomics."
-)]
 struct Counter(AtomicUsize);
-#[allow(
-    clippy::disallowed_types,
-    reason = "std::task::Wake requires std::sync::Arc in host tests."
-)]
 impl Wake for Counter {
     fn wake(self: Arc<Self>) {
         self.0.fetch_add(1, Ordering::SeqCst);
@@ -30,10 +22,6 @@ impl Wake for Counter {
         self.0.fetch_add(1, Ordering::SeqCst);
     }
 }
-#[allow(
-    clippy::disallowed_types,
-    reason = "std::task::Wake requires std::sync::Arc in host tests."
-)]
 fn counter() -> (Arc<Counter>, Waker) {
     let count = Arc::new(Counter::default());
     let waker = Waker::from(count.clone());
@@ -283,10 +271,6 @@ async fn vfs_steady_state_poll_wake_and_cancel_allocate_nothing() {
     assert_eq!(requests, 0);
 }
 
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only test flag uses std atomics."
-)]
 #[task::test]
 async fn external_deadline_cancels_pending_registration() {
     use std::sync::atomic::AtomicBool;

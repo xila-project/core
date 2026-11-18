@@ -93,6 +93,10 @@ pub async fn termination_requested(manager: &Manager, task: TaskIdentifier) -> b
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_types,
+    reason = "host-only unit tests use std atomics"
+)]
 mod tests {
     extern crate std;
 
@@ -107,10 +111,6 @@ mod tests {
         move || start.elapsed()
     }
 
-    #[allow(
-        clippy::disallowed_types,
-        reason = "Host-only test signaling flag uses std atomics."
-    )]
     #[task::test]
     async fn cooperative_tasks_stop_and_unresponsive_ones_time_out() {
         static RELEASED: AtomicBool = AtomicBool::new(false);

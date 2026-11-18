@@ -8,15 +8,7 @@ use std::sync::{
 use std::task::Wake;
 
 #[derive(Default)]
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only waker test uses std::task::Wake and std atomics."
-)]
 struct Counter(AtomicUsize);
-#[allow(
-    clippy::disallowed_types,
-    reason = "std::task::Wake requires std::sync::Arc in host tests."
-)]
 impl Wake for Counter {
     fn wake(self: Arc<Self>) {
         self.0.fetch_add(1, Ordering::SeqCst);
@@ -25,10 +17,6 @@ impl Wake for Counter {
         self.0.fetch_add(1, Ordering::SeqCst);
     }
 }
-#[allow(
-    clippy::disallowed_types,
-    reason = "std::task::Wake requires std::sync::Arc in host tests."
-)]
 fn counter() -> (Arc<Counter>, Waker) {
     let count = Arc::new(Counter::default());
     let waker = Waker::from(count.clone());
@@ -176,10 +164,6 @@ fn data_before_registration_and_zero_length_io_complete_immediately() {
     assert_eq!(count.0.load(Ordering::SeqCst), 0);
 }
 
-#[allow(
-    clippy::disallowed_types,
-    reason = "std::task::Wake requires std::sync::Arc in host tests."
-)]
 struct Reentrant {
     pipe: Arc<Pipe>,
     calls: Arc<Counter>,
@@ -192,10 +176,6 @@ impl Reentrant {
         self.calls.0.fetch_add(1, Ordering::SeqCst);
     }
 }
-#[allow(
-    clippy::disallowed_types,
-    reason = "std::task::Wake requires std::sync::Arc in host tests."
-)]
 impl Wake for Reentrant {
     fn wake(self: Arc<Self>) {
         self.check_unlocked();
@@ -207,10 +187,6 @@ impl Drop for Reentrant {
     }
 }
 
-#[allow(
-    clippy::disallowed_types,
-    reason = "std::task::Wake requires std::sync::Arc in host tests."
-)]
 #[test]
 fn wake_and_replaced_cancelled_waker_drop_run_outside_lock() {
     let pipe = Arc::new(Pipe::new(1));

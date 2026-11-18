@@ -275,6 +275,10 @@ impl<'a, D> fmt::Debug for PartitionDevice<'a, D> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_types,
+    reason = "host-only unit tests count cancellations"
+)]
 mod tests {
     use alloc::boxed::Box;
 
@@ -282,10 +286,6 @@ mod tests {
 
     use super::*;
 
-    #[allow(
-        clippy::disallowed_types,
-        reason = "host-only unit test counts cancellations"
-    )]
     struct Deferred(core::sync::atomic::AtomicUsize);
     impl DirectBaseOperations for Deferred {
         fn read(
@@ -374,10 +374,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(
-        clippy::disallowed_types,
-        reason = "host-only unit test counts cancellations"
-    )]
     fn partition_forwards_pending_and_cancellation_to_its_device() {
         let device = Deferred(core::sync::atomic::AtomicUsize::new(0));
         let partition = PartitionDevice::new(&device, 0, 1, 512);

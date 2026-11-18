@@ -1,5 +1,6 @@
 //! System shutdown pipeline against a real VFS, LittleFS and power device.
 #![cfg(target_os = "linux")]
+#![allow(clippy::disallowed_types, reason = "host-only test uses std atomics")]
 
 extern crate abi_definitions;
 
@@ -21,10 +22,6 @@ use task::{TaskIdentifier, test};
 use virtual_file_system::{File, VirtualFileSystem};
 
 /// Memory block device whose flush can be made to fail.
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only test device uses std atomics."
-)]
 struct Disk {
     memory: &'static MemoryDevice<512>,
     fail_flush: AtomicBool,
@@ -71,10 +68,6 @@ impl MountOperations for Disk {}
 impl file_system::DirectBlockDevice for Disk {}
 
 /// Power-off-only controller recording `action << 8 | status`.
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only test power recorder uses std atomics."
-)]
 struct Recorder(&'static AtomicU16);
 
 impl PowerController for Recorder {
@@ -91,10 +84,6 @@ impl PowerController for Recorder {
     }
 }
 
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only test harness holds std atomic."
-)]
 struct System {
     task: TaskIdentifier,
     vfs: &'static VirtualFileSystem,
@@ -103,10 +92,6 @@ struct System {
     time: &'static time::Manager<'static>,
 }
 
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only test harness allocates std atomics."
-)]
 async fn boot(disk: Option<&'static Disk>) -> System {
     if !log::is_initialized() {
         let _ = log::initialize(&testing::Logger);
@@ -300,10 +285,6 @@ async fn flush_failure_stops_before_the_power_action() {
     assert_eq!(system.powered.load(Ordering::SeqCst), 0);
 }
 
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only test flag uses std atomics."
-)]
 #[test]
 async fn unresponsive_task_times_out_without_teardown() {
     static RELEASE: AtomicBool = AtomicBool::new(false);

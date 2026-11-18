@@ -1,4 +1,8 @@
 #![no_std]
+#![allow(
+    clippy::disallowed_types,
+    reason = "host-only test uses core atomics under no_std"
+)]
 
 extern crate alloc;
 use core::time::Duration;
@@ -28,10 +32,6 @@ fn test_uptime() {
 }
 
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only test clock uses core atomics under no_std."
-)]
 struct WallClock {
     seconds: AtomicU64,
     failed: AtomicBool,
@@ -50,10 +50,6 @@ impl time::RealtimeSource for WallClock {
     }
 }
 
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only test clock uses core atomics under no_std."
-)]
 struct Clock(AtomicU64);
 impl time::MonotonicClock for Clock {
     fn now(&self) -> Duration {
@@ -62,10 +58,6 @@ impl time::MonotonicClock for Clock {
 }
 
 // Replacing monotonic time with UTC would change every elapsed observation here.
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only test clock uses core atomics under no_std."
-)]
 #[test]
 fn utc_steps_do_not_change_uptime_ticks_or_deadlines() {
     let wall = WallClock {
@@ -109,10 +101,6 @@ fn utc_steps_do_not_change_uptime_ticks_or_deadlines() {
 }
 
 // LVGL computes tick differences with wrapping u32 subtraction.
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only test clock uses core atomics under no_std."
-)]
 #[test]
 fn millisecond_tick_rollover_preserves_elapsed_time() {
     let clock = Clock(AtomicU64::new(4_294_967_290));

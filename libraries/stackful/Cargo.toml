@@ -11,7 +11,6 @@ fpu = []
 name = "stackful"
 
 [dependencies]
-embassy-futures = { workspace = true }
 critical-section = { workspace = true }
 
 [dev-dependencies]

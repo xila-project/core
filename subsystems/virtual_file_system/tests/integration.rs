@@ -1,3 +1,8 @@
+#![allow(
+    clippy::disallowed_types,
+    reason = "host-only integration test uses std::sync::{Arc, atomic}"
+)]
+
 extern crate alloc;
 
 extern crate abi_definitions;
@@ -1730,10 +1735,6 @@ async fn hard_links_stay_beneath_their_roots_and_report_missing_backend_support(
 }
 
 /// Memory block device whose flush can be made to fail.
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only test device uses std atomics."
-)]
 struct FlakyDevice {
     inner: &'static MemoryDevice<512>,
     fail_flush: std::sync::atomic::AtomicBool,
@@ -1798,10 +1799,6 @@ async fn initialize_on(
     (task, vfs)
 }
 
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only test device uses std atomics."
-)]
 fn flaky_device() -> &'static FlakyDevice {
     Box::leak(Box::new(FlakyDevice {
         inner: MemoryDevice::<512>::new_static(1024 * 512),
@@ -1955,20 +1952,12 @@ async fn storage_flush_failure_is_surfaced_and_keeps_the_mount() {
     assert_eq!(buffer, b"data");
 }
 
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only test device uses std atomics."
-)]
 struct CountingBlockDevice {
     inner: &'static MemoryDevice<512>,
     write_count: std::sync::atomic::AtomicUsize,
 }
 
 impl CountingBlockDevice {
-    #[allow(
-        clippy::disallowed_types,
-        reason = "Host-only test device uses std atomics."
-    )]
     fn new_static() -> &'static Self {
         Box::leak(Box::new(Self {
             inner: MemoryDevice::<512>::new_static(1024 * 512),

@@ -1,4 +1,8 @@
 #![cfg(all(target_os = "linux", feature = "uart"))]
+#![allow(
+    clippy::disallowed_types,
+    reason = "host-only test uses std::sync::Arc"
+)]
 
 //! UART device nodes: a loopback pair is mounted as `/devices/uart/loop0` and
 //! `/devices/uart/loop1` and driven through the VFS `File` API and control
@@ -49,10 +53,6 @@ struct Wire {
 /// One end of a test loopback. Unlike `peripherals::uart::LoopbackUart`, it is
 /// `Send` (shared state sits behind `Arc<Mutex<_>>`), which `PeripheralHandle`
 /// requires. Empty reads report `WouldBlock`, as a non-blocking endpoint does.
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only test loopback uses std::sync::Arc."
-)]
 struct LoopbackEnd {
     wire: Arc<Mutex<Wire>>,
     side: usize,
@@ -61,10 +61,6 @@ struct LoopbackEnd {
     nonblocking: bool,
 }
 
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only test loopback uses std::sync::Arc."
-)]
 fn loopback_pair() -> (LoopbackEnd, LoopbackEnd) {
     let wire = Arc::new(Mutex::new(Wire::default()));
     let end = |side| LoopbackEnd {

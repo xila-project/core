@@ -335,5 +335,9 @@ mod regression_tests {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::disallowed_types,
+    reason = "host-only waker tests use std::task::Wake and std atomics"
+)]
 #[path = "pipe_tests.rs"]
 mod polling_tests;

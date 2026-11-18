@@ -7,10 +7,6 @@ use std::{
 
 struct Directory(PathBuf);
 impl Directory {
-    #[allow(
-        clippy::disallowed_types,
-        reason = "Host-only test counter uses std atomics."
-    )]
     fn new() -> Self {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let path = std::env::temp_dir().join(format!(

@@ -41,7 +41,7 @@ depends = ["localization:host-check", "localization:guest-check"]
 
 [tasks."clippy:host"]
 description = "Run Clippy for the Linux host target"
-run = "cargo clippy --package xila --package xila-audio --target x86_64-unknown-linux-gnu --features xila/graphics,xila/abi_definitions,xila/graphics_rendering_xrgb8888 --all-targets -- -D warnings"
+run = "cargo clippy --workspace --target x86_64-unknown-linux-gnu --features xila/graphics,xila/abi_definitions,xila/graphics_rendering_xrgb8888 --all-targets -- -D warnings"
 
 [tasks."clippy:guest"]
 description = "Run Clippy for the WASM guest target"

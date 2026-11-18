@@ -66,8 +66,10 @@ pub fn main() {
         env::set_var("RUSTC_WRAPPER", "");
         // Cross-target flags (such as portable-atomic cfgs for CAS-less
         // targets) must not leak into cbindgen's host macro expansion build.
-        env::remove_var("CARGO_ENCODED_RUSTFLAGS");
-        env::remove_var("RUSTFLAGS");
+        if env::var_os("TARGET") != env::var_os("HOST") {
+            env::remove_var("CARGO_ENCODED_RUSTFLAGS");
+            env::remove_var("RUSTFLAGS");
+        }
     }
 
     cbindgen::Builder::new()

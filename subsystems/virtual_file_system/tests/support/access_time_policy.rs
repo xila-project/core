@@ -4,20 +4,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use users::{GroupIdentifier, UserIdentifier};
 use virtual_file_system::{AccessTimePolicy, Directory, Error, MountOptions};
 
-#[allow(
-    clippy::disallowed_types,
-    reason = "Host-only test device uses std atomics."
-)]
 struct CountingDevice {
     inner: &'static MemoryDevice<512>,
     writes: AtomicUsize,
 }
 
 impl CountingDevice {
-    #[allow(
-        clippy::disallowed_types,
-        reason = "Host-only test device uses std atomics."
-    )]
     fn new() -> &'static Self {
         Box::leak(Box::new(Self {
             inner: MemoryDevice::<512>::new_static(1024 * 512),
