@@ -7,5 +7,9 @@ edition = "2024"
 synchronization = { workspace = true }
 log_external = { package = "log", version = "0.4" }
 
+# `log` only provides its safe setters with pointer compare-and-swap.
+[target.'cfg(not(target_has_atomic = "ptr"))'.dependencies]
+critical-section = { workspace = true }
+
 [lib]
 name = "log"

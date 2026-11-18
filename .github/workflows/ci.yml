@@ -111,6 +111,8 @@ jobs:
         run: mise run ci:firmware
       - name: "Test | Bare-metal façade"
         run: mise run ci:bare-metal
+      - name: "Test | Bare-metal façade without CAS"
+        run: mise run ci:bare-metal-no-cas
       - name: "Test | Task profiling"
         run: mise run ci:profiling-task-tests
       - name: "Test | Font linking"

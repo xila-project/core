@@ -10,6 +10,10 @@ shared = { workspace = true }
 synchronization = { workspace = true }
 nanoaudio = { workspace = true, features = ["buffer", "dsp"] }
 
+# Native 8-bit and pointer atomics are used directly where available.
+[target.'cfg(not(all(target_has_atomic = "8", target_has_atomic = "ptr")))'.dependencies]
+portable-atomic = { workspace = true }
+
 [dev-dependencies]
 critical-section = { workspace = true, features = ["std"] }
 

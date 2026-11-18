@@ -2,8 +2,15 @@
 
 use super::*;
 use alloc::vec::Vec;
-use smol_str::SmolStr;
 use users::{GroupIdentifier, UserIdentifier};
+
+/// Maximum task name length in bytes; longer names are truncated on a
+/// character boundary.
+pub(crate) const MAXIMUM_NAME_LENGTH: usize = 23;
+
+/// Inline task name: 23 bytes plus a one-byte length, so it never allocates
+/// and does not need pointer atomics.
+pub(crate) type Name = heapless::String<MAXIMUM_NAME_LENGTH, u8>;
 
 /// Internal representation of a task.
 pub(crate) struct Metadata {
@@ -11,7 +18,7 @@ pub(crate) struct Metadata {
     /// Internal identifier of the task.
     pub(crate) internal_identifier: usize,
     /// Name of the task.
-    pub(crate) name: SmolStr,
+    pub(crate) name: Name,
     /// The children of the task.
     pub(crate) parent: TaskIdentifier,
     /// The identifier of the user that owns the task.

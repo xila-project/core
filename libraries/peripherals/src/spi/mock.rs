@@ -1,9 +1,50 @@
+#[cfg(target_has_atomic = "8")]
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use synchronization::{
     blocking_mutex::raw::CriticalSectionRawMutex,
     mutex::{Mutex, MutexGuard},
 };
+
+#[cfg(target_has_atomic = "8")]
+struct ReservedFlag(AtomicBool);
+
+#[cfg(target_has_atomic = "8")]
+impl ReservedFlag {
+    const fn new() -> Self {
+        Self(AtomicBool::new(false))
+    }
+
+    fn try_acquire(&self) -> bool {
+        !self.0.swap(true, Ordering::AcqRel)
+    }
+
+    fn release(&self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+#[cfg(not(target_has_atomic = "8"))]
+struct ReservedFlag(
+    synchronization::blocking_mutex::Mutex<CriticalSectionRawMutex, core::cell::Cell<bool>>,
+);
+
+#[cfg(not(target_has_atomic = "8"))]
+impl ReservedFlag {
+    const fn new() -> Self {
+        Self(synchronization::blocking_mutex::Mutex::new(
+            core::cell::Cell::new(false),
+        ))
+    }
+
+    fn try_acquire(&self) -> bool {
+        self.0.lock(|reserved| !reserved.replace(true))
+    }
+
+    fn release(&self) {
+        self.0.lock(|reserved| reserved.set(false));
+    }
+}
 
 use embedded_hal::spi::Operation;
 
@@ -83,7 +124,7 @@ type Endpoint<'d> = Option<&'d Mutex<CriticalSectionRawMutex, dyn SimulatedSpiDe
 pub struct SpiMock<'d, const N: usize> {
     capabilities: BusCapabilities,
     endpoints: [Endpoint<'d>; N],
-    reserved: AtomicBool,
+    reserved: ReservedFlag,
 }
 
 impl<'d, const N: usize> SpiMock<'d, N> {
@@ -91,7 +132,7 @@ impl<'d, const N: usize> SpiMock<'d, N> {
         Self {
             capabilities,
             endpoints,
-            reserved: AtomicBool::new(false),
+            reserved: ReservedFlag::new(),
         }
     }
 
@@ -137,7 +178,7 @@ impl<'a, 'd, const N: usize> SpiMockReservation<'a, 'd, N> {
 
 impl<const N: usize> Drop for SpiMockReservation<'_, '_, N> {
     fn drop(&mut self) {
-        self.bus.reserved.store(false, Ordering::Release);
+        self.bus.reserved.release();
     }
 }
 
@@ -148,7 +189,7 @@ impl<'d, const N: usize> SpiController for SpiMock<'d, N> {
         Self: 'a;
 
     fn reserve(&self) -> Result<Self::Reservation<'_>, SpiError> {
-        if self.reserved.swap(true, Ordering::AcqRel) {
+        if !self.reserved.try_acquire() {
             return Err(SpiError::Busy);
         }
         Ok(SpiMockReservation { bus: self })

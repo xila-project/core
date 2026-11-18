@@ -1,9 +1,8 @@
 // Registration module - handles task registration and basic task data
 
 use super::*;
-use crate::manager::Metadata;
+use crate::manager::{MAXIMUM_NAME_LENGTH, Metadata, Name};
 use alloc::vec::Vec;
-use smol_str::SmolStr;
 use users::{GroupIdentifier, UserIdentifier};
 
 impl Manager {
@@ -50,14 +49,14 @@ impl Manager {
             return Err(Error::InvalidTaskIdentifier);
         };
 
-        // SmolStr's inline capacity is 23 bytes, not characters.
-        let mut end = name.len().min(23);
+        // The capacity is in bytes, not characters.
+        let mut end = name.len().min(MAXIMUM_NAME_LENGTH);
         while !name.is_char_boundary(end) {
             end -= 1;
         }
-        let name = &name[..end];
-
-        let name = SmolStr::new_inline(name);
+        let mut truncated = Name::new();
+        // Cannot fail: `end` never exceeds the capacity.
+        let _ = truncated.push_str(&name[..end]);
 
         let generation = inner
             .next_generation
@@ -67,7 +66,7 @@ impl Manager {
         let metadata = Metadata {
             generation,
             internal_identifier: 0, // Will be set later
-            name: name.clone(),
+            name: truncated,
             parent: parent_task_identifier,
             user,
             group,

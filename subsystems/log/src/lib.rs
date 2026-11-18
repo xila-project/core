@@ -5,8 +5,6 @@ extern crate alloc;
 use alloc::fmt;
 use log_external::Log;
 use log_external::Metadata;
-use log_external::set_logger;
-use log_external::set_max_level;
 pub use log_external::{debug, error, info as information, trace, warn as warning};
 use synchronization::once_lock::OnceLock;
 
@@ -104,7 +102,7 @@ static LOGGER_INSTANCE: OnceLock<Logger> = OnceLock::new();
 pub fn initialize(logger: &'static dyn LoggerTrait) -> Result<(), log_external::SetLoggerError> {
     let log = LOGGER_INSTANCE.get_or_init(|| Logger(logger));
 
-    if set_logger(log).is_err() {
+    if install(log).is_err() {
         logger.log(&Record {
             level: Level::Error,
             target: "log",
@@ -112,8 +110,33 @@ pub fn initialize(logger: &'static dyn LoggerTrait) -> Result<(), log_external::
         });
     }
 
-    set_max_level(log_external::LevelFilter::Trace);
     Ok(())
+}
+
+/// Register `log` as the global logger and enable every level.
+#[cfg(target_has_atomic = "ptr")]
+fn install(log: &'static Logger) -> Result<(), log_external::SetLoggerError> {
+    let result = log_external::set_logger(log);
+    log_external::set_max_level(log_external::LevelFilter::Trace);
+    result
+}
+
+/// Register `log` as the global logger and enable every level.
+///
+/// Without pointer compare-and-swap, `log` only offers racy setters. One
+/// critical section serializes every call made through this crate.
+#[cfg(not(target_has_atomic = "ptr"))]
+fn install(log: &'static Logger) -> Result<(), log_external::SetLoggerError> {
+    critical_section::with(|_| {
+        // SAFETY: the critical section excludes every other `initialize`
+        // call, the only place Xila sets the logger and maximum level. Logging
+        // concurrently with these setters is allowed by `log`.
+        unsafe {
+            let result = log_external::set_logger_racy(log);
+            log_external::set_max_level_racy(log_external::LevelFilter::Trace);
+            result
+        }
+    })
 }
 
 pub fn is_initialized() -> bool {

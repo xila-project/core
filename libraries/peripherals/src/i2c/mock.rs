@@ -1,9 +1,50 @@
+#[cfg(target_has_atomic = "8")]
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use synchronization::{
     blocking_mutex::raw::CriticalSectionRawMutex,
     mutex::{Mutex, MutexGuard},
 };
+
+#[cfg(target_has_atomic = "8")]
+struct BusyFlag(AtomicBool);
+
+#[cfg(target_has_atomic = "8")]
+impl BusyFlag {
+    const fn new() -> Self {
+        Self(AtomicBool::new(false))
+    }
+
+    fn try_acquire(&self) -> bool {
+        !self.0.swap(true, Ordering::AcqRel)
+    }
+
+    fn release(&self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+#[cfg(not(target_has_atomic = "8"))]
+struct BusyFlag(
+    synchronization::blocking_mutex::Mutex<CriticalSectionRawMutex, core::cell::Cell<bool>>,
+);
+
+#[cfg(not(target_has_atomic = "8"))]
+impl BusyFlag {
+    const fn new() -> Self {
+        Self(synchronization::blocking_mutex::Mutex::new(
+            core::cell::Cell::new(false),
+        ))
+    }
+
+    fn try_acquire(&self) -> bool {
+        self.0.lock(|busy| !busy.replace(true))
+    }
+
+    fn release(&self) {
+        self.0.lock(|busy| busy.set(false));
+    }
+}
 
 use embedded_hal::i2c::{ErrorType, Operation, SevenBitAddress, TenBitAddress};
 
@@ -27,7 +68,7 @@ struct Attachment<'s> {
 pub struct MockI2cController<'s, const N: usize> {
     capabilities: Capabilities,
     slaves: Mutex<CriticalSectionRawMutex, [Option<Attachment<'s>>; N]>,
-    busy: AtomicBool,
+    busy: BusyFlag,
 }
 
 impl<'s, const N: usize> MockI2cController<'s, N> {
@@ -41,7 +82,7 @@ impl<'s, const N: usize> MockI2cController<'s, N> {
         Self {
             capabilities,
             slaves: Mutex::new([const { None }; N]),
-            busy: AtomicBool::new(false),
+            busy: BusyFlag::new(),
         }
     }
 
@@ -82,7 +123,7 @@ impl<'s, const N: usize> I2cController for MockI2cController<'s, N> {
         if !self.capabilities.supports_config(config) {
             return Err(Error::Unsupported);
         }
-        if self.busy.swap(true, Ordering::AcqRel) {
+        if !self.busy.try_acquire() {
             return Err(Error::Busy);
         }
         Ok(MockI2cBus { controller: self })
@@ -172,6 +213,6 @@ impl<const N: usize> embedded_hal_async::i2c::I2c<TenBitAddress> for MockI2cBus<
 
 impl<const N: usize> Drop for MockI2cBus<'_, '_, N> {
     fn drop(&mut self) {
-        self.controller.busy.store(false, Ordering::Release);
+        self.controller.busy.release();
     }
 }

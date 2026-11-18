@@ -19,7 +19,6 @@ embedded-i18n = { workspace = true }
 embedded-io-async = { workspace = true }
 embassy-time = { workspace = true }
 embassy-futures = { workspace = true }
-smol_str = { workspace = true }
 smoltcp = { workspace = true, features = [
   "async",
   "alloc",

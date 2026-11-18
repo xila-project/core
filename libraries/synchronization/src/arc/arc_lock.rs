@@ -1,7 +1,9 @@
 #![allow(dead_code)]
 
 use alloc::boxed::Box;
-use core::{alloc::Layout, cell::RefCell, fmt, marker::PhantomData, ops::Deref, ptr::NonNull};
+use core::{
+    alloc::Layout, cell::RefCell, fmt, hash::Hash, marker::PhantomData, ops::Deref, ptr::NonNull,
+};
 use embassy_sync::blocking_mutex::{Mutex, raw::CriticalSectionRawMutex};
 
 /// Inner data structure for Arc containing the value and reference counts
@@ -219,6 +221,12 @@ impl<T: ?Sized + PartialEq> PartialEq for Arc<T> {
 
 impl<T: ?Sized + Eq> Eq for Arc<T> {}
 
+impl<T: ?Sized + Hash> Hash for Arc<T> {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        (**self).hash(state)
+    }
+}
+
 // Weak pointer implementation
 
 /// A weak version of `Arc`.
@@ -418,6 +426,18 @@ mod tests {
 
         assert_eq!(arc1, arc2);
         assert_ne!(arc1, arc3);
+    }
+
+    #[test]
+    fn test_arc_hash_matches_inner_value() {
+        use core::hash::{BuildHasher, BuildHasherDefault};
+        extern crate std;
+        let hasher = BuildHasherDefault::<std::hash::DefaultHasher>::default();
+
+        assert_eq!(
+            hasher.hash_one(Arc::new(String::from("key"))),
+            hasher.hash_one(String::from("key"))
+        );
     }
 
     #[test]

@@ -16,8 +16,8 @@ mod tests;
 
 // - Re-exports
 
-pub(crate) use metadata::Metadata;
 pub use metadata::TaskAuthority;
+pub(crate) use metadata::{MAXIMUM_NAME_LENGTH, Metadata, Name};
 pub use spawner::*;
 
 // Manager module - core Manager structure and initialization

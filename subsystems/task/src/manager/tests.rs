@@ -956,6 +956,24 @@ async fn utf8_names_and_failed_spawn_are_transactional() {
     manager.unregister(child).await.unwrap();
 }
 
+#[test(task_path = crate)]
+async fn names_keep_at_most_twenty_three_bytes_inline() {
+    // Same footprint as the former `SmolStr`, without pointer atomics.
+    assert_eq!(core::mem::size_of::<Name>(), 24);
+
+    let manager = initialize();
+    let root = manager.get_current_task_identifier().await;
+    for (name, expected) in [
+        ("", ""),
+        ("abcdefghijklmnopqrstuvw", "abcdefghijklmnopqrstuvw"),
+        ("abcdefghijklmnopqrstuvwxyz", "abcdefghijklmnopqrstuvw"),
+    ] {
+        let child = manager.register(root, name).await.unwrap();
+        assert_eq!(manager.get_name(child).await.unwrap(), expected);
+        manager.unregister(child).await.unwrap();
+    }
+}
+
 #[std::prelude::v1::test]
 fn identity_outside_embassy_is_fallible() {
     assert_eq!(

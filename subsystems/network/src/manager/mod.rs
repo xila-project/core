@@ -107,9 +107,7 @@ impl Manager {
 
     pub(crate) async fn find_stack(stacks: &StackList, name: &str) -> Option<Stack> {
         for stack in stacks {
-            let stack_name = stack.with(|s| s.name.clone()).await;
-
-            if stack_name.as_str() == name {
+            if stack.with(|s| s.name == name).await {
                 return Some(stack.clone());
             }
         }

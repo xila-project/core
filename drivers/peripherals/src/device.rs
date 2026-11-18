@@ -1,9 +1,10 @@
 //! Generic character-device wrapper around a peripheral handle.
 
-use core::{
-    sync::atomic::{AtomicBool, Ordering},
-    task::Poll,
-};
+#[cfg(target_has_atomic = "8")]
+use core::sync::atomic::AtomicBool;
+use core::{sync::atomic::Ordering, task::Poll};
+#[cfg(not(target_has_atomic = "8"))]
+use portable_atomic::AtomicBool;
 
 use alloc::boxed::Box;
 use file_system::{
