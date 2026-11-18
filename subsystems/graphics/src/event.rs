@@ -16,9 +16,10 @@ impl Event {
     /// A window clears the targets of events aimed at its descendants as soon
     /// as LVGL reports their deletion, so a queued event never matches a
     /// widget created later at the same address; the event itself is kept,
-    /// with no target.
+    /// with no target, and a cleared target matches nothing, not even a null
+    /// candidate.
     pub fn is_target(&self, candidate: *const lvgl::lv_obj_t) -> bool {
-        core::ptr::eq(self.target, candidate)
+        !self.target.is_null() && core::ptr::eq(self.target, candidate)
     }
 
     pub fn new(code: EventKind, target: *mut lvgl::lv_obj_t, key: Option<Key>) -> Self {
@@ -257,5 +258,22 @@ impl From<EventKind> for lvgl::lv_event_code_t {
 impl From<lvgl::lv_event_code_t> for EventKind {
     fn from(code: lvgl::lv_event_code_t) -> Self {
         EventKind::from_lvgl_code(code)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Event, EventKind};
+    use core::ptr;
+
+    #[test]
+    fn a_cleared_target_matches_no_candidate() {
+        let cleared = Event::new(EventKind::Pressed, ptr::null_mut(), None);
+        assert!(!cleared.is_target(ptr::null()));
+
+        let mut object = 0u8;
+        let address = (&raw mut object).cast();
+        assert!(!cleared.is_target(address));
+        assert!(Event::new(EventKind::Pressed, address, None).is_target(address));
     }
 }

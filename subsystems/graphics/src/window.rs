@@ -146,10 +146,15 @@ unsafe extern "C" fn window_event_callback(
                 (code, None)
             }
             lvgl::lv_event_code_t_LV_EVENT_CHILD_DELETED => {
-                // A descendant was deleted or moved out (LVGL sends this to
-                // every ancestor, after the object is gone and before
-                // anything can reuse its memory). Queued events aimed at it
-                // would otherwise match a widget created at the same address.
+                // A descendant was deleted or moved out. LVGL sends this to
+                // the direct parent after the object is freed, and it reaches
+                // the window by bubbling. Queued events aimed at it would
+                // otherwise match a widget created later at the same address.
+                // Remaining gap: user code that runs between the free and
+                // this event (a raw CHILD_CHANGED or scroll handler during a
+                // clean, a parent destructor, or a handler that stops
+                // bubbling) could create a widget at the freed address before
+                // the sweep, and that widget would then match a stale event.
                 forget_dead_targets(window);
                 (code, None)
             }
