@@ -4,6 +4,7 @@ use super::*;
 // - Submodules
 mod lifecycle;
 mod metadata;
+mod metrics;
 mod properties;
 mod registration;
 mod relationships;
@@ -33,6 +34,9 @@ pub(crate) struct Inner {
     pub(crate) tasks: BTreeMap<TaskIdentifier, Metadata>,
     pub(crate) identifiers: BTreeMap<usize, TaskIdentifier>,
     slots: alloc::vec::Vec<&'static embassy_executor::raw::TaskStorage<lifecycle::TaskFuture>>,
+    /// Poll counters of each slot, at the same index.
+    #[cfg(feature = "metrics")]
+    counters: alloc::vec::Vec<&'static crate::metrics::TaskCounters>,
     maximum_tasks: usize,
 }
 
@@ -110,6 +114,8 @@ impl Manager {
                 tasks: BTreeMap::new(),
                 identifiers: BTreeMap::new(),
                 slots: alloc::vec::Vec::new(),
+                #[cfg(feature = "metrics")]
+                counters: alloc::vec::Vec::new(),
                 maximum_tasks,
             }),
             synchronization::blocking_mutex::Mutex::new(core::cell::RefCell::new(BTreeMap::new())),

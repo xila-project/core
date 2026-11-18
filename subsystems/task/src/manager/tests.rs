@@ -1237,3 +1237,160 @@ async fn send_spawn_balances_executors_and_keeps_non_send_state_remote() {
         assert_eq!(spawners[&remote].tasks, 0);
     });
 }
+
+#[cfg(not(feature = "metrics"))]
+#[test(task_path = crate)]
+async fn metrics_are_unavailable_without_the_feature() {
+    const { assert!(!crate::metrics::ENABLED) };
+    assert!(initialize().get_metrics().await.is_none());
+}
+
+/// Busy-wait so the poll takes measurable time on the test clock.
+#[cfg(feature = "metrics")]
+fn spin(duration: Duration) {
+    let start = std::time::Instant::now();
+    while start.elapsed() < duration {
+        core::hint::spin_loop();
+    }
+}
+
+#[cfg(feature = "metrics")]
+#[test(task_path = crate)]
+async fn metrics_count_task_polls_and_executor_load() {
+    let manager = initialize();
+    let root = manager.get_current_task_identifier().await;
+    let first = manager.get_metrics().await.unwrap();
+    let release: &'static synchronization::signal::Signal<
+        synchronization::blocking_mutex::raw::CriticalSectionRawMutex,
+        (),
+    > = alloc::boxed::Box::leak(alloc::boxed::Box::new(
+        synchronization::signal::Signal::new(),
+    ));
+    let (worker, worker_identifier) = manager
+        .spawn(root, "metrics worker", None, async move |_| {
+            for _ in 0..3 {
+                spin(Duration::from_millis(2));
+                crate::yield_now().await;
+            }
+            release.wait().await;
+        })
+        .await
+        .unwrap();
+    // Let the worker run its three busy polls and park on the signal.
+    for _ in 0..10 {
+        crate::yield_now().await;
+    }
+    // A sleeping executor accumulates idle time through the test executor's hook.
+    crate::sleep(Duration::from_millis(5)).await;
+    let second = manager.get_metrics().await.unwrap();
+    let task = second
+        .tasks
+        .iter()
+        .find(|t| t.identifier == worker_identifier)
+        .unwrap();
+    assert_eq!(task.name, "metrics worker");
+    assert!(task.polls >= 4, "{task:?}");
+    // Measured durations may fall one clock tick short of the real ones.
+    assert!(task.busy_nanoseconds >= 5_900_000, "{task:?}");
+    assert!(task.longest_poll_nanoseconds >= 1_900_000, "{task:?}");
+    assert!(task.longest_poll_nanoseconds <= task.busy_nanoseconds);
+    let spawner = manager.get_spawner(root).await.unwrap();
+    assert_eq!(task.spawner, spawner);
+
+    let before = first
+        .executors
+        .iter()
+        .find(|e| e.spawner == spawner)
+        .unwrap();
+    let after = second
+        .executors
+        .iter()
+        .find(|e| e.spawner == spawner)
+        .unwrap();
+    assert_eq!(before.executor, after.executor);
+    assert!(second.timestamp_nanoseconds > first.timestamp_nanoseconds);
+    assert!(after.polls >= before.polls + 4);
+    let busy = after.busy_nanoseconds - before.busy_nanoseconds;
+    let idle = after.idle_nanoseconds.unwrap() - before.idle_nanoseconds.unwrap_or(0);
+    let elapsed = second.timestamp_nanoseconds - first.timestamp_nanoseconds;
+    assert!(busy >= 5_900_000, "busy {busy}");
+    assert!(idle >= 4_000_000, "idle {idle}");
+    assert!(busy + idle <= elapsed, "{busy} + {idle} > {elapsed}");
+
+    release.signal(());
+    worker.join().await;
+    let third = manager.get_metrics().await.unwrap();
+    assert!(
+        !third
+            .tasks
+            .iter()
+            .any(|t| t.identifier == worker_identifier)
+    );
+    let last = third
+        .executors
+        .iter()
+        .find(|e| e.spawner == spawner)
+        .unwrap();
+    // Executor counters keep the time of finished tasks.
+    assert!(last.busy_nanoseconds >= after.busy_nanoseconds);
+    assert!(last.polls > after.polls);
+}
+
+#[cfg(feature = "metrics")]
+#[test(task_path = crate)]
+async fn reused_slots_restart_task_counters() {
+    let manager = initialize();
+    let root = manager.get_current_task_identifier().await;
+    let mut generations = Vec::new();
+    for _ in 0..2 {
+        let (gate, identifier) = manager
+            .spawn(root, "reused metrics", None, async |_| {
+                crate::yield_now().await;
+            })
+            .await
+            .unwrap();
+        let snapshot = manager.get_metrics().await.unwrap();
+        let task = snapshot
+            .tasks
+            .iter()
+            .find(|t| t.identifier == identifier)
+            .unwrap();
+        // Not polled yet: the previous task's counters were reset on claim.
+        assert_eq!(task.polls, 0);
+        assert_eq!(task.busy_nanoseconds, 0);
+        generations.push(task.generation);
+        gate.join().await;
+    }
+    assert_ne!(generations[0], generations[1]);
+}
+
+#[cfg(feature = "metrics")]
+#[test(task_path = crate)]
+async fn executors_on_other_threads_are_reported_separately() {
+    let manager = initialize();
+    let root = manager.get_current_task_identifier().await;
+    let local = manager.get_spawner(root).await.unwrap();
+    let remote = crate::test_executor::new_thread_executor(manager).await;
+    let (handle, identifier) = manager
+        .spawn_send(root, "remote metrics", Some(remote), |_| async {
+            spin(Duration::from_millis(3));
+        })
+        .await
+        .unwrap();
+    handle.join().await;
+    let snapshot = manager.get_metrics().await.unwrap();
+    assert!(!snapshot.tasks.iter().any(|t| t.identifier == identifier));
+    let local = snapshot
+        .executors
+        .iter()
+        .find(|e| e.spawner == local)
+        .unwrap();
+    let remote = snapshot
+        .executors
+        .iter()
+        .find(|e| e.spawner == remote)
+        .unwrap();
+    assert_ne!(local.executor, remote.executor);
+    assert!(remote.busy_nanoseconds >= 2_900_000, "{remote:?}");
+    assert!(remote.idle_nanoseconds.is_some());
+}

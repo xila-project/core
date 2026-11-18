@@ -23,6 +23,9 @@ pub(crate) struct Metadata {
     pub(crate) signals: SignalAccumulator,
     /// Index of the spawner that spawned this task (for tracking completion)
     pub(crate) spawner_identifier: usize,
+    /// Poll counters of the task's storage slot; `None` for adopted tasks.
+    #[cfg(feature = "metrics")]
+    pub(crate) counters: Option<&'static crate::metrics::TaskCounters>,
 }
 
 /// Authority bound to one task registration in one manager. Copies retain that

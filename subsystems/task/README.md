@@ -70,3 +70,40 @@ The browser yield delay remains 10 ms. Embassy 0.10's wasm pender uses
 `Promise.then`, so a continuously self-waking yield can starve rendering, input
 and timer macrotasks. Replacing the delay requires a platform macrotask primitive
 and browser fairness/latency validation.
+
+# Activity metrics
+
+The opt-in `metrics` feature (`xila/task_metrics`) times every poll of a
+managed task with Embassy's monotonic clock, the one each platform already
+provides for `sleep`, so it works under `no_std` on every target. Each task
+records its poll count, busy time and longest poll; each executor (a core or
+an operating system thread) records its busy time, plus its idle time when
+the platform reports it. `Manager::get_metrics` returns a `MetricsSnapshot`
+of these monotonically increasing counters with a timestamp on the same clock;
+applications compute CPU shares from the differences between two snapshots.
+Without the feature it returns `None`, and the platform hook only runs its
+closure.
+
+Task counters live in a parallel array beside the retained storage slots and
+are reset when a slot is claimed, so spawning and polling allocate nothing.
+Executor counters are allocated once per executor and kept. Writers are
+always the executor that owns the counters; readers use a sequence lock built
+from 32-bit atomic loads and stores only, so it works without compare-and-swap
+or 64-bit atomics (Cortex-M, ESP32 and ESP32-C3).
+
+Executor busy time is the sum of its task polls and needs no platform code.
+To measure idle time, executor loops wrap their wait for work:
+
+```rust,ignore
+let activity = task::metrics::ExecutorActivity::get(spawner.executor_id());
+loop {
+    unsafe { executor.poll() };
+    activity.measure_idle(|| cortex_m::asm::wfe());
+}
+```
+
+The remainder, elapsed time minus busy and idle time, is executor bookkeeping
+and, on hosts, time the thread was descheduled. Core's test executor uses the
+hook. The Linux-only `profiling` feature is unchanged; it adds per-thread CPU
+clocks, allocation attribution and finished-task history for recordings, and
+both features can be enabled together.

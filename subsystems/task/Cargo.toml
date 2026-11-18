@@ -46,6 +46,8 @@ test_harness = [
   "embassy-executor/executor-thread",
 ]
 profiling = ["dep:libc"]
+# Portable per-task and per-executor CPU activity counters (`task::metrics`).
+metrics = []
 
 [dev-dependencies]
 critical-section = { workspace = true, features = ["std"] }
