@@ -1,7 +1,7 @@
 use file_system::DirectCharacterDevice;
 use synchronization::Arc;
 
-use crate::lvgl;
+use crate::ffi;
 
 use super::{InputData, InputKind, InputQueue};
 
@@ -11,10 +11,10 @@ use super::{InputData, InputKind, InputQueue};
 ///
 /// This function may dereference a raw pointer.
 pub unsafe extern "C" fn binding_callback_function(
-    input_device: *mut lvgl::lv_indev_t,
-    data: *mut lvgl::lv_indev_data_t,
+    input_device: *mut ffi::lv_indev_t,
+    data: *mut ffi::lv_indev_data_t,
 ) {
-    let user_data = unsafe { lvgl::lv_indev_get_user_data(input_device) as *mut UserData };
+    let user_data = unsafe { ffi::lv_indev_get_user_data(input_device) as *mut UserData };
 
     let user_data = unsafe { &*user_data };
     let input_data = user_data

@@ -5,7 +5,12 @@ extern crate abi_definitions;
 
 testing::instantiate_global_allocator!();
 
-use graphics::{EventKind, WINDOW_EVENT_QUEUE_CAPACITY, Window, lvgl};
+#[expect(
+    deprecated,
+    reason = "the test drives the Window class through the raw bindings"
+)]
+use graphics::lvgl;
+use graphics::{EventKind, WINDOW_EVENT_QUEUE_CAPACITY, Window};
 
 fn system_used() -> usize {
     testing::memory_crate::global_manager().get_used()
@@ -51,7 +56,7 @@ fn event_bursts_do_not_allocate_and_keep_clicks() {
     let mut queued = 0;
     while let Some(event) = window.pop_event() {
         assert_eq!(event.code, EventKind::Clicked);
-        assert_eq!(event.target, child);
+        assert!(event.is_target(child));
         queued += 1;
     }
     assert_eq!(queued, WINDOW_EVENT_QUEUE_CAPACITY);

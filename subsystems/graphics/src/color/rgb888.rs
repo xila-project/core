@@ -1,4 +1,4 @@
-use crate::lvgl;
+use crate::ffi;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct ColorRGB888 {
@@ -42,12 +42,12 @@ impl ColorRGB888 {
         self
     }
 
-    pub const fn from_lvgl_color(value: lvgl::lv_color_t) -> Self {
+    pub const fn from_lvgl_color(value: ffi::lv_color_t) -> Self {
         Self::new(value.red, value.green, value.blue)
     }
 
-    pub const fn into_lvgl_color(self) -> lvgl::lv_color_t {
-        lvgl::lv_color_t {
+    pub const fn into_lvgl_color(self) -> ffi::lv_color_t {
+        ffi::lv_color_t {
             red: self.get_red(),
             green: self.get_green(),
             blue: self.get_blue(),
@@ -55,14 +55,14 @@ impl ColorRGB888 {
     }
 }
 
-impl From<ColorRGB888> for lvgl::lv_color_t {
+impl From<ColorRGB888> for ffi::lv_color_t {
     fn from(value: ColorRGB888) -> Self {
         value.into_lvgl_color()
     }
 }
 
-impl From<lvgl::lv_color_t> for ColorRGB888 {
-    fn from(value: lvgl::lv_color_t) -> Self {
+impl From<ffi::lv_color_t> for ColorRGB888 {
+    fn from(value: ffi::lv_color_t) -> Self {
         ColorRGB888::from_lvgl_color(value)
     }
 }

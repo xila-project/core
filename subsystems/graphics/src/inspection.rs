@@ -1,4 +1,4 @@
-use crate::lvgl;
+use crate::ffi;
 use alloc::{string::String, vec::Vec};
 use core::str;
 const UI_ELEMENT_MAX_TEXT_BYTES: usize = 512;
@@ -84,39 +84,39 @@ pub(crate) fn semantic_role(class: &str) -> Option<&'static str> {
 
 /// Flags report explicit LVGL state; they do not assert visibility through
 /// clipping, occlusion, or whether a click would hit this object.
-unsafe fn is_hidden_by_ancestor(mut object: *mut lvgl::lv_obj_t) -> bool {
+unsafe fn is_hidden_by_ancestor(mut object: *mut ffi::lv_obj_t) -> bool {
     while !object.is_null() {
-        if unsafe { lvgl::lv_obj_has_flag(object, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_HIDDEN) } {
+        if unsafe { ffi::lv_obj_has_flag(object, ffi::lv_obj_flag_t_LV_OBJ_FLAG_HIDDEN) } {
             return true;
         }
-        object = unsafe { lvgl::lv_obj_get_parent(object) };
+        object = unsafe { ffi::lv_obj_get_parent(object) };
     }
     false
 }
 
 /// Use only unambiguous associations: textarea placeholder, checkbox text, or
 /// the first direct label in a button. Never search arbitrary siblings.
-unsafe fn widget_name(object: *mut lvgl::lv_obj_t, semantic_role: Option<&str>) -> Option<String> {
+unsafe fn widget_name(object: *mut ffi::lv_obj_t, semantic_role: Option<&str>) -> Option<String> {
     unsafe {
         match semantic_role {
-            Some("textbox") if lvgl::lv_obj_has_class(object, &lvgl::lv_textarea_class) => {
+            Some("textbox") if ffi::lv_obj_has_class(object, &ffi::lv_textarea_class) => {
                 bounded_c_string_with_limit(
-                    lvgl::lv_textarea_get_placeholder_text(object),
+                    ffi::lv_textarea_get_placeholder_text(object),
                     UI_ELEMENT_MAX_NAME_BYTES,
                 )
             }
-            Some("checkbox") if lvgl::lv_obj_has_class(object, &lvgl::lv_checkbox_class) => {
+            Some("checkbox") if ffi::lv_obj_has_class(object, &ffi::lv_checkbox_class) => {
                 bounded_c_string_with_limit(
-                    lvgl::lv_checkbox_get_text(object),
+                    ffi::lv_checkbox_get_text(object),
                     UI_ELEMENT_MAX_NAME_BYTES,
                 )
             }
-            Some("button") if lvgl::lv_obj_has_class(object, &lvgl::lv_button_class) => {
-                for index in 0..lvgl::lv_obj_get_child_count(object).min(UI_NAME_MAX_CHILDREN) {
-                    let child = lvgl::lv_obj_get_child(object, index as i32);
-                    if lvgl::lv_obj_has_class(child, &lvgl::lv_label_class) {
+            Some("button") if ffi::lv_obj_has_class(object, &ffi::lv_button_class) => {
+                for index in 0..ffi::lv_obj_get_child_count(object).min(UI_NAME_MAX_CHILDREN) {
+                    let child = ffi::lv_obj_get_child(object, index as i32);
+                    if ffi::lv_obj_has_class(child, &ffi::lv_label_class) {
                         return bounded_c_string_with_limit(
-                            lvgl::lv_label_get_text(child),
+                            ffi::lv_label_get_text(child),
                             UI_ELEMENT_MAX_NAME_BYTES,
                         );
                     }
@@ -129,7 +129,7 @@ unsafe fn widget_name(object: *mut lvgl::lv_obj_t, semantic_role: Option<&str>) 
 }
 
 pub(crate) unsafe fn inspect_children(
-    object: *mut lvgl::lv_obj_t,
+    object: *mut ffi::lv_obj_t,
     parent_id: Option<u32>,
     depth: usize,
     limits: (usize, usize),
@@ -147,25 +147,25 @@ pub(crate) unsafe fn inspect_children(
     }
 
     let id = elements.len() as u32;
-    let class = unsafe { lvgl::lv_obj_get_class(object) };
+    let class = unsafe { ffi::lv_obj_get_class(object) };
     let role = if class.is_null() {
         String::from("unknown")
     } else {
         unsafe { bounded_c_string((*class).name) }.unwrap_or_else(|| String::from("unknown"))
     };
 
-    let mut area = lvgl::lv_area_t::default();
-    unsafe { lvgl::lv_obj_get_coords(object, &mut area) };
+    let mut area = ffi::lv_area_t::default();
+    unsafe { ffi::lv_obj_get_coords(object, &mut area) };
 
     let redacted = unsafe { password_ancestor(object) };
     let text = if redacted {
         None
     } else {
         unsafe {
-            if lvgl::lv_obj_has_class(object, &lvgl::lv_label_class) {
-                bounded_c_string(lvgl::lv_label_get_text(object))
-            } else if lvgl::lv_obj_has_class(object, &lvgl::lv_textarea_class) {
-                bounded_c_string(lvgl::lv_textarea_get_text(object))
+            if ffi::lv_obj_has_class(object, &ffi::lv_label_class) {
+                bounded_c_string(ffi::lv_label_get_text(object))
+            } else if ffi::lv_obj_has_class(object, &ffi::lv_textarea_class) {
+                bounded_c_string(ffi::lv_textarea_get_text(object))
             } else {
                 None
             }
@@ -175,19 +175,19 @@ pub(crate) unsafe fn inspect_children(
     let semantic_role = semantic_role(&role);
     let (name, hidden, disabled, focused, clickable, checked) = unsafe {
         (
-            if redacted && !lvgl::lv_obj_has_class(object, &lvgl::lv_textarea_class) {
+            if redacted && !ffi::lv_obj_has_class(object, &ffi::lv_textarea_class) {
                 None
             } else {
                 widget_name(object, semantic_role)
             },
             is_hidden_by_ancestor(object),
-            lvgl::lv_obj_has_state(object, lvgl::lv_state_t_LV_STATE_DISABLED),
-            lvgl::lv_obj_has_state(object, lvgl::lv_state_t_LV_STATE_FOCUSED),
-            lvgl::lv_obj_has_flag(object, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_CLICKABLE),
+            ffi::lv_obj_has_state(object, ffi::lv_state_t_LV_STATE_DISABLED),
+            ffi::lv_obj_has_state(object, ffi::lv_state_t_LV_STATE_FOCUSED),
+            ffi::lv_obj_has_flag(object, ffi::lv_obj_flag_t_LV_OBJ_FLAG_CLICKABLE),
             if matches!(semantic_role, Some("checkbox" | "switch")) {
-                Some(lvgl::lv_obj_has_state(
+                Some(ffi::lv_obj_has_state(
                     object,
-                    lvgl::lv_state_t_LV_STATE_CHECKED,
+                    ffi::lv_state_t_LV_STATE_CHECKED,
                 ))
             } else {
                 None
@@ -198,7 +198,7 @@ pub(crate) unsafe fn inspect_children(
     let clipped_bounds = unsafe { clipped_bounds(object) };
     let visible = !hidden
         && clipped_bounds.is_some()
-        && unsafe { lvgl::lv_obj_get_style_opa_recursive(object, 0) } != 0;
+        && unsafe { ffi::lv_obj_get_style_opa_recursive(object, 0) } != 0;
     let WidgetValue {
         value,
         range,
@@ -223,13 +223,10 @@ pub(crate) unsafe fn inspect_children(
     };
     let text_truncated = !redacted
         && unsafe {
-            if lvgl::lv_obj_has_class(object, &lvgl::lv_label_class) {
-                was_capped(lvgl::lv_label_get_text(object), UI_ELEMENT_MAX_TEXT_BYTES)
-            } else if lvgl::lv_obj_has_class(object, &lvgl::lv_textarea_class) {
-                was_capped(
-                    lvgl::lv_textarea_get_text(object),
-                    UI_ELEMENT_MAX_TEXT_BYTES,
-                )
+            if ffi::lv_obj_has_class(object, &ffi::lv_label_class) {
+                was_capped(ffi::lv_label_get_text(object), UI_ELEMENT_MAX_TEXT_BYTES)
+            } else if ffi::lv_obj_has_class(object, &ffi::lv_textarea_class) {
+                was_capped(ffi::lv_textarea_get_text(object), UI_ELEMENT_MAX_TEXT_BYTES)
             } else {
                 false
             }
@@ -238,19 +235,18 @@ pub(crate) unsafe fn inspect_children(
         && unsafe {
             match semantic_role {
                 Some("textbox") => was_capped(
-                    lvgl::lv_textarea_get_placeholder_text(object),
+                    ffi::lv_textarea_get_placeholder_text(object),
                     UI_ELEMENT_MAX_NAME_BYTES,
                 ),
-                Some("checkbox") => was_capped(
-                    lvgl::lv_checkbox_get_text(object),
-                    UI_ELEMENT_MAX_NAME_BYTES,
-                ),
-                Some("button") => (0..lvgl::lv_obj_get_child_count(object)
+                Some("checkbox") => {
+                    was_capped(ffi::lv_checkbox_get_text(object), UI_ELEMENT_MAX_NAME_BYTES)
+                }
+                Some("button") => (0..ffi::lv_obj_get_child_count(object)
                     .min(UI_NAME_MAX_CHILDREN))
                     .find_map(|i| {
-                        let child = lvgl::lv_obj_get_child(object, i as i32);
-                        lvgl::lv_obj_has_class(child, &lvgl::lv_label_class).then(|| {
-                            was_capped(lvgl::lv_label_get_text(child), UI_ELEMENT_MAX_NAME_BYTES)
+                        let child = ffi::lv_obj_get_child(object, i as i32);
+                        ffi::lv_obj_has_class(child, &ffi::lv_label_class).then(|| {
+                            was_capped(ffi::lv_label_get_text(child), UI_ELEMENT_MAX_NAME_BYTES)
                         })
                     })
                     .unwrap_or(false),
@@ -276,11 +272,11 @@ pub(crate) unsafe fn inspect_children(
         redacted,
         text_truncated,
         name_truncated,
-        state: unsafe { lvgl::lv_obj_get_state(object) },
+        state: unsafe { ffi::lv_obj_get_state(object) },
         scroll: unsafe {
             (
-                lvgl::lv_obj_get_scroll_x(object),
-                lvgl::lv_obj_get_scroll_y(object),
+                ffi::lv_obj_get_scroll_x(object),
+                ffi::lv_obj_get_scroll_y(object),
             )
         },
         value,
@@ -293,7 +289,7 @@ pub(crate) unsafe fn inspect_children(
         buttons_truncated,
     });
 
-    let child_count = unsafe { lvgl::lv_obj_get_child_count(object) };
+    let child_count = unsafe { ffi::lv_obj_get_child_count(object) };
     if child_count == 0 {
         return;
     }
@@ -306,7 +302,7 @@ pub(crate) unsafe fn inspect_children(
             *truncated = true;
             break;
         }
-        let child = unsafe { lvgl::lv_obj_get_child(object, index as i32) };
+        let child = unsafe { ffi::lv_obj_get_child(object, index as i32) };
         unsafe {
             inspect_children(
                 child,
@@ -373,74 +369,72 @@ pub struct UiButton {
     pub checked: bool,
 }
 
-unsafe fn password_ancestor(mut obj: *mut lvgl::lv_obj_t) -> bool {
+unsafe fn password_ancestor(mut obj: *mut ffi::lv_obj_t) -> bool {
     while !obj.is_null() {
         if unsafe {
-            lvgl::lv_obj_has_class(obj, &lvgl::lv_textarea_class)
-                && lvgl::lv_textarea_get_password_mode(obj)
+            ffi::lv_obj_has_class(obj, &ffi::lv_textarea_class)
+                && ffi::lv_textarea_get_password_mode(obj)
         } {
             return true;
         }
-        obj = unsafe { lvgl::lv_obj_get_parent(obj) };
+        obj = unsafe { ffi::lv_obj_get_parent(obj) };
     }
     false
 }
 
 /// Intersect with the display and clipping ancestors. Overflow-visible parents
 /// do not clip children. This intentionally makes no occlusion claim.
-unsafe fn clipped_bounds(obj: *mut lvgl::lv_obj_t) -> Option<(i32, i32, i32, i32)> {
+unsafe fn clipped_bounds(obj: *mut ffi::lv_obj_t) -> Option<(i32, i32, i32, i32)> {
     unsafe {
-        let mut area = lvgl::lv_area_t::default();
-        lvgl::lv_obj_get_coords(obj, &mut area);
-        let display = lvgl::lv_obj_get_display(obj);
+        let mut area = ffi::lv_area_t::default();
+        ffi::lv_obj_get_coords(obj, &mut area);
+        let display = ffi::lv_obj_get_display(obj);
         area.x1 = area.x1.max(0);
         area.y1 = area.y1.max(0);
         area.x2 = area
             .x2
-            .min(lvgl::lv_display_get_horizontal_resolution(display) - 1);
+            .min(ffi::lv_display_get_horizontal_resolution(display) - 1);
         area.y2 = area
             .y2
-            .min(lvgl::lv_display_get_vertical_resolution(display) - 1);
-        let mut parent = lvgl::lv_obj_get_parent(obj);
+            .min(ffi::lv_display_get_vertical_resolution(display) - 1);
+        let mut parent = ffi::lv_obj_get_parent(obj);
         while !parent.is_null() {
-            if !lvgl::lv_obj_has_flag(parent, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_OVERFLOW_VISIBLE) {
-                let mut p = lvgl::lv_area_t::default();
-                lvgl::lv_obj_get_coords(parent, &mut p);
+            if !ffi::lv_obj_has_flag(parent, ffi::lv_obj_flag_t_LV_OBJ_FLAG_OVERFLOW_VISIBLE) {
+                let mut p = ffi::lv_area_t::default();
+                ffi::lv_obj_get_coords(parent, &mut p);
                 area.x1 = area.x1.max(p.x1);
                 area.y1 = area.y1.max(p.y1);
                 area.x2 = area.x2.min(p.x2);
                 area.y2 = area.y2.min(p.y2);
             }
-            parent = lvgl::lv_obj_get_parent(parent);
+            parent = ffi::lv_obj_get_parent(parent);
         }
         (area.x1 <= area.x2 && area.y1 <= area.y2).then_some((area.x1, area.y1, area.x2, area.y2))
     }
 }
 
-unsafe fn style(obj: *mut lvgl::lv_obj_t) -> UiStyle {
+unsafe fn style(obj: *mut ffi::lv_obj_t) -> UiStyle {
     unsafe {
         UiStyle {
-            background: lvgl::lv_color_to_u32(lvgl::lv_obj_get_style_bg_color(obj, 0)),
-            text_color: lvgl::lv_color_to_u32(lvgl::lv_obj_get_style_text_color(obj, 0)),
-            border_color: lvgl::lv_color_to_u32(lvgl::lv_obj_get_style_border_color(obj, 0)),
-            opacity: lvgl::lv_obj_get_style_opa_recursive(obj, 0),
-            background_opacity: lvgl::lv_obj_get_style_bg_opa(obj, 0),
-            border_width: lvgl::lv_obj_get_style_border_width(obj, 0),
-            radius: lvgl::lv_obj_get_style_radius(obj, 0),
+            background: ffi::lv_color_to_u32(ffi::lv_obj_get_style_bg_color(obj, 0)),
+            text_color: ffi::lv_color_to_u32(ffi::lv_obj_get_style_text_color(obj, 0)),
+            border_color: ffi::lv_color_to_u32(ffi::lv_obj_get_style_border_color(obj, 0)),
+            opacity: ffi::lv_obj_get_style_opa_recursive(obj, 0),
+            background_opacity: ffi::lv_obj_get_style_bg_opa(obj, 0),
+            border_width: ffi::lv_obj_get_style_border_width(obj, 0),
+            radius: ffi::lv_obj_get_style_radius(obj, 0),
             padding: (
-                lvgl::lv_obj_get_style_pad_top(obj, 0),
-                lvgl::lv_obj_get_style_pad_right(obj, 0),
-                lvgl::lv_obj_get_style_pad_bottom(obj, 0),
-                lvgl::lv_obj_get_style_pad_left(obj, 0),
+                ffi::lv_obj_get_style_pad_top(obj, 0),
+                ffi::lv_obj_get_style_pad_right(obj, 0),
+                ffi::lv_obj_get_style_pad_bottom(obj, 0),
+                ffi::lv_obj_get_style_pad_left(obj, 0),
             ),
             gap: (
-                lvgl::lv_obj_get_style_pad_row(obj, 0),
-                lvgl::lv_obj_get_style_pad_column(obj, 0),
+                ffi::lv_obj_get_style_pad_row(obj, 0),
+                ffi::lv_obj_get_style_pad_column(obj, 0),
             ),
-            layout: lvgl::lv_obj_get_style_layout(obj, 0),
-            font_line_height: lvgl::lv_font_get_line_height(lvgl::lv_obj_get_style_text_font(
-                obj, 0,
-            )),
+            layout: ffi::lv_obj_get_style_layout(obj, 0),
+            font_line_height: ffi::lv_font_get_line_height(ffi::lv_obj_get_style_text_font(obj, 0)),
         }
     }
 }
@@ -453,53 +447,53 @@ struct WidgetValue {
     selected_text: Option<String>,
     selected_text_truncated: bool,
 }
-unsafe fn widget_value(obj: *mut lvgl::lv_obj_t, role: &str) -> WidgetValue {
+unsafe fn widget_value(obj: *mut ffi::lv_obj_t, role: &str) -> WidgetValue {
     unsafe {
         let mut data = WidgetValue::default();
         match role {
             "lv_slider" => {
-                data.value = Some(lvgl::lv_slider_get_value(obj));
+                data.value = Some(ffi::lv_slider_get_value(obj));
                 data.range = Some((
-                    lvgl::lv_slider_get_min_value(obj),
-                    lvgl::lv_slider_get_max_value(obj),
+                    ffi::lv_slider_get_min_value(obj),
+                    ffi::lv_slider_get_max_value(obj),
                 ));
             }
             "lv_bar" => {
-                data.value = Some(lvgl::lv_bar_get_value(obj));
+                data.value = Some(ffi::lv_bar_get_value(obj));
                 data.range = Some((
-                    lvgl::lv_bar_get_min_value(obj),
-                    lvgl::lv_bar_get_max_value(obj),
+                    ffi::lv_bar_get_min_value(obj),
+                    ffi::lv_bar_get_max_value(obj),
                 ));
             }
             "lv_arc" => {
-                data.value = Some(lvgl::lv_arc_get_value(obj));
+                data.value = Some(ffi::lv_arc_get_value(obj));
                 data.range = Some((
-                    lvgl::lv_arc_get_min_value(obj),
-                    lvgl::lv_arc_get_max_value(obj),
+                    ffi::lv_arc_get_min_value(obj),
+                    ffi::lv_arc_get_max_value(obj),
                 ));
             }
-            "lv_spinbox" => data.value = Some(lvgl::lv_spinbox_get_value(obj)),
+            "lv_spinbox" => data.value = Some(ffi::lv_spinbox_get_value(obj)),
             "lv_dropdown" | "lv_roller" => {
                 let mut buffer = [0 as core::ffi::c_char; UI_ELEMENT_MAX_TEXT_BYTES + 4];
                 data.selected = Some(if role == "lv_dropdown" {
-                    lvgl::lv_dropdown_get_selected_str(
+                    ffi::lv_dropdown_get_selected_str(
                         obj,
                         buffer.as_mut_ptr(),
                         buffer.len() as u32,
                     );
-                    lvgl::lv_dropdown_get_selected(obj)
+                    ffi::lv_dropdown_get_selected(obj)
                 } else {
-                    lvgl::lv_roller_get_selected_str(obj, buffer.as_mut_ptr(), buffer.len() as u32);
-                    lvgl::lv_roller_get_selected(obj)
+                    ffi::lv_roller_get_selected_str(obj, buffer.as_mut_ptr(), buffer.len() as u32);
+                    ffi::lv_roller_get_selected(obj)
                 });
                 data.selected_text = bounded_c_string(buffer.as_ptr());
                 data.selected_text_truncated =
                     was_capped(buffer.as_ptr(), UI_ELEMENT_MAX_TEXT_BYTES);
             }
-            "lv_tabview" => data.selected = Some(lvgl::lv_tabview_get_tab_active(obj)),
+            "lv_tabview" => data.selected = Some(ffi::lv_tabview_get_tab_active(obj)),
             "lv_buttonmatrix" | "lv_keyboard" => {
-                let selected = lvgl::lv_buttonmatrix_get_selected_button(obj);
-                data.selected = (selected != lvgl::LV_BUTTONMATRIX_BUTTON_NONE).then_some(selected);
+                let selected = ffi::lv_buttonmatrix_get_selected_button(obj);
+                data.selected = (selected != ffi::LV_BUTTONMATRIX_BUTTON_NONE).then_some(selected);
             }
             _ => {}
         }
@@ -508,7 +502,7 @@ unsafe fn widget_value(obj: *mut lvgl::lv_obj_t, role: &str) -> WidgetValue {
 }
 
 unsafe fn matrix_buttons(
-    obj: *mut lvgl::lv_obj_t,
+    obj: *mut ffi::lv_obj_t,
     role: &str,
     remaining: usize,
 ) -> (Vec<UiButton>, bool) {
@@ -517,7 +511,7 @@ unsafe fn matrix_buttons(
     }
     // The pinned LVGL exposes this private layout; access stays within Core.
     unsafe {
-        let matrix = &*obj.cast::<lvgl::lv_buttonmatrix_t>();
+        let matrix = &*obj.cast::<ffi::lv_buttonmatrix_t>();
         let count = matrix.btn_cnt.min(64).min(remaining as u32);
         if count == 0 {
             return (Vec::new(), matrix.btn_cnt > 0);
@@ -527,16 +521,16 @@ unsafe fn matrix_buttons(
         }
 
         let mut buttons = Vec::with_capacity(count as usize);
-        let mut area = lvgl::lv_area_t::default();
-        lvgl::lv_obj_get_coords(obj, &mut area);
+        let mut area = ffi::lv_area_t::default();
+        ffi::lv_obj_get_coords(obj, &mut area);
         for index in 0..count {
             let text =
-                bounded_c_string_with_limit(lvgl::lv_buttonmatrix_get_button_text(obj, index), 128);
+                bounded_c_string_with_limit(ffi::lv_buttonmatrix_get_button_text(obj, index), 128);
             let b = *matrix.button_areas.add(index as usize);
             let flags = *matrix.ctrl_bits.add(index as usize);
             buttons.push(UiButton {
                 index,
-                text_truncated: was_capped(lvgl::lv_buttonmatrix_get_button_text(obj, index), 128),
+                text_truncated: was_capped(ffi::lv_buttonmatrix_get_button_text(obj, index), 128),
                 text,
                 bounds: (
                     area.x1 + b.x1,
@@ -544,9 +538,9 @@ unsafe fn matrix_buttons(
                     area.x1 + b.x2,
                     area.y1 + b.y2,
                 ),
-                hidden: flags & lvgl::lv_buttonmatrix_ctrl_t_LV_BUTTONMATRIX_CTRL_HIDDEN != 0,
-                disabled: flags & lvgl::lv_buttonmatrix_ctrl_t_LV_BUTTONMATRIX_CTRL_DISABLED != 0,
-                checked: flags & lvgl::lv_buttonmatrix_ctrl_t_LV_BUTTONMATRIX_CTRL_CHECKED != 0,
+                hidden: flags & ffi::lv_buttonmatrix_ctrl_t_LV_BUTTONMATRIX_CTRL_HIDDEN != 0,
+                disabled: flags & ffi::lv_buttonmatrix_ctrl_t_LV_BUTTONMATRIX_CTRL_DISABLED != 0,
+                checked: flags & ffi::lv_buttonmatrix_ctrl_t_LV_BUTTONMATRIX_CTRL_CHECKED != 0,
             });
         }
         (buttons, matrix.btn_cnt > count)
@@ -556,10 +550,10 @@ unsafe fn matrix_buttons(
 /// Return the pointer for an index in exactly the same bounded traversal. Used
 /// only under the graphics lock within a single inspect-and-act operation.
 pub(crate) unsafe fn object_at(
-    root: *mut lvgl::lv_obj_t,
+    root: *mut ffi::lv_obj_t,
     index: &mut u32,
     depth: usize,
-) -> Option<*mut lvgl::lv_obj_t> {
+) -> Option<*mut ffi::lv_obj_t> {
     if depth >= crate::UI_TREE_MAX_DEPTH {
         return None;
     }
@@ -568,9 +562,9 @@ pub(crate) unsafe fn object_at(
     }
     *index -= 1;
     unsafe {
-        for child in 0..lvgl::lv_obj_get_child_count(root) {
+        for child in 0..ffi::lv_obj_get_child_count(root) {
             if let Some(obj) =
-                object_at(lvgl::lv_obj_get_child(root, child as i32), index, depth + 1)
+                object_at(ffi::lv_obj_get_child(root, child as i32), index, depth + 1)
             {
                 return Some(obj);
             }
@@ -597,13 +591,13 @@ mod tests {
     use super::*;
     #[test]
     fn matrix_with_unallocated_arrays_is_incomplete_not_dereferenced() {
-        let mut matrix = lvgl::lv_buttonmatrix_t {
+        let mut matrix = ffi::lv_buttonmatrix_t {
             btn_cnt: 1,
             ..Default::default()
         };
         let (buttons, truncated) = unsafe {
             matrix_buttons(
-                (&mut matrix as *mut lvgl::lv_buttonmatrix_t).cast(),
+                (&mut matrix as *mut ffi::lv_buttonmatrix_t).cast(),
                 "lv_buttonmatrix",
                 64,
             )

@@ -1,6 +1,6 @@
 //! Per-user appearance preferences. Record size and preset IDs are stable on disk.
 use crate as graphics;
-use crate::{Color, lvgl};
+use crate::{Color, ffi};
 use file_system::{AccessFlags, CreateFlags, Flags, Permissions};
 use task::TaskIdentifier;
 use virtual_file_system::{self, File, VirtualFileSystem, user_home};
@@ -32,9 +32,9 @@ impl Appearance {
         // are accessed, and they can be read before graphics initialization.
         let palette = unsafe {
             if self.is_dark {
-                *lvgl::lv_theme_shadcn_palette_zinc_dark()
+                *ffi::lv_theme_shadcn_palette_zinc_dark()
             } else {
-                *lvgl::lv_theme_shadcn_palette_zinc_light()
+                *ffi::lv_theme_shadcn_palette_zinc_light()
             }
         };
         let preset = |index, automatic| match index {

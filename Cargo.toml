@@ -68,8 +68,8 @@ quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 # Raw bindings and the safe layer come from the same lvgl-rust revision: the
 # safe layer defines LVGL's OBJ_ID hooks for the bindings' library.
-lvgl_rust_sys = { git = "https://github.com/AlixANNERAUD/lvgl_rust.git", rev = "cc419cb282da75f90e4df182c63c1e78cae1c14e", package = "lvgl-rust-sys", default-features = false }
-lvgl-rust = { git = "https://github.com/AlixANNERAUD/lvgl_rust.git", rev = "cc419cb282da75f90e4df182c63c1e78cae1c14e", default-features = false }
+lvgl_rust_sys = { git = "https://github.com/AlixANNERAUD/lvgl_rust.git", rev = "9547282d814eb704670d9a8c785d3fefa76bf407", package = "lvgl-rust-sys", default-features = false }
+lvgl-rust = { git = "https://github.com/AlixANNERAUD/lvgl_rust.git", rev = "9547282d814eb704670d9a8c785d3fefa76bf407", default-features = false }
 embassy-executor = { version = "0.10", default-features = false }
 embassy-futures = { version = "0.1" }
 embassy-sync = { version = "0.8" }

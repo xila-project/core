@@ -93,48 +93,63 @@ upper bound and fewer heap blocks.
 ## LVGL bindings (lvgl-rust)
 
 Graphics builds LVGL 9.6 through `lvgl-rust-sys`, using `include/lv_conf.h`.
-The existing `graphics::lvgl` module keeps the raw API and Xila helpers.
 Allocator hooks, locale fonts and the shadcn theme remain owned by Core.
-The safe API is re-exported as `graphics::lvgl_rust`.
+The safe API is re-exported as `graphics::lvgl_rust`, in its views-only mode:
+borrowed views under the graphics lock and no handle registry, so nothing
+is reserved per widget and no static table is paid on 256 KB devices.
+
+`graphics::lvgl` (the raw bindings and a few helpers) is **deprecated** and
+is removed before the first release. Rust reports a deprecated module where it
+is imported (`use graphics::lvgl;`) and for helpers defined in it, not for a
+full path or a named import of an item it re-exports: a migrated crate sets
+`#![deny(deprecated)]` and may take a scoped
+`#[expect(deprecated, reason = "...")]` on each audited import.
 
 ### Safe sessions
 
 Use `manager.with_lvgl(|lv| { /* safe LVGL calls */ Ok(()) }).await?`,
 or `with_lvgl_sync` in synchronous code. The private guard implements
 `LvglAccess` using the same mutex as `Manager::lock`; views cannot escape
-this closure. Store a `Handle<W>` across calls and resolve it in each session.
-Code already holding the graphics lock can use unsafe `with_lvgl_locked`:
-it must hold that lock throughout and must not overlap another session.
-Raw calls that delete or move objects must never overlap safe views.
-Do not call raw `lv_init`, `lv_deinit`, or change object IDs.
+this closure. Code already holding the graphics lock can use unsafe
+`with_lvgl_locked`: it must hold that lock throughout and must not overlap
+another session. Raw calls that delete or move objects must never overlap safe
+views. Do not call raw `lv_init` or `lv_deinit`.
 
-### Wasm host integration
+An application edits its window through `OwnedWindow::content_mut(lv)` (the
+window's object, to add children), `OwnedWindow::edit(lv, |root| ...)` (a
+descendant, picked by a selector) and `OwnedWindow::view(lv)`. They need no
+`unsafe`: the `OwnedWindow` keeps the window alive, and Window is registered
+as an externally owned class that accepts only child edits, so safe code
+cannot delete, move or reparent it.
 
-Each VM keeps its own table of handles and gives the guest indices into it,
-never raw handles, like file descriptors (see lvgl-rust's
-`host-several-clients` guide). Resolve every guest index through the table of
-the VM that sent it; an index from another VM, or of a deleted object, fails
-as `Dead`. Insert only objects the VM created beneath its own private root;
-shared windows and display layers stay host-owned and out of the table.
+### Object identity (Wasm host)
 
-Install the single `Lvgl::set_free_observer(Some(callback))` (`free-observer`
-feature) to learn about objects LVGL deletes on its own, such as children
-deleted with their parent. It runs at the end of LVGL destruction, including
-cascading raw deletions, and must not call LVGL or re-enter graphics: record
-`Freed::handle().into_raw()` and release retained side-table data after the
-LVGL work. `WidgetExt::find_handle` maps a live object back to its handle via
-its object ID in O(1), without a per-object callback. At teardown, delete the
-VM's root under the graphics lock and drop its table.
+LVGL's `id` word of each object (`LV_USE_OBJ_ID 1`, `LV_USE_OBJ_ID_BUILTIN 0`)
+belongs to the `object_id` module, which defines the five `lv_obj_*_id` hooks.
 
-The registry starts with 32 static slots and grows in non-moving doubling
-chunks from the global allocator; published chunks remain allocated for the
-process lifetime so deferred drops can address them safely. A handle is 4
-bytes, a slot 8 bytes on 32-bit targets (16 on 64-bit), plus LVGL's object-ID
-pointer (4/8 bytes). Its 16-bit generation detects a stale handle until 65,536
-reuses of the same slot; handles are not cryptographic capabilities. A VM's
-table adds about 4 bytes per object in its own memory. The safe crate's
-default remains allocation-free; Core explicitly enables `growable-registry`
-and `free-observer`, without `heap`.
+- Each VM owns an `ObjectTable`: a counter issuing nonzero, monotonic 32-bit
+  ids (never reissued, so a recycled address cannot match an old id), and a
+  sorted `(id, object)` array of the objects the guest can see: 8 B per such
+  object on 32-bit targets, nothing for any other widget, sized to its content
+  in steps of four entries, looked up by binary search.
+- `ObjectTable::publish` is the only code that writes the word. An id is an
+  opaque number: it is never dereferenced, and a foreign, stale or invented
+  value is not found in the caller's table. When a VM's counter runs out only
+  its creations fail (`Error::NotAvailable`).
+- `lv_obj_free_id` runs at the end of the destructor of every object, on every
+  deletion path (the object, a parent, `clean`, a screen), and tells the
+  observer installed with `object_id::set_free_observer`, which removes the
+  entry **by pointer** (`ObjectTable::remove`) and releases the VM's side data.
+  The observer must not call LVGL or keep the pointer.
+- Window events carry the id the target had when the event was queued
+  (`Event::target_id`). Resolve it through the VM's table: it names nothing
+  once the target is deleted. Events whose target carries no id (native
+  children) have none.
+- Never call LVGL's `lv_obj_find_by_id`: with a null root it searches the
+  active screen, whatever table the id belongs to.
+
+At teardown, delete the VM's root objects under the graphics lock and drop
+its table.
 
 ### Updating consumers
 

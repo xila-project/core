@@ -18,7 +18,7 @@
 
 use alloc::vec;
 
-use crate::{Color, Error, Point, Result, lvgl, theme};
+use crate::{Color, Error, Point, Result, ffi, theme};
 
 /// Width of the supplied artwork, in source units.
 const EXTENT: f32 = 617.45;
@@ -297,14 +297,14 @@ pub enum LogoStyle {
 }
 
 pub struct Logo {
-    pub object: *mut lvgl::lv_obj_t,
-    buffers: [*mut lvgl::lv_draw_buf_t; Self::ARM_COUNT],
+    pub object: *mut ffi::lv_obj_t,
+    buffers: [*mut ffi::lv_draw_buf_t; Self::ARM_COUNT],
 }
 
-unsafe extern "C" fn palette_color_changed(event: *mut lvgl::lv_event_t) {
+unsafe extern "C" fn palette_color_changed(event: *mut ffi::lv_event_t) {
     unsafe {
-        let object = lvgl::lv_event_get_current_target(event) as *mut lvgl::lv_obj_t;
-        let role = lvgl::lv_event_get_user_data(event) as usize;
+        let object = ffi::lv_event_get_current_target(event) as *mut ffi::lv_obj_t;
+        let role = ffi::lv_event_get_user_data(event) as usize;
 
         if let Some(color) = theme::get_palette_color(object, theme::PaletteColor::from_index(role))
         {
@@ -321,11 +321,11 @@ impl Logo {
     /// Child index of the center square.
     pub const CENTER_INDEX: usize = Self::ARM_COUNT;
 
-    const ALIGNMENTS: [lvgl::lv_align_t; Self::ARM_COUNT] = [
-        lvgl::lv_align_t_LV_ALIGN_TOP_LEFT,
-        lvgl::lv_align_t_LV_ALIGN_BOTTOM_LEFT,
-        lvgl::lv_align_t_LV_ALIGN_BOTTOM_RIGHT,
-        lvgl::lv_align_t_LV_ALIGN_TOP_RIGHT,
+    const ALIGNMENTS: [ffi::lv_align_t; Self::ARM_COUNT] = [
+        ffi::lv_align_t_LV_ALIGN_TOP_LEFT,
+        ffi::lv_align_t_LV_ALIGN_BOTTOM_LEFT,
+        ffi::lv_align_t_LV_ALIGN_BOTTOM_RIGHT,
+        ffi::lv_align_t_LV_ALIGN_TOP_RIGHT,
     ];
 
     pub fn get_factor(size: Point) -> u8 {
@@ -339,7 +339,7 @@ impl Logo {
     ///
     /// # Safety
     /// `parent` must be a live LVGL object and the caller must hold the LVGL lock.
-    pub unsafe fn new(parent: *mut lvgl::lv_obj_t, factor: u8, color: Color) -> Result<Self> {
+    pub unsafe fn new(parent: *mut ffi::lv_obj_t, factor: u8, color: Color) -> Result<Self> {
         unsafe { Self::new_with_style(parent, factor, color, LogoStyle::Filled) }
     }
 
@@ -348,7 +348,7 @@ impl Logo {
     /// # Safety
     /// `parent` must be a live LVGL object and the caller must hold the LVGL lock.
     pub unsafe fn new_with_style(
-        parent: *mut lvgl::lv_obj_t,
+        parent: *mut ffi::lv_obj_t,
         factor: u8,
         color: Color,
         style: LogoStyle,
@@ -360,7 +360,7 @@ impl Logo {
         let metrics = Metrics::new(size);
 
         unsafe {
-            let object = lvgl::lv_obj_create(parent);
+            let object = ffi::lv_obj_create(parent);
 
             if object.is_null() {
                 return Err(Error::FailedToCreateObject);
@@ -374,10 +374,10 @@ impl Logo {
             };
 
             // Decorative and theme independent: no surface, padding or input.
-            lvgl::lv_obj_remove_style_all(object);
-            lvgl::lv_obj_set_size(object, metrics.size as i32, metrics.size as i32);
-            lvgl::lv_obj_remove_flag(object, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_CLICKABLE);
-            lvgl::lv_obj_remove_flag(object, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_SCROLLABLE);
+            ffi::lv_obj_remove_style_all(object);
+            ffi::lv_obj_set_size(object, metrics.size as i32, metrics.size as i32);
+            ffi::lv_obj_remove_flag(object, ffi::lv_obj_flag_t_LV_OBJ_FLAG_CLICKABLE);
+            ffi::lv_obj_remove_flag(object, ffi::lv_obj_flag_t_LV_OBJ_FLAG_SCROLLABLE);
 
             logo.create_arms(&metrics, style)?;
             logo.create_center(&metrics, style)?;
@@ -392,11 +392,11 @@ impl Logo {
 
         unsafe {
             for slot in &mut self.buffers {
-                let buffer = lvgl::lv_draw_buf_create(
+                let buffer = ffi::lv_draw_buf_create(
                     side,
                     side,
-                    lvgl::lv_color_format_t_LV_COLOR_FORMAT_A8,
-                    lvgl::LV_STRIDE_AUTO,
+                    ffi::lv_color_format_t_LV_COLOR_FORMAT_A8,
+                    ffi::LV_STRIDE_AUTO,
                 );
                 if buffer.is_null() {
                     return Err(Error::OutOfMemory);
@@ -424,8 +424,8 @@ impl Logo {
             let side = side as usize;
             for (index, alignment) in Self::ALIGNMENTS.iter().enumerate().take(3) {
                 let (mirror_x, mirror_y) = match *alignment {
-                    lvgl::lv_align_t_LV_ALIGN_TOP_LEFT => (true, false),
-                    lvgl::lv_align_t_LV_ALIGN_BOTTOM_LEFT => (true, true),
+                    ffi::lv_align_t_LV_ALIGN_TOP_LEFT => (true, false),
+                    ffi::lv_align_t_LV_ALIGN_BOTTOM_LEFT => (true, true),
                     _ => (false, true),
                 };
                 let target_buffer = self.buffers[index].as_mut().ok_or(Error::OutOfMemory)?;
@@ -443,15 +443,15 @@ impl Logo {
             }
 
             for (buffer, alignment) in self.buffers.iter().zip(Self::ALIGNMENTS) {
-                let arm = lvgl::lv_image_create(self.object);
+                let arm = ffi::lv_image_create(self.object);
                 if arm.is_null() {
                     return Err(Error::FailedToCreateObject);
                 }
-                lvgl::lv_obj_remove_style_all(arm);
-                lvgl::lv_image_set_src(arm, *buffer as *const _);
-                lvgl::lv_obj_set_align(arm, alignment);
-                lvgl::lv_obj_remove_flag(arm, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_CLICKABLE);
-                lvgl::lv_obj_add_flag(arm, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_EVENT_BUBBLE);
+                ffi::lv_obj_remove_style_all(arm);
+                ffi::lv_image_set_src(arm, *buffer as *const _);
+                ffi::lv_obj_set_align(arm, alignment);
+                ffi::lv_obj_remove_flag(arm, ffi::lv_obj_flag_t_LV_OBJ_FLAG_CLICKABLE);
+                ffi::lv_obj_add_flag(arm, ffi::lv_obj_flag_t_LV_OBJ_FLAG_EVENT_BUBBLE);
             }
         }
 
@@ -460,47 +460,47 @@ impl Logo {
 
     unsafe fn create_center(&mut self, metrics: &Metrics, style: LogoStyle) -> Result<()> {
         unsafe {
-            let center = lvgl::lv_obj_create(self.object);
+            let center = ffi::lv_obj_create(self.object);
             if center.is_null() {
                 return Err(Error::FailedToCreateObject);
             }
             let side = (metrics.square_half * 2) as i32;
 
-            lvgl::lv_obj_remove_style_all(center);
-            lvgl::lv_obj_set_size(center, side, side);
-            lvgl::lv_obj_set_align(center, lvgl::lv_align_t_LV_ALIGN_CENTER);
-            lvgl::lv_obj_set_style_radius(
+            ffi::lv_obj_remove_style_all(center);
+            ffi::lv_obj_set_size(center, side, side);
+            ffi::lv_obj_set_align(center, ffi::lv_align_t_LV_ALIGN_CENTER);
+            ffi::lv_obj_set_style_radius(
                 center,
                 metrics.square_radius as i32,
-                lvgl::LV_STATE_DEFAULT,
+                ffi::LV_STATE_DEFAULT,
             );
             match style {
                 LogoStyle::Filled => {
-                    lvgl::lv_obj_set_style_bg_opa(center, lvgl::LV_OPA_COVER as _, 0);
+                    ffi::lv_obj_set_style_bg_opa(center, ffi::LV_OPA_COVER as _, 0);
                 }
                 LogoStyle::Outline => {
-                    lvgl::lv_obj_set_style_border_width(center, 1, lvgl::LV_STATE_DEFAULT);
-                    lvgl::lv_obj_set_style_border_opa(center, lvgl::LV_OPA_COVER as _, 0);
+                    ffi::lv_obj_set_style_border_width(center, 1, ffi::LV_STATE_DEFAULT);
+                    ffi::lv_obj_set_style_border_opa(center, ffi::LV_OPA_COVER as _, 0);
                 }
             }
-            lvgl::lv_obj_remove_flag(center, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_CLICKABLE);
-            lvgl::lv_obj_add_flag(center, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_EVENT_BUBBLE);
+            ffi::lv_obj_remove_flag(center, ffi::lv_obj_flag_t_LV_OBJ_FLAG_CLICKABLE);
+            ffi::lv_obj_add_flag(center, ffi::lv_obj_flag_t_LV_OBJ_FLAG_EVENT_BUBBLE);
         }
 
         Ok(())
     }
 
-    unsafe fn apply_color(object: *mut lvgl::lv_obj_t, color: Color) {
+    unsafe fn apply_color(object: *mut ffi::lv_obj_t, color: Color) {
         let color = color.into_lvgl_color();
 
         unsafe {
             for index in 0..Self::ARM_COUNT {
-                let arm = lvgl::lv_obj_get_child(object, index as i32);
-                lvgl::lv_obj_set_style_image_recolor(arm, color, lvgl::LV_STATE_DEFAULT);
+                let arm = ffi::lv_obj_get_child(object, index as i32);
+                ffi::lv_obj_set_style_image_recolor(arm, color, ffi::LV_STATE_DEFAULT);
             }
-            let center = lvgl::lv_obj_get_child(object, Self::CENTER_INDEX as i32);
-            lvgl::lv_obj_set_style_bg_color(center, color, lvgl::LV_STATE_DEFAULT);
-            lvgl::lv_obj_set_style_border_color(center, color, lvgl::LV_STATE_DEFAULT);
+            let center = ffi::lv_obj_get_child(object, Self::CENTER_INDEX as i32);
+            ffi::lv_obj_set_style_bg_color(center, color, ffi::LV_STATE_DEFAULT);
+            ffi::lv_obj_set_style_border_color(center, color, ffi::LV_STATE_DEFAULT);
         }
     }
 
@@ -522,16 +522,16 @@ impl Logo {
             if let Some(value) = theme::get_palette_color(self.object, color) {
                 Self::apply_color(self.object, value);
             }
-            lvgl::lv_obj_add_event_cb(
+            ffi::lv_obj_add_event_cb(
                 self.object,
                 Some(palette_color_changed),
-                lvgl::lv_event_code_t_LV_EVENT_STYLE_CHANGED,
+                ffi::lv_event_code_t_LV_EVENT_STYLE_CHANGED,
                 color as usize as *mut core::ffi::c_void,
             );
         }
     }
 
-    pub fn get_inner_object(&self) -> *mut lvgl::lv_obj_t {
+    pub fn get_inner_object(&self) -> *mut ffi::lv_obj_t {
         self.object
     }
 
@@ -539,16 +539,16 @@ impl Logo {
     ///
     /// # Safety
     /// The caller must hold the LVGL lock.
-    pub unsafe fn get_arm(&self, index: usize) -> *mut lvgl::lv_obj_t {
-        unsafe { lvgl::lv_obj_get_child(self.object, index.min(Self::ARM_COUNT - 1) as i32) }
+    pub unsafe fn get_arm(&self, index: usize) -> *mut ffi::lv_obj_t {
+        unsafe { ffi::lv_obj_get_child(self.object, index.min(Self::ARM_COUNT - 1) as i32) }
     }
 
     /// Center square object.
     ///
     /// # Safety
     /// The caller must hold the LVGL lock.
-    pub unsafe fn get_center(&self) -> *mut lvgl::lv_obj_t {
-        unsafe { lvgl::lv_obj_get_child(self.object, Self::CENTER_INDEX as i32) }
+    pub unsafe fn get_center(&self) -> *mut ffi::lv_obj_t {
+        unsafe { ffi::lv_obj_get_child(self.object, Self::CENTER_INDEX as i32) }
     }
 }
 
@@ -556,11 +556,11 @@ impl Drop for Logo {
     fn drop(&mut self) {
         unsafe {
             // Delete the images before releasing the bitmaps they reference.
-            lvgl::lv_obj_delete(self.object);
+            ffi::lv_obj_delete(self.object);
             for buffer in self.buffers {
                 if !buffer.is_null() {
-                    lvgl::lv_image_cache_drop(buffer as *const _);
-                    lvgl::lv_draw_buf_destroy(buffer);
+                    ffi::lv_image_cache_drop(buffer as *const _);
+                    ffi::lv_draw_buf_destroy(buffer);
                 }
             }
         }

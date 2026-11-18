@@ -1,6 +1,6 @@
 use core::mem::transmute;
 
-use crate::{Point, lvgl};
+use crate::{Point, ffi};
 
 use super::{Key, State};
 
@@ -103,14 +103,14 @@ impl AsMut<[u8]> for InputData {
     }
 }
 
-impl From<InputData> for lvgl::lv_indev_data_t {
-    fn from(value: InputData) -> lvgl::lv_indev_data_t {
-        let mut input_device_data = lvgl::lv_indev_data_t::default();
+impl From<InputData> for ffi::lv_indev_data_t {
+    fn from(value: InputData) -> ffi::lv_indev_data_t {
+        let mut input_device_data = ffi::lv_indev_data_t::default();
 
         let state = value.get_touch();
 
         let point = value.get_point();
-        input_device_data.point = lvgl::lv_point_t {
+        input_device_data.point = ffi::lv_point_t {
             x: point.x as i32,
             y: point.y as i32,
         };

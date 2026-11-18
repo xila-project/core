@@ -9,7 +9,7 @@ use crate::{
     draw_buffer::Buffer,
 };
 
-use super::lvgl;
+use super::ffi;
 
 fn checked_buffer_size_bytes(pixel_count: usize, bytes_per_pixel: usize) -> Option<u32> {
     u32::try_from(pixel_count.checked_mul(bytes_per_pixel)?).ok()
@@ -20,7 +20,7 @@ struct UserData {
 }
 
 pub struct Display {
-    display: *mut lvgl::lv_display_t,
+    display: *mut ffi::lv_display_t,
     _buffer_1: Buffer,
     _buffer_2: Option<Buffer>,
 }
@@ -30,8 +30,8 @@ unsafe impl Send for Display {}
 unsafe impl Sync for Display {}
 
 unsafe extern "C" fn binding_callback_function(
-    display: *mut lvgl::lv_disp_t,
-    area: *const lvgl::lv_area_t,
+    display: *mut ffi::lv_disp_t,
+    area: *const ffi::lv_area_t,
     data: *mut u8,
 ) {
     let lv_area = unsafe { *area };
@@ -45,7 +45,7 @@ unsafe extern "C" fn binding_callback_function(
 
     let buffer = unsafe { slice::from_raw_parts(data as *const u8, buffer_size) };
 
-    let user_data = unsafe { &mut *(lvgl::lv_display_get_user_data(display) as *mut UserData) };
+    let user_data = unsafe { &mut *(ffi::lv_display_get_user_data(display) as *mut UserData) };
 
     let device = &user_data.device;
 
@@ -61,13 +61,13 @@ unsafe extern "C" fn binding_callback_function(
         .write_sync(buffer, 0)
         .expect("Error writing to display");
 
-    unsafe { lvgl::lv_display_flush_ready(display) };
+    unsafe { ffi::lv_display_flush_ready(display) };
 }
 
 impl Drop for Display {
     fn drop(&mut self) {
         unsafe {
-            lvgl::lv_display_delete(self.display);
+            ffi::lv_display_delete(self.display);
         }
     }
 }
@@ -93,9 +93,8 @@ impl Display {
             .expect("Error getting resolution");
 
         // Create the display.
-        let lvgl_display: *mut lvgl_rust_sys::_lv_display_t = unsafe {
-            lvgl::lv_display_create(resolution.get_x() as i32, resolution.get_y() as i32)
-        };
+        let lvgl_display: *mut lvgl_rust_sys::_lv_display_t =
+            unsafe { ffi::lv_display_create(resolution.get_x() as i32, resolution.get_y() as i32) };
 
         // Set the buffer(s) and the render mode.
         let buffer_1 = Buffer::new(buffer_size);
@@ -107,14 +106,14 @@ impl Display {
         };
 
         unsafe {
-            lvgl::lv_display_set_buffers(
+            ffi::lv_display_set_buffers(
                 lvgl_display,
                 buffer_1.as_ref().as_ptr() as *mut c_void,
                 buffer_2
                     .as_ref()
                     .map_or(null_mut(), |buffer| buffer.as_ref().as_ptr() as *mut c_void),
                 buffer_size_bytes,
-                lvgl::lv_display_render_mode_t_LV_DISPLAY_RENDER_MODE_PARTIAL,
+                ffi::lv_display_render_mode_t_LV_DISPLAY_RENDER_MODE_PARTIAL,
             )
         }
 
@@ -122,11 +121,11 @@ impl Display {
         let user_data = Box::new(UserData { device });
 
         unsafe {
-            lvgl::lv_display_set_user_data(lvgl_display, Box::into_raw(user_data) as *mut c_void)
+            ffi::lv_display_set_user_data(lvgl_display, Box::into_raw(user_data) as *mut c_void)
         };
 
         // Set the flush callback.
-        unsafe { lvgl::lv_display_set_flush_cb(lvgl_display, Some(binding_callback_function)) }
+        unsafe { ffi::lv_display_set_flush_cb(lvgl_display, Some(binding_callback_function)) }
 
         Ok(Self {
             display: lvgl_display,
@@ -137,7 +136,7 @@ impl Display {
 
     pub fn check_for_resizing(&self) {
         let user_data =
-            unsafe { &mut *(lvgl::lv_display_get_user_data(self.display) as *mut UserData) };
+            unsafe { &mut *(ffi::lv_display_get_user_data(self.display) as *mut UserData) };
 
         let mut was_resize = false;
 
@@ -166,7 +165,7 @@ impl Display {
             .expect("Error getting resolution");
 
         unsafe {
-            lvgl::lv_display_set_resolution(
+            ffi::lv_display_set_resolution(
                 self.display,
                 resolution.get_x() as i32,
                 resolution.get_y() as i32,
@@ -174,19 +173,19 @@ impl Display {
         }
     }
 
-    pub fn get_lvgl_display(&self) -> *mut lvgl::lv_display_t {
+    pub fn get_lvgl_display(&self) -> *mut ffi::lv_display_t {
         self.display
     }
 
-    pub fn get_object(&self) -> *mut lvgl::lv_obj_t {
-        unsafe { lvgl::lv_display_get_screen_active(self.display) }
+    pub fn get_object(&self) -> *mut ffi::lv_obj_t {
+        unsafe { ffi::lv_display_get_screen_active(self.display) }
     }
 
     pub fn get_resolution(&self) -> Point {
         unsafe {
             Point::new(
-                lvgl::lv_display_get_horizontal_resolution(self.display) as i16,
-                lvgl::lv_display_get_vertical_resolution(self.display) as i16,
+                ffi::lv_display_get_horizontal_resolution(self.display) as i16,
+                ffi::lv_display_get_vertical_resolution(self.display) as i16,
             )
         }
     }
@@ -204,10 +203,10 @@ impl Display {
         let mut capture = crate::screenshot::capture_screen(self.get_object())?;
         unsafe {
             for layer in [
-                lvgl::lv_display_get_layer_top(self.display),
-                lvgl::lv_display_get_layer_sys(self.display),
+                ffi::lv_display_get_layer_top(self.display),
+                ffi::lv_display_get_layer_sys(self.display),
             ] {
-                if lvgl::lv_obj_get_child_count(layer) == 0 {
+                if ffi::lv_obj_get_child_count(layer) == 0 {
                     continue;
                 }
                 let overlay = crate::screenshot::capture_screen(layer)?;
