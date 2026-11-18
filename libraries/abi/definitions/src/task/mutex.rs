@@ -2,27 +2,41 @@ use core::{
     mem::{align_of, size_of},
     ptr::drop_in_place,
 };
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 use synchronization::blocking_mutex::{Mutex, raw::CriticalSectionRawMutex};
 use task::TaskIdentifier;
+
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+use std::sync::{Condvar as ConditionVariable, Mutex as ThreadMutex, PoisonError};
 
 use crate::XilaTaskIdentifier;
 
 #[derive(Debug, Clone, Copy, Default)]
-struct MutexState {
+pub(super) struct MutexState {
     task: Option<TaskIdentifier>,
     lock_count: u32, // For recursive mutexes
 }
 
 pub struct RawMutex {
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     mutex: Mutex<CriticalSectionRawMutex, MutexState>,
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    mutex: ThreadMutex<MutexState>,
     recursive: bool,
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    released: ConditionVariable,
 }
 
 impl RawMutex {
     pub fn new(recursive: bool) -> Self {
         Self {
+            #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
             mutex: Mutex::new(MutexState::default()),
+            #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+            mutex: ThreadMutex::new(MutexState::default()),
             recursive,
+            #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+            released: ConditionVariable::new(),
         }
     }
 
@@ -60,47 +74,68 @@ impl RawMutex {
         }
     }
 
-    pub fn lock(&self, task: TaskIdentifier) -> bool {
-        unsafe {
-            self.mutex.lock_mut(|state| {
-                if let Some(owner) = state.task {
-                    if owner == task && self.recursive {
-                        // Recursive lock
-                        state.lock_count += 1;
-                        return true;
-                    }
-                    // Mutex is already locked by another task
-                    return false;
-                }
+    fn with_state<T>(&self, operation: impl FnOnce(&mut MutexState) -> T) -> T {
+        #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+        return operation(&mut self.mutex.lock().unwrap_or_else(PoisonError::into_inner));
 
-                // Lock is available
-                state.task = Some(task);
-                state.lock_count = 1;
-                true
-            })
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+        // State operations never reenter this mutex.
+        unsafe {
+            self.mutex.lock_mut(operation)
         }
     }
 
-    pub fn unlock(&self, task: TaskIdentifier) -> bool {
-        unsafe {
-            self.mutex.lock_mut(|state| {
-                // Check if current task owns the mutex
-                if let Some(owner) = state.task
-                    && owner == task
-                {
-                    if self.recursive && state.lock_count > 1 {
-                        // Decrement lock count for recursive mutex
-                        state.lock_count -= 1;
-                    } else {
-                        // Unlock the mutex
-                        state.task = None;
-                        state.lock_count = 0;
-                    }
-                    return true; // Successfully unlocked
+    pub fn lock(&self, task: TaskIdentifier) -> bool {
+        self.with_state(|state| {
+            if let Some(owner) = state.task {
+                if owner != task || !self.recursive {
+                    return false;
                 }
-                false // Not owned by current task or not locked
-            })
-        }
+                let Some(count) = state.lock_count.checked_add(1) else {
+                    return false;
+                };
+                state.lock_count = count;
+            } else {
+                state.task = Some(task);
+                state.lock_count = 1;
+            }
+            true
+        })
+    }
+
+    pub fn unlock(&self, task: TaskIdentifier) -> bool {
+        self.with_state(|state| {
+            if state.task != Some(task) {
+                return false;
+            }
+            state.lock_count -= 1;
+            if state.lock_count == 0 {
+                state.task = None;
+                #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+                self.released.notify_one();
+            }
+            true
+        })
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    pub(super) fn release_for_condition_wait(&self) -> Option<MutexState> {
+        self.with_state(|state| {
+            state.task?;
+            let saved = core::mem::take(state);
+            self.released.notify_one();
+            Some(saved)
+        })
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    pub(super) fn reacquire_after_condition_wait(&self, saved: MutexState) {
+        let state = self.mutex.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut state = self
+            .released
+            .wait_while(state, |state| state.task.is_some())
+            .unwrap_or_else(PoisonError::into_inner);
+        *state = saved;
     }
 }
 
@@ -168,7 +203,7 @@ pub unsafe extern "C" fn xila_initialize_recursive_mutex(mutex: *mut RawMutex) -
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_lock_mutex(mutex: *mut RawMutex, task: XilaTaskIdentifier) -> bool {
     unsafe {
-        let mutex = match RawMutex::from_mutable_pointer(mutex) {
+        let mutex = match RawMutex::from_pointer(mutex) {
             Some(mutex) => mutex,
             None => return false,
         };
@@ -188,7 +223,7 @@ pub unsafe extern "C" fn xila_lock_mutex(mutex: *mut RawMutex, task: XilaTaskIde
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_unlock_mutex(mutex: *mut RawMutex, task: XilaTaskIdentifier) -> bool {
     unsafe {
-        let mutex = match RawMutex::from_mutable_pointer(mutex) {
+        let mutex = match RawMutex::from_pointer(mutex) {
             Some(mutex) => mutex,
             None => return false,
         };

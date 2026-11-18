@@ -15,6 +15,9 @@ shared = { workspace = true }
 
 log = { workspace = true }
 
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+libc = "0.2"
+
 [features]
 default = []
 allocation_redundancy_check = []

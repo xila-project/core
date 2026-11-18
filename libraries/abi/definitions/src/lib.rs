@@ -1,6 +1,8 @@
 #![no_std]
 
 extern crate alloc;
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+extern crate std;
 
 use synchronization::once_lock::OnceLock;
 
@@ -17,9 +19,11 @@ pub fn initialize(runtime_context: RuntimeContext) {
 }
 
 pub(crate) fn runtime_context() -> &'static RuntimeContext {
-    RUNTIME_CONTEXT
-        .try_get()
-        .expect("ABI runtime context not initialized")
+    try_runtime_context().expect("ABI runtime context not initialized")
+}
+
+pub(crate) fn try_runtime_context() -> Option<&'static RuntimeContext> {
+    RUNTIME_CONTEXT.try_get()
 }
 
 mod file_system;

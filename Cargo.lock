@@ -1904,6 +1904,7 @@ dependencies = [
 name = "xila-abi-definitions"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "xila-drivers-core",
  "xila-file-system",
  "xila-little-fs",
