@@ -2159,9 +2159,6 @@ dependencies = [
  "bitflags 2.13.2",
  "critical-section",
  "linked_list_allocator",
- "xila-log",
- "xila-shared",
- "xila-synchronization",
 ]
 
 [[package]]

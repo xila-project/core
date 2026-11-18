@@ -125,10 +125,7 @@ impl<'a> Manager<'a> {
     /// - The address is valid and points to a memory region of at least `size` bytes
     /// - The memory region is not being modified while the instruction cache is being flushed
     pub unsafe fn flush_instruction_cache(&self, address: *const u8, size: usize) {
-        let address = if let Some(address) = NonNull::new(address as *mut u8) {
-            address
-        } else {
-            log::warning!("flush_instruction_cache called with null address, ignoring");
+        let Some(address) = NonNull::new(address as *mut u8) else {
             return;
         };
 
