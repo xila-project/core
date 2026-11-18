@@ -2332,6 +2332,7 @@ dependencies = [
  "embedded-io-async",
  "xila-abi-definitions",
  "xila-drivers-core",
+ "xila-executable",
  "xila-file-system",
  "xila-little-fs",
  "xila-log",
