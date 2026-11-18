@@ -785,7 +785,7 @@ impl VirtualFileSystem {
             log::error!(
                 "Asked permissions {:?} not granted for user {:?} on path {:?} (owner: {:?}, group: {:?}, permissions: {:?})",
                 asked_permissions,
-                owner_user,
+                current_user,
                 path,
                 owner_user,
                 owner_group,

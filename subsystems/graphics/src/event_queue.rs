@@ -17,7 +17,7 @@ pub enum PushOutcome {
     Queued,
     /// The event replaced the queued pointer move it superseded.
     Coalesced,
-    /// The ring was full: the oldest coalescible event was dropped to make room
+    /// The ring was full: the oldest expendable event was dropped to make room
     /// and the event was appended.
     EvictedOldest,
     /// The ring was full of events that must be kept: the event was dropped.
@@ -40,6 +40,17 @@ const _: () =
 /// pointer moves only carry the latest position.
 const fn is_coalescible(event: &Event) -> bool {
     matches!(event.code, EventKind::Pressing)
+}
+
+/// Whether a full ring may sacrifice this event for a newer one: pointer moves,
+/// scroll animation steps and the style refreshes a press or release emits for
+/// every affected object. Otherwise one click or tile animation can fill the ring
+/// and push out its own release, click or value change.
+const fn is_expendable(event: &Event) -> bool {
+    matches!(
+        event.code,
+        EventKind::Pressing | EventKind::Scroll | EventKind::StyleChanged
+    )
 }
 
 impl EventQueue {
@@ -74,9 +85,9 @@ impl EventQueue {
     ///
     /// 1. A pointer move (`Pressing`) directly following a pointer move for the
     ///    same target replaces it: only the latest position is useful.
-    /// 2. Otherwise, if the ring is full, the oldest queued pointer move is
-    ///    dropped to make room, so key, click, press and release events are
-    ///    never lost while a move can be sacrificed.
+    /// 2. Otherwise, if the ring is full, the oldest queued expendable event (a
+    ///    pointer move, scroll step or style change) is dropped to make room, so key, click, press, release and value events are never lost
+    ///    while such an event can be sacrificed.
     /// 3. If the ring is still full, the new event is dropped (keeping the
     ///    queue order and front stable) and counted in [`Self::dropped`].
     pub fn push(&mut self, event: Event) -> PushOutcome {
@@ -92,7 +103,7 @@ impl EventQueue {
         let mut outcome = PushOutcome::Queued;
         if self.is_full() {
             let Some(index) =
-                (0..self.len()).find(|&index| self.get(index).is_some_and(is_coalescible))
+                (0..self.len()).find(|&index| self.get(index).is_some_and(is_expendable))
             else {
                 self.dropped = self.dropped.saturating_add(1);
                 return PushOutcome::Dropped;
@@ -346,6 +357,30 @@ mod tests {
             assert_eq!(queue.pop_front().unwrap().code, EventKind::Clicked);
         }
         assert_eq!(queue.pop_front().unwrap().pointer, Some([3, 0, 100, 100]));
+    }
+
+    #[test]
+    fn full_ring_sacrifices_scroll_and_style_events_for_input_and_value_events() {
+        let mut queue = EventQueue::new();
+        queue.push(event(EventKind::Pressed, 1));
+        while !queue.is_full() {
+            queue.push(event(EventKind::StyleChanged, 1));
+            queue.push(event(EventKind::Scroll, 2));
+        }
+        let important = [
+            EventKind::Released,
+            EventKind::ShortClicked,
+            EventKind::Clicked,
+            EventKind::ValueChanged,
+        ];
+        for code in important {
+            assert_eq!(queue.push(event(code, 1)), PushOutcome::EvictedOldest);
+        }
+        let drained = drain(&mut queue);
+        assert_eq!(drained.len(), WINDOW_EVENT_QUEUE_CAPACITY);
+        assert_eq!(drained[0], (EventKind::Pressed, 1));
+        let codes: Vec<_> = drained.iter().map(|(code, _)| *code).collect();
+        assert_eq!(codes[codes.len() - important.len()..], important);
     }
 
     #[test]

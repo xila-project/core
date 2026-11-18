@@ -168,6 +168,9 @@ unsafe extern "C" fn window_event_callback(
             | lvgl::lv_event_code_t_LV_EVENT_DRAW_MAIN_END
             | lvgl::lv_event_code_t_LV_EVENT_DRAW_POST
             | lvgl::lv_event_code_t_LV_EVENT_DRAW_POST_BEGIN
+            | lvgl::lv_event_code_t_LV_EVENT_DRAW_POST_END
+            | lvgl::lv_event_code_t_LV_EVENT_DRAW_TASK_ADDED
+            | lvgl::lv_event_code_t_LV_EVENT_REFR_EXT_DRAW_SIZE
             | lvgl::lv_event_code_t_LV_EVENT_GET_SELF_SIZE
             | lvgl::lv_event_code_t_LV_EVENT_COVER_CHECK
             | lvgl::lv_event_code_t_LV_EVENT_LAYOUT_CHANGED => {
@@ -177,7 +180,14 @@ unsafe extern "C" fn window_event_callback(
             _ => (code, None),
         };
 
-        let mut queued = Event::new(EventKind::from_lvgl_code(code), target, key);
+        let kind = EventKind::from_lvgl_code(code);
+        // Codes without a kind (state changes, checked/unchecked) would reach
+        // consumers as an opaque `Last` while taking a slot in the bounded ring.
+        if kind == EventKind::Last {
+            return;
+        }
+
+        let mut queued = Event::new(kind, target, key);
         if matches!(
             code,
             lvgl::lv_event_code_t_LV_EVENT_PRESSED

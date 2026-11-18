@@ -1055,7 +1055,16 @@ impl VirtualFileSystem {
             return Err(Error::AlreadyExists);
         };
 
-        // Get the parent directory attributes
+        // Like POSIX mkdir, an existing entry is reported before the parent
+        // write check: resolution already required search permission on the
+        // parent, so this reveals nothing a lookup would not.
+        let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
+        match Self::get_attributes(file_system.file_system, relative_path, &mut attributes).await {
+            Ok(()) => return Err(Error::AlreadyExists),
+            Err(Error::FileSystem(file_system::Error::NotFound)) => {}
+            Err(error) => return Err(error),
+        }
+
         self.check_permissions(
             file_system.file_system,
             parent_path,

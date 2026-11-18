@@ -1014,6 +1014,70 @@ async fn group_permissions_do_not_fall_through_to_others() {
     ));
 }
 
+/// A user creating an existing directory under a parent it cannot write, as
+/// the graphical shell does with the seeded shortcut directory, is told the
+/// directory exists instead of being denied (and logged as an error).
+#[cfg(target_os = "linux")]
+#[test]
+async fn existing_directory_is_reported_before_the_parent_write_check() {
+    use virtual_file_system::Error;
+    let (task, vfs) = initialize().await;
+    let user = unprivileged_user(vfs).await;
+    vfs.create_directory(task, &"/shared").await.unwrap();
+    vfs.create_directory(task, &"/shared/existing")
+        .await
+        .unwrap();
+    File::write_to_path(vfs, task, "/shared/file", b"data")
+        .await
+        .unwrap();
+    vfs.create_symlink(
+        task,
+        Path::from_str("/missing"),
+        Path::from_str("/shared/dangling"),
+    )
+    .await
+    .unwrap();
+    // Root-owned and readable by everyone, like the seeded `/configuration/shared`.
+    vfs.set_permissions(
+        task,
+        "/shared",
+        file_system::Permissions::from_octal(0o755).unwrap(),
+    )
+    .await
+    .unwrap();
+    vfs.task_manager().set_user(task, user).await.unwrap();
+
+    for path in ["/shared/existing", "/shared/file", "/shared/dangling"] {
+        assert_eq!(
+            vfs.create_directory(task, &path).await,
+            Err(Error::AlreadyExists),
+            "{path}"
+        );
+    }
+    assert_eq!(
+        vfs.create_directory(task, &"/shared/new").await,
+        Err(Error::PermissionDenied)
+    );
+
+    // Without search permission on the parent, existence stays hidden.
+    vfs.task_manager()
+        .set_user(task, users::UserIdentifier::ROOT)
+        .await
+        .unwrap();
+    vfs.set_permissions(
+        task,
+        "/shared",
+        file_system::Permissions::from_octal(0o700).unwrap(),
+    )
+    .await
+    .unwrap();
+    vfs.task_manager().set_user(task, user).await.unwrap();
+    assert_eq!(
+        vfs.create_directory(task, &"/shared/existing").await,
+        Err(Error::PermissionDenied)
+    );
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 async fn owner_can_chmod_path_but_cannot_change_ownership() {
