@@ -99,6 +99,30 @@ unsafe extern "C" fn window_destructor(
     }
 }
 
+/// Whether `target` is `root` or one of its descendants. Compares addresses
+/// with live objects only: `target` itself is never dereferenced.
+unsafe fn is_in_tree(root: *mut lvgl::lv_obj_t, target: *mut lvgl::lv_obj_t) -> bool {
+    unsafe {
+        root == target
+            || (0..lvgl::lv_obj_get_child_count(root) as i32)
+                .any(|index| is_in_tree(lvgl::lv_obj_get_child(root, index), target))
+    }
+}
+
+/// Null the target of every queued event whose widget is no longer below the
+/// window. Costs nothing per object and allocates nothing; the walk runs only
+/// when a descendant goes away and an event is queued.
+unsafe fn forget_dead_targets(window: *mut Window) {
+    unsafe {
+        let queue = &mut (*window).event_queue;
+        if queue.is_empty() {
+            return;
+        }
+        let root = window as *mut lvgl::lv_obj_t;
+        queue.clear_dead_targets(|target| is_in_tree(root, target));
+    }
+}
+
 unsafe extern "C" fn window_event_callback(
     _class_p: *const lvgl::lv_obj_class_t,
     event: *mut lvgl::lv_event_t,
@@ -119,6 +143,14 @@ unsafe extern "C" fn window_event_callback(
             lvgl::lv_event_code_t_LV_EVENT_CHILD_CREATED => {
                 let child = lvgl::lv_event_get_param(event) as *mut lvgl::lv_obj_t;
                 lvgl::lv_obj_add_flag(child, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_EVENT_BUBBLE);
+                (code, None)
+            }
+            lvgl::lv_event_code_t_LV_EVENT_CHILD_DELETED => {
+                // A descendant was deleted or moved out (LVGL sends this to
+                // every ancestor, after the object is gone and before
+                // anything can reuse its memory). Queued events aimed at it
+                // would otherwise match a widget created at the same address.
+                forget_dead_targets(window);
                 (code, None)
             }
             lvgl::lv_event_code_t_LV_EVENT_KEY => {
@@ -215,6 +247,10 @@ impl Window {
 
     /// Forget queued targets before their LVGL storage can be reused. This only
     /// compares addresses; it never dereferences the potentially deleted target.
+    ///
+    /// Not needed for widgets below the window that LVGL deletes or moves
+    /// away: the window clears those targets itself when LVGL reports the
+    /// deletion.
     pub fn discard_events_for_target(&mut self, target: *mut lvgl::lv_obj_t) {
         self.event_queue.discard_target(target);
     }

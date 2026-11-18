@@ -13,6 +13,10 @@ pub struct Event {
 impl Event {
     /// Compare the queued address with a candidate widget. The event carries
     /// no lifetime guarantee, and LVGL may reuse an address after deletion.
+    /// A window clears the targets of events aimed at its descendants as soon
+    /// as LVGL reports their deletion, so a queued event never matches a
+    /// widget created later at the same address; the event itself is kept,
+    /// with no target.
     pub fn is_target(&self, candidate: *const lvgl::lv_obj_t) -> bool {
         core::ptr::eq(self.target, candidate)
     }
