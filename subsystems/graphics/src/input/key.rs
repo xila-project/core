@@ -1,4 +1,4 @@
-use crate::lvgl;
+use crate::ffi;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Key {
@@ -20,18 +20,18 @@ pub enum Key {
 impl From<u32> for Key {
     fn from(value: u32) -> Key {
         match value {
-            lvgl::lv_key_t_LV_KEY_UP => Key::Up,
-            lvgl::lv_key_t_LV_KEY_DOWN => Key::Down,
-            lvgl::lv_key_t_LV_KEY_RIGHT => Key::Right,
-            lvgl::lv_key_t_LV_KEY_LEFT => Key::Left,
-            lvgl::lv_key_t_LV_KEY_ESC => Key::Escape,
-            lvgl::lv_key_t_LV_KEY_DEL => Key::Delete,
-            lvgl::lv_key_t_LV_KEY_BACKSPACE => Key::Backspace,
-            lvgl::lv_key_t_LV_KEY_ENTER => Key::Enter,
-            lvgl::lv_key_t_LV_KEY_NEXT => Key::Next,
-            lvgl::lv_key_t_LV_KEY_PREV => Key::Previous,
-            lvgl::lv_key_t_LV_KEY_HOME => Key::Home,
-            lvgl::lv_key_t_LV_KEY_END => Key::End,
+            ffi::lv_key_t_LV_KEY_UP => Key::Up,
+            ffi::lv_key_t_LV_KEY_DOWN => Key::Down,
+            ffi::lv_key_t_LV_KEY_RIGHT => Key::Right,
+            ffi::lv_key_t_LV_KEY_LEFT => Key::Left,
+            ffi::lv_key_t_LV_KEY_ESC => Key::Escape,
+            ffi::lv_key_t_LV_KEY_DEL => Key::Delete,
+            ffi::lv_key_t_LV_KEY_BACKSPACE => Key::Backspace,
+            ffi::lv_key_t_LV_KEY_ENTER => Key::Enter,
+            ffi::lv_key_t_LV_KEY_NEXT => Key::Next,
+            ffi::lv_key_t_LV_KEY_PREV => Key::Previous,
+            ffi::lv_key_t_LV_KEY_HOME => Key::Home,
+            ffi::lv_key_t_LV_KEY_END => Key::End,
             character => Key::Character(character as u8),
         }
     }
@@ -40,18 +40,18 @@ impl From<u32> for Key {
 impl From<Key> for u32 {
     fn from(value: Key) -> u32 {
         match value {
-            Key::Up => lvgl::lv_key_t_LV_KEY_UP,
-            Key::Down => lvgl::lv_key_t_LV_KEY_DOWN,
-            Key::Right => lvgl::lv_key_t_LV_KEY_RIGHT,
-            Key::Left => lvgl::lv_key_t_LV_KEY_LEFT,
-            Key::Escape => lvgl::lv_key_t_LV_KEY_ESC,
-            Key::Delete => lvgl::lv_key_t_LV_KEY_DEL,
-            Key::Backspace => lvgl::lv_key_t_LV_KEY_BACKSPACE,
-            Key::Enter => lvgl::lv_key_t_LV_KEY_ENTER,
-            Key::Next => lvgl::lv_key_t_LV_KEY_NEXT,
-            Key::Previous => lvgl::lv_key_t_LV_KEY_PREV,
-            Key::Home => lvgl::lv_key_t_LV_KEY_HOME,
-            Key::End => lvgl::lv_key_t_LV_KEY_END,
+            Key::Up => ffi::lv_key_t_LV_KEY_UP,
+            Key::Down => ffi::lv_key_t_LV_KEY_DOWN,
+            Key::Right => ffi::lv_key_t_LV_KEY_RIGHT,
+            Key::Left => ffi::lv_key_t_LV_KEY_LEFT,
+            Key::Escape => ffi::lv_key_t_LV_KEY_ESC,
+            Key::Delete => ffi::lv_key_t_LV_KEY_DEL,
+            Key::Backspace => ffi::lv_key_t_LV_KEY_BACKSPACE,
+            Key::Enter => ffi::lv_key_t_LV_KEY_ENTER,
+            Key::Next => ffi::lv_key_t_LV_KEY_NEXT,
+            Key::Previous => ffi::lv_key_t_LV_KEY_PREV,
+            Key::Home => ffi::lv_key_t_LV_KEY_HOME,
+            Key::End => ffi::lv_key_t_LV_KEY_END,
             Key::Character(character) => character as u32,
         }
     }

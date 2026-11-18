@@ -124,7 +124,7 @@ impl EventQueue {
 
     /// Remove every event aimed at `target`, preserving the order of the rest.
     /// Only compares addresses; never dereferences `target`.
-    pub fn discard_target(&mut self, target: *mut crate::lvgl::lv_obj_t) {
+    pub fn discard_target(&mut self, target: *mut crate::ffi::lv_obj_t) {
         let mut kept = 0;
         for index in 0..self.len() {
             let source = self.physical(index);
@@ -142,7 +142,7 @@ impl EventQueue {
 
     /// Keep every event but null the ones aimed at `target`.
     /// Only compares addresses; never dereferences `target`.
-    pub fn clear_target(&mut self, target: *mut crate::lvgl::lv_obj_t) {
+    pub fn clear_target(&mut self, target: *mut crate::ffi::lv_obj_t) {
         for event in self.slots.iter_mut().flatten() {
             if event.target == target {
                 event.target = ptr::null_mut();
@@ -189,11 +189,11 @@ impl Default for EventQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Key, lvgl};
+    use crate::{Key, ffi};
     use alloc::vec::Vec;
 
-    fn object(address: usize) -> *mut lvgl::lv_obj_t {
-        address as *mut lvgl::lv_obj_t
+    fn object(address: usize) -> *mut ffi::lv_obj_t {
+        address as *mut ffi::lv_obj_t
     }
 
     fn event(code: EventKind, address: usize) -> Event {

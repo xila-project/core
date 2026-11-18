@@ -1,4 +1,4 @@
-use crate::lvgl;
+use crate::ffi;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[repr(u8)]
@@ -8,11 +8,11 @@ pub enum State {
     Pressed,
 }
 
-impl From<State> for lvgl::lv_indev_state_t {
-    fn from(value: State) -> lvgl::lv_indev_state_t {
+impl From<State> for ffi::lv_indev_state_t {
+    fn from(value: State) -> ffi::lv_indev_state_t {
         match value {
-            State::Pressed => lvgl::lv_indev_state_t_LV_INDEV_STATE_PRESSED,
-            State::Released => lvgl::lv_indev_state_t_LV_INDEV_STATE_RELEASED,
+            State::Pressed => ffi::lv_indev_state_t_LV_INDEV_STATE_PRESSED,
+            State::Released => ffi::lv_indev_state_t_LV_INDEV_STATE_RELEASED,
         }
     }
 }

@@ -6,7 +6,7 @@ use synchronization::{
     blocking_mutex::{Mutex, raw::CriticalSectionRawMutex},
 };
 
-use crate::{Error, Point, Result, lvgl};
+use crate::{Error, Point, Result, ffi};
 
 use super::{InputData, InputKind, Key, State};
 
@@ -183,7 +183,7 @@ impl InputQueue {
         })
     }
 
-    pub(crate) fn pop_for(&self, kind: InputKind) -> Option<lvgl::lv_indev_data_t> {
+    pub(crate) fn pop_for(&self, kind: InputKind) -> Option<ffi::lv_indev_data_t> {
         self.events.lock(|events| {
             let mut events = events.borrow_mut();
             let matches = matches!(
@@ -198,7 +198,7 @@ impl InputQueue {
                 InjectedEvent::Pointer { point, state } => {
                     Some(InputData::new(point, state, Key::Character(0), false).into())
                 }
-                InjectedEvent::Key { key, state } => Some(lvgl::lv_indev_data_t {
+                InjectedEvent::Key { key, state } => Some(ffi::lv_indev_data_t {
                     key: u32::from_ne_bytes(key),
                     state: state.into(),
                     ..Default::default()
@@ -310,11 +310,11 @@ mod tests {
             return;
         }
         unsafe {
-            lvgl::lv_init();
-            let display = lvgl::lv_display_create(32, 32);
+            ffi::lv_init();
+            let display = ffi::lv_display_create(32, 32);
             assert!(!display.is_null());
-            let screen = lvgl::lv_display_get_screen_active(display);
-            let textarea = lvgl::lv_textarea_create(screen);
+            let screen = ffi::lv_display_get_screen_active(display);
+            let textarea = ffi::lv_textarea_create(screen);
             assert!(!textarea.is_null());
             let queue = InputQueue::new().unwrap();
             assert_eq!(queue.text_chunk("Aé中"), Ok("Aé中".len()));
@@ -322,16 +322,16 @@ mod tests {
                 let mut press = queue.pop_for(InputKind::Keypad).unwrap();
                 let release = queue.pop_for(InputKind::Keypad).unwrap();
                 assert_eq!(press.key, release.key);
-                lvgl::lv_obj_send_event(
+                ffi::lv_obj_send_event(
                     textarea,
-                    lvgl::lv_event_code_t_LV_EVENT_KEY,
+                    ffi::lv_event_code_t_LV_EVENT_KEY,
                     (&mut press.key as *mut u32).cast(),
                 );
             }
-            let value = core::ffi::CStr::from_ptr(lvgl::lv_textarea_get_text(textarea));
+            let value = core::ffi::CStr::from_ptr(ffi::lv_textarea_get_text(textarea));
             assert_eq!(value.to_str().unwrap(), "Aé中");
-            lvgl::lv_display_delete(display);
-            lvgl::lv_deinit();
+            ffi::lv_display_delete(display);
+            ffi::lv_deinit();
         }
     }
 

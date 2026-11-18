@@ -4,21 +4,21 @@ use synchronization::Arc;
 
 use core::ffi::c_void;
 
-use crate::{Result, lvgl};
+use crate::{Result, ffi};
 
 use super::{InputKind, InputQueue, UserData, binding_callback_function};
 
 pub struct Input {
     #[allow(dead_code)]
-    input_device: *mut lvgl::lv_indev_t,
+    input_device: *mut ffi::lv_indev_t,
 }
 
 impl Drop for Input {
     fn drop(&mut self) {
         unsafe {
-            let _ = Box::from_raw(lvgl::lv_indev_get_user_data(self.input_device) as *mut UserData);
+            let _ = Box::from_raw(ffi::lv_indev_get_user_data(self.input_device) as *mut UserData);
 
-            lvgl::lv_indev_delete(self.input_device);
+            ffi::lv_indev_delete(self.input_device);
 
             // User_data will be dropped here.
         }
@@ -51,15 +51,15 @@ impl Input {
         });
 
         let input_device = unsafe {
-            let input_device = lvgl::lv_indev_create();
-            lvgl::lv_indev_set_type(input_device, kind.into());
-            lvgl::lv_indev_set_read_cb(input_device, Some(binding_callback_function));
-            lvgl::lv_indev_set_user_data(input_device, Box::into_raw(user_data) as *mut c_void);
+            let input_device = ffi::lv_indev_create();
+            ffi::lv_indev_set_type(input_device, kind.into());
+            ffi::lv_indev_set_read_cb(input_device, Some(binding_callback_function));
+            ffi::lv_indev_set_user_data(input_device, Box::into_raw(user_data) as *mut c_void);
 
             if kind == InputKind::Keypad {
-                let group = lvgl::lv_group_get_default();
+                let group = ffi::lv_group_get_default();
 
-                lvgl::lv_indev_set_group(input_device, group);
+                ffi::lv_indev_set_group(input_device, group);
             }
 
             input_device

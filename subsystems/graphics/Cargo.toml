@@ -9,14 +9,11 @@ file_system = { workspace = true }
 virtual_file_system = { workspace = true }
 # Runtime graphics needs the C archive; binding generators remain bindgen-only.
 lvgl_rust_sys = { workspace = true, features = ["build-lvgl", "shadcn-theme"] }
-# The safe layer and its handle registry. Registry chunks come from the global
-# allocator (never LVGL's pool); owner tags let the Wasm host keep each VM's
-# handles apart. Core provides LVGL's string functions itself.
-lvgl-rust = { workspace = true, features = [
-  "growable-registry",
-  "free-observer",
-  "external-class-policy",
-] }
+# The safe layer in views-only mode: borrowed views under the graphics lock and
+# no handle registry (RAM and code on 256 KB devices). Core defines LVGL's
+# OBJ_ID hooks itself (`object_id`), which is why the registry is off. Core
+# provides LVGL's string functions itself.
+lvgl-rust = { workspace = true, features = ["views-only", "external-class-policy"] }
 time = { workspace = true }
 shared = { workspace = true }
 synchronization = { workspace = true }

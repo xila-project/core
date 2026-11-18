@@ -9,7 +9,10 @@ use file_system::{
     ControlCommand, ControlCommandIdentifier, DirectBaseOperations, DirectCharacterDevice,
     MountOperations, Size,
 };
-use graphics::{GET_RESOLUTION, Point, SET_DRAWING_AREA, WAS_RESIZED, lvgl};
+// Raw LVGL builds fixtures the safe layer does not cover.
+#[expect(deprecated, reason = "fixtures build widgets through the raw bindings")]
+use graphics::lvgl;
+use graphics::{GET_RESOLUTION, Point, SET_DRAWING_AREA, WAS_RESIZED};
 use shared::AnyByLayout;
 
 struct Screen;
@@ -54,7 +57,7 @@ fn snapshot_describes_widget_roles_labels_and_explicit_state() {
     )));
     graphics::set_ffi_manager(manager);
     // The safe session and raw compatibility API share one LVGL and lock.
-    use graphics::lvgl_rust::{Error, Obj, WidgetExt};
+    use graphics::lvgl_rust::{Error, Obj};
     let window = core::mem::ManuallyDrop::new(task::block_on(manager.create_window()).unwrap());
     manager
         .with_lvgl_sync(|lv| {
@@ -67,17 +70,21 @@ fn snapshot_describes_widget_roles_labels_and_explicit_state() {
         .unwrap();
     drop(core::mem::ManuallyDrop::into_inner(window));
 
-    let handle = manager
-        .with_lvgl_sync(|lv| {
-            let mut screen = lv.screen_active_mut().unwrap();
-            Ok(Obj::create(&mut screen)?.handle()?)
-        })
-        .unwrap();
     manager
         .with_lvgl_sync(|lv| {
-            assert!(handle.get_mut(lv).is_ok());
-            handle.get_mut(lv)?.delete()?;
-            assert!(handle.get_mut(lv).is_err());
+            let children = |lv: &graphics::lvgl_rust::Lvgl| {
+                (0..)
+                    .map_while(|index| lv.screen_active()?.child(index))
+                    .count()
+            };
+            let before = children(lv);
+            let mut screen = lv.screen_active_mut().unwrap();
+            Obj::create(&mut screen)?;
+            assert_eq!(children(lv), before + 1);
+            lv.edit(|lv| lv.screen_active()?.child(-1))
+                .unwrap()
+                .delete()?;
+            assert_eq!(children(lv), before);
             Ok(())
         })
         .unwrap();

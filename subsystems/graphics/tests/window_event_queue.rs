@@ -5,7 +5,12 @@ extern crate abi_definitions;
 
 testing::instantiate_global_allocator!();
 
-use graphics::{EventKind, WINDOW_EVENT_QUEUE_CAPACITY, Window, lvgl};
+#[expect(
+    deprecated,
+    reason = "the test drives the Window class through the raw bindings"
+)]
+use graphics::lvgl;
+use graphics::{EventKind, WINDOW_EVENT_QUEUE_CAPACITY, Window};
 
 fn system_used() -> usize {
     testing::memory_crate::global_manager().get_used()

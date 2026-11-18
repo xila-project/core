@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use crate::{Error, Result, lvgl};
+use crate::{Error, Result, ffi};
 
 /// Maximum active-screen area accepted by [`crate::Manager::capture_screen`].
 pub const SCREEN_SNAPSHOT_MAX_PIXELS: usize = 2_073_600;
@@ -48,15 +48,15 @@ fn copy_strided_bgra_to_rgba(
     Ok(pixels_rgba)
 }
 
-struct DrawBuffer(*mut lvgl::lv_draw_buf_t);
+struct DrawBuffer(*mut ffi::lv_draw_buf_t);
 
 impl Drop for DrawBuffer {
     fn drop(&mut self) {
-        unsafe { lvgl::lv_draw_buf_destroy(self.0) };
+        unsafe { ffi::lv_draw_buf_destroy(self.0) };
     }
 }
 
-pub(crate) fn capture_screen(object: *mut lvgl::lv_obj_t) -> Result<ScreenSnapshot> {
+pub(crate) fn capture_screen(object: *mut ffi::lv_obj_t) -> Result<ScreenSnapshot> {
     if object.is_null() {
         return Err(Error::NotAvailable);
     }
@@ -65,10 +65,10 @@ pub(crate) fn capture_screen(object: *mut lvgl::lv_obj_t) -> Result<ScreenSnapsh
     // layout-derived dimensions first so an oversized object cannot trigger
     // an unbounded allocation before our post-capture validation.
     let (expected_width, expected_height) = unsafe {
-        lvgl::lv_obj_update_layout(object);
-        let width = lvgl::lv_obj_get_width(object);
-        let height = lvgl::lv_obj_get_height(object);
-        let ext = lvgl::lv_obj_get_ext_draw_size(object);
+        ffi::lv_obj_update_layout(object);
+        let width = ffi::lv_obj_get_width(object);
+        let height = ffi::lv_obj_get_height(object);
+        let ext = ffi::lv_obj_get_ext_draw_size(object);
         let twice_ext = ext.checked_mul(2).ok_or(Error::InvalidParameter)?;
         (
             width
@@ -89,7 +89,7 @@ pub(crate) fn capture_screen(object: *mut lvgl::lv_obj_t) -> Result<ScreenSnapsh
     }
 
     let draw_buf =
-        unsafe { lvgl::snapshot_take(object, lvgl::lv_color_format_t_LV_COLOR_FORMAT_ARGB8888) };
+        unsafe { ffi::snapshot_take(object, ffi::lv_color_format_t_LV_COLOR_FORMAT_ARGB8888) };
     if draw_buf.is_null() {
         return Err(Error::OutOfMemory);
     }
@@ -109,7 +109,7 @@ pub(crate) fn capture_screen(object: *mut lvgl::lv_obj_t) -> Result<ScreenSnapsh
     let stride = header.stride() as usize;
     let source_len = stride.checked_mul(height).ok_or(Error::InvalidParameter)?;
     let source = unsafe { &*draw_buf.0 };
-    if header.cf() != lvgl::lv_color_format_t_LV_COLOR_FORMAT_ARGB8888
+    if header.cf() != ffi::lv_color_format_t_LV_COLOR_FORMAT_ARGB8888
         || stride < row_bytes
         || source.data.is_null()
         || (source.data_size as usize) < source_len
