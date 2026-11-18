@@ -2361,3 +2361,123 @@ async fn memory_file_system_mounted_on_devices_avoids_little_fs_writes() {
         "LittleFS block device must receive zero writes after mounting memory_file_system"
     );
 }
+
+/// Character device keeping only terminal attributes, like a serial console.
+struct AttributesTerminalDevice {
+    attributes: synchronization::blocking_mutex::Mutex<
+        synchronization::blocking_mutex::raw::CriticalSectionRawMutex,
+        core::cell::Cell<file_system::character_device::TerminalAttributes>,
+    >,
+}
+
+impl file_system::DirectBaseOperations for AttributesTerminalDevice {
+    fn read(
+        &self,
+        _task_context: &mut core::task::Context<'_>,
+        _buffer: &mut [u8],
+        _absolute_position: file_system::Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        core::task::Poll::Ready(Ok(0))
+    }
+
+    fn write(
+        &self,
+        _task_context: &mut core::task::Context<'_>,
+        buffer: &[u8],
+        _absolute_position: file_system::Size,
+    ) -> core::task::Poll<file_system::Result<usize>> {
+        core::task::Poll::Ready(Ok(buffer.len()))
+    }
+
+    fn control(
+        &self,
+        _task_context: &mut core::task::Context<'_>,
+        command: file_system::ControlCommandIdentifier,
+        input: &shared::AnyByLayout,
+        output: &mut shared::AnyByLayout,
+    ) -> core::task::Poll<file_system::Result<()>> {
+        use file_system::ControlCommand;
+        use file_system::character_device::{GET_TERMINAL_ATTRIBUTES, SET_TERMINAL_ATTRIBUTES};
+
+        file_system::ready(|| match command {
+            GET_TERMINAL_ATTRIBUTES::IDENTIFIER => {
+                *GET_TERMINAL_ATTRIBUTES::cast_output(output)? =
+                    self.attributes.lock(|attributes| attributes.get());
+                Ok(())
+            }
+            SET_TERMINAL_ATTRIBUTES::IDENTIFIER => {
+                let requested = *SET_TERMINAL_ATTRIBUTES::cast_input(input)?;
+                if !requested.has_only_known_flags() {
+                    return Err(file_system::Error::InvalidParameter);
+                }
+                self.attributes.lock(|attributes| attributes.set(requested));
+                Ok(())
+            }
+            _ => Err(file_system::Error::UnsupportedOperation),
+        })
+    }
+}
+
+impl file_system::MountOperations for AttributesTerminalDevice {}
+impl file_system::DirectCharacterDevice for AttributesTerminalDevice {}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn terminal_attributes_change_through_a_read_only_handle() {
+    use file_system::character_device::{
+        GET_TERMINAL_ATTRIBUTES, SET_TERMINAL_ATTRIBUTES, TerminalAttributes, TerminalFlags,
+    };
+
+    let (task, virtual_file_system) = initialize().await;
+    virtual_file_system
+        .mount_character_device(
+            task,
+            Path::from_str("/terminal"),
+            AttributesTerminalDevice {
+                attributes: synchronization::blocking_mutex::Mutex::new(core::cell::Cell::new(
+                    TerminalAttributes::INTERACTIVE,
+                )),
+            },
+        )
+        .await
+        .unwrap();
+
+    // Programs change the settings of their standard input, opened read-only.
+    let mut input = File::open(
+        virtual_file_system,
+        task,
+        "/terminal",
+        AccessFlags::Read.into(),
+    )
+    .await
+    .unwrap();
+
+    let saved = input.control(GET_TERMINAL_ATTRIBUTES, &()).await.unwrap();
+    assert_eq!(saved, TerminalAttributes::INTERACTIVE);
+
+    input
+        .control(SET_TERMINAL_ATTRIBUTES, &saved.with_echo(false))
+        .await
+        .unwrap();
+    let changed = input.control(GET_TERMINAL_ATTRIBUTES, &()).await.unwrap();
+    assert!(!changed.is_echo_enabled());
+    assert!(changed.is_canonical());
+
+    let unknown = TerminalAttributes::new(TerminalFlags::from_bits_retain(1 << 31));
+    assert!(
+        input
+            .control(SET_TERMINAL_ATTRIBUTES, &unknown)
+            .await
+            .is_err()
+    );
+
+    input
+        .control(SET_TERMINAL_ATTRIBUTES, &saved)
+        .await
+        .unwrap();
+    assert_eq!(
+        input.control(GET_TERMINAL_ATTRIBUTES, &()).await.unwrap(),
+        TerminalAttributes::INTERACTIVE
+    );
+    input.close(virtual_file_system).await.unwrap();
+}
