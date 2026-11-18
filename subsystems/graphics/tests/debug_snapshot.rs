@@ -57,7 +57,19 @@ fn snapshot_describes_widget_roles_labels_and_explicit_state() {
         false,
     ));
     // The safe session and raw compatibility API share one LVGL and lock.
-    use graphics::lvgl_rust::{Obj, WidgetExt};
+    use graphics::lvgl_rust::{Error, Obj, WidgetExt};
+    let window = core::mem::ManuallyDrop::new(task::block_on(manager.create_window()).unwrap());
+    manager
+        .with_lvgl_sync(|lv| {
+            assert_eq!(
+                lv.edit(|lv| lv.screen_active()?.child(0)).unwrap().delete(),
+                Err(Error::Internal),
+            );
+            Ok(())
+        })
+        .unwrap();
+    drop(core::mem::ManuallyDrop::into_inner(window));
+
     let handle = manager
         .with_lvgl_sync(|lv| {
             let mut screen = lv.screen_active_mut().unwrap();

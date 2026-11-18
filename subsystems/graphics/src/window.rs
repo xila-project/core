@@ -15,6 +15,22 @@ unsafe impl Sync for ClassWrapper {}
 
 static WINDOW_CLASS: OnceLock<ClassWrapper> = OnceLock::new();
 
+#[unsafe(no_mangle)]
+fn lvgl_rust_external_class_policy(
+    class: *const lvgl::lv_obj_class_t,
+) -> lvgl_rust::ExternalClassPolicy {
+    // The descriptor is initialized under the graphics lock before use. A
+    // policy lookup may only read it; initializing it calls LVGL.
+    if WINDOW_CLASS
+        .try_get()
+        .is_some_and(|window| core::ptr::eq(&window.0, class))
+    {
+        lvgl_rust::ExternalClassPolicy::ChildrenOnly
+    } else {
+        lvgl_rust::ExternalClassPolicy::Protected
+    }
+}
+
 pub fn get_window_class() -> &'static lvgl::lv_obj_class_t {
     let class_ref = WINDOW_CLASS.get_or_init(|| {
         let mut cls = lvgl::lv_obj_class_t {

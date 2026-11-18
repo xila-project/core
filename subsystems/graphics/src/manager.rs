@@ -545,6 +545,8 @@ impl Manager {
             );
             let mut session = lvgl_rust::init(&mut guard).map_err(Error::from)?;
             session.set_tick_cb(binding_tick_callback_function);
+            // Initialize the Window descriptor before any class policy lookup.
+            crate::window::get_window_class();
             unsafe {
                 // LVGL assigns newly created keypads to the default group.
                 // Create it before display creation also creates the

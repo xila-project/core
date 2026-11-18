@@ -51,7 +51,7 @@ fn event_bursts_do_not_allocate_and_keep_clicks() {
     let mut queued = 0;
     while let Some(event) = window.pop_event() {
         assert_eq!(event.code, EventKind::Clicked);
-        assert_eq!(event.target, child);
+        assert!(event.is_target(child));
         queued += 1;
     }
     assert_eq!(queued, WINDOW_EVENT_QUEUE_CAPACITY);

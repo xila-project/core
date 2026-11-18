@@ -3,7 +3,7 @@ use crate::{Key, lvgl};
 #[derive(Debug, Clone)]
 pub struct Event {
     pub code: EventKind,
-    pub target: *mut lvgl::lv_obj_t,
+    pub(super) target: *mut lvgl::lv_obj_t,
     pub key: Option<Key>,
     /// Pointer position relative to the target content, plus content width/height,
     /// captured at event time rather than when a consumer drains the queue.
@@ -11,6 +11,12 @@ pub struct Event {
 }
 
 impl Event {
+    /// Compare the queued address with a candidate widget. The event carries
+    /// no lifetime guarantee, and LVGL may reuse an address after deletion.
+    pub fn is_target(&self, candidate: *const lvgl::lv_obj_t) -> bool {
+        core::ptr::eq(self.target, candidate)
+    }
+
     pub fn new(code: EventKind, target: *mut lvgl::lv_obj_t, key: Option<Key>) -> Self {
         Self {
             code,
