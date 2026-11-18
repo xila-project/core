@@ -1,10 +1,11 @@
 /// This module implements the POSIX like file system C ABI.
 use core::ffi::c_char;
 use file_system::{
-    AccessFlags, CreateFlags, Flags, Kind, Permissions, StateFlags, Statistics, Time,
+    AccessFlags, CreateFlags, Flags, Kind, Path, Permissions, StateFlags, Statistics, Time,
     character_device,
 };
 use shared::generate_shadow_type;
+use task::block_on;
 use users::{GroupIdentifier, UserIdentifier};
 use virtual_file_system::{Error, SynchronousFile};
 
@@ -391,45 +392,11 @@ abi_unsafe_function! {
         modification: XilaTime,
         flags: u8,
     ) -> XilaFileSystemResult {
-        const ACCESS_EXPLICIT: u8 = 1 << 0;
-        const ACCESS_CURRENT: u8 = 1 << 1;
-        const MODIFICATION_EXPLICIT: u8 = 1 << 2;
-        const MODIFICATION_CURRENT: u8 = 1 << 3;
-        const ACCESS: u8 = ACCESS_EXPLICIT | ACCESS_CURRENT;
-        const MODIFICATION: u8 = MODIFICATION_EXPLICIT | MODIFICATION_CURRENT;
-        const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
-
-        if flags & !(ACCESS | MODIFICATION) != 0
-            || flags & ACCESS == ACCESS
-            || flags & MODIFICATION == MODIFICATION
-        {
-            return Err(Error::InvalidParameter);
-        }
-        if flags == 0 {
+        let (access, modification) = requested_times(access, modification, flags)?;
+        if access.is_none() && modification.is_none() {
             return Ok(());
         }
-
-        let current = if flags & (ACCESS_CURRENT | MODIFICATION_CURRENT) != 0 {
-            let runtime = crate::RUNTIME_CONTEXT
-                .try_get()
-                .ok_or(time::Error::NotInitialized)?;
-            let current = runtime.time_manager.realtime_now()?;
-            Some(Time::from(current.try_into_duration()?))
-        } else {
-            None
-        };
-        let requested_time = |explicit, use_current, value| {
-            if flags & use_current != 0 {
-                current
-            } else {
-                (flags & explicit != 0).then(|| Time::new(value / NANOSECONDS_PER_SECOND))
-            }
-        };
-
-        (*file).set_times(
-            requested_time(ACCESS_EXPLICIT, ACCESS_CURRENT, access),
-            requested_time(MODIFICATION_EXPLICIT, MODIFICATION_CURRENT, modification),
-        )
+        (*file).set_times(access, modification)
     }
 }
 
@@ -440,16 +407,26 @@ abi_unsafe_function! {
     ///
     /// This function is unsafe because it dereferences raw pointers.
     fn xila_file_system_set_times_from_path(
+        task: XilaTaskIdentifier,
         path: *const c_char,
-        _access: XilaTime,
-        _modification: XilaTime,
-        _flags: u8,
-        _follow: bool,
+        access: XilaTime,
+        modification: XilaTime,
+        flags: u8,
+        follow: bool,
     ) -> XilaFileSystemResult {
-        parse_c_str(path)?;
-        // Path mutations require the caller's task. This signature supplies no
-        // task, and synchronous calls cannot retrieve it from the executor.
-        Err(Error::FailedToGetTaskInformations)
+        let path = parse_c_str(path)?;
+        let (access, modification) = requested_times(access, modification, flags)?;
+        if access.is_none() && modification.is_none() {
+            return Ok(());
+        }
+        block_on(crate::runtime_context().virtual_file_system.set_times_beneath(
+            task.into(),
+            &path,
+            follow,
+            Path::ROOT,
+            access,
+            modification,
+        ))
     }
 }
 
@@ -473,14 +450,17 @@ abi_unsafe_function! {
     ///
     /// This function is unsafe because it dereferences raw pointers.
     fn xila_file_system_link(
+        task: XilaTaskIdentifier,
         path: *const c_char,
         link: *const c_char,
     ) -> XilaFileSystemResult {
-        parse_c_str(path)?;
-        parse_c_str(link)?;
-        // Link creation requires the caller's task, which this signature
-        // cannot supply and synchronous calls cannot retrieve.
-        Err(Error::FailedToGetTaskInformations)
+        let path = parse_c_str(path)?;
+        let link = parse_c_str(link)?;
+        block_on(
+            crate::runtime_context()
+                .virtual_file_system
+                .link(task.into(), &path, false, &link),
+        )
     }
 }
 
@@ -537,6 +517,54 @@ abi_unsafe_function! {
     fn xila_file_system_dummy(_event: XilaFileSystemPollEvent) -> XilaFileSystemResult {
         Ok(())
     }
+}
+
+/// Decode the timestamp flags shared by the time setting functions.
+///
+/// Explicit times are in nanoseconds since the Unix epoch. Bits zero through
+/// three select explicit access, current access, explicit modification and
+/// current modification. A clear pair leaves the corresponding time unchanged.
+fn requested_times(
+    access: XilaTime,
+    modification: XilaTime,
+    flags: u8,
+) -> Result<(Option<Time>, Option<Time>), Error> {
+    const ACCESS_EXPLICIT: u8 = 1 << 0;
+    const ACCESS_CURRENT: u8 = 1 << 1;
+    const MODIFICATION_EXPLICIT: u8 = 1 << 2;
+    const MODIFICATION_CURRENT: u8 = 1 << 3;
+    const ACCESS: u8 = ACCESS_EXPLICIT | ACCESS_CURRENT;
+    const MODIFICATION: u8 = MODIFICATION_EXPLICIT | MODIFICATION_CURRENT;
+    const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
+
+    if flags & !(ACCESS | MODIFICATION) != 0
+        || flags & ACCESS == ACCESS
+        || flags & MODIFICATION == MODIFICATION
+    {
+        return Err(Error::InvalidParameter);
+    }
+
+    let current = if flags & (ACCESS_CURRENT | MODIFICATION_CURRENT) != 0 {
+        let runtime = crate::RUNTIME_CONTEXT
+            .try_get()
+            .ok_or(time::Error::NotInitialized)?;
+        let current = runtime.time_manager.realtime_now()?;
+        Some(Time::from(current.try_into_duration()?))
+    } else {
+        None
+    };
+    let requested_time = |explicit, use_current, value: XilaTime| {
+        if flags & use_current != 0 {
+            current
+        } else {
+            (flags & explicit != 0).then(|| Time::new(value / NANOSECONDS_PER_SECOND))
+        }
+    };
+
+    Ok((
+        requested_time(ACCESS_EXPLICIT, ACCESS_CURRENT, access),
+        requested_time(MODIFICATION_EXPLICIT, MODIFICATION_CURRENT, modification),
+    ))
 }
 
 #[cfg(all(test, target_os = "linux"))]
