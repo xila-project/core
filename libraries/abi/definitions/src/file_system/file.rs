@@ -317,10 +317,11 @@ abi_unsafe_function! {
     /// # Safety
     /// The caller must ensure that the provided pointer is valid and points to a properly initialized `XilaFileSystemItem` that is a file.
     fn xila_file_system_file_set_flags(
-        _file: *mut XilaFileSystemFile,
-        _state: XilaFileSystemState,
+        file: *mut XilaFileSystemFile,
+        state: XilaFileSystemState,
     ) -> XilaFileSystemResult {
-        todo!()
+        let state = StateFlags::from_bits(state).ok_or(Error::InvalidParameter)?;
+        (*file).set_state(state)
     }
 }
 
@@ -375,17 +376,60 @@ abi_unsafe_function! {
 }
 
 abi_unsafe_function! {
-    /// This function is used to advice the file system about the access pattern of a file.
+    /// Set a file's access and modification times.
+    ///
+    /// Explicit times are in nanoseconds since the Unix epoch. Timestamp flags
+    /// select explicit access, current access, explicit modification, and current
+    /// modification in bits zero through three, respectively. Clear pairs leave
+    /// the corresponding time unchanged.
     ///
     /// # Safety
     /// The caller must ensure that the provided pointer is valid and points to a properly initialized `XilaFileSystemItem` that is a file.
     fn xila_file_system_set_times(
-        _file: *mut XilaFileSystemFile,
-        _access: XilaTime,
-        _modification: XilaTime,
-        _flags: u8,
+        file: *mut XilaFileSystemFile,
+        access: XilaTime,
+        modification: XilaTime,
+        flags: u8,
     ) -> XilaFileSystemResult {
-        todo!()
+        const ACCESS_EXPLICIT: u8 = 1 << 0;
+        const ACCESS_CURRENT: u8 = 1 << 1;
+        const MODIFICATION_EXPLICIT: u8 = 1 << 2;
+        const MODIFICATION_CURRENT: u8 = 1 << 3;
+        const ACCESS: u8 = ACCESS_EXPLICIT | ACCESS_CURRENT;
+        const MODIFICATION: u8 = MODIFICATION_EXPLICIT | MODIFICATION_CURRENT;
+        const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
+
+        if flags & !(ACCESS | MODIFICATION) != 0
+            || flags & ACCESS == ACCESS
+            || flags & MODIFICATION == MODIFICATION
+        {
+            return Err(Error::InvalidParameter);
+        }
+        if flags == 0 {
+            return Ok(());
+        }
+
+        let current = if flags & (ACCESS_CURRENT | MODIFICATION_CURRENT) != 0 {
+            let runtime = crate::RUNTIME_CONTEXT
+                .try_get()
+                .ok_or(time::Error::NotInitialized)?;
+            let current = runtime.time_manager.realtime_now()?;
+            Some(Time::from(current.try_into_duration()?))
+        } else {
+            None
+        };
+        let requested_time = |explicit, use_current, value| {
+            if flags & use_current != 0 {
+                current
+            } else {
+                (flags & explicit != 0).then(|| Time::new(value / NANOSECONDS_PER_SECOND))
+            }
+        };
+
+        (*file).set_times(
+            requested_time(ACCESS_EXPLICIT, ACCESS_CURRENT, access),
+            requested_time(MODIFICATION_EXPLICIT, MODIFICATION_CURRENT, modification),
+        )
     }
 }
 
@@ -396,13 +440,16 @@ abi_unsafe_function! {
     ///
     /// This function is unsafe because it dereferences raw pointers.
     fn xila_file_system_set_times_from_path(
-        _path: *const c_char,
+        path: *const c_char,
         _access: XilaTime,
         _modification: XilaTime,
         _flags: u8,
         _follow: bool,
     ) -> XilaFileSystemResult {
-        todo!()
+        parse_c_str(path)?;
+        // Path mutations require the caller's task. This signature supplies no
+        // task, and synchronous calls cannot retrieve it from the executor.
+        Err(Error::FailedToGetTaskInformations)
     }
 }
 
@@ -412,10 +459,10 @@ abi_unsafe_function! {
     /// # Safety
     /// The caller must ensure that the provided pointer is valid and points to a properly initialized `XilaFileSystemItem` that is a file.
     fn xila_file_system_truncate(
-        _file:  *mut XilaFileSystemFile,
-        _length: XilaFileSystemSize,
+        file: *mut XilaFileSystemFile,
+        length: XilaFileSystemSize,
     ) -> XilaFileSystemResult {
-        todo!()
+        (*file).set_size(length)
     }
 }
 
@@ -426,15 +473,19 @@ abi_unsafe_function! {
     ///
     /// This function is unsafe because it dereferences raw pointers.
     fn xila_file_system_link(
-        _path: *const c_char,
-        _link: *const c_char,
+        path: *const c_char,
+        link: *const c_char,
     ) -> XilaFileSystemResult {
-        todo!()
+        parse_c_str(path)?;
+        parse_c_str(link)?;
+        // Link creation requires the caller's task, which this signature
+        // cannot supply and synchronous calls cannot retrieve.
+        Err(Error::FailedToGetTaskInformations)
     }
 }
 
 abi_unsafe_function! {
-    /// This function is used to advice the file system about the access pattern of a file.
+    /// Advise the file system about the access pattern of a file.
     ///
     /// # Safety
     /// The caller must ensure that the provided pointer is valid and points to a properly initialized `XilaFileSystemItem` that is a file.
@@ -444,7 +495,8 @@ abi_unsafe_function! {
         _length: XilaFileSystemSize,
         _advice: u8,
     ) -> XilaFileSystemResult {
-        todo!()
+        // The virtual file system has no operation for access pattern hints.
+        Err(Error::UnsupportedOperation)
     }
 }
 
@@ -458,20 +510,22 @@ abi_unsafe_function! {
         _offset: XilaFileSystemSize,
         _length: XilaFileSystemSize,
     ) -> XilaFileSystemResult {
-        todo!()
+        // The virtual file system has no operation to reserve storage for a
+        // byte range.
+        Err(Error::UnsupportedOperation)
     }
 }
 
 abi_unsafe_function! {
-    /// This function is used to set the position in a file.
+    /// Set the size of a file.
     ///
     /// # Safety
     /// The caller must ensure that the provided pointer is valid and points to a properly initialized `XilaFileSystemItem` that is a file.
     fn xila_file_system_file_truncate(
-        _file:  *mut XilaFileSystemFile,
-        _length: XilaFileSystemSize,
+        file: *mut XilaFileSystemFile,
+        length: XilaFileSystemSize,
     ) -> XilaFileSystemResult {
-        todo!()
+        (*file).set_size(length)
     }
 }
 
@@ -484,3 +538,6 @@ abi_unsafe_function! {
         Ok(())
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests;
