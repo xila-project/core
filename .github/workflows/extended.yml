@@ -35,7 +35,7 @@ jobs:
       XILA_APPLICATIONS_MANIFEST: ${{ github.workspace }}/.application-src/Cargo.toml
       XILA_FONT_CATALOG_ROOTS: ${{ github.workspace }}/.application-src
     steps:
-      - name: "Setup | Checkout pinned applications"
+      - name: "Setup | Checkout Core"
         uses: actions/checkout@v7
         with:
           repository: xila-project/core
@@ -49,7 +49,7 @@ jobs:
           path: .application-src
           persist-credentials: false
       - name: "Setup | Rust toolchain and build cache"
-        uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
+        uses: xila-project/workspace/.github/actions/setup-rust@b216689233e8eaac92653bedaff417d82797d15e
         with:
           cache-mode: objects
           cache-generation: v1-extended-coverage
@@ -79,7 +79,7 @@ jobs:
       CI_ABI_MEMORY: ${{ matrix.memory }}
       XILA_MBX: "1"
     steps:
-      - name: "Setup | Checkout pinned applications"
+      - name: "Setup | Checkout Core"
         uses: actions/checkout@v7
         with:
           repository: xila-project/core
@@ -93,7 +93,7 @@ jobs:
           path: .application-src
           persist-credentials: false
       - name: "Setup | Rust toolchain and build cache"
-        uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
+        uses: xila-project/workspace/.github/actions/setup-rust@b216689233e8eaac92653bedaff417d82797d15e
         with:
           toolchain-task: ci:toolchain-nightly
           cache-mode: objects
