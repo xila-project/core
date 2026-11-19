@@ -106,8 +106,10 @@ pub struct Context<'a> {
 ///
 /// This function can return errors in the following cases:
 /// - Failed to read users or groups directory
-/// - Failed to parse user or group files
 /// - Failed to add users or groups to the Users manager
+///
+/// Records that cannot be read or parsed are skipped with a warning
+/// instead of failing the whole load.
 ///
 /// # Examples
 ///

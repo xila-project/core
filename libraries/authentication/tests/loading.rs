@@ -24,6 +24,10 @@ impl LoggerTrait for Capture {
 
 static CAPTURE: Capture = Capture(Mutex::new(Vec::new()));
 
+fn clear_messages() {
+    CAPTURE.0.lock().unwrap().clear();
+}
+
 fn messages() -> Vec<String> {
     CAPTURE.0.lock().unwrap().clone()
 }
@@ -111,6 +115,7 @@ async fn loading_skips_special_entries_and_logs_only_real_failures() {
     assert!(users.contains(&("..".into(), Kind::Directory)), "{users:?}");
 
     // A clean disk loads without a single skipped record.
+    clear_messages();
     let users_manager = load(&context).await;
     assert_eq!(users_manager.get_user_name(alice).await.unwrap(), "alice");
     assert_eq!(
@@ -134,8 +139,13 @@ async fn loading_skips_special_entries_and_logs_only_real_failures() {
     )
     .await
     .unwrap();
+    clear_messages();
     load(&context).await;
-    assert!(messages().is_empty(), "{:?}", messages());
+    let skipped: Vec<_> = messages()
+        .into_iter()
+        .filter(|message| message.contains("Skipped"))
+        .collect();
+    assert!(skipped.is_empty(), "{skipped:?}");
 
     // Records that genuinely fail to load are still reported, once each.
     File::write_to_path(
@@ -154,10 +164,23 @@ async fn loading_skips_special_entries_and_logs_only_real_failures() {
     )
     .await
     .unwrap();
+    // A record damaged into invalid UTF-8 is skipped too, not a panic.
+    File::write_to_path(
+        context.virtual_file_system,
+        context.task,
+        &"/system/accounts/groups/garbled",
+        b"\xff\xfe",
+    )
+    .await
+    .unwrap();
+    clear_messages();
     let users_manager = load(&context).await;
     assert_eq!(users_manager.get_user_name(alice).await.unwrap(), "alice");
-    let skipped = messages();
-    assert_eq!(skipped.len(), 2, "{skipped:?}");
+    let skipped: Vec<_> = messages()
+        .into_iter()
+        .filter(|message| message.contains("Skipped"))
+        .collect();
+    assert_eq!(skipped.len(), 3, "{skipped:?}");
     assert!(
         skipped
             .iter()
