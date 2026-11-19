@@ -92,6 +92,19 @@ async fn load(context: &Context<'_>) -> &'static users::Manager {
     users_manager
 }
 
+async fn random_password(context: &Context<'_>) -> String {
+    let mut bytes = [0; 16];
+    File::read_slice_from_path(
+        context.virtual_file_system,
+        context.task,
+        "/devices/random/source",
+        &mut bytes,
+    )
+    .await
+    .unwrap();
+    format!("{:032x}", u128::from_ne_bytes(bytes))
+}
+
 #[task::test]
 async fn loading_skips_special_entries_and_logs_only_real_failures() {
     log::initialize(&CAPTURE).unwrap();
@@ -99,10 +112,11 @@ async fn loading_skips_special_entries_and_logs_only_real_failures() {
     authentication::create_group(&context, "people", Some(GroupIdentifier::new(1000)))
         .await
         .unwrap();
+    let password = random_password(&context).await;
     let alice = authentication::create_user(
         &context,
         "alice",
-        "correct horse battery staple",
+        &password,
         GroupIdentifier::new(1000),
         None,
     )
