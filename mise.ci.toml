@@ -394,7 +394,7 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", compone
 ] }
 
 [tasks."ci:bare-metal"]
-description = "Check the Cortex-M façade and the 32-bit native ABI, with and without network"
+description = "Check the Cortex-M façade and graphics and the 32-bit native ABI, with and without network"
 shell = "bash -c"
 depends = ["ci:packages-host"]
 # No C library on bare metal: build LittleFS with clang's freestanding headers.
@@ -403,6 +403,8 @@ run = """
 set -eu
 cargo check --locked -p xila --target thumbv7em-none-eabihf
 cargo check --locked -p xila --no-default-features --features abi_definitions --target thumbv7em-none-eabihf
+# Graphics is C-backed and its FFI differs by target: `c_char` is unsigned on ARM.
+cargo check --locked -p xila-graphics --features rendering_rgb565 --target thumbv7em-none-eabihf
 for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf; do
   cargo clippy --locked -p xila-abi-application --no-default-features --target "$target" -- -D warnings
   cargo clippy --locked -p xila-abi-application --features network --target "$target" -- -D warnings
@@ -415,6 +417,7 @@ done
 """
 tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
   "clippy",
+  "rustfmt",
 ], targets = [
   "thumbv7em-none-eabihf",
   "thumbv8m.main-none-eabihf",

@@ -298,6 +298,24 @@ class WorkflowPolicy(unittest.TestCase):
                 components = rust.get("components", []) if isinstance(rust, dict) else []
                 self.assertIn("rustfmt", components, "wasm build scripts execute rustfmt on generated bindings")
 
+    def test_graphics_builds_for_cortex_m_where_c_char_is_unsigned(self):
+        task = ci_config()["tasks"]["ci:bare-metal"]
+        self.assertIn(
+            "cargo check --locked -p xila-graphics --features rendering_rgb565 --target thumbv7em-none-eabihf",
+            task["run"],
+        )
+        raw = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]["ci:bare-metal"]
+        self.assertEqual(raw["env"]["CC_thumbv7em_none_eabihf"], "clang")
+        self.assertIn("thumbv7em-none-eabihf", task["tools"]["rust"]["targets"])
+        # The graphics build script formats generated bindings with rustfmt.
+        self.assertIn("rustfmt", task["tools"]["rust"]["components"])
+
+    def test_host_clippy_lints_graphics_test_targets(self):
+        lint = tomllib.loads((ROOT / "mise.toml").read_text())["tasks"]["clippy:host"]["run"]
+        self.assertIn("--all-targets", lint)
+        self.assertIn("-D warnings", lint)
+        self.assertIn("xila/graphics", lint)
+
     def test_host_tests_install_wasi_for_nested_guest_builds(self):
         rust = ci_config()["tasks"]["ci:host-tests"]["tools"]["rust"]
         self.assertIn("wasm32-wasip1", rust.get("targets", []))
