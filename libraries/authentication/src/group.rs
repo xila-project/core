@@ -151,7 +151,7 @@ pub async fn read_group_file(
         AccessFlags::Read.into(),
     )
     .await
-    .map_err(Error::FailedToReadGroupDirectory)?;
+    .map_err(Error::FailedToOpenGroupFile)?;
 
     buffer.clear();
 
@@ -165,8 +165,10 @@ pub async fn read_group_file(
         .await
         .map_err(Error::FailedToCloseFile)?;
 
-    miniserde::json::from_str(core::str::from_utf8(buffer).unwrap())
-        .map_err(Error::FailedToParseGroupFile)
+    let text = core::str::from_utf8(buffer)
+        .map_err(|_| Error::FailedToParseGroupFile(miniserde::Error))?;
+
+    miniserde::json::from_str(text).map_err(Error::FailedToParseGroupFile)
 }
 
 /// Creates a new group with the specified parameters.
