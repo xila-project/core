@@ -12,7 +12,6 @@ critical-section = { workspace = true }
 critical-section = { workspace = true, features = ["std"] }
 
 [features]
-default = ["Debug"]
 Debug = []
 Nightly = []
 

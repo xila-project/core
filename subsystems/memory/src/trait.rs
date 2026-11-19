@@ -51,25 +51,25 @@ pub trait ManagerTrait: Send + Sync {
     /// On success, the contents are preserved up to the smaller of the two sizes.
     /// On failure, the original allocation remains valid.
     ///
-    /// The allocator may move the block according to its ordinary placement policy.
-    /// Callers that need specific capabilities after resizing must allocate a new block
-    /// with those flags, copy the data and free the old block.
+    /// The allocator may move the block according to its ordinary placement policy,
+    /// subject to the original capability requirements.
     ///
     /// # Safety
     ///
-    /// - `old_pointer` must refer to a live allocation from this manager with `old_layout`.
+    /// - `old_pointer` must refer to a live allocation from this manager with `old_layout`
+    ///   and the original `capabilities`.
     /// - On success, access the allocation through the returned pointer and `new_layout`.
     unsafe fn reallocate(
         &self,
+        capabilities: CapabilityFlags,
         old_pointer: NonNull<u8>,
         old_layout: Layout,
         new_layout: Layout,
     ) -> Option<NonNull<u8>> {
-        // if old_layout == new_layout {
-        //     return Some(old_pointer);
-        // }
-
-        let new_pointer = unsafe { self.allocate(CapabilityFlags::empty(), new_layout) }?;
+        if new_layout.size() == 0 {
+            return None;
+        }
+        let new_pointer = unsafe { self.allocate(capabilities, new_layout) }?;
 
         // Copy the old data to the new memory
 
