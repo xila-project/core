@@ -415,6 +415,7 @@ for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imafc-unkno
   cargo build --locked -p xila-stackful --target "$target" --release
 done
 """
+# rustfmt keeps generated binding diagnostics readable; bindgen continues without it.
 tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
   "clippy",
   "rustfmt",
@@ -424,6 +425,8 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", compone
   "riscv32imac-unknown-none-elf",
   "riscv32imafc-unknown-none-elf",
 ] }
+# The graphics build script generates fonts with the pinned Node converter.
+tools.node = "{{ vars.node_version }}"
 
 [tasks."ci:bare-metal-no-cas"]
 description = "Check the façade and peripheral adapters for a RISC-V target without atomic compare-and-swap"

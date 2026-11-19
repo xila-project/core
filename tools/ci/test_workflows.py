@@ -307,14 +307,14 @@ class WorkflowPolicy(unittest.TestCase):
         raw = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]["ci:bare-metal"]
         self.assertEqual(raw["env"]["CC_thumbv7em_none_eabihf"], "clang")
         self.assertIn("thumbv7em-none-eabihf", task["tools"]["rust"]["targets"])
-        # The graphics build script formats generated bindings with rustfmt.
-        self.assertIn("rustfmt", task["tools"]["rust"]["components"])
+        # The graphics build script runs the pinned Node font converter.
+        self.assertEqual(raw["tools"]["node"], "{{ vars.node_version }}")
 
     def test_host_clippy_lints_graphics_test_targets(self):
-        lint = tomllib.loads((ROOT / "mise.toml").read_text())["tasks"]["clippy:host"]["run"]
+        lint = ci_config()["tasks"]["clippy:host"]["run"]
         self.assertIn("--all-targets", lint)
         self.assertIn("-D warnings", lint)
-        self.assertIn("xila/graphics", lint)
+        self.assertRegex(lint, r"--features[ =][^ ]*xila/graphics")
 
     def test_host_tests_install_wasi_for_nested_guest_builds(self):
         rust = ci_config()["tasks"]["ci:host-tests"]["tools"]["rust"]
