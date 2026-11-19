@@ -3,7 +3,7 @@
 //! LVGL and LittleFS expect a C library (`malloc`, `memcpy`, `strlen`, ...).
 //! Their Rust glue (`graphics`' LVGL hooks and `little_fs`' stubs) forwards to
 //! the functions of this crate, which allocate through the system
-//! [`memory`] manager and implement the memory and string primitives.
+//! `memory` manager and implement the memory and string primitives.
 //!
 //! This crate is plain Rust: it exports no C symbols, ships no header and is
 //! not an application ABI. The public native ABI is `xila-abi-application`.
