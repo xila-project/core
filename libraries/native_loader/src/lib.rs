@@ -4,7 +4,7 @@
 mod elf;
 
 use core::{alloc::Layout, ptr::NonNull};
-use elf::Elf;
+use elf::{Elf, Native};
 
 pub const ELF_MAGIC: &[u8; 4] = b"\x7fELF";
 
@@ -19,6 +19,8 @@ pub enum Error {
     Interpreter,
     ThreadLocalStorage,
     InvalidAlignment,
+    /// `e_flags` the target cannot run: Arm EABI version or float ABI, RISC-V float ABI or RVC.
+    IncompatibleFlags(u32),
     InvalidSegment,
     OverlappingSegments,
     InvalidEntry,
@@ -26,6 +28,9 @@ pub enum Error {
     MissingAbiNote,
     IncompatibleAbi(u32),
     InvalidDynamic,
+    /// DT_INIT, DT_FINI or an init, fini or preinit array: the loader runs no
+    /// constructors or destructors.
+    Constructors,
     DynamicDependency,
     UnsupportedDynamicTag(usize),
     InvalidRelocationTable,
@@ -95,7 +100,7 @@ impl LoadedImage {
         memory: &'static dyn ExecutableMemory,
         max_image_size: usize,
     ) -> Result<Self, Error> {
-        let elf = Elf::parse(bytes)?;
+        let elf = Elf::<Native>::parse(bytes)?;
         elf.check_abi()?;
         if elf.layout.size() > max_image_size {
             return Err(Error::ImageTooLarge);
@@ -115,10 +120,6 @@ impl LoadedImage {
         elf.copy_to(image);
         elf.relocate(image, bias)?;
         unsafe { memory.finish_writes(allocation, elf.layout, &mut elf.regions()) }?;
-        log::debug!(
-            "Native image base {:p}; GDB: add-symbol-file <elf> -o {bias:#x}",
-            allocation.as_ptr()
-        );
         Ok(loaded)
     }
 

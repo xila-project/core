@@ -2200,7 +2200,6 @@ name = "xila-native-loader"
 version = "0.1.0"
 dependencies = [
  "xila-abi-application",
- "xila-log",
  "xila-stackful",
  "xila-task",
 ]

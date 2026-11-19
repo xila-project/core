@@ -141,9 +141,8 @@ impl BaseOperations for PendingDevice {
 impl MountOperations for PendingDevice {}
 impl CharacterDevice for PendingDevice {}
 
-#[task::test]
-async fn executes_c_elf_from_vfs_with_suspending_abi_read() {
-    let output = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("xila-start.elf");
+fn build_fixture(name: &str, flags: &str) -> Vec<u8> {
+    let output = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
     let recipe = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../native_loader/fixtures/build.sh"
@@ -152,11 +151,47 @@ async fn executes_c_elf_from_vfs_with_suspending_abi_read() {
         Command::new("sh")
             .arg(recipe)
             .arg(&output)
+            .env("XILA_FIXTURE_FLAGS", flags)
             .status()
             .unwrap()
             .success()
     );
-    let bytes = std::fs::read(output).unwrap();
+    std::fs::read(output).unwrap()
+}
+
+/// Memory backend that fails the test if the loader allocates.
+struct NoMemory;
+
+// SAFETY: it never hands out memory.
+unsafe impl ExecutableMemory for NoMemory {
+    fn allocate(&self, _: Layout) -> Result<NonNull<u8>, LoaderError> {
+        panic!("the loader allocated for a rejected image");
+    }
+    unsafe fn finish_writes(
+        &self,
+        _: NonNull<u8>,
+        _: Layout,
+        _: &mut dyn Iterator<Item = Region>,
+    ) -> Result<(), LoaderError> {
+        unreachable!()
+    }
+    unsafe fn free(&self, _: NonNull<u8>, _: Layout) {
+        unreachable!()
+    }
+}
+
+#[test]
+fn rejects_c_images_with_constructors_before_allocating() {
+    let bytes = build_fixture("xila-constructor.elf", "-DXILA_FIXTURE_CONSTRUCTOR");
+    assert!(matches!(
+        LoadedImage::load(&bytes, &NoMemory, 32 * 1024),
+        Err(LoaderError::Constructors)
+    ));
+}
+
+#[task::test]
+async fn executes_c_elf_from_vfs_with_suspending_abi_read() {
+    let bytes = build_fixture("xila-start.elf", "");
 
     let time = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
     let tasks = task::test_manager();
@@ -208,15 +243,9 @@ async fn executes_c_elf_from_vfs_with_suspending_abi_read() {
         .await
         .unwrap();
 
-    let reader = execute(
-        context,
-        "/program",
-        vec![],
-        make_standard().await,
-        None,
-    )
-    .await
-    .unwrap();
+    let reader = execute(context, "/program", vec![], make_standard().await, None)
+        .await
+        .unwrap();
     assert_eq!(MAPPINGS.load(Ordering::Relaxed), 1);
 
     // Wait for the actual ABI read to register a waker. This task is on the

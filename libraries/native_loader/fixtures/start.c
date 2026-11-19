@@ -12,6 +12,11 @@ static const char answer[] = "ok";
 static const char *volatile expected = answer; /* Force a RELATIVE relocation. */
 static volatile unsigned int calls;           /* Exercise writable, zeroed BSS. */
 
+#ifdef XILA_FIXTURE_CONSTRUCTOR
+/* The loader runs no constructors, so it must reject the image. */
+__attribute__((constructor)) static void construct(void) { calls = 0; }
+#endif
+
 int32_t _xila_start(const XilaStartup *startup) {
     if (startup->size != sizeof(*startup) || startup->argument_count != 0 ||
         !startup->api || !startup->standard_input || !startup->standard_output ||
