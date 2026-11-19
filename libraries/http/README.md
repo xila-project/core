@@ -2,7 +2,7 @@
 
 `no_std` HTTP/1 request writers and response framing with no allocation by
 default. Enable `alloc` only for `format_url`; borrowed URL parsing is always
-available. Rust 1.90 or later.
+available. Rust 1.97 or later.
 
 `parse_response_head::<N>` borrows contiguous caller storage. It returns `None`
 for a partial head, and uses `N * size_of::<httparse::Header>()` stack bytes

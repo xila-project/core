@@ -2,6 +2,7 @@
 name = "xila-log"
 version.workspace = true
 edition = "2024"
+rust-version.workspace = true
 
 [dependencies]
 synchronization = { workspace = true }

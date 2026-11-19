@@ -2,6 +2,7 @@
 name = "xila-testing"
 version.workspace = true
 edition = "2024"
+rust-version.workspace = true
 description = "Minimal std test support for Xila: test devices, allocator and environment setup, without platform drivers"
 
 [dependencies]

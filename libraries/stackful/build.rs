@@ -1,6 +1,7 @@
 use std::env;
 fn main() {
     println!("cargo:rustc-check-cfg=cfg(stackful_float)");
+    println!("cargo:rustc-check-cfg=cfg(stackful_fpv5)");
     println!("cargo:rerun-if-env-changed=CARGO_ENCODED_RUSTFLAGS");
     let target = env::var("TARGET").unwrap();
     let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
@@ -46,5 +47,9 @@ fn main() {
     }
     if float {
         println!("cargo:rustc-cfg=stackful_float");
+        // Cortex-M33 class cores have an FPv5 unit; Cortex-M4F has FPv4.
+        if target.starts_with("thumbv8m.main-") {
+            println!("cargo:rustc-cfg=stackful_fpv5");
+        }
     }
 }

@@ -2,7 +2,7 @@
 name = "xila_http"
 version.workspace = true
 edition = "2024"
-rust-version = "1.90"
+rust-version.workspace = true
 license = "Apache-2.0"
 description = "Bounded no_std HTTP/1 response framing and request writers"
 

@@ -397,9 +397,16 @@ run = """
 set -eu
 cargo check --locked -p xila --target thumbv7em-none-eabihf
 cargo check --locked -p xila --no-default-features --features abi_definitions --target thumbv7em-none-eabihf
+# `check` never assembles inline assembly, and a debug build wouldn't either: only an optimised
+# build with several codegen units hits the toolchain issue. Build every float context switch.
+for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imafc-unknown-none-elf; do
+  cargo build --locked -p xila-stackful --target "$target" --release
+done
 """
 tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", targets = [
   "thumbv7em-none-eabihf",
+  "thumbv8m.main-none-eabihf",
+  "riscv32imafc-unknown-none-elf",
 ] }
 
 [tasks."ci:bare-metal-no-cas"]

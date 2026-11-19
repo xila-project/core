@@ -119,7 +119,7 @@ class WorkflowPolicy(unittest.TestCase):
                         self.assertEqual(task["tools"]["rust"]["components"], ["rustfmt"])
                         self.assertFalse(task["tools"]["rust"].get("targets"))
         tasks = configured_tasks("ci")
-        self.assertEqual(tasks["ci:abi"]["tools"]["rust"], {"version": "1.100.0", "profile": "minimal"})
+        self.assertEqual(tasks["ci:abi"]["tools"]["rust"], {"version": "1.97.0", "profile": "minimal"})
         self.assertNotIn("tools", tomllib.loads((ROOT / "mise.development.toml").read_text()))
 
     def test_validation_jobs_call_the_same_ordered_leaf_tasks_as_local_wrappers(self):

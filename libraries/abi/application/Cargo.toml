@@ -2,6 +2,7 @@
 name = "xila-abi-application"
 version.workspace = true
 edition = "2024"
+rust-version.workspace = true
 links = "xila_abi_application"
 
 [lib]

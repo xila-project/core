@@ -124,10 +124,29 @@ pub unsafe fn initialize(top: usize, entry: usize) -> usize {
     sp
 }
 
+#[cfg(all(target_arch = "arm", stackful_float, stackful_fpv5))]
+macro_rules! fpu_directive {
+    () => {
+        ".fpu fpv5-sp-d16"
+    };
+}
+#[cfg(all(target_arch = "arm", stackful_float, not(stackful_fpv5)))]
+macro_rules! fpu_directive {
+    () => {
+        ".fpu fpv4-sp-d16"
+    };
+}
+
 #[cfg(all(target_arch = "arm", stackful_float))]
 #[unsafe(naked)]
 pub unsafe extern "C" fn switch(_from: *mut usize, _to: *const usize) {
     naked_asm!(
+        // Rust <= 1.98 (LLVM <= 22) parses module-level asm without the
+        // target's features in optimised builds with several codegen units
+        // (local ThinLTO), so the VFP instructions below need an explicit
+        // `.fpu`. It names the target's own FPU so the state left for later
+        // asm matches the default. Remove once the toolchain is >= 1.99.
+        fpu_directive!(),
         "push {{r4-r7, lr}}",
         "mov r4, r8",
         "mov r5, r9",
@@ -206,7 +225,7 @@ pub unsafe fn initialize(top: usize, entry: usize) -> usize {
     let sp = top - 64;
     unsafe {
         (sp as *mut u8).write_bytes(0, 64);
-        ((sp + 0) as *mut usize).write(entry);
+        (sp as *mut usize).write(entry);
     }
     sp
 }
@@ -215,6 +234,10 @@ pub unsafe fn initialize(top: usize, entry: usize) -> usize {
 #[unsafe(naked)]
 pub unsafe extern "C" fn switch(_from: *mut usize, _to: *const usize) {
     naked_asm!(
+        // Same LLVM <= 22 issue as the Arm switch: enable F for this block
+        // only. Remove once the toolchain is >= 1.99.
+        ".option push",
+        ".option arch, +f",
         "addi sp, sp, -128",
         "sw ra, 0(sp)",
         "sw s0, 4(sp)",
@@ -274,6 +297,7 @@ pub unsafe extern "C" fn switch(_from: *mut usize, _to: *const usize) {
         "lw s11, 48(sp)",
         "addi sp, sp, 128",
         "ret",
+        ".option pop",
     );
 }
 #[cfg(all(target_arch = "riscv32", stackful_float))]
@@ -281,7 +305,7 @@ pub unsafe fn initialize(top: usize, entry: usize) -> usize {
     let sp = top - 128;
     unsafe {
         (sp as *mut u8).write_bytes(0, 128);
-        ((sp + 0) as *mut usize).write(entry);
+        (sp as *mut usize).write(entry);
     }
     sp
 }

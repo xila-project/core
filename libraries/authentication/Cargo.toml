@@ -2,6 +2,7 @@
 name = "xila-authentication"
 version.workspace = true
 edition = "2024"
+rust-version.workspace = true
 description = "User and group authentication module for Xila OS with secure password hashing"
 keywords = ["authentication", "security", "users", "groups", "no-std"]
 categories = ["authentication", "no-std", "os"]

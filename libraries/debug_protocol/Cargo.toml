@@ -2,6 +2,7 @@
 name = "xila-debug-protocol"
 version.workspace = true
 edition = "2024"
+rust-version.workspace = true
 
 [dependencies]
 serde = { version = "1.0", default-features = false, features = [
