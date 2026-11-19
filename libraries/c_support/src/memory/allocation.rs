@@ -118,8 +118,8 @@ pub unsafe fn memory_deallocate(pointer: *mut c_void) {
 ///
 /// - If `Pointer` is not null, it must have been returned by a previous call to
 ///   `memory_allocate` or `memory_reallocate`
-/// - The pointer must not be used after this function returns (use the returned pointer instead)
-/// - If the function returns null, the original pointer remains valid
+/// - Use the returned pointer after a successful resize
+/// - A non-null original pointer remains valid only if a nonzero resize fails
 ///
 /// # Parameters
 ///
@@ -131,7 +131,7 @@ pub unsafe fn memory_deallocate(pointer: *mut c_void) {
 ///
 /// - Pointer to the reallocated memory block
 /// - Null if allocation fails or if size is 0
-/// - If `Pointer` is null, behaves like `memory_allocate` with default alignment
+/// - If `Pointer` is null and `Size` is nonzero, allocates with default alignment
 ///
 /// # Examples
 ///
@@ -149,6 +149,12 @@ pub unsafe fn memory_deallocate(pointer: *mut c_void) {
 /// memory_reallocate(ptr, 0);
 /// ```
 pub unsafe fn memory_reallocate(pointer: *mut c_void, size: usize) -> *mut c_void {
+    if size == 0 {
+        // Deallocation takes the allocation mutex itself and accepts null.
+        unsafe { memory_deallocate(pointer) };
+        return null_mut();
+    }
+
     let _lock = block_on(ALLOCATION_MUTEX.lock());
 
     unsafe {
@@ -177,16 +183,8 @@ pub unsafe fn memory_reallocate(pointer: *mut c_void, size: usize) -> *mut c_voi
             new_layout.size(),
         );
 
-        let allocated = match Allocated::from_layout(pointer, &new_layout, capabilities) {
-            Some(alloc) => alloc,
-            None => {
-                warning!(
-                    "memory_reallocate failed to create allocation metadata: New Size: {}, Old Size: {}",
-                    size,
-                    old_layout.size()
-                );
-                return null_mut();
-            }
+        let Some(allocated) = Allocated::from_layout(pointer, &new_layout, capabilities) else {
+            return null_mut();
         };
 
         allocated.get_user_pointer() as *mut c_void
@@ -267,14 +265,9 @@ pub unsafe fn memory_allocate(
 
     let pointer = unsafe { memory::global_manager().allocate(capabilities, layout) };
 
-    let allocated = match unsafe { Allocated::from_layout(pointer, &layout, capabilities) } {
-        Some(alloc) => alloc,
-        None => {
-            warning!(
-                "memory_allocate failed to create allocation metadata: Size: {size}, Alignment: {alignment}, Capabilities: {capabilities:?}"
-            );
-            return null_mut();
-        }
+    let Some(allocated) = (unsafe { Allocated::from_layout(pointer, &layout, capabilities) })
+    else {
+        return null_mut();
     };
 
     allocated.get_user_pointer() as *mut c_void
@@ -312,6 +305,7 @@ mod tests {
     //! - **Stress Testing**: Multiple allocations and allocation tracking
     //! - **Error Handling**: Invalid inputs and error recovery
     use alloc::vec::Vec;
+    use testing_support::MemoryManager;
 
     use super::*;
 
@@ -653,26 +647,27 @@ mod tests {
         }
     }
 
-    /// Tests reallocation to zero size (equivalent to deallocation).
-    ///
-    /// When realloc is called with size 0, it should behave like free(),
-    /// deallocating the memory and potentially returning null.
     #[test]
     fn test_reallocate_to_zero() {
+        let before = MemoryManager::thread_allocations();
         unsafe {
-            // Test reallocating to zero size (equivalent to deallocation)
-            let initial_size = 64;
+            let pointer = memory_allocate_core(64);
+            assert!(!pointer.is_null());
 
-            let pointer = memory_reallocate(core::ptr::null_mut(), initial_size);
-            assert!(!pointer.is_null(), "Initial allocation should succeed");
-
-            let new_pointer = memory_reallocate(pointer, 0);
-            // Zero-size reallocation might return null or a valid pointer
-            // If it returns a valid pointer, we should deallocate it
-            if !new_pointer.is_null() {
-                memory_deallocate(new_pointer);
-            }
+            assert!(memory_reallocate(pointer, 0).is_null());
         }
+        let delta = MemoryManager::thread_allocations().since(before);
+        assert_eq!(delta.allocations(), 1);
+        assert_eq!(delta.deallocated_bytes(), delta.allocated_bytes());
+    }
+
+    #[test]
+    fn test_reallocate_null_to_zero() {
+        let before = MemoryManager::thread_allocations();
+        unsafe {
+            assert!(memory_reallocate(null_mut(), 0).is_null());
+        }
+        assert_eq!(MemoryManager::thread_allocations(), before);
     }
 
     #[test]
