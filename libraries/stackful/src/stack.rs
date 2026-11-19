@@ -29,17 +29,25 @@ impl Stack {
     /// suspended futures pinned on the native stack, and shared interrupt frames.
     /// Audit worst-case stack usage before choosing a 2 KiB stack.
     pub fn with_min_size(size: usize, min_usable: usize) -> Self {
-        let floor = min_usable.max(MIN_STACK_SIZE);
-        let size = size
-            .max(floor)
-            .checked_add(GUARD + 15)
-            .expect("stack too large")
-            & !15;
-        let layout = Layout::from_size_align(size, 16).expect("stack too large");
-        let memory =
-            NonNull::new(unsafe { alloc(layout) }).unwrap_or_else(|| handle_alloc_error(layout));
-        unsafe { memory.as_ptr().write_bytes(PAINT, size) };
-        Self { memory, layout }
+        let layout = Self::layout(size, min_usable).expect("stack too large");
+        Self::allocate(layout).unwrap_or_else(|| handle_alloc_error(layout))
+    }
+
+    /// Like [`Stack::with_min_size`], but returns `None` instead of panicking or
+    /// aborting when the size is unrepresentable or the allocator is out of memory.
+    pub fn try_with_min_size(size: usize, min_usable: usize) -> Option<Self> {
+        Self::allocate(Self::layout(size, min_usable)?)
+    }
+
+    fn layout(size: usize, min_usable: usize) -> Option<Layout> {
+        let size = size.max(min_usable.max(MIN_STACK_SIZE));
+        Layout::from_size_align(size.checked_add(GUARD + 15)? & !15, 16).ok()
+    }
+
+    fn allocate(layout: Layout) -> Option<Self> {
+        let memory = NonNull::new(unsafe { alloc(layout) })?;
+        unsafe { memory.as_ptr().write_bytes(PAINT, layout.size()) };
+        Some(Self { memory, layout })
     }
     pub(crate) fn top(&mut self) -> usize {
         self.memory.as_ptr() as usize + self.layout.size()
@@ -100,5 +108,15 @@ mod tests {
             Stack::with_min_size(MIN_STACK_SIZE + 1, MIN_STACK_SIZE).usable_size(),
             MIN_STACK_SIZE + 16
         );
+    }
+
+    #[test]
+    fn try_with_min_size_reports_failure_instead_of_aborting() {
+        let stack = Stack::try_with_min_size(MIN_STACK_SIZE + 1, MIN_STACK_SIZE).unwrap();
+        assert_eq!(stack.usable_size(), MIN_STACK_SIZE + 16);
+        assert!(stack.guard_intact());
+        // Unrepresentable and unobtainable sizes.
+        assert!(Stack::try_with_min_size(usize::MAX, MIN_STACK_SIZE).is_none());
+        assert!(Stack::try_with_min_size(isize::MAX as usize - 80, MIN_STACK_SIZE).is_none());
     }
 }

@@ -7,6 +7,26 @@ embedded_i18n::i18n!("locales");
 #[cfg(feature = "building")]
 mod building;
 mod error;
+mod format;
+#[cfg(all(
+    feature = "native-dev",
+    any(
+        all(
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            target_os = "linux"
+        ),
+        all(
+            any(
+                target_arch = "x86_64",
+                target_arch = "aarch64",
+                target_arch = "arm",
+                target_arch = "riscv32"
+            ),
+            target_os = "none"
+        )
+    )
+))]
+mod native;
 mod standard;
 mod traits;
 
@@ -14,13 +34,35 @@ mod traits;
 pub use building::*;
 pub use error::*;
 pub use file_system as exported_file_system;
+pub use format::*;
+#[cfg(all(
+    feature = "native-dev",
+    any(
+        all(
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            target_os = "linux"
+        ),
+        all(
+            any(
+                target_arch = "x86_64",
+                target_arch = "aarch64",
+                target_arch = "arm",
+                target_arch = "riscv32"
+            ),
+            target_os = "none"
+        )
+    )
+))]
+pub use native::NativeFormat;
+#[cfg(feature = "native-dev")]
+pub use native_loader;
 pub use standard::*;
 pub use task as exported_task;
 pub use traits::*;
 pub use virtual_file_system as exported_virtual_file_system;
 
 use alloc::{string::String, vec::Vec};
-use file_system::{AccessFlags, Path, Permission, Statistics};
+use file_system::{AccessFlags, Kind, Path, Permission, Position, Statistics};
 use task::{JoinHandle, SpawnerIdentifier, TaskIdentifier};
 use users::UserIdentifier;
 use virtual_file_system::File;
@@ -112,6 +154,7 @@ async fn execute_inner(
 
     let virtual_file_system = &context.virtual_file_system;
 
+    // Query by path: mounted executables do not implement attribute operations on their handles.
     let statistics = virtual_file_system.get_statistics(&path).await?;
 
     // - Check the executable bit
@@ -127,12 +170,50 @@ async fn execute_inner(
 
     let mut file = File::open(virtual_file_system, task, path, AccessFlags::Read.into()).await?;
 
-    // - Check if the user can override the user identifier
-    let new_user = get_overridden_user(context, &statistics, task).await?;
-
     let file_name = path
         .get_file_name()
         .ok_or(virtual_file_system::Error::InvalidPath)?;
+
+    if statistics.kind == Kind::File {
+        let mut magic = [0; 4];
+        let mut read = 0;
+        while read < magic.len() {
+            let count = file.read(&mut magic[read..]).await?;
+            if count == 0 {
+                break;
+            }
+            read += count;
+        }
+        if read != 0 {
+            file.set_position(&Position::Start(0)).await?;
+        }
+        if read == magic.len()
+            && let Some(handler) = find_format(
+                context.formats,
+                magic,
+                statistics
+                    .permissions
+                    .get_special()
+                    .get_set_user_identifier(),
+            )?
+        {
+            let mut standard = standard;
+            standard.context = context;
+            return handler
+                .launch(FormatRequest {
+                    file,
+                    file_size: statistics.size,
+                    name: String::from(file_name),
+                    parent: task,
+                    spawner,
+                    standard,
+                    arguments: inputs,
+                })
+                .await;
+        }
+    }
+
+    let new_user = get_overridden_user(context, &statistics, task).await?;
 
     let main_function: MainFunction = file.control(GET_MAIN_FUNCTION, &()).await?;
 
@@ -208,5 +289,42 @@ mod tests {
 
         let statistics = get_statistics_with_permissions(Permissions::ALL_READ_WRITE);
         assert!(!is_execute_allowed(&users_manager, &statistics, UserIdentifier::ROOT).await);
+    }
+}
+
+#[cfg(test)]
+mod format_tests {
+    use super::*;
+
+    struct Handler;
+    impl FormatHandler for Handler {
+        fn launch(&self, _: FormatRequest) -> FormatLaunch<'_> {
+            unreachable!()
+        }
+    }
+
+    static FORMATS: [ExecutableFormat; 2] = [
+        ExecutableFormat::new(*b"\0asm", &Handler),
+        ExecutableFormat::new(*b"\x7fELF", &Handler),
+    ];
+
+    #[test]
+    fn detects_registered_formats_and_applies_native_policy() {
+        assert!(find_format(&FORMATS, *b"\0asm", false).unwrap().is_some());
+        assert!(find_format(&FORMATS, *b"data", false).unwrap().is_none());
+        assert!(matches!(
+            find_format(&FORMATS, *b"\x7fELF", true),
+            Err(Error::PermissionDenied)
+        ));
+        assert!(matches!(
+            find_format(&[], *b"\x7fELF", false),
+            Err(Error::PermissionDenied)
+        ));
+        let native = find_format(&FORMATS, *b"\x7fELF", false);
+        if cfg!(feature = "native-dev") {
+            assert!(native.unwrap().is_some());
+        } else {
+            assert!(matches!(native, Err(Error::PermissionDenied)));
+        }
     }
 }

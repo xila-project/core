@@ -2,6 +2,8 @@
   "errors": {
     "failed_to_get_main_function": "Impossibile ottenere la funzione principale",
     "invalid_stack_size": "Dimensione dello stack non valida",
+    "native_load": "Impossibile caricare l’eseguibile nativo",
+    "native_file_too_large": "Il file eseguibile nativo supera il limite di dimensione",
     "permission_denied": "Accesso negato"
   }
 }

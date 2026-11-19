@@ -2,6 +2,8 @@
   "errors": {
     "failed_to_get_main_function": "メイン関数を取得できませんでした",
     "invalid_stack_size": "無効なスタックサイズ",
+    "native_load": "ネイティブ実行ファイルを読み込めませんでした",
+    "native_file_too_large": "ネイティブ実行ファイルがサイズ上限を超えています",
     "permission_denied": "アクセスが拒否されました"
   }
 }

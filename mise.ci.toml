@@ -147,6 +147,7 @@ mise run ci:host-tests
 mise run ci:firmware
 mise run ci:bare-metal
 mise run ci:bare-metal-no-cas
+mise run ci:native-loader-targets
 mise run ci:profiling-task-tests
 mise run ci:host-font-tests
 """
@@ -280,6 +281,7 @@ cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888
 cargo test --locked -p xila-abi-application --no-default-features
 # The graphics feature also enables environment.
 cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888,xila-testing/graphics --no-run
+mise run test:native-loader
 mise run test:graphics-pool
 """
 
@@ -448,3 +450,22 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", targets
 extends = "ci:rust-lint"
 depends = ["ci:packages-host"]
 run = "cargo test --locked -p xila-task --lib --features test_harness,profiling"
+
+[tasks."test:native-loader"]
+extends = "ci:rust-lint"
+
+[tasks."ci:native-loader-targets"]
+description = "Check and build native ELF loading on Cortex-M4, RV32IMAC and RV32IMAFC"
+depends = ["ci:packages-host"]
+run = """
+set -eu
+for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf riscv32imafc-unknown-none-elf; do
+  cargo check --locked -p xila-executable --features native-dev --target "$target"
+  cargo build --locked --release -p xila-executable --features native-dev --target "$target"
+done
+"""
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", targets = [
+  "thumbv7em-none-eabihf",
+  "riscv32imac-unknown-none-elf",
+  "riscv32imafc-unknown-none-elf",
+] }

@@ -111,6 +111,13 @@ class WorkflowPolicy(unittest.TestCase):
                 bare["run"],
             )
 
+    def test_native_loader_targets_cover_every_float_abi(self):
+        task = ci_config()["tasks"]["ci:native-loader-targets"]
+        # riscv32imafc is the only target whose hard-float ABI `rustc` hides from cfg.
+        for target in ("thumbv7em-none-eabihf", "riscv32imac-unknown-none-elf", "riscv32imafc-unknown-none-elf"):
+            self.assertIn(target, task["tools"]["rust"]["targets"])
+            self.assertIn(target, task["run"])
+
     def test_ci_policy_uses_pinned_uv_dependencies(self):
         self.assertIn("mise run ci:policy-tests", job("ci.yml", "quality"))
         policy = ci_config()["tasks"]["ci:policy-tests"]
@@ -152,7 +159,7 @@ class WorkflowPolicy(unittest.TestCase):
     def test_validation_jobs_call_the_same_ordered_leaf_tasks_as_local_wrappers(self):
         tasks = ci_config()["tasks"]
         groups = {
-            ("ci.yml", "host"): ["ci:host-clippy", "ci:host-wasm-clippy", "ci:host-tests", "ci:firmware", "ci:bare-metal", "ci:bare-metal-no-cas", "ci:profiling-task-tests", "ci:host-font-tests"],
+            ("ci.yml", "host"): ["ci:host-clippy", "ci:host-wasm-clippy", "ci:host-tests", "ci:firmware", "ci:bare-metal", "ci:bare-metal-no-cas", "ci:native-loader-targets", "ci:profiling-task-tests", "ci:host-font-tests"],
             ("ci.yml", "wasm"): ["ci:wasm-clippy", "ci:wasm-audio-check"],
             ("extended.yml", "abi-deep"): ["ci:abi-coverage", "ci:abi-miri", "ci:abi-miri-cross"],
         }

@@ -2035,16 +2035,24 @@ name = "xila-executable"
 version = "0.1.0"
 dependencies = [
  "embedded-i18n",
+ "libc",
+ "portable-atomic",
+ "xila-abi-application",
+ "xila-abi-definitions",
  "xila-device",
  "xila-drivers-core",
  "xila-file-system",
  "xila-graphics",
  "xila-lifecycle",
+ "xila-little-fs",
  "xila-log",
+ "xila-native-loader",
  "xila-network",
  "xila-shared",
+ "xila-stackful",
  "xila-synchronization",
  "xila-task",
+ "xila-testing-support",
  "xila-time",
  "xila-users",
  "xila-virtual-file-system",
@@ -2186,6 +2194,15 @@ dependencies = [
  "xila-synchronization",
  "xila-testing",
  "xila-users",
+]
+
+[[package]]
+name = "xila-native-loader"
+version = "0.1.0"
+dependencies = [
+ "xila-abi-application",
+ "xila-stackful",
+ "xila-task",
 ]
 
 [[package]]

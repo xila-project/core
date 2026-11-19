@@ -163,7 +163,8 @@ links `sdk/crt0.c` and `sdk/stubs.c`, using `-Iinclude/xila -Isdk` and including
 and table sizes and the ABI version, installs the image-local table pointer,
 then calls `xila_main`. Before startup and after `xila_main` returns, all stubs
 return `XILA_STATUS_UNAVAILABLE`. The entry must join any users of the stubs
-before returning. Invalid startup returns -1.
+before returning. Invalid startup returns -1. The [native loader](../../native_loader/README.md) maps
+such an image and calls `_xila_start`.
 Built-in callers use their startup pointer directly so concurrent executions can
 borrow different capabilities.
 

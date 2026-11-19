@@ -2,6 +2,8 @@
   "errors": {
     "failed_to_get_main_function": "获取主函数失败",
     "invalid_stack_size": "栈大小无效",
+    "native_load": "无法加载原生可执行文件",
+    "native_file_too_large": "原生可执行文件超出大小限制",
     "permission_denied": "权限不足"
   }
 }

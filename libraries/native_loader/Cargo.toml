@@ -1,0 +1,15 @@
+[package]
+name = "xila-native-loader"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "native_loader"
+
+[dependencies]
+abi_application.workspace = true
+
+[target.'cfg(any(all(any(target_arch = "x86_64", target_arch = "aarch64"), target_os = "linux"), all(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "arm", target_arch = "riscv32"), target_os = "none")))'.dependencies]
+stackful.workspace = true
+task.workspace = true

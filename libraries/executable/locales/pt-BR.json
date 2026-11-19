@@ -2,6 +2,8 @@
   "errors": {
     "failed_to_get_main_function": "Não foi possível obter a função principal",
     "invalid_stack_size": "Tamanho de pilha inválido",
+    "native_load": "Falha ao carregar o executável nativo",
+    "native_file_too_large": "O arquivo executável nativo excede o limite de tamanho",
     "permission_denied": "Permissão negada"
   }
 }
