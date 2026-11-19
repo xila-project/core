@@ -14,6 +14,7 @@ mod startup;
 #[cfg(feature = "network")]
 pub use network::*;
 pub use network_types::*;
+mod random;
 mod status;
 mod time;
 
@@ -21,6 +22,7 @@ pub use directory::*;
 pub use file::*;
 pub use iterator::*;
 pub use metadata::*;
+pub use random::*;
 pub use startup::*;
 pub use status::*;
 pub use time::*;
@@ -84,6 +86,13 @@ use task::block_on as suspend_on;
 )))]
 const fn is_in_coroutine() -> bool {
     false
+}
+
+/// The one shared, non-generic `suspend_on` instantiation for unit-output futures.
+/// Sleep and random fill both go through it so the generic code exists once.
+#[inline(never)]
+fn suspend_dynamic(future: core::pin::Pin<&mut dyn core::future::Future<Output = ()>>) {
+    suspend_on(future)
 }
 
 #[cfg(test)]
@@ -328,6 +337,48 @@ mod tests {
                 Status::InvalidArgument
             );
             assert_eq!(xila_time_realtime(ptr::null_mut()), Status::InvalidArgument);
+            // No clock is installed: resolution is unavailable, bad arguments still
+            // fail first, and the output is untouched.
+            let mut resolution = 789;
+            for clock in [XILA_CLOCK_MONOTONIC, XILA_CLOCK_REALTIME] {
+                assert_eq!(
+                    xila_time_resolution(clock, &mut resolution),
+                    Status::Unavailable
+                );
+                assert_eq!(
+                    xila_time_resolution(clock, ptr::null_mut()),
+                    Status::InvalidArgument
+                );
+            }
+            assert_eq!(
+                xila_time_resolution(2, &mut resolution),
+                Status::InvalidArgument
+            );
+            assert_eq!(resolution, 789);
+            // Sleeping needs the executor's timer, not the manager.
+            assert_eq!(xila_time_sleep(0), Status::Ok);
+            let clock = &::time::EmbassyClock;
+            let start = ::time::MonotonicClock::now(clock);
+            assert_eq!(xila_time_sleep(2_000_000), Status::Ok);
+            let elapsed = ::time::MonotonicClock::now(clock) - start;
+            assert!(elapsed >= core::time::Duration::from_millis(2));
+            // No entropy source is installed: only an empty fill can succeed.
+            let mut bytes = [0x5A_u8; 4];
+            assert_eq!(xila_random_fill(ptr::null_mut(), 0), Status::Ok);
+            assert_eq!(xila_random_fill(bytes.as_mut_ptr().cast(), 0), Status::Ok);
+            assert_eq!(
+                xila_random_fill(ptr::null_mut(), 1),
+                Status::InvalidArgument
+            );
+            assert_eq!(
+                xila_random_fill(bytes.as_mut_ptr().cast(), isize::MAX as usize + 1),
+                Status::InvalidArgument
+            );
+            assert_eq!(
+                xila_random_fill(bytes.as_mut_ptr().cast(), bytes.len()),
+                Status::Unavailable
+            );
+            assert_eq!(bytes, [0x5A; 4]);
         }
         std::println!(
             "File={} Directory={}",

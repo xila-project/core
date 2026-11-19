@@ -430,6 +430,35 @@ XilaStatus xila_heap_free(XilaHeap * heap, void * pointer) {
     return xila_sdk_api->heap_free(heap, pointer);
 }
 
+static XilaStatus unavailable_time_resolution(uint32_t clock, uint64_t * nanoseconds) {
+    (void)clock;
+    (void)nanoseconds;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_time_resolution(uint32_t clock, uint64_t * nanoseconds) {
+    return xila_sdk_api->time_resolution(clock, nanoseconds);
+}
+
+static XilaStatus unavailable_time_sleep(uint64_t nanoseconds) {
+    (void)nanoseconds;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_time_sleep(uint64_t nanoseconds) {
+    return xila_sdk_api->time_sleep(nanoseconds);
+}
+
+static XilaStatus unavailable_random_fill(void * buffer, size_t size) {
+    (void)buffer;
+    (void)size;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_random_fill(void * buffer, size_t size) {
+    return xila_sdk_api->random_fill(buffer, size);
+}
+
 const XilaApi xila_sdk_fallback_api = {
     .version = (XILA_ABI_VERSION_MAJOR << 16) | XILA_ABI_VERSION_MINOR,
     .size = sizeof(XilaApi),
@@ -472,4 +501,7 @@ const XilaApi xila_sdk_fallback_api = {
     .heap_allocate = unavailable_heap_allocate,
     .heap_reallocate = unavailable_heap_reallocate,
     .heap_free = unavailable_heap_free,
+    .time_resolution = unavailable_time_resolution,
+    .time_sleep = unavailable_time_sleep,
+    .random_fill = unavailable_random_fill,
 };

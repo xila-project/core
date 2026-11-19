@@ -66,6 +66,16 @@
 
 #define XILA_SHUTDOWN_WRITE 1
 
+/**
+ * Monotonic clock identifier for `xila_time_resolution`.
+ */
+#define XILA_CLOCK_MONOTONIC 0
+
+/**
+ * Realtime (Unix UTC) clock identifier for `xila_time_resolution`.
+ */
+#define XILA_CLOCK_REALTIME 1
+
 #if defined(__arm__)
 /**
  * Alignment guaranteed for every allocation, including zero-length requests.
@@ -375,6 +385,21 @@ typedef struct XilaApi {
    * Release an allocation from this heap. Null succeeds.
    */
   XilaStatus (*heap_free)(struct XilaHeap *heap, void *pointer);
+  /**
+   * Read a clock's nominal resolution: XILA_CLOCK_MONOTONIC or XILA_CLOCK_REALTIME.
+   * Returns Unavailable when the host installed no clock.
+   */
+  XilaStatus (*time_resolution)(uint32_t clock, uint64_t *nanoseconds);
+  /**
+   * Suspend for at least the given nanoseconds on the executor's clock. A zero wait
+   * yields once inside a coroutine and returns at once outside one.
+   */
+  XilaStatus (*time_sleep)(uint64_t nanoseconds);
+  /**
+   * Fill a buffer from the host-granted entropy source. Zero size succeeds. The
+   * buffer contents are unspecified after a failure.
+   */
+  XilaStatus (*random_fill)(void *buffer, size_t size);
 } XilaApi;
 
 /**

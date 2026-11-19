@@ -163,6 +163,15 @@ pub struct XilaApi {
     ) -> Status,
     /// Release an allocation from this heap. Null succeeds.
     pub heap_free: unsafe extern "C" fn(heap: *mut Heap, pointer: *mut c_void) -> Status,
+    /// Read a clock's nominal resolution: XILA_CLOCK_MONOTONIC or XILA_CLOCK_REALTIME.
+    /// Returns Unavailable when the host installed no clock.
+    pub time_resolution: unsafe extern "C" fn(clock: u32, nanoseconds: *mut u64) -> Status,
+    /// Suspend for at least the given nanoseconds on the executor's clock. A zero wait
+    /// yields once inside a coroutine and returns at once outside one.
+    pub time_sleep: unsafe extern "C" fn(nanoseconds: u64) -> Status,
+    /// Fill a buffer from the host-granted entropy source. Zero size succeeds. The
+    /// buffer contents are unspecified after a failure.
+    pub random_fill: unsafe extern "C" fn(buffer: *mut c_void, size: usize) -> Status,
 }
 
 include!(concat!(env!("OUT_DIR"), "/api_layout.rs"));
@@ -213,4 +222,7 @@ pub static XILA_API: XilaApi = XilaApi {
     heap_allocate: xila_heap_allocate,
     heap_reallocate: xila_heap_reallocate,
     heap_free: xila_heap_free,
+    time_resolution: xila_time_resolution,
+    time_sleep: xila_time_sleep,
+    random_fill: xila_random_fill,
 };

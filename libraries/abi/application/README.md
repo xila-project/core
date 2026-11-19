@@ -59,12 +59,47 @@ OutOfMemory.
 - `xila_directory_create`, `xila_directory_remove`, `xila_directory_rename`: namespace changes.
 - `xila_file_set_size`: resize writable files without changing their cursor.
 - `xila_time_monotonic`, `xila_time_realtime`: checked nanosecond clock reads.
+- `xila_time_resolution`, `xila_time_sleep`: clock quantization and cooperative sleep.
+- `xila_random_fill`: bytes from the host-granted entropy source.
 - `xila_heap_allocate`, `xila_heap_reallocate`, `xila_heap_free`: process-owned allocation.
 
 The host constructs capabilities with `Directory::new` and wraps existing streams
 with `File::new`. `into_raw` transfers ownership and unsafe `from_raw` reclaims it
 exactly once. The host installs its time manager with `initialize`; clock reads
 before initialization and unsynchronized realtime reads return Unavailable.
+
+## Clocks, sleep and randomness
+
+None of these calls assumes a host OS clock or entropy source.
+
+`xila_time_resolution(clock, &nanoseconds)` reports the nominal quantization of
+`XILA_CLOCK_MONOTONIC` or `XILA_CLOCK_REALTIME`; actual precision can be coarser.
+The realtime resolution is the coarser of the clock's synchronization sample and
+the monotonic clock, and stays readable while UTC is unsynchronized, when it
+equals the monotonic one. An unknown clock or a null output returns
+InvalidArgument; no installed time manager returns Unavailable.
+
+`xila_time_sleep(nanoseconds)` waits at least that long on the executor's clock,
+which is the monotonic clock unless the host installed a custom one, and is
+unaffected by UTC corrections. Inside a coroutine it suspends on the executor's
+Embassy timer, so peers on the same executor keep running; zero yields once.
+Embassy timers need an executor waker that the `task::block_on` fallback lacks,
+so outside a coroutine the call polls the clock instead (and zero returns at
+once). Durations are converted to ticks with saturating arithmetic, rounded up
+plus one tick, so `UINT64_MAX` waits practically forever instead of wrapping. It
+needs no time manager and returns Ok on hosts whose Embassy time driver works
+(there is no signal delivery, so nothing interrupts it).
+
+`xila_random_fill(buffer, size)` fills the buffer from the entropy source that the
+host installs once with `initialize_random`, typically the character device
+mounted at `/devices/random/source`, which the network manager and authentication
+already use. A source that is pending suspends the coroutine like any other
+blocking call, and short reads are retried until the buffer is full. Zero size
+succeeds without touching the buffer or the source and permits a null buffer.
+Before installation a nonempty fill returns Unavailable; a source that reports no
+progress returns InputOutput and its own errors map through the usual status
+translation. This is the one call whose output is not success-only: after a
+failure the buffer contents are unspecified and must not be used.
 
 ## Header and compatibility
 

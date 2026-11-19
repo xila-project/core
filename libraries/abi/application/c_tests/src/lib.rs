@@ -19,12 +19,59 @@ mod tests {
         fn sdk_test_startup(startup: *const XilaStartup) -> i32;
         fn startup_heap_main(startup: *const XilaStartup) -> i32;
         fn startup_empty_main(startup: *const XilaStartup) -> i32;
+        fn startup_clock_random_main(startup: *const XilaStartup) -> i32;
         fn application_c_network(
             api: *const XilaApi,
             network: *const Network,
             denied: *const Network,
             listen_only: *const Network,
         ) -> i32;
+    }
+
+    /// Entropy source that reads at most three bytes at a time, is pending on every
+    /// other read, fills with 0xA5, is unavailable for 13-byte requests and makes
+    /// no progress for 17-byte requests. It keeps no per-test mode, so tests that
+    /// share the process-wide installation cannot disturb each other.
+    struct ScriptedEntropy(portable_atomic::AtomicUsize);
+    static ENTROPY: ScriptedEntropy = ScriptedEntropy(portable_atomic::AtomicUsize::new(0));
+    impl file_system::DirectBaseOperations for ScriptedEntropy {
+        fn read(
+            &self,
+            cx: &mut core::task::Context<'_>,
+            buffer: &mut [u8],
+            _: file_system::Size,
+        ) -> core::task::Poll<file_system::Result<usize>> {
+            match buffer.len() {
+                13 => return core::task::Poll::Ready(Err(file_system::Error::NotInitialized)),
+                17 => return core::task::Poll::Ready(Ok(0)),
+                _ => {}
+            }
+            if self
+                .0
+                .fetch_add(1, portable_atomic::Ordering::Relaxed)
+                .is_multiple_of(2)
+            {
+                cx.waker().wake_by_ref();
+                return core::task::Poll::Pending;
+            }
+            let count = buffer.len().min(3);
+            buffer[..count].fill(0xA5);
+            core::task::Poll::Ready(Ok(count))
+        }
+        fn write(
+            &self,
+            _: &mut core::task::Context<'_>,
+            _: &[u8],
+            _: file_system::Size,
+        ) -> core::task::Poll<file_system::Result<usize>> {
+            core::task::Poll::Ready(Err(file_system::Error::UnsupportedOperation))
+        }
+    }
+    impl file_system::MountOperations for ScriptedEntropy {}
+    impl file_system::DirectCharacterDevice for ScriptedEntropy {}
+    fn install_entropy() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| initialize_random(&ENTROPY));
     }
 
     #[test]
@@ -134,6 +181,19 @@ mod tests {
             let mut real = 17;
             assert_eq!(xila_time_monotonic(&mut mono), Status::Ok);
             time.invalidate();
+            install_entropy();
+            assert_eq!(
+                run_main(
+                    startup_clock_random_main,
+                    &mut Heap::new(),
+                    &["unsynchronized"],
+                    None,
+                    None,
+                    None,
+                    None
+                ),
+                0
+            );
             assert_eq!(xila_time_realtime(&mut real), Status::Unavailable);
             assert_eq!(real, 17);
             time.set_realtime(time::RealtimeSample {
@@ -154,6 +214,18 @@ mod tests {
         })
         .unwrap();
         unsafe {
+            assert_eq!(
+                run_main(
+                    startup_clock_random_main,
+                    &mut Heap::new(),
+                    &["synchronized"],
+                    None,
+                    None,
+                    None,
+                    None
+                ),
+                0
+            );
             assert_eq!(
                 run_main(
                     startup_empty_main,
@@ -473,5 +545,107 @@ mod tests {
         assert_eq!(reader.join().await, 0);
         peer.join().await;
         assert_eq!(state.polls.load(Ordering::Relaxed), 2);
+    }
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    #[task::test]
+    async fn stackful_sleep_and_random_yield_to_executor_peer() {
+        use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
+
+        install_entropy();
+        let tasks = task::test_manager();
+        let task = tasks.get_current_task_identifier().await;
+        let spawner = tasks.get_spawner(task).await.unwrap();
+        let finished: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
+        let peer_turns: &'static AtomicUsize = Box::leak(Box::new(AtomicUsize::new(0)));
+
+        // SAFETY: The bounded ABI call chain fits within the supplied stack.
+        let (sleeper, _) = unsafe {
+            stackful::spawn(
+                tasks,
+                task,
+                "ABI sleeper",
+                stackful::Stack::new(64 * 1024),
+                move || {
+                    let start = ::time::MonotonicClock::now(&::time::EmbassyClock);
+                    let slept = xila_time_sleep(20_000_000);
+                    let elapsed = ::time::MonotonicClock::now(&::time::EmbassyClock) - start;
+                    // The entropy source is pending on alternate reads, so this fill
+                    // suspends the coroutine as well.
+                    let mut buffer = [0u8; 8];
+                    let filled = xila_random_fill(buffer.as_mut_ptr().cast(), buffer.len());
+                    finished.store(true, Ordering::Relaxed);
+                    i32::from(
+                        slept != Status::Ok
+                            || elapsed < core::time::Duration::from_millis(20)
+                            || filled != Status::Ok
+                            || buffer != [0xA5; 8],
+                    )
+                },
+            )
+            .await
+            .unwrap()
+        };
+        // Runs on the same executor, so it only progresses while the sleeper is suspended.
+        let (peer, _) = tasks
+            .spawn(task, "sleep peer", Some(spawner), move |_| async move {
+                while !finished.load(Ordering::Relaxed) {
+                    peer_turns.fetch_add(1, Ordering::Relaxed);
+                    task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+        assert_eq!(sleeper.join().await, 0);
+        peer.join().await;
+        assert!(peer_turns.load(Ordering::Relaxed) > 1);
+    }
+
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    #[task::test]
+    async fn stackful_sleep_forever_does_not_return() {
+        use core::{future::poll_fn, pin::pin, task::Poll};
+        use portable_atomic::{AtomicBool, Ordering};
+
+        static RETURNED: AtomicBool = AtomicBool::new(false);
+        let tasks = task::test_manager();
+        let task = tasks.get_current_task_identifier().await;
+        let spawner = tasks.get_spawner(task).await.unwrap();
+        // The task races the coroutine against a timer and then drops it, so
+        // the test ends with no task left behind.
+        let (watcher, _) = tasks
+            .spawn(
+                task,
+                "forever sleeper",
+                Some(spawner),
+                move |_| async move {
+                    // SAFETY: The bounded ABI call chain fits within the supplied stack.
+                    let coroutine = unsafe {
+                        stackful::Coroutine::new(stackful::Stack::new(64 * 1024), || {
+                            let status = xila_time_sleep(u64::MAX);
+                            RETURNED.store(true, Ordering::Relaxed);
+                            i32::from(status != Status::Ok)
+                        })
+                    };
+                    let mut sleeper = pin!(stackful::drive(coroutine));
+                    let mut limit = pin!(task::sleep(core::time::Duration::from_millis(50)));
+                    poll_fn(|context| {
+                        if sleeper.as_mut().poll(context).is_ready() {
+                            return Poll::Ready(true);
+                        }
+                        limit.as_mut().poll(context).map(|()| false)
+                    })
+                    .await
+                },
+            )
+            .await
+            .unwrap();
+        assert!(!watcher.join().await, "sleep(u64::MAX) returned");
+        assert!(!RETURNED.load(Ordering::Relaxed));
     }
 }

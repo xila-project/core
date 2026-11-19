@@ -21,6 +21,7 @@ file_system.workspace = true
 task.workspace = true
 time.workspace = true
 synchronization.workspace = true
+embassy-time.workspace = true
 
 [target.'cfg(any(all(any(target_arch = "x86_64", target_arch = "aarch64"), target_os = "linux"), all(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "arm", target_arch = "riscv32"), target_os = "none")))'.dependencies]
 stackful = { workspace = true }
