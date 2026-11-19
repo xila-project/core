@@ -2735,3 +2735,65 @@ async fn link_limit_and_invalid_link_target_are_different_failures() {
         Some(IoErrorKind::SymlinkLoop)
     );
 }
+
+/// Caller input errors are reported as such; `CorruptData` is only for a
+/// stored link target that cannot be used.
+#[cfg(target_os = "linux")]
+#[test]
+async fn symlink_input_errors_describe_the_argument() {
+    use file_system::io_error::PosixErrno;
+    let (task, vfs) = initialize().await;
+
+    // POSIX `symlink("", link)` fails with ENOENT.
+    let empty = vfs
+        .create_symlink(task, Path::from_str(""), Path::from_str("/empty"))
+        .await
+        .unwrap_err();
+    assert_eq!(empty, IoErrorKind::NotFound);
+    assert_eq!(empty.posix_errno(), PosixErrno::ENOENT);
+
+    let long_target = "a".repeat(4097);
+    let too_long = vfs
+        .create_symlink(task, Path::new(&long_target), Path::from_str("/long"))
+        .await
+        .unwrap_err();
+    assert_eq!(too_long, IoErrorKind::NameTooLong);
+    assert_eq!(too_long.posix_errno(), PosixErrno::ENAMETOOLONG);
+
+    for (target, link) in [
+        ("/bad target", "/invalid-target"),
+        ("/target", "relative-link"),
+        ("/target", "/"),
+        ("/target", "/trailing/"),
+    ] {
+        let error = vfs
+            .create_symlink(task, Path::new(target), Path::new(link))
+            .await
+            .unwrap_err();
+        assert_eq!(error, IoErrorKind::InvalidPath, "{target} -> {link}");
+        assert_eq!(error.posix_errno(), PosixErrno::EINVAL);
+    }
+}
+
+/// Reading a link that is not a link is POSIX `readlink` EINVAL.
+#[cfg(target_os = "linux")]
+#[test]
+async fn read_symlink_on_a_regular_file_is_invalid_argument() {
+    use file_system::io_error::PosixErrno;
+    let (task, vfs) = initialize().await;
+    File::open(
+        vfs,
+        task,
+        "/regular",
+        Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None),
+    )
+    .await
+    .unwrap();
+    let mut buffer = [0; 16];
+    let error = vfs
+        .read_symlink(task, Path::from_str("/regular"), &mut buffer)
+        .await
+        .unwrap_err();
+    assert_eq!(error, IoErrorKind::InvalidArgument);
+    assert_eq!(error.posix_errno(), PosixErrno::EINVAL);
+}

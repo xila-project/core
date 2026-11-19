@@ -1115,6 +1115,10 @@ impl VirtualFileSystem {
 
     /// Create a symbolic link at `link` whose target is interpreted in the
     /// caller's virtual namespace. The target may be dangling or cross mounts.
+    ///
+    /// Invalid caller input is reported as `InvalidPath` (unusable target or
+    /// link path), `NameTooLong` (target over the link limit) and `NotFound`
+    /// for an empty target, which is POSIX `symlink("")` failing with ENOENT.
     pub async fn create_symlink(
         &self,
         task: TaskIdentifier,
@@ -1144,15 +1148,23 @@ impl VirtualFileSystem {
         link: &Path,
         root: Option<&Path>,
     ) -> Result<()> {
+        // Caller input is validated first and reported with the kind that
+        // describes the argument; `CorruptData` is reserved for stored link
+        // targets that cannot be used.
+        if target.is_empty() {
+            // POSIX `symlink("", link)` fails with ENOENT.
+            return Err(IoErrorKind::NotFound);
+        }
+        if target.get_length() > MAX_SYMLINK_TARGET_LENGTH {
+            return Err(IoErrorKind::NameTooLong);
+        }
         if !target.is_valid()
-            || target.is_empty()
-            || target.get_length() > MAX_SYMLINK_TARGET_LENGTH
             || !link.is_valid()
             || (root.is_none() && !link.is_absolute())
             || link.is_root()
             || link.as_str().ends_with('/')
         {
-            return Err(IoErrorKind::CorruptData);
+            return Err(IoErrorKind::InvalidPath);
         }
 
         let user = self.task_manager.get_user(task).await.map_io_error()?;
@@ -1356,7 +1368,8 @@ impl VirtualFileSystem {
         let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
         Self::get_attributes(file_system.file_system, relative_link, &mut attributes).await?;
         if attributes.get_kind() != Some(&Kind::SymbolicLink) {
-            return Err(IoErrorKind::CorruptData);
+            // POSIX `readlink` on something that is not a link: EINVAL.
+            return Err(IoErrorKind::InvalidArgument);
         }
         let size = {
             let mut size = Attributes::new().set_mask(AttributeFlags::Size);
