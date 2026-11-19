@@ -455,11 +455,11 @@ run = "cargo test --locked -p xila-task --lib --features test_harness,profiling"
 extends = "ci:rust-lint"
 
 [tasks."ci:native-loader-targets"]
-description = "Check and build native ELF loading on Cortex-M4 and RV32IMAC"
+description = "Check and build native ELF loading on Cortex-M4, RV32IMAC and RV32IMAFC"
 depends = ["ci:packages-host"]
 run = """
 set -eu
-for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf; do
+for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf riscv32imafc-unknown-none-elf; do
   cargo check --locked -p xila-executable --features native-dev --target "$target"
   cargo build --locked --release -p xila-executable --features native-dev --target "$target"
 done
@@ -467,4 +467,5 @@ done
 tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", targets = [
   "thumbv7em-none-eabihf",
   "riscv32imac-unknown-none-elf",
+  "riscv32imafc-unknown-none-elf",
 ] }

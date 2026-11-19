@@ -332,6 +332,11 @@ fn checks_arm_flags() {
     assert!(!arm_flags_supported(0x0500_0200, true));
     assert!(arm_flags_supported(0x0500_0200, false));
     assert!(!arm_flags_supported(0x0500_0400, false));
+    // An image that sets neither float ABI flag ("compatible" VFP args) runs on both.
+    assert!(arm_flags_supported(0x0500_0000, true));
+    assert!(arm_flags_supported(0x0500_0000, false));
+    assert!(!arm_flags_supported(0x0500_0600, true));
+    assert!(!arm_flags_supported(0x0500_0600, false));
     // Other EABI versions and big-endian BE8 images.
     assert!(!arm_flags_supported(0x0400_0400, true));
     assert!(!arm_flags_supported(0x0000_0400, true));

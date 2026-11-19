@@ -68,7 +68,7 @@ impl NativeFormat {
 impl FormatHandler for NativeFormat {
     fn launch(&self, mut request: FormatRequest) -> FormatLaunch<'_> {
         Box::pin(async move {
-            if !(MIN_STACK_SIZE..=isize::MAX as usize - 80).contains(&self.stack_size) {
+            if self.stack_size < MIN_STACK_SIZE {
                 return Err(Error::InvalidStackSize);
             }
             let manager = request.standard.context.task_manager;
@@ -94,18 +94,18 @@ impl FormatHandler for NativeFormat {
                 standard_error: wrap(error),
                 home: None,
             };
-            Ok(unsafe {
-                image
-                    .spawn(
-                        manager,
-                        request.parent,
-                        &request.name,
-                        stack,
-                        startup,
-                        |status| status as isize,
-                    )
-                    .await?
-            })
+            let spawned = unsafe {
+                image.spawn(
+                    manager,
+                    request.parent,
+                    &request.name,
+                    stack,
+                    startup,
+                    |status| status as isize,
+                )
+            };
+            let (handle, _) = spawned.map_err(Error::Native)?.await?;
+            Ok(handle)
         })
     }
 }

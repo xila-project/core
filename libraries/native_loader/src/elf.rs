@@ -59,15 +59,95 @@ pub(crate) trait Abi: 'static {
     }
 }
 
-/// `e_flags` of an Arm EABI image: EABI version 5, the float ABI of the target
-/// and little-endian code.
+/// `e_flags` of an Arm EABI image: EABI version 5, little-endian code and a
+/// float ABI the target can call. An image that sets neither float ABI flag
+/// (for example one whose VFP-args attribute is "compatible") runs on both.
 pub(crate) const fn arm_flags_supported(flags: u32, hard_float: bool) -> bool {
     const EF_ARM_BE8: u32 = 0x0080_0000;
+    const EF_ARM_ABI_FLOAT_SOFT: u32 = 0x200;
     const EF_ARM_ABI_FLOAT_HARD: u32 = 0x400;
+    let float = flags & (EF_ARM_ABI_FLOAT_SOFT | EF_ARM_ABI_FLOAT_HARD);
     flags >> 24 == 5
         && flags & EF_ARM_BE8 == 0
-        && (flags & EF_ARM_ABI_FLOAT_HARD != 0) == hard_float
+        && (float == 0
+            || float
+                == if hard_float {
+                    EF_ARM_ABI_FLOAT_HARD
+                } else {
+                    EF_ARM_ABI_FLOAT_SOFT
+                })
 }
+
+/// The `EF_RISCV_FLOAT_ABI` value of the running target, from the float ABI
+/// that `build.rs` detects. `cfg!(target_feature = "f")` is false on stable
+/// Rust even for `riscv32imafc`, so it cannot be used here.
+const RISCV_FLOAT_ABI: u32 = if cfg!(native_loader_float_abi = "double") {
+    4
+} else if cfg!(native_loader_float_abi = "single") {
+    2
+} else {
+    0
+};
+
+/// Rust targets whose `EF_RISCV_FLOAT_ABI` value is known: 0 soft, 2 single.
+#[cfg(target_arch = "riscv32")]
+const RISCV_TARGET_FLOAT_ABIS: &[(&str, u32)] = &[
+    ("riscv32i-unknown-none-elf", 0),
+    ("riscv32im-unknown-none-elf", 0),
+    ("riscv32imc-unknown-none-elf", 0),
+    ("riscv32ima-unknown-none-elf", 0),
+    ("riscv32imac-unknown-none-elf", 0),
+    ("riscv32imac-esp-espidf", 0),
+    ("riscv32imc-esp-espidf", 0),
+    ("riscv32imafc-unknown-none-elf", 2),
+];
+
+/// The `EF_RISCV_FLOAT_ABI` value of the Rust target `target`, or `None` for a
+/// target the table does not list.
+#[cfg(target_arch = "riscv32")]
+const fn riscv_target_float_abi(target: &str) -> Option<u32> {
+    let mut index = 0;
+    while index < RISCV_TARGET_FLOAT_ABIS.len() {
+        let (name, abi) = RISCV_TARGET_FLOAT_ABIS[index];
+        if str_eq(target, name) {
+            return Some(abi);
+        }
+        index += 1;
+    }
+    None
+}
+
+#[cfg(target_arch = "riscv32")]
+const fn str_eq(left: &str, right: &str) -> bool {
+    let (left, right) = (left.as_bytes(), right.as_bytes());
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut index = 0;
+    while index < left.len() {
+        if left[index] != right[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+// Pin the detection of every known RISC-V target, so a wrong float ABI fails
+// the build of that target instead of silently rejecting correct images. An
+// explicit `-C target-feature` float flag overrides the target.
+#[cfg(all(target_arch = "riscv32", not(native_loader_float_flags)))]
+const _: () = match riscv_target_float_abi(env!("NATIVE_LOADER_TARGET")) {
+    Some(expected) => assert!(
+        RISCV_FLOAT_ABI == expected,
+        "the detected RISC-V float ABI does not match the target"
+    ),
+    None => {}
+};
+
+/// Whether the target is RV32E. `rustc` reports it as `target_abi = "ilp32e"`,
+/// while `cfg!(target_feature = "e")` is always false.
+const RISCV_EMBEDDED: bool = cfg!(target_abi = "ilp32e");
 
 /// `e_flags` of a RISC-V image. `float_abi` uses the `EF_RISCV_FLOAT_ABI`
 /// encoding: 0 soft, 2 single, 4 double. Compressed code needs a target with
@@ -136,14 +216,8 @@ impl Abi for Native {
             Arch::Riscv32 => riscv_flags_supported(
                 flags,
                 cfg!(target_feature = "c"),
-                if cfg!(target_feature = "d") {
-                    4
-                } else if cfg!(target_feature = "f") {
-                    2
-                } else {
-                    0
-                },
-                cfg!(target_feature = "e"),
+                RISCV_FLOAT_ABI,
+                RISCV_EMBEDDED,
             ),
             // Xtensa flags describe the core configuration, which the linker
             // already checked against the toolchain.

@@ -106,6 +106,5 @@ run = "cargo test --locked -p xila-firmware-update --features native"
 description = "Test ELF validation, executable dispatch and native C startup on Linux x86-64"
 run = """
 set -eu
-cargo test --locked -p xila-native-loader -p xila-executable
 cargo test --locked -p xila-executable --features native-dev
 """

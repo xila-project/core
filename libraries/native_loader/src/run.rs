@@ -1,11 +1,11 @@
 extern crate alloc;
 
-use alloc::{boxed::Box, string::String, vec::Vec};
-use core::ptr::NonNull;
+use alloc::{alloc::alloc, boxed::Box, string::String, vec::Vec};
+use core::{alloc::Layout, cell::UnsafeCell, ptr::NonNull};
 
 use abi_application::{Directory, File, Heap, XilaStartup, run_main};
 
-use crate::LoadedImage;
+use crate::{Error, LoadedImage};
 
 /// Capabilities and arguments owned by the loaded program's coroutine.
 #[derive(Default)]
@@ -17,28 +17,64 @@ pub struct Startup {
     pub home: Option<Directory>,
 }
 
-/// The image and process heap of one running program. The task future owns this
-/// value, not the coroutine stack, so cancelling a suspended coroutine (which
-/// leaks its stack) still releases both once the task future is dropped.
+/// The image and process heap of one running program, in a single allocation.
+/// The task future owns it through [`Owned`], not the coroutine stack, so
+/// cancelling a suspended coroutine (which leaks its stack) still releases both
+/// once the task future is dropped.
+///
+/// Freeing the image and the heap while the cancelled coroutine's own pending
+/// future is leaked is sound because no driver keeps a pointer into a program
+/// buffer between polls: `BaseOperations` are poll-based, so a suspended
+/// coroutine holds no reference the executor or a device could still use.
 struct Process {
     _image: LoadedImage,
-    heap: NonNull<Heap>,
+    heap: UnsafeCell<Heap>,
 }
 
-impl Drop for Process {
+/// The owner of a leaked [`Process`] allocation, freeing it on drop.
+struct Owned(NonNull<Process>);
+
+impl Owned {
+    /// Move `process` into a new allocation, reporting allocator exhaustion
+    /// instead of aborting. The image is released if this fails.
+    fn new(process: Process) -> Result<Self, Error> {
+        let layout = Layout::new::<Process>();
+        // SAFETY: `Process` holds an image and a heap, so the layout is not zero-sized.
+        let pointer = NonNull::new(unsafe { alloc(layout) }.cast::<Process>())
+            .ok_or(Error::AllocationFailed)?;
+        // SAFETY: the allocation is valid and uninitialized, for the layout of `Process`.
+        unsafe { pointer.write(process) };
+        Ok(Self(pointer))
+    }
+
+    /// The heap of the process. It stays valid until `self` is dropped.
+    fn heap(&self) -> NonNull<Heap> {
+        // SAFETY: the pointer refers to an initialized `Process`.
+        unsafe { NonNull::new_unchecked((*self.0.as_ptr()).heap.get()) }
+    }
+}
+
+impl Drop for Owned {
     fn drop(&mut self) {
-        // SAFETY: `heap` came from `Box::into_raw` and the program can no longer
-        // run: it returned, or its suspended coroutine was cancelled and is never resumed.
-        drop(unsafe { Box::from_raw(self.heap.as_ptr()) });
+        // SAFETY: the pointer came from `Owned::new`, with the global allocator and
+        // the layout of `Process`, and the program can no longer run: it returned,
+        // or its suspended coroutine was cancelled and is never resumed.
+        drop(unsafe { Box::from_raw(self.0.as_ptr()) });
     }
 }
 
 impl LoadedImage {
-    /// Run the ELF entry point on the calling task's executor.
+    /// Prepare to run the ELF entry point on the calling task's executor.
+    ///
+    /// Allocating the process state can fail with [`Error::AllocationFailed`],
+    /// which releases the image. Otherwise the returned future spawns the task
+    /// and resolves to its join handle and identifier, like
+    /// `stackful::spawn_with_result`.
     ///
     /// The image and the process heap are released when the task finishes or is
-    /// cancelled. A cancelled coroutine's stack, argument strings and startup
-    /// streams stay leaked, as stackful documents.
+    /// cancelled, or when the future is dropped before it completes. A
+    /// cancelled coroutine's stack, argument strings and startup streams stay
+    /// leaked, as stackful documents.
     ///
     /// # Safety
     /// The image must come from a trusted source and implement
@@ -47,7 +83,7 @@ impl LoadedImage {
     /// unwinding or leaving code or data references in other tasks. The caller
     /// must meet the executor affinity and single-core requirements of
     /// `stackful::spawn`.
-    pub async unsafe fn spawn<T: 'static>(
+    pub unsafe fn spawn<T: 'static>(
         self,
         manager: &'static task::Manager,
         parent: task::TaskIdentifier,
@@ -55,11 +91,17 @@ impl LoadedImage {
         stack: stackful::Stack,
         startup: Startup,
         map: impl FnOnce(i32) -> T + 'static,
-    ) -> task::Result<task::JoinHandle<T>> {
+    ) -> Result<
+        impl Future<Output = task::Result<(task::JoinHandle<T>, task::TaskIdentifier)>>,
+        Error,
+    > {
         let entry = self.entry_address();
-        let heap = NonNull::from(Box::leak(Box::new(Heap::new())));
-        let process = Process { _image: self, heap };
-        unsafe {
+        let process = Owned::new(Process {
+            _image: self,
+            heap: UnsafeCell::new(Heap::new()),
+        })?;
+        let heap = process.heap();
+        Ok(unsafe {
             stackful::spawn_with_result(
                 manager,
                 parent,
@@ -72,9 +114,7 @@ impl LoadedImage {
                     result
                 },
             )
-            .await
-            .map(|(handle, _)| handle)
-        }
+        })
     }
 }
 
