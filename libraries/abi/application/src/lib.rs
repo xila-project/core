@@ -8,9 +8,11 @@ mod iterator;
 mod metadata;
 #[cfg(feature = "network")]
 mod network;
+mod network_types;
 mod startup;
 #[cfg(feature = "network")]
 pub use network::*;
+pub use network_types::*;
 mod status;
 mod time;
 
@@ -25,13 +27,10 @@ pub use time::*;
 pub const XILA_ABI_VERSION_MAJOR: u32 = 0;
 pub const XILA_ABI_VERSION_MINOR: u32 = 1;
 
-/// Return the ABI version as (major << 16) | minor.
-/// # Safety
-/// No preconditions.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn xila_abi_version() -> u32 {
-    (XILA_ABI_VERSION_MAJOR << 16) | XILA_ABI_VERSION_MINOR
-}
+mod api;
+mod heap;
+pub use api::{XILA_API, XilaApi};
+pub use heap::*;
 
 #[cfg(any(
     all(
@@ -94,18 +93,37 @@ mod tests {
     use file_system::{AccessFlags, CreateFlags, StateFlags};
     testing::instantiate_global_allocator!();
     #[test]
-    fn generated_header() {
-        let generated = std::fs::read(concat!(env!("OUT_DIR"), "/application.h")).unwrap();
-        let committed =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("include/xila/application.h");
-        if std::env::var_os("XILA_UPDATE_HEADER").is_some() {
-            std::fs::write(&committed, &generated).unwrap();
+    fn generated_header_and_sdk() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let out = std::path::Path::new(env!("OUT_DIR"));
+        for (generated, committed) in [
+            ("application.h", "include/xila/application.h"),
+            ("stubs.h", "sdk/stubs.h"),
+            ("stubs.c", "sdk/stubs.c"),
+            // This snapshot pins both the symbol names and the slot order.
+            ("slots.tsv", "sdk/slots.tsv"),
+        ] {
+            let generated = std::fs::read(out.join(generated)).unwrap();
+            let committed = root.join(committed);
+            if std::env::var_os("XILA_UPDATE_HEADER").is_some() {
+                std::fs::write(&committed, &generated).unwrap();
+            }
+            assert!(
+                std::fs::read(&committed).unwrap() == generated,
+                "{} is stale; regenerate with XILA_UPDATE_HEADER=1",
+                committed.display()
+            );
         }
+    }
+
+    #[cfg(not(feature = "network"))]
+    #[test]
+    fn disabled_network_keeps_its_slots() {
         assert_eq!(
-            std::fs::read(committed).unwrap(),
-            generated,
-            "regenerate with XILA_UPDATE_HEADER=1"
+            unsafe { (XILA_API.network_close)(ptr::null_mut()) },
+            Status::Unsupported
         );
+        assert_eq!(XILA_API.size as usize, core::mem::size_of::<XilaApi>());
     }
     #[test]
     fn validation() {
@@ -250,10 +268,15 @@ mod tests {
             (E::NoSpaceLeft, Status::NoSpace),
             (E::IsDirectory, Status::IsADirectory),
             (E::NotDirectory, Status::NotADirectory),
-            (E::RessourceBusy, Status::WouldBlock),
-            (E::InvalidMode, Status::PermissionDenied),
+            (E::RessourceBusy, Status::ResourceBusy),
+            (E::InvalidMode, Status::BadDescriptor),
             (E::UnsupportedOperation, Status::Unsupported),
             (E::InputOutput, Status::InputOutput),
+            (E::InvalidFlags, Status::InvalidFlags),
+            (E::InvalidPath, Status::InvalidPath),
+            (E::NameTooLong, Status::NameTooLong),
+            (E::FileTooLarge, Status::FileTooLarge),
+            (E::Corrupted, Status::CorruptData),
         ] {
             assert_eq!(Status::from(error), expected);
             assert_eq!(

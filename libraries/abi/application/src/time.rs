@@ -10,7 +10,6 @@ pub fn initialize(time_manager: &'static time::Manager<'static>) {
 /// Read monotonic nanoseconds from an arbitrary epoch; may return Overflow.
 /// # Safety
 /// Output must be aligned and writable.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_time_monotonic(nanoseconds: *mut u64) -> Status {
     if nanoseconds.is_null() {
         return Status::InvalidArgument;
@@ -29,7 +28,6 @@ pub unsafe extern "C" fn xila_time_monotonic(nanoseconds: *mut u64) -> Status {
 /// Read signed Unix UTC nanoseconds; unsynchronized clocks return Unavailable.
 /// # Safety
 /// Output must be aligned and writable.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_time_realtime(nanoseconds: *mut i64) -> Status {
     if nanoseconds.is_null() {
         return Status::InvalidArgument;

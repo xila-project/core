@@ -1,5 +1,5 @@
 //! Startup capabilities borrowed by a linked native C application.
-use crate::{Directory, File};
+use crate::{Directory, File, Heap, XILA_API, XilaApi};
 use alloc::vec::Vec;
 use core::{ffi::c_char, ptr};
 
@@ -11,12 +11,15 @@ pub struct XilaString {
 }
 
 /// Host-owned startup data, valid only for the duration of the entry call.
-/// Any pointer may be null when not granted (with zero argument_count for arguments).
+/// The API is always present. Capability pointers may be null when not granted.
+/// A null argument array has argument_count zero.
 /// Applications must not close, retain or transfer these objects; closing them is
 /// undefined behavior. Objects opened by the application must still be closed.
 #[repr(C)]
 pub struct XilaStartup {
     pub size: u32,
+    pub api: *const XilaApi,
+    pub heap: *mut Heap,
     pub arguments: *const XilaString,
     pub argument_count: usize,
     pub standard_input: *mut File,
@@ -45,8 +48,11 @@ pub unsafe fn run_main(
             length: argument.len(),
         })
         .collect();
+    let mut heap = Heap::new();
     let startup = XilaStartup {
         size: core::mem::size_of::<XilaStartup>() as u32,
+        api: &XILA_API,
+        heap: &mut heap,
         arguments: if arguments.is_empty() {
             ptr::null()
         } else {

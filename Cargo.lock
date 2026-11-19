@@ -1868,7 +1868,9 @@ version = "0.1.0"
 dependencies = [
  "cbindgen",
  "embassy-futures",
+ "quote",
  "smoltcp",
+ "syn 3.0.9",
  "xila-file-system",
  "xila-network",
  "xila-stackful",

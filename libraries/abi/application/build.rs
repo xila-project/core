@@ -1,9 +1,12 @@
+mod generate_api;
+
 use std::{env, path::PathBuf};
 fn main() {
     let root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
     let mut config = cbindgen::Config {
         language: cbindgen::Language::C,
+        cpp_compat: true,
         include_guard: Some("XILA_APPLICATION_H".into()),
         sys_includes: vec!["stdint.h".into(), "stddef.h".into(), "stdbool.h".into()],
         usize_is_size_t: true,
@@ -24,6 +27,7 @@ fn main() {
         .insert("Status".into(), "XilaStatus".into());
     for (rust, c) in [
         ("Statistics", "XilaStatistics"),
+        ("Heap", "XilaHeap"),
         ("DirectoryIterator", "XilaDirectoryIterator"),
     ] {
         config.export.rename.insert(rust.into(), c.into());
@@ -31,7 +35,7 @@ fn main() {
     config
         .export
         .include
-        .extend(["XilaString".into(), "XilaStartup".into()]);
+        .extend(["XilaString".into(), "XilaStartup".into(), "XilaApi".into()]);
     for name in ["Network", "NetworkAddress", "Tcp", "TcpListener", "Udp"] {
         config
             .export
@@ -40,6 +44,7 @@ fn main() {
     }
     config.enumeration.rename_variants = cbindgen::RenameRule::ScreamingSnakeCase;
     config.enumeration.prefix_with_name = true;
+    generate_api::generate(&root, &out, &config.export);
     cbindgen::Builder::new()
         .with_crate(&root)
         .with_config(config)

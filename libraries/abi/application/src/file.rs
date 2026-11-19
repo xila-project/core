@@ -80,7 +80,6 @@ pub(crate) fn open_flags(flags: u32, rights: u8) -> Result<Flags, Status> {
 /// # Safety
 /// Objects must be live. Path must be readable for its length; output writable,
 /// aligned and disjoint from inputs. Calls on an object must be serialized.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_file_open(
     directory: *const Directory,
     path: *const c_char,
@@ -113,11 +112,19 @@ pub unsafe extern "C" fn xila_file_open(
     }
 }
 
+// VFS reports a cancelled one-shot I/O probe as resource busy.
+fn io_status(error: virtual_file_system::Error) -> Status {
+    match error {
+        virtual_file_system::Error::FileSystem(file_system::Error::RessourceBusy)
+        | virtual_file_system::Error::RessourceBusy => Status::WouldBlock,
+        error => error.into(),
+    }
+}
+
 /// Read directly into the caller's buffer; zero size permits a null buffer.
 /// # Safety
 /// File must be live and exclusively accessed. Buffer must be writable for size
 /// bytes and disjoint from file and count. Count must be aligned and writable.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_file_read(
     file: *mut File,
     buffer: *mut core::ffi::c_void,
@@ -147,14 +154,13 @@ pub unsafe extern "C" fn xila_file_read(
             unsafe { count.write(value) };
             Status::Ok
         }
-        Err(error) => error.into(),
+        Err(error) => io_status(error),
     }
 }
 /// Write directly from the caller's buffer; zero size permits a null buffer.
 /// # Safety
 /// File must be live and exclusively accessed. Buffer must be readable for size
 /// bytes and disjoint from file and count. Count must be aligned and writable.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_file_write(
     file: *mut File,
     buffer: *const core::ffi::c_void,
@@ -184,14 +190,13 @@ pub unsafe extern "C" fn xila_file_write(
             unsafe { count.write(value) };
             Status::Ok
         }
-        Err(error) => error.into(),
+        Err(error) => io_status(error),
     }
 }
 /// Seek using XILA_SEEK_START, CURRENT or END. Position output is optional.
 /// # Safety
 /// File must be live and exclusively accessed; non-null position must be aligned,
 /// writable and disjoint from the object.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_file_seek(
     file: *mut File,
     offset: i64,
@@ -224,7 +229,6 @@ pub unsafe extern "C" fn xila_file_seek(
 /// Flush pending writes.
 /// # Safety
 /// File must be live and exclusively accessed.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_file_flush(file: *mut File) -> Status {
     if file.is_null() {
         return Status::InvalidArgument;
@@ -235,12 +239,11 @@ pub unsafe extern "C" fn xila_file_flush(file: *mut File) -> Status {
     } else {
         file.as_synchronous_file_mut().flush()
     };
-    result.map_or_else(Status::from, |()| Status::Ok)
+    result.map_or_else(io_status, |()| Status::Ok)
 }
 /// Close and free the object even if closing fails. Null succeeds.
 /// # Safety
 /// Non-null file must be owned and released exactly once, with no concurrent calls.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_file_close(file: *mut File) -> Status {
     if file.is_null() {
         return Status::Ok;
@@ -255,7 +258,6 @@ pub unsafe extern "C" fn xila_file_close(file: *mut File) -> Status {
 /// Resize a writable file without changing its cursor.
 /// # Safety
 /// File must be live and exclusively accessed.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_file_set_size(file: *mut File, size: u64) -> Status {
     if file.is_null() {
         return Status::InvalidArgument;
