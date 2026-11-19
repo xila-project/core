@@ -173,3 +173,49 @@ fn queued_events_never_match_widgets_created_after_a_rebuild() {
 
     unsafe { lvgl::lv_obj_delete(window.as_object_mutable()) };
 }
+
+/// Building a page creates a widget per label and button without draining the
+/// queue in between (a guest builds in fuel slices): creating and deleting
+/// widgets must not take ring slots, or the next click is dropped.
+#[test]
+fn building_a_page_does_not_drop_the_next_click() {
+    let _lvgl = LVGL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    unsafe { lvgl::lv_init() };
+    unsafe { lvgl::lv_display_create(320, 240) };
+    let screen = unsafe { lvgl::lv_obj_create(core::ptr::null_mut()) };
+    let mut window = unsafe { Window::new(screen).unwrap() };
+    let window = unsafe { window.as_mut() };
+    while window.pop_event().is_some() {}
+
+    let page = unsafe { lvgl::lv_obj_create(window.as_object_mutable()) };
+    // Both directly under the window and nested deeper.
+    let mut children: Vec<_> = (0..40)
+        .map(|_| unsafe { lvgl::lv_obj_create(page) })
+        .collect();
+    children.extend((0..40).map(|_| unsafe { lvgl::lv_obj_create(window.as_object_mutable()) }));
+    let button = children[79];
+    unsafe {
+        lvgl::lv_obj_send_event(
+            button,
+            lvgl::lv_event_code_t_LV_EVENT_CLICKED,
+            core::ptr::null_mut(),
+        );
+    }
+    assert_eq!(window.dropped_event_count(), 0);
+    let queued = core::iter::from_fn(|| window.pop_event()).collect::<Vec<_>>();
+    assert_eq!(
+        queued.iter().map(|e| e.code).collect::<Vec<_>>(),
+        [EventKind::Clicked],
+        "only the click is queued"
+    );
+    assert_eq!(queued[0].code, EventKind::Clicked);
+    assert!(queued[0].is_target(button));
+
+    // Deleting the widgets queues nothing either.
+    unsafe { lvgl::lv_obj_clean(page) };
+    unsafe { lvgl::lv_obj_clean(window.as_object_mutable()) };
+    assert!(window.pop_event().is_none());
+    assert_eq!(window.dropped_event_count(), 0);
+
+    unsafe { lvgl::lv_obj_delete(window.as_object_mutable()) };
+}

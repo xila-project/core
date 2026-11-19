@@ -140,10 +140,14 @@ unsafe extern "C" fn window_event_callback(
         let target = lvgl::lv_event_get_target(event) as *mut lvgl::lv_obj_t;
 
         let (code, key) = match code {
+            // The window handles tree changes itself and never queues them:
+            // consumers ignore them, and building a page emits several per
+            // widget, which would fill the bounded ring and push out clicks.
+            lvgl::lv_event_code_t_LV_EVENT_CHILD_CHANGED => return,
             lvgl::lv_event_code_t_LV_EVENT_CHILD_CREATED => {
                 let child = lvgl::lv_event_get_param(event) as *mut lvgl::lv_obj_t;
                 lvgl::lv_obj_add_flag(child, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_EVENT_BUBBLE);
-                (code, None)
+                return;
             }
             lvgl::lv_event_code_t_LV_EVENT_CHILD_DELETED => {
                 // A descendant was deleted or moved out. LVGL sends this to
@@ -156,7 +160,7 @@ unsafe extern "C" fn window_event_callback(
                 // bubbling) could create a widget at the freed address before
                 // the sweep, and that widget would then match a stale event.
                 forget_dead_targets(window);
-                (code, None)
+                return;
             }
             lvgl::lv_event_code_t_LV_EVENT_KEY => {
                 let key = lvgl::lv_indev_get_key(lvgl::lv_indev_active());
