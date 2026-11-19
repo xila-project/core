@@ -177,7 +177,6 @@ impl<'a> SynchronousFile<'a> {
             .as_base_operations()
             .ok_or(IoErrorKind::Unsupported)?
             .flush(&mut self.context, cx)
-            .map(|result| result)
     }
 
     pub(crate) fn poll_control(
@@ -198,7 +197,6 @@ impl<'a> SynchronousFile<'a> {
             .as_base_operations()
             .ok_or(IoErrorKind::Unsupported)?
             .control(&mut self.context, cx, command, input, output)
-            .map(|result| result)
     }
 
     pub fn write(&mut self, buffer: &[u8]) -> Result<usize> {

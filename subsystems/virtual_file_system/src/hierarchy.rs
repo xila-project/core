@@ -205,6 +205,11 @@ pub async fn clean_devices_in_directory(
         }
 
         match virtual_file_system.remove(task, &entry_path).await {
+            // Main ignored `InvalidIdentifier` here: a device entry whose
+            // registration is already gone. That condition is `BadDescriptor`
+            // in the unified model. Removal opens no descriptor with an access
+            // mode, so the mode violations that moved from `PermissionDenied`
+            // to `BadDescriptor` cannot reach this arm.
             Ok(()) | Err(IoErrorKind::BadDescriptor) => {}
             Err(error) => return Err(error),
         }
