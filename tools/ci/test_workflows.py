@@ -408,7 +408,7 @@ class WorkflowPolicy(unittest.TestCase):
     def test_primary_ci_jobs_are_parallel_and_required_aggregates_results(self):
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
         self.assertIn("workflow_call:", ci)
-        primary = ["quality", "verification", "host", "wasm", "abi", "localization"]
+        primary = ["quality", "verification", "host", "xtensa", "wasm", "abi", "localization"]
         for name in primary:
             with self.subTest(job=name):
                 self.assertNotRegex(job("ci.yml", name), r"(?m)^    needs:")

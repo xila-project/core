@@ -439,6 +439,13 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", compone
 # The graphics build script generates fonts with the pinned Node converter.
 tools.node = "{{ vars.node_version }}"
 
+[tasks."ci:xtensa"]
+description = "Build LittleFS and RGB565 graphics for bare-metal ESP32-S3"
+extends = "ci:node"
+env = { CC_xtensa_esp32s3_none_elf = "xtensa-esp32s3-elf-gcc", BINDGEN_EXTRA_CLANG_ARGS_xtensa_esp32s3_none_elf = "-ffreestanding" }
+# Run Cargo directly with the esp toolchain, which supplies Xtensa Rust and rust-src.
+run = "rustup run esp cargo build --locked -Zbuild-std=core,alloc --target xtensa-esp32s3-none-elf -p xila-little-fs -p xila-graphics --features xila-graphics/rendering_rgb565"
+
 [tasks."ci:bare-metal-no-cas"]
 description = "Check the façade and peripheral adapters for a RISC-V target without atomic compare-and-swap"
 shell = "bash -c"
