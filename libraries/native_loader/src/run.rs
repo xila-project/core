@@ -2,7 +2,7 @@ extern crate alloc;
 
 use alloc::{string::String, vec::Vec};
 
-use abi_application::{Directory, File, XilaStartup, run_main};
+use abi_application::{Directory, File, Heap, XilaStartup, run_main};
 
 use crate::LoadedImage;
 
@@ -54,10 +54,11 @@ impl LoadedImage {
         let entry: unsafe extern "C" fn(*const XilaStartup) -> i32 =
             unsafe { core::mem::transmute(address) };
         let args: Vec<&str> = startup.arguments.iter().map(String::as_str).collect();
-        // M1 supplies the API table through the startup constructed by run_main.
+        let mut heap = Heap::new();
         unsafe {
             run_main(
                 entry,
+                &mut heap,
                 &args,
                 startup.standard_input,
                 startup.standard_output,

@@ -8,40 +8,26 @@ static const struct {
     uint32_t version;
 } abi_note = {5, 4, 1, "XILA", (XILA_ABI_VERSION_MAJOR << 16) | XILA_ABI_VERSION_MINOR};
 
-/* Test-only transport until XilaStartup gains its API table. */
-typedef struct {
-    uint32_t (*version)(void);
-    XilaStatus (*read)(XilaFile *, void *, size_t, size_t *);
-    XilaStatus (*write)(XilaFile *, const void *, size_t, size_t *);
-} FixtureApi;
-
 static const char answer[] = "ok";
 static const char *volatile expected = answer; /* Force a RELATIVE relocation. */
 static volatile unsigned int calls;           /* Exercise writable, zeroed BSS. */
 
 int32_t _xila_start(const XilaStartup *startup) {
-    if (startup->size != sizeof(*startup) || startup->argument_count != 1 ||
-        !startup->standard_input || !startup->standard_output || calls++ != 0)
+    if (startup->size != sizeof(*startup) || startup->argument_count != 0 ||
+        !startup->api || !startup->standard_input || !startup->standard_output ||
+        calls++ != 0)
         return 1;
 
-    XilaString argument = startup->arguments[0];
-    uintptr_t address = 0;
-    if (argument.length != sizeof(address) * 2)
-        return 2;
-    for (size_t i = 0; i < argument.length; ++i) {
-        unsigned int digit = (unsigned char)argument.data[i];
-        address = (address << 4) | (digit >= 'a' ? digit - 'a' + 10 : digit - '0');
-    }
-    const FixtureApi *api = (const FixtureApi *)address;
-    if (api->version() != abi_note.version)
+    const XilaApi *api = startup->api;
+    if (api->version != abi_note.version || api->size < sizeof(*api))
         return 3;
 
     char bytes[2];
     size_t count = 0;
-    if (api->read(startup->standard_input, bytes, sizeof(bytes), &count) != XILA_STATUS_OK ||
+    if (api->file_read(startup->standard_input, bytes, sizeof(bytes), &count) != XILA_STATUS_OK ||
         count != sizeof(bytes) || bytes[0] != expected[0] || bytes[1] != expected[1])
         return 4;
-    if (api->write(startup->standard_output, bytes, count, &count) != XILA_STATUS_OK ||
+    if (api->file_write(startup->standard_output, bytes, count, &count) != XILA_STATUS_OK ||
         count != sizeof(bytes))
         return 5;
     return 73;

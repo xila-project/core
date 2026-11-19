@@ -9,7 +9,6 @@ use core::{
 use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::{process::Command, sync::Mutex};
 
-use abi_application::{File as AbiFile, Status, xila_abi_version, xila_file_read, xila_file_write};
 use executable::{Error, ExecutableContext, NativeFormat, Standard, execute};
 use file_system::{
     AccessFlags, BaseOperations, CharacterDevice, Context as DeviceContext, CreateFlags, Flags,
@@ -94,20 +93,6 @@ unsafe impl ExecutableMemory for Mmap {
 // SAFETY: this test installs only the fixture it compiled locally, with a stack
 // sized for the debug ABI call chain and on the test's single executor.
 static LOADER: NativeFormat = unsafe { NativeFormat::new(&Mmap, 64 * 1024, 32 * 1024, 32 * 1024) };
-
-#[repr(C)]
-struct FixtureApi {
-    version: unsafe extern "C" fn() -> u32,
-    read: unsafe extern "C" fn(*mut AbiFile, *mut core::ffi::c_void, usize, *mut usize) -> Status,
-    write:
-        unsafe extern "C" fn(*mut AbiFile, *const core::ffi::c_void, usize, *mut usize) -> Status,
-}
-
-static API: FixtureApi = FixtureApi {
-    version: xila_abi_version,
-    read: xila_file_read,
-    write: xila_file_write,
-};
 
 #[derive(Default)]
 struct ReadState {
@@ -223,15 +208,10 @@ async fn executes_c_elf_from_vfs_with_suspending_abi_read() {
         .await
         .unwrap();
 
-    let address = format!(
-        "{:0width$x}",
-        (&raw const API).addr(),
-        width = size_of::<usize>() * 2
-    );
     let reader = execute(
         context,
         "/program",
-        vec![address],
+        vec![],
         make_standard().await,
         None,
     )
