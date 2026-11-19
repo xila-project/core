@@ -8,7 +8,7 @@ use critical_section::Mutex;
 
 use crate::{
     CapabilityFlags, Layout, ManagerTrait, RegionStatistics, Statistics,
-    heap::{Heap, Resize},
+    heap::{BLOCK_ALIGN, Heap, MIN_BLOCK, Resize},
 };
 
 /// Configuration metadata for a single static memory region managed by [`RegionManager`].
@@ -89,7 +89,10 @@ impl Region {
     ///
     /// A block carries no record of the capabilities it was allocated with. In a DMA-capable region,
     /// a block placed at a DMA-aligned address is treated as a DMA block and keeps that alignment;
-    /// the size rule stays with the caller, as it does for any DMA allocation.
+    /// the size rule stays with the caller, as it does for any DMA allocation. An ordinary block
+    /// that merely happens to sit at such an address is treated the same way: the only cost is
+    /// that it stays aligned when it moves inside its region, which can leave a few bytes of
+    /// alignment gap.
     fn preserved_alignment(&self, pointer: NonNull<u8>) -> usize {
         let alignment = self.dma_alignment();
         if self
@@ -255,76 +258,117 @@ impl<const N: usize> RegionManagerInner<N> {
     }
 }
 
+/// Outcome of [`RegionManagerInner::reallocate`].
+enum Reallocation {
+    /// The block was resized where it is.
+    InPlace,
+    /// A new block was allocated; the caller copies the data and frees the old block.
+    Moved(NonNull<u8>),
+}
+
 impl<const N: usize> RegionManagerInner<N> {
-    /// Resizes a live block without moving it.
-    ///
-    /// The block stays in its region, so it keeps every capability the region gave it.
+    /// Resizes a live block of region `index` where it is, if it is aligned for `new_layout` and
+    /// the region can do it.
     ///
     /// # Safety
     ///
-    /// `pointer` must be a live block of `old_layout` from this manager.
-    unsafe fn resize_in_place(
+    /// `pointer` must be a live block of `old_layout` in region `index`.
+    unsafe fn resize_in_region(
         &mut self,
+        index: usize,
         pointer: NonNull<u8>,
         old_layout: Layout,
         new_layout: Layout,
-    ) -> Resize {
-        if !pointer.as_ptr().addr().is_multiple_of(new_layout.align()) {
-            return Resize::Impossible;
-        }
-
-        #[cfg(feature = "Debug")]
-        let used_before = self.total_used();
-
-        let index = self.region_index(pointer, old_layout);
-        let resize = unsafe {
-            self.regions[index]
-                .heap
-                .resize_in_place(pointer, old_layout, new_layout)
-        };
-
-        #[cfg(feature = "Debug")]
-        if resize == Resize::Done {
-            self.record_usage_change(used_before);
-        }
-
-        resize
+    ) -> bool {
+        pointer.as_ptr().addr().is_multiple_of(new_layout.align())
+            && unsafe {
+                self.regions[index]
+                    .heap
+                    .resize_in_place(pointer, old_layout, new_layout)
+            } == Resize::Done
     }
 
-    /// Allocates the block a reallocation moves to.
+    /// Decides where a reallocated block goes, and resizes or allocates accordingly.
     ///
-    /// The region of the old block is tried first, so that a block keeps the capabilities of its
-    /// region, then the ordinary placement order applies.
+    /// * A shrink never moves: the tail goes back to the region.
+    /// * Below the large-allocation threshold, a block stays in the region it is in while it
+    ///   fits: the region resizes it in place when the memory right after the block is free,
+    ///   otherwise a new block is taken in that region. Only when the region cannot hold it do the
+    ///   other regions follow, in the ordinary order. The block keeps the capabilities and DMA
+    ///   alignment of its region.
+    /// * At or above the threshold, the ordinary placement order applies, as for an allocation
+    ///   (regions in reverse order), so that large buffers move to the large region instead of
+    ///   filling the primary one. The region of the old block is tried in its turn, in place
+    ///   first, so a block that already is in the preferred region does not move.
     ///
     /// # Safety
     ///
     /// If `old_layout` is not empty, `old_pointer` must be a live block of it from this manager.
-    unsafe fn allocate_moved(
+    unsafe fn reallocate(
         &mut self,
         old_pointer: NonNull<u8>,
         old_layout: Layout,
         new_layout: Layout,
-    ) -> Option<NonNull<u8>> {
-        if old_layout.size() > 0 {
-            let index = self.region_index(old_pointer, old_layout);
-            let region = &mut self.regions[index];
-            let alignment = new_layout
-                .align()
-                .max(region.preserved_alignment(old_pointer));
+    ) -> Option<Reallocation> {
+        #[cfg(feature = "Debug")]
+        let used_before = self.total_used();
 
-            if let Ok(layout) = Layout::from_size_align(new_layout.size(), alignment) {
-                #[cfg(feature = "Debug")]
-                let used_before = self.total_used();
+        let old_index = (old_layout.size() > 0).then(|| self.region_index(old_pointer, old_layout));
+        let shrinks = new_layout.size() <= old_layout.size();
 
-                if let Some(pointer) = self.regions[index].heap.allocate(layout) {
-                    #[cfg(feature = "Debug")]
-                    self.record_usage_change(used_before);
-                    return Some(pointer);
+        let outcome = 'placed: {
+            if let Some(index) = old_index
+                && shrinks
+                && unsafe { self.resize_in_region(index, old_pointer, old_layout, new_layout) }
+            {
+                break 'placed Some(Reallocation::InPlace);
+            }
+
+            let large = new_layout.size() >= self.large_allocation_threshold;
+            let first = old_index.filter(|_| !large);
+            let order = first.into_iter().chain(
+                (0..N)
+                    .map(|step| if large { N - 1 - step } else { step })
+                    .filter(|index| Some(*index) != first),
+            );
+
+            for index in order {
+                let layout = if Some(index) == old_index {
+                    if !shrinks
+                        && unsafe {
+                            self.resize_in_region(index, old_pointer, old_layout, new_layout)
+                        }
+                    {
+                        break 'placed Some(Reallocation::InPlace);
+                    }
+                    // A block moved inside its region keeps the DMA alignment it had there.
+                    let alignment = new_layout
+                        .align()
+                        .max(self.regions[index].preserved_alignment(old_pointer));
+                    match Layout::from_size_align(new_layout.size(), alignment) {
+                        Ok(layout) => layout,
+                        Err(_) => continue,
+                    }
+                } else {
+                    new_layout
+                };
+                if let Some(pointer) = Self::allocate_from_region(
+                    &mut self.regions[index],
+                    CapabilityFlags::empty(),
+                    layout,
+                ) {
+                    break 'placed Some(Reallocation::Moved(pointer));
                 }
             }
+            None
+        };
+
+        #[cfg(feature = "Debug")]
+        if outcome.is_some() {
+            self.record_usage_change(used_before);
         }
 
-        self.allocate(CapabilityFlags::empty(), new_layout)
+        outcome
     }
 }
 
@@ -333,22 +377,24 @@ fn is_valid_heap_range(start: *mut u8, size: usize) -> bool {
         return false;
     }
 
-    let align = core::mem::align_of::<usize>();
-    let min_hole = 2 * core::mem::size_of::<usize>();
+    // The heap rounds the start up and the end down to `BLOCK_ALIGN` and needs one hole.
     let addr = start as usize;
 
-    let Some(aligned_start) = addr.checked_add(align - 1).map(|v| v & !(align - 1)) else {
+    let Some(aligned_start) = addr
+        .checked_add(BLOCK_ALIGN - 1)
+        .map(|v| v & !(BLOCK_ALIGN - 1))
+    else {
         return false;
     };
     let Some(end) = addr.checked_add(size) else {
         return false;
     };
-    let aligned_end = end & !(align - 1);
+    let aligned_end = end & !(BLOCK_ALIGN - 1);
 
-    aligned_end.saturating_sub(aligned_start) >= min_hole
+    aligned_end.saturating_sub(aligned_start) >= MIN_BLOCK
 }
 
-/// Static multi-region memory manager backed by `linked_list_allocator`.
+/// Static multi-region memory manager backed by an address-ordered first-fit free list per region.
 ///
 /// Manages a fixed compile-time count `N` of non-overlapping memory regions without heap-allocated
 /// bookkeeping or per-allocation headers. Regions are ordered from highest-priority / fastest
@@ -530,17 +576,20 @@ impl<const N: usize> ManagerTrait for RegionManager<N> {
 
     /// Resizes a block, in place when possible.
     ///
-    /// * A shrink keeps the pointer; the freed tail returns to the region's free list. The one
-    ///   exception is a shrink by a single word with no free memory after the block: the region
-    ///   cannot record such a tail, so the block moves to stay exact, or, if nothing can hold the
-    ///   smaller block, stays as it is with that word as slack.
-    /// * A growth keeps the pointer when the memory right after the block is free.
-    /// * Otherwise the block moves: the region of the old block is tried first, then the ordinary
-    ///   placement order applies. The copy runs outside the critical section.
+    /// * A shrink keeps the pointer; the freed tail returns to the region's free list. It never
+    ///   fails and never moves, whatever the sizes involved.
+    /// * Below the large-allocation threshold, the block stays in its region while it fits. The
+    ///   region grows it in place when the memory right after the block is free, otherwise it
+    ///   moves to another place of the same region. Only when the region cannot hold the block do
+    ///   the other regions follow, in the ordinary order. A block therefore keeps the capabilities
+    ///   and the DMA alignment of its region.
+    /// * At or above the threshold, placement follows the ordinary policy, as for an allocation:
+    ///   regions are probed in reverse order, so a large buffer moves to the large region (PSRAM)
+    ///   instead of filling the primary one. A block already in the region that policy picks is
+    ///   grown in place when possible. A block that moves out of its region can lose the
+    ///   capabilities of that region.
     ///
-    /// A block never leaves its region while it can be resized in place or fits elsewhere in that
-    /// region, so it keeps the capabilities and DMA alignment of the region it was allocated in.
-    /// Regions are only left when the old region is full.
+    /// The copy of a moved block runs outside the critical section.
     unsafe fn reallocate(
         &self,
         old_pointer: NonNull<u8>,
@@ -553,30 +602,19 @@ impl<const N: usize> ManagerTrait for RegionManager<N> {
         if new_size == 0 {
             return None;
         }
-
-        let mut resize = Resize::Impossible;
-        if old_size > 0 {
-            if old_layout == new_layout {
-                return Some(old_pointer);
-            }
-
-            resize = critical_section::with(|cs| unsafe {
-                self.inner
-                    .borrow_ref_mut(cs)
-                    .resize_in_place(old_pointer, old_layout, new_layout)
-            });
-            if resize == Resize::Done {
-                return Some(old_pointer);
-            }
+        if old_size > 0 && old_layout == new_layout {
+            return Some(old_pointer);
         }
 
-        let Some(new_pointer) = critical_section::with(|cs| unsafe {
+        let outcome = critical_section::with(|cs| unsafe {
             self.inner
                 .borrow_ref_mut(cs)
-                .allocate_moved(old_pointer, old_layout, new_layout)
-        }) else {
-            // A shrink must not fail: keep the block, and the word the region cannot take back.
-            return (resize == Resize::OneWordTail).then_some(old_pointer);
+                .reallocate(old_pointer, old_layout, new_layout)
+        })?;
+
+        let new_pointer = match outcome {
+            Reallocation::InPlace => return Some(old_pointer),
+            Reallocation::Moved(new_pointer) => new_pointer,
         };
 
         if old_size > 0 {
@@ -829,7 +867,7 @@ mod tests {
 
     /// Bytes a block of `size` bytes occupies in a region.
     fn footprint(size: usize) -> usize {
-        size.max(2 * WORD).next_multiple_of(WORD)
+        size.max(2 * WORD).next_multiple_of(2 * WORD)
     }
 
     fn region_used<const N: usize>(manager: &RegionManager<N>, region: usize) -> usize {
@@ -867,12 +905,13 @@ mod tests {
     }
 
     #[test]
-    fn reallocate_prefers_the_old_region_and_spills_when_it_is_full() {
+    fn reallocate_prefers_the_old_region_below_the_threshold_and_spills_when_it_is_full() {
         let internal = AlignedBacking::<{ 16 * 1024 }>::leak();
         let psram = AlignedBacking::<{ 64 * 1024 }>::leak();
         let manager = make_esp32s3_like_manager(internal, Some(psram));
 
         let small_layout = Layout::from_size_align(256, 8).unwrap();
+        let medium_layout = Layout::from_size_align(THRESHOLD - 8, 8).unwrap();
         let large_layout = Layout::from_size_align(8192, 8).unwrap();
 
         // Start small -> internal SRAM.
@@ -884,29 +923,41 @@ mod tests {
         let p_same = unsafe { manager.reallocate(p_small, small_layout, small_layout) }.unwrap();
         assert_eq!(p_same, p_small);
 
-        // Growing past the threshold stays in the region that already holds the block.
-        let p_large = unsafe { manager.reallocate(p_same, small_layout, large_layout) }.unwrap();
-        assert!(manager.region_contains(0, p_large));
-        assert_stamp(p_large, small_layout.size(), 1);
+        // Growing below the threshold stays in the region that already holds the block.
+        let p_medium = unsafe { manager.reallocate(p_same, small_layout, medium_layout) }.unwrap();
+        assert!(manager.region_contains(0, p_medium));
+        assert_stamp(p_medium, small_layout.size(), 1);
         assert_eq!(region_used(&manager, 1), 0);
 
         // Failed reallocations leave the old allocation intact.
         let too_large = Layout::from_size_align(128 * 1024, 128).unwrap();
         let zero = Layout::from_size_align(0, 8).unwrap();
         for layout in [too_large, zero] {
-            assert!(unsafe { manager.reallocate(p_large, large_layout, layout) }.is_none());
+            assert!(unsafe { manager.reallocate(p_medium, medium_layout, layout) }.is_none());
         }
+        assert_stamp(p_medium, small_layout.size(), 1);
+        assert_eq!(region_used(&manager, 0), footprint(medium_layout.size()));
+
+        // Growing to the threshold follows the ordinary placement policy: the large region.
+        let p_large = unsafe { manager.reallocate(p_medium, medium_layout, large_layout) }.unwrap();
+        assert!(manager.region_contains(1, p_large));
         assert_stamp(p_large, small_layout.size(), 1);
-        assert_eq!(region_used(&manager, 0), footprint(large_layout.size()));
+        assert_eq!(region_used(&manager, 0), 0);
+        assert_eq!(region_used(&manager, 1), footprint(large_layout.size()));
 
         // Shrinking never moves the block, even across the threshold.
         let p_shrunk = unsafe { manager.reallocate(p_large, large_layout, small_layout) }.unwrap();
         assert_eq!(p_shrunk, p_large);
         assert_stamp(p_shrunk, small_layout.size(), 1);
-        assert_eq!(region_used(&manager, 0), footprint(small_layout.size()));
+        assert_eq!(region_used(&manager, 1), footprint(small_layout.size()));
+        unsafe { manager.deallocate(p_shrunk, small_layout) };
 
-        // When the region cannot hold the grown block, it spills to the next region.
-        let filler_layout = Layout::from_size_align(8192, 8).unwrap();
+        // Below the threshold, when the region cannot hold the grown block, it spills to the next
+        // region.
+        let p_small = unsafe { manager.allocate(CapabilityFlags::empty(), small_layout) }.unwrap();
+        assert!(manager.region_contains(0, p_small));
+        stamp(p_small, small_layout.size(), 2);
+        let filler_layout = Layout::from_size_align(2048, 8).unwrap();
         let mut fillers = alloc::vec::Vec::new();
         while let Some(filler) =
             unsafe { manager.allocate(CapabilityFlags::AlwaysAccessible, filler_layout) }
@@ -915,15 +966,91 @@ mod tests {
         }
         assert!(!fillers.is_empty());
         let p_spilled =
-            unsafe { manager.reallocate(p_shrunk, small_layout, large_layout) }.unwrap();
+            unsafe { manager.reallocate(p_small, small_layout, medium_layout) }.unwrap();
         assert!(manager.region_contains(1, p_spilled));
-        assert_stamp(p_spilled, small_layout.size(), 1);
-        assert_eq!(region_used(&manager, 1), footprint(large_layout.size()));
+        assert_stamp(p_spilled, small_layout.size(), 2);
+        assert_eq!(region_used(&manager, 1), footprint(medium_layout.size()));
 
         for filler in fillers {
             unsafe { manager.deallocate(filler, filler_layout) };
         }
-        unsafe { manager.deallocate(p_spilled, large_layout) };
+        unsafe { manager.deallocate(p_spilled, medium_layout) };
+        assert_eq!(manager.get_used(), 0);
+        validate_regions(&manager);
+    }
+
+    /// A buffer that grows past the large-allocation threshold moves to the large region (PSRAM),
+    /// as an allocation of that size would, instead of filling the internal SRAM that
+    /// `AlwaysAccessible` and DMA requests depend on.
+    #[test]
+    fn growth_past_the_threshold_leaves_internal_ram_free() {
+        let internal = AlignedBacking::<{ 16 * 1024 }>::leak();
+        let psram = AlignedBacking::<{ 64 * 1024 }>::leak();
+        let manager = make_esp32s3_like_manager(internal, Some(psram));
+
+        // Growth in one step, and by doubling like a `Vec`.
+        for doubling in [false, true] {
+            let mut layout = Layout::from_size_align(64, 8).unwrap();
+            let mut pointer =
+                unsafe { manager.allocate(CapabilityFlags::empty(), layout) }.unwrap();
+            assert!(manager.region_contains(0, pointer));
+            stamp(pointer, 64, 4);
+            while layout.size() < 16 * 1024 {
+                let size = if doubling {
+                    layout.size() * 2
+                } else {
+                    16 * 1024
+                };
+                let next = Layout::from_size_align(size, 8).unwrap();
+                pointer = unsafe { manager.reallocate(pointer, layout, next) }.unwrap();
+                layout = next;
+                assert_eq!(
+                    manager.region_contains(1, pointer),
+                    layout.size() >= THRESHOLD,
+                    "{} bytes",
+                    layout.size()
+                );
+                assert_stamp(pointer, 64, 4);
+            }
+            assert_eq!(region_used(&manager, 0), 0);
+
+            // Internal SRAM is still free for a large `AlwaysAccessible` request.
+            let always_accessible = Layout::from_size_align(8192, 8).unwrap();
+            let internal_block =
+                unsafe { manager.allocate(CapabilityFlags::AlwaysAccessible, always_accessible) }
+                    .expect("internal SRAM was filled by a grown buffer");
+            assert!(manager.region_contains(0, internal_block));
+            unsafe {
+                manager.deallocate(internal_block, always_accessible);
+                manager.deallocate(pointer, layout);
+            }
+            assert_eq!(manager.get_used(), 0);
+        }
+
+        // A block already in the preferred region keeps growing in place, whatever the size.
+        let layout = Layout::from_size_align(8192, 8).unwrap();
+        let bigger = Layout::from_size_align(16384, 8).unwrap();
+        let block = unsafe { manager.allocate(CapabilityFlags::empty(), layout) }.unwrap();
+        assert!(manager.region_contains(1, block));
+        let grown = unsafe { manager.reallocate(block, layout, bigger) }.unwrap();
+        assert_eq!(grown, block);
+        unsafe { manager.deallocate(grown, bigger) };
+
+        // With the large region full, a block grows where it can instead of failing: in place
+        // in the internal SRAM.
+        let psram_fill = Layout::from_size_align(60 * 1024, 8).unwrap();
+        let psram_block =
+            unsafe { manager.allocate(CapabilityFlags::empty(), psram_fill) }.unwrap();
+        assert!(manager.region_contains(1, psram_block));
+        let small = Layout::from_size_align(64, 8).unwrap();
+        let block = unsafe { manager.allocate(CapabilityFlags::empty(), small) }.unwrap();
+        let grown = unsafe { manager.reallocate(block, small, bigger) }.unwrap();
+        assert!(manager.region_contains(0, grown));
+        assert_eq!(grown, block);
+        unsafe {
+            manager.deallocate(grown, bigger);
+            manager.deallocate(psram_block, psram_fill);
+        }
         assert_eq!(manager.get_used(), 0);
         validate_regions(&manager);
     }
@@ -1041,11 +1168,11 @@ mod tests {
         let manager = make_esp32s3_like_manager(internal, Some(psram));
         let blocker = Layout::from_size_align(64, 8).unwrap();
 
-        // `AlwaysAccessible` data grown past the threshold stays in internal SRAM, whether the
+        // `AlwaysAccessible` data grown below the threshold stays in internal SRAM, whether the
         // block is resized in place or has to move.
         for move_it in [false, true] {
-            let small = Layout::from_size_align(1024, 8).unwrap();
-            let large = Layout::from_size_align(8192, 8).unwrap();
+            let small = Layout::from_size_align(512, 8).unwrap();
+            let large = Layout::from_size_align(THRESHOLD - 8, 8).unwrap();
             let block =
                 unsafe { manager.allocate(CapabilityFlags::AlwaysAccessible, small) }.unwrap();
             let guard = move_it.then(|| unsafe {
@@ -1166,234 +1293,6 @@ mod tests {
         validate_regions(&manager);
     }
 
-    /// Deterministic generator for the property test.
-    struct XorShift(u64);
-
-    impl XorShift {
-        fn next(&mut self) -> u64 {
-            self.0 ^= self.0 << 13;
-            self.0 ^= self.0 >> 7;
-            self.0 ^= self.0 << 17;
-            self.0
-        }
-
-        fn below(&mut self, bound: usize) -> usize {
-            (self.next() % bound as u64) as usize
-        }
-    }
-
-    struct Live {
-        pointer: NonNull<u8>,
-        layout: Layout,
-        capabilities: CapabilityFlags,
-        region: usize,
-        seed: u8,
-    }
-
-    fn region_of(manager: &RegionManager<2>, pointer: NonNull<u8>) -> usize {
-        (0..2)
-            .find(|index| manager.region_contains(*index, pointer))
-            .unwrap()
-    }
-
-    fn random_reallocation_sequences(seed: u64) {
-        let internal = AlignedBacking::<{ 192 * 1024 }>::leak();
-        let psram = AlignedBacking::<{ 192 * 1024 }>::leak();
-        let manager = RegionManager::new(
-            [
-                RegionDescriptor::new(
-                    CapabilityFlags::DirectMemoryAccess | CapabilityFlags::AlwaysAccessible,
-                )
-                .with_dma_alignment(4),
-                RegionDescriptor::new(CapabilityFlags::DirectMemoryAccess).with_dma_alignment(64),
-            ],
-            Some(THRESHOLD),
-        );
-        assert!(internal.init_region(&manager, 0));
-        assert!(psram.init_region(&manager, 1));
-
-        let mut random = XorShift(seed);
-        let mut live: alloc::vec::Vec<Live> = alloc::vec::Vec::new();
-        let mut expected_used = 0usize;
-        let mut next_seed = 0u8;
-        let (mut grown_in_place, mut moved, mut shrunk, mut word_tail_moves) =
-            (0usize, 0usize, 0usize, 0usize);
-
-        // DMA data keeps sizes and alignment valid for every region, plain data does not.
-        let make_layout = |random: &mut XorShift, capabilities: CapabilityFlags| {
-            if capabilities.contains(CapabilityFlags::DirectMemoryAccess) {
-                (random.below(24) + 1) * 64
-            } else {
-                random.below(1500) + 1
-            }
-        };
-
-        // Miri is far slower: a shorter run still reaches every path.
-        let operations = if cfg!(miri) { 400 } else { 4000 };
-        for _ in 0..operations {
-            let before_used = manager.get_used();
-            match random.below(10) {
-                0..=3 if live.len() < 60 => {
-                    let capabilities = [
-                        CapabilityFlags::empty(),
-                        CapabilityFlags::AlwaysAccessible,
-                        CapabilityFlags::DirectMemoryAccess,
-                    ][random.below(3)];
-                    let size = make_layout(&mut random, capabilities);
-                    let align = if capabilities.contains(CapabilityFlags::DirectMemoryAccess) {
-                        64
-                    } else {
-                        1 << random.below(6)
-                    };
-                    let layout = Layout::from_size_align(size, align).unwrap();
-                    let Some(pointer) = (unsafe { manager.allocate(capabilities, layout) }) else {
-                        continue;
-                    };
-                    next_seed = next_seed.wrapping_add(37);
-                    stamp(pointer, size, next_seed);
-                    expected_used += footprint(size);
-                    live.push(Live {
-                        pointer,
-                        layout,
-                        capabilities,
-                        region: region_of(&manager, pointer),
-                        seed: next_seed,
-                    });
-                    assert_eq!(pointer.as_ptr().addr() % align, 0);
-                }
-                4..=5 if !live.is_empty() => {
-                    let block = live.swap_remove(random.below(live.len()));
-                    unsafe { manager.deallocate(block.pointer, block.layout) };
-                    expected_used -= footprint(block.layout.size());
-                }
-                _ if !live.is_empty() => {
-                    let index = random.below(live.len());
-                    let block = &mut live[index];
-                    // Mostly small steps, so that in-place growth and one-word shrinks happen.
-                    let unit = if block
-                        .capabilities
-                        .contains(CapabilityFlags::DirectMemoryAccess)
-                    {
-                        64
-                    } else {
-                        WORD
-                    };
-                    let new_size = match random.below(4) {
-                        0 => make_layout(&mut random, block.capabilities),
-                        1 => block.layout.size() + (random.below(8) + 1) * unit,
-                        2 => block
-                            .layout
-                            .size()
-                            .saturating_sub((random.below(8) + 1) * unit),
-                        _ => block.layout.size().saturating_sub(WORD),
-                    }
-                    .max(unit);
-                    let new_layout =
-                        Layout::from_size_align(new_size, block.layout.align()).unwrap();
-
-                    let old_pointer = block.pointer;
-                    let old_size = block.layout.size();
-                    let Some(pointer) =
-                        (unsafe { manager.reallocate(old_pointer, block.layout, new_layout) })
-                    else {
-                        // A failed reallocation changes nothing.
-                        assert_eq!(manager.get_used(), before_used);
-                        assert_stamp(old_pointer, old_size, block.seed);
-                        continue;
-                    };
-
-                    assert_stamp(pointer, old_size.min(new_size), block.seed);
-                    assert_eq!(pointer.as_ptr().addr() % block.layout.align(), 0);
-                    if new_size <= old_size && footprint(old_size) - footprint(new_size) != WORD {
-                        assert_eq!(pointer, old_pointer, "a shrink must not move");
-                    }
-                    let region = region_of(&manager, pointer);
-                    assert_eq!(region, block.region, "the block left its region");
-                    assert!(
-                        manager.is_region_initialized(region)
-                            && critical_section::with(|cs| manager.inner.borrow_ref(cs).regions
-                                [region]
-                                .supports(block.capabilities, new_layout)),
-                        "capabilities or DMA alignment lost"
-                    );
-
-                    expected_used = expected_used - footprint(old_size) + footprint(new_size);
-                    if new_size > old_size {
-                        if pointer == old_pointer {
-                            grown_in_place += 1;
-                        } else {
-                            moved += 1;
-                        }
-                    } else if new_size < old_size {
-                        shrunk += 1;
-                        if pointer != old_pointer {
-                            word_tail_moves += 1;
-                        }
-                    }
-
-                    block.pointer = pointer;
-                    block.layout = new_layout;
-                    next_seed = next_seed.wrapping_add(37);
-                    block.seed = next_seed;
-                    stamp(pointer, new_size, next_seed);
-                }
-                _ => {}
-            }
-
-            assert_eq!(manager.get_used(), expected_used);
-            let statistics = manager.get_statistics();
-            for region in statistics.region_stats.iter().flatten() {
-                assert_eq!(region.used + region.free, region.size);
-            }
-            #[cfg(feature = "Debug")]
-            assert_eq!(
-                statistics.total_allocated - statistics.total_freed,
-                statistics.current_usage
-            );
-        }
-
-        // The sequence exercised every path.
-        assert!(
-            grown_in_place > 5 && moved > 5 && shrunk > 5,
-            "{grown_in_place} {moved} {shrunk}"
-        );
-        assert!(word_tail_moves > 0, "no one-word shrink was exercised");
-
-        // Nothing overlaps and nothing was overwritten.
-        live.sort_by_key(|block| block.pointer.as_ptr().addr());
-        for pair in live.windows(2) {
-            assert!(
-                pair[0].pointer.as_ptr().addr() + footprint(pair[0].layout.size())
-                    <= pair[1].pointer.as_ptr().addr()
-            );
-        }
-        for block in &live {
-            assert_stamp(block.pointer, block.layout.size(), block.seed);
-        }
-        validate_regions(&manager);
-
-        for block in live {
-            unsafe { manager.deallocate(block.pointer, block.layout) };
-        }
-        assert_eq!(manager.get_used(), 0);
-        validate_regions(&manager);
-    }
-
-    #[test]
-    fn random_reallocation_sequences_keep_statistics_exact() {
-        for seed in [
-            0x9E37_79B9_7F4A_7C15,
-            0xD1B5_4A32_D192_ED03,
-            0x1234_5678_9ABC_DEF1,
-            0xFEED_FACE_CAFE_BEEF,
-        ]
-        .into_iter()
-        .take(if cfg!(miri) { 1 } else { 4 })
-        {
-            random_reallocation_sequences(seed);
-        }
-    }
-
     #[test]
     fn per_region_statistics_and_edge_cases() {
         let internal = AlignedBacking::<{ 16 * 1024 }>::leak();
@@ -1487,3 +1386,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod stress_tests;

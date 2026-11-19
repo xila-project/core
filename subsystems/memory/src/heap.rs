@@ -1,10 +1,10 @@
 //! Address-ordered free-list heap that can resize a block in place.
 //!
-//! The block model is the one of `linked_list_allocator::Heap` (first fit, free holes stored inside
-//! the free memory itself, no per-allocation header), so allocation, deallocation and statistics
-//! behave the same. `linked_list_allocator` keeps its hole list private, which makes it impossible
-//! to ask whether the memory right after a block is free. This module keeps the list reachable so
-//! a block can grow into the following hole or give its tail back without moving.
+//! The block model is the one of a first-fit free-list heap: free holes are stored inside the free
+//! memory itself and blocks have no per-allocation header. The heap used before
+//! (`linked_list_allocator`) keeps its hole list private, which makes it impossible to ask whether
+//! the memory right after a block is free. This module keeps the list reachable so a block can
+//! grow into the following hole or give its tail back without moving.
 //!
 //! The RAM cost is lower than the previous heap: four words per region instead of six.
 //!
@@ -13,9 +13,11 @@
 //! * A block occupies `footprint(layout)` bytes: the layout size, raised to [`MIN_BLOCK`] and
 //!   rounded up to [`BLOCK_ALIGN`]. Only the size matters, so the alignment of a layout can change
 //!   between allocation and deallocation.
+//! * Blocks and holes have a size and an address that are multiples of [`BLOCK_ALIGN`], which is
+//!   the size of a hole header. Every gap between two blocks is therefore empty or a whole hole,
+//!   and no operation can strand bytes that are neither in a block nor in a hole. The price is
+//!   up to [`MIN_BLOCK`] `- 1` bytes of rounding per block (half of that on average).
 //! * Free holes are kept sorted by address and are never adjacent (they are merged on free).
-//!   Every hole is at least [`MIN_BLOCK`] bytes, with a size and address multiple of
-//!   [`BLOCK_ALIGN`].
 //! * A region never holds bytes that are neither in a hole nor in a block, so
 //!   `used + free == size` is exact.
 
@@ -32,11 +34,13 @@ struct Hole {
     next: Option<NonNull<Hole>>,
 }
 
-/// Alignment and granularity of every block and hole.
-const BLOCK_ALIGN: usize = align_of::<Hole>();
+/// Alignment and granularity of every block and hole: the size of a hole header, so that whatever
+/// is left between two blocks can always be a hole.
+pub(crate) const BLOCK_ALIGN: usize = size_of::<Hole>();
+const _: () = assert!(BLOCK_ALIGN.is_multiple_of(align_of::<Hole>()));
 
 /// Smallest block, and smallest hole: a hole must be able to store its own header.
-pub(crate) const MIN_BLOCK: usize = size_of::<Hole>();
+pub(crate) const MIN_BLOCK: usize = BLOCK_ALIGN;
 
 /// Bytes a block of `layout` occupies in the heap.
 fn footprint(layout: Layout) -> Option<usize> {
@@ -55,13 +59,7 @@ fn align_up(address: usize, align: usize) -> Option<usize> {
 pub(crate) enum Resize {
     /// The block now has the requested size and kept its address.
     Done,
-    /// The block shrinks by a single word and no hole follows it.
-    ///
-    /// A word is smaller than a hole and the heap has no header to record it, so releasing it
-    /// would lose it for good. The caller either moves the block, which is exact, or keeps the
-    /// block as it is, which leaves that word with the block as unreclaimable slack.
-    OneWordTail,
-    /// The block cannot be resized where it is.
+    /// The block cannot be resized where it is; the heap is unchanged.
     Impossible,
 }
 
@@ -192,7 +190,8 @@ impl Heap {
         }
 
         // Leading gap: none when the hole already fits the alignment, otherwise at least a whole
-        // hole so the gap stays a valid hole.
+        // hole so the gap stays a valid hole. Hole addresses and `align` (when above `BLOCK_ALIGN`)
+        // are multiples of `BLOCK_ALIGN`, so the gap is one too.
         let address = start.addr();
         let front = if address.is_multiple_of(align) {
             0
@@ -204,11 +203,9 @@ impl Heap {
             return None;
         }
 
-        // Trailing gap: it must be empty or a valid hole, otherwise bytes would be lost.
+        // Trailing gap: a multiple of `BLOCK_ALIGN`, so it is empty or a valid hole.
         let back = hole_size - end;
-        if back != 0 && back < MIN_BLOCK {
-            return None;
-        }
+        debug_assert!(back == 0 || back >= MIN_BLOCK);
 
         // SAFETY: `front + size + back == hole_size`, so every pointer stays inside the hole.
         // The header values were read above, before any write can overwrite them.
@@ -242,17 +239,18 @@ impl Heap {
     /// `layout` must have the size of the block (the alignment is ignored).
     pub(crate) unsafe fn deallocate(&mut self, pointer: NonNull<u8>, layout: Layout) {
         let size = footprint(layout).expect("layout was allocated");
+        // The hole header is written through this pointer, possibly past the block the caller's
+        // pointer was derived for: use the provenance of the whole heap instead.
+        let start = self.bottom.with_addr(pointer.as_ptr().addr());
         // SAFETY: forwarded from the caller; a whole block is at least `MIN_BLOCK`.
-        let inserted = unsafe { self.release(pointer.as_ptr(), size) };
-        debug_assert!(inserted);
+        unsafe { self.release(start, size) };
         self.used -= size;
     }
 
     /// Changes the size of a live block without moving it.
     ///
-    /// * Shrinking releases the tail, merged with the hole that follows it.
-    /// * Growing succeeds when a hole starts right after the block, is large enough, and leaves
-    ///   either nothing or a valid hole behind.
+    /// * Shrinking always succeeds: the tail is released, merged with the hole that follows it.
+    /// * Growing succeeds when a hole starts right after the block and is large enough.
     ///
     /// The heap is left untouched unless the result is [`Resize::Done`].
     ///
@@ -272,20 +270,20 @@ impl Heap {
         if new == old {
             return Resize::Done;
         }
+        // Hole headers are written past the block: use the provenance of the whole heap.
+        let pointer = self.bottom.with_addr(pointer.as_ptr().addr());
         if new < old {
             let tail = old - new;
-            // SAFETY: the tail is inside the block, which the caller owns.
-            return if unsafe { self.release(pointer.as_ptr().add(new), tail) } {
-                self.used -= tail;
-                Resize::Done
-            } else {
-                Resize::OneWordTail
-            };
+            // SAFETY: the tail is inside the block, which the caller owns, and is a whole number
+            // of `MIN_BLOCK`s.
+            unsafe { self.release(pointer.add(new), tail) };
+            self.used -= tail;
+            return Resize::Done;
         }
 
         let extra = new - old;
         // SAFETY: the block lies inside the heap, so its end is at most `top`.
-        let end = unsafe { pointer.as_ptr().add(old) };
+        let end = unsafe { pointer.add(old) };
 
         let mut link: *mut Option<NonNull<Hole>> = &mut self.first;
         // SAFETY: same list invariants as in `allocate`.
@@ -294,14 +292,16 @@ impl Heap {
                 let address = hole.as_ptr().cast::<u8>().addr();
                 if address == end.addr() {
                     let Hole { size, next } = ptr::read(hole.as_ptr());
+                    // `size` and `extra` are multiples of `BLOCK_ALIGN`: what is left is empty or a
+                    // whole hole.
                     match size.checked_sub(extra) {
+                        None => return Resize::Impossible,
                         Some(0) => *link = next,
-                        Some(rest) if rest >= MIN_BLOCK => {
+                        Some(rest) => {
                             let moved = end.add(extra).cast::<Hole>();
                             moved.write(Hole { size: rest, next });
                             *link = Some(NonNull::new_unchecked(moved));
                         }
-                        _ => return Resize::Impossible,
                     }
                     self.used += extra;
                     return Resize::Done;
@@ -317,13 +317,15 @@ impl Heap {
 
     /// Turns `[start, start + size)` into free memory, merging it with its neighbours.
     ///
-    /// A range smaller than [`MIN_BLOCK`] is only accepted when it touches the hole after it;
-    /// otherwise nothing changes and `false` is returned.
-    ///
     /// # Safety
     ///
-    /// The range must be inside the heap, owned by the caller and not already free.
-    unsafe fn release(&mut self, start: *mut u8, size: usize) -> bool {
+    /// The range must be inside the heap, a non-empty multiple of [`BLOCK_ALIGN`] long, aligned to
+    /// it, owned by the caller and not already free. `start` must carry the provenance of the
+    /// whole heap.
+    unsafe fn release(&mut self, start: *mut u8, size: usize) {
+        debug_assert!(size >= MIN_BLOCK && size.is_multiple_of(BLOCK_ALIGN));
+        debug_assert!(start.addr().is_multiple_of(BLOCK_ALIGN));
+
         let mut link: *mut Option<NonNull<Hole>> = &mut self.first;
         let mut previous: Option<NonNull<Hole>> = None;
 
@@ -358,20 +360,16 @@ impl Heap {
                 if end == start.addr() {
                     (*previous.as_ptr()).size += size;
                     (*previous.as_ptr()).next = following;
-                    return true;
+                    return;
                 }
             }
 
-            if size < MIN_BLOCK {
-                return false;
-            }
             let hole = start.cast::<Hole>();
             hole.write(Hole {
                 size,
                 next: following,
             });
             *link = Some(NonNull::new_unchecked(hole));
-            true
         }
     }
 
@@ -434,6 +432,18 @@ mod tests {
             cursor = hole.next;
         }
         holes
+    }
+
+    #[test]
+    fn rounding_wastes_half_a_granule_per_block_on_average() {
+        // Sizes spread uniformly over a multiple of the granularity: the padding averages
+        // `(BLOCK_ALIGN - 1) / 2` bytes per block, which the README quotes.
+        let sizes = 1..=4096usize;
+        let padding: usize = sizes
+            .clone()
+            .map(|size| footprint(layout(size)).unwrap() - size)
+            .sum();
+        assert_eq!(2 * padding, sizes.count() * (BLOCK_ALIGN - 1));
     }
 
     #[test]
@@ -519,73 +529,117 @@ mod tests {
     }
 
     #[test]
-    fn a_one_word_tail_is_only_taken_back_by_an_adjacent_hole() {
+    fn a_shrink_of_less_than_a_granule_keeps_the_block_whole_and_a_larger_one_never_strands_bytes()
+    {
         let mut heap = heap();
         let block = alloc_block(&mut heap, 64);
         let guard = alloc_block(&mut heap, 32);
         let used = heap.used();
 
-        // Busy neighbour: the word cannot be recorded, so the heap stays as it is.
+        // One word less rounds to the same footprint: nothing to release, nothing lost.
         assert_eq!(
             unsafe { heap.resize_in_place(block, layout(64), layout(64 - WORD)) },
-            Resize::OneWordTail
+            Resize::Done
         );
         assert_eq!(heap.used(), used);
         heap.validate();
 
-        // Free neighbour: the word joins the hole.
-        unsafe { heap.deallocate(guard, layout(32)) };
-        let used = heap.used();
+        // One granule less, with a busy neighbour: the tail is a hole of its own.
         assert_eq!(
-            unsafe { heap.resize_in_place(block, layout(64), layout(64 - WORD)) },
+            unsafe { heap.resize_in_place(block, layout(64 - WORD), layout(64 - BLOCK_ALIGN)) },
             Resize::Done
         );
-        assert_eq!(heap.used(), used - WORD);
-        assert_eq!(holes(&heap)[0].0, block.addr().get() + 64 - WORD);
+        assert_eq!(heap.used(), used - BLOCK_ALIGN);
+        assert_eq!(
+            holes(&heap)[0],
+            (block.addr().get() + 64 - BLOCK_ALIGN, BLOCK_ALIGN)
+        );
         heap.validate();
+
+        // Everything is returned: one hole, nothing used.
+        unsafe {
+            heap.deallocate(block, layout(64 - BLOCK_ALIGN));
+            heap.deallocate(guard, layout(32));
+        }
+        heap.validate();
+        assert_eq!(heap.used(), 0);
+        assert_eq!(holes(&heap), [(heap.bottom().addr(), heap.size())]);
+    }
+
+    #[test]
+    fn a_two_block_region_can_be_fully_reclaimed_after_a_shrink_by_one_word() {
+        // The shrink that used to strand a word: no hole after the block, the neighbour is busy.
+        let mut heap = heap();
+        let half = heap.size() / 2;
+        let a = alloc_block(&mut heap, half);
+        let b = alloc_block(&mut heap, half);
+        assert_eq!(heap.free(), 0);
+        assert_eq!(
+            unsafe { heap.resize_in_place(a, layout(half), layout(half - WORD)) },
+            Resize::Done
+        );
+        unsafe {
+            heap.deallocate(a, layout(half - WORD));
+            heap.deallocate(b, layout(half));
+        }
+        heap.validate();
+        assert_eq!(heap.used(), 0);
+        assert_eq!(holes(&heap), [(heap.bottom().addr(), heap.size())]);
+        assert!(heap.allocate(layout(heap.size())).is_some());
     }
 
     #[test]
     fn grow_takes_the_hole_after_the_block() {
+        const G: usize = BLOCK_ALIGN;
         let mut heap = heap();
-        let block = alloc_block(&mut heap, 64);
-        let guard = alloc_block(&mut heap, 64);
-        let tail = alloc_block(&mut heap, 64);
-        unsafe { heap.deallocate(guard, layout(64)) };
+        let block = alloc_block(&mut heap, 4 * G);
+        let guard = alloc_block(&mut heap, 4 * G);
+        let tail = alloc_block(&mut heap, 4 * G);
+        unsafe { heap.deallocate(guard, layout(4 * G)) };
+        let end_of_block = |size: usize| block.addr().get() + size;
 
         // Part of the hole: the rest of it stays a hole.
         assert_eq!(
-            unsafe { heap.resize_in_place(block, layout(64), layout(96)) },
+            unsafe { heap.resize_in_place(block, layout(4 * G), layout(6 * G)) },
             Resize::Done
         );
         heap.validate();
-        assert!(holes(&heap).contains(&(block.addr().get() + 96, 32)));
+        assert!(holes(&heap).contains(&(end_of_block(6 * G), 2 * G)));
 
-        // Leaving less than a hole is refused and changes nothing.
+        // A word less than the whole hole takes all of it: no word is left behind.
+        assert_eq!(
+            unsafe { heap.resize_in_place(block, layout(6 * G), layout(8 * G - WORD)) },
+            Resize::Done
+        );
+        heap.validate();
+        assert_eq!(heap.used(), 8 * G + 4 * G);
+        assert!(
+            holes(&heap)
+                .iter()
+                .all(|(address, _)| *address != end_of_block(6 * G))
+        );
+
+        // A busy neighbour blocks growth and leaves the heap untouched.
         let used = heap.used();
         let before = holes(&heap);
         assert_eq!(
-            unsafe { heap.resize_in_place(block, layout(96), layout(96 + 32 - WORD)) },
+            unsafe { heap.resize_in_place(block, layout(8 * G - WORD), layout(8 * G + 1)) },
             Resize::Impossible
         );
         assert_eq!((heap.used(), holes(&heap)), (used, before));
 
-        // The whole hole.
+        // So does a hole that is too small.
         assert_eq!(
-            unsafe { heap.resize_in_place(block, layout(96), layout(128)) },
-            Resize::Done
-        );
-        heap.validate();
-        assert_eq!(heap.used(), 128 + 64);
-
-        // A busy neighbour blocks growth.
-        assert_eq!(
-            unsafe { heap.resize_in_place(block, layout(128), layout(129)) },
+            unsafe { heap.resize_in_place(tail, layout(4 * G), layout(heap.size())) },
             Resize::Impossible
         );
+        assert_eq!(
+            unsafe { heap.resize_in_place(tail, layout(4 * G), layout(5 * G)) },
+            Resize::Done
+        );
         unsafe {
-            heap.deallocate(tail, layout(64));
-            heap.deallocate(block, layout(128));
+            heap.deallocate(tail, layout(5 * G));
+            heap.deallocate(block, layout(8 * G));
         }
         heap.validate();
         assert_eq!(heap.used(), 0);
@@ -609,3 +663,6 @@ mod tests {
         heap.validate();
     }
 }
+
+#[cfg(test)]
+mod model_tests;

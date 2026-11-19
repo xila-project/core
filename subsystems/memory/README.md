@@ -78,17 +78,26 @@ Placement policy is **platform behavior** configured via [`RegionManager::new`](
   - Allocations strictly smaller than the threshold probe regions forward (`0..N`), placing small general-purpose objects in fast internal RAM first.
   - Allocations at or above the threshold probe regions in reverse (`(0..N).rev()`), steering large buffers into external PSRAM first when available.
 - **Fallback:** If the preferred region is uninitialized (e.g. a board without PSRAM), lacks a requested capability (`AlwaysAccessible`, `DirectMemoryAccess`), rejects the caller's DMA alignment, or is full, the manager continues across the remaining capable regions in order before returning `None`.
-- Reallocation resizes in place when it can, so a block keeps the region it was
-  allocated in. A shrink keeps the pointer and returns the freed tail to the
-  region. A growth keeps the pointer when the memory right after the block is
-  free. Otherwise the block moves: the region of the old block is tried first,
-  then the ordinary placement order applies, so a block only leaves its region
-  when that region cannot hold it. A block does not record its capabilities, so
-  a block that has to leave a full region can lose the capabilities of that
-  region; callers that must never lose them allocate a replacement with the same
-  flags, copy the data and free the original block. A block in a DMA-capable
-  region that sits at a DMA-aligned address keeps that alignment when it moves
-  within the region. Deallocation finds the owning region by its address range.
+- **Reallocation** resizes in place when it can, and its placement follows the same threshold:
+  - A **shrink** keeps the pointer whatever the sizes: the freed tail returns to the region and
+    merges with the hole that follows it. It never fails and never moves.
+  - A **growth below the threshold** keeps the block in the region it is in: the region grows it in
+    place when the memory right after the block is free, otherwise the block moves elsewhere in
+    the same region, and only when that region cannot hold it do the other regions follow, in
+    forward order. The block keeps the capabilities and DMA alignment of its region.
+  - A **growth to the threshold or above** follows the placement policy of an allocation of that
+    size, so a buffer that grows (a `Vec` doubling, a framebuffer) moves to the large region
+    (PSRAM) instead of filling the internal SRAM that `AlwaysAccessible` and DMA requests depend
+    on. A block that already is in the region the policy picks first is grown in place when
+    possible. When the region the policy picks cannot hold it, the old region is tried in its turn,
+    in place first. A block that moves out of its region can lose the capabilities of that region:
+    callers that must keep them allocate a replacement with the same flags, copy the data and free
+    the original block.
+  - A block does not record its capabilities. In a DMA-capable region, a block that sits at a
+    DMA-aligned address keeps that alignment when it moves within the region, so an ordinary block
+    that happens to be 64-aligned in PSRAM is kept 64-aligned too, at the cost of a few bytes of
+    alignment gap.
+- Deallocation finds the owning region by its address range.
 
 Boards without initialized PSRAM continue to place ordinary allocations in
 their primary region. The host keeps its existing lazy mappings and growth
@@ -98,26 +107,28 @@ for bit 2 from the Rust definition.
 
 ## Overhead Budget
 
-`RegionManager<N>` uses static `[Region; N]` storage backed by an address-ordered first-fit free list ([`heap.rs`](./src/heap.rs), the block model of `linked_list_allocator::Heap` with the hole list kept reachable so a block can be resized in place) under `critical_section::Mutex`, with **zero per-allocation headers** and **zero heap allocation** for its own bookkeeping. A region costs 20 B on 32-bit targets (a 16 B heap and the descriptor).
+`RegionManager<N>` uses static `[Region; N]` storage backed by an address-ordered first-fit free list ([`heap.rs`](./src/heap.rs); free holes live in the free memory itself, and the list is kept reachable so a block can be resized in place) under `critical_section::Mutex`, with **zero per-allocation headers** and **zero heap allocation** for its own bookkeeping. A region costs 20 B on 32-bit targets (a 16 B heap and the descriptor).
+
+Blocks and holes are multiples of two words (8 B on 32-bit targets, 16 B on 64-bit ones), the size of a hole header: whatever lies between two blocks is then empty or a whole hole, so no resize can strand a word that is neither in a block nor in a hole. The price is rounding: a block of `n` bytes occupies `n` rounded up to 8 B (16 B), and at least 8 B (16 B). Over sizes uniformly spread in `1..=4096` that is 3.5 B (7.5 B) of padding per block on average, 2 B (4 B) more than the previous word granularity; for sizes that are multiples of 4 B, as most Rust types are, the average goes from 0 B to 2 B on 32-bit targets.
 
 Measured with a freestanding ELF probe built with Rust
-`1.102.0-nightly (8eb778d04 2026-11-12)`, `opt-level = "z"`, LTO, one
-codegen unit and `panic = "abort"`. The probe initializes regions and exercises
-allocate, reallocate, deallocate and statistics with runtime inputs. It uses
-stub critical-section hooks and takes the backing addresses as inputs.
-`llvm-nm-19 -S` gives the allocator symbol size and `llvm-size-19 -A` gives
-the ELF section sizes. Heap backing bytes and the firmware runtime are
-outside the measurement.
+`1.97.0 (2d8144b78 2026-07-07)`, `opt-level = "z"`, LTO, one codegen unit and
+`panic = "abort"`. The probe initializes regions and exercises allocate,
+reallocate, deallocate and statistics with runtime inputs read from fixed
+addresses, so the manager is its only static. It uses stub critical-section
+hooks. The toolchain's `llvm-size -A` gives the ELF section sizes. Heap backing
+bytes and the firmware runtime are outside the measurement. RAM and `.text` come
+from the same build of each row.
 
-| Configuration | Target | Manager RAM | ELF `.text` (before in-place resize) | ELF `.data` / `.bss` |
+| Configuration | Target | Manager RAM | ELF `.text` | ELF `.data` / `.bss` |
 |---|---|---:|---:|---:|
-| `RegionManager<1>` (without `Debug`) | `thumbv7em-none-eabihf` | 28 B | 1,976 B | 28 B / 0 B |
-| `RegionManager<1>` (without `Debug`) | `riscv32imac-unknown-none-elf` | 28 B | 1,902 B | 28 B / 0 B |
-| `RegionManager<2>` (without `Debug`) | `thumbv7em-none-eabihf` | 48 B | 2,056 B | 48 B / 0 B |
-| `RegionManager<2>` (without `Debug`) | `riscv32imac-unknown-none-elf` | 48 B | 2,002 B | 48 B / 0 B |
-| `RegionManager<2>` (with `Debug`) | `thumbv7em-none-eabihf` | 60 B | 2,202 B | 60 B / 0 B |
-| `RegionManager<2>` (with `Debug`) | `riscv32imac-unknown-none-elf` | 60 B | 2,174 B | 60 B / 0 B |
-| `esp_alloc::EspHeap` (0.11.0, LLFF) | `riscv32imac-unknown-none-elf` | 100 B | 2,082 B | 0 B / 100 B |
+| `RegionManager<1>` (without `Debug`) | `thumbv7em-none-eabihf` | 28 B | 2,124 B | 28 B / 0 B |
+| `RegionManager<1>` (without `Debug`) | `riscv32imac-unknown-none-elf` | 28 B | 1,910 B | 28 B / 0 B |
+| `RegionManager<2>` (without `Debug`) | `thumbv7em-none-eabihf` | 48 B | 2,284 B | 48 B / 0 B |
+| `RegionManager<2>` (without `Debug`) | `riscv32imac-unknown-none-elf` | 48 B | 2,114 B | 48 B / 0 B |
+| `RegionManager<2>` (with `Debug`) | `thumbv7em-none-eabihf` | 60 B | 2,472 B | 60 B / 0 B |
+| `RegionManager<2>` (with `Debug`) | `riscv32imac-unknown-none-elf` | 60 B | 2,354 B | 60 B / 0 B |
+| `esp_alloc::EspHeap` (0.11.0, LLFF) | `riscv32imac-unknown-none-elf` | 100 B | 1,896 B | 0 B / 100 B |
 
 Each probe had 0 B of `.rodata`. `Debug`, enabled by default, adds three
 32-bit statistics counters. With those counters, the two-region manager uses
@@ -125,12 +136,16 @@ Each probe had 0 B of `.rodata`. `Debug`, enabled by default, adds three
 `Debug` saves another 12 B. These link sizes are probe-specific and omit
 board startup, critical-section and cache maintenance costs.
 
-The RAM figures and `.data` were updated for the in-place heap: it drops the
-unused dummy hole size and the pending-extend byte of `linked_list_allocator`,
-so a region is 8 B smaller. The `.text` column was measured before the heap
-changed. In-place reallocation and the owned heap add flash: the same kind of
-probe (Rust 1.100.0, `thumbv7em-none-eabi`, the options above, `RegionManager<2>`)
-grew from 2,164 B to 2,394 B without `Debug` and from 2,294 B to 2,600 B with it.
+The heap replaces `linked_list_allocator`: it drops the unused dummy hole size
+and the pending-extend byte, so a region is 8 B smaller (the same probe on the
+previous heap: 36 B for `RegionManager<1>`, 64 B for `RegionManager<2>` and 76 B with
+`Debug`). In-place
+reallocation and the owned heap add flash. On the previous heap the same probe
+measures `.text` at 2,030 B (`thumbv7em-none-eabihf`) and 1,894 B
+(`riscv32imac-unknown-none-elf`) for `RegionManager<1>`, 2,044 B and 1,980 B for
+`RegionManager<2>` without `Debug`, and 2,184 B and 2,140 B with it. The price
+is 240 B (thumb) and 134 B (RISC-V) of flash for the two-region manager without
+`Debug`.
 
 [metadata]: https://docs.rs/crate/esp-metadata-generated/0.5.3/source/src/_build_script_utils.rs
 [region-alignment]: https://docs.rs/crate/esp-hal/1.2.2/source/src/dma/aligned.rs

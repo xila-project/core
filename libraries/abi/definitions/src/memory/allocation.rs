@@ -165,8 +165,12 @@ pub unsafe extern "C" fn xila_memory_deallocate(pointer: *mut c_void) {
 /// This function changes the size of a previously allocated memory block. If the new size
 /// is larger, the additional memory is uninitialized. If the new size is smaller, the
 /// excess memory is freed. The original data is preserved up to the minimum of the old
-/// and new sizes. Resizing uses the platform's ordinary placement policy. To retain specific
-/// capabilities, allocate a replacement with those flags, copy the data and free the old block.
+/// and new sizes. The platform resizes the block in place when it can, and a shrink never moves
+/// it. A grown block stays in the memory region it is in while the new size is below the
+/// platform's large-allocation threshold and the region can hold it; otherwise, and always from
+/// the threshold up, the platform's ordinary placement policy applies and the block can lose the
+/// capabilities of its region. To retain specific capabilities, allocate a replacement with those
+/// flags, copy the data and free the old block.
 ///
 /// # Safety
 ///
