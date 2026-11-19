@@ -65,12 +65,15 @@ OutOfMemory.
 
 The host constructs capabilities with `Directory::new` and wraps existing streams
 with `File::new`. `into_raw` transfers ownership and unsafe `from_raw` reclaims it
-exactly once. The host installs its time manager with `initialize`; clock reads
-before initialization and unsynchronized realtime reads return Unavailable.
+exactly once.
 
 ## Clocks, sleep and randomness
 
-None of these calls assumes a host OS clock or entropy source.
+Core's `NativeFormat` handler (`native-dev`) installs the time manager from
+`ExecutableContext` and looks for the entropy character device at
+`/devices/random/source` before starting a native ELF. Once installed, each
+service is reused for subsequent launches. Clock reads before installation and
+unsynchronized realtime reads return Unavailable.
 
 `xila_time_resolution(clock, &nanoseconds)` reports the nominal quantization of
 `XILA_CLOCK_MONOTONIC` or `XILA_CLOCK_REALTIME`; actual precision can be coarser.
@@ -90,16 +93,15 @@ plus one tick, so `UINT64_MAX` waits practically forever instead of wrapping. It
 needs no time manager and returns Ok on hosts whose Embassy time driver works
 (there is no signal delivery, so nothing interrupts it).
 
-`xila_random_fill(buffer, size)` fills the buffer from the entropy source that the
-host installs once with `initialize_random`, typically the character device
-mounted at `/devices/random/source`, which the network manager and authentication
-already use. A source that is pending suspends the coroutine like any other
-blocking call, and short reads are retried until the buffer is full. Zero size
-succeeds without touching the buffer or the source and permits a null buffer.
-Before installation a nonempty fill returns Unavailable; a source that reports no
-progress returns InputOutput and its own errors map through the usual status
-translation. This is the one call whose output is not success-only: after a
-failure the buffer contents are unspecified and must not be used.
+`xila_random_fill(buffer, size)` opens the mounted entropy character device for
+the duration of each fill, using the application's VFS permissions. A pending
+source suspends the coroutine, and short reads are retried until the buffer is
+full. Zero size succeeds without touching the buffer or the source and permits
+a null buffer. Native executables still start when the device is absent, and
+nonempty fills return Unavailable. A later launch can discover a device mounted
+after the first launch. A source that reports no progress returns InputOutput
+and other errors map through the usual status translation. After a failed fill,
+the buffer contents are unspecified and must not be used.
 
 ## Header and compatibility
 

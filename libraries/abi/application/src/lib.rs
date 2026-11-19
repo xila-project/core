@@ -1,3 +1,12 @@
+//! Host implementation of the native application C ABI.
+//!
+//! Core's native ELF handler installs the time manager from its executable
+//! context and discovers the entropy character device at
+//! `/devices/random/source` before launch. The first successful installation of
+//! each service is retained for the system. Native applications can run
+//! without an entropy device, in which case nonempty random fills return
+//! [`Status::Unavailable`].
+
 #![no_std]
 #![deny(clippy::unwrap_used, clippy::expect_used)]
 

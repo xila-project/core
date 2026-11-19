@@ -71,13 +71,17 @@ impl FormatHandler for NativeFormat {
             if self.stack_size < MIN_STACK_SIZE {
                 return Err(Error::InvalidStackSize);
             }
-            let manager = request.standard.context.task_manager;
+            let context = request.standard.context;
+            let manager = context.task_manager;
             if let Some(spawner) = request.spawner
                 && spawner != manager.get_spawner(request.parent).await?
             {
                 // Native coroutines must stay on the caller's executor.
                 return Err(task::Error::InvalidSpawnerIdentifier.into());
             }
+            abi_application::initialize(context.time_manager);
+            abi_application::initialize_random(context.virtual_file_system).await;
+
             // Allocate the stack, fallibly, before the executable image: running out of
             // stack memory must not leave an installed image to unwind.
             let stack = Stack::try_with_min_size(self.stack_size, MIN_STACK_SIZE)

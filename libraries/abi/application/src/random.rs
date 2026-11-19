@@ -1,15 +1,25 @@
 use crate::Status;
-use core::{ffi::c_void, future::poll_fn, pin::pin, slice};
-use file_system::{DirectCharacterDevice, Operation};
+use core::{ffi::c_void, pin::pin, slice};
+use file_system::Kind;
 use synchronization::once_lock::OnceLock;
+use task::Manager;
+use virtual_file_system::{File, VirtualFileSystem};
 
-static ENTROPY: OnceLock<&'static dyn DirectCharacterDevice> = OnceLock::new();
+const ENTROPY_PATH: &str = "/devices/random/source";
+static ENTROPY: OnceLock<&'static VirtualFileSystem> = OnceLock::new();
 
-/// Install the runtime's entropy source once, for example the device mounted at
-/// `/devices/random/source`. Later calls are ignored. Until it is installed, a
-/// nonempty fill returns Unavailable.
-pub fn initialize_random(device: &'static dyn DirectCharacterDevice) {
-    ENTROPY.get_or_init(|| device);
+/// Install the runtime's entropy source once if the system VFS has a character
+/// device at `/devices/random/source`. The native executable handler calls this
+/// before launch. If the device is absent, a later launch can retry.
+pub async fn initialize_random(vfs: &'static VirtualFileSystem) {
+    if ENTROPY.try_get().is_none()
+        && vfs
+            .get_statistics_for_task(Manager::ROOT_TASK_IDENTIFIER, &ENTROPY_PATH)
+            .await
+            .is_ok_and(|statistics| statistics.kind == Kind::CharacterDevice)
+    {
+        ENTROPY.get_or_init(|| vfs);
+    }
 }
 
 /// Fill the caller's buffer with random bytes from the host-granted entropy source.
@@ -25,33 +35,28 @@ pub unsafe extern "C" fn xila_random_fill(buffer: *mut c_void, size: usize) -> S
     if size == 0 {
         return Status::Ok;
     }
-    let Some(device) = ENTROPY.try_get() else {
+    let Some(vfs) = ENTROPY.try_get() else {
         return Status::Unavailable;
     };
     // SAFETY: non-null and at most isize::MAX bytes; the caller guarantees validity.
-    let mut remaining: &mut [u8] = unsafe { slice::from_raw_parts_mut(buffer.cast(), size) };
-    while !remaining.is_empty() {
-        // The shared suspension only returns `()`, so the read result travels
-        // through this slot.
-        let mut result = Ok(0);
-        {
-            let future = pin!(poll_fn(|context| {
-                device
-                    .read(context, remaining, 0)
-                    .map(|value| result = value)
-            }));
-            crate::suspend_dynamic(future);
+    let buffer = unsafe { slice::from_raw_parts_mut(buffer.cast(), size) };
+    // A native coroutine opens the source with its own VFS permissions.
+    // Direct calls by the Rust host use the system task.
+    let in_coroutine = crate::is_in_coroutine();
+    let mut result = Ok(());
+    crate::suspend_dynamic(pin!(async {
+        result = async {
+            let task = if in_coroutine {
+                vfs.task_manager().try_get_current_task_identifier().await?
+            } else {
+                Manager::ROOT_TASK_IDENTIFIER
+            };
+            File::read_slice_from_character_device(vfs, task, ENTROPY_PATH, buffer).await
         }
-        device.cancel_operation(Operation::Read);
-        match result {
-            // A source that makes no progress would otherwise loop forever.
-            Ok(0) => return Status::InputOutput,
-            Ok(count) => {
-                let length = remaining.len();
-                remaining = &mut core::mem::take(&mut remaining)[count.min(length)..];
-            }
-            Err(error) => return error.into(),
-        }
+        .await;
+    }));
+    match result {
+        Ok(()) => Status::Ok,
+        Err(error) => error.into(),
     }
-    Status::Ok
 }
