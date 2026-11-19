@@ -175,11 +175,11 @@ mod tests {
             // The desktop watermark follows the palette instead of a fixed color.
             let themed = &logos[2].0;
             themed.follow_palette_color(PaletteColor::Input);
-            let arm_color = |logo: &crate::Logo| {
-                lvgl::lv_obj_get_style_image_recolor(logo.get_arm(0), lvgl::LV_PART_MAIN)
+            let logo_color = |logo: &crate::Logo| {
+                lvgl::lv_obj_get_style_text_color(logo.get_inner_object(), lvgl::LV_PART_MAIN)
             };
             assert!(lvgl::lv_color_eq(
-                arm_color(themed),
+                logo_color(themed),
                 (*lvgl::lv_theme_shadcn_get_palette(display)).input
             ));
             let button = lvgl::lv_button_create(screen);
@@ -223,11 +223,19 @@ mod tests {
                 light.muted
             ));
 
-            assert!(lvgl::lv_color_eq(arm_color(&logos[2].0), light.input));
-            assert!(!lvgl::lv_color_eq(arm_color(&logos[2].0), dark.input));
+            assert!(lvgl::lv_color_eq(logo_color(&logos[2].0), light.input));
+            assert!(!lvgl::lv_color_eq(logo_color(&logos[2].0), dark.input));
             // Fixed-color logos keep their color.
             assert!(lvgl::lv_color_eq(
-                arm_color(&logos[0].0),
+                logo_color(&logos[0].0),
+                Color::WHITE.into_lvgl_color()
+            ));
+            themed.follow_palette_color(PaletteColor::Border);
+            assert!(lvgl::lv_color_eq(logo_color(themed), light.border));
+            themed.set_color(Color::WHITE);
+            update_display(display, primary, secondary, true);
+            assert!(lvgl::lv_color_eq(
+                logo_color(themed),
                 Color::WHITE.into_lvgl_color()
             ));
             for (logo, factor) in &logos {
@@ -247,42 +255,7 @@ mod tests {
             lvgl::lv_obj_update_layout(object);
             assert_eq!(lvgl::lv_obj_get_width(object), size);
             assert_eq!(lvgl::lv_obj_get_height(object), size);
-            assert_eq!(
-                lvgl::lv_obj_get_child_count(object),
-                crate::Logo::ARM_COUNT as u32 + 1
-            );
-            let mut bounds = lvgl::lv_area_t::default();
-            lvgl::lv_obj_get_coords(object, &mut bounds);
-            let mut arm_side = None;
-            for index in 0..crate::Logo::ARM_COUNT {
-                let arm = logo.get_arm(index);
-                let side = lvgl::lv_obj_get_width(arm);
-                assert_eq!(lvgl::lv_obj_get_height(arm), side);
-                assert_eq!(*arm_side.get_or_insert(side), side);
-                // Arms are separated by a transparent cross through the center.
-                assert!(side < size / 2);
-                let mut coordinates = lvgl::lv_area_t::default();
-                lvgl::lv_obj_get_coords(arm, &mut coordinates);
-                let expected_x = if index < 2 {
-                    bounds.x1
-                } else {
-                    bounds.x2 - side + 1
-                };
-                let expected_y = if index == 0 || index == 3 {
-                    bounds.y1
-                } else {
-                    bounds.y2 - side + 1
-                };
-                assert_eq!((coordinates.x1, coordinates.y1), (expected_x, expected_y));
-            }
-            let center = logo.get_center();
-            let mut coordinates = lvgl::lv_area_t::default();
-            lvgl::lv_obj_get_coords(center, &mut coordinates);
-            assert_eq!(
-                coordinates.x1 + coordinates.x2 + 1,
-                bounds.x1 + bounds.x2 + 1,
-                "center square must be centered"
-            );
+            assert_eq!(lvgl::lv_obj_get_child_count(object), 0);
         }
     }
 }

@@ -4,20 +4,12 @@
 //! `00d6686` (identity 2.0.0, designed by Martin Legand). The symbol is four
 //! rounded diagonal arms around a separate rounded center square.
 //!
-//! Each arm is rasterized once, at the requested size, from the supplied path
-//! into an alpha-only (`A8`) LVGL draw buffer: the shapes need anti-aliased
-//! diagonals and curves that LVGL rectangles cannot express, and the vector
-//! renderer (ThorVG) is not built. Only the top-right arm is rasterized; the
-//! other arms are exact mirror copies. The center square is a regular rounded
-//! LVGL object. A logo of `32 * factor` pixels costs about `0.82 * size²`
-//! bytes of heap (3.3 KiB at 64 px, 21 KiB at 160 px) and no flash assets.
-//!
-//! The axis-aligned edges (center square, arm inner edges and notches) are
-//! snapped to whole pixels before rasterization, so the symbol stays crisp and
-//! its separations stay open at every factor.
+//! A single LVGL object draws the symbol directly into the current layer.
+//! Whole-pixel inner edges, notches and center-square edges preserve the gaps
+//! between the pieces at every factor.
 
-use alloc::vec;
 use core::{mem::ManuallyDrop, ptr};
+use synchronization::once_lock::OnceLock;
 
 use crate::{Color, Error, Point, Result, lvgl, theme};
 
@@ -33,34 +25,6 @@ const NOTCH: f32 = 403.63 - CENTER;
 const SQUARE_HALF: f32 = 118.02 / 2.0;
 /// Corner radius of the center square.
 const SQUARE_RADIUS: f32 = 4.4;
-/// Line segments used for each cubic Bézier corner.
-const CURVE_STEPS: usize = 8;
-
-/// One command of the supplied top-right arm path, in absolute source units.
-#[derive(Clone, Copy)]
-enum Segment {
-    Line(f32, f32),
-    Cubic(f32, f32, f32, f32, f32, f32),
-}
-
-/// Top-right arm of `source/symbol.svg`, starting at `M403.63,243.27`.
-const ARM_START: (f32, f32) = (403.63, 243.27);
-const ARM_PATH: [Segment; 14] = [
-    Segment::Line(403.63, 280.12),
-    Segment::Line(469.64, 280.12),
-    Segment::Cubic(476.30, 280.12, 482.69, 277.47, 487.40, 272.76),
-    Segment::Line(610.09, 150.07),
-    Segment::Cubic(614.80, 145.36, 617.45, 138.97, 617.45, 132.31),
-    Segment::Line(617.45, 25.14),
-    Segment::Cubic(617.45, 11.27, 606.20, 0.02, 592.33, 0.02),
-    Segment::Line(485.12, 0.02),
-    Segment::Cubic(478.46, 0.02, 472.07, 2.67, 467.36, 7.38),
-    Segment::Line(344.69, 130.05),
-    Segment::Cubic(339.98, 134.76, 337.33, 141.15, 337.33, 147.81),
-    Segment::Line(337.33, 213.82),
-    Segment::Line(374.18, 213.82),
-    Segment::Cubic(390.38, 213.82, 403.63, 227.07, 403.63, 243.27),
-];
 
 /// Pixel metrics of a symbol, with the axis-aligned edges snapped to pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,7 +63,7 @@ impl Metrics {
         }
     }
 
-    /// Side of the square bitmap holding one arm.
+    /// Side of one arm bounding square.
     const fn arm_size(&self) -> u16 {
         self.size / 2 - self.arm_inner
     }
@@ -128,7 +92,7 @@ impl Metrics {
         (self.size / 2) as f32 + (distance - CENTER) * scale
     }
 
-    /// Map a top-right arm point in source units to its bitmap coordinates.
+    /// Map a top-right arm point in source units to its local coordinates.
     fn map_arm_point(&self, (x, y): (f32, f32)) -> (f32, f32) {
         let arm_size = self.arm_size() as f32;
         let x = self.map_distance(x - CENTER) - self.arm_inner as f32;
@@ -138,152 +102,370 @@ impl Metrics {
     }
 }
 
-/// Flatten the top-right arm path into closed polygon vertices, in bitmap pixels.
-fn arm_polygon(metrics: &Metrics) -> alloc::vec::Vec<(f32, f32)> {
-    let mut points = vec![metrics.map_arm_point(ARM_START)];
-    let mut current = ARM_START;
+/// The top-right arm's two edges, ordered from its outer horizontal edge
+/// down to its inner horizontal edge. The obtuse corners and recessed notch
+/// use two chords through each source Bézier's midpoint. The outside right
+/// angle uses an LVGL rounded rectangle.
+const LEFT_EDGE: [(f32, f32); 10] = [
+    (485.12, 0.02),
+    (475.51, 1.93),
+    (467.36, 7.38),
+    (344.69, 130.05),
+    (339.24, 138.20),
+    (337.33, 147.81),
+    (337.33, 213.82),
+    (374.18, 213.82),
+    (394.98, 222.47),
+    (403.63, 243.27),
+];
+const RIGHT_EDGE: [(f32, f32); 7] = [
+    (617.45, 25.14),
+    (617.45, 132.31),
+    (615.54, 141.92),
+    (610.09, 150.07),
+    (487.40, 272.76),
+    (479.25, 278.21),
+    (469.64, 280.12),
+];
 
-    for segment in ARM_PATH {
-        match segment {
-            Segment::Line(x, y) => {
-                current = (x, y);
-                points.push(metrics.map_arm_point(current));
+/// Coordinates on pixel boundaries in the canonical (top-right) arm.
+#[derive(Clone, Copy)]
+struct Vertex {
+    x: i32,
+    y: i32,
+}
+
+struct Arm {
+    x: i32,
+    y: i32,
+    mirror_x: bool,
+    mirror_y: bool,
+    side: i32,
+}
+
+impl Arm {
+    fn vertex(&self, point: Vertex) -> lvgl::lv_point_precise_t {
+        lvgl::lv_point_precise_t {
+            x: self.x
+                + if self.mirror_x {
+                    self.side - point.x
+                } else {
+                    point.x
+                },
+            y: self.y
+                + if self.mirror_y {
+                    self.side - point.y
+                } else {
+                    point.y
+                },
+        }
+    }
+
+    /// Convert a half-open rectangle on pixel boundaries to LVGL's inclusive area.
+    fn area(&self, x1: i32, y1: i32, x2: i32, y2: i32) -> lvgl::lv_area_t {
+        let a = self.vertex(Vertex { x: x1, y: y1 });
+        let b = self.vertex(Vertex { x: x2, y: y2 });
+        lvgl::lv_area_t {
+            x1: a.x.min(b.x),
+            x2: a.x.max(b.x) - 1,
+            y1: a.y.min(b.y),
+            y2: a.y.max(b.y) - 1,
+        }
+    }
+}
+
+struct Painter {
+    layer: *mut lvgl::lv_layer_t,
+    fill: lvgl::lv_draw_fill_dsc_t,
+    triangle: lvgl::lv_draw_triangle_dsc_t,
+    line: lvgl::lv_draw_line_dsc_t,
+}
+
+impl Painter {
+    unsafe fn draw_fill(&self, area: &lvgl::lv_area_t) {
+        unsafe {
+            if lvgl::lv_area_is_on(area, &(*self.layer)._clip_area) {
+                lvgl::lv_draw_fill(self.layer, &self.fill, area);
             }
-            Segment::Cubic(x1, y1, x2, y2, x, y) => {
-                let (x0, y0) = current;
-                for step in 1..=CURVE_STEPS {
-                    let t = step as f32 / CURVE_STEPS as f32;
-                    let u = 1.0 - t;
-                    let (a, b, c, d) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
-                    let point = (
-                        a * x0 + b * x1 + c * x2 + d * x,
-                        a * y0 + b * y1 + c * y2 + d * y,
-                    );
-                    points.push(metrics.map_arm_point(point));
+        }
+    }
+
+    /// Paint one edge up to the arm's interior split column. The solid
+    /// rectangle and the sloping triangle own disjoint columns, so their
+    /// shared vertical edge never receives two antialiased fills.
+    unsafe fn fill_edge(&mut self, arm: &Arm, edge: &[Vertex], left: bool, radius: i32) {
+        let side = arm.side;
+        let middle = side / 2;
+        // The midline moves left between the upper and lower halves so
+        // it stays inside the diagonal band at the top and bottom.
+        for (top, bottom, split) in [(0, middle, side * 2 / 3), (middle, side, side / 3)] {
+            let (near, far) = if left { (0, split) } else { (split, side) };
+            let original = unsafe { (*self.layer)._clip_area };
+            if !left && top == 0 && radius > 0 {
+                let area = arm.area(split, 0, side - radius, radius);
+                unsafe { self.draw_fill(&area) };
+            }
+            for pair in edge.windows(2) {
+                let [a, b] = [pair[0], pair[1]];
+                let y1 = a.y.max(top);
+                let y2 = b.y.min(bottom);
+                if y1 >= y2 {
+                    continue;
                 }
-                current = (x, y);
+                let (tip, base) = if (a.x < b.x) == left { (b, a) } else { (a, b) };
+                let (rect_left, rect_right) = if left { (tip.x, far) } else { (near, tip.x) };
+                if rect_left < rect_right {
+                    let area = arm.area(rect_left, y1, rect_right, y2);
+                    unsafe { self.draw_fill(&area) };
+                }
+
+                let x1 = near.max(a.x.min(b.x));
+                let x2 = far.min(a.x.max(b.x));
+                if x1 < x2 {
+                    let area = arm.area(x1, y1, x2, y2);
+                    let mut clip = lvgl::lv_area_t::default();
+                    if unsafe { lvgl::lv_area_intersect(&mut clip, &original, &area) } {
+                        self.triangle.p = [
+                            arm.vertex(tip),
+                            arm.vertex(base),
+                            arm.vertex(Vertex {
+                                x: tip.x,
+                                y: base.y,
+                            }),
+                        ];
+                        unsafe {
+                            (*self.layer)._clip_area = clip;
+                            lvgl::lv_draw_triangle(self.layer, &self.triangle);
+                            (*self.layer)._clip_area = original;
+                        }
+                    }
+                }
             }
         }
     }
 
-    points
-}
-
-/// Floor of a non-negative value.
-fn floor(value: f32) -> f32 {
-    (value as i32) as f32
-}
-
-/// Accumulate the signed area that one edge covers inside row `[row, row + 1)`.
-///
-/// This is the exact-area scanline method used by font rasterizers: the prefix
-/// sum of `accumulator` gives each pixel's coverage.
-fn accumulate_edge(accumulator: &mut [f32], row: f32, from: (f32, f32), to: (f32, f32)) {
-    let (direction, (x0, y0), (x1, y1)) = if from.1 < to.1 {
-        (1.0, from, to)
-    } else if from.1 > to.1 {
-        (-1.0, to, from)
-    } else {
-        return;
-    };
-
-    let top = y0.max(row);
-    let bottom = y1.min(row + 1.0);
-    if top >= bottom {
-        return;
-    }
-
-    let slope = (x1 - x0) / (y1 - y0);
-    let x_top = x0 + (top - y0) * slope;
-    let x_bottom = x0 + (bottom - y0) * slope;
-    let delta = (bottom - top) * direction;
-    let (left, right) = if x_top < x_bottom {
-        (x_top, x_bottom)
-    } else {
-        (x_bottom, x_top)
-    };
-
-    let left_floor = floor(left);
-    let left_index = left_floor as usize;
-    let right_ceil = {
-        let floor = floor(right);
-        if floor < right { floor + 1.0 } else { floor }
-    };
-    let right_index = right_ceil as usize;
-
-    if right_index <= left_index + 1 {
-        let middle = 0.5 * (x_top + x_bottom) - left_floor;
-        accumulator[left_index] += delta - delta * middle;
-        accumulator[left_index + 1] += delta * middle;
-    } else {
-        let inverse_width = 1.0 / (right - left);
-        let left_fraction = left - left_floor;
-        let first = 0.5 * inverse_width * (1.0 - left_fraction) * (1.0 - left_fraction);
-        let right_fraction = right - right_ceil + 1.0;
-        let last = 0.5 * inverse_width * right_fraction * right_fraction;
-
-        accumulator[left_index] += delta * first;
-        if right_index == left_index + 2 {
-            accumulator[left_index + 1] += delta * (1.0 - first - last);
-        } else {
-            let second = inverse_width * (1.5 - left_fraction);
-            accumulator[left_index + 1] += delta * (second - first);
-            for value in &mut accumulator[left_index + 2..right_index - 1] {
-                *value += delta * inverse_width;
+    /// Draw only the quadrant in the outside corner. The other arms mirror
+    /// its pixel bounds in the same way as the straight edges.
+    unsafe fn rounded_corner(&self, arm: &Arm, radius: i32, outline: bool) {
+        let area = arm.area(arm.side - 2 * radius, 0, arm.side, 2 * radius);
+        let quadrant = arm.area(arm.side - radius, 0, arm.side, radius);
+        unsafe {
+            let original = (*self.layer)._clip_area;
+            let mut clip = lvgl::lv_area_t::default();
+            if lvgl::lv_area_intersect(&mut clip, &original, &quadrant) {
+                (*self.layer)._clip_area = clip;
+                draw_rounded_rect(
+                    self.layer,
+                    &area,
+                    self.fill.color,
+                    radius,
+                    outline,
+                    self.fill.opa,
+                );
+                (*self.layer)._clip_area = original;
             }
-            let before_last = second + (right_index - left_index - 3) as f32 * inverse_width;
-            accumulator[right_index - 1] += delta * (1.0 - before_last - last);
         }
-        accumulator[right_index] += delta * last;
+    }
+
+    /// Stroke the inside of an edge. The row clip makes adjacent chords meet
+    /// without accumulating opacity at their joins.
+    unsafe fn stroke_edge(&mut self, arm: &Arm, edge: &[Vertex], left: bool) {
+        let original = unsafe { (*self.layer)._clip_area };
+        for pair in edge.windows(2) {
+            let [a, b] = [pair[0], pair[1]];
+            if a.y == b.y {
+                if a.x != b.x {
+                    // The notch and flattened corner chords can be horizontal.
+                    let interior_below = (b.x < a.x) == left;
+                    let y = (a.y - i32::from(!interior_below)).clamp(0, arm.side - 1);
+                    let area = arm.area(a.x.min(b.x), y, a.x.max(b.x), y + 1);
+                    unsafe { self.draw_fill(&area) };
+                }
+                continue;
+            }
+            let mut p = arm.vertex(a);
+            let mut q = arm.vertex(b);
+            if p.y > q.y {
+                core::mem::swap(&mut p, &mut q);
+            }
+            let interior_right = left != arm.mirror_x;
+            let dx = q.x - p.x;
+            // LVGL places a one-pixel steep stroke to the right of its
+            // geometric line. For a shallow stroke the bias is along y.
+            if dx.abs() <= q.y - p.y {
+                let inset = i32::from(!interior_right);
+                p.x -= inset;
+                q.x -= inset;
+            } else if interior_right == (dx > 0) {
+                p.y -= 1;
+                q.y -= 1;
+            }
+            let area = arm.area(0, a.y, arm.side, b.y);
+            let mut clip = lvgl::lv_area_t::default();
+            if unsafe { lvgl::lv_area_intersect(&mut clip, &original, &area) } {
+                self.line.p1 = p;
+                self.line.p2 = q;
+                unsafe {
+                    (*self.layer)._clip_area = clip;
+                    lvgl::lv_draw_line(self.layer, &self.line);
+                    (*self.layer)._clip_area = original;
+                }
+            }
+        }
     }
 }
 
-/// Rasterize the top-right arm into an `A8` bitmap of `side × side` pixels.
-fn rasterize_arm(metrics: &Metrics, output: &mut [u8], stride: usize) {
-    let side = metrics.arm_size() as usize;
-    let polygon = arm_polygon(metrics);
-    let mut accumulator = vec![0.0f32; side + 2];
+unsafe fn draw_logo(object: *mut lvgl::lv_obj_t, layer: *mut lvgl::lv_layer_t) {
+    unsafe {
+        let instance = object.cast::<LogoObject>();
+        let outline = (*instance).style == LogoStyle::Outline;
+        let pose = (*instance).pose;
+        let mut bounds = lvgl::lv_area_t::default();
+        lvgl::lv_obj_get_coords(object, &mut bounds);
+        let width = bounds.x2 - bounds.x1 + 1;
+        let height = bounds.y2 - bounds.y1 + 1;
+        let size = width.min(height).min(i32::from(u8::MAX) * 32) & !1;
+        if size < 32 {
+            return;
+        }
+        let x = bounds.x1 + (width - size) / 2;
+        let y = bounds.y1 + (height - size) / 2;
+        let metrics = Metrics::new(size as u16);
+        let side = i32::from(metrics.arm_size());
+        let map = |point| {
+            let (x, y) = metrics.map_arm_point(point);
+            Vertex {
+                x: (x + 0.5) as i32,
+                y: (y + 0.5) as i32,
+            }
+        };
+        let left = LEFT_EDGE.map(map);
+        let right = RIGHT_EDGE.map(map);
+        let radius = right[0].y;
+        let bottom_left = Vertex {
+            x: i32::from(metrics.notch - metrics.arm_inner),
+            y: side,
+        };
 
-    for row in 0..side {
-        accumulator.fill(0.0);
-        let row_position = row as f32;
+        // The logo takes its color directly from text_color and deliberately
+        // ignores color_filter and layer recolor.
+        let color = lvgl::lv_obj_get_style_text_color(object, lvgl::LV_PART_MAIN);
+        let clip = (*layer)._clip_area;
+        let layer_opa = (*layer).opa;
+        // Match LVGL's descriptor initialization, including LV_OPA_MIX2
+        // when the layer is translucent.
+        let mix_opacity = |opacity| {
+            if layer_opa < lvgl::LV_OPA_MAX as u8 {
+                ((u16::from(opacity) * u16::from(layer_opa)) >> 8) as u8
+            } else {
+                opacity
+            }
+        };
+        let mut painter = Painter {
+            layer,
+            fill: lvgl::lv_draw_fill_dsc_t::default(),
+            triangle: lvgl::lv_draw_triangle_dsc_t::default(),
+            line: lvgl::lv_draw_line_dsc_t::default(),
+        };
+        lvgl::lv_draw_fill_dsc_init(&mut painter.fill);
+        lvgl::lv_draw_triangle_dsc_init(&mut painter.triangle);
+        lvgl::lv_draw_line_dsc_init(&mut painter.line);
+        painter.fill.color = color;
+        painter.triangle.color = color;
+        painter.line.color = color;
+        painter.line.width = 1;
+        painter.line.set_raw_end(1);
 
-        for (index, from) in polygon.iter().enumerate() {
-            let to = polygon[(index + 1) % polygon.len()];
-            accumulate_edge(&mut accumulator, row_position, *from, to);
+        let mut left_edge = [bottom_left; LEFT_EDGE.len() + 1];
+        left_edge[..left.len()].copy_from_slice(&left);
+        let mirrors = [(true, false), (true, true), (false, true), (false, false)];
+        for ((mirror_x, mirror_y), arm_pose) in mirrors.into_iter().zip(pose.arms) {
+            let opacity = mix_opacity(arm_pose.opacity);
+            if opacity == 0 {
+                continue;
+            }
+            let offset = i32::from(arm_pose.offset);
+            let arm = Arm {
+                x: if mirror_x {
+                    x - offset
+                } else {
+                    x + size - side + offset
+                },
+                y: if mirror_y {
+                    y + size - side + offset
+                } else {
+                    y - offset
+                },
+                mirror_x,
+                mirror_y,
+                side,
+            };
+            if !lvgl::lv_area_is_on(&arm.area(0, 0, side, side), &clip) {
+                continue;
+            }
+            painter.fill.opa = opacity;
+            painter.line.opa = opacity;
+            painter.triangle.opa = opacity;
+            painter.rounded_corner(&arm, radius, outline);
+            if outline {
+                let top_right = Vertex {
+                    x: side - radius,
+                    y: 0,
+                };
+                painter.stroke_edge(&arm, &left_edge, true);
+                painter.stroke_edge(&arm, &right, false);
+                painter.stroke_edge(&arm, &[left[0], top_right], false);
+                painter.stroke_edge(&arm, &[bottom_left, right[right.len() - 1]], false);
+            } else {
+                painter.fill_edge(&arm, &left_edge, true, 0);
+                painter.fill_edge(&arm, &right, false, radius);
+            }
         }
 
-        let mut coverage = 0.0f32;
-        for (column, alpha) in output[row * stride..row * stride + side]
-            .iter_mut()
-            .enumerate()
-        {
-            coverage += accumulator[column];
-            let value = if coverage < 0.0 { -coverage } else { coverage };
-            *alpha = (value.min(1.0) * 255.0 + 0.5) as u8;
-        }
+        let half = i32::from(metrics.square_half);
+        let center_x = x + size / 2;
+        let center_y = y + size / 2;
+        draw_rounded_rect(
+            layer,
+            &lvgl::lv_area_t {
+                x1: center_x - half,
+                y1: center_y - half,
+                x2: center_x + half - 1,
+                y2: center_y + half - 1,
+            },
+            color,
+            i32::from(metrics.square_radius),
+            outline,
+            mix_opacity(pose.center_opacity),
+        );
     }
 }
 
-/// Keep a one-pixel anti-aliased ring along the edges of a filled bitmap.
-fn outline(bitmap: &mut [u8], side: usize, stride: usize) {
-    let filled = alloc::vec::Vec::from(&bitmap[..]);
-    let at = |x: isize, y: isize| -> u8 {
-        if x < 0 || y < 0 || x >= side as isize || y >= side as isize {
-            0
+unsafe fn draw_rounded_rect(
+    layer: *mut lvgl::lv_layer_t,
+    area: &lvgl::lv_area_t,
+    color: lvgl::lv_color_t,
+    radius: i32,
+    outline: bool,
+    opacity: lvgl::lv_opa_t,
+) {
+    unsafe {
+        if opacity == 0 || !lvgl::lv_area_is_on(area, &(*layer)._clip_area) {
+            return;
+        }
+        let mut rect = lvgl::lv_draw_rect_dsc_t::default();
+        lvgl::lv_draw_rect_dsc_init(&mut rect);
+        rect.radius = radius;
+        if outline {
+            rect.bg_opa = 0;
+            rect.border_width = 1;
+            rect.border_color = color;
+            rect.border_opa = opacity;
         } else {
-            filled[y as usize * stride + x as usize]
+            rect.bg_color = color;
+            rect.bg_opa = opacity;
         }
-    };
-
-    for y in 0..side as isize {
-        for x in 0..side as isize {
-            let eroded = at(x - 1, y)
-                .min(at(x + 1, y))
-                .min(at(x, y - 1))
-                .min(at(x, y + 1));
-            bitmap[y as usize * stride + x as usize] = at(x, y).saturating_sub(eroded);
-        }
+        lvgl::lv_draw_rect(layer, &rect, area);
     }
 }
 
@@ -297,33 +479,101 @@ pub enum LogoStyle {
     Outline,
 }
 
-/// A logo that deletes its LVGL object on drop.
-#[non_exhaustive]
-pub struct Logo {
-    pub object: *mut lvgl::lv_obj_t,
+/// Visual state of one arm in an animated logo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LogoArmPose {
+    /// Outward displacement in pixels on each axis.
+    pub offset: u16,
+    /// Opacity from 0 (transparent) to 255 (opaque).
+    pub opacity: u8,
 }
 
-struct ArmBuffer(*mut lvgl::lv_draw_buf_t);
+/// Per-piece animation state, stored inline in the logo object.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LogoPose {
+    /// Top-left, bottom-left, bottom-right, top-right.
+    pub arms: [LogoArmPose; Logo::ARM_COUNT],
+    /// Opacity from 0 (transparent) to 255 (opaque).
+    pub center_opacity: u8,
+}
 
-impl Drop for ArmBuffer {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe {
-                lvgl::lv_image_cache_drop(self.0.cast());
-                lvgl::lv_draw_buf_destroy(self.0);
+impl LogoPose {
+    /// Centered, fully opaque logo.
+    pub const REST: Self = Self {
+        arms: [LogoArmPose {
+            offset: 0,
+            opacity: 255,
+        }; Logo::ARM_COUNT],
+        center_opacity: 255,
+    };
+
+    fn outset(&self) -> i32 {
+        i32::from(self.arms.iter().map(|arm| arm.offset).max().unwrap_or(0))
+    }
+}
+
+#[repr(C)]
+struct LogoObject {
+    base: lvgl::lv_obj_t,
+    pose: LogoPose,
+    style: LogoStyle,
+}
+
+struct LogoClass(lvgl::lv_obj_class_t);
+
+// The descriptor is immutable after initialization and points to static data.
+unsafe impl Send for LogoClass {}
+unsafe impl Sync for LogoClass {}
+
+static LOGO_CLASS: OnceLock<LogoClass> = OnceLock::new();
+
+fn logo_class() -> &'static lvgl::lv_obj_class_t {
+    &LOGO_CLASS
+        .get_or_init(|| {
+            let mut class = lvgl::lv_obj_class_t {
+                base_class: &raw const lvgl::lv_obj_class,
+                constructor_cb: Some(construct_logo),
+                event_cb: Some(logo_event),
+                name: c"logo".as_ptr(),
+                ..Default::default()
+            };
+            class.set_instance_size(size_of::<LogoObject>() as _);
+            LogoClass(class)
+        })
+        .0
+}
+
+unsafe extern "C" fn construct_logo(_: *const lvgl::lv_obj_class_t, object: *mut lvgl::lv_obj_t) {
+    unsafe {
+        let instance = object.cast::<LogoObject>();
+        ptr::addr_of_mut!((*instance).pose).write(LogoPose::REST);
+        ptr::addr_of_mut!((*instance).style).write(LogoStyle::Filled);
+    }
+}
+
+unsafe extern "C" fn logo_event(class: *const lvgl::lv_obj_class_t, event: *mut lvgl::lv_event_t) {
+    unsafe {
+        if lvgl::lv_obj_event_base(class, event) != lvgl::lv_result_t_LV_RESULT_OK {
+            return;
+        }
+        let object = lvgl::lv_event_get_current_target(event).cast::<lvgl::lv_obj_t>();
+        match lvgl::lv_event_get_code(event) {
+            lvgl::lv_event_code_t_LV_EVENT_DRAW_MAIN => {
+                draw_logo(object, lvgl::lv_event_get_layer(event));
             }
+            lvgl::lv_event_code_t_LV_EVENT_REFR_EXT_DRAW_SIZE => {
+                let pose = (*object.cast::<LogoObject>()).pose;
+                lvgl::lv_event_set_ext_draw_size(event, pose.outset());
+            }
+            _ => {}
         }
     }
 }
 
-unsafe extern "C" fn delete_arm_buffer(event: *mut lvgl::lv_event_t) {
-    unsafe {
-        let arm = lvgl::lv_event_get_current_target(event).cast();
-        let buffer = ArmBuffer(lvgl::lv_event_get_user_data(event).cast());
-        // The delete event runs before LVGL destroys the image.
-        lvgl::lv_image_set_src(arm, ptr::null());
-        drop(buffer);
-    }
+/// A logo that deletes its LVGL object on drop.
+#[non_exhaustive]
+pub struct Logo {
+    pub object: *mut lvgl::lv_obj_t,
 }
 
 unsafe extern "C" fn palette_color_changed(event: *mut lvgl::lv_event_t) {
@@ -340,18 +590,7 @@ unsafe extern "C" fn palette_color_changed(event: *mut lvgl::lv_event_t) {
 
 impl Logo {
     pub const BASE_SIZE: Point = Point::new(32, 32);
-    /// Number of arms, created first as children in this order: top-left,
-    /// bottom-left, bottom-right, top-right (counter-clockwise).
     pub const ARM_COUNT: usize = 4;
-    /// Child index of the center square.
-    pub const CENTER_INDEX: usize = Self::ARM_COUNT;
-
-    const ALIGNMENTS: [lvgl::lv_align_t; Self::ARM_COUNT] = [
-        lvgl::lv_align_t_LV_ALIGN_TOP_LEFT,
-        lvgl::lv_align_t_LV_ALIGN_BOTTOM_LEFT,
-        lvgl::lv_align_t_LV_ALIGN_BOTTOM_RIGHT,
-        lvgl::lv_align_t_LV_ALIGN_TOP_RIGHT,
-    ];
 
     pub fn get_factor(size: Point) -> u8 {
         let factor_x = size.get_x() / Self::BASE_SIZE.get_x();
@@ -385,167 +624,69 @@ impl Logo {
         if factor == 0 {
             return Err(Error::InvalidParameter);
         }
-        let size = (Self::BASE_SIZE.get_x() as u32 * factor as u32).min(u16::MAX as u32) as u16;
-        let metrics = Metrics::new(size);
+        let size = i32::from(Self::BASE_SIZE.get_x()) * i32::from(factor);
 
         unsafe {
-            let object = lvgl::lv_obj_create(parent);
+            let object = lvgl::lv_obj_class_create_obj(logo_class(), parent);
 
             if object.is_null() {
                 return Err(Error::FailedToCreateObject);
             }
 
-            // Drop deletes the partial widget tree if construction fails.
-            let logo = Self { object };
+            lvgl::lv_obj_class_init_obj(object);
+            (*object.cast::<LogoObject>()).style = style;
 
             // Decorative and theme independent: no surface, padding or input.
             lvgl::lv_obj_remove_style_all(object);
-            lvgl::lv_obj_set_size(object, metrics.size as i32, metrics.size as i32);
+            lvgl::lv_obj_set_size(object, size, size);
             lvgl::lv_obj_remove_flag(object, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_CLICKABLE);
             lvgl::lv_obj_remove_flag(object, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_SCROLLABLE);
-
-            logo.create_arms(&metrics, style)?;
-            logo.create_center(&metrics, style)?;
-            Self::apply_color(object, color);
-
-            Ok(logo)
+            lvgl::lv_obj_set_style_text_color(object, color.into_lvgl_color(), 0);
+            Ok(Self { object })
         }
     }
 
-    unsafe fn create_arms(&self, metrics: &Metrics, style: LogoStyle) -> Result<()> {
-        let side = metrics.arm_size() as u32;
-
+    /// Replace the animation pose of a logo, invalidating its old and new bounds.
+    ///
+    /// # Safety
+    /// `object` must be a live object created by [`Self::new`] or
+    /// [`Self::new_with_style`]. The caller must hold the LVGL lock.
+    pub unsafe fn set_pose(object: *mut lvgl::lv_obj_t, pose: LogoPose) {
         unsafe {
-            let mut buffers = [const { ArmBuffer(ptr::null_mut()) }; Self::ARM_COUNT];
-            for slot in &mut buffers {
-                let buffer = lvgl::lv_draw_buf_create(
-                    side,
-                    side,
-                    lvgl::lv_color_format_t_LV_COLOR_FORMAT_A8,
-                    lvgl::LV_STRIDE_AUTO,
-                );
-                if buffer.is_null() {
-                    return Err(Error::OutOfMemory);
-                }
-                slot.0 = buffer;
+            debug_assert!(lvgl::lv_obj_has_class(object, logo_class()));
+            let instance = object.cast::<LogoObject>();
+            let previous = (*instance).pose;
+            if pose == previous {
+                return;
             }
-
-            // Every buffer was allocated above with the same geometry; keep the
-            // accesses checked so no raw pointer is dereferenced unproven.
-            let source_buffer = buffers[3].0.as_mut().ok_or(Error::OutOfMemory)?;
-            if source_buffer.data.is_null() {
-                return Err(Error::OutOfMemory);
+            lvgl::lv_obj_invalidate(object);
+            (*instance).pose = pose;
+            if pose.outset() != previous.outset() {
+                lvgl::lv_obj_refresh_ext_draw_size(object);
             }
-            let stride = source_buffer.header.stride() as usize;
-            let length = stride * side as usize;
-            let source = core::slice::from_raw_parts_mut(source_buffer.data, length);
-            source.fill(0);
-            rasterize_arm(metrics, source, stride);
-            if style == LogoStyle::Outline {
-                outline(source, side as usize, stride);
-            }
-
-            // The symbol is mirror symmetric: derive the other arms from the
-            // top-right one instead of rasterizing them again.
-            let side = side as usize;
-            for (index, alignment) in Self::ALIGNMENTS.iter().enumerate().take(3) {
-                let (mirror_x, mirror_y) = match *alignment {
-                    lvgl::lv_align_t_LV_ALIGN_TOP_LEFT => (true, false),
-                    lvgl::lv_align_t_LV_ALIGN_BOTTOM_LEFT => (true, true),
-                    _ => (false, true),
-                };
-                let target_buffer = buffers[index].0.as_mut().ok_or(Error::OutOfMemory)?;
-                if target_buffer.data.is_null() {
-                    return Err(Error::OutOfMemory);
-                }
-                let target = core::slice::from_raw_parts_mut(target_buffer.data, length);
-                for y in 0..side {
-                    let source_y = if mirror_y { side - 1 - y } else { y };
-                    for x in 0..side {
-                        let source_x = if mirror_x { side - 1 - x } else { x };
-                        target[y * stride + x] = source[source_y * stride + source_x];
-                    }
-                }
-            }
-
-            for (buffer, alignment) in buffers.into_iter().zip(Self::ALIGNMENTS) {
-                let arm = lvgl::lv_image_create(self.object);
-                if arm.is_null() {
-                    return Err(Error::FailedToCreateObject);
-                }
-                lvgl::lv_obj_remove_style_all(arm);
-                let on_delete = lvgl::lv_obj_add_event_cb(
-                    arm,
-                    Some(delete_arm_buffer),
-                    lvgl::lv_event_code_t_LV_EVENT_DELETE,
-                    buffer.0.cast(),
-                );
-                if on_delete.is_null() {
-                    return Err(Error::OutOfMemory);
-                }
-                // The image now owns the buffer through its delete callback.
-                lvgl::lv_image_set_src(arm, ManuallyDrop::new(buffer).0.cast());
-                lvgl::lv_obj_set_align(arm, alignment);
-                lvgl::lv_obj_remove_flag(arm, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_CLICKABLE);
-                lvgl::lv_obj_add_flag(arm, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_EVENT_BUBBLE);
-            }
+            lvgl::lv_obj_invalidate(object);
         }
-
-        Ok(())
-    }
-
-    unsafe fn create_center(&self, metrics: &Metrics, style: LogoStyle) -> Result<()> {
-        unsafe {
-            let center = lvgl::lv_obj_create(self.object);
-            if center.is_null() {
-                return Err(Error::FailedToCreateObject);
-            }
-            let side = (metrics.square_half * 2) as i32;
-
-            lvgl::lv_obj_remove_style_all(center);
-            lvgl::lv_obj_set_size(center, side, side);
-            lvgl::lv_obj_set_align(center, lvgl::lv_align_t_LV_ALIGN_CENTER);
-            lvgl::lv_obj_set_style_radius(
-                center,
-                metrics.square_radius as i32,
-                lvgl::LV_STATE_DEFAULT,
-            );
-            match style {
-                LogoStyle::Filled => {
-                    lvgl::lv_obj_set_style_bg_opa(center, lvgl::LV_OPA_COVER as _, 0);
-                }
-                LogoStyle::Outline => {
-                    lvgl::lv_obj_set_style_border_width(center, 1, lvgl::LV_STATE_DEFAULT);
-                    lvgl::lv_obj_set_style_border_opa(center, lvgl::LV_OPA_COVER as _, 0);
-                }
-            }
-            lvgl::lv_obj_remove_flag(center, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_CLICKABLE);
-            lvgl::lv_obj_add_flag(center, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_EVENT_BUBBLE);
-        }
-
-        Ok(())
     }
 
     unsafe fn apply_color(object: *mut lvgl::lv_obj_t, color: Color) {
         let color = color.into_lvgl_color();
-
         unsafe {
-            for index in 0..Self::ARM_COUNT {
-                let arm = lvgl::lv_obj_get_child(object, index as i32);
-                lvgl::lv_obj_set_style_image_recolor(arm, color, lvgl::LV_STATE_DEFAULT);
+            // Setting a style sends STYLE_CHANGED to the logo itself.
+            if !lvgl::lv_color_eq(lvgl::lv_obj_get_style_text_color(object, 0), color) {
+                lvgl::lv_obj_set_style_text_color(object, color, 0);
             }
-            let center = lvgl::lv_obj_get_child(object, Self::CENTER_INDEX as i32);
-            lvgl::lv_obj_set_style_bg_color(center, color, lvgl::LV_STATE_DEFAULT);
-            lvgl::lv_obj_set_style_border_color(center, color, lvgl::LV_STATE_DEFAULT);
         }
     }
 
-    /// Repaint the logo with a fixed color.
+    /// Repaint the logo with a fixed color and stop following the palette.
     ///
     /// # Safety
     /// The caller must hold the LVGL lock.
     pub unsafe fn set_color(&self, color: Color) {
-        unsafe { Self::apply_color(self.object, color) }
+        unsafe {
+            lvgl::lv_obj_remove_event_cb(self.object, Some(palette_color_changed));
+            Self::apply_color(self.object, color);
+        }
     }
 
     /// Paint the logo with a theme palette color and follow later palette or
@@ -555,6 +696,7 @@ impl Logo {
     /// The caller must hold the LVGL lock.
     pub unsafe fn follow_palette_color(&self, color: theme::PaletteColor) {
         unsafe {
+            lvgl::lv_obj_remove_event_cb(self.object, Some(palette_color_changed));
             if let Some(value) = theme::get_palette_color(self.object, color) {
                 Self::apply_color(self.object, value);
             }
@@ -571,26 +713,10 @@ impl Logo {
         self.object
     }
 
-    /// Leave the logo and its draw buffers owned by the LVGL object tree.
+    /// Leave the logo owned by the LVGL object tree.
     /// The returned pointer is valid until LVGL deletes the logo.
     pub fn into_inner_object(self) -> *mut lvgl::lv_obj_t {
         ManuallyDrop::new(self).object
-    }
-
-    /// Arm object, in [`Self::ARM_COUNT`] order.
-    ///
-    /// # Safety
-    /// The caller must hold the LVGL lock.
-    pub unsafe fn get_arm(&self, index: usize) -> *mut lvgl::lv_obj_t {
-        unsafe { lvgl::lv_obj_get_child(self.object, index.min(Self::ARM_COUNT - 1) as i32) }
-    }
-
-    /// Center square object.
-    ///
-    /// # Safety
-    /// The caller must hold the LVGL lock.
-    pub unsafe fn get_center(&self) -> *mut lvgl::lv_obj_t {
-        unsafe { lvgl::lv_obj_get_child(self.object, Self::CENTER_INDEX as i32) }
     }
 }
 
@@ -603,37 +729,10 @@ impl Drop for Logo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::vec::Vec;
-
-    fn arm_bitmap(size: u16, style: LogoStyle) -> (Metrics, Vec<u8>) {
-        let metrics = Metrics::new(size);
-        let side = metrics.arm_size() as usize;
-        let mut bitmap = vec![0; side * side];
-        rasterize_arm(&metrics, &mut bitmap, side);
-        if style == LogoStyle::Outline {
-            outline(&mut bitmap, side, side);
-        }
-        (metrics, bitmap)
-    }
-
-    /// Shoelace area of the unhinted arm, in source units².
-    fn arm_source_area() -> f32 {
-        let mut points = vec![ARM_START];
-        points.extend(ARM_PATH.map(|segment| match segment {
-            Segment::Line(x, y) | Segment::Cubic(.., x, y) => (x, y),
-        }));
-        let mut area = 0.0;
-        for index in 0..points.len() {
-            let (x0, y0) = points[index];
-            let (x1, y1) = points[(index + 1) % points.len()];
-            area += x0 * y1 - x1 * y0;
-        }
-        (area / 2.0).abs()
-    }
 
     #[test]
     fn metrics_keep_edges_snapped_and_separations_open() {
-        for size in [16, 32, 64, 96, 128, 160, 192, 256, 320] {
+        for size in (1..=u16::from(u8::MAX)).map(|factor| factor * 32) {
             let metrics = Metrics::new(size);
             assert!(metrics.arm_inner >= 1, "{size}: arms must not touch");
             assert!(metrics.notch > metrics.square_half, "{size}: square gap");
@@ -651,58 +750,5 @@ mod tests {
                 square_radius: 1,
             }
         );
-    }
-
-    #[test]
-    fn arm_bitmap_matches_supplied_area() {
-        let source_area = arm_source_area();
-        for size in [64, 128, 160, 320] {
-            let (_, bitmap) = arm_bitmap(size, LogoStyle::Filled);
-            let scale = size as f32 / EXTENT;
-            let expected = source_area * scale * scale;
-            let actual = bitmap
-                .iter()
-                .map(|&alpha| alpha as f32 / 255.0)
-                .sum::<f32>();
-            let error = (actual - expected).abs() / expected;
-            // Corner flattening and pixel snapping change the area slightly.
-            assert!(error < 0.04, "{size}: {actual} vs {expected}");
-        }
-    }
-
-    #[test]
-    fn arm_bitmap_has_crisp_snapped_edges() {
-        let (metrics, bitmap) = arm_bitmap(160, LogoStyle::Filled);
-        let side = metrics.arm_size() as usize;
-        let notch_depth = (metrics.notch - metrics.arm_inner) as usize;
-
-        // Outer right edge, between the rounded corner and the chamfer.
-        assert_eq!(bitmap[(side / 4) * side + side - 1], 255);
-        // Inner left edge, between the chamfer and the notch.
-        let row = side - notch_depth - 2;
-        assert_eq!(bitmap[row * side], 255);
-        // Notch: its snapped top and right edges have no partial pixels.
-        assert_eq!(bitmap[(side - notch_depth - 1) * side], 255);
-        assert_eq!(bitmap[(side - notch_depth) * side], 0);
-        assert_eq!(bitmap[(side - 1) * side + notch_depth - 1], 0);
-        assert_eq!(bitmap[(side - 1) * side + notch_depth], 255);
-        // Chamfered and rounded corners stay transparent.
-        assert_eq!(bitmap[0], 0);
-        assert_eq!(bitmap[side - 1], 0);
-        assert_eq!(bitmap[side * side - 1], 0);
-    }
-
-    #[test]
-    fn outline_keeps_only_the_contour() {
-        let (metrics, filled) = arm_bitmap(128, LogoStyle::Filled);
-        let (_, outlined) = arm_bitmap(128, LogoStyle::Outline);
-        let side = metrics.arm_size() as usize;
-        let middle = (side / 2) * side + side / 2;
-
-        assert_eq!(filled[middle], 255);
-        assert_eq!(outlined[middle], 0);
-        assert_eq!(outlined[(side / 4) * side + side - 1], 255);
-        let total = |bitmap: &[u8]| bitmap.iter().map(|&alpha| alpha as u32).sum::<u32>();
-        assert!(total(&outlined) * 4 < total(&filled));
     }
 }

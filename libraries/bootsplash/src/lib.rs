@@ -5,15 +5,13 @@ extern crate alloc;
 use core::ffi::c_void;
 
 use graphics::{
-    Color, Logo,
+    Color, Logo, LogoArmPose, LogoPose,
     lvgl::{
-        _lv_obj_t, LV_PART_MAIN, LV_STATE_DEFAULT, lv_align_t_LV_ALIGN_CENTER,
-        lv_anim_completed_cb_t, lv_anim_delete, lv_anim_exec_xcb_t, lv_anim_init,
-        lv_anim_set_completed_cb, lv_anim_set_duration, lv_anim_set_exec_cb,
-        lv_anim_set_repeat_count, lv_anim_set_values, lv_anim_set_var, lv_anim_start, lv_anim_t,
-        lv_obj_get_child, lv_obj_get_size, lv_obj_get_style_text_color, lv_obj_get_width,
-        lv_obj_set_align, lv_obj_set_style_opa, lv_obj_set_style_translate_x,
-        lv_obj_set_style_translate_y,
+        _lv_obj_t, LV_PART_MAIN, lv_align_t_LV_ALIGN_CENTER, lv_anim_completed_cb_t,
+        lv_anim_delete, lv_anim_exec_xcb_t, lv_anim_init, lv_anim_set_completed_cb,
+        lv_anim_set_duration, lv_anim_set_exec_cb, lv_anim_set_repeat_count, lv_anim_set_values,
+        lv_anim_set_var, lv_anim_start, lv_anim_t, lv_obj_get_size, lv_obj_get_style_text_color,
+        lv_obj_get_width, lv_obj_set_align,
     },
 };
 
@@ -46,10 +44,8 @@ mod timeline {
     /// Opacity of an arm at the top of its pulse.
     pub const PULSE_OPACITY: i32 = 180;
 
-    /// Clockwise rank of each arm in `Logo` child order (TL, BL, BR, TR).
+    /// Clockwise rank of each arm in `LogoPose` order (TL, BL, BR, TR).
     pub const CLOCKWISE_RANK: [i32; 4] = [0, 3, 2, 1];
-    /// Outward diagonal of each arm in `Logo` child order.
-    pub const DIRECTION: [(i32, i32); 4] = [(-1, -1), (-1, 1), (1, 1), (1, -1)];
 
     /// Outward offset in pixels and opacity of an arm.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -124,14 +120,10 @@ mod timeline {
 
 use timeline::ArmState;
 
-unsafe fn apply_arm(logo: *mut _lv_obj_t, index: usize, state: ArmState) {
-    let (x, y) = timeline::DIRECTION[index];
-
-    unsafe {
-        let arm = lv_obj_get_child(logo, index as i32);
-        lv_obj_set_style_translate_x(arm, x * state.offset, LV_STATE_DEFAULT);
-        lv_obj_set_style_translate_y(arm, y * state.offset, LV_STATE_DEFAULT);
-        lv_obj_set_style_opa(arm, state.opacity, LV_STATE_DEFAULT);
+fn arm_pose(state: ArmState) -> LogoArmPose {
+    LogoArmPose {
+        offset: state.offset as u16,
+        opacity: state.opacity,
     }
 }
 
@@ -142,11 +134,14 @@ unsafe fn apply_arm(logo: *mut _lv_obj_t, index: usize, state: ArmState) {
 unsafe fn show_intro(logo: *mut _lv_obj_t, time: i32) {
     unsafe {
         let size = lv_obj_get_width(logo);
-        let center = lv_obj_get_child(logo, Logo::CENTER_INDEX as i32);
-        lv_obj_set_style_opa(center, timeline::square_opacity(time), LV_STATE_DEFAULT);
-        for index in 0..Logo::ARM_COUNT {
-            apply_arm(logo, index, timeline::intro_arm(index, time, size));
-        }
+        let arms = core::array::from_fn(|index| arm_pose(timeline::intro_arm(index, time, size)));
+        Logo::set_pose(
+            logo,
+            LogoPose {
+                arms,
+                center_opacity: timeline::square_opacity(time),
+            },
+        );
     }
 }
 
@@ -157,13 +152,16 @@ unsafe fn show_intro(logo: *mut _lv_obj_t, time: i32) {
 unsafe fn show_loop(logo: *mut _lv_obj_t, time: i32, first_cycle: bool) {
     unsafe {
         let size = lv_obj_get_width(logo);
-        for index in 0..Logo::ARM_COUNT {
-            apply_arm(
-                logo,
-                index,
-                timeline::loop_arm(index, time, size, first_cycle),
-            );
-        }
+        let arms = core::array::from_fn(|index| {
+            arm_pose(timeline::loop_arm(index, time, size, first_cycle))
+        });
+        Logo::set_pose(
+            logo,
+            LogoPose {
+                arms,
+                center_opacity: 255,
+            },
+        );
     }
 }
 
