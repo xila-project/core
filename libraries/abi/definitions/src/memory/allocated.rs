@@ -59,13 +59,13 @@ impl Allocated {
     /// A non-null `user_pointer` must have been returned by `get_user_pointer` for
     /// a live allocation with intact metadata.
     pub unsafe fn from_user_pointer(user_pointer: *mut u8) -> Option<Self> {
-        NonNull::new(user_pointer)?;
+        let user_pointer = NonNull::new(user_pointer)?;
+        // SAFETY: The caller guarantees a live allocation whose header precedes it.
         let header_pointer = unsafe { user_pointer.sub(Self::HEADER_SIZE) };
         let bytes = unsafe { header_pointer.cast::<[u8; Self::HEADER_SIZE]>().read() };
         let metadata = CompactLayout::from_le_bytes(bytes);
-        let pointer = unsafe {
-            NonNull::new_unchecked(user_pointer.sub(Self::user_offset(metadata.get_alignment())))
-        };
+        // SAFETY: The base precedes the user pointer within the same allocation.
+        let pointer = unsafe { user_pointer.sub(Self::user_offset(metadata.get_alignment())) };
         Some(Self { pointer, metadata })
     }
 

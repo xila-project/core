@@ -1337,6 +1337,38 @@ mod tests {
         }
     }
 
+    // Shrinking a DMA block to a size its region's DMA alignment does not
+    // divide moves it to a region that accepts the new size, so it never
+    // shares a cache line with another allocation.
+    #[test]
+    fn dma_shrink_moves_when_the_region_alignment_no_longer_divides() {
+        let caps = CapabilityFlags::DirectMemoryAccess;
+        let manager = RegionManager::new(
+            [
+                RegionDescriptor::new(caps).with_dma_alignment(4),
+                RegionDescriptor::new(caps).with_dma_alignment(64),
+            ],
+            Some(THRESHOLD),
+        );
+        assert!(AlignedBacking::<{ 16 * 1024 }>::leak().init_region(&manager, 0));
+        assert!(AlignedBacking::<{ 16 * 1024 }>::leak().init_region(&manager, 1));
+
+        let large = Layout::from_size_align(THRESHOLD + 64, 64).unwrap();
+        let block = unsafe { manager.allocate(caps, large) }.unwrap();
+        assert!(manager.region_contains(1, block));
+        stamp(block, 100, 31);
+
+        let small = Layout::from_size_align(100, 64).unwrap();
+        let shrunk = unsafe { manager.reallocate(caps, block, large, small) }.unwrap();
+        assert!(manager.region_contains(0, shrunk));
+        assert_eq!(shrunk.as_ptr().addr() % 64, 0);
+        assert_stamp(shrunk, 100, 31);
+
+        unsafe { manager.deallocate(shrunk, small) };
+        assert_eq!(manager.get_used(), 0);
+        validate_regions(&manager);
+    }
+
     #[test]
     fn dma_alignment_128_survives_reallocation() {
         let first = AlignedBacking::<{ 16 * 1024 }>::leak();

@@ -180,7 +180,8 @@ pub unsafe extern "C" fn xila_memory_deallocate(pointer: *mut c_void) {
 /// # Parameters
 ///
 /// * `Pointer` - Pointer to the memory block to reallocate, or null for new allocation
-/// * `Size` - New size in bytes (0 is equivalent to deallocation)
+/// * `Size` - New size in bytes (0 is equivalent to deallocation). On 32-bit
+///   targets a block, including its header and padding, is limited to 32 MiB.
 ///
 /// # Returns
 ///
@@ -260,12 +261,13 @@ pub unsafe extern "C" fn xila_memory_reallocate(pointer: *mut c_void, size: usiz
 /// This function is unsafe because:
 /// - The returned memory is uninitialized
 /// - The caller must ensure proper deallocation
-/// - The hint address, if providalignment enumed, must be a valid memory address
+/// - The hint address, if provided, must be a valid memory address
 ///
 /// # Parameters
 ///
 /// * `Hint_address` - Preferred memory address (hint only, may be ignored), or null
-/// * `Size` - Size of the memory block in bytes
+/// * `Size` - Size of the memory block in bytes. On 32-bit targets a block,
+///   including its header and padding, is limited to 32 MiB.
 /// * `Alignment` - Required memory alignment in bytes (must be a power of 2)
 /// * `Capabilities` - Memory capabilities flags (see `xila_memory_capabilities_*` constants)
 ///
@@ -764,8 +766,10 @@ mod tests {
         let caps = CapabilityFlags::DirectMemoryAccess | CapabilityFlags::AlwaysAccessible;
         unsafe {
             assert!(xila_memory_allocate(null_mut(), usize::MAX - 7, 8, caps.bits()).is_null());
-            let pointer = xila_memory_allocate(null_mut(), 64, 64, caps.bits());
-            assert!(!pointer.is_null());
+            let pointer =
+                core::ptr::NonNull::new(xila_memory_allocate(null_mut(), 64, 64, caps.bits()))
+                    .expect("allocation failed")
+                    .as_ptr();
             pointer.cast::<u8>().write_bytes(0x5a, 64);
 
             for size in [usize::MAX - 7, isize::MAX as usize] {

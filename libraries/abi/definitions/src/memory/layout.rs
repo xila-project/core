@@ -29,6 +29,11 @@ impl CompactLayout {
     const CAPABILITY_MASK: u8 = (1 << Self::CAPABILITY_BITS) - 1;
 
     pub(super) const MAXIMUM_SIZE: usize = (1 << Self::SIZE_BITS) - 1;
+
+    // A new capability flag must widen the field, or blocks that carry it
+    // would be allocated and then lose their metadata.
+    const _CAPABILITIES_FIT: () =
+        assert!(CapabilityFlags::all().bits() as usize <= Self::CAPABILITY_MASK as usize);
     pub(super) const MAXIMUM_ALIGNMENT: usize = 1 << ((1 << Self::ALIGNMENT_BITS) - 1);
 
     pub const fn from_layout(layout: &Layout, capabilities: CapabilityFlags) -> Option<Self> {
@@ -86,6 +91,18 @@ impl CompactLayout {
     }
 }
 
+// 32-bit targets keep 25 size bits, so a block is at most 32 MiB - 1, and one
+// byte more is rejected rather than spilling into the capability bits.
+// Checked at compile time so the bare-metal CI build enforces it.
+#[cfg(target_pointer_width = "32")]
+const _: () = {
+    assert!(CompactLayout::MAXIMUM_SIZE == (1 << 25) - 1);
+    let Ok(too_large) = Layout::from_size_align(CompactLayout::MAXIMUM_SIZE + 1, 8) else {
+        panic!("invalid probe layout");
+    };
+    assert!(CompactLayout::from_layout(&too_large, CapabilityFlags::all()).is_none());
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,6 +127,20 @@ mod tests {
         let layout = Layout::from_size_align(CompactLayout::MAXIMUM_SIZE, 1).unwrap();
         let compact = CompactLayout::from_layout(&layout, CapabilityFlags::empty()).unwrap();
         assert_eq!(compact.get_size(), CompactLayout::MAXIMUM_SIZE);
+    }
+
+    // 32-bit targets keep 25 size bits: a block is at most 32 MiB - 1.
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn test_32_bit_packing() {
+        assert_eq!(CompactLayout::MAXIMUM_SIZE, (1 << 25) - 1);
+        let layout = Layout::from_size_align(CompactLayout::MAXIMUM_SIZE, 8).unwrap();
+        let compact = CompactLayout::from_layout(&layout, CapabilityFlags::all()).unwrap();
+        assert_eq!(compact.get_size(), CompactLayout::MAXIMUM_SIZE);
+        assert_eq!(compact.get_capabilities(), CapabilityFlags::all());
+        assert_eq!(compact.get_alignment(), 8);
+        let too_large = Layout::from_size_align(CompactLayout::MAXIMUM_SIZE + 1, 8).unwrap();
+        assert!(CompactLayout::from_layout(&too_large, CapabilityFlags::all()).is_none());
     }
 
     #[test]
