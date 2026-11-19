@@ -1,0 +1,93 @@
+# CMake toolchain file for Xila native applications on @XILA_SDK_TARGET@.
+#
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=<sdk>/cmake/xila-toolchain.cmake
+#
+# Generated from sdk/cmake/xila-toolchain.cmake.in by tools/sdk/build.py. It compiles
+# with clang, links with lld into a static PIE that the Xila native loader can map
+# (the SDK's linker script, no interpreter, RELATIVE relocations only) and links the
+# picolibc C library, the POSIX layer, the API stubs and crt0.
+#
+# Cache variables:
+#   XILA_DATA_ALIGNMENT  data segment alignment (default @XILA_DATA_ALIGNMENT@: a page on hosts that
+#                        protect segments, 16 on microcontrollers)
+#   XILA_PRINTF_FORMAT   printf and scanf variant: minimal, integer (default), long-long,
+#                        float or double. Integer-only costs the least flash and RAM.
+#   XILA_BUILTINS_LIBRARY  compiler runtime archive (64-bit division, soft doubles) when the
+#                        target needs one; found automatically when possible
+
+set(CMAKE_SYSTEM_NAME Generic)
+set(CMAKE_SYSTEM_PROCESSOR @XILA_CMAKE_PROCESSOR@)
+
+get_filename_component(XILA_SDK_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+
+if(NOT CMAKE_C_COMPILER)
+  find_program(XILA_CLANG clang REQUIRED)
+  set(CMAKE_C_COMPILER "${XILA_CLANG}")
+endif()
+# lld, wherever the distribution put it (next to clang when it is not on PATH).
+execute_process(
+  COMMAND "${CMAKE_C_COMPILER}" -print-prog-name=ld.lld
+  OUTPUT_VARIABLE XILA_LLD
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(NOT IS_ABSOLUTE "${XILA_LLD}")
+  find_program(XILA_LLD ld.lld REQUIRED)
+endif()
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+
+set(XILA_DATA_ALIGNMENT @XILA_DATA_ALIGNMENT@ CACHE STRING "Data segment alignment in bytes")
+
+# The compiler's own freestanding headers (stdarg.h, stddef.h...) come after the SDK's.
+execute_process(
+  COMMAND "${CMAKE_C_COMPILER}" --target=@XILA_CLANG_TRIPLE@ -print-resource-dir
+  OUTPUT_VARIABLE XILA_RESOURCE_DIR
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+set(XILA_ARCH_FLAGS "@XILA_ARCH_FLAGS@")
+string(REPLACE ";" " " XILA_ARCH_FLAGS_TEXT "${XILA_ARCH_FLAGS}")
+
+set(CMAKE_C_FLAGS_INIT "--target=@XILA_CLANG_TRIPLE@ ${XILA_ARCH_FLAGS_TEXT} -nostdinc -isystem ${XILA_SDK_ROOT}/include -isystem ${XILA_RESOURCE_DIR}/include -D_GNU_SOURCE -fPIE -ffunction-sections -fdata-sections -fno-stack-protector -fno-unwind-tables -fno-asynchronous-unwind-tables")
+set(CMAKE_C_FLAGS_RELEASE_INIT "-Os")
+set(CMAKE_C_FLAGS_MINSIZEREL_INIT "-Os")
+set(CMAKE_EXECUTABLE_SUFFIX_C ".elf")
+
+# Compiler runtime (libgcc-style helpers).
+set(XILA_BUILTINS_COMMAND "@XILA_BUILTINS_COMMAND@")
+set(XILA_BUILTINS_LIBRARY "" CACHE FILEPATH "Compiler runtime archive for @XILA_SDK_TARGET@")
+if(NOT XILA_BUILTINS_LIBRARY AND XILA_BUILTINS_COMMAND)
+  execute_process(
+    COMMAND ${XILA_BUILTINS_COMMAND}
+    OUTPUT_VARIABLE XILA_BUILTINS_FOUND
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+    RESULT_VARIABLE XILA_BUILTINS_RESULT)
+  if(NOT XILA_BUILTINS_RESULT EQUAL 0 OR NOT EXISTS "${XILA_BUILTINS_FOUND}")
+    message(FATAL_ERROR
+      "No compiler runtime found for @XILA_SDK_TARGET@. Install the Arm GNU toolchain "
+      "(gcc-arm-none-eabi) or pass -DXILA_BUILTINS_LIBRARY=<libgcc.a or libclang_rt.builtins.a>.")
+  endif()
+  set(XILA_BUILTINS_LIBRARY "${XILA_BUILTINS_FOUND}" CACHE FILEPATH "Compiler runtime archive" FORCE)
+endif()
+
+# printf and scanf variants: picolibc builds all of them, and the linker aliases the
+# generic entry points to the one the application asks for.
+set(XILA_PRINTF_FORMAT "integer" CACHE STRING "printf and scanf variant")
+set_property(CACHE XILA_PRINTF_FORMAT PROPERTY STRINGS minimal integer long-long float double)
+set(XILA_PRINTF_ALIASES "")
+if(NOT XILA_PRINTF_FORMAT STREQUAL "integer")
+  set(XILA_PRINTF_LETTER_minimal m)
+  set(XILA_PRINTF_LETTER_long-long l)
+  set(XILA_PRINTF_LETTER_float f)
+  set(XILA_PRINTF_LETTER_double d)
+  if(NOT DEFINED XILA_PRINTF_LETTER_${XILA_PRINTF_FORMAT})
+    message(FATAL_ERROR "XILA_PRINTF_FORMAT must be minimal, integer, long-long, float or double")
+  endif()
+  set(XILA_PRINTF_ALIASES "--defsym=vfprintf=__${XILA_PRINTF_LETTER_${XILA_PRINTF_FORMAT}}_vfprintf --defsym=vfscanf=__${XILA_PRINTF_LETTER_${XILA_PRINTF_FORMAT}}_vfscanf")
+endif()
+
+# One link rule for every executable, calling lld directly: the static-PIE flags and the
+# SDK linker script, crt0 first, then the objects, then the libraries as a group because
+# libc calls back into the POSIX layer (read, write, malloc, ...). These flags live in the
+# rule, not in CMAKE_EXE_LINKER_FLAGS, so that a user's own flags cannot replace them;
+# CMAKE_EXE_LINKER_FLAGS and target link options therefore take ld.lld flags (no -Wl,).
+set(CMAKE_C_LINK_EXECUTABLE
+  "${XILA_LLD} -pie --no-dynamic-linker -Bsymbolic -z max-page-size=16 --gc-sections --build-id=none --defsym=XILA_DATA_ALIGN=${XILA_DATA_ALIGNMENT} ${XILA_PRINTF_ALIASES} -T ${XILA_SDK_ROOT}/lib/xila-static-pie.ld <CMAKE_C_LINK_FLAGS> <LINK_FLAGS> ${XILA_SDK_ROOT}/lib/crt0.o <OBJECTS> -o <TARGET> -L${XILA_SDK_ROOT}/lib --start-group <LINK_LIBRARIES> -lxila_posix -lxila -lc ${XILA_BUILTINS_LIBRARY} --end-group")

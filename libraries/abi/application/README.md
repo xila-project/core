@@ -194,9 +194,13 @@ heap and owns its teardown.
 
 ## SDK startup
 
+Applications written in C normally use the published [SDK](sdk/README.md): picolibc
+and a POSIX layer on top of this ABI, with `main` as the entry point. The text below
+is the layer underneath, for images that do not use the C library.
+
 A separately linked C image defines `int32_t xila_main(const XilaStartup *)` and
 links `sdk/crt0.c` and `sdk/stubs.c`, using `-Iinclude/xila -Isdk` and including
-`stubs.h`. The host calls `_xila_start` once per image. crt0 checks the startup
+`stubs.h`. crt0 also carries the `XILA` ABI note the loader requires. The host calls `_xila_start` once per image. crt0 checks the startup
 and table sizes and the ABI version, installs the image-local table pointer,
 then calls `xila_main`. Before startup and after `xila_main` returns, all stubs
 return `XILA_STATUS_UNAVAILABLE`. The entry must join any users of the stubs

@@ -16,3 +16,4 @@ node_modules
 
 # Optional Japanese source font, installed by the pinned font setup script.
 /subsystems/graphics/fonts/SourceHanSansJP-Regular.otf
+__pycache__/
