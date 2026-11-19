@@ -60,17 +60,22 @@ impl TcpSocket {
     ) -> Result<()> {
         let endpoint = IpListenEndpoint::new(address.map(Into::into), port.into()).into_smoltcp();
 
-        self.with_mutable(|s| {
-            if s.state() == tcp::State::Closed {
-                s.listen(endpoint).map_err(|e| match e {
-                    tcp::ListenError::InvalidState => Error::InvalidState,
-                    tcp::ListenError::Unaddressable => Error::InvalidPort,
-                })
-            } else {
-                Ok(())
-            }
-        })
-        .await?;
+        let started_listening = self
+            .with_mutable(|s| -> Result<bool> {
+                if s.state() == tcp::State::Closed {
+                    s.listen(endpoint).map_err(|e| match e {
+                        tcp::ListenError::InvalidState => Error::InvalidState,
+                        tcp::ListenError::Unaddressable => Error::InvalidPort,
+                    })?;
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            })
+            .await?;
+        if started_listening {
+            self.context.closed = false;
+        }
 
         poll_fn(|cx| {
             self.poll_with_mutable(cx, |s, cx| match s.state() {
@@ -105,6 +110,7 @@ impl TcpSocket {
                 }
             })
             .await?;
+        self.context.closed = false;
 
         poll_fn(|cx| {
             self.poll_with_mutable(cx, |socket, cx| match socket.state() {
@@ -133,13 +139,17 @@ impl TcpSocket {
                 }
                 Ok(n) => Poll::Ready(Ok(n)),
                 Err(tcp::RecvError::Finished) => Poll::Ready(Ok(0)),
-                Err(tcp::RecvError::InvalidState) => Poll::Ready(Err(Error::ConnectionReset)),
+                Err(tcp::RecvError::InvalidState) => Poll::Ready(Err(Error::NotConnected)),
             })
         })
         .await
     }
 
     pub async fn write(&mut self, buffer: &[u8]) -> Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+
         poll_fn(|cx| {
             self.poll_with_mutable(cx, |s, cx| match s.send_slice(buffer) {
                 Ok(0) => {
@@ -147,7 +157,22 @@ impl TcpSocket {
                     Poll::Pending
                 }
                 Ok(n) => Poll::Ready(Ok(n)),
-                Err(tcp::SendError::InvalidState) => Poll::Ready(Err(Error::ConnectionReset)),
+                Err(tcp::SendError::InvalidState) => {
+                    let send_closed = self.context.closed
+                        || matches!(
+                            s.state(),
+                            tcp::State::FinWait1
+                                | tcp::State::FinWait2
+                                | tcp::State::Closing
+                                | tcp::State::LastAck
+                                | tcp::State::TimeWait
+                        );
+                    Poll::Ready(Err(if send_closed {
+                        Error::BrokenPipe
+                    } else {
+                        Error::NotConnected
+                    }))
+                }
             })
         })
         .await
@@ -262,6 +287,55 @@ mod tests {
     use super::*;
 
     static TEST_MUTEX: Mutex<CriticalSectionRawMutex, ()> = Mutex::new(());
+
+    #[task::test]
+    async fn unconnected_tcp_io_reports_not_connected() {
+        let _lock = TEST_MUTEX.lock().await;
+        let manager = initialize().await;
+        let mut socket = manager.new_tcp_socket(128, 128, None).await.unwrap();
+
+        assert_eq!(socket.write(b"data").await, Err(Error::NotConnected));
+        assert_eq!(socket.read(&mut [0; 1]).await, Err(Error::NotConnected));
+        socket.close_forced().await;
+    }
+
+    #[task::test]
+    async fn empty_tcp_writes_complete_and_local_shutdown_breaks_writes() {
+        use core::future::Future;
+
+        let _lock = TEST_MUTEX.lock().await;
+        let manager = initialize().await;
+        let port = Port::from_inner(51011);
+        let mut listener = manager.new_tcp_socket(128, 128, None).await.unwrap();
+        listener
+            .with_mutable(|s| s.listen(port.into_inner()).unwrap())
+            .await;
+        let mut client = manager.new_tcp_socket(128, 128, None).await.unwrap();
+
+        let handshake = embassy_futures::join::join(
+            listener.accept(Some([127, 0, 0, 1]), port),
+            client.connect([127, 0, 0, 1], port),
+        );
+        let embassy_futures::select::Either::First((Ok(()), Ok(()))) =
+            embassy_futures::select::select(
+                handshake,
+                task::sleep(core::time::Duration::from_secs(2)),
+            )
+            .await
+        else {
+            panic!("loopback TCP handshake failed");
+        };
+
+        let poll = core::pin::pin!(client.write(&[]))
+            .poll(&mut Context::from_waker(core::task::Waker::noop()));
+        assert_eq!(poll, Poll::Ready(Ok(0)));
+        assert_eq!(block_on(client.write(&[])), Ok(0));
+
+        client.close().await;
+        assert_eq!(client.write(b"data").await, Err(Error::BrokenPipe));
+        assert_eq!(client.write(&[]).await, Ok(0));
+        listener.close_forced().await;
+    }
 
     #[task::test]
     async fn close_then_drop_delivers_queued_data_and_fin() {
