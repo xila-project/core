@@ -17,6 +17,7 @@
 //! its separations stay open at every factor.
 
 use alloc::vec;
+use core::{mem::ManuallyDrop, ptr};
 
 use crate::{Color, Error, Point, Result, lvgl, theme};
 
@@ -296,9 +297,33 @@ pub enum LogoStyle {
     Outline,
 }
 
+/// A logo that deletes its LVGL object on drop.
+#[non_exhaustive]
 pub struct Logo {
     pub object: *mut lvgl::lv_obj_t,
-    buffers: [*mut lvgl::lv_draw_buf_t; Self::ARM_COUNT],
+}
+
+struct ArmBuffer(*mut lvgl::lv_draw_buf_t);
+
+impl Drop for ArmBuffer {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe {
+                lvgl::lv_image_cache_drop(self.0.cast());
+                lvgl::lv_draw_buf_destroy(self.0);
+            }
+        }
+    }
+}
+
+unsafe extern "C" fn delete_arm_buffer(event: *mut lvgl::lv_event_t) {
+    unsafe {
+        let arm = lvgl::lv_event_get_current_target(event).cast();
+        let buffer = ArmBuffer(lvgl::lv_event_get_user_data(event).cast());
+        // The delete event runs before LVGL destroys the image.
+        lvgl::lv_image_set_src(arm, ptr::null());
+        drop(buffer);
+    }
 }
 
 unsafe extern "C" fn palette_color_changed(event: *mut lvgl::lv_event_t) {
@@ -339,6 +364,8 @@ impl Logo {
     ///
     /// # Safety
     /// `parent` must be a live LVGL object and the caller must hold the LVGL lock.
+    /// Keep the logo's object alive until the wrapper is dropped or converted
+    /// with [`Self::into_inner_object`]. Drop the wrapper under the LVGL lock.
     pub unsafe fn new(parent: *mut lvgl::lv_obj_t, factor: u8, color: Color) -> Result<Self> {
         unsafe { Self::new_with_style(parent, factor, color, LogoStyle::Filled) }
     }
@@ -347,6 +374,8 @@ impl Logo {
     ///
     /// # Safety
     /// `parent` must be a live LVGL object and the caller must hold the LVGL lock.
+    /// Keep the logo's object alive until the wrapper is dropped or converted
+    /// with [`Self::into_inner_object`]. Drop the wrapper under the LVGL lock.
     pub unsafe fn new_with_style(
         parent: *mut lvgl::lv_obj_t,
         factor: u8,
@@ -366,12 +395,8 @@ impl Logo {
                 return Err(Error::FailedToCreateObject);
             }
 
-            // Build the logo before handing ownership to `Self`, so a failure
-            // releases everything created so far through `Drop`.
-            let mut logo = Self {
-                object,
-                buffers: [core::ptr::null_mut(); Self::ARM_COUNT],
-            };
+            // Drop deletes the partial widget tree if construction fails.
+            let logo = Self { object };
 
             // Decorative and theme independent: no surface, padding or input.
             lvgl::lv_obj_remove_style_all(object);
@@ -387,11 +412,12 @@ impl Logo {
         }
     }
 
-    unsafe fn create_arms(&mut self, metrics: &Metrics, style: LogoStyle) -> Result<()> {
+    unsafe fn create_arms(&self, metrics: &Metrics, style: LogoStyle) -> Result<()> {
         let side = metrics.arm_size() as u32;
 
         unsafe {
-            for slot in &mut self.buffers {
+            let mut buffers = [const { ArmBuffer(ptr::null_mut()) }; Self::ARM_COUNT];
+            for slot in &mut buffers {
                 let buffer = lvgl::lv_draw_buf_create(
                     side,
                     side,
@@ -401,12 +427,12 @@ impl Logo {
                 if buffer.is_null() {
                     return Err(Error::OutOfMemory);
                 }
-                *slot = buffer;
+                slot.0 = buffer;
             }
 
             // Every buffer was allocated above with the same geometry; keep the
             // accesses checked so no raw pointer is dereferenced unproven.
-            let source_buffer = self.buffers[3].as_mut().ok_or(Error::OutOfMemory)?;
+            let source_buffer = buffers[3].0.as_mut().ok_or(Error::OutOfMemory)?;
             if source_buffer.data.is_null() {
                 return Err(Error::OutOfMemory);
             }
@@ -428,7 +454,7 @@ impl Logo {
                     lvgl::lv_align_t_LV_ALIGN_BOTTOM_LEFT => (true, true),
                     _ => (false, true),
                 };
-                let target_buffer = self.buffers[index].as_mut().ok_or(Error::OutOfMemory)?;
+                let target_buffer = buffers[index].0.as_mut().ok_or(Error::OutOfMemory)?;
                 if target_buffer.data.is_null() {
                     return Err(Error::OutOfMemory);
                 }
@@ -442,13 +468,23 @@ impl Logo {
                 }
             }
 
-            for (buffer, alignment) in self.buffers.iter().zip(Self::ALIGNMENTS) {
+            for (buffer, alignment) in buffers.into_iter().zip(Self::ALIGNMENTS) {
                 let arm = lvgl::lv_image_create(self.object);
                 if arm.is_null() {
                     return Err(Error::FailedToCreateObject);
                 }
                 lvgl::lv_obj_remove_style_all(arm);
-                lvgl::lv_image_set_src(arm, *buffer as *const _);
+                let on_delete = lvgl::lv_obj_add_event_cb(
+                    arm,
+                    Some(delete_arm_buffer),
+                    lvgl::lv_event_code_t_LV_EVENT_DELETE,
+                    buffer.0.cast(),
+                );
+                if on_delete.is_null() {
+                    return Err(Error::OutOfMemory);
+                }
+                // The image now owns the buffer through its delete callback.
+                lvgl::lv_image_set_src(arm, ManuallyDrop::new(buffer).0.cast());
                 lvgl::lv_obj_set_align(arm, alignment);
                 lvgl::lv_obj_remove_flag(arm, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_CLICKABLE);
                 lvgl::lv_obj_add_flag(arm, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_EVENT_BUBBLE);
@@ -458,7 +494,7 @@ impl Logo {
         Ok(())
     }
 
-    unsafe fn create_center(&mut self, metrics: &Metrics, style: LogoStyle) -> Result<()> {
+    unsafe fn create_center(&self, metrics: &Metrics, style: LogoStyle) -> Result<()> {
         unsafe {
             let center = lvgl::lv_obj_create(self.object);
             if center.is_null() {
@@ -535,6 +571,12 @@ impl Logo {
         self.object
     }
 
+    /// Leave the logo and its draw buffers owned by the LVGL object tree.
+    /// The returned pointer is valid until LVGL deletes the logo.
+    pub fn into_inner_object(self) -> *mut lvgl::lv_obj_t {
+        ManuallyDrop::new(self).object
+    }
+
     /// Arm object, in [`Self::ARM_COUNT`] order.
     ///
     /// # Safety
@@ -554,16 +596,7 @@ impl Logo {
 
 impl Drop for Logo {
     fn drop(&mut self) {
-        unsafe {
-            // Delete the images before releasing the bitmaps they reference.
-            lvgl::lv_obj_delete(self.object);
-            for buffer in self.buffers {
-                if !buffer.is_null() {
-                    lvgl::lv_image_cache_drop(buffer as *const _);
-                    lvgl::lv_draw_buf_destroy(buffer);
-                }
-            }
-        }
+        unsafe { lvgl::lv_obj_delete(self.object) };
     }
 }
 
