@@ -182,6 +182,14 @@ struct Painter {
 }
 
 impl Painter {
+    unsafe fn draw_fill(&self, area: &lvgl::lv_area_t) {
+        unsafe {
+            if lvgl::lv_area_is_on(area, &(*self.layer)._clip_area) {
+                lvgl::lv_draw_fill(self.layer, &self.fill, area);
+            }
+        }
+    }
+
     /// Paint one edge up to the arm's interior split column. The solid
     /// rectangle and the sloping triangle own disjoint columns, so their
     /// shared vertical edge never receives two antialiased fills.
@@ -195,7 +203,7 @@ impl Painter {
             let original = unsafe { (*self.layer)._clip_area };
             if !left && top == 0 && radius > 0 {
                 let area = arm.area(split, 0, side - radius, radius);
-                unsafe { lvgl::lv_draw_fill(self.layer, &self.fill, &area) };
+                unsafe { self.draw_fill(&area) };
             }
             for pair in edge.windows(2) {
                 let [a, b] = [pair[0], pair[1]];
@@ -208,7 +216,7 @@ impl Painter {
                 let (rect_left, rect_right) = if left { (tip.x, far) } else { (near, tip.x) };
                 if rect_left < rect_right {
                     let area = arm.area(rect_left, y1, rect_right, y2);
-                    unsafe { lvgl::lv_draw_fill(self.layer, &self.fill, &area) };
+                    unsafe { self.draw_fill(&area) };
                 }
 
                 let x1 = near.max(a.x.min(b.x));
@@ -271,7 +279,7 @@ impl Painter {
                     let interior_below = (b.x < a.x) == left;
                     let y = (a.y - i32::from(!interior_below)).clamp(0, arm.side - 1);
                     let area = arm.area(a.x.min(b.x), y, a.x.max(b.x), y + 1);
-                    unsafe { lvgl::lv_draw_fill(self.layer, &self.fill, &area) };
+                    unsafe { self.draw_fill(&area) };
                 }
                 continue;
             }
@@ -339,7 +347,20 @@ unsafe fn draw_logo(object: *mut lvgl::lv_obj_t, layer: *mut lvgl::lv_layer_t) {
             y: side,
         };
 
+        // The logo takes its color directly from text_color and deliberately
+        // ignores color_filter and layer recolor.
         let color = lvgl::lv_obj_get_style_text_color(object, lvgl::LV_PART_MAIN);
+        let clip = (*layer)._clip_area;
+        let layer_opa = (*layer).opa;
+        // Match LVGL's descriptor initialization, including LV_OPA_MIX2
+        // when the layer is translucent.
+        let mix_opacity = |opacity| {
+            if layer_opa < lvgl::LV_OPA_MAX as u8 {
+                ((u16::from(opacity) * u16::from(layer_opa)) >> 8) as u8
+            } else {
+                opacity
+            }
+        };
         let mut painter = Painter {
             layer,
             fill: lvgl::lv_draw_fill_dsc_t::default(),
@@ -359,7 +380,8 @@ unsafe fn draw_logo(object: *mut lvgl::lv_obj_t, layer: *mut lvgl::lv_layer_t) {
         left_edge[..left.len()].copy_from_slice(&left);
         let mirrors = [(true, false), (true, true), (false, true), (false, false)];
         for ((mirror_x, mirror_y), arm_pose) in mirrors.into_iter().zip(pose.arms) {
-            if arm_pose.opacity == 0 {
+            let opacity = mix_opacity(arm_pose.opacity);
+            if opacity == 0 {
                 continue;
             }
             let offset = i32::from(arm_pose.offset);
@@ -378,9 +400,12 @@ unsafe fn draw_logo(object: *mut lvgl::lv_obj_t, layer: *mut lvgl::lv_layer_t) {
                 mirror_y,
                 side,
             };
-            painter.fill.opa = arm_pose.opacity;
-            painter.line.opa = arm_pose.opacity;
-            painter.triangle.opa = arm_pose.opacity;
+            if !lvgl::lv_area_is_on(&arm.area(0, 0, side, side), &clip) {
+                continue;
+            }
+            painter.fill.opa = opacity;
+            painter.line.opa = opacity;
+            painter.triangle.opa = opacity;
             painter.rounded_corner(&arm, radius, outline);
             if outline {
                 let top_right = Vertex {
@@ -411,7 +436,7 @@ unsafe fn draw_logo(object: *mut lvgl::lv_obj_t, layer: *mut lvgl::lv_layer_t) {
             color,
             i32::from(metrics.square_radius),
             outline,
-            pose.center_opacity,
+            mix_opacity(pose.center_opacity),
         );
     }
 }
@@ -424,10 +449,10 @@ unsafe fn draw_rounded_rect(
     outline: bool,
     opacity: lvgl::lv_opa_t,
 ) {
-    if opacity == 0 {
-        return;
-    }
     unsafe {
+        if opacity == 0 || !lvgl::lv_area_is_on(area, &(*layer)._clip_area) {
+            return;
+        }
         let mut rect = lvgl::lv_draw_rect_dsc_t::default();
         lvgl::lv_draw_rect_dsc_init(&mut rect);
         rect.radius = radius;
@@ -628,6 +653,7 @@ impl Logo {
     /// [`Self::new_with_style`]. The caller must hold the LVGL lock.
     pub unsafe fn set_pose(object: *mut lvgl::lv_obj_t, pose: LogoPose) {
         unsafe {
+            debug_assert!(lvgl::lv_obj_has_class(object, logo_class()));
             let instance = object.cast::<LogoObject>();
             let previous = (*instance).pose;
             if pose == previous {

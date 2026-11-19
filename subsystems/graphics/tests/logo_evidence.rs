@@ -3,11 +3,14 @@
 
 extern crate abi_definitions;
 
-use std::{cell::Cell, fmt::Write as _, fs, path::Path, ptr::NonNull, time::Instant};
+use std::{cell::Cell, fmt::Write as _, fs, path::Path, ptr::NonNull, sync::Mutex, time::Instant};
 
 use graphics::{Color, Logo, LogoStyle, lvgl};
 use memory::{CapabilityFlags, Layout, ManagerTrait};
 use testing::{MemoryManager, ThreadAllocations};
+
+// Both opt-in tests use the process-wide LVGL instance.
+static LVGL: Mutex<()> = Mutex::new(());
 
 struct MeasuringAllocator(MemoryManager);
 
@@ -72,9 +75,9 @@ fn median_ns(draw: impl Fn()) -> u128 {
 #[test]
 #[ignore = "writes comparison inputs and measures host redraws"]
 fn capture_logo_evidence() {
-    let output = std::env::var_os("XILA_LOGO_EVIDENCE").expect("set XILA_LOGO_EVIDENCE");
-    let output = Path::new(&output);
-    fs::create_dir_all(output).unwrap();
+    let _lock = LVGL.lock().unwrap();
+    let output = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/logo-capture");
+    fs::create_dir_all(&output).unwrap();
     let mut report = String::from(
         "size,style,background,format,object_bytes,cold_peak,cold_retained,warm_peak,warm_retained,background_peak,snapshot_ns,background_ns\n",
     );
@@ -150,4 +153,79 @@ fn capture_logo_evidence() {
         }
     }
     fs::write(output.join("measurements.csv"), report).unwrap();
+}
+
+/// Count allocations on the render thread with LVGL in partial render mode.
+#[test]
+#[ignore = "measures host redraw allocations"]
+fn count_logo_redraw_allocations() {
+    let _lock = LVGL.lock().unwrap();
+    const SIZE: i32 = 128;
+    unsafe extern "C" fn flush(
+        display: *mut lvgl::lv_display_t,
+        _: *const lvgl::lv_area_t,
+        _: *mut u8,
+    ) {
+        unsafe { lvgl::lv_display_flush_ready(display) };
+    }
+
+    unsafe {
+        lvgl::lv_init();
+        let display = lvgl::lv_display_create(SIZE, SIZE);
+        lvgl::lv_display_set_color_format(
+            display,
+            lvgl::lv_color_format_t_LV_COLOR_FORMAT_XRGB8888,
+        );
+        let mut pixels = vec![0_u32; (SIZE * SIZE) as usize];
+        lvgl::lv_display_set_buffers(
+            display,
+            pixels.as_mut_ptr().cast(),
+            std::ptr::null_mut(),
+            (pixels.len() * size_of::<u32>()) as u32,
+            lvgl::lv_display_render_mode_t_LV_DISPLAY_RENDER_MODE_PARTIAL,
+        );
+        lvgl::lv_display_set_flush_cb(display, Some(flush));
+        let screen = lvgl::lv_display_get_screen_active(display);
+        lvgl::lv_obj_remove_style_all(screen);
+        lvgl::lv_obj_set_style_bg_opa(screen, 255, 0);
+        lvgl::lv_refr_now(display);
+
+        let count = |y1, y2| {
+            let area = lvgl::lv_area_t {
+                x1: 0,
+                x2: SIZE - 1,
+                y1,
+                y2,
+            };
+            let redraw = || {
+                assert_eq!(
+                    lvgl::lv_obj_invalidate_area(screen, &area),
+                    lvgl::lv_result_t_LV_RESULT_OK,
+                );
+                lvgl::lv_refr_now(display);
+            };
+            redraw();
+            let before = MemoryManager::thread_allocations();
+            redraw();
+            MemoryManager::thread_allocations()
+                .since(before)
+                .allocations()
+        };
+        let full_background = count(0, SIZE - 1);
+        let strip_background = count(SIZE / 2 - 1, SIZE / 2);
+        for style in [LogoStyle::Filled, LogoStyle::Outline] {
+            let logo = Logo::new_with_style(screen, 4, Color::WHITE, style).unwrap();
+            lvgl::lv_refr_now(display);
+            let full = count(0, SIZE - 1);
+            let strip = count(SIZE / 2 - 1, SIZE / 2);
+            println!(
+                "{style:?}: full {} ({full} total), center strip {} ({strip} total)",
+                full - full_background,
+                strip - strip_background,
+            );
+            drop(logo);
+        }
+        lvgl::lv_display_delete(display);
+        lvgl::lv_deinit();
+    }
 }
