@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 
-use crate::{Error, ItemStatic, Result, VirtualFileSystem, suspend_on};
+use crate::{IoErrorKind, ItemStatic, Result, VirtualFileSystem, suspend_on};
 use alloc::{vec, vec::Vec};
 use exported_file_system::StateFlags;
 use exported_file_system::{ControlCommand, ControlCommandIdentifier, Permissions};
@@ -70,7 +70,7 @@ impl<'a> SynchronousFile<'a> {
         let operations = self
             .item
             .as_base_operations()
-            .ok_or(Error::UnsupportedOperation)?;
+            .ok_or(IoErrorKind::Unsupported)?;
         let context = &mut self.context;
         self.cursor.update(|current| {
             let absolute;
@@ -78,7 +78,7 @@ impl<'a> SynchronousFile<'a> {
                 absolute = Position::Start(
                     current
                         .checked_add_signed(*delta)
-                        .ok_or(Error::InvalidParameter)?,
+                        .ok_or(IoErrorKind::InvalidArgument)?,
                 );
                 &absolute
             } else {
@@ -103,21 +103,17 @@ impl<'a> SynchronousFile<'a> {
         buffer: &mut [u8],
     ) -> core::task::Poll<Result<usize>> {
         if !self.flags.get_access().contains(AccessFlags::Read) {
-            return core::task::Poll::Ready(Err(Error::InvalidMode));
+            return core::task::Poll::Ready(Err(IoErrorKind::BadDescriptor));
         }
         let operations = self
             .item
             .as_base_operations()
-            .ok_or(Error::UnsupportedOperation)?;
+            .ok_or(IoErrorKind::Unsupported)?;
         let context = &mut self.context;
         self.cursor.poll_update(|position| {
             operations
                 .read(context, cx, buffer, position)
-                .map(|result| {
-                    result
-                        .map(|count| (count, position + count as Size))
-                        .map_err(Error::from)
-                })
+                .map(|result| result.map(|count| (count, position + count as Size)))
         })
     }
 
@@ -128,21 +124,17 @@ impl<'a> SynchronousFile<'a> {
         delimiter: &[u8],
     ) -> core::task::Poll<Result<usize>> {
         if !self.flags.get_access().contains(AccessFlags::Read) {
-            return core::task::Poll::Ready(Err(Error::InvalidMode));
+            return core::task::Poll::Ready(Err(IoErrorKind::BadDescriptor));
         }
         let operations = self
             .item
             .as_base_operations()
-            .ok_or(Error::UnsupportedOperation)?;
+            .ok_or(IoErrorKind::Unsupported)?;
         let context = &mut self.context;
         self.cursor.poll_update(|position| {
             operations
                 .read_until(context, cx, buffer, position, delimiter)
-                .map(|result| {
-                    result
-                        .map(|count| (count, position + count as Size))
-                        .map_err(Error::from)
-                })
+                .map(|result| result.map(|count| (count, position + count as Size)))
         })
     }
 
@@ -161,23 +153,19 @@ impl<'a> SynchronousFile<'a> {
         buffer: &[u8],
     ) -> core::task::Poll<Result<usize>> {
         if !self.flags.get_access().contains(AccessFlags::Write) {
-            return core::task::Poll::Ready(Err(Error::InvalidMode));
+            return core::task::Poll::Ready(Err(IoErrorKind::BadDescriptor));
         }
         let append_position = self.append_position();
         let operations = self
             .item
             .as_base_operations()
-            .ok_or(Error::UnsupportedOperation)?;
+            .ok_or(IoErrorKind::Unsupported)?;
         let context = &mut self.context;
         self.cursor.poll_update(|position| {
             let position = append_position.unwrap_or(position);
             operations
                 .write(context, cx, buffer, position)
-                .map(|result| {
-                    result
-                        .map(|count| (count, position + count as Size))
-                        .map_err(Error::from)
-                })
+                .map(|result| result.map(|count| (count, position + count as Size)))
         })
     }
 
@@ -187,9 +175,9 @@ impl<'a> SynchronousFile<'a> {
     ) -> core::task::Poll<Result<()>> {
         self.item
             .as_base_operations()
-            .ok_or(Error::UnsupportedOperation)?
+            .ok_or(IoErrorKind::Unsupported)?
             .flush(&mut self.context, cx)
-            .map(|result| result.map_err(Error::from))
+            .map(|result| result)
     }
 
     pub(crate) fn poll_control(
@@ -204,24 +192,24 @@ impl<'a> SynchronousFile<'a> {
             .contains(file_system::ControlDirectionFlags::Write)
             && !self.flags.get_access().contains(AccessFlags::Write)
         {
-            return core::task::Poll::Ready(Err(Error::InvalidMode));
+            return core::task::Poll::Ready(Err(IoErrorKind::BadDescriptor));
         }
         self.item
             .as_base_operations()
-            .ok_or(Error::UnsupportedOperation)?
+            .ok_or(IoErrorKind::Unsupported)?
             .control(&mut self.context, cx, command, input, output)
-            .map(|result| result.map_err(Error::from))
+            .map(|result| result)
     }
 
     pub fn write(&mut self, buffer: &[u8]) -> Result<usize> {
         if !self.flags.get_access().contains(AccessFlags::Write) {
-            return Err(Error::InvalidMode);
+            return Err(IoErrorKind::BadDescriptor);
         }
         let append_position = self.append_position();
         let operations = self
             .item
             .as_base_operations()
-            .ok_or(Error::UnsupportedOperation)?;
+            .ok_or(IoErrorKind::Unsupported)?;
         let context = &mut self.context;
         self.cursor.update(|position| {
             let position = append_position.unwrap_or(position);
@@ -232,12 +220,12 @@ impl<'a> SynchronousFile<'a> {
 
     pub fn write_vectored(&mut self, buffers: &[&[u8]]) -> Result<usize> {
         if !self.flags.get_access().contains(AccessFlags::Write) {
-            return Err(Error::InvalidMode);
+            return Err(IoErrorKind::BadDescriptor);
         }
         let operations = self
             .item
             .as_base_operations()
-            .ok_or(Error::UnsupportedOperation)?;
+            .ok_or(IoErrorKind::Unsupported)?;
         let context = &mut self.context;
         self.cursor.update(|position| {
             let count = operations.write_vectored_sync(context, buffers, position)?;
@@ -253,12 +241,12 @@ impl<'a> SynchronousFile<'a> {
 
     pub fn read(&mut self, buffer: &mut [u8]) -> Result<usize> {
         if !self.flags.get_access().contains(AccessFlags::Read) {
-            return Err(Error::InvalidMode);
+            return Err(IoErrorKind::BadDescriptor);
         }
         let operations = self
             .item
             .as_base_operations()
-            .ok_or(Error::UnsupportedOperation)?;
+            .ok_or(IoErrorKind::Unsupported)?;
         let context = &mut self.context;
         self.cursor.update(|position| {
             let count = operations.read_sync(context, buffer, position)?;
@@ -268,12 +256,12 @@ impl<'a> SynchronousFile<'a> {
 
     pub fn read_until(&mut self, buffer: &mut [u8], delimiter: &[u8]) -> Result<usize> {
         if !self.flags.get_access().contains(AccessFlags::Read) {
-            return Err(Error::InvalidMode);
+            return Err(IoErrorKind::BadDescriptor);
         }
         let operations = self
             .item
             .as_base_operations()
-            .ok_or(Error::UnsupportedOperation)?;
+            .ok_or(IoErrorKind::Unsupported)?;
         let context = &mut self.context;
         self.cursor.update(|position| {
             let count = operations.read_until_sync(context, buffer, position, delimiter)?;
@@ -306,7 +294,7 @@ impl<'a> SynchronousFile<'a> {
     pub fn flush(&mut self) -> Result<()> {
         self.item
             .as_base_operations()
-            .ok_or(Error::UnsupportedOperation)?
+            .ok_or(IoErrorKind::Unsupported)?
             .flush_sync(&mut self.context)?;
 
         Ok(())
@@ -316,7 +304,7 @@ impl<'a> SynchronousFile<'a> {
         let context = self
             .item
             .as_base_operations()
-            .ok_or(Error::UnsupportedOperation)?
+            .ok_or(IoErrorKind::Unsupported)?
             .clone_context(&self.context)?;
         suspend_on(self.virtual_file_system.retain(&self.item))?;
 
@@ -336,20 +324,20 @@ impl<'a> SynchronousFile<'a> {
 
         self.item
             .as_attributes_operations()
-            .ok_or(Error::UnsupportedOperation)?
+            .ok_or(IoErrorKind::Unsupported)?
             .get_attributes(&mut self.context, &mut attributes)?;
 
-        Statistics::from_attributes(&attributes).ok_or(Error::MissingAttribute)
+        Statistics::from_attributes(&attributes).ok_or(IoErrorKind::InputOutput)
     }
 
     /// Resize through an already opened writable file without changing its cursor.
     pub fn set_size(&mut self, size: Size) -> Result<()> {
         if !self.flags.get_access().contains(AccessFlags::Write) {
-            return Err(Error::InvalidMode);
+            return Err(IoErrorKind::BadDescriptor);
         }
         self.item
             .as_attributes_operations()
-            .ok_or(Error::UnsupportedOperation)?
+            .ok_or(IoErrorKind::Unsupported)?
             .set_attributes(&mut self.context, &Attributes::new().set_size(size))?;
         Ok(())
     }
@@ -373,25 +361,23 @@ impl<'a> SynchronousFile<'a> {
     /// Read at an explicit offset, leaving the shared cursor unchanged.
     pub fn read_at(&mut self, buffer: &mut [u8], offset: Size) -> Result<usize> {
         if !self.flags.get_access().contains(AccessFlags::Read) {
-            return Err(Error::InvalidMode);
+            return Err(IoErrorKind::BadDescriptor);
         }
-        Ok(self
-            .item
+        self.item
             .as_base_operations()
-            .ok_or(Error::UnsupportedOperation)?
-            .read_sync(&mut self.context, buffer, offset)?)
+            .ok_or(IoErrorKind::Unsupported)?
+            .read_sync(&mut self.context, buffer, offset)
     }
 
     /// Write at an explicit offset, leaving the shared cursor unchanged.
     pub fn write_at(&mut self, buffer: &[u8], offset: Size) -> Result<usize> {
         if !self.flags.get_access().contains(AccessFlags::Write) {
-            return Err(Error::InvalidMode);
+            return Err(IoErrorKind::BadDescriptor);
         }
-        Ok(self
-            .item
+        self.item
             .as_base_operations()
-            .ok_or(Error::UnsupportedOperation)?
-            .write_sync(&mut self.context, buffer, offset)?)
+            .ok_or(IoErrorKind::Unsupported)?
+            .write_sync(&mut self.context, buffer, offset)
     }
 
     pub fn set_owner(
@@ -424,10 +410,12 @@ impl<'a> SynchronousFile<'a> {
 
     fn set_metadata(&mut self, attributes: &Attributes) -> Result<()> {
         if self.closed {
-            return Err(Error::InvalidIdentifier);
+            return Err(IoErrorKind::BadDescriptor);
         }
         self.virtual_file_system.set_handle_attributes(
-            self.authority.as_ref().ok_or(Error::PermissionDenied)?,
+            self.authority
+                .as_ref()
+                .ok_or(IoErrorKind::PermissionDenied)?,
             &self.item,
             &mut self.context,
             attributes,
@@ -446,11 +434,11 @@ impl<'a> SynchronousFile<'a> {
             .contains(file_system::ControlDirectionFlags::Write)
             && !self.flags.get_access().contains(AccessFlags::Write)
         {
-            return Err(Error::InvalidMode);
+            return Err(IoErrorKind::BadDescriptor);
         }
         self.item
             .as_base_operations()
-            .ok_or(Error::UnsupportedOperation)?
+            .ok_or(IoErrorKind::Unsupported)?
             .control_sync(
                 &mut self.context,
                 C::IDENTIFIER,
@@ -473,11 +461,11 @@ impl<'a> SynchronousFile<'a> {
             .contains(file_system::ControlDirectionFlags::Write)
             && !self.flags.get_access().contains(AccessFlags::Write)
         {
-            return Err(Error::InvalidMode);
+            return Err(IoErrorKind::BadDescriptor);
         }
         self.item
             .as_base_operations()
-            .ok_or(Error::UnsupportedOperation)?
+            .ok_or(IoErrorKind::Unsupported)?
             .control_sync(&mut self.context, command, input, output)?;
 
         Ok(())
@@ -490,7 +478,7 @@ impl<'a> SynchronousFile<'a> {
     /// Set status flags supported by synchronous handles.
     pub fn set_state(&mut self, state: StateFlags) -> Result<()> {
         if state.intersects(StateFlags::Synchronous | StateFlags::SynchronousDataOnly) {
-            return Err(Error::UnsupportedOperation);
+            return Err(IoErrorKind::Unsupported);
         }
         self.flags = self.flags.set_status(state);
         Ok(())

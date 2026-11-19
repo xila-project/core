@@ -16,11 +16,11 @@
 //!
 //! Every struct starts with a `version` field equal to [`ABI_VERSION`] and its
 //! reserved fields must be zero; otherwise the command fails with
-//! `InvalidParameter`. Field values outside their documented range are
-//! `InvalidParameter`. A controller refusal to take the line (unsupported
+//! `InvalidArgument`. Field values outside their documented range are
+//! `InvalidArgument`. A controller refusal to take the line (unsupported
 //! option, line already in use) is reported as `InputOutput`.
 
-use file_system::{ControlCommand, ControlCommandIdentifier, Error, Result};
+use file_system::{ControlCommand, ControlCommandIdentifier, IoErrorKind, Result};
 use peripherals::gpio::{
     DriveMode, GpioController, InputConfig, LineCapabilities, LineId, OutputConfig, PinState, Pull,
 };
@@ -62,7 +62,7 @@ impl<C: GpioController + Sync + 'static> GpioHandle<C> {
             0 => Pull::Disabled,
             1 => Pull::Up,
             2 => Pull::Down,
-            _ => return Err(Error::InvalidParameter),
+            _ => return Err(IoErrorKind::InvalidArgument),
         };
 
         // Release the current line before requesting it again, or the
@@ -73,18 +73,18 @@ impl<C: GpioController + Sync + 'static> GpioHandle<C> {
             0 => Pin::Input(
                 self.controller
                     .request_input(self.line, InputConfig::new(pull))
-                    .map_err(|_| Error::InputOutput)?,
+                    .map_err(|_| IoErrorKind::InputOutput)?,
             ),
             1 => {
                 let drive_mode = match request.drive_mode {
                     0 => DriveMode::PushPull,
                     1 => DriveMode::OpenDrain,
-                    _ => return Err(Error::InvalidParameter),
+                    _ => return Err(IoErrorKind::InvalidArgument),
                 };
                 let initial_state = match request.initial_level {
                     0 => PinState::Low,
                     1 => PinState::High,
-                    _ => return Err(Error::InvalidParameter),
+                    _ => return Err(IoErrorKind::InvalidArgument),
                 };
 
                 Pin::Output(
@@ -93,10 +93,10 @@ impl<C: GpioController + Sync + 'static> GpioHandle<C> {
                             self.line,
                             OutputConfig::new(pull, drive_mode, initial_state),
                         )
-                        .map_err(|_| Error::InputOutput)?,
+                        .map_err(|_| IoErrorKind::InputOutput)?,
                 )
             }
-            _ => return Err(Error::InvalidParameter),
+            _ => return Err(IoErrorKind::InvalidArgument),
         });
 
         Ok(())
@@ -106,7 +106,7 @@ impl<C: GpioController + Sync + 'static> GpioHandle<C> {
         let capabilities: LineCapabilities = self
             .controller
             .capabilities(self.line)
-            .ok_or(Error::NotFound)?;
+            .ok_or(IoErrorKind::NotFound)?;
 
         Ok(CapabilitiesAbi {
             version: ABI_VERSION,
@@ -129,11 +129,11 @@ where
     fn read(&mut self, buffer: &mut [u8]) -> Result<usize> {
         use embedded_hal::digital::{InputPin, StatefulOutputPin};
 
-        let first = buffer.first_mut().ok_or(Error::InvalidParameter)?;
+        let first = buffer.first_mut().ok_or(IoErrorKind::InvalidArgument)?;
 
-        *first = match self.pin.as_mut().ok_or(Error::NotInitialized)? {
-            Pin::Input(pin) => u8::from(pin.is_high().map_err(|_| Error::InputOutput)?),
-            Pin::Output(pin) => u8::from(pin.is_set_high().map_err(|_| Error::InputOutput)?),
+        *first = match self.pin.as_mut().ok_or(IoErrorKind::DeviceUnavailable)? {
+            Pin::Input(pin) => u8::from(pin.is_high().map_err(|_| IoErrorKind::InputOutput)?),
+            Pin::Output(pin) => u8::from(pin.is_set_high().map_err(|_| IoErrorKind::InputOutput)?),
         };
 
         Ok(1)
@@ -142,19 +142,19 @@ where
     fn write(&mut self, buffer: &[u8]) -> Result<usize> {
         use embedded_hal::digital::OutputPin;
 
-        let level = match buffer.first().ok_or(Error::InvalidParameter)? {
+        let level = match buffer.first().ok_or(IoErrorKind::InvalidArgument)? {
             0 => false,
             1 => true,
-            _ => return Err(Error::InvalidParameter),
+            _ => return Err(IoErrorKind::InvalidArgument),
         };
 
-        match self.pin.as_mut().ok_or(Error::NotInitialized)? {
+        match self.pin.as_mut().ok_or(IoErrorKind::DeviceUnavailable)? {
             Pin::Output(pin) => {
                 let result = if level { pin.set_high() } else { pin.set_low() };
-                result.map_err(|_| Error::InputOutput)?;
+                result.map_err(|_| IoErrorKind::InputOutput)?;
                 Ok(1)
             }
-            Pin::Input(_) => Err(Error::UnsupportedOperation),
+            Pin::Input(_) => Err(IoErrorKind::Unsupported),
         }
     }
 
@@ -175,7 +175,7 @@ where
             check_version(GET_CAPABILITIES::cast_input(input)?)?;
             *GET_CAPABILITIES::cast_output(output)? = self.capabilities()?;
         } else {
-            return Err(Error::UnsupportedOperation);
+            return Err(IoErrorKind::Unsupported);
         }
 
         Ok(())
@@ -197,7 +197,7 @@ fn check_abi(version: u16, reserved_is_zero: bool) -> Result<()> {
     if version == ABI_VERSION && reserved_is_zero {
         Ok(())
     } else {
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     }
 }
 
@@ -220,11 +220,11 @@ where
     use file_system::Path;
 
     if name.is_empty() || name == "." || name == ".." || name.contains('/') {
-        return Err(virtual_file_system::Error::FileSystem(Error::InvalidPath));
+        return Err(IoErrorKind::InvalidPath);
     }
     let path = Path::GPIO_DEVICES
         .join(name)
-        .ok_or(virtual_file_system::Error::FileSystem(Error::InvalidPath))?;
+        .ok_or(IoErrorKind::InvalidPath)?;
     let handle = GpioHandle::new(controller, line);
 
     virtual_file_system::ignore_already_exists_error(

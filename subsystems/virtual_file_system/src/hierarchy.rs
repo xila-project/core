@@ -4,11 +4,11 @@ use exported_file_system::Permissions;
 use file_system::{Kind, Path};
 use task::TaskIdentifier;
 
-use crate::{Directory, Error, Result, VirtualFileSystem};
+use crate::{Directory, IoErrorKind, Result, VirtualFileSystem};
 
 pub fn ignore_already_exists_error<T>(result: Result<T>) -> Result<()> {
     match result {
-        Ok(_) | Err(Error::AlreadyExists) => Ok(()),
+        Ok(_) | Err(IoErrorKind::AlreadyExists) => Ok(()),
         Err(error) => Err(error),
     }
 }
@@ -87,14 +87,14 @@ pub async fn create_default_hierarchy(
     for path in paths {
         match virtual_file_system.create_directory(task, &path).await {
             Ok(()) => {}
-            Err(Error::AlreadyExists) => {
+            Err(IoErrorKind::AlreadyExists) => {
                 if virtual_file_system
                     .get_statistics_for_task(task, &path)
                     .await?
                     .kind
                     != Kind::Directory
                 {
-                    return Err(Error::NotADirectory);
+                    return Err(IoErrorKind::NotADirectory);
                 }
             }
             Err(error) => return Err(error),
@@ -175,7 +175,9 @@ async fn clear_directory_contents(
             if entry.name == "." || entry.name == ".." {
                 continue;
             }
-            let entry_path = entry.join_path(&directory_path).ok_or(Error::InvalidPath)?;
+            let entry_path = entry
+                .join_path(&directory_path)
+                .ok_or(IoErrorKind::InvalidPath)?;
             pending.push((entry_path, entry.kind != Kind::Directory));
         }
         // Never mutate a directory while its entries are being enumerated.
@@ -195,7 +197,7 @@ pub async fn clean_devices_in_directory(
             continue;
         }
 
-        let entry_path = path.append(&entry.name).ok_or(Error::InvalidPath)?;
+        let entry_path = path.append(&entry.name).ok_or(IoErrorKind::InvalidPath)?;
         let kind = virtual_file_system.get_statistics(&entry_path).await?.kind;
 
         if kind != Kind::CharacterDevice && kind != Kind::BlockDevice {
@@ -203,7 +205,7 @@ pub async fn clean_devices_in_directory(
         }
 
         match virtual_file_system.remove(task, &entry_path).await {
-            Ok(()) | Err(Error::InvalidIdentifier) => {}
+            Ok(()) | Err(IoErrorKind::BadDescriptor) => {}
             Err(error) => return Err(error),
         }
     }
@@ -225,12 +227,12 @@ mod tests {
     #[test]
     fn ignore_already_exists_error_only_suppresses_existing_paths() {
         assert_eq!(
-            ignore_already_exists_error::<()>(Err(Error::AlreadyExists)),
+            ignore_already_exists_error::<()>(Err(IoErrorKind::AlreadyExists)),
             Ok(())
         );
         assert_eq!(
-            ignore_already_exists_error::<()>(Err(Error::PermissionDenied)),
-            Err(Error::PermissionDenied)
+            ignore_already_exists_error::<()>(Err(IoErrorKind::PermissionDenied)),
+            Err(IoErrorKind::PermissionDenied)
         );
     }
 }

@@ -18,7 +18,7 @@
 //!   `n` starts at the sum of the lengths of segments `0..n`.
 
 use embedded_hal::spi::Operation;
-use file_system::{ControlCommand, ControlCommandIdentifier, Error, Result};
+use file_system::{ControlCommand, ControlCommandIdentifier, IoErrorKind, Result};
 use peripherals::spi::{
     BitOrder, ChipSelect, DeviceConfig, Mode, Segment, SpiController, SpiDeviceHandle, SpiError,
 };
@@ -57,19 +57,19 @@ fn configuration_from_abi(abi: SpiConfigurationAbi) -> Result<DeviceConfig> {
         || abi.reserved != [0; 3]
         || !(1..=32).contains(&abi.bits_per_word)
     {
-        return Err(Error::InvalidParameter);
+        return Err(IoErrorKind::InvalidArgument);
     }
     let mode = match abi.mode {
         0 => Mode::Mode0,
         1 => Mode::Mode1,
         2 => Mode::Mode2,
         3 => Mode::Mode3,
-        _ => return Err(Error::InvalidParameter),
+        _ => return Err(IoErrorKind::InvalidArgument),
     };
     let bit_order = match abi.bit_order {
         0 => BitOrder::MsbFirst,
         1 => BitOrder::LsbFirst,
-        _ => return Err(Error::InvalidParameter),
+        _ => return Err(IoErrorKind::InvalidArgument),
     };
     Ok(DeviceConfig {
         mode,
@@ -80,27 +80,27 @@ fn configuration_from_abi(abi: SpiConfigurationAbi) -> Result<DeviceConfig> {
 }
 
 /// Maps a contract error to the closest file system error.
-fn map_error(error: SpiError) -> Error {
+fn map_error(error: SpiError) -> IoErrorKind {
     match error {
-        SpiError::Busy => Error::RessourceBusy,
-        SpiError::InvalidChipSelect => Error::NotFound,
+        SpiError::Busy => IoErrorKind::ResourceBusy,
+        SpiError::InvalidChipSelect => IoErrorKind::NotFound,
         SpiError::ModeNotSupported
         | SpiError::FrequencyNotSupported
         | SpiError::BitsPerWordNotSupported
         | SpiError::BitOrderNotSupported
-        | SpiError::Unsupported => Error::UnsupportedOperation,
-        SpiError::InvalidSegment => Error::InvalidParameter,
+        | SpiError::Unsupported => IoErrorKind::Unsupported,
+        SpiError::InvalidSegment => IoErrorKind::InvalidArgument,
     }
 }
 
 /// Checks the header of a transaction input and returns (segment count, total length).
 fn validate_transaction(input: &SpiTransactionInputAbi) -> Result<(usize, usize)> {
     if input.version != SPI_ABI_VERSION || input.reserved != 0 {
-        return Err(Error::InvalidParameter);
+        return Err(IoErrorKind::InvalidArgument);
     }
     let count = usize::from(input.segment_count);
     if count == 0 || count > SPI_MAX_SEGMENTS {
-        return Err(Error::InvalidParameter);
+        return Err(IoErrorKind::InvalidArgument);
     }
 
     let mut total = 0usize;
@@ -110,12 +110,12 @@ fn validate_transaction(input: &SpiTransactionInputAbi) -> Result<(usize, usize)
             SPI_SEGMENT_WRITE | SPI_SEGMENT_READ | SPI_SEGMENT_TRANSFER
         ) || segment.cs_change > 1
         {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         total += usize::from(segment.length);
     }
     if total > SPI_MAX_TRANSACTION_BYTES {
-        return Err(Error::InvalidParameter);
+        return Err(IoErrorKind::InvalidArgument);
     }
     Ok((count, total))
 }
@@ -228,7 +228,7 @@ impl<C: SpiController + Sync + 'static> PeripheralHandle for SpiDevice<C> {
             let (input, output) = SPI_TRANSFER::cast(input, output)?;
             let length = usize::from(input.length);
             if input.version != SPI_ABI_VERSION || length > SPI_MAX_TRANSFER_BYTES {
-                return Err(Error::InvalidParameter);
+                return Err(IoErrorKind::InvalidArgument);
             }
 
             output.version = SPI_ABI_VERSION;
@@ -253,7 +253,7 @@ impl<C: SpiController + Sync + 'static> PeripheralHandle for SpiDevice<C> {
             // One reservation covers every segment, so no other master interleaves.
             self.run(segments)
         } else {
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         }
     }
 }
@@ -279,7 +279,7 @@ where
 
     for directory in [Path::DEVICES, Path::SPI_DEVICES] {
         match virtual_file_system.create_directory(task, &directory).await {
-            Ok(()) | Err(virtual_file_system::Error::AlreadyExists) => {}
+            Ok(()) | Err(virtual_file_system::IoErrorKind::AlreadyExists) => {}
             Err(error) => return Err(error),
         }
     }

@@ -4,7 +4,7 @@ macro_rules! mount {
     ( $virtual_file_system:expr, $task:expr, &[ $( (
         $path:expr, $kind:expr, $device:expr) ),* $(,)? ] ) => {
 
-    async || -> Result<(), $crate::exported_file_system::Error>
+    async || -> Result<(), $crate::exported_file_system::IoErrorKind>
     {
         $(
             let __device = Box::leak(Box::new($device));

@@ -46,7 +46,7 @@ impl DirectBaseOperations for HeadlessScreenDevice {
         _: &mut [u8],
         _: Size,
     ) -> core::task::Poll<file_system::Result<usize>> {
-        file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
+        file_system::ready(|| Err(file_system::IoErrorKind::Unsupported))
     }
 
     fn write(
@@ -57,19 +57,19 @@ impl DirectBaseOperations for HeadlessScreenDevice {
     ) -> core::task::Poll<file_system::Result<usize>> {
         file_system::ready(|| {
             let pixels: &[RenderingColor] =
-                align_slice_to(buffer).ok_or(file_system::Error::InvalidParameter)?;
+                align_slice_to(buffer).ok_or(file_system::IoErrorKind::InvalidArgument)?;
             let expected = self
                 .drawing_area
                 .lock()
-                .map_err(|_| file_system::Error::InputOutput)
+                .map_err(|_| file_system::IoErrorKind::InputOutput)
                 .and_then(|area| {
                     validate_flush(self.resolution, *area, size_of::<RenderingColor>())
-                        .map_err(|_| file_system::Error::InvalidParameter)
+                        .map_err(|_| file_system::IoErrorKind::InvalidArgument)
                 })?;
             if pixels.len().checked_mul(size_of::<RenderingColor>()) != Some(expected)
                 || buffer.len() != expected
             {
-                return Err(file_system::Error::InvalidParameter);
+                return Err(file_system::IoErrorKind::InvalidArgument);
             }
             Ok(buffer.len())
         })
@@ -89,7 +89,7 @@ impl DirectBaseOperations for HeadlessScreenDevice {
                     *self
                         .drawing_area
                         .lock()
-                        .map_err(|_| file_system::Error::InputOutput)? = area;
+                        .map_err(|_| file_system::IoErrorKind::InputOutput)? = area;
                 }
                 GET_RESOLUTION::IDENTIFIER => {
                     *GET_RESOLUTION::cast_output(output)? = self.resolution;
@@ -97,7 +97,7 @@ impl DirectBaseOperations for HeadlessScreenDevice {
                 WAS_RESIZED::IDENTIFIER => {
                     *WAS_RESIZED::cast_output(output)? = false;
                 }
-                _ => return Err(file_system::Error::UnsupportedOperation),
+                _ => return Err(file_system::IoErrorKind::Unsupported),
             }
             Ok(())
         })

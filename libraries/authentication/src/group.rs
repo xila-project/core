@@ -225,7 +225,7 @@ pub async fn create_group(
     let task = context.task;
 
     match Directory::create(virtual_file_system, task, GROUP_FOLDER_PATH).await {
-        Ok(_) | Err(virtual_file_system::Error::AlreadyExists) => {}
+        Ok(_) | Err(virtual_file_system::IoErrorKind::AlreadyExists) => {}
         Err(error) => Err(Error::FailedToCreateGroupsDirectory(error))?,
     };
 

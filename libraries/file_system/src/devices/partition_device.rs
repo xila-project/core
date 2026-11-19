@@ -11,7 +11,7 @@ use shared::AnyByLayout;
 
 use crate::{
     BaseOperations, ControlCommand, ControlCommandIdentifier, DirectBaseOperations,
-    DirectBlockDevice, Error, MountOperations, Position, Result, Size,
+    DirectBlockDevice, IoErrorKind, MountOperations, Position, Result, Size,
     block_device::{self, ERASE, EraseRange, GET_BLOCK_COUNT, GET_BLOCK_SIZE},
 };
 
@@ -197,7 +197,7 @@ impl<'a, D: DirectBaseOperations> DirectBaseOperations for PartitionDevice<'a, D
 
         let device_position = self
             .get_device_position(position)
-            .ok_or(Error::InvalidParameter)?;
+            .ok_or(IoErrorKind::InvalidArgument)?;
 
         self.base_device
             .set_position(device_position, &Position::Start(0))?;
@@ -237,7 +237,7 @@ impl<'a, D: DirectBaseOperations> DirectBaseOperations for PartitionDevice<'a, D
                     .filter(|end| *end <= self.size)
                     .and_then(|_| self.offset.checked_add(range.position))
                 else {
-                    return core::task::Poll::Ready(Err(Error::InvalidParameter));
+                    return core::task::Poll::Ready(Err(IoErrorKind::InvalidArgument));
                 };
                 let range = EraseRange {
                     position,
@@ -341,7 +341,7 @@ mod tests {
                     self.0.set(Some(*ERASE::cast_input(input)?));
                     Ok(())
                 }
-                _ => Err(Error::UnsupportedOperation),
+                _ => Err(IoErrorKind::Unsupported),
             })
         }
     }
@@ -362,15 +362,21 @@ mod tests {
             })
         );
 
-        assert_eq!(partition.erase(512, 1024), Err(Error::InvalidParameter));
-        assert_eq!(partition.erase(u64::MAX, 2), Err(Error::InvalidParameter));
+        assert_eq!(
+            partition.erase(512, 1024),
+            Err(IoErrorKind::InvalidArgument)
+        );
+        assert_eq!(
+            partition.erase(u64::MAX, 2),
+            Err(IoErrorKind::InvalidArgument)
+        );
         assert_eq!(base.0.take(), None);
     }
 
     #[test]
     fn rewritable_device_reports_erase_as_unsupported() {
         let base = MemoryDevice::<512>::new(4096);
-        assert_eq!(base.erase(0, 512), Err(Error::UnsupportedOperation));
+        assert_eq!(base.erase(0, 512), Err(IoErrorKind::Unsupported));
     }
 
     #[test]

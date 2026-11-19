@@ -22,10 +22,10 @@ use drivers_peripherals::uart::{
     ConfigAbi, FLOW_CONTROL_RTS_CTS, FLOW_CONTROL_XON_XOFF, FLUSH_RX, FLUSH_TX, GET_CONFIG,
     PARITY_EVEN, SET_CONFIG, VersionAbi, mount_uart,
 };
-use file_system::{AccessFlags, Error as FileSystemError, Flags, MemoryDevice};
+use file_system::{AccessFlags, Flags, IoErrorKind, MemoryDevice};
 use peripherals::uart::{Capabilities, Config, Error as UartError, UartControl};
 use task::TaskIdentifier;
-use virtual_file_system::{Error, File, VirtualFileSystem};
+use virtual_file_system::{File, VirtualFileSystem};
 
 fn capabilities() -> Capabilities {
     Capabilities {
@@ -183,10 +183,6 @@ fn version() -> VersionAbi {
     VersionAbi { version: 1 }
 }
 
-fn fs_error(error: FileSystemError) -> Option<Error> {
-    Some(Error::FileSystem(error))
-}
-
 #[task::test]
 async fn loopback_ends_are_mounted_and_exchange_bytes_through_plain_file_io() {
     let (task, vfs) = initialize().await;
@@ -202,7 +198,7 @@ async fn loopback_ends_are_mounted_and_exchange_bytes_through_plain_file_io() {
     // A second opening of the same node is refused while the first is held.
     assert_eq!(
         open(vfs, task, "/devices/uart/loop0").await.err(),
-        fs_error(FileSystemError::RessourceBusy)
+        Some(IoErrorKind::ResourceBusy)
     );
 
     assert_eq!(sender.write(b"ping").await.unwrap(), 4);
@@ -212,10 +208,10 @@ async fn loopback_ends_are_mounted_and_exchange_bytes_through_plain_file_io() {
     let count = receiver.read(&mut buffer).await.unwrap();
     assert_eq!(&buffer[..count], b"ping");
 
-    // Nothing is left, so an empty read is a non-blocking busy result.
+    // Nothing is left, so an empty read is a non-blocking would-block result.
     assert_eq!(
         receiver.read(&mut buffer).await.err(),
-        fs_error(FileSystemError::RessourceBusy)
+        Some(IoErrorKind::WouldBlock)
     );
 
     // Reverse direction.
@@ -271,7 +267,7 @@ async fn configuration_round_trips_through_control_and_rejects_bad_values() {
     };
     assert_eq!(
         file.control(SET_CONFIG, &unsupported).await.err(),
-        fs_error(FileSystemError::UnsupportedOperation)
+        Some(IoErrorKind::Unsupported)
     );
     assert_eq!(
         file.control(GET_CONFIG, &version()).await.unwrap(),
@@ -285,7 +281,7 @@ async fn configuration_round_trips_through_control_and_rejects_bad_values() {
     };
     assert_eq!(
         file.control(SET_CONFIG, &bad_parity).await.err(),
-        fs_error(FileSystemError::InvalidParameter)
+        Some(IoErrorKind::InvalidArgument)
     );
     let bad_version = ConfigAbi {
         version: 2,
@@ -293,13 +289,13 @@ async fn configuration_round_trips_through_control_and_rejects_bad_values() {
     };
     assert_eq!(
         file.control(SET_CONFIG, &bad_version).await.err(),
-        fs_error(FileSystemError::InvalidParameter)
+        Some(IoErrorKind::InvalidArgument)
     );
     assert_eq!(
         file.control(GET_CONFIG, &VersionAbi { version: 2 })
             .await
             .err(),
-        fs_error(FileSystemError::InvalidParameter)
+        Some(IoErrorKind::InvalidArgument)
     );
 
     // Queue flushes are accepted with a matching version.

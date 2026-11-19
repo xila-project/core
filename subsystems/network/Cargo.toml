@@ -15,7 +15,6 @@ users = { workspace = true }
 log = { workspace = true }
 virtual_file_system = { workspace = true }
 shared = { workspace = true }
-embedded-i18n = { workspace = true }
 
 embedded-io-async = { workspace = true }
 embassy-time = { workspace = true }
@@ -51,9 +50,3 @@ little_fs = { workspace = true }
 
 [lib]
 name = "network"
-
-[package.metadata.i18n]
-load-path = "locales"
-default-locale = "en"
-fallback = ["en"]
-strict = true

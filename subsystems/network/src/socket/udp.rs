@@ -6,7 +6,7 @@ use core::{
 use embassy_futures::block_on;
 use smoltcp::socket::udp;
 
-use crate::{Error, IpAddress, Port, Result, SocketContext, UdpMetadata};
+use crate::{IoErrorKind, IpAddress, Port, Result, SocketContext, UdpMetadata};
 
 pub struct UdpSocket {
     context: SocketContext,
@@ -48,7 +48,9 @@ impl UdpSocket {
     pub async fn bind(&mut self, port: Port) -> Result<()> {
         let port = port.into_inner();
 
-        self.with_mutable(|socket| socket.bind(port)).await?;
+        self.with_mutable(|socket| socket.bind(port))
+            .await
+            .map_err(crate::error::udp_bind_error)?;
 
         Ok(())
     }
@@ -70,7 +72,7 @@ impl UdpSocket {
                     capacity,
                     buffer.len()
                 );
-                return Poll::Ready(Err(Error::PacketTooLarge));
+                return Poll::Ready(Err(IoErrorKind::MessageTooLarge));
             }
 
             let metadata = metadata.to_smoltcp();
@@ -85,14 +87,14 @@ impl UdpSocket {
                     socket.register_send_waker(cx.waker());
                     Poll::Pending
                 }
-                Err(udp::SendError::Unaddressable) => {
-                    if socket.endpoint().port == 0 {
-                        log::error!("UDP send failed: socket not bound");
-                        Poll::Ready(Err(Error::SocketNotBound))
-                    } else {
-                        log::error!("UDP send failed: no route");
-                        Poll::Ready(Err(Error::NoRoute))
-                    }
+                Err(error @ udp::SendError::Unaddressable) => {
+                    let error = crate::error::udp_send_error(
+                        error,
+                        socket.endpoint().port != 0,
+                        !metadata.endpoint.addr.is_unspecified() && metadata.endpoint.port != 0,
+                    );
+                    log::error!("UDP send failed: {}", error.id());
+                    Poll::Ready(Err(error))
                 }
             }
         })
@@ -117,7 +119,7 @@ impl UdpSocket {
                 }
                 Err(udp::RecvError::Truncated) => {
                     log::warning!("UDP receive truncated");
-                    Poll::Ready(Err(Error::Truncated))
+                    Poll::Ready(Err(IoErrorKind::DatagramTruncated))
                 }
                 Err(udp::RecvError::Exhausted) => {
                     log::information!(

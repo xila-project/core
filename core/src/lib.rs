@@ -28,6 +28,7 @@ pub use authentication;
 pub use embedded_i18n as internationalization;
 pub use executable;
 pub use file_system;
+pub use file_system::io_error;
 pub use lifecycle;
 pub use little_fs;
 pub use log;

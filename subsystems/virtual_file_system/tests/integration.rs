@@ -8,7 +8,7 @@ extern crate alloc;
 use task::TaskIdentifier;
 
 use file_system::{
-    AccessFlags, Context, CreateFlags, Flags, MemoryDevice, Path, Position, StateFlags,
+    AccessFlags, Context, CreateFlags, Flags, IoErrorKind, MemoryDevice, Path, Position, StateFlags,
 };
 #[cfg(target_os = "linux")]
 use task::test;
@@ -500,7 +500,7 @@ async fn hierarchy_reports_non_directory_conflicts() {
 
     assert_eq!(
         virtual_file_system::create_default_hierarchy(virtual_file_system, task).await,
-        Err(virtual_file_system::Error::NotADirectory)
+        Err(IoErrorKind::NotADirectory)
     );
 }
 
@@ -548,7 +548,7 @@ async fn homes_come_from_the_account_record_not_the_current_name() {
     );
     assert_eq!(
         vfs.get_user_application_directory(alice, "..").await,
-        Err(virtual_file_system::Error::InvalidPath)
+        Err(IoErrorKind::InvalidPath)
     );
 
     // An account saved before homes were recorded keeps its numeric home.
@@ -570,7 +570,7 @@ async fn homes_come_from_the_account_record_not_the_current_name() {
         .unwrap();
     assert_eq!(
         vfs.ensure_user_home(task, escaped).await,
-        Err(virtual_file_system::Error::InvalidPath)
+        Err(IoErrorKind::InvalidPath)
     );
 }
 
@@ -627,7 +627,7 @@ async fn global_application_storage_follows_posix_and_user_app_storage_is_separa
     // cannot read it, irrespective of which binary they are running.
     assert_eq!(
         task::block_on(vfs.get_statistics_for_task(task, &global_directory)),
-        Err(virtual_file_system::Error::PermissionDenied)
+        Err(IoErrorKind::PermissionDenied)
     );
     assert!(matches!(
         File::open(
@@ -637,7 +637,7 @@ async fn global_application_storage_follows_posix_and_user_app_storage_is_separa
             AccessFlags::Read.into()
         )
         .await,
-        Err(virtual_file_system::Error::PermissionDenied)
+        Err(IoErrorKind::PermissionDenied)
     ));
 
     // A user-owned private directory remains accessible to its owner.
@@ -665,7 +665,7 @@ mod device_polling;
 #[cfg(target_os = "linux")]
 #[test]
 async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
-    use virtual_file_system::Error as VfsError;
+    use virtual_file_system::IoErrorKind;
 
     let (task, vfs) = initialize().await;
     vfs.create_directory(task, &Path::from_str("/links"))
@@ -832,7 +832,10 @@ async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
     let trailing_slash_stats = vfs
         .get_statistics(&Path::from_str("/links/absolute/"))
         .await;
-    assert!(matches!(trailing_slash_stats, Err(VfsError::NotADirectory)));
+    assert!(matches!(
+        trailing_slash_stats,
+        Err(IoErrorKind::NotADirectory)
+    ));
 
     // A trailing slash requires a directory, but must not make entry
     // operations follow a final symlink and mutate its target.
@@ -942,9 +945,7 @@ async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
     .unwrap();
     assert!(matches!(
         File::open(vfs, task, "/links/loop-a", AccessFlags::Read.into()).await,
-        Err(VfsError::FileSystem(
-            file_system::Error::InvalidSymbolicLink
-        ))
+        Err(IoErrorKind::SymlinkLoop)
     ));
 
     assert!(matches!(
@@ -955,7 +956,7 @@ async fn symlink_resolution_and_entry_operations_follow_vfs_semantics() {
             Flags::new(AccessFlags::Read, Some(CreateFlags::CREATE_EXCLUSIVE), None)
         )
         .await,
-        Err(VfsError::AlreadyExists)
+        Err(IoErrorKind::AlreadyExists)
     ));
 
     vfs.rename(
@@ -1066,7 +1067,7 @@ async fn owner_permissions_do_not_fall_through_to_group_or_others() {
     vfs.task_manager().set_user(task, user).await.unwrap();
     assert!(matches!(
         File::open(vfs, task, "/owned", AccessFlags::Write.into()).await,
-        Err(virtual_file_system::Error::PermissionDenied)
+        Err(IoErrorKind::PermissionDenied)
     ));
 }
 
@@ -1085,7 +1086,7 @@ async fn group_permissions_do_not_fall_through_to_others() {
     vfs.task_manager().set_user(task, user).await.unwrap();
     assert!(matches!(
         File::open(vfs, task, "/foreign", AccessFlags::Write.into()).await,
-        Err(virtual_file_system::Error::PermissionDenied)
+        Err(IoErrorKind::PermissionDenied)
     ));
 }
 
@@ -1095,7 +1096,7 @@ async fn group_permissions_do_not_fall_through_to_others() {
 #[cfg(target_os = "linux")]
 #[test]
 async fn existing_directory_is_reported_before_the_parent_write_check() {
-    use virtual_file_system::Error;
+    use virtual_file_system::IoErrorKind;
     let (task, vfs) = initialize().await;
     let user = unprivileged_user(vfs).await;
     vfs.create_directory(task, &"/shared").await.unwrap();
@@ -1125,13 +1126,13 @@ async fn existing_directory_is_reported_before_the_parent_write_check() {
     for path in ["/shared/existing", "/shared/file", "/shared/dangling"] {
         assert_eq!(
             vfs.create_directory(task, &path).await,
-            Err(Error::AlreadyExists),
+            Err(IoErrorKind::AlreadyExists),
             "{path}"
         );
     }
     assert_eq!(
         vfs.create_directory(task, &"/shared/new").await,
-        Err(Error::PermissionDenied)
+        Err(IoErrorKind::PermissionDenied)
     );
 
     // Without search permission on the parent, existence stays hidden.
@@ -1149,7 +1150,7 @@ async fn existing_directory_is_reported_before_the_parent_write_check() {
     vfs.task_manager().set_user(task, user).await.unwrap();
     assert_eq!(
         vfs.create_directory(task, &"/shared/existing").await,
-        Err(Error::PermissionDenied)
+        Err(IoErrorKind::PermissionDenied)
     );
 }
 
@@ -1175,7 +1176,7 @@ async fn owner_can_chmod_path_but_cannot_change_ownership() {
     ] {
         assert_eq!(
             vfs.set_ownership(task, "/owned", uid, gid).await,
-            Err(virtual_file_system::Error::PermissionDenied)
+            Err(IoErrorKind::PermissionDenied)
         );
     }
 }
@@ -1184,7 +1185,7 @@ async fn owner_can_chmod_path_but_cannot_change_ownership() {
 #[test]
 async fn shared_and_temporary_directories_allow_user_writes_and_enforce_sticky_bit() {
     use file_system::Permissions;
-    use virtual_file_system::Error;
+    use virtual_file_system::IoErrorKind;
 
     let (task, vfs) = initialize().await;
     virtual_file_system::create_default_hierarchy(vfs, task)
@@ -1226,7 +1227,7 @@ async fn shared_and_temporary_directories_allow_user_writes_and_enforce_sticky_b
         .unwrap();
     assert!(matches!(
         File::write_to_path(vfs, task, "/temporary/sessions/alice", b"denied").await,
-        Err(Error::PermissionDenied)
+        Err(IoErrorKind::PermissionDenied)
     ));
 
     // User B can also create files there, but cannot remove, rename, or replace user A's files.
@@ -1236,21 +1237,24 @@ async fn shared_and_temporary_directories_allow_user_writes_and_enforce_sticky_b
         .unwrap();
 
     for path in ["/data/shared/alice", "/temporary/alice"] {
-        assert_eq!(vfs.remove(task, path).await, Err(Error::PermissionDenied));
+        assert_eq!(
+            vfs.remove(task, path).await,
+            Err(IoErrorKind::PermissionDenied)
+        );
         assert_eq!(
             vfs.rename(task, &path, &"/temporary/bob_stolen").await,
-            Err(Error::PermissionDenied)
+            Err(IoErrorKind::PermissionDenied)
         );
     }
     assert_eq!(
         vfs.rename(task, &"/temporary/bob", &"/temporary/alice")
             .await,
-        Err(Error::PermissionDenied)
+        Err(IoErrorKind::PermissionDenied)
     );
     assert_eq!(
         vfs.rename(task, &"/temporary/bob", &"/data/shared/alice")
             .await,
-        Err(Error::PermissionDenied)
+        Err(IoErrorKind::PermissionDenied)
     );
 
     // User B can rename their own file to a non-existent destination.
@@ -1318,15 +1322,11 @@ async fn zero_capacity_named_pipe_is_rejected_without_creating_an_entry() {
     let (task, vfs) = initialize().await;
     assert_eq!(
         vfs.create_named_pipe(&"/zero", 0, task).await,
-        Err(virtual_file_system::Error::FileSystem(
-            file_system::Error::InvalidParameter
-        ))
+        Err(IoErrorKind::InvalidArgument)
     );
     assert!(matches!(
         vfs.get_statistics(&"/zero").await,
-        Err(virtual_file_system::Error::FileSystem(
-            file_system::Error::NotFound
-        ))
+        Err(IoErrorKind::NotFound)
     ));
 }
 
@@ -1371,15 +1371,15 @@ async fn active_mount_ancestors_cannot_be_renamed_or_removed() {
     mount_test_filesystem(vfs, task, "/ancestor/mount").await;
     assert_eq!(
         vfs.rename(task, &"/ancestor", &"/moved").await,
-        Err(virtual_file_system::Error::RessourceBusy)
+        Err(IoErrorKind::ResourceBusy)
     );
     assert_eq!(
         vfs.remove(task, "/ancestor/mount").await,
-        Err(virtual_file_system::Error::RessourceBusy)
+        Err(IoErrorKind::ResourceBusy)
     );
     assert_eq!(
         vfs.rename(task, &"/ancestor/mount", &"/other").await,
-        Err(virtual_file_system::Error::RessourceBusy)
+        Err(IoErrorKind::ResourceBusy)
     );
     // A shorter shared string prefix must not reserve unrelated siblings.
     vfs.create_directory(task, &"/anc").await.unwrap();
@@ -1402,7 +1402,7 @@ async fn unmount_refuses_to_orphan_nested_mounts_even_when_forced() {
     for force in [false, true] {
         assert_eq!(
             vfs.unmount("/parent", force).await,
-            Err(virtual_file_system::Error::RessourceBusy)
+            Err(IoErrorKind::ResourceBusy)
         );
     }
     vfs.unmount("/parent/child", false).await.unwrap();
@@ -1417,9 +1417,7 @@ async fn invalid_or_pre_epoch_utc_does_not_become_unsigned_file_metadata() {
     let flags = Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None);
     assert!(matches!(
         File::open(vfs, task, "/invalid-time", flags).await,
-        Err(virtual_file_system::Error::Time(
-            time::Error::Unsynchronized
-        ))
+        Err(IoErrorKind::DeviceUnavailable)
     ));
     time_manager
         .set_realtime(time::RealtimeSample {
@@ -1431,13 +1429,11 @@ async fn invalid_or_pre_epoch_utc_does_not_become_unsigned_file_metadata() {
         .unwrap();
     assert!(matches!(
         File::open(vfs, task, "/invalid-time", flags).await,
-        Err(virtual_file_system::Error::Time(time::Error::Overflow))
+        Err(IoErrorKind::Overflow)
     ));
     assert!(matches!(
         vfs.get_statistics_for_task(task, &"/invalid-time").await,
-        Err(virtual_file_system::Error::FileSystem(
-            file_system::Error::NotFound
-        ))
+        Err(IoErrorKind::NotFound)
     ));
     time_manager
         .set_realtime(time::RealtimeSample {
@@ -1528,7 +1524,7 @@ async fn existing_files_remain_accessible_without_representable_utc() {
 #[cfg(target_os = "linux")]
 #[test]
 async fn beneath_resolution_confines_links_and_all_namespace_operations() {
-    use virtual_file_system::Error;
+    use virtual_file_system::IoErrorKind;
     let (task, vfs) = initialize().await;
     let root = Path::new("/sandbox");
     for path in ["/sandbox", "/sandbox/sub", "/outside"] {
@@ -1573,7 +1569,7 @@ async fn beneath_resolution_confines_links_and_all_namespace_operations() {
                 None
             )
             .await,
-            Err(Error::PathEscapesRoot)
+            Err(IoErrorKind::PathEscapesRoot)
         );
     }
     for path in [
@@ -1587,7 +1583,7 @@ async fn beneath_resolution_confines_links_and_all_namespace_operations() {
         assert_eq!(
             vfs.get_statistics_beneath(task, &Path::new(path), true, root)
                 .await,
-            Err(Error::PathEscapesRoot),
+            Err(IoErrorKind::PathEscapesRoot),
             "{path}"
         );
     }
@@ -1610,7 +1606,7 @@ async fn beneath_resolution_confines_links_and_all_namespace_operations() {
     assert!(matches!(
         vfs.get_statistics_beneath(task, &Path::new("loop"), true, root)
             .await,
-        Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink))
+        Err(IoErrorKind::SymlinkLoop)
     ));
     assert!(
         vfs.get_statistics_for_task(task, &"/sandbox/absolute")
@@ -1630,22 +1626,22 @@ async fn beneath_resolution_confines_links_and_all_namespace_operations() {
             root
         )
         .await,
-        Err(Error::PathEscapesRoot)
+        Err(IoErrorKind::PathEscapesRoot)
     ));
     assert!(matches!(
         vfs.open_directory_beneath(task, &Path::new("absolute"), root)
             .await,
-        Err(Error::PathEscapesRoot)
+        Err(IoErrorKind::PathEscapesRoot)
     ));
     assert_eq!(
         vfs.create_directory_beneath(task, &Path::new("absolute/new"), root)
             .await,
-        Err(Error::PathEscapesRoot)
+        Err(IoErrorKind::PathEscapesRoot)
     );
     assert_eq!(
         vfs.remove_beneath(task, Path::new("absolute/file"), root)
             .await,
-        Err(Error::PathEscapesRoot)
+        Err(IoErrorKind::PathEscapesRoot)
     );
     assert_eq!(
         vfs.rename_beneath(
@@ -1656,7 +1652,7 @@ async fn beneath_resolution_confines_links_and_all_namespace_operations() {
             root
         )
         .await,
-        Err(Error::PathEscapesRoot)
+        Err(IoErrorKind::PathEscapesRoot)
     );
     assert_eq!(
         vfs.rename_beneath(
@@ -1667,7 +1663,7 @@ async fn beneath_resolution_confines_links_and_all_namespace_operations() {
             root
         )
         .await,
-        Err(Error::PathEscapesRoot)
+        Err(IoErrorKind::PathEscapesRoot)
     );
     vfs.create_symlink_beneath(task, Path::new("sub"), Path::new("newlink"), root)
         .await
@@ -1723,7 +1719,7 @@ async fn beneath_resolution_confines_links_and_all_namespace_operations() {
 #[cfg(target_os = "linux")]
 #[test]
 async fn hard_links_stay_beneath_their_roots_and_report_missing_backend_support() {
-    use virtual_file_system::Error;
+    use virtual_file_system::IoErrorKind;
     let (task, vfs) = initialize().await;
     let root = Path::new("/sandbox");
     for path in ["/sandbox", "/sandbox/dir", "/outside"] {
@@ -1757,7 +1753,7 @@ async fn hard_links_stay_beneath_their_roots_and_report_missing_backend_support(
                 root
             )
             .await,
-            Err(Error::PathEscapesRoot),
+            Err(IoErrorKind::PathEscapesRoot),
             "{existing} -> {new}"
         );
     }
@@ -1771,12 +1767,12 @@ async fn hard_links_stay_beneath_their_roots_and_report_missing_backend_support(
             root
         )
         .await,
-        Err(Error::FileSystem(file_system::Error::NotFound))
+        Err(IoErrorKind::NotFound)
     ));
     assert!(matches!(
         vfs.link_beneath(task, &Path::new("dir"), true, &Path::new("new"), root, root)
             .await,
-        Err(Error::FileSystem(file_system::Error::IsDirectory))
+        Err(IoErrorKind::IsADirectory)
     ));
     assert_eq!(
         vfs.link_beneath(
@@ -1788,7 +1784,7 @@ async fn hard_links_stay_beneath_their_roots_and_report_missing_backend_support(
             root
         )
         .await,
-        Err(Error::AlreadyExists)
+        Err(IoErrorKind::AlreadyExists)
     );
     // LittleFS has no hard links: a valid request must say so instead of
     // pretending to succeed or silently copying.
@@ -1802,7 +1798,7 @@ async fn hard_links_stay_beneath_their_roots_and_report_missing_backend_support(
             root
         )
         .await,
-        Err(Error::FileSystem(file_system::Error::UnsupportedOperation))
+        Err(IoErrorKind::Unsupported)
     );
     assert!(
         vfs.get_statistics_beneath(task, &Path::new("new"), false, root)
@@ -1823,12 +1819,12 @@ async fn hard_links_stay_beneath_their_roots_and_report_missing_backend_support(
             root
         )
         .await,
-        Err(Error::FileSystem(file_system::Error::InvalidParameter))
+        Err(IoErrorKind::InvalidArgument)
     );
     assert_eq!(
         vfs.rename_beneath(task, &Path::new("dir"), &Path::new("dir/moved"), root, root)
             .await,
-        Err(Error::FileSystem(file_system::Error::InvalidParameter))
+        Err(IoErrorKind::InvalidArgument)
     );
     vfs.rename_beneath(task, &Path::new("dir"), &Path::new("dir2"), root, root)
         .await
@@ -1853,7 +1849,7 @@ async fn hard_links_stay_beneath_their_roots_and_report_missing_backend_support(
             root
         )
         .await,
-        Err(Error::CrossDevice)
+        Err(IoErrorKind::CrossDevice)
     );
     assert_eq!(
         vfs.rename_beneath(
@@ -1864,7 +1860,7 @@ async fn hard_links_stay_beneath_their_roots_and_report_missing_backend_support(
             root
         )
         .await,
-        Err(Error::CrossDevice)
+        Err(IoErrorKind::CrossDevice)
     );
     assert_eq!(
         vfs.get_statistics_beneath(task, &Path::new("file"), false, root)
@@ -1902,7 +1898,7 @@ impl file_system::DirectBaseOperations for FlakyDevice {
 
     fn flush(&self, cx: &mut core::task::Context<'_>) -> core::task::Poll<file_system::Result<()>> {
         if self.fail_flush.load(std::sync::atomic::Ordering::SeqCst) {
-            return core::task::Poll::Ready(Err(file_system::Error::InputOutput));
+            return core::task::Poll::Ready(Err(IoErrorKind::InputOutput));
         }
         self.inner.flush(cx)
     }
@@ -1964,7 +1960,7 @@ async fn storage_shutdown_requires_closed_handles_and_freezes_io() {
     file.write(b"durable").await.unwrap();
     assert!(matches!(
         vfs.shutdown_storage().await,
-        Err(virtual_file_system::Error::RessourceBusy)
+        Err(IoErrorKind::ResourceBusy)
     ));
     // A refused shutdown leaves storage fully usable.
     file.write(b" data").await.unwrap();
@@ -2213,7 +2209,7 @@ impl file_system::DirectBaseOperations for LoopbackCharacterDevice {
             let mut stored = self
                 .buffer
                 .try_lock()
-                .map_err(|_| file_system::Error::RessourceBusy)?;
+                .map_err(|_| IoErrorKind::WouldBlock)?;
             let read_length = buffer.len().min(stored.len());
             buffer[..read_length].copy_from_slice(&stored[..read_length]);
             stored.drain(..read_length);
@@ -2231,7 +2227,7 @@ impl file_system::DirectBaseOperations for LoopbackCharacterDevice {
             let mut stored = self
                 .buffer
                 .try_lock()
-                .map_err(|_| file_system::Error::RessourceBusy)?;
+                .map_err(|_| IoErrorKind::WouldBlock)?;
             stored.extend_from_slice(buffer);
             Ok(buffer.len())
         })
@@ -2594,12 +2590,12 @@ impl file_system::DirectBaseOperations for AttributesTerminalDevice {
             SET_TERMINAL_ATTRIBUTES::IDENTIFIER => {
                 let requested = *SET_TERMINAL_ATTRIBUTES::cast_input(input)?;
                 if !requested.has_only_known_flags() {
-                    return Err(file_system::Error::InvalidParameter);
+                    return Err(IoErrorKind::InvalidArgument);
                 }
                 self.attributes.lock(|attributes| attributes.set(requested));
                 Ok(())
             }
-            _ => Err(file_system::Error::UnsupportedOperation),
+            _ => Err(IoErrorKind::Unsupported),
         })
     }
 }
@@ -2666,4 +2662,76 @@ async fn terminal_attributes_change_through_a_read_only_handle() {
         TerminalAttributes::INTERACTIVE
     );
     input.close(virtual_file_system).await.unwrap();
+}
+
+/// The VFS used to flatten every wrapped file system error to `Other` at the
+/// embedded-io boundary. One kind now travels from the producer to the caller.
+#[cfg(target_os = "linux")]
+#[test]
+async fn vfs_keeps_not_found_and_permission_denied_through_embedded_io() {
+    use embedded_io_async::{Error as _, ErrorKind};
+    use file_system::Permissions;
+    let (task, vfs) = initialize().await;
+    let missing = File::open(vfs, task, "/missing", AccessFlags::Read.into())
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(missing, IoErrorKind::NotFound);
+    assert_eq!(missing.kind(), ErrorKind::NotFound);
+
+    let user = unprivileged_user(vfs).await;
+    File::write_to_path(vfs, task, "/private", b"data")
+        .await
+        .unwrap();
+    vfs.set_permissions(task, "/private", Permissions::from_octal(0o600).unwrap())
+        .await
+        .unwrap();
+    vfs.task_manager().set_user(task, user).await.unwrap();
+    let denied = File::open(vfs, task, "/private", AccessFlags::Read.into())
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(denied, IoErrorKind::PermissionDenied);
+    assert_eq!(denied.kind(), ErrorKind::PermissionDenied);
+}
+
+/// Readiness (`WouldBlock`) and administrative busy (`ResourceBusy`) have
+/// different recovery paths and project to different errno values.
+#[cfg(target_os = "linux")]
+#[test]
+async fn readiness_and_administrative_busy_stay_distinct() {
+    use file_system::io_error::PosixErrno;
+    let (task, vfs) = initialize().await;
+    let (mut reader, _writer) = File::create_unnamed_pipe(vfs, 1, StateFlags::NonBlocking)
+        .await
+        .unwrap();
+    let mut byte = [0];
+    let not_ready = reader.read(&mut byte).await.err().unwrap();
+    assert_eq!(not_ready, IoErrorKind::WouldBlock);
+    assert_eq!(not_ready.posix_errno(), PosixErrno::EAGAIN);
+
+    vfs.create_directory(task, &"/ancestor").await.unwrap();
+    mount_test_filesystem(vfs, task, "/ancestor/mount").await;
+    let in_use = vfs.remove(task, "/ancestor/mount").await.unwrap_err();
+    assert_eq!(in_use, IoErrorKind::ResourceBusy);
+    assert_eq!(in_use.posix_errno(), PosixErrno::EBUSY);
+}
+
+/// Following too many links is a limit, not corrupt link data.
+#[cfg(target_os = "linux")]
+#[test]
+async fn link_limit_and_invalid_link_target_are_different_failures() {
+    let (task, vfs) = initialize().await;
+    vfs.create_symlink(task, Path::from_str("/b"), Path::from_str("/a"))
+        .await
+        .unwrap();
+    vfs.create_symlink(task, Path::from_str("/a"), Path::from_str("/b"))
+        .await
+        .unwrap();
+    assert_eq!(
+        File::open(vfs, task, "/a", AccessFlags::Read.into())
+            .await
+            .err(),
+        Some(IoErrorKind::SymlinkLoop)
+    );
 }

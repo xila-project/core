@@ -7,7 +7,7 @@ use core::future::poll_fn;
 
 use alloc::{vec, vec::Vec};
 pub use context::*;
-use file_system::{DirectCharacterDevice, Path};
+use file_system::{DirectCharacterDevice, IntoIoErrorKind, Path};
 pub use runner::*;
 use smoltcp::{
     phy::Device,
@@ -20,7 +20,8 @@ use task::{SpawnerIdentifier, TaskIdentifier};
 use virtual_file_system::VirtualFileSystem;
 
 use crate::{
-    DnsQueryKind, Error, IcmpSocket, IpAddress, Result, TcpSocket, UdpSocket,
+    DnsQueryKind, IcmpSocket, IoErrorKind, IpAddress, ResolveError, ResolveResult, Result,
+    TcpSocket, UdpSocket,
     manager::{
         device::NetworkDevice,
         stack::{Stack, StackInner},
@@ -89,7 +90,7 @@ impl Manager {
         let mut buffer = [0u8; 8];
         self.random_device
             .read_sync(&mut buffer, 0)
-            .map_err(Error::FailedToGenerateSeed)?;
+            .map_err(|_| IoErrorKind::InputOutput)?;
         Ok(u64::from_le_bytes(buffer))
     }
 
@@ -115,6 +116,21 @@ impl Manager {
         None
     }
 
+    /// Select the named interface, or the first available one.
+    ///
+    /// An unknown name is `DeviceUnavailable`; having no usable interface at all
+    /// is `NetworkDown`, so callers can tell a typo from a missing network.
+    async fn select_stack(stacks: &StackList, interface_name: Option<&str>) -> Result<Stack> {
+        match interface_name {
+            Some(name) => Self::find_stack(stacks, name)
+                .await
+                .ok_or(IoErrorKind::DeviceUnavailable),
+            None => Self::find_first_available_stack(stacks)
+                .await
+                .ok_or(IoErrorKind::NetworkDown),
+        }
+    }
+
     pub async fn mount_interface(
         &self,
         task: TaskIdentifier,
@@ -126,7 +142,7 @@ impl Manager {
         let mut stacks = self.stacks.write().await;
 
         if Self::find_stack(&stacks, name).await.is_some() {
-            return Err(Error::DuplicateIdentifier);
+            return Err(IoErrorKind::AlreadyExists);
         }
 
         let random_seed = self.generate_seed()?;
@@ -158,11 +174,11 @@ impl Manager {
                 },
             )
             .await
-            .map_err(Error::FailedToSpawnNetworkTask)?;
+            .map_err(IntoIoErrorKind::into_io_error_kind)?;
 
         let path = Path::NETWORK_DEVICES
             .join(Path::from_str(name))
-            .ok_or(Error::InvalidIdentifier)?;
+            .ok_or(IoErrorKind::InvalidArgument)?;
 
         let device = NetworkDevice::new(stack.clone());
 
@@ -172,20 +188,19 @@ impl Manager {
             .await
         {
             Ok(_) => {}
-            Err(virtual_file_system::Error::AlreadyExists) => {}
-            Err(e) => return Err(Error::FailedToMountDevice(e)),
+            Err(IoErrorKind::AlreadyExists) => {}
+            Err(e) => return Err(e),
         };
 
         match self.virtual_file_system.remove(task, &path).await {
             Ok(_) => {}
-            Err(virtual_file_system::Error::FileSystem(file_system::Error::NotFound)) => {}
-            Err(e) => return Err(Error::FailedToMountDevice(e)),
+            Err(IoErrorKind::NotFound) => {}
+            Err(e) => return Err(e),
         };
 
         self.virtual_file_system
             .mount_character_device(task, path, device)
-            .await
-            .map_err(Error::FailedToMountDevice)?;
+            .await?;
 
         stacks.push(stack);
 
@@ -198,22 +213,20 @@ impl Manager {
         kind: DnsQueryKind,
         stop_on_first_match: bool,
         interface_name: Option<&str>,
-    ) -> Result<Vec<IpAddress>> {
+    ) -> ResolveResult<Vec<IpAddress>> {
         if let Ok(host) = IpAddress::try_from(host) {
             return Ok(vec![host]);
         }
 
         let stacks = self.stacks.read().await;
 
-        let stack = if let Some(name) = interface_name {
-            Self::find_stack(&stacks, name)
+        let stack =
+            Self::select_stack(&stacks, interface_name)
                 .await
-                .ok_or(Error::NotFound)?
-        } else {
-            Self::find_first_available_stack(&stacks)
-                .await
-                .ok_or(Error::NotFound)?
-        };
+                .map_err(|error| match error {
+                    IoErrorKind::DeviceUnavailable => ResolveError::NoInterface,
+                    _ => ResolveError::NetworkDown,
+                })?;
 
         resolve_queries(kind, stop_on_first_match, async |query_kind| {
             let handle = stack
@@ -237,15 +250,7 @@ impl Manager {
     ) -> Result<TcpSocket> {
         let stacks = self.stacks.read().await;
 
-        let stack = if let Some(name) = interface_name {
-            Self::find_stack(&stacks, name)
-                .await
-                .ok_or(Error::NotFound)?
-        } else {
-            Self::find_first_available_stack(&stacks)
-                .await
-                .ok_or(Error::NotFound)?
-        };
+        let stack = Self::select_stack(&stacks, interface_name).await?;
 
         let send_buffer = tcp::SocketBuffer::new(vec![0u8; transmit_buffer_size]);
         let receive_buffer = tcp::SocketBuffer::new(vec![0u8; receive_buffer_size]);
@@ -273,15 +278,7 @@ impl Manager {
     ) -> Result<UdpSocket> {
         let stacks = self.stacks.read().await;
 
-        let stack = if let Some(name) = interface_name {
-            Self::find_stack(&stacks, name)
-                .await
-                .ok_or(Error::NotFound)?
-        } else {
-            Self::find_first_available_stack(&stacks)
-                .await
-                .ok_or(Error::NotFound)?
-        };
+        let stack = Self::select_stack(&stacks, interface_name).await?;
 
         let receive_meta_buffer = udp::PacketBuffer::new(
             vec![udp::PacketMetadata::EMPTY; receive_meta_buffer_size],
@@ -315,15 +312,7 @@ impl Manager {
     ) -> Result<IcmpSocket> {
         let stacks = self.stacks.read().await;
 
-        let stack = if let Some(name) = interface_name {
-            Self::find_stack(&stacks, name)
-                .await
-                .ok_or(Error::NotFound)?
-        } else {
-            Self::find_first_available_stack(&stacks)
-                .await
-                .ok_or(Error::NotFound)?
-        };
+        let stack = Self::select_stack(&stacks, interface_name).await?;
 
         let receive_buffer = icmp::PacketBuffer::new(
             vec![icmp::PacketMetadata::EMPTY; receive_meta_buffer_size],
@@ -353,8 +342,8 @@ impl Manager {
 async fn resolve_queries(
     kind: DnsQueryKind,
     stop_on_first_match: bool,
-    mut query: impl AsyncFnMut(DnsQueryKind) -> Result<Vec<IpAddress>>,
-) -> Result<Vec<IpAddress>> {
+    mut query: impl AsyncFnMut(DnsQueryKind) -> ResolveResult<Vec<IpAddress>>,
+) -> ResolveResult<Vec<IpAddress>> {
     let query_types = [
         DnsQueryKind::A,
         DnsQueryKind::Aaaa,
@@ -383,7 +372,7 @@ async fn resolve_queries(
             }
             Err(error) => {
                 // Prefer a specific cause over smoltcp's generic query failure.
-                if query_error.is_none() || query_error == Some(Error::Failed) {
+                if query_error.is_none() || query_error == Some(ResolveError::Failure) {
                     query_error = Some(error);
                 }
             }
@@ -445,7 +434,7 @@ mod dns_tests {
                 queries.push(kind);
 
                 match kind {
-                    DnsQueryKind::A => Err(Error::Failed),
+                    DnsQueryKind::A => Err(ResolveError::Failure),
                     DnsQueryKind::Aaaa => Ok(vec![ipv6.clone()]),
                     _ => panic!("unexpected query: {kind:?}"),
                 }
@@ -488,7 +477,7 @@ mod dns_tests {
             true,
             async |kind| match kind {
                 DnsQueryKind::A => Ok(vec![]),
-                DnsQueryKind::Aaaa => Err(Error::Failed),
+                DnsQueryKind::Aaaa => Err(ResolveError::Failure),
                 _ => panic!("unexpected query: {kind:?}"),
             },
         ));
@@ -499,8 +488,8 @@ mod dns_tests {
     #[test]
     fn returns_specific_error_only_if_every_query_fails() {
         for errors in [
-            [Error::Failed, Error::NameTooLong],
-            [Error::NameTooLong, Error::Failed],
+            [ResolveError::Failure, ResolveError::NameTooLong],
+            [ResolveError::NameTooLong, ResolveError::Failure],
         ] {
             let result = block_on(resolve_queries(
                 DnsQueryKind::A | DnsQueryKind::Aaaa,
@@ -511,7 +500,31 @@ mod dns_tests {
                     _ => panic!("unexpected query: {kind:?}"),
                 },
             ));
-            assert_eq!(result, Err(Error::NameTooLong));
+            assert_eq!(result, Err(ResolveError::NameTooLong));
         }
+    }
+
+    #[test]
+    fn an_unknown_interface_is_not_a_missing_network() {
+        let stacks = StackList::new();
+        assert_eq!(
+            block_on(Manager::select_stack(&stacks, Some("wlan9"))).err(),
+            Some(IoErrorKind::DeviceUnavailable)
+        );
+        assert_eq!(
+            block_on(Manager::select_stack(&stacks, None)).err(),
+            Some(IoErrorKind::NetworkDown)
+        );
+    }
+
+    #[test]
+    fn every_query_failing_with_the_generic_failure_stays_generic() {
+        let result = block_on(resolve_queries(
+            DnsQueryKind::A | DnsQueryKind::Aaaa,
+            false,
+            async |_| Err(ResolveError::Failure),
+        ));
+        // Never promoted to a confirmed negative answer without evidence.
+        assert_eq!(result, Err(ResolveError::Failure));
     }
 }

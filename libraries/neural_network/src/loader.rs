@@ -16,6 +16,6 @@ pub trait Loader: Send + Sync + 'static {
 
     /// Maximum model size in bytes accepted by this loader.
     ///
-    /// Writes beyond this bound return [`file_system::Error::FileTooLarge`].
+    /// Writes beyond this bound return [`file_system::IoErrorKind::FileTooLarge`].
     fn maximum_model_size(&self) -> usize;
 }

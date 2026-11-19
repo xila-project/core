@@ -15,11 +15,11 @@
 //!
 //! Every struct starts with a `version` field equal to [`ABI_VERSION`] and its
 //! reserved fields must be zero; otherwise the command fails with
-//! `InvalidParameter`. A channel outside `0..channels` is `InvalidParameter`,
+//! `InvalidArgument`. A channel outside `0..channels` is `InvalidArgument`,
 //! and `READ_MILLIVOLTS` on a converter without a reference voltage is
-//! `UnsupportedOperation`.
+//! `Unsupported`.
 
-use file_system::{ControlCommand, ControlCommandIdentifier, Error, Result};
+use file_system::{ControlCommand, ControlCommandIdentifier, IoErrorKind, Result};
 use peripherals::adc::{AdcController, Error as AdcError, raw_to_millivolts};
 use shared::AnyByLayout;
 
@@ -63,7 +63,7 @@ where
 {
     fn read(&mut self, buffer: &mut [u8]) -> Result<usize> {
         if buffer.len() < 2 {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         let raw = self.controller.read_raw(self.channel).map_err(map_error)?;
         buffer[..2].copy_from_slice(&raw.to_le_bytes());
@@ -71,7 +71,7 @@ where
     }
 
     fn write(&mut self, _buffer: &[u8]) -> Result<usize> {
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     }
 
     fn control(
@@ -87,7 +87,7 @@ where
             let request = SELECT_CHANNEL::cast_input(input)?;
             check_abi(request.version, request.reserved == 0)?;
             if request.channel >= self.controller.channel_count() {
-                return Err(Error::InvalidParameter);
+                return Err(IoErrorKind::InvalidArgument);
             }
             self.channel = request.channel;
             *SELECT_CHANNEL::cast_output(output)? = version_abi();
@@ -96,7 +96,7 @@ where
             let reference = self
                 .controller
                 .reference_millivolts()
-                .ok_or(Error::UnsupportedOperation)?;
+                .ok_or(IoErrorKind::Unsupported)?;
             let raw = self.controller.read_raw(self.channel).map_err(map_error)?;
             let millivolts = raw_to_millivolts(raw, self.controller.resolution_bits(), reference);
             *READ_MILLIVOLTS::cast_output(output)? = MillivoltsAbi {
@@ -105,7 +105,7 @@ where
                 millivolts,
             };
         } else {
-            return Err(Error::UnsupportedOperation);
+            return Err(IoErrorKind::Unsupported);
         }
         Ok(())
     }
@@ -126,17 +126,17 @@ fn check_abi(version: u16, reserved_is_zero: bool) -> Result<()> {
     if version == ABI_VERSION && reserved_is_zero {
         Ok(())
     } else {
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     }
 }
 
 /// Maps an ADC error to the file system error seen by applications.
-fn map_error(error: AdcError) -> Error {
+fn map_error(error: AdcError) -> IoErrorKind {
     match error {
-        AdcError::InvalidChannel => Error::InvalidParameter,
-        AdcError::Busy => Error::RessourceBusy,
-        AdcError::Unsupported => Error::UnsupportedOperation,
-        AdcError::Other => Error::InputOutput,
+        AdcError::InvalidChannel => IoErrorKind::InvalidArgument,
+        AdcError::Busy => IoErrorKind::ResourceBusy,
+        AdcError::Unsupported => IoErrorKind::Unsupported,
+        AdcError::Other => IoErrorKind::InputOutput,
     }
 }
 
@@ -156,11 +156,11 @@ where
     use file_system::Path;
 
     if name.is_empty() || name == "." || name == ".." || name.contains('/') {
-        return Err(virtual_file_system::Error::FileSystem(Error::InvalidPath));
+        return Err(IoErrorKind::InvalidPath);
     }
     let path = Path::ADC_DEVICES
         .join(name)
-        .ok_or(virtual_file_system::Error::FileSystem(Error::InvalidPath))?;
+        .ok_or(IoErrorKind::InvalidPath)?;
     let handle = AdcHandle::new(controller);
 
     virtual_file_system::ignore_already_exists_error(

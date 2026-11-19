@@ -1,195 +1,153 @@
-use core::{fmt::Display, num::NonZeroU8};
-use embedded_i18n::t;
+//! Network errors are the shared I/O vocabulary plus a typed resolver error.
+//!
+//! The translations from smoltcp live here, one per operation, because the same
+//! smoltcp error means different things for a bind, a send and a lookup.
+
+pub use file_system::{IntoIoErrorKind, IoErrorKind, Result, ResultExt, io_error};
+pub use io_error::{GetAddrInfoError, ResolveError};
+
 use smoltcp::socket::{dns, icmp, udp};
 
-pub type Result<T> = core::result::Result<T, Error>;
+/// Result of a name resolution.
+pub type ResolveResult<T> = core::result::Result<T, ResolveError>;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[repr(u8)]
-pub enum Error {
-    NotFound = 1,
-    PermissionDenied,
-    ConnectionRefused,
-    ConnectionReset,
-    HostUnreachable,
-    NetworkUnreachable,
-    ConnectionAborted,
-    NotConnected,
-    AddressInUse,
-    AddressNotAvailable,
-    NetworkDown,
-    BrokenPipe,
-    AlreadyExists,
-    WouldBlock,
-    InvalidInput,
-    InvalidData,
-    TimedOut,
-    WriteZero,
-    StorageFull,
-    ResourceBusy,
-    Deadlock,
-    Interrupted,
-    Unsupported,
-    UnexpectedEndOfFile,
-    OutOfMemory,
-    Pending,
-    UnsupportedProtocol,
-    InvalidIdentifier,
-    DuplicateIdentifier,
-    FailedToGenerateSeed(file_system::Error),
-    FailedToSpawnNetworkTask(task::Error),
-    // - DNS
-    InvalidName,
-    NameTooLong,
-    Failed,
-    // - Accept / Connect
-    InvalidState,
-    InvalidPort,
-    NoRoute,
-    // Udp
-    Truncated,
-    SocketNotBound,
-    PacketTooLarge,
-    InvalidEndpoint,
-
-    FailedToMountDevice(virtual_file_system::Error),
-
-    NoFreeSlot,
-
-    Other,
-}
-
-impl core::error::Error for Error {}
-
-impl Error {
-    pub const fn get_discriminant(&self) -> NonZeroU8 {
-        unsafe { *(self as *const Self as *const NonZeroU8) }
+/// A DNS query could not be started.
+pub(crate) fn dns_start_error(error: dns::StartQueryError) -> ResolveError {
+    match error {
+        dns::StartQueryError::InvalidName => ResolveError::InvalidName,
+        dns::StartQueryError::NameTooLong => ResolveError::NameTooLong,
+        dns::StartQueryError::NoFreeSlot => ResolveError::NoQuerySlots,
     }
 }
 
-impl From<Error> for NonZeroU8 {
-    fn from(value: Error) -> Self {
-        value.get_discriminant()
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Error::NotFound => write!(f, "{}", t!("errors.not_found")),
-            Error::PermissionDenied => write!(f, "{}", t!("errors.permission_denied")),
-            Error::ConnectionRefused => write!(f, "{}", t!("errors.connection_refused")),
-            Error::ConnectionReset => write!(f, "{}", t!("errors.connection_reset")),
-            Error::HostUnreachable => write!(f, "{}", t!("errors.host_unreachable")),
-            Error::NetworkUnreachable => write!(f, "{}", t!("errors.network_unreachable")),
-            Error::ConnectionAborted => write!(f, "{}", t!("errors.connection_aborted")),
-            Error::NotConnected => write!(f, "{}", t!("errors.not_connected")),
-            Error::AddressInUse => write!(f, "{}", t!("errors.address_in_use")),
-            Error::AddressNotAvailable => write!(f, "{}", t!("errors.address_not_available")),
-            Error::NetworkDown => write!(f, "{}", t!("errors.network_down")),
-            Error::BrokenPipe => write!(f, "{}", t!("errors.broken_pipe")),
-            Error::AlreadyExists => write!(f, "{}", t!("errors.already_exists")),
-            Error::WouldBlock => write!(f, "{}", t!("errors.would_block")),
-            Error::InvalidInput => write!(f, "{}", t!("errors.invalid_input")),
-            Error::InvalidData => write!(f, "{}", t!("errors.invalid_data")),
-            Error::TimedOut => write!(f, "{}", t!("errors.timed_out")),
-            Error::WriteZero => write!(f, "{}", t!("errors.write_zero")),
-            Error::StorageFull => write!(f, "{}", t!("errors.storage_full")),
-            Error::ResourceBusy => write!(f, "{}", t!("errors.resource_busy")),
-            Error::Deadlock => write!(f, "{}", t!("errors.deadlock")),
-            Error::Interrupted => write!(f, "{}", t!("errors.interrupted")),
-            Error::Unsupported => write!(f, "{}", t!("errors.unsupported_operation")),
-            Error::UnexpectedEndOfFile => write!(f, "{}", t!("errors.unexpected_end_of_file")),
-            Error::OutOfMemory => write!(f, "{}", t!("errors.out_of_memory")),
-            Error::Pending => write!(
-                f,
-                "{}",
-                t!("errors.in_progress_operation_not_completed_yet")
-            ),
-            Error::UnsupportedProtocol => {
-                write!(f, "{}", t!("errors.unsupported_protocol_used_in_operation"))
-            }
-            Error::InvalidIdentifier => {
-                write!(
-                    f,
-                    "{}",
-                    t!("errors.invalid_identifier_provided_for_operation")
-                )
-            }
-            Error::DuplicateIdentifier => {
-                write!(
-                    f,
-                    "{}",
-                    t!("errors.duplicate_identifier_found_in_operation")
-                )
-            }
-            Error::FailedToGenerateSeed(e) => {
-                write!(f, "{}", t!("errors.failed_to_generate_seed", arg0 = e))
-            }
-            Error::FailedToSpawnNetworkTask(e) => {
-                write!(f, "{}", t!("errors.failed_to_spawn_network_task", arg0 = e))
-            }
-            Error::InvalidName => write!(f, "{}", t!("errors.invalid_name")),
-            Error::NameTooLong => write!(f, "{}", t!("errors.name_too_long")),
-            Error::Failed => write!(f, "{}", t!("errors.failed")),
-            Error::InvalidState => write!(f, "{}", t!("errors.invalid_state_for_operation")),
-            Error::InvalidPort => write!(f, "{}", t!("errors.invalid_port_specified")),
-            Error::NoRoute => write!(f, "{}", t!("errors.no_route_to_host")),
-            Error::Truncated => write!(f, "{}", t!("errors.truncated_packet_received")),
-            Error::SocketNotBound => write!(f, "{}", t!("errors.socket_not_bound")),
-            Error::PacketTooLarge => write!(f, "{}", t!("errors.packet_too_large_to_send")),
-            Error::InvalidEndpoint => write!(f, "{}", t!("errors.invalid_endpoint_specified")),
-            Error::FailedToMountDevice(e) => {
-                write!(f, "{}", t!("errors.failed_to_mount_device", arg0 = e))
-            }
-            Error::NoFreeSlot => write!(f, "{}", t!("errors.no_free_slot_available")),
-            Error::Other => write!(f, "{}", t!("errors.other_error_occurred")),
+/// A finished DNS query failed. smoltcp reports no reason, so this stays the
+/// generic failure: it is never reported as a confirmed negative answer.
+pub(crate) fn dns_result_error(error: dns::GetQueryResultError) -> ResolveError {
+    match error {
+        dns::GetQueryResultError::Pending | dns::GetQueryResultError::Failed => {
+            ResolveError::Failure
         }
     }
 }
 
-impl From<dns::StartQueryError> for Error {
-    fn from(e: dns::StartQueryError) -> Self {
-        match e {
-            dns::StartQueryError::InvalidName => Error::InvalidName,
-            dns::StartQueryError::NameTooLong => Error::NameTooLong,
-            dns::StartQueryError::NoFreeSlot => Error::NoFreeSlot,
-        }
+/// An ICMP or UDP bind failed: the socket is already open, or the local
+/// address cannot be used.
+pub(crate) fn icmp_bind_error(error: icmp::BindError) -> IoErrorKind {
+    match error {
+        icmp::BindError::InvalidState => IoErrorKind::InvalidState,
+        icmp::BindError::Unaddressable => IoErrorKind::AddressNotAvailable,
     }
 }
 
-impl From<dns::GetQueryResultError> for Error {
-    fn from(e: dns::GetQueryResultError) -> Self {
-        match e {
-            dns::GetQueryResultError::Pending => Error::Pending,
-            dns::GetQueryResultError::Failed => Error::Failed,
-        }
+/// See [`icmp_bind_error`].
+pub(crate) fn udp_bind_error(error: udp::BindError) -> IoErrorKind {
+    match error {
+        udp::BindError::InvalidState => IoErrorKind::InvalidState,
+        udp::BindError::Unaddressable => IoErrorKind::AddressNotAvailable,
     }
 }
 
-impl From<icmp::SendError> for Error {
-    fn from(e: icmp::SendError) -> Self {
-        match e {
-            icmp::SendError::Unaddressable => Error::InvalidEndpoint,
-            icmp::SendError::BufferFull => Error::ResourceBusy,
-        }
+/// An ICMP send was refused by smoltcp.
+///
+/// `bound` says whether the socket has a local binding and `destination_given`
+/// whether the caller supplied a usable destination: smoltcp reports both
+/// problems as the same `Unaddressable`.
+pub(crate) fn icmp_send_error(
+    error: icmp::SendError,
+    bound: bool,
+    destination_given: bool,
+) -> IoErrorKind {
+    match error {
+        icmp::SendError::BufferFull => IoErrorKind::WouldBlock,
+        icmp::SendError::Unaddressable => unaddressable_send(bound, destination_given),
     }
 }
 
-impl From<icmp::BindError> for Error {
-    fn from(e: icmp::BindError) -> Self {
-        match e {
-            icmp::BindError::InvalidState => Error::InvalidState,
-            icmp::BindError::Unaddressable => Error::NoRoute,
-        }
+/// A UDP send was refused by smoltcp. See [`icmp_send_error`].
+pub(crate) fn udp_send_error(
+    error: udp::SendError,
+    bound: bool,
+    destination_given: bool,
+) -> IoErrorKind {
+    match error {
+        udp::SendError::BufferFull => IoErrorKind::WouldBlock,
+        udp::SendError::Unaddressable => unaddressable_send(bound, destination_given),
     }
 }
 
-impl From<udp::BindError> for Error {
-    fn from(e: udp::BindError) -> Self {
-        match e {
-            udp::BindError::InvalidState => Error::InvalidState,
-            udp::BindError::Unaddressable => Error::NoRoute,
-        }
+fn unaddressable_send(bound: bool, destination_given: bool) -> IoErrorKind {
+    if !destination_given {
+        IoErrorKind::DestinationRequired
+    } else if !bound {
+        IoErrorKind::InvalidState
+    } else {
+        IoErrorKind::HostUnreachable
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dns_failures_stay_distinct() {
+        assert_eq!(
+            dns_start_error(dns::StartQueryError::InvalidName),
+            ResolveError::InvalidName
+        );
+        assert_eq!(
+            dns_start_error(dns::StartQueryError::NameTooLong),
+            ResolveError::NameTooLong
+        );
+        assert_eq!(
+            dns_start_error(dns::StartQueryError::NoFreeSlot),
+            ResolveError::NoQuerySlots
+        );
+        // The opaque smoltcp failure is never a confirmed negative answer.
+        assert_eq!(
+            dns_result_error(dns::GetQueryResultError::Failed),
+            ResolveError::Failure
+        );
+    }
+
+    #[test]
+    fn bind_errors_split_state_and_address() {
+        assert_eq!(
+            icmp_bind_error(icmp::BindError::InvalidState),
+            IoErrorKind::InvalidState
+        );
+        assert_eq!(
+            icmp_bind_error(icmp::BindError::Unaddressable),
+            IoErrorKind::AddressNotAvailable
+        );
+        assert_eq!(
+            udp_bind_error(udp::BindError::InvalidState),
+            IoErrorKind::InvalidState
+        );
+        assert_eq!(
+            udp_bind_error(udp::BindError::Unaddressable),
+            IoErrorKind::AddressNotAvailable
+        );
+    }
+
+    #[test]
+    fn unaddressable_send_depends_on_the_cause() {
+        let error = udp::SendError::Unaddressable;
+        assert_eq!(
+            udp_send_error(error, true, false),
+            IoErrorKind::DestinationRequired
+        );
+        assert_eq!(
+            udp_send_error(error, false, true),
+            IoErrorKind::InvalidState
+        );
+        assert_eq!(
+            udp_send_error(error, true, true),
+            IoErrorKind::HostUnreachable
+        );
+        assert_eq!(
+            icmp_send_error(icmp::SendError::BufferFull, true, true),
+            IoErrorKind::WouldBlock
+        );
     }
 }

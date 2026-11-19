@@ -12,10 +12,10 @@ use drivers_peripherals::pwm::{
     GET_INFO, PwmDutyPermilleAbi, PwmFrequencyAbi, PwmInfoAbi, PwmVersionAbi, SET_DUTY_PERMILLE,
     SET_FREQUENCY, mount_pwm,
 };
-use file_system::{AccessFlags, Error as FileSystemError, Flags, MemoryDevice};
+use file_system::{AccessFlags, Flags, IoErrorKind, MemoryDevice};
 use peripherals::pwm::{ChannelId, PwmController, PwmMock};
 use task::TaskIdentifier;
-use virtual_file_system::{Error, File, VirtualFileSystem};
+use virtual_file_system::{File, VirtualFileSystem};
 
 const MIN_FREQUENCY_HZ: u32 = 1_000;
 const MAX_FREQUENCY_HZ: u32 = 100_000;
@@ -74,10 +74,6 @@ fn version() -> PwmVersionAbi {
     }
 }
 
-fn fs_error(error: FileSystemError) -> Option<Error> {
-    Some(Error::FileSystem(error))
-}
-
 #[task::test]
 async fn plain_write_and_read_round_trip_the_duty() {
     let (task, vfs) = initialize().await;
@@ -110,15 +106,15 @@ async fn out_of_range_and_partial_writes_are_rejected() {
 
     assert_eq!(
         file.write(&(MAX_DUTY + 1).to_le_bytes()).await.err(),
-        fs_error(FileSystemError::InvalidParameter)
+        Some(IoErrorKind::InvalidArgument)
     );
     assert_eq!(
         file.write(&[0x01]).await.err(),
-        fs_error(FileSystemError::InvalidParameter)
+        Some(IoErrorKind::InvalidArgument)
     );
     assert_eq!(
         file.write(&[0x01, 0x00, 0x00]).await.err(),
-        fs_error(FileSystemError::InvalidParameter)
+        Some(IoErrorKind::InvalidArgument)
     );
     // Nothing was applied by the rejected writes.
     assert_eq!(mock.duty_cycle(ChannelId::new(0)), Ok(0));
@@ -159,7 +155,7 @@ async fn permille_maps_to_the_channel_max_duty() {
         )
         .await
         .err(),
-        fs_error(FileSystemError::InvalidParameter)
+        Some(IoErrorKind::InvalidArgument)
     );
 
     file.close(vfs).await.unwrap();
@@ -212,7 +208,7 @@ async fn frequency_is_set_and_reported_by_get_info() {
         )
         .await
         .err(),
-        fs_error(FileSystemError::InvalidParameter)
+        Some(IoErrorKind::InvalidArgument)
     );
 
     // Unknown ABI versions and non-zero reserved fields are refused.
@@ -226,7 +222,7 @@ async fn frequency_is_set_and_reported_by_get_info() {
         )
         .await
         .err(),
-        fs_error(FileSystemError::InvalidParameter)
+        Some(IoErrorKind::InvalidArgument)
     );
     assert_eq!(
         file.control(
@@ -238,7 +234,7 @@ async fn frequency_is_set_and_reported_by_get_info() {
         )
         .await
         .err(),
-        fs_error(FileSystemError::InvalidParameter)
+        Some(IoErrorKind::InvalidArgument)
     );
 
     file.close(vfs).await.unwrap();
@@ -255,7 +251,7 @@ async fn second_open_of_the_node_is_busy() {
     let file = open(vfs, task, "/devices/pwm/busy0").await.unwrap();
     assert_eq!(
         open(vfs, task, "/devices/pwm/busy0").await.err(),
-        fs_error(FileSystemError::RessourceBusy)
+        Some(IoErrorKind::ResourceBusy)
     );
 
     file.close(vfs).await.unwrap();

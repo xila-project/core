@@ -79,7 +79,7 @@ impl<T: ExecutableTrait> DirectBaseOperations for ExecutableWrapper<T> {
         _buffer: &mut [u8],
         _absolute_position: file_system::Size,
     ) -> core::task::Poll<file_system::Result<usize>> {
-        file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
+        file_system::ready(|| Err(file_system::IoErrorKind::Unsupported))
     }
 
     fn write(
@@ -88,7 +88,7 @@ impl<T: ExecutableTrait> DirectBaseOperations for ExecutableWrapper<T> {
         _buffer: &[u8],
         _absolute_position: file_system::Size,
     ) -> core::task::Poll<file_system::Result<usize>> {
-        file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
+        file_system::ready(|| Err(file_system::IoErrorKind::Unsupported))
     }
 
     fn control(
@@ -113,7 +113,7 @@ impl<T: ExecutableTrait> DirectBaseOperations for ExecutableWrapper<T> {
                     }));
                     Ok(())
                 }
-                _ => Err(file_system::Error::UnsupportedOperation),
+                _ => Err(file_system::IoErrorKind::Unsupported),
             }
         })
     }

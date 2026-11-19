@@ -49,7 +49,7 @@ define_command!(
     (),
     WifiScanResultCount
 );
-// A generation mismatch returns InvalidParameter; fetch the count and restart enumeration.
+// A generation mismatch returns InvalidArgument; fetch the count and restart enumeration.
 define_command!(
     GET_WIFI_SCAN_RESULT,
     Read,

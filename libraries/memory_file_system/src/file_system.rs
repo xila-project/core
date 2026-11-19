@@ -2,8 +2,8 @@ use alloc::{boxed::Box, vec, vec::Vec};
 use core::task::{Context as TaskContext, Poll};
 use file_system::{
     AttributeFlags, AttributeOperations, Attributes, BaseOperations, Context, DirectoryOperations,
-    Error, FileOperations, FileSystemOperations, Flags, Kind, MountOperations, Path, Permissions,
-    Position, Result, Size, mount::MutexMountWrapper,
+    FileOperations, FileSystemOperations, Flags, IoErrorKind, Kind, MountOperations, Path,
+    Permissions, Position, Result, Size, mount::MutexMountWrapper,
 };
 use synchronization::{Arc, blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 
@@ -53,20 +53,20 @@ impl State {
         self.nodes
             .get(index)
             .and_then(|slot| slot.as_ref())
-            .ok_or(Error::NotFound)
+            .ok_or(IoErrorKind::NotFound)
     }
 
     pub(crate) fn get_node_mutable(&mut self, index: usize) -> Result<&mut Node> {
         self.nodes
             .get_mut(index)
             .and_then(|slot| slot.as_mut())
-            .ok_or(Error::NotFound)
+            .ok_or(IoErrorKind::NotFound)
     }
 
     pub(crate) fn get_node_with_generation(&self, index: usize, generation: u32) -> Result<&Node> {
         let node = self.get_node(index)?;
         if node.generation != generation {
-            return Err(Error::NotFound);
+            return Err(IoErrorKind::NotFound);
         }
         Ok(node)
     }
@@ -78,7 +78,7 @@ impl State {
     ) -> Result<&mut Node> {
         let node = self.get_node_mutable(index)?;
         if node.generation != generation {
-            return Err(Error::NotFound);
+            return Err(IoErrorKind::NotFound);
         }
         Ok(node)
     }
@@ -165,7 +165,7 @@ impl State {
         }
 
         if self.nodes.len() >= u32::MAX as usize {
-            return Err(Error::NoSpaceLeft);
+            return Err(IoErrorKind::NoSpace);
         }
 
         let new_index = self.nodes.len();
@@ -189,7 +189,7 @@ impl State {
         // an empty relative path: like LittleFS, resolve it to the root.
         let path_string = path.as_str();
         if path_string.contains('\0') {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         Ok(path_string)
     }
@@ -202,7 +202,7 @@ impl State {
                 continue;
             }
             if !self.get_node(current)?.is_directory() {
-                return Err(Error::NotDirectory);
+                return Err(IoErrorKind::NotADirectory);
             }
             match segment {
                 "." => {}
@@ -212,7 +212,7 @@ impl State {
                 name => {
                     current = self
                         .find_child(current as u32, name)
-                        .ok_or(Error::NotFound)?;
+                        .ok_or(IoErrorKind::NotFound)?;
                 }
             }
         }
@@ -226,7 +226,7 @@ impl State {
         let node_index = self.resolve_segments(path_string)?;
 
         if trailing_slash && !self.get_node(node_index)?.is_directory() {
-            return Err(Error::NotDirectory);
+            return Err(IoErrorKind::NotADirectory);
         }
 
         Ok(node_index)
@@ -249,7 +249,7 @@ impl State {
         if name == "." || name == ".." {
             let existing = self.resolve_segments(trimmed)?;
             if trailing_slash && !self.get_node(existing)?.is_directory() {
-                return Err(Error::NotDirectory);
+                return Err(IoErrorKind::NotADirectory);
             }
             return Ok(TargetPath::ExistingComponent(existing));
         }
@@ -259,7 +259,7 @@ impl State {
         } else {
             let index = self.resolve_segments(parent_string)?;
             if !self.get_node(index)?.is_directory() {
-                return Err(Error::NotDirectory);
+                return Err(IoErrorKind::NotADirectory);
             }
             index
         };
@@ -273,14 +273,14 @@ impl State {
 
     fn create_directory(&mut self, path: &Path) -> Result<()> {
         match self.resolve_target_path(path)? {
-            TargetPath::Root | TargetPath::ExistingComponent(_) => Err(Error::AlreadyExists),
+            TargetPath::Root | TargetPath::ExistingComponent(_) => Err(IoErrorKind::AlreadyExists),
             TargetPath::Child {
                 parent_index,
                 name,
                 trailing_slash: _,
             } => {
                 if self.find_child(parent_index as u32, name).is_some() {
-                    return Err(Error::AlreadyExists);
+                    return Err(IoErrorKind::AlreadyExists);
                 }
                 self.insert_node(parent_index, name, Kind::Directory)?;
                 Ok(())
@@ -290,12 +290,12 @@ impl State {
 
     fn create_file(&mut self, path: &Path) -> Result<()> {
         match self.resolve_target_path(path)? {
-            TargetPath::Root => Err(Error::IsDirectory),
+            TargetPath::Root => Err(IoErrorKind::IsADirectory),
             TargetPath::ExistingComponent(existing_index) => {
                 if self.get_node(existing_index)?.is_directory() {
-                    Err(Error::IsDirectory)
+                    Err(IoErrorKind::IsADirectory)
                 } else {
-                    Err(Error::AlreadyExists)
+                    Err(IoErrorKind::AlreadyExists)
                 }
             }
             TargetPath::Child {
@@ -305,12 +305,12 @@ impl State {
             } => {
                 if let Some(existing_index) = self.find_child(parent_index as u32, name) {
                     if self.get_node(existing_index)?.is_directory() {
-                        return Err(Error::IsDirectory);
+                        return Err(IoErrorKind::IsADirectory);
                     }
-                    return Err(Error::AlreadyExists);
+                    return Err(IoErrorKind::AlreadyExists);
                 }
                 if trailing_slash {
-                    return Err(Error::InvalidPath);
+                    return Err(IoErrorKind::InvalidPath);
                 }
                 self.insert_node(parent_index, name, Kind::File)?;
                 Ok(())
@@ -321,11 +321,11 @@ impl State {
     fn remove(&mut self, path: &Path) -> Result<()> {
         let node_index = self.resolve_existing_path(path)?;
         if node_index == ROOT_NODE_INDEX {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
 
         if self.get_node(node_index)?.is_directory() && self.has_children(node_index as u32) {
-            return Err(Error::DirectoryNotEmpty);
+            return Err(IoErrorKind::DirectoryNotEmpty);
         }
 
         self.remove_slot(node_index);
@@ -335,18 +335,18 @@ impl State {
     fn rename(&mut self, source: &Path, destination: &Path) -> Result<()> {
         let source_index = self.resolve_existing_path(source)?;
         if source_index == ROOT_NODE_INDEX {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
 
         let source_is_directory = self.get_node(source_index)?.is_directory();
 
         match self.resolve_target_path(destination)? {
-            TargetPath::Root => Err(Error::InvalidParameter),
+            TargetPath::Root => Err(IoErrorKind::InvalidArgument),
             TargetPath::ExistingComponent(existing_index) => {
                 if existing_index == source_index {
                     Ok(())
                 } else {
-                    Err(Error::InvalidParameter)
+                    Err(IoErrorKind::InvalidArgument)
                 }
             }
             TargetPath::Child {
@@ -355,7 +355,7 @@ impl State {
                 trailing_slash,
             } => {
                 if source_is_directory && self.is_ancestor(source_index, parent_index) {
-                    return Err(Error::InvalidParameter);
+                    return Err(IoErrorKind::InvalidArgument);
                 }
 
                 if let Some(destination_index) = self.find_child(parent_index as u32, name) {
@@ -365,21 +365,21 @@ impl State {
 
                     let destination_is_directory = self.get_node(destination_index)?.is_directory();
                     if source_is_directory && !destination_is_directory {
-                        return Err(Error::NotDirectory);
+                        return Err(IoErrorKind::NotADirectory);
                     }
                     if !source_is_directory && destination_is_directory {
-                        return Err(Error::IsDirectory);
+                        return Err(IoErrorKind::IsADirectory);
                     }
                     if destination_is_directory && self.has_children(destination_index as u32) {
-                        return Err(Error::DirectoryNotEmpty);
+                        return Err(IoErrorKind::DirectoryNotEmpty);
                     }
                     if trailing_slash && !source_is_directory {
-                        return Err(Error::NotDirectory);
+                        return Err(IoErrorKind::NotADirectory);
                     }
 
                     self.remove_slot(destination_index);
                 } else if trailing_slash && !source_is_directory {
-                    return Err(Error::NotDirectory);
+                    return Err(IoErrorKind::NotADirectory);
                 }
 
                 let source_node = self.get_node_mutable(source_index)?;
@@ -450,8 +450,8 @@ impl FileSystem {
         let mut state = self.state.try_get()?;
         let directory = context
             .get_private_data_of_type::<SharedContext<Directory>>()
-            .ok_or(Error::InvalidParameter)?;
-        let mut directory = directory.try_lock().map_err(|_| Error::RessourceBusy)?;
+            .ok_or(IoErrorKind::InvalidArgument)?;
+        let mut directory = directory.try_lock().map_err(|_| IoErrorKind::WouldBlock)?;
         operation(&mut state, &mut directory)
     }
 }
@@ -483,7 +483,7 @@ impl FileSystemOperations for FileSystem {
             let node_index = state.resolve_existing_path(path)?;
             let node = state.get_node(node_index)?;
             if !node.is_directory() {
-                return Err(Error::NotDirectory);
+                return Err(IoErrorKind::NotADirectory);
             }
 
             let directory = Box::new(Directory::new(node_index, node.generation));
@@ -498,9 +498,9 @@ impl FileSystemOperations for FileSystem {
         self.with_state(|state| {
             let node_index = state.resolve_existing_path(path)?;
             if state.get_node(node_index)?.is_directory() {
-                return Err(Error::IsDirectory);
+                return Err(IoErrorKind::IsADirectory);
             }
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         })
     }
 
@@ -563,7 +563,7 @@ impl BaseOperations for FileSystem {
         _buffer: &mut [u8],
         _absolute_position: Size,
     ) -> Poll<Result<usize>> {
-        Poll::Ready(Err(Error::UnsupportedOperation))
+        Poll::Ready(Err(IoErrorKind::Unsupported))
     }
 
     fn write(
@@ -573,7 +573,7 @@ impl BaseOperations for FileSystem {
         _buffer: &[u8],
         _absolute_position: Size,
     ) -> Poll<Result<usize>> {
-        Poll::Ready(Err(Error::UnsupportedOperation))
+        Poll::Ready(Err(IoErrorKind::Unsupported))
     }
 
     fn set_position(
@@ -582,7 +582,7 @@ impl BaseOperations for FileSystem {
         _current: Size,
         _position: &Position,
     ) -> Result<Size> {
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     }
 
     fn flush(
@@ -590,22 +590,22 @@ impl BaseOperations for FileSystem {
         _context: &mut Context,
         _task_context: &mut TaskContext<'_>,
     ) -> Poll<Result<()>> {
-        Poll::Ready(Err(Error::UnsupportedOperation))
+        Poll::Ready(Err(IoErrorKind::Unsupported))
     }
 
     fn open(&self, _context: &mut Context) -> Result<()> {
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     }
 
     fn close(&self, _context: &mut Context) -> Result<()> {
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     }
 
     fn clone_context(&self, context: &Context) -> Result<Context> {
         if let Some(directory) = context.get_private_data_of_type::<SharedContext<Directory>>() {
             Ok(Context::new(Some(directory.clone())))
         } else {
-            Err(Error::InvalidParameter)
+            Err(IoErrorKind::InvalidArgument)
         }
     }
 }
@@ -637,7 +637,7 @@ impl DirectoryOperations for FileSystem {
             .take_private_data_of_type::<SharedContext<Directory>>()
             .is_none()
         {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         Ok(())
     }
@@ -792,11 +792,11 @@ mod tests {
         let mut context = Context::new_empty();
         assert_eq!(
             file_system.lookup_file(&mut context, node_path, AccessFlags::Read.into()),
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         );
         assert_eq!(
             file_system.lookup_file(&mut context, Path::ROOT, AccessFlags::Read.into()),
-            Err(Error::IsDirectory)
+            Err(IoErrorKind::IsADirectory)
         );
         assert_eq!(
             file_system.lookup_file(
@@ -804,33 +804,33 @@ mod tests {
                 Path::new("/missing"),
                 AccessFlags::Read.into()
             ),
-            Err(Error::NotFound)
+            Err(IoErrorKind::NotFound)
         );
 
         let mut buffer = [0u8; 8];
         assert_eq!(
             BaseOperations::read_sync(&file_system, &mut context, &mut buffer, 0),
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         );
         assert_eq!(
             BaseOperations::write_sync(&file_system, &mut context, b"data", 0),
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         );
         assert_eq!(
             BaseOperations::flush_sync(&file_system, &mut context),
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         );
         assert_eq!(
             BaseOperations::set_position(&file_system, &mut context, 0, &Position::Start(0)),
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         );
         assert_eq!(
             BaseOperations::open(&file_system, &mut context),
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         );
         assert_eq!(
             BaseOperations::close(&file_system, &mut context),
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         );
     }
 
@@ -864,16 +864,16 @@ mod tests {
 
         assert_eq!(
             file_system.create_symlink(Path::new("/tty0"), Path::new("/tty_link")),
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         );
         assert_eq!(
             file_system.link(Path::new("/tty0"), Path::new("/tty_hardlink")),
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         );
         let mut symlink_buffer = [0u8; 16];
         assert_eq!(
             file_system.read_symlink(Path::new("/tty_link"), &mut symlink_buffer),
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         );
     }
 
@@ -908,7 +908,7 @@ mod tests {
                 Path::new("/uart/uart0"),
                 &mut read_back
             ),
-            Err(Error::NotFound)
+            Err(IoErrorKind::NotFound)
         );
         FileSystemOperations::get_attributes(
             &file_system,
@@ -940,21 +940,21 @@ mod tests {
             .unwrap();
         assert_eq!(
             file_system.rename(Path::new("/uart"), Path::new("/uart/child/nested")),
-            Err(Error::InvalidParameter)
+            Err(IoErrorKind::InvalidArgument)
         );
 
         // Type mismatch and non-empty directory overwrite errors.
         assert_eq!(
             file_system.rename(Path::new("/serial/console"), Path::new("/uart")),
-            Err(Error::IsDirectory)
+            Err(IoErrorKind::IsADirectory)
         );
         assert_eq!(
             file_system.rename(Path::new("/uart"), Path::new("/serial/console")),
-            Err(Error::NotDirectory)
+            Err(IoErrorKind::NotADirectory)
         );
         assert_eq!(
             file_system.rename(Path::new("/serial"), Path::new("/uart")),
-            Err(Error::DirectoryNotEmpty)
+            Err(IoErrorKind::DirectoryNotEmpty)
         );
     }
 
@@ -1021,9 +1021,9 @@ mod tests {
         file_system.unmount().unwrap();
         assert_eq!(
             file_system.create_file(Path::new("/after_unmount")),
-            Err(Error::NotMounted)
+            Err(IoErrorKind::DeviceUnavailable)
         );
-        assert_eq!(file_system.unmount(), Err(Error::NotMounted));
+        assert_eq!(file_system.unmount(), Err(IoErrorKind::DeviceUnavailable));
 
         file_system.mount().unwrap();
         assert_eq!(
@@ -1032,7 +1032,7 @@ mod tests {
                 Path::new("/temporary_node"),
                 &mut attributes,
             ),
-            Err(Error::NotFound)
+            Err(IoErrorKind::NotFound)
         );
     }
 
@@ -1093,7 +1093,7 @@ mod tests {
         // Removing a non-empty directory fails.
         assert_eq!(
             file_system.remove(Path::new("/devices")),
-            Err(Error::DirectoryNotEmpty)
+            Err(IoErrorKind::DirectoryNotEmpty)
         );
 
         // Removing an empty directory invalidates open handles even if its slot is reused.
@@ -1108,7 +1108,7 @@ mod tests {
         file_system.create_directory(Path::new("/reused")).unwrap();
         assert_eq!(
             DirectoryOperations::read(&file_system, &mut stale_context),
-            Err(Error::NotFound)
+            Err(IoErrorKind::NotFound)
         );
     }
 
@@ -1121,7 +1121,7 @@ mod tests {
         let mut attributes = Attributes::new().set_kind(Kind::File);
         assert_eq!(
             FileSystemOperations::set_attributes(&file_system, Path::new("/folder"), &attributes),
-            Err(Error::IsDirectory)
+            Err(IoErrorKind::IsADirectory)
         );
 
         attributes = Attributes::new().set_kind(Kind::Directory);
@@ -1131,7 +1131,7 @@ mod tests {
                 Path::new("/folder/node"),
                 &attributes
             ),
-            Err(Error::InvalidParameter)
+            Err(IoErrorKind::InvalidArgument)
         );
 
         attributes = Attributes::new().set_kind(Kind::Pipe).set_inode(5);
@@ -1155,28 +1155,28 @@ mod tests {
                 Path::new("/folder/node/"),
                 &mut read_back,
             ),
-            Err(Error::NotDirectory)
+            Err(IoErrorKind::NotADirectory)
         );
         assert_eq!(
             file_system.create_file(Path::new("/missing/node")),
-            Err(Error::NotFound)
+            Err(IoErrorKind::NotFound)
         );
         assert_eq!(
             file_system.create_file(Path::new("/folder/node/child")),
-            Err(Error::NotDirectory)
+            Err(IoErrorKind::NotADirectory)
         );
         // An empty path is the root, as for a mount point's own directory.
         assert_eq!(
             file_system.create_file(Path::EMPTY),
-            Err(Error::IsDirectory)
+            Err(IoErrorKind::IsADirectory)
         );
         assert_eq!(
             file_system.create_directory(Path::EMPTY),
-            Err(Error::AlreadyExists)
+            Err(IoErrorKind::AlreadyExists)
         );
         assert_eq!(
             file_system.create_file(Path::new("/bad\0name")),
-            Err(Error::InvalidParameter)
+            Err(IoErrorKind::InvalidArgument)
         );
     }
 

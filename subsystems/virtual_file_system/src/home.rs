@@ -2,7 +2,7 @@ use file_system::{Kind, PathOwned, Permissions};
 use task::TaskIdentifier;
 use users::UserIdentifier;
 
-use crate::{Error, Result, VirtualFileSystem};
+use crate::{IoErrorKind, Result, ResultExt, VirtualFileSystem};
 
 fn is_valid_application_identifier(application_id: &str) -> bool {
     !application_id.is_empty()
@@ -19,11 +19,15 @@ impl VirtualFileSystem {
     /// name, so renaming a user does not move or lose their home. Recorded
     /// homes are always a single entry directly below `/users`.
     pub async fn get_user_home(&self, user: UserIdentifier) -> Result<PathOwned> {
-        let home = self.users_manager().get_user_home(user).await?;
+        let home = self
+            .users_manager()
+            .get_user_home(user)
+            .await
+            .map_io_error()?;
         if !users::is_valid_user_home(&home) {
-            return Err(Error::InvalidPath);
+            return Err(IoErrorKind::InvalidPath);
         }
-        PathOwned::new(home).ok_or(Error::InvalidPath)
+        PathOwned::new(home).ok_or(IoErrorKind::InvalidPath)
     }
 
     /// The private directory of an application inside the user's recorded home.
@@ -33,13 +37,13 @@ impl VirtualFileSystem {
         application_id: &str,
     ) -> Result<PathOwned> {
         if !is_valid_application_identifier(application_id) {
-            return Err(Error::InvalidPath);
+            return Err(IoErrorKind::InvalidPath);
         }
         self.get_user_home(user)
             .await?
             .append("applications")
             .and_then(|path| path.append(application_id))
-            .ok_or(Error::InvalidPath)
+            .ok_or(IoErrorKind::InvalidPath)
     }
 
     /// Lazily create the user's private application configuration, data and cache directories.
@@ -50,42 +54,47 @@ impl VirtualFileSystem {
         application_id: &str,
     ) -> Result<PathOwned> {
         if !is_valid_application_identifier(application_id) {
-            return Err(Error::InvalidPath);
+            return Err(IoErrorKind::InvalidPath);
         }
-        let current_user = self.task_manager().get_user(task).await?;
+        let current_user = self.task_manager().get_user(task).await.map_io_error()?;
         if current_user != user && current_user != UserIdentifier::ROOT {
-            return Err(Error::PermissionDenied);
+            return Err(IoErrorKind::PermissionDenied);
         }
         let home = self.ensure_user_home(task, user).await?;
-        let group = self.users_manager().get_user_primary_group(user).await?;
+        let group = self
+            .users_manager()
+            .get_user_primary_group(user)
+            .await
+            .map_io_error()?;
         let application = self
             .get_user_application_directory(user, application_id)
             .await?;
         let paths = [
-            home.append("applications").ok_or(Error::InvalidPath)?,
+            home.append("applications")
+                .ok_or(IoErrorKind::InvalidPath)?,
             application.clone(),
             application
                 .clone()
                 .append("configuration")
-                .ok_or(Error::InvalidPath)?,
+                .ok_or(IoErrorKind::InvalidPath)?,
             application
                 .clone()
                 .append("data")
-                .ok_or(Error::InvalidPath)?,
+                .ok_or(IoErrorKind::InvalidPath)?,
             application
                 .clone()
                 .append("cache")
-                .ok_or(Error::InvalidPath)?,
+                .ok_or(IoErrorKind::InvalidPath)?,
         ];
 
         for path in paths {
             match self.get_statistics(&path).await {
                 Ok(statistics) => {
                     if statistics.kind != Kind::Directory || statistics.user != user {
-                        return Err(Error::PermissionDenied);
+                        return Err(IoErrorKind::PermissionDenied);
                     }
                 }
-                Err(Error::FileSystem(file_system::Error::NotFound)) => {
+                Err(IoErrorKind::NotFound) => {
                     self.create_directory(task, &path).await?;
                     self.set_permissions(task, &path, Permissions::USER_FULL)
                         .await?;
@@ -112,19 +121,23 @@ impl VirtualFileSystem {
         match self.get_statistics(&path).await {
             Ok(statistics) => {
                 if statistics.kind != Kind::Directory {
-                    return Err(Error::NotADirectory);
+                    return Err(IoErrorKind::NotADirectory);
                 }
                 if statistics.user != user {
-                    return Err(Error::PermissionDenied);
+                    return Err(IoErrorKind::PermissionDenied);
                 }
                 self.set_permissions(task, &path, Permissions::USER_FULL)
                     .await?;
                 return Ok(path);
             }
-            Err(Error::FileSystem(file_system::Error::NotFound)) => {}
+            Err(IoErrorKind::NotFound) => {}
             Err(error) => return Err(error),
         }
-        let group = self.users_manager().get_user_primary_group(user).await?;
+        let group = self
+            .users_manager()
+            .get_user_primary_group(user)
+            .await
+            .map_io_error()?;
         self.create_directory(task, &path).await?;
         self.set_permissions(task, &path, Permissions::USER_FULL)
             .await?;

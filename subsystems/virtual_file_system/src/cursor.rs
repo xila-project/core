@@ -1,4 +1,4 @@
-use crate::{Error, Result};
+use crate::{IoErrorKind, Result};
 use core::cell::RefCell;
 use file_system::Size;
 use synchronization::{
@@ -47,7 +47,7 @@ impl Cursor {
                 Poll::Pending => Poll::Pending,
             },
             Position::Shared(shared) => {
-                let mut value = shared.try_lock().map_err(|_| Error::RessourceBusy)?;
+                let mut value = shared.try_lock().map_err(|_| IoErrorKind::WouldBlock)?;
                 match operation(*value) {
                     Poll::Ready(Ok((result, next))) => {
                         *value = next;
@@ -62,7 +62,7 @@ impl Cursor {
 
     pub fn update<T>(&self, operation: impl FnOnce(Size) -> Result<(T, Size)>) -> Result<T> {
         // Never hold the global critical section across device I/O. Contended
-        // duplicated streams return ResourceBusy without changing the cursor.
+        // duplicated streams return WouldBlock without changing the cursor.
         let position = self.0.lock(|position| position.borrow().clone());
         match position {
             Position::Exclusive(value) => {
@@ -72,7 +72,7 @@ impl Cursor {
                 Ok(result)
             }
             Position::Shared(shared) => {
-                let mut value = shared.try_lock().map_err(|_| Error::RessourceBusy)?;
+                let mut value = shared.try_lock().map_err(|_| IoErrorKind::WouldBlock)?;
                 let (result, next) = operation(*value)?;
                 *value = next;
                 Ok(result)
@@ -112,7 +112,7 @@ mod tests {
             .update(|position| {
                 assert_eq!(
                     cursor.poll_update::<()>(|_| panic!("contended callback must not run")),
-                    Poll::Ready(Err(Error::RessourceBusy))
+                    Poll::Ready(Err(IoErrorKind::WouldBlock))
                 );
                 Ok(((), position))
             })
@@ -140,7 +140,7 @@ mod tests {
                 });
                 assert!(matches!(
                     duplicate.update(|_| Ok(((), 1))),
-                    Err(Error::RessourceBusy)
+                    Err(IoErrorKind::WouldBlock)
                 ));
                 Ok(((), position + 1))
             })

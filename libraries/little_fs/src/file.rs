@@ -2,7 +2,7 @@ use super::{convert_flags, convert_result, littlefs};
 use crate::attributes::InternalAttributes;
 use alloc::{boxed::Box, ffi::CString};
 use core::ffi::c_void;
-use file_system::{AttributeFlags, Attributes, Error, Flags, Path, Position, Result, Size};
+use file_system::{AttributeFlags, Attributes, Flags, IoErrorKind, Path, Position, Result, Size};
 
 fn convert_position(position: &Position) -> (i32, i32) {
     match position {
@@ -37,7 +37,7 @@ impl File {
         path: &Path,
         flags: Flags,
     ) -> Result<Box<Self>> {
-        let path = CString::new(path.as_str()).map_err(|_| Error::InvalidParameter)?;
+        let path = CString::new(path.as_str()).map_err(|_| IoErrorKind::InvalidArgument)?;
 
         let little_fs_flags = convert_flags(flags);
 
@@ -71,7 +71,7 @@ impl File {
     }
 
     pub fn create(file_system: &mut littlefs::lfs_t, path: &Path) -> Result<()> {
-        let path = CString::new(path.as_str()).map_err(|_| Error::InvalidParameter)?;
+        let path = CString::new(path.as_str()).map_err(|_| IoErrorKind::InvalidArgument)?;
 
         let mut file = littlefs::lfs_file_t::default();
 
@@ -130,19 +130,19 @@ impl File {
         // Read-only opens cannot persist configured attributes. Never report a
         // successful chmod that disappears when the descriptor closes.
         if self.file.flags & 3 == littlefs::lfs_open_flags_LFS_O_RDONLY {
-            return Err(Error::UnsupportedOperation);
+            return Err(IoErrorKind::Unsupported);
         }
         // sync skips errored files and commits data together with attributes.
         // A dusty independent open has stale data; callers must reopen it.
         if self.file.flags & littlefs::lfs_open_flags_LFS_F_ERRED != 0 {
-            return Err(Error::InputOutput);
+            return Err(IoErrorKind::InputOutput);
         }
         if self.file.flags & littlefs::lfs_open_flags_LFS_F_DUSTY != 0 {
-            return Err(Error::RessourceBusy);
+            return Err(IoErrorKind::ResourceBusy);
         }
         if let Some(size) = attributes.get_size() {
             // LittleFS uses signed 32-bit offsets and limits file sizes accordingly.
-            let size = i32::try_from(*size).map_err(|_| Error::FileTooLarge)?;
+            let size = i32::try_from(*size).map_err(|_| IoErrorKind::FileTooLarge)?;
             convert_result(unsafe {
                 littlefs::lfs_file_truncate(file_system, &mut self.file, size as u32)
             })?;
@@ -272,7 +272,7 @@ mod tests {
                     native,
                     &Attributes::new().set_permissions(file_system::Permissions::ALL_FULL)
                 ),
-                Err(Error::InputOutput)
+                Err(IoErrorKind::InputOutput)
             );
             assert_eq!(file.internal_attributes.permissions, original);
             file.close(native)

@@ -6,7 +6,7 @@ pub const SEED_PENDING_CONTENT: &[u8] = b"xila-seed-v1\n";
 use alloc::vec::Vec;
 use file_system::AccessFlags;
 use users::{GroupIdentifier, UserIdentifier};
-use virtual_file_system::{Error as FsError, File};
+use virtual_file_system::File;
 
 /// Load saved users and finish an explicitly pending seed installation.
 /// An unmarked disk never authorizes account creation or password replacement.
@@ -36,7 +36,7 @@ pub async fn initialize_seeded(context: &Context<'_>) -> Result<()> {
             }
             true
         }
-        Err(FsError::FileSystem(file_system::Error::NotFound)) => false,
+        Err(file_system::IoErrorKind::NotFound) => false,
         Err(error) => return Err(Error::FailedToReadUserFile(error)),
     };
     crate::load_all_users_and_groups(context).await?;
@@ -109,12 +109,12 @@ pub async fn initialize_seeded(context: &Context<'_>) -> Result<()> {
 }
 
 pub(crate) fn invalid() -> Error {
-    Error::FailedToReadUserFile(FsError::FileSystem(file_system::Error::InvalidFile))
+    Error::FailedToReadUserFile(file_system::IoErrorKind::CorruptData)
 }
 async fn exists(context: &Context<'_>, path: &str) -> Result<bool> {
     match context.virtual_file_system.get_statistics(&path).await {
         Ok(_) => Ok(true),
-        Err(FsError::FileSystem(file_system::Error::NotFound)) => Ok(false),
+        Err(file_system::IoErrorKind::NotFound) => Ok(false),
         Err(error) => Err(Error::FailedToReadUserFile(error)),
     }
 }

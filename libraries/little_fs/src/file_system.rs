@@ -9,7 +9,7 @@ use crate::{
 use alloc::{boxed::Box, ffi::CString};
 use file_system::{
     AttributeFlags, AttributeOperations, Attributes, BaseOperations, Context, DirectBlockDevice,
-    DirectoryOperations, Entry, Error, FileOperations, FileSystemOperations, Flags, Kind,
+    DirectoryOperations, Entry, FileOperations, FileSystemOperations, Flags, IoErrorKind, Kind,
     MountOperations, Path, Position, Result, Size, mount::MutexMountWrapper,
 };
 use synchronization::{Arc, blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
@@ -63,8 +63,12 @@ impl FileSystem {
         device: &'static dyn DirectBlockDevice,
         options: Options,
     ) -> Result<littlefs::lfs_config> {
-        let block_size = device.get_block_size().map_err(|_| Error::InputOutput)?;
-        let block_count = device.get_block_count().map_err(|_| Error::InputOutput)?;
+        let block_size = device
+            .get_block_size()
+            .map_err(|_| IoErrorKind::InputOutput)?;
+        let block_count = device
+            .get_block_count()
+            .map_err(|_| IoErrorKind::InputOutput)?;
 
         let mut configuration = Configuration::new(
             device,
@@ -73,7 +77,7 @@ impl FileSystem {
             options.cache_size,
             options.cache_size,
         )
-        .ok_or(Error::InvalidParameter)?;
+        .ok_or(IoErrorKind::InvalidArgument)?;
 
         if let Some(block_cycles) = options.block_cycles {
             configuration = configuration.set_block_cycles(block_cycles);
@@ -81,7 +85,7 @@ impl FileSystem {
 
         configuration
             .try_into()
-            .map_err(|_| Error::InvalidParameter)
+            .map_err(|_| IoErrorKind::InvalidArgument)
     }
 
     pub fn new_format(device: &'static dyn DirectBlockDevice, options: Options) -> Result<Self> {
@@ -124,7 +128,7 @@ impl FileSystem {
                 0,
             ));
 
-            if let Err(Error::NoAttribute) = result {
+            if let Err(IoErrorKind::MissingAttribute) = result {
                 // Set root attributes if not present
                 let mut internal_attributes = InternalAttributes::new_uninitialized().assume_init();
                 internal_attributes.kind = Kind::Directory;
@@ -174,8 +178,8 @@ impl FileSystem {
 
         let file = context
             .get_private_data_of_type::<SharedContext<I>>()
-            .ok_or(Error::InvalidParameter)?;
-        let mut file = file.try_lock().map_err(|_| Error::RessourceBusy)?;
+            .ok_or(IoErrorKind::InvalidArgument)?;
+        let mut file = file.try_lock().map_err(|_| IoErrorKind::WouldBlock)?;
         operation(&mut file_system, &mut file)
     }
 }
@@ -196,7 +200,7 @@ impl MountOperations for FileSystem {
             // Directory updates are committed immediately; `lfs_unmount` only
             // frees caches, so the backing device is synced explicitly first.
             if unsafe { super::callbacks::flush_callback(file_system.cfg) } != 0 {
-                return Err(Error::InputOutput);
+                return Err(IoErrorKind::InputOutput);
             }
             convert_result(unsafe { littlefs::lfs_unmount(file_system) })?;
             let mut configuration =
@@ -221,10 +225,10 @@ impl FileSystemOperations for FileSystem {
 
     fn rename(&self, source: &Path, destination: &Path) -> Result<()> {
         self.operation(|file_system| {
-            let source = CString::new(source.as_str()).map_err(|_| Error::InvalidParameter)?;
+            let source = CString::new(source.as_str()).map_err(|_| IoErrorKind::InvalidArgument)?;
 
             let destination =
-                CString::new(destination.as_str()).map_err(|_| Error::InvalidParameter)?;
+                CString::new(destination.as_str()).map_err(|_| IoErrorKind::InvalidArgument)?;
 
             if source != destination {
                 let mut probe = littlefs::lfs_file_t::default();
@@ -240,7 +244,7 @@ impl FileSystemOperations for FileSystem {
                     let busy = crate::open_metadata::has_other_open(file_system, &probe);
                     convert_result(unsafe { littlefs::lfs_file_close(file_system, &mut probe) })?;
                     if busy {
-                        return Err(Error::RessourceBusy);
+                        return Err(IoErrorKind::ResourceBusy);
                     }
                 } else if opened != littlefs::lfs_error_LFS_ERR_ISDIR {
                     convert_result(opened)?;
@@ -256,7 +260,7 @@ impl FileSystemOperations for FileSystem {
     }
 
     fn remove(&self, path: &Path) -> Result<()> {
-        let path = CString::new(path.as_str()).map_err(|_| Error::InvalidParameter)?;
+        let path = CString::new(path.as_str()).map_err(|_| IoErrorKind::InvalidArgument)?;
 
         self.operation(|file_system| {
             convert_result(unsafe { littlefs::lfs_remove(file_system, path.as_ptr()) })?;
@@ -304,7 +308,7 @@ impl FileSystemOperations for FileSystem {
         }
 
         self.operation(|file_system| {
-            let path = CString::new(path.as_str()).map_err(|_| Error::InvalidParameter)?;
+            let path = CString::new(path.as_str()).map_err(|_| IoErrorKind::InvalidArgument)?;
 
             let mut internal_attributes =
                 unsafe { InternalAttributes::new_uninitialized().assume_init() };
@@ -345,7 +349,7 @@ impl FileSystemOperations for FileSystem {
         InternalAttributes::validate_attribute_mask(mask)?;
 
         self.operation(|file_system| {
-            let path = CString::new(path.as_str()).map_err(|_| Error::InvalidParameter)?;
+            let path = CString::new(path.as_str()).map_err(|_| IoErrorKind::InvalidArgument)?;
 
             let mut internal_attributes =
                 unsafe { InternalAttributes::new_uninitialized().assume_init() };
@@ -412,7 +416,7 @@ impl AttributeOperations for FileSystem {
         if let Some(file) = context.get_private_data_of_type::<SharedContext<File>>() {
             self.operation(|file_system| {
                 file.try_lock()
-                    .map_err(|_| Error::RessourceBusy)?
+                    .map_err(|_| IoErrorKind::WouldBlock)?
                     .get_attributes(file_system, attributes)
             })
         } else if let Some(directory) =
@@ -420,10 +424,10 @@ impl AttributeOperations for FileSystem {
         {
             directory
                 .try_lock()
-                .map_err(|_| Error::RessourceBusy)?
+                .map_err(|_| IoErrorKind::WouldBlock)?
                 .get_attributes(attributes)
         } else {
-            Err(Error::InvalidParameter)
+            Err(IoErrorKind::InvalidArgument)
         }
     }
 
@@ -436,7 +440,7 @@ impl AttributeOperations for FileSystem {
         if let Some(file) = context.get_private_data_of_type::<SharedContext<File>>() {
             self.operation(|file_system| {
                 file.try_lock()
-                    .map_err(|_| Error::RessourceBusy)?
+                    .map_err(|_| IoErrorKind::WouldBlock)?
                     .set_attributes(file_system, attributes)
             })
         } else if let Some(directory) =
@@ -444,10 +448,10 @@ impl AttributeOperations for FileSystem {
         {
             directory
                 .try_lock()
-                .map_err(|_| Error::RessourceBusy)?
+                .map_err(|_| IoErrorKind::WouldBlock)?
                 .set_attributes(attributes)
         } else {
-            Err(Error::InvalidParameter)
+            Err(IoErrorKind::InvalidArgument)
         }
     }
 }
@@ -512,7 +516,7 @@ impl BaseOperations for FileSystem {
         {
             Ok(Context::new(Some(directory.clone())))
         } else {
-            Err(Error::InvalidParameter)
+            Err(IoErrorKind::InvalidArgument)
         }
     }
 
@@ -520,10 +524,10 @@ impl BaseOperations for FileSystem {
         self.operation(|file_system| {
             let file = context
                 .get_private_data_of_type::<SharedContext<File>>()
-                .ok_or(Error::InvalidParameter)?;
+                .ok_or(IoErrorKind::InvalidArgument)?;
             if Arc::strong_count(file) == 1 {
                 file.try_lock()
-                    .map_err(|_| Error::RessourceBusy)?
+                    .map_err(|_| IoErrorKind::WouldBlock)?
                     .close(file_system)?;
             }
             context.take_private_data_of_type::<SharedContext<File>>();
@@ -564,11 +568,11 @@ impl DirectoryOperations for FileSystem {
         self.operation(|file_system| {
             let directory = context
                 .get_private_data_of_type::<SharedContext<Directory>>()
-                .ok_or(Error::InvalidParameter)?;
+                .ok_or(IoErrorKind::InvalidArgument)?;
             if Arc::strong_count(directory) == 1 {
                 directory
                     .try_lock()
-                    .map_err(|_| Error::RessourceBusy)?
+                    .map_err(|_| IoErrorKind::WouldBlock)?
                     .close(file_system)?;
             }
             context.take_private_data_of_type::<SharedContext<Directory>>();
@@ -607,23 +611,23 @@ pub fn mount_disk<D: DirectBlockDevice>(
         XILA_DISK_SIGNATURE,
         mbr::{Mbr, PartitionKind, create_partition_device},
     };
-    let mbr = Mbr::read_from_device(device).map_err(|_| Error::InvalidFile)?;
+    let mbr = Mbr::read_from_device(device).map_err(|_| IoErrorKind::CorruptData)?;
     let count = device.get_block_count()?;
     for entry in mbr.partitions.iter().filter(|entry| entry.is_valid()) {
         if entry.start_block == 0 || entry.start_block as u64 + entry.block_count as u64 > count {
-            return Err(Error::InvalidFile);
+            return Err(IoErrorKind::CorruptData);
         }
     }
-    mbr.validate().map_err(|_| Error::InvalidFile)?;
+    mbr.validate().map_err(|_| IoErrorKind::CorruptData)?;
     if mbr.get_disk_signature() != XILA_DISK_SIGNATURE {
-        return Err(Error::InvalidFile);
+        return Err(IoErrorKind::CorruptData);
     }
     let entry = mbr
         .partitions
         .iter()
         .find(|entry| entry.is_valid() && entry.kind == PartitionKind::Xila)
-        .ok_or(Error::InvalidFile)?;
-    let partition = create_partition_device(device, entry).map_err(|_| Error::InvalidFile)?;
+        .ok_or(IoErrorKind::CorruptData)?;
+    let partition = create_partition_device(device, entry).map_err(|_| IoErrorKind::CorruptData)?;
     FileSystem::new(Box::leak(Box::new(partition)), options)
 }
 
@@ -682,7 +686,7 @@ mod tests {
             let unsupported = Attributes::new().set_size(12).set_links(2).set_mask(mask);
             assert_eq!(
                 FileSystemOperations::set_attributes(&fs, file, &unsupported),
-                Err(Error::UnsupportedOperation)
+                Err(IoErrorKind::Unsupported)
             );
         }
 
@@ -692,7 +696,7 @@ mod tests {
             .set_mask(AttributeFlags::Permissions | AttributeFlags::Size);
         assert_eq!(
             FileSystemOperations::set_attributes(&fs, file, &mixed),
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         );
 
         let mut actual = Attributes::new().set_mask(AttributeFlags::Permissions);
@@ -721,7 +725,7 @@ mod tests {
                 &mut file_context,
                 &Attributes::new().set_size(8),
             ),
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         );
         BaseOperations::close(&fs, &mut file_context).unwrap();
 
@@ -748,7 +752,7 @@ mod tests {
                 &mut directory_context,
                 &Attributes::new().set_mask(AttributeFlags::Kind),
             ),
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         );
         AttributeOperations::set_attributes(&fs, &mut directory_context, &Attributes::new())
             .unwrap();
@@ -760,7 +764,7 @@ mod tests {
                 Path::new("/missing-attributes.txt"),
                 &Attributes::new().set_permissions(file_system::Permissions::NONE),
             ),
-            Err(Error::NotFound)
+            Err(IoErrorKind::NotFound)
         );
     }
 
@@ -783,7 +787,7 @@ mod tests {
             .set_mask(AttributeFlags::all());
         assert_eq!(
             FileSystemOperations::set_attributes(&fs, file, &unsupported),
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         );
 
         let mut after_rejection = Attributes::new().set_mask(AttributeFlags::Permissions);
@@ -833,7 +837,7 @@ mod tests {
         // unsupported case instead of silently changing their object identity.
         assert_eq!(
             FileSystemOperations::rename(&fs, original, moved),
-            Err(Error::RessourceBusy)
+            Err(IoErrorKind::ResourceBusy)
         );
         BaseOperations::close(&fs, &mut open).unwrap();
         FileSystemOperations::rename(&fs, original, moved).unwrap();
@@ -917,7 +921,7 @@ mod tests {
                 &mut stale,
                 &Attributes::new().set_permissions(file_system::Permissions::ALL_FULL)
             ),
-            Err(Error::RessourceBusy)
+            Err(IoErrorKind::ResourceBusy)
         );
         BaseOperations::close(&fs, &mut stale).unwrap();
         BaseOperations::close(&fs, &mut writer).unwrap();

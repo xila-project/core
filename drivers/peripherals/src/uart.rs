@@ -15,9 +15,9 @@
 //! | `0x03` | `FLUSH_TX`   | Write     | `VersionAbi` | `VersionAbi` | Discards queued, untransmitted data.|
 //!
 //! Every struct starts with a `version` field that must equal [`ABI_VERSION`];
-//! any other value is `InvalidParameter`. Enum fields use the numeric codes
-//! below; an unknown code is `InvalidParameter`, and a setting the driver
-//! cannot express (per `Capabilities::check`) is `UnsupportedOperation`.
+//! any other value is `InvalidArgument`. Enum fields use the numeric codes
+//! below; an unknown code is `InvalidArgument`, and a setting the driver
+//! cannot express (per `Capabilities::check`) is `Unsupported`.
 //!
 //! # Flush semantics
 //!
@@ -26,7 +26,7 @@
 //! discards queued output, which an application's `flush` must not do. The
 //! discarding behaviour is exposed explicitly as `FLUSH_TX`.
 
-use file_system::{ControlCommand, ControlCommandIdentifier, Error, Result};
+use file_system::{ControlCommand, ControlCommandIdentifier, IoErrorKind, Result};
 use peripherals::uart::{
     Config, DataBits, Error as UartError, FlowControl, Parity, StopBits, UartControl,
 };
@@ -43,7 +43,7 @@ pub use device::uart::{
 ///
 /// The endpoint is switched to non-blocking mode at construction, so each
 /// read or write is one attempt: an empty receive or full transmit queue
-/// returns `RessourceBusy`.
+/// returns `WouldBlock`.
 pub struct UartHandle<U> {
     uart: U,
 }
@@ -103,7 +103,7 @@ where
             self.uart.flush_tx().map_err(map_error)?;
             *FLUSH_TX::cast_output(output)? = version_abi();
         } else {
-            return Err(Error::UnsupportedOperation);
+            return Err(IoErrorKind::Unsupported);
         }
         Ok(())
     }
@@ -119,7 +119,7 @@ fn check_version(version: u32) -> Result<()> {
     if version == ABI_VERSION {
         Ok(())
     } else {
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     }
 }
 
@@ -156,24 +156,24 @@ fn config_from_abi(abi: &ConfigAbi) -> Result<Config> {
         6 => DataBits::Six,
         7 => DataBits::Seven,
         8 => DataBits::Eight,
-        _ => return Err(Error::InvalidParameter),
+        _ => return Err(IoErrorKind::InvalidArgument),
     };
     let stop_bits = match abi.stop_bits {
         1 => StopBits::One,
         2 => StopBits::Two,
-        _ => return Err(Error::InvalidParameter),
+        _ => return Err(IoErrorKind::InvalidArgument),
     };
     let parity = match abi.parity {
         PARITY_NONE => Parity::None,
         PARITY_EVEN => Parity::Even,
         PARITY_ODD => Parity::Odd,
-        _ => return Err(Error::InvalidParameter),
+        _ => return Err(IoErrorKind::InvalidArgument),
     };
     let flow_control = match abi.flow_control {
         FLOW_CONTROL_NONE => FlowControl::None,
         FLOW_CONTROL_RTS_CTS => FlowControl::RtsCts,
         FLOW_CONTROL_XON_XOFF => FlowControl::XonXoff,
-        _ => return Err(Error::InvalidParameter),
+        _ => return Err(IoErrorKind::InvalidArgument),
     };
     Ok(Config::new(
         abi.baud_rate,
@@ -185,16 +185,16 @@ fn config_from_abi(abi: &ConfigAbi) -> Result<Config> {
 }
 
 /// Maps a UART error to the file system error seen by applications.
-fn map_error(error: UartError) -> Error {
+fn map_error(error: UartError) -> IoErrorKind {
     match error {
-        UartError::WouldBlock => Error::RessourceBusy,
+        UartError::WouldBlock => IoErrorKind::WouldBlock,
         UartError::UnsupportedBaudRate
         | UartError::UnsupportedDataBits
         | UartError::UnsupportedStopBits
         | UartError::UnsupportedParity
-        | UartError::UnsupportedFlowControl => Error::UnsupportedOperation,
+        | UartError::UnsupportedFlowControl => IoErrorKind::Unsupported,
         UartError::Framing | UartError::ParityError | UartError::Overrun | UartError::Io => {
-            Error::InputOutput
+            IoErrorKind::InputOutput
         }
     }
 }
@@ -215,12 +215,12 @@ where
     use file_system::Path;
 
     if name.is_empty() || name == "." || name == ".." || name.contains('/') {
-        return Err(virtual_file_system::Error::FileSystem(Error::InvalidPath));
+        return Err(IoErrorKind::InvalidPath);
     }
     let path = Path::UART_DEVICES
         .join(name)
-        .ok_or(virtual_file_system::Error::FileSystem(Error::InvalidPath))?;
-    let handle = UartHandle::new(uart).map_err(virtual_file_system::Error::FileSystem)?;
+        .ok_or(IoErrorKind::InvalidPath)?;
+    let handle = UartHandle::new(uart)?;
 
     virtual_file_system::ignore_already_exists_error(
         virtual_file_system

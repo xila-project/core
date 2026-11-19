@@ -82,9 +82,7 @@ async fn vfs_full_write_waits_then_reports_last_reader_close() {
     assert_eq!(count.0.load(Ordering::SeqCst), 2);
     assert_eq!(
         write.as_mut().poll(&mut cx),
-        Poll::Ready(Err(virtual_file_system::Error::FileSystem(
-            file_system::Error::InputOutput
-        )))
+        Poll::Ready(Err(file_system::IoErrorKind::BrokenPipe))
     );
 }
 
@@ -97,9 +95,7 @@ async fn vfs_nonblocking_read_and_write_return_busy_without_waking() {
     let (count, waker) = counter();
     let mut cx = Context::from_waker(&waker);
     let mut byte = [0];
-    let busy = Poll::Ready(Err(virtual_file_system::Error::FileSystem(
-        file_system::Error::RessourceBusy,
-    )));
+    let busy = Poll::Ready(Err(file_system::IoErrorKind::WouldBlock));
     {
         let mut read = pin!(reader.read(&mut byte));
         assert_eq!(read.as_mut().poll(&mut cx), busy);
@@ -352,9 +348,7 @@ async fn duplicate_capacity_failure_leaves_existing_descriptors_usable() {
     }
     assert!(matches!(
         readers[0].duplicate().await,
-        Err(virtual_file_system::Error::FileSystem(
-            file_system::Error::TooManyOpenFiles
-        ))
+        Err(file_system::IoErrorKind::SystemFileLimit)
     ));
     readers.pop().unwrap().close(vfs).await.unwrap();
     let mut replacement = readers[0].duplicate().await.unwrap();

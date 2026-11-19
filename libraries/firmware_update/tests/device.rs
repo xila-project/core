@@ -4,7 +4,7 @@ use firmware_update::{
     AUTHENTICATED_UPDATE, Capabilities, Error as FirmwareError, FUNCTIONAL_REVERT, FirmwareBackend,
 };
 use users::{GroupIdentifier, UserIdentifier};
-use virtual_file_system::{Error, File, ItemStatic, VirtualFileSystem};
+use virtual_file_system::{File, IoErrorKind, ItemStatic, VirtualFileSystem};
 testing::instantiate_global_allocator!();
 
 #[derive(Default)]
@@ -110,15 +110,15 @@ async fn vfs_stream_is_exclusive_explicit_and_privileged() {
         .unwrap();
     assert!(matches!(
         File::open(vfs, task, DEVICE_PATH, AccessFlags::Write.into()).await,
-        Err(Error::FileSystem(file_system::Error::RessourceBusy))
+        Err(file_system::IoErrorKind::ResourceBusy)
     ));
     assert!(matches!(
         file.duplicate().await,
-        Err(Error::FileSystem(file_system::Error::UnsupportedOperation))
+        Err(file_system::IoErrorKind::Unsupported)
     ));
     assert_eq!(
         file.control(ACTIVATE, &header()).await,
-        Err(Error::FileSystem(file_system::Error::InvalidParameter))
+        Err(file_system::IoErrorKind::InvalidArgument)
     );
     let request = begin_request(137, b"metadata").unwrap();
     file.control(BEGIN, &request).await.unwrap();
@@ -143,7 +143,7 @@ async fn vfs_stream_is_exclusive_explicit_and_privileged() {
     vfs.task_manager().set_user(task, user).await.unwrap();
     assert!(matches!(
         File::open(vfs, task, DEVICE_PATH, AccessFlags::Write.into()).await,
-        Err(Error::PermissionDenied)
+        Err(IoErrorKind::PermissionDenied)
     ));
 }
 #[task::test]
@@ -152,10 +152,13 @@ async fn readonly_controls_and_malformed_abi_do_not_mutate() {
     let mut f = File::open(vfs, task, DEVICE_PATH, AccessFlags::Read.into())
         .await
         .unwrap();
-    assert_eq!(f.control(ABORT, &header()).await, Err(Error::InvalidMode));
+    assert_eq!(
+        f.control(ABORT, &header()).await,
+        Err(IoErrorKind::BadDescriptor)
+    );
     assert_eq!(
         f.as_synchronous_file_mut().control(ABORT, &header()),
-        Err(Error::InvalidMode)
+        Err(IoErrorKind::BadDescriptor)
     );
     assert_eq!(
         f.as_synchronous_file_mut().control_raw(
@@ -163,7 +166,7 @@ async fn readonly_controls_and_malformed_abi_do_not_mutate() {
             shared::AnyByLayout::from(&header()),
             shared::AnyByLayout::from_mutable(&mut ())
         ),
-        Err(Error::InvalidMode)
+        Err(IoErrorKind::BadDescriptor)
     );
     f.close(vfs).await.unwrap();
     let mut f = File::open(vfs, task, DEVICE_PATH, AccessFlags::Write.into())
@@ -173,13 +176,13 @@ async fn readonly_controls_and_malformed_abi_do_not_mutate() {
     bad[7] = 1;
     assert_eq!(
         f.control(ABORT, &bad).await,
-        Err(Error::FileSystem(file_system::Error::InvalidParameter))
+        Err(file_system::IoErrorKind::InvalidArgument)
     );
     let mut bad = begin_request(3, b"metadata").unwrap();
     bad[279] = 1;
     assert_eq!(
         f.control(BEGIN, &bad).await,
-        Err(Error::FileSystem(file_system::Error::InvalidParameter))
+        Err(file_system::IoErrorKind::InvalidArgument)
     );
     f.control(BEGIN, &begin_request(3, b"metadata").unwrap())
         .await

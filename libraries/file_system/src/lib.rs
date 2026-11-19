@@ -38,7 +38,7 @@
 //!
 //! ### Fundamental Types
 //! - [`Path`] - File system path representation
-//! - [`Error`] - File system error enumeration
+//! - [`IoErrorKind`] - Common I/O error kind
 //! - [`Size`] - Size and position types
 //! - [`Time`] - Timestamp handling
 //! - [`Flags`] - File operation flags
@@ -91,13 +91,11 @@
 //! ## Error Handling
 //!
 //! Device I/O returns `Poll<Result<T>>`; synchronous operations return [`Result<T>`].
-//! The [`Error`] enum provides comprehensive error reporting for all file system operations.
+//! The [`IoErrorKind`] enum provides comprehensive error reporting for all file system operations.
 
 #![no_std]
 
 extern crate alloc;
-
-embedded_i18n::i18n!("locales");
 
 #[cfg(feature = "std")]
 extern crate std;

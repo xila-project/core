@@ -326,7 +326,7 @@ pub(crate) async fn request_with(
     action: Action,
     status: u8,
 ) -> Result<(), Error> {
-    use virtual_file_system::Error as VfsError;
+    use virtual_file_system::IoErrorKind;
     let mut device = File::open(
         virtual_file_system,
         task,
@@ -335,12 +335,8 @@ pub(crate) async fn request_with(
     )
     .await
     .map_err(|error| match error {
-        VfsError::PermissionDenied | VfsError::FileSystem(file_system::Error::PermissionDenied) => {
-            Error::PermissionDenied
-        }
-        VfsError::RessourceBusy | VfsError::FileSystem(file_system::Error::RessourceBusy) => {
-            Error::Busy
-        }
+        IoErrorKind::PermissionDenied => Error::PermissionDenied,
+        IoErrorKind::ResourceBusy => Error::Busy,
         _ => Error::Unsupported,
     })?;
     let capabilities = device.control(device::power::GET_CAPABILITIES, &()).await;

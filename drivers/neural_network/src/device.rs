@@ -2,8 +2,8 @@ use alloc::{boxed::Box, vec, vec::Vec};
 use core::task::Poll;
 
 use file_system::{
-    BaseOperations, CharacterDevice, Context, ControlCommand, ControlCommandIdentifier, Error,
-    MountOperations, Result, Size,
+    BaseOperations, CharacterDevice, Context, ControlCommand, ControlCommandIdentifier,
+    IoErrorKind, MountOperations, Result, Size,
 };
 use shared::AnyByLayout;
 
@@ -29,7 +29,7 @@ impl<B: Backend> NeuralNetworkDevice<B> {
         context
             .get_private_data_of_type::<DeviceContext<B>>()
             .filter(|state| self.backend.owns_execution(&state.execution))
-            .ok_or(Error::InvalidContext)
+            .ok_or(IoErrorKind::BadDescriptor)
     }
 
     fn state_mut<'context>(
@@ -39,7 +39,7 @@ impl<B: Backend> NeuralNetworkDevice<B> {
         context
             .get_private_data_mutable_of_type::<DeviceContext<B>>()
             .filter(|state| self.backend.owns_execution(&state.execution))
-            .ok_or(Error::InvalidContext)
+            .ok_or(IoErrorKind::BadDescriptor)
     }
 }
 
@@ -73,7 +73,7 @@ impl<L: Loader> LoaderDevice<L> {
                     loader_id: id,
                 } => *id == loader_id && backend.owns_execution(&device_context.execution),
             })
-            .ok_or(Error::InvalidContext)
+            .ok_or(IoErrorKind::BadDescriptor)
     }
 
     fn state_mut<'context>(
@@ -91,7 +91,7 @@ impl<L: Loader> LoaderDevice<L> {
                     loader_id: id,
                 } => *id == loader_id && backend.owns_execution(&device_context.execution),
             })
-            .ok_or(Error::InvalidContext)
+            .ok_or(IoErrorKind::BadDescriptor)
     }
 }
 
@@ -119,7 +119,7 @@ pub(crate) fn compute<B: Backend>(backend: &B, state: &mut DeviceContext<B>) -> 
     state.computed = false;
     for (index, filled) in state.input_filled.iter().enumerate() {
         if backend.input_info(index)?.byte_len as usize != *filled {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
     }
     // Arena planning can overwrite inputs even when a kernel returns an error.
@@ -136,7 +136,7 @@ pub(crate) fn handle_inference_read<B: Backend>(
     absolute_position: Size,
 ) -> Result<usize> {
     if !state.computed {
-        return Err(Error::NotInitialized);
+        return Err(IoErrorKind::DeviceUnavailable);
     }
     let tensor = backend.output(&state.execution, state.output_index)?;
     let output = tensor.as_ref();
@@ -159,10 +159,10 @@ pub(crate) fn handle_inference_write<B: Backend>(
     let filled = *state
         .input_filled
         .get(index)
-        .ok_or(Error::InvalidParameter)?;
+        .ok_or(IoErrorKind::InvalidArgument)?;
     let offset = usize::try_from(absolute_position).unwrap_or(usize::MAX);
     if offset > filled {
-        return Err(Error::InvalidParameter);
+        return Err(IoErrorKind::InvalidArgument);
     }
     let mut tensor = backend.input(&mut state.execution, index)?;
     let input = tensor.as_mut();
@@ -170,7 +170,7 @@ pub(crate) fn handle_inference_write<B: Backend>(
         return if buffer.is_empty() {
             Ok(0)
         } else {
-            Err(Error::FileTooLarge)
+            Err(IoErrorKind::FileTooLarge)
         };
     }
     let count = buffer.len().min(input.len() - offset);
@@ -201,7 +201,7 @@ pub(crate) fn handle_inference_control<B: Backend>(
             validate_command::<SET_INPUT_INDEX>(input, output)?;
             let index = *SET_INPUT_INDEX::cast_input(input)? as usize;
             if index >= backend.input_count() {
-                return Err(Error::InvalidParameter);
+                return Err(IoErrorKind::InvalidArgument);
             }
             state.input_index = index;
         }
@@ -218,7 +218,7 @@ pub(crate) fn handle_inference_control<B: Backend>(
             validate_command::<SET_OUTPUT_INDEX>(input, output)?;
             let index = *SET_OUTPUT_INDEX::cast_input(input)? as usize;
             if index >= backend.output_count() {
-                return Err(Error::InvalidParameter);
+                return Err(IoErrorKind::InvalidArgument);
             }
             state.output_index = index;
         }
@@ -242,7 +242,7 @@ pub(crate) fn handle_inference_control<B: Backend>(
             validate_command::<COMPUTE>(input, output)?;
             compute(backend, state)?;
         }
-        _ => return Err(Error::UnsupportedOperation),
+        _ => return Err(IoErrorKind::Unsupported),
     }
     Ok(())
 }
@@ -250,7 +250,7 @@ pub(crate) fn handle_inference_control<B: Backend>(
 impl<B: Backend> BaseOperations for NeuralNetworkDevice<B> {
     fn open(&self, context: &mut Context) -> Result<()> {
         if context.get_private_data().is_some() {
-            return Err(Error::InvalidContext);
+            return Err(IoErrorKind::InvalidState);
         }
         let execution = self.backend.create_execution()?;
         context.set_private_data(Box::new(DeviceContext::<B> {
@@ -268,7 +268,7 @@ impl<B: Backend> BaseOperations for NeuralNetworkDevice<B> {
         context
             .take_private_data_of_type::<DeviceContext<B>>()
             .map(drop)
-            .ok_or(Error::InvalidContext)
+            .ok_or(IoErrorKind::BadDescriptor)
     }
 
     fn read(
@@ -312,7 +312,7 @@ impl<B: Backend> BaseOperations for NeuralNetworkDevice<B> {
     }
 
     fn clone_context(&self, _context: &Context) -> Result<Context> {
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     }
 }
 
@@ -327,7 +327,7 @@ impl<B: Backend> CharacterDevice for NeuralNetworkDevice<B> {}
 impl<L: Loader> BaseOperations for LoaderDevice<L> {
     fn open(&self, context: &mut Context) -> Result<()> {
         if context.get_private_data().is_some() {
-            return Err(Error::InvalidContext);
+            return Err(IoErrorKind::InvalidState);
         }
         context.set_private_data(Box::new(LoaderContext::<L::Backend>::Staging {
             bytes: ModelBuffer::new(),
@@ -341,7 +341,7 @@ impl<L: Loader> BaseOperations for LoaderDevice<L> {
         context
             .take_private_data_of_type::<LoaderContext<L::Backend>>()
             .map(drop)
-            .ok_or(Error::InvalidContext)
+            .ok_or(IoErrorKind::BadDescriptor)
     }
 
     fn read(
@@ -354,7 +354,7 @@ impl<L: Loader> BaseOperations for LoaderDevice<L> {
         file_system::ready(|| {
             let state = self.state(context)?;
             match state {
-                LoaderContext::Staging { .. } => Err(Error::InvalidContext),
+                LoaderContext::Staging { .. } => Err(IoErrorKind::InvalidState),
                 LoaderContext::Ready {
                     backend,
                     device_context,
@@ -377,7 +377,7 @@ impl<L: Loader> BaseOperations for LoaderDevice<L> {
                 LoaderContext::Staging { bytes, .. } => {
                     let offset = usize::try_from(absolute_position).unwrap_or(usize::MAX);
                     if offset > bytes.len() {
-                        return Err(Error::InvalidParameter);
+                        return Err(IoErrorKind::InvalidArgument);
                     }
                     bytes.write_at_within(offset, buffer, self.loader.maximum_model_size())?;
                     Ok(buffer.len())
@@ -404,12 +404,12 @@ impl<L: Loader> BaseOperations for LoaderDevice<L> {
             match state {
                 LoaderContext::Staging { bytes, loader_id } => {
                     if command != LOAD::IDENTIFIER {
-                        return Err(Error::InvalidContext);
+                        return Err(IoErrorKind::InvalidState);
                     }
                     validate_command::<LOAD>(input, output)?;
                     let request = *LOAD::cast_input(input)?;
                     if request.version != LoadRequest::VERSION || request.reserved != [0, 0] {
-                        return Err(Error::InvalidParameter);
+                        return Err(IoErrorKind::InvalidArgument);
                     }
                     let encoding = ModelEncoding::try_from(request.encoding)?;
                     let model = core::mem::take(bytes);
@@ -435,7 +435,7 @@ impl<L: Loader> BaseOperations for LoaderDevice<L> {
                     ..
                 } => {
                     if command == LOAD::IDENTIFIER {
-                        return Err(Error::InvalidContext);
+                        return Err(IoErrorKind::InvalidState);
                     }
                     handle_inference_control(backend, device_context, command, input, output)
                 }
@@ -444,7 +444,7 @@ impl<L: Loader> BaseOperations for LoaderDevice<L> {
     }
 
     fn clone_context(&self, _context: &Context) -> Result<Context> {
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     }
 }
 

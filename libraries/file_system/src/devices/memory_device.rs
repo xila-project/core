@@ -15,8 +15,8 @@ use synchronization::{blocking_mutex::raw::CriticalSectionRawMutex, rwlock::RwLo
 
 use crate::block_device::GET_BLOCK_SIZE;
 use crate::{
-    ControlCommand, DirectBaseOperations, DirectBlockDevice, Error, MountOperations, Result, Size,
-    block_device,
+    ControlCommand, DirectBaseOperations, DirectBlockDevice, IoErrorKind, MountOperations, Result,
+    Size, block_device,
 };
 
 /// In-memory device implementation with configurable block size.
@@ -145,7 +145,7 @@ impl<const BLOCK_SIZE: u32> DirectBaseOperations for MemoryDevice<BLOCK_SIZE> {
             let inner = self
                 .0
                 .try_write()
-                .map_err(|_| crate::Error::RessourceBusy)?;
+                .map_err(|_| crate::IoErrorKind::WouldBlock)?;
 
             let absolute_position = absolute_position as usize;
 
@@ -168,7 +168,7 @@ impl<const BLOCK_SIZE: u32> DirectBaseOperations for MemoryDevice<BLOCK_SIZE> {
             let mut inner = self
                 .0
                 .try_write()
-                .map_err(|_| crate::Error::RessourceBusy)?;
+                .map_err(|_| crate::IoErrorKind::WouldBlock)?;
 
             let absolute_position = absolute_position as usize;
 
@@ -201,11 +201,11 @@ impl<const BLOCK_SIZE: u32> DirectBaseOperations for MemoryDevice<BLOCK_SIZE> {
                     *output = (self
                         .0
                         .try_read()
-                        .map_err(|_| crate::Error::RessourceBusy)?
+                        .map_err(|_| crate::IoErrorKind::WouldBlock)?
                         .len()
                         / BLOCK_SIZE as usize) as u32;
                 }
-                _ => return Err(Error::UnsupportedOperation),
+                _ => return Err(IoErrorKind::Unsupported),
             }
 
             Ok(())

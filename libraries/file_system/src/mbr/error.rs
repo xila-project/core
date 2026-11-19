@@ -4,7 +4,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
 pub enum Error {
-    Device(crate::Error),
+    Device(crate::IoErrorKind),
     InvalidPartition,
     InvalidSignature,
     DeviceTooSmall,
@@ -33,8 +33,8 @@ impl core::fmt::Display for Error {
     }
 }
 
-impl From<crate::Error> for Error {
-    fn from(value: crate::Error) -> Self {
+impl From<crate::IoErrorKind> for Error {
+    fn from(value: crate::IoErrorKind) -> Self {
         Error::Device(value)
     }
 }

@@ -82,7 +82,7 @@ fn full_write_waits_for_space_and_last_reader_close() {
     assert_eq!(count.0.load(Ordering::SeqCst), 2);
     assert_eq!(
         BaseOperations::write(&pipe, &mut writer, &mut cx, b"c", 0),
-        Poll::Ready(Err(Error::InputOutput))
+        Poll::Ready(Err(IoErrorKind::BrokenPipe))
     );
 }
 
@@ -128,11 +128,11 @@ fn opening_capacity_is_explicit_and_slots_are_reused() {
     }
     assert!(matches!(
         pipe.open_context(AccessFlags::Write),
-        Err(Error::TooManyOpenFiles)
+        Err(IoErrorKind::SystemFileLimit)
     ));
     assert!(matches!(
         pipe.clone_context(&contexts[0]),
-        Err(Error::TooManyOpenFiles)
+        Err(IoErrorKind::SystemFileLimit)
     ));
     pipe.close(&mut contexts.pop().unwrap()).unwrap();
     let mut replacement = pipe.open_context(AccessFlags::Write).unwrap();

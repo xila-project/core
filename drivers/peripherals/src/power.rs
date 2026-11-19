@@ -7,7 +7,7 @@
 //! identity, so the VFS permission check at open time is the authorization.
 //! The OS lifecycle opens this node as the last step of a shutdown.
 
-use file_system::{ControlCommand, ControlCommandIdentifier, Error, Result};
+use file_system::{ControlCommand, ControlCommandIdentifier, IoErrorKind, Result};
 use peripherals::power::{Error as PowerError, PowerController};
 use shared::AnyByLayout;
 
@@ -29,11 +29,11 @@ where
     C: PowerController + Send,
 {
     fn read(&mut self, _buffer: &mut [u8]) -> Result<usize> {
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     }
 
     fn write(&mut self, _buffer: &[u8]) -> Result<usize> {
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     }
 
     fn control(
@@ -54,16 +54,16 @@ where
         } else if command == SLEEP::IDENTIFIER {
             self.0.sleep().map_err(map_error)
         } else {
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         }
     }
 }
 
 /// Maps a power controller error to the file system error seen by callers.
-fn map_error(error: PowerError) -> Error {
+fn map_error(error: PowerError) -> IoErrorKind {
     match error {
-        PowerError::Unsupported => Error::UnsupportedOperation,
-        PowerError::Other => Error::InputOutput,
+        PowerError::Unsupported => IoErrorKind::Unsupported,
+        PowerError::Other => IoErrorKind::InputOutput,
     }
 }
 
@@ -109,11 +109,11 @@ mod tests {
 
         assert_eq!(
             control::<POWER_OFF>(&mut handle, &0, &mut ()),
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         );
         assert_eq!(
             control::<SLEEP>(&mut handle, &(), &mut ()),
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         );
         control::<RESTART>(&mut handle, &7, &mut ()).unwrap();
         assert_eq!(handle.0.restarted, Some(7));
@@ -122,7 +122,7 @@ mod tests {
     #[test]
     fn raw_bytes_cannot_trigger_an_action() {
         let mut handle = PowerHandle::new(ResetOnly::default());
-        assert_eq!(handle.write(b"reboot"), Err(Error::UnsupportedOperation));
+        assert_eq!(handle.write(b"reboot"), Err(IoErrorKind::Unsupported));
         assert_eq!(handle.0.restarted, None);
     }
 }

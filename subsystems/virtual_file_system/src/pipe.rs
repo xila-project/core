@@ -4,7 +4,7 @@ use core::{
     task::{Context as TaskContext, Poll, Waker},
 };
 use file_system::{
-    AccessFlags, BaseOperations, Context, Error, MountOperations, Operation, Result, Size,
+    AccessFlags, BaseOperations, Context, IoErrorKind, MountOperations, Operation, Result, Size,
 };
 use synchronization::blocking_mutex::{Mutex, raw::CriticalSectionRawMutex};
 
@@ -75,11 +75,11 @@ impl Pipe {
                 .slots
                 .iter()
                 .position(|slot| slot.access.is_none())
-                .ok_or(Error::TooManyOpenFiles)?;
+                .ok_or(IoErrorKind::SystemFileLimit)?;
             state.slots[slot].access = Some(access);
             state.readers += usize::from(access.contains(AccessFlags::Read));
             state.writers += usize::from(access.contains(AccessFlags::Write));
-            Ok::<_, Error>(slot)
+            Ok::<_, IoErrorKind>(slot)
         })?;
         context
             .get_private_data_mutable_of_type::<Opening>()
@@ -91,9 +91,9 @@ impl Pipe {
     fn opening(context: &Context, required: AccessFlags) -> Result<&Opening> {
         let opening = context
             .get_private_data_of_type::<Opening>()
-            .ok_or(Error::InvalidContext)?;
+            .ok_or(IoErrorKind::BadDescriptor)?;
         if !opening.access.contains(required) {
-            return Err(Error::InvalidMode);
+            return Err(IoErrorKind::BadDescriptor);
         }
         Ok(opening)
     }
@@ -111,7 +111,7 @@ impl Pipe {
         let result = self.state.lock(|state| {
             let mut state = state.borrow_mut();
             let result = operation(&mut state);
-            if result == Err(Error::RessourceBusy) && registration.is_some() {
+            if result == Err(IoErrorKind::WouldBlock) && registration.is_some() {
                 let (slot, waker) = registration.take().unwrap();
                 retired = state.slots[slot].waiter.replace((kind, waker));
                 return Poll::Pending;
@@ -150,7 +150,7 @@ impl Pipe {
                 return Ok(0);
             }
             if state.buffer.is_empty() && state.writers > 0 {
-                return Err(Error::RessourceBusy);
+                return Err(IoErrorKind::WouldBlock);
             }
             let mut length = 0;
             while length < data.len() {
@@ -177,11 +177,11 @@ impl Pipe {
                 return Ok(0);
             }
             if state.readers == 0 {
-                return Err(Error::InputOutput);
+                return Err(IoErrorKind::BrokenPipe);
             }
             let length = data.len().min(self.capacity - state.buffer.len());
             if length == 0 {
-                return Err(Error::RessourceBusy);
+                return Err(IoErrorKind::WouldBlock);
             }
             state.buffer.extend(&data[..length]);
             Ok(length)
@@ -192,7 +192,7 @@ impl BaseOperations for Pipe {
     fn close(&self, context: &mut Context) -> Result<()> {
         let opening = context
             .take_private_data_of_type::<Opening>()
-            .ok_or(Error::InvalidContext)?;
+            .ok_or(IoErrorKind::BadDescriptor)?;
         let mut retired = None;
         let mut wake: WakeBatch = core::array::from_fn(|_| None);
         self.state.lock(|state| {
@@ -219,7 +219,7 @@ impl BaseOperations for Pipe {
         self.open_context(
             context
                 .get_private_data_of_type::<Opening>()
-                .ok_or(Error::InvalidContext)?
+                .ok_or(IoErrorKind::BadDescriptor)?
                 .access,
         )
     }
@@ -263,7 +263,7 @@ impl BaseOperations for Pipe {
     ) -> Poll<Result<usize>> {
         let opening = Self::opening(context, AccessFlags::Read)?;
         if delimiter.is_empty() {
-            return Poll::Ready(Err(Error::InvalidParameter));
+            return Poll::Ready(Err(IoErrorKind::InvalidArgument));
         }
         self.read_inner(data, Some(delimiter), Some((opening.slot, cx.waker())))
     }
@@ -302,7 +302,7 @@ mod regression_tests {
         assert_eq!(pipe.write_sync(&mut writer, b"abcdef", 0).unwrap(), 4);
         assert_eq!(
             pipe.write_sync(&mut writer, b"x", 0),
-            Err(Error::RessourceBusy)
+            Err(IoErrorKind::WouldBlock)
         );
     }
     #[test]
@@ -313,7 +313,7 @@ mod regression_tests {
         let mut duplicate = pipe.clone_context(&writer).unwrap();
         assert_eq!(
             pipe.read_sync(&mut reader, &mut [0; 1], 0),
-            Err(Error::RessourceBusy)
+            Err(IoErrorKind::WouldBlock)
         );
         pipe.write_sync(&mut writer, b"hi", 0).unwrap();
         pipe.close(&mut writer).unwrap();
@@ -321,7 +321,7 @@ mod regression_tests {
         assert_eq!(pipe.read_sync(&mut reader, &mut output, 0).unwrap(), 2);
         assert_eq!(
             pipe.read_sync(&mut reader, &mut output, 0),
-            Err(Error::RessourceBusy)
+            Err(IoErrorKind::WouldBlock)
         );
         pipe.close(&mut duplicate).unwrap();
         assert_eq!(pipe.read_sync(&mut reader, &mut output, 0).unwrap(), 0);
@@ -329,7 +329,7 @@ mod regression_tests {
         let mut writer = pipe.open_context(AccessFlags::Write).unwrap();
         assert_eq!(
             pipe.write_sync(&mut writer, b"x", 0),
-            Err(Error::InputOutput)
+            Err(IoErrorKind::BrokenPipe)
         );
     }
 }
