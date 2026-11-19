@@ -2080,6 +2080,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "xila-io-error"
+version = "0.1.0"
+dependencies = [
+ "embedded-i18n",
+ "embedded-io",
+]
+
+[[package]]
 name = "xila-lifecycle"
 version = "0.1.0"
 dependencies = [
