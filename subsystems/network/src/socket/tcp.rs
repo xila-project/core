@@ -75,6 +75,7 @@ impl TcpSocket {
             .await?;
         if started_listening {
             self.context.closed = false;
+            self.context.was_connected = false;
         }
 
         poll_fn(|cx| {
@@ -83,10 +84,12 @@ impl TcpSocket {
                     s.register_send_waker(cx.waker());
                     Poll::Pending
                 }
-                _ => Poll::Ready(Ok(())),
+                _ => Poll::Ready(()),
             })
         })
-        .await
+        .await;
+        self.context.was_connected = true;
+        Ok(())
     }
 
     pub async fn connect(
@@ -111,6 +114,7 @@ impl TcpSocket {
             })
             .await?;
         self.context.closed = false;
+        self.context.was_connected = false;
 
         poll_fn(|cx| {
             self.poll_with_mutable(cx, |socket, cx| match socket.state() {
@@ -125,7 +129,9 @@ impl TcpSocket {
                 _ => Poll::Ready(Ok(())),
             })
         })
-        .await
+        .await?;
+        self.context.was_connected = true;
+        Ok(())
     }
 
     pub async fn read(&mut self, buffer: &mut [u8]) -> Result<usize> {
@@ -139,7 +145,13 @@ impl TcpSocket {
                 }
                 Ok(n) => Poll::Ready(Ok(n)),
                 Err(tcp::RecvError::Finished) => Poll::Ready(Ok(0)),
-                Err(tcp::RecvError::InvalidState) => Poll::Ready(Err(Error::NotConnected)),
+                Err(tcp::RecvError::InvalidState) => {
+                    Poll::Ready(Err(if self.context.was_connected && !self.context.closed {
+                        Error::ConnectionReset
+                    } else {
+                        Error::NotConnected
+                    }))
+                }
             })
         })
         .await
@@ -169,6 +181,8 @@ impl TcpSocket {
                         );
                     Poll::Ready(Err(if send_closed {
                         Error::BrokenPipe
+                    } else if self.context.was_connected {
+                        Error::ConnectionReset
                     } else {
                         Error::NotConnected
                     }))
@@ -288,24 +302,8 @@ mod tests {
 
     static TEST_MUTEX: Mutex<CriticalSectionRawMutex, ()> = Mutex::new(());
 
-    #[task::test]
-    async fn unconnected_tcp_io_reports_not_connected() {
-        let _lock = TEST_MUTEX.lock().await;
+    async fn connected_tcp_pair(port: Port) -> (TcpSocket, TcpSocket) {
         let manager = initialize().await;
-        let mut socket = manager.new_tcp_socket(128, 128, None).await.unwrap();
-
-        assert_eq!(socket.write(b"data").await, Err(Error::NotConnected));
-        assert_eq!(socket.read(&mut [0; 1]).await, Err(Error::NotConnected));
-        socket.close_forced().await;
-    }
-
-    #[task::test]
-    async fn empty_tcp_writes_complete_and_local_shutdown_breaks_writes() {
-        use core::future::Future;
-
-        let _lock = TEST_MUTEX.lock().await;
-        let manager = initialize().await;
-        let port = Port::from_inner(51011);
         let mut listener = manager.new_tcp_socket(128, 128, None).await.unwrap();
         listener
             .with_mutable(|s| s.listen(port.into_inner()).unwrap())
@@ -326,6 +324,27 @@ mod tests {
             panic!("loopback TCP handshake failed");
         };
 
+        (listener, client)
+    }
+
+    #[task::test]
+    async fn unconnected_tcp_io_reports_not_connected() {
+        let _lock = TEST_MUTEX.lock().await;
+        let manager = initialize().await;
+        let mut socket = manager.new_tcp_socket(128, 128, None).await.unwrap();
+
+        assert_eq!(socket.write(b"data").await, Err(Error::NotConnected));
+        assert_eq!(socket.read(&mut [0; 1]).await, Err(Error::NotConnected));
+        socket.close_forced().await;
+    }
+
+    #[task::test]
+    async fn empty_tcp_writes_complete_and_local_shutdown_breaks_writes() {
+        use core::future::Future;
+
+        let _lock = TEST_MUTEX.lock().await;
+        let (mut listener, mut client) = connected_tcp_pair(Port::from_inner(51011)).await;
+
         let poll = core::pin::pin!(client.write(&[]))
             .poll(&mut Context::from_waker(core::task::Waker::noop()));
         assert_eq!(poll, Poll::Ready(Ok(0)));
@@ -335,6 +354,30 @@ mod tests {
         assert_eq!(client.write(b"data").await, Err(Error::BrokenPipe));
         assert_eq!(client.write(&[]).await, Ok(0));
         listener.close_forced().await;
+    }
+
+    #[task::test]
+    async fn tcp_io_reports_peer_reset() {
+        let _lock = TEST_MUTEX.lock().await;
+        let (mut listener, mut client) = connected_tcp_pair(Port::from_inner(51012)).await;
+        listener.close_forced().await;
+
+        let mut buffer = [0; 1];
+        let embassy_futures::select::Either::First(read_result) = embassy_futures::select::select(
+            client.read(&mut buffer),
+            task::sleep(core::time::Duration::from_secs(2)),
+        )
+        .await
+        else {
+            panic!("client did not receive the TCP reset");
+        };
+        let write_result = client.write(b"data").await;
+
+        client.close_forced().await;
+        assert_eq!(
+            (read_result, write_result),
+            (Err(Error::ConnectionReset), Err(Error::ConnectionReset))
+        );
     }
 
     #[task::test]

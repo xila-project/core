@@ -7,6 +7,7 @@ pub struct SocketContext {
     pub handle: SocketHandle,
     pub stack: Stack,
     pub closed: bool,
+    pub was_connected: bool,
 }
 
 impl SocketContext {
