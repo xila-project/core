@@ -70,3 +70,79 @@ The browser yield delay remains 10 ms. Embassy 0.10's wasm pender uses
 `Promise.then`, so a continuously self-waking yield can starve rendering, input
 and timer macrotasks. Replacing the delay requires a platform macrotask primitive
 and browser fairness/latency validation.
+
+# Activity metrics
+
+The opt-in `metrics` feature (`xila/task_metrics`) times every poll of a
+managed task with a monotonic clock: the operating system's on Linux, macOS
+and Windows (lock-free, nanosecond resolution), and Embassy's elsewhere, the
+one each platform already provides for `sleep`, so it works under `no_std` on
+every target. Each task records its poll count, busy time and longest poll;
+each executor (a core or an operating system thread) records its busy time,
+plus its idle time when the platform reports it. `Manager::get_metrics`
+returns a `MetricsSnapshot` of these monotonically increasing counters with
+timestamps on the same clock; applications compute CPU shares from the
+differences between two snapshots. Without the feature it returns `None`, and
+the platform hook only runs its closure.
+
+Busy time is wall-clock time inside polls, not processor time: on hosts, time
+a thread is descheduled or blocked during a poll counts as busy. On hosts the
+metrics clock counts from its own first read, not from `embassy_time::Instant`'s
+origin, so compare metrics timestamps only with each other.
+
+Task counters live in a parallel array beside the retained storage slots and
+are reset when a slot is claimed, so spawning and polling allocate nothing.
+Executor counters are allocated once per executor and kept. Writers are
+always the executor that owns the counters; readers use a sequence lock built
+from 32-bit atomic loads and stores only, so it works without compare-and-swap
+or 64-bit atomics (Cortex-M, ESP32 and ESP32-C3). Readers spin while a write
+is in progress, outside any critical section: never read the metrics from an
+interrupt handler or from an interrupt executor that preempts an instrumented
+executor on the same core.
+
+Writers read the clock inside the write section, which keeps readers from
+extrapolating a finished period on one core and on x86. On weakly ordered
+multi-core targets (AArch64, RISC-V), fences do not order a system-register
+clock read after a store, so a reader on another core can still extrapolate a
+period in progress by up to the writer's store latency. Executor busy time,
+idle time and timestamps never decrease because readers clamp each sample to
+a per-executor high-water mark, updated with plain loads and stores in a short
+critical section.
+
+Executor busy time is the sum of its task polls and needs no platform code.
+To measure idle time, executor loops create the hook on the executor's thread
+before the loop and wrap their wait for work. Once the hook exists the
+executor reports idle time, starting at 0; without it, idle time is `None`.
+The hook is created from the executor's `Spawner` and is `!Send`, so it stays
+on the executor's thread, the counters' only writer:
+
+```rust,ignore
+let activity = task::metrics::ExecutorActivity::new(executor.spawner());
+loop {
+    unsafe { executor.poll() };
+    activity.measure_idle(|| cortex_m::asm::wfe());
+}
+```
+
+For a monitoring application such as Activity, compute every difference with
+`saturating_sub`:
+
+- Match executors between snapshots by `executor`, not by `spawner`.
+- Core load is `1 − Δidle / Δtimestamp` when idle time is reported, and
+  `Δbusy / Δtimestamp` otherwise, using the executor's own `timestamp_nanoseconds`.
+  Clamp it to `[0, 1]`: each counter is converted to nanoseconds separately,
+  rounding down, so with a clock rate that does not divide one billion, such as
+  32,768 Hz, `Δidle` can exceed `Δtimestamp` by 1 ns over the same ticks, and
+  cross-core extrapolation can add a little more.
+- A task's share is `Δbusy / Δtimestamp` with the snapshot timestamp. Busy time
+  is added when a poll ends, so a long poll counts entirely in the window where
+  it ends. Group tasks by `executor` and, when one executor's shares sum above
+  1, divide them by that sum instead of clamping each task.
+- Adopted tasks have no counters, report `spawner == usize::MAX` and no
+  `executor`.
+
+The remainder, elapsed time minus busy and idle time, is executor bookkeeping
+and, on hosts, time the thread was descheduled outside polls. Core's test
+executor uses the hook. The Linux-only `profiling` feature is unchanged; it
+adds per-thread CPU clocks, allocation attribution and finished-task history
+for recordings, and both features can be enabled together.

@@ -28,7 +28,11 @@ fn embassy_vtable() -> *const RawWakerVTable {
 /// Embassy 0.10 keeps try_task_from_waker private. Remember its vtable here
 /// to reject foreign wakers before reading their opaque task identity.
 /// This avoids relying on TaskRef's layout or private executor symbols.
-pub(super) struct TaskFuture(Pin<Box<dyn Future<Output = ()>>>);
+pub(super) struct TaskFuture {
+    future: Pin<Box<dyn Future<Output = ()>>>,
+    #[cfg(feature = "metrics")]
+    instrumentation: crate::metrics::TaskInstrumentation,
+}
 
 // SAFETY: Embassy needs `Send` only to enqueue a token through a `SendSpawner`;
 // the storage itself is Sync whatever its future. `spawn_on` enqueues through
@@ -43,7 +47,19 @@ impl Future for TaskFuture {
     type Output = ();
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         remember_vtable(cx.waker().vtable());
-        self.0.as_mut().poll(cx)
+        #[cfg(feature = "metrics")]
+        {
+            // Both times are read inside the executor's write sections, so
+            // readers rarely extrapolate a finished poll; they clamp the rest.
+            let instrumentation = self.instrumentation;
+            let start = instrumentation.executor.begin_poll();
+            let result = self.future.as_mut().poll(cx);
+            let end = instrumentation.executor.end_period();
+            instrumentation.task.record_poll(end.saturating_sub(start));
+            result
+        }
+        #[cfg(not(feature = "metrics"))]
+        self.future.as_mut().poll(cx)
     }
 }
 
@@ -162,8 +178,10 @@ impl Manager {
             #[cfg(all(feature = "profiling", target_os = "linux"))]
             let profiling_name = inner.tasks[&identifier].name.clone();
             let (parent, child) = JoinHandle::new();
-            let mut future = Some(move || {
-                TaskFuture(Box::pin(async move {
+            #[cfg(feature = "metrics")]
+            let executor = self.spawner_counters(selected);
+            let mut future = Some(move || -> Pin<Box<dyn Future<Output = ()>>> {
+                Box::pin(async move {
                     #[cfg(all(feature = "profiling", target_os = "linux"))]
                     let result = crate::profiling::instrument(
                         self as *const Manager as usize,
@@ -178,7 +196,7 @@ impl Manager {
                     // Complete metadata cleanup before publishing the result.
                     let _ = self.unregister(identifier).await;
                     child.signal(result);
-                }))
+                })
             });
             // TaskStorage is retained forever: stale wakers and queued exited
             // tasks can still touch its header. Only the boxed future is freed
@@ -186,9 +204,25 @@ impl Manager {
             // Embassy still owns a slot, so reuse is executor-safe, including
             // on another executor, which Embassy explicitly allows.
             loop {
-                for slot in &inner.slots {
+                for (index, slot) in inner.slots.iter().enumerate() {
                     if let Some(available) = AvailableTask::claim(slot) {
-                        let token = available.initialize(future.take().unwrap());
+                        let future = future.take().unwrap();
+                        #[cfg(feature = "metrics")]
+                        let instrumentation = crate::metrics::TaskInstrumentation {
+                            task: inner.counters[index],
+                            executor,
+                        };
+                        // The claim orders this reset after the previous
+                        // task's last poll, so the slot has one writer.
+                        #[cfg(feature = "metrics")]
+                        instrumentation.task.reset();
+                        #[cfg(not(feature = "metrics"))]
+                        let _ = index;
+                        let token = available.initialize(move || TaskFuture {
+                            future: future(),
+                            #[cfg(feature = "metrics")]
+                            instrumentation,
+                        });
                         // Embassy's id() truncates pointers to u32 on 64-bit hosts.
                         // Use the full public waker data identity instead; TaskStorage
                         // is repr(C), with its header at offset zero.
@@ -196,6 +230,10 @@ impl Manager {
                         let metadata = inner.tasks.get_mut(&identifier).unwrap();
                         metadata.internal_identifier = internal;
                         metadata.spawner_identifier = selected;
+                        #[cfg(feature = "metrics")]
+                        {
+                            metadata.instrumentation = Some(instrumentation);
+                        }
                         inner.identifiers.insert(internal, identifier);
                         start(token);
                         return Ok((parent, identifier));
@@ -212,6 +250,14 @@ impl Manager {
                     .collect::<alloc::vec::Vec<_>>()
                     .into_boxed_slice();
                 inner.slots.extend(Box::leak(chunk).iter());
+                #[cfg(feature = "metrics")]
+                {
+                    let counters = (0..count)
+                        .map(|_| crate::metrics::TaskCounters::new())
+                        .collect::<alloc::vec::Vec<_>>()
+                        .into_boxed_slice();
+                    inner.counters.extend(Box::leak(counters).iter());
+                }
             }
         })();
         if result.is_err() {

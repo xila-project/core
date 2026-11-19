@@ -117,7 +117,7 @@ jobs:
         run: mise run ci:bare-metal-no-cas
       - name: "Test | Bare-metal native loader"
         run: mise run ci:native-loader-targets
-      - name: "Test | Task profiling"
+      - name: "Test | Task profiling and metrics"
         run: mise run ci:profiling-task-tests
       - name: "Test | Font linking"
         run: mise run ci:host-font-tests

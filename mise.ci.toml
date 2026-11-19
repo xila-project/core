@@ -412,6 +412,7 @@ run = """
 set -eu
 cargo check --locked -p xila --target thumbv7em-none-eabihf
 cargo check --locked -p xila --no-default-features --target thumbv7em-none-eabihf
+cargo check --locked -p xila --features task_metrics --target thumbv7em-none-eabihf
 # Graphics is C-backed and its FFI differs by target: `c_char` is unsigned on ARM and RISC-V.
 cargo check --locked -p xila-graphics --features rendering_rgb565 --target thumbv7em-none-eabihf
 cargo check --locked -p xila-graphics --features rendering_rgb565 --target riscv32imac-unknown-none-elf
@@ -450,6 +451,7 @@ run = """
 set -eu
 cargo check --locked -p xila --target riscv32imc-unknown-none-elf
 cargo check --locked -p xila --no-default-features --target riscv32imc-unknown-none-elf
+cargo check --locked -p xila --features task_metrics --target riscv32imc-unknown-none-elf
 cargo check --locked -p xila-drivers-peripherals --all-features --target riscv32imc-unknown-none-elf
 cargo check --locked -p xila-peripherals --all-features --target riscv32imc-unknown-none-elf
 cargo check --locked -p xila-audio --target riscv32imc-unknown-none-elf
@@ -460,8 +462,15 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", targets
 
 [tasks."ci:profiling-task-tests"]
 extends = "ci:rust-lint"
+description = "Lint and test the task subsystem's profiling and metrics features"
+shell = "bash -c"
 depends = ["ci:packages-host"]
-run = "cargo test --locked -p xila-task --lib --features test_harness,profiling"
+run = """
+set -eu
+cargo clippy --locked -p xila-task --lib --tests --features test_harness,metrics,profiling -- -D warnings
+cargo test --locked -p xila-task --lib --features test_harness,profiling
+cargo test --locked -p xila-task --lib --features test_harness,metrics,profiling
+"""
 
 [tasks."test:native-loader"]
 extends = "ci:rust-lint"

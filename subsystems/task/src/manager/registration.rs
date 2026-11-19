@@ -64,6 +64,8 @@ impl Manager {
             environment_variables: parent_environment_variables,
             signals: SignalAccumulator::new(),
             spawner_identifier: usize::MAX, // No spawner until enqueued
+            #[cfg(feature = "metrics")]
+            instrumentation: None,
         };
 
         let mut candidate = TaskIdentifierInner::from(inner.root_established);

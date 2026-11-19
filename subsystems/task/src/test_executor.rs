@@ -13,7 +13,7 @@ use std::sync::{Condvar, Mutex};
 use synchronization::blocking_mutex::raw::CriticalSectionRawMutex;
 use synchronization::signal::Signal;
 
-use crate::{Manager, SpawnerIdentifier};
+use crate::{Manager, SpawnerIdentifier, metrics::ExecutorActivity};
 
 /// A std executor that [`Executor::run`] until [`Executor::stop`] is called.
 pub struct Executor {
@@ -51,23 +51,32 @@ impl Executor {
 
     /// Call `init` with a spawner, then poll tasks until [`Self::stop`].
     pub fn run(&'static self, init: impl FnOnce(Spawner, &'static Self)) {
+        // Create the hook before registering, so every snapshot that sees
+        // this executor already reports its idle time.
+        let activity = self.activity();
         init(self.inner.spawner(), self);
         while !self.stop.load(Ordering::SeqCst) {
-            self.poll_and_wait();
+            self.poll_and_wait(&activity);
         }
     }
 
     /// Call `init` with a spawner, then poll tasks forever.
     pub fn start(&'static self, init: impl FnOnce(Spawner)) -> ! {
+        let activity = self.activity();
         init(self.inner.spawner());
         loop {
-            self.poll_and_wait();
+            self.poll_and_wait(&activity);
         }
     }
 
-    fn poll_and_wait(&'static self) {
+    /// Idle accounting hook, as platform executors should use it.
+    fn activity(&'static self) -> ExecutorActivity {
+        ExecutorActivity::new(self.inner.spawner())
+    }
+
+    fn poll_and_wait(&'static self, activity: &ExecutorActivity) {
         unsafe { self.inner.poll() };
-        self.signaler.wait();
+        activity.measure_idle(|| self.signaler.wait());
     }
 }
 

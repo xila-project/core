@@ -47,3 +47,5 @@ bootsplash = ["dep:bootsplash"]
 graphics = ["dep:graphics", "executable/graphics"]
 graphics_rendering_rgb565 = ["graphics", "graphics/rendering_rgb565"]
 graphics_rendering_xrgb8888 = ["graphics", "graphics/rendering_xrgb8888"]
+# Portable task and executor CPU activity counters (`task::metrics`).
+task_metrics = ["task/metrics"]
