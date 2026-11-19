@@ -284,19 +284,50 @@ pub fn tls_set(slot: usize, value: usize) -> Result<(), TlsError> {
     Ok(())
 }
 
-// C ABI makes escaping panics abort on hosts even when the application uses unwind.
-extern "C" fn trampoline() -> ! {
-    let c = current();
+/// Publish `status`, wake the join observer and leave the coroutine for good.
+///
+/// # Safety
+/// `c` must be the control block of the running coroutine. Nothing may resume it.
+unsafe fn finish(c: *const Control, status: i32) -> ! {
     unsafe {
-        let result = ((*c).run)((*c).entry.get());
-        (*c).result.set(Some(Ok(result)));
-        if let Some(w) = (*c).waker.borrow_mut().take() {
+        (*c).result.set(Some(Ok(status)));
+        let waker = (*c).waker.borrow_mut().take();
+        if let Some(w) = waker {
             w.wake();
         }
         (*c).stack.check_guard();
         arch::switch((*c).coroutine_sp.get(), (*c).caller_sp.get());
     }
     panic!("completed coroutine resumed");
+}
+
+/// End the running coroutine at once with `status`, as if its entry had returned it.
+///
+/// The frames between this call and the entry are abandoned: no destructor runs and
+/// nothing unwinds, like a `longjmp` that never returns. The driver then observes
+/// `status`, and the stack and control block are released as for a normal return.
+/// Panics outside a coroutine.
+///
+/// # Safety
+/// Every object that owns a resource (an allocation, an open file, a lock guard) and
+/// is live in an abandoned frame is leaked. The caller must have released or must
+/// not need such resources, including the entry closure's own captures: move owned
+/// data out of the coroutine stack, or free it before calling. Frames that
+/// borrowed data from the caller's executor side stay valid, as the stack is only
+/// dropped by the driver after this call.
+pub unsafe fn exit(status: i32) -> ! {
+    let c = current();
+    assert!(!c.is_null(), "exit outside a coroutine");
+    unsafe { finish(c, status) }
+}
+
+// C ABI makes escaping panics abort on hosts even when the application uses unwind.
+extern "C" fn trampoline() -> ! {
+    let c = current();
+    unsafe {
+        let result = ((*c).run)((*c).entry.get());
+        finish(c, result)
+    }
 }
 
 /// Spawn on the calling task's executor, preserving stack/thread affinity.
