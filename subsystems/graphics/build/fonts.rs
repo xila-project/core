@@ -5,7 +5,7 @@ use std::ops::Range;
 use embedded_i18n::{get_locale_ranges, merge_contiguous_ranges};
 
 const SHIPPED_LOCALES: &[&str] = &["en", "fr", "es", "de", "pt-BR", "it", "pl"];
-const EXTRA_RANGES: &[Range<u32>] = &[0xb0..0xb1, 0x2022..0x2023];
+const EXTRA_RANGES: &[Range<u32>] = &[0xb0..0xb1, 0x2019..0x201a, 0x2022..0x2023];
 
 pub fn catalog_font(locale: &str, fallback: &str) -> Option<&'static str> {
     std::iter::once(locale)

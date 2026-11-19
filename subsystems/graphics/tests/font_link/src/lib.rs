@@ -42,12 +42,22 @@ mod tests {
                     )
                 }
             };
-            for letter in [' ', '~', 'A', '°', '•'] {
+            for letter in [' ', '~', 'A', '°', '•', '’'] {
                 assert!(
                     has_glyph(letter),
                     "missing {letter:?} at {}px",
                     font.line_height
                 );
+            }
+            if accented {
+                // French typography: no-break space and guillemets.
+                for letter in ['\u{a0}', '«', '»'] {
+                    assert!(
+                        has_glyph(letter),
+                        "missing {letter:?} at {}px",
+                        font.line_height
+                    );
+                }
             }
             assert_eq!(
                 has_glyph('é'),

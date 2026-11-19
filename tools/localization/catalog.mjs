@@ -36,3 +36,29 @@ export function flattenCatalog(catalog) {
   }
   return translations;
 }
+
+/**
+ * Report French typography problems in one translation value.
+ *
+ * French uses a no-break space (U+00A0) before ":", ";", "!", "?" and "»" and
+ * after "«", and typographic apostrophes. U+202F is rejected because the
+ * shipped Montserrat and Unscii fonts have no glyph for it. Placeholders such
+ * as {arg0:?} and URLs are skipped.
+ */
+export function frenchTypographyIssues(value) {
+  let text = value;
+  for (let previous = ""; previous !== text;) {
+    previous = text;
+    text = text.replace(/\{[^{}]*\}/g, "");
+  }
+  const rules = [
+    [/[  ](?=[:;!?»])/, "use U+00A0, not a plain or narrow space, before : ; ! ? or »"],
+    [/[^\s ;!?][:;!?](?=\s|$)/, "missing U+00A0 before : ; ! or ?"],
+    [/«(?! )/, "missing U+00A0 after «"],
+    [/[^ ]»/, "missing U+00A0 before »"],
+    [/'/, "use the typographic apostrophe ’"],
+    [/"/, "use « » for quotation marks"],
+    [/ /, "U+202F has no glyph in the shipped fonts; use U+00A0"],
+  ];
+  return rules.filter(([pattern]) => pattern.test(text)).map(([, message]) => message);
+}

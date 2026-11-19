@@ -32,13 +32,13 @@ mod tests {
     fn english_includes_required_extras() {
         assert_eq!(
             effective_ranges("en", "en").unwrap(),
-            vec![0x20..0x7f, 0xb0..0xb1, 0x2022..0x2023]
+            vec![0x20..0x7f, 0xb0..0xb1, 0x2019..0x201a, 0x2022..0x2023]
         );
     }
 
     #[test]
     fn fallback_chains_and_regional_locales_union_coverage() {
-        let french = vec![0x20..0x7f, 0xa0..0x250, 0x2022..0x2023];
+        let french = vec![0x20..0x7f, 0xa0..0x250, 0x2019..0x201a, 0x2022..0x2023];
         for (locale, fallback) in [
             ("en", "fr"),
             ("fr", "en"),
@@ -49,7 +49,7 @@ mod tests {
         }
         assert_eq!(
             effective_ranges("es", "").unwrap(),
-            vec![0x20..0x7f, 0xa0..0x100, 0x2022..0x2023]
+            vec![0x20..0x7f, 0xa0..0x100, 0x2019..0x201a, 0x2022..0x2023]
         );
         assert!(effective_ranges("xx", "en").is_err());
         assert!(effective_ranges("en", "xx").is_err());
@@ -71,7 +71,7 @@ mod tests {
         for locale in ["de", "pt-BR", "pl"] {
             assert_eq!(
                 effective_ranges(locale, "en").unwrap(),
-                vec![0x20..0x7f, 0xa0..0x180, 0x2022..0x2023]
+                vec![0x20..0x7f, 0xa0..0x180, 0x2019..0x201a, 0x2022..0x2023]
             );
         }
     }
@@ -80,7 +80,7 @@ mod tests {
     fn upstream_non_shipped_coverage_remains_supported() {
         assert_eq!(
             effective_ranges("en", "ru,ru,en").unwrap(),
-            vec![0x20..0x7f, 0xb0..0xb1, 0x400..0x530, 0x2022..0x2023]
+            vec![0x20..0x7f, 0xb0..0xb1, 0x400..0x530, 0x2019..0x201a, 0x2022..0x2023]
         );
     }
 
