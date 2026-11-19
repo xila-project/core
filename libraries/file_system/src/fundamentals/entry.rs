@@ -6,15 +6,16 @@
 
 use alloc::string::String;
 
-use crate::{Kind, Path, PathOwned};
+use crate::{Kind, Path, PathOwned, Time};
 
 use super::{Inode, Size};
 
 /// Represents a single entry within a directory.
 ///
 /// A directory entry contains metadata about a file system object including its
-/// inode number, name, type, and size. This structure is used when reading directory
-/// contents to provide information about each item within the directory.
+/// inode number, name, type, size, and last modification time. This structure is
+/// used when reading directory contents to provide information about each item
+/// within the directory.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
     /// The inode number identifying this file system object
@@ -25,6 +26,11 @@ pub struct Entry {
     pub kind: Kind,
     /// The size of the file system object in bytes
     pub size: Size,
+    /// The last modification time, in UTC seconds since the Unix epoch.
+    ///
+    /// `0` means unknown: the time was never set (no UTC clock was available)
+    /// or the object was created without Xila attributes.
+    pub modification: Time,
 }
 
 impl Entry {
@@ -32,31 +38,34 @@ impl Entry {
     ///
     /// # Arguments
     ///
-    /// * `Inode` - Unique inode number for this file system object
-    /// * `Name` - Name of the file or directory
-    /// * `Type` - Type of the file system object
-    /// * `Size` - Size in bytes (for files) or entry count (for directories)
+    /// * `inode` - Unique inode number for this file system object
+    /// * `name` - Name of the file or directory
+    /// * `type` - Type of the file system object
+    /// * `size` - Size in bytes (for files) or entry count (for directories)
+    /// * `modification` - Last modification time of the file system object
     ///
     /// # Examples
     ///
     /// ```rust
     /// # extern crate alloc;
-    /// use file_system::{Entry, Inode, Kind, Size};
+    /// use file_system::{Entry, Inode, Kind, Size, Time};
     /// use alloc::string::String;
     ///
     /// let entry = Entry::new(
     ///     123,
     ///     String::from("example.txt"),
     ///     Kind::File,
-    ///     2048
+    ///     2048,
+    ///     Time::new(1_700_000_000),
     /// );
     /// ```
-    pub fn new(inode: Inode, name: String, r#type: Kind, size: Size) -> Self {
+    pub fn new(inode: Inode, name: String, r#type: Kind, size: Size, modification: Time) -> Self {
         Self {
             inode,
             name,
             kind: r#type,
             size,
+            modification,
         }
     }
 
@@ -99,7 +108,8 @@ mod tests {
 
     #[test]
     fn test_entry_as_mut_slice() {
-        let mut entry = Entry::new(42, String::from("test"), Kind::File, 100);
+        let mut entry = Entry::new(42, String::from("test"), Kind::File, 100, Time::new(1234));
+        assert_eq!(entry.modification, Time::new(1234));
 
         let slice = entry.as_mut();
         assert_eq!(slice.len(), core::mem::size_of::<Entry>());
@@ -123,5 +133,13 @@ mod tests {
         // This might fail due to alignment requirements, which is expected behavior
         // The important thing is that we're testing the code path
         let _ = result; // We don't assert success since alignment isn't guaranteed
+    }
+
+    #[test]
+    fn test_entry_size() {
+        #[cfg(target_pointer_width = "32")]
+        assert_eq!(core::mem::size_of::<Entry>(), 40);
+        #[cfg(target_pointer_width = "64")]
+        assert_eq!(core::mem::size_of::<Entry>(), 56);
     }
 }

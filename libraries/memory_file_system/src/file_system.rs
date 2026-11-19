@@ -1179,4 +1179,55 @@ mod tests {
             Err(Error::InvalidParameter)
         );
     }
+
+    #[test]
+    fn directory_entries_carry_inode_and_modification_time() {
+        let file_system = FileSystem::new();
+        let root_mtime = file_system::Time::new(1_700_000_000);
+        let dir_mtime = file_system::Time::new(1_700_000_100);
+        let file_mtime = file_system::Time::new(1_700_000_200);
+
+        FileSystemOperations::set_attributes(
+            &file_system,
+            Path::ROOT,
+            &Attributes::new().set_inode(1).set_modification(root_mtime),
+        )
+        .unwrap();
+        file_system.create_directory(Path::new("/dir")).unwrap();
+        FileSystemOperations::set_attributes(
+            &file_system,
+            Path::new("/dir"),
+            &Attributes::new().set_inode(2).set_modification(dir_mtime),
+        )
+        .unwrap();
+        file_system.create_file(Path::new("/dir/item")).unwrap();
+        FileSystemOperations::set_attributes(
+            &file_system,
+            Path::new("/dir/item"),
+            &Attributes::new().set_inode(3).set_modification(file_mtime),
+        )
+        .unwrap();
+
+        let mut context = Context::new_empty();
+        file_system
+            .lookup_directory(&mut context, Path::new("/dir"))
+            .unwrap();
+        let mut entries = alloc::vec::Vec::new();
+        while let Some(entry) = DirectoryOperations::read(&file_system, &mut context).unwrap() {
+            entries.push(entry);
+        }
+        DirectoryOperations::close(&file_system, &mut context).unwrap();
+
+        let dot = entries.iter().find(|entry| entry.name == ".").unwrap();
+        assert_eq!(dot.inode, 2);
+        assert_eq!(dot.modification, dir_mtime);
+
+        let dot_dot = entries.iter().find(|entry| entry.name == "..").unwrap();
+        assert_eq!(dot_dot.inode, 1);
+        assert_eq!(dot_dot.modification, root_mtime);
+
+        let item = entries.iter().find(|entry| entry.name == "item").unwrap();
+        assert_eq!(item.inode, 3);
+        assert_eq!(item.modification, file_mtime);
+    }
 }

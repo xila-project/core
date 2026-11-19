@@ -51,6 +51,7 @@ impl Directory {
                 String::from("."),
                 Kind::Directory,
                 0,
+                directory_node.modification,
             )));
         }
 
@@ -62,6 +63,7 @@ impl Directory {
                 String::from(".."),
                 Kind::Directory,
                 0,
+                parent_node.modification,
             )));
         }
 
@@ -75,6 +77,7 @@ impl Directory {
                 String::from(child.name.as_ref()),
                 child.kind,
                 0,
+                child.modification,
             )));
         }
 

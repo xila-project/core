@@ -228,6 +228,7 @@ mod behavior_tests {
                     alloc::format!("entry{i}"),
                     Kind::File,
                     0,
+                    file_system::Time::new(0),
                 ));
             }
             Ok(Page {
