@@ -270,6 +270,10 @@ impl Bootsplash {
             lv_anim_delete(object, Some(cycle_callback));
         }
 
+        // Parameters drop after the body's locals, so the logo would otherwise
+        // be deleted after `_lock` is released.
+        drop(self.logo);
+
         Ok(())
     }
 }
