@@ -215,39 +215,18 @@ impl Manager {
                 .ok_or(Error::NotFound)?
         };
 
-        let query_iterator = &[
-            DnsQueryKind::A,
-            DnsQueryKind::Aaaa,
-            DnsQueryKind::Cname,
-            DnsQueryKind::Soa,
-            DnsQueryKind::Ns,
-        ];
-
-        let mut resolved_addresses = vec![];
-
-        for query_kind in query_iterator {
-            if !kind.contains(*query_kind) {
-                continue;
-            }
-
+        resolve_queries(kind, stop_on_first_match, async |query_kind| {
             let handle = stack
-                .with_mutable(|s| s.start_dns_query(host, kind))
+                .with_mutable(|s| s.start_dns_query(host, query_kind))
                 .await?;
 
-            let result = poll_fn(|cx| {
+            poll_fn(|cx| {
                 stack
                     .poll_with_mutable(cx, |s, cx| s.get_dns_query_result(handle, Some(cx.waker())))
             })
-            .await?;
-
-            resolved_addresses.extend(result);
-
-            if !resolved_addresses.is_empty() && stop_on_first_match {
-                break;
-            }
-        }
-
-        Ok(resolved_addresses)
+            .await
+        })
+        .await
     }
 
     pub async fn new_tcp_socket(
@@ -368,6 +347,53 @@ impl Manager {
     }
 }
 
+async fn resolve_queries(
+    kind: DnsQueryKind,
+    stop_on_first_match: bool,
+    mut query: impl AsyncFnMut(DnsQueryKind) -> Result<Vec<IpAddress>>,
+) -> Result<Vec<IpAddress>> {
+    let query_types = [
+        DnsQueryKind::A,
+        DnsQueryKind::Aaaa,
+        DnsQueryKind::Cname,
+        DnsQueryKind::Soa,
+        DnsQueryKind::Ns,
+    ];
+
+    let mut resolved_addresses = vec![];
+    let mut query_succeeded = false;
+    let mut query_error = None;
+
+    for query_kind in query_types {
+        if !kind.contains(query_kind) {
+            continue;
+        }
+
+        match query(query_kind).await {
+            Ok(addresses) => {
+                query_succeeded = true;
+                resolved_addresses.extend(addresses);
+
+                if stop_on_first_match && !resolved_addresses.is_empty() {
+                    break;
+                }
+            }
+            Err(error) => {
+                // Prefer a specific cause over smoltcp's generic query failure.
+                if query_error.is_none() || query_error == Some(Error::Failed) {
+                    query_error = Some(error);
+                }
+            }
+        }
+    }
+
+    if !query_succeeded && let Some(error) = query_error {
+        return Err(error);
+    }
+
+    Ok(resolved_addresses)
+}
+
 #[cfg(test)]
 #[allow(
     clippy::disallowed_types,
@@ -394,5 +420,94 @@ mod clock_tests {
         assert_eq!(get_smoltcp_time(&manager).total_micros(), 10_123);
         clock.0.store(i64::MAX as u64 + 1, Ordering::Relaxed);
         assert_eq!(get_smoltcp_time(&manager).total_micros(), i64::MAX);
+    }
+}
+
+#[cfg(test)]
+mod dns_tests {
+    use embassy_futures::block_on;
+
+    use super::*;
+
+    #[test]
+    fn resolves_aaaa_after_a_fails() {
+        let ipv6 = IpAddress::from([0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+        let mut queries = vec![];
+
+        let result = block_on(resolve_queries(
+            DnsQueryKind::A | DnsQueryKind::Aaaa,
+            true,
+            async |kind| {
+                queries.push(kind);
+
+                match kind {
+                    DnsQueryKind::A => Err(Error::Failed),
+                    DnsQueryKind::Aaaa => Ok(vec![ipv6.clone()]),
+                    _ => panic!("unexpected query: {kind:?}"),
+                }
+            },
+        ));
+
+        assert_eq!(queries, [DnsQueryKind::A, DnsQueryKind::Aaaa]);
+        assert_eq!(result, Ok(vec![ipv6]));
+    }
+
+    #[test]
+    fn stops_after_first_address_when_requested() {
+        let ipv4 = IpAddress::from([192, 0, 2, 1]);
+        let ipv6 = IpAddress::from([0x20, 1, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+
+        for stop_on_first_match in [true, false] {
+            let result = block_on(resolve_queries(
+                DnsQueryKind::A | DnsQueryKind::Aaaa,
+                stop_on_first_match,
+                async |kind| match kind {
+                    DnsQueryKind::A => Ok(vec![ipv4.clone()]),
+                    DnsQueryKind::Aaaa => Ok(vec![ipv6.clone()]),
+                    _ => panic!("unexpected query: {kind:?}"),
+                },
+            ));
+
+            let expected = if stop_on_first_match {
+                vec![ipv4.clone()]
+            } else {
+                vec![ipv4.clone(), ipv6.clone()]
+            };
+            assert_eq!(result, Ok(expected));
+        }
+    }
+
+    #[test]
+    fn successful_query_with_no_addresses_still_counts_as_success() {
+        let result = block_on(resolve_queries(
+            DnsQueryKind::A | DnsQueryKind::Aaaa,
+            true,
+            async |kind| match kind {
+                DnsQueryKind::A => Ok(vec![]),
+                DnsQueryKind::Aaaa => Err(Error::Failed),
+                _ => panic!("unexpected query: {kind:?}"),
+            },
+        ));
+
+        assert_eq!(result, Ok(vec![]));
+    }
+
+    #[test]
+    fn returns_specific_error_only_if_every_query_fails() {
+        for errors in [
+            [Error::Failed, Error::NameTooLong],
+            [Error::NameTooLong, Error::Failed],
+        ] {
+            let result = block_on(resolve_queries(
+                DnsQueryKind::A | DnsQueryKind::Aaaa,
+                false,
+                async |kind| match kind {
+                    DnsQueryKind::A => Err(errors[0]),
+                    DnsQueryKind::Aaaa => Err(errors[1]),
+                    _ => panic!("unexpected query: {kind:?}"),
+                },
+            ));
+            assert_eq!(result, Err(Error::NameTooLong));
+        }
     }
 }
