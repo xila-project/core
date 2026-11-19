@@ -78,6 +78,10 @@ impl FormatHandler for NativeFormat {
                 // Native coroutines must stay on the caller's executor.
                 return Err(task::Error::InvalidSpawnerIdentifier.into());
             }
+            // Allocate the stack, fallibly, before the executable image: running out of
+            // stack memory must not leave an installed image to unwind.
+            let stack = Stack::try_with_min_size(self.stack_size, MIN_STACK_SIZE)
+                .ok_or(Error::Native(native_loader::Error::AllocationFailed))?;
             let image = self.load(&mut request).await?;
             let (input, output, error) = request.standard.split();
             let wrap = |file: virtual_file_system::File<'static>| {
@@ -96,7 +100,7 @@ impl FormatHandler for NativeFormat {
                         manager,
                         request.parent,
                         &request.name,
-                        Stack::with_min_size(self.stack_size, MIN_STACK_SIZE),
+                        stack,
                         startup,
                         |status| status as isize,
                     )
