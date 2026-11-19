@@ -257,6 +257,7 @@ impl Manager {
             handle,
             stack: stack.clone(),
             closed: false,
+            was_connected: false,
         };
 
         Ok(TcpSocket::new(context))
@@ -298,6 +299,7 @@ impl Manager {
             handle,
             stack: stack.clone(),
             closed: false,
+            was_connected: false,
         };
 
         Ok(UdpSocket::new(context))
@@ -339,6 +341,7 @@ impl Manager {
             handle,
             stack: stack.clone(),
             closed: false,
+            was_connected: false,
         };
 
         let socket = IcmpSocket::new(context);
