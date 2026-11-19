@@ -1921,7 +1921,7 @@ dependencies = [
  "xila-shared",
  "xila-synchronization",
  "xila-task",
- "xila-testing",
+ "xila-testing-support",
  "xila-time",
  "xila-users",
  "xila-virtual-file-system",
@@ -1951,7 +1951,7 @@ dependencies = [
  "xila-file-system",
  "xila-little-fs",
  "xila-task",
- "xila-testing",
+ "xila-testing-support",
  "xila-time",
  "xila-users",
  "xila-virtual-file-system",
@@ -2045,7 +2045,6 @@ dependencies = [
  "xila-shared",
  "xila-synchronization",
  "xila-task",
- "xila-testing",
  "xila-time",
  "xila-users",
  "xila-virtual-file-system",
@@ -2108,7 +2107,7 @@ dependencies = [
  "xila-shared",
  "xila-synchronization",
  "xila-task",
- "xila-testing",
+ "xila-testing-support",
  "xila-time",
  "xila-users",
  "xila-virtual-file-system",
@@ -2138,7 +2137,7 @@ dependencies = [
  "xila-peripherals",
  "xila-shared",
  "xila-task",
- "xila-testing",
+ "xila-testing-support",
  "xila-time",
  "xila-users",
  "xila-virtual-file-system",
@@ -2157,7 +2156,7 @@ dependencies = [
  "xila-shared",
  "xila-synchronization",
  "xila-task",
- "xila-testing",
+ "xila-testing-support",
  "xila-time",
  "xila-users",
 ]
@@ -2208,7 +2207,7 @@ dependencies = [
  "xila-shared",
  "xila-synchronization",
  "xila-task",
- "xila-testing",
+ "xila-testing-support",
  "xila-time",
  "xila-users",
  "xila-virtual-file-system",
@@ -2295,24 +2294,36 @@ dependencies = [
 name = "xila-testing"
 version = "0.1.0"
 dependencies = [
- "getrandom",
- "sha2",
  "xila-abi-definitions",
  "xila-authentication",
- "xila-device",
  "xila-drivers-core",
  "xila-executable",
  "xila-file-system",
  "xila-graphics",
  "xila-little-fs",
  "xila-log",
- "xila-memory",
  "xila-network",
  "xila-shared",
  "xila-task",
+ "xila-testing-support",
  "xila-time",
  "xila-users",
  "xila-virtual-file-system",
+]
+
+[[package]]
+name = "xila-testing-support"
+version = "0.1.0"
+dependencies = [
+ "getrandom",
+ "sha2",
+ "xila-device",
+ "xila-file-system",
+ "xila-log",
+ "xila-memory",
+ "xila-shared",
+ "xila-task",
+ "xila-time",
 ]
 
 [[package]]
@@ -2327,7 +2338,7 @@ dependencies = [
  "xila-shared",
  "xila-synchronization",
  "xila-task",
- "xila-testing",
+ "xila-testing-support",
 ]
 
 [[package]]
@@ -2338,7 +2349,6 @@ dependencies = [
  "xila-drivers-core",
  "xila-synchronization",
  "xila-task",
- "xila-testing",
 ]
 
 [[package]]
@@ -2359,7 +2369,7 @@ dependencies = [
  "xila-stackful",
  "xila-synchronization",
  "xila-task",
- "xila-testing",
+ "xila-testing-support",
  "xila-time",
  "xila-users",
 ]

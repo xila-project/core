@@ -3,7 +3,7 @@
 
 extern crate abi_definitions;
 
-testing::instantiate_global_allocator!();
+testing_support::instantiate_global_allocator!();
 
 use graphics::{EventKind, WINDOW_EVENT_QUEUE_CAPACITY, Window, lvgl};
 use std::sync::Mutex;
@@ -12,7 +12,7 @@ use std::sync::Mutex;
 static LVGL: Mutex<()> = Mutex::new(());
 
 fn thread_allocated_bytes() -> usize {
-    testing::MemoryManager::thread_allocations().allocated_bytes()
+    testing_support::MemoryManager::thread_allocations().allocated_bytes()
 }
 
 #[test]

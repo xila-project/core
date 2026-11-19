@@ -7,7 +7,7 @@ use std::{cell::Cell, fmt::Write as _, fs, path::Path, ptr::NonNull, sync::Mutex
 
 use graphics::{Color, Logo, LogoStyle, lvgl};
 use memory::{CapabilityFlags, Layout, ManagerTrait};
-use testing::{MemoryManager, ThreadAllocations};
+use testing_support::{MemoryManager, ThreadAllocations};
 
 // Both opt-in tests use the process-wide LVGL instance.
 static LVGL: Mutex<()> = Mutex::new(());

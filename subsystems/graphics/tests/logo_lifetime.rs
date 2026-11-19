@@ -3,10 +3,10 @@
 
 extern crate abi_definitions;
 
-testing::instantiate_global_allocator!();
+testing_support::instantiate_global_allocator!();
 
 use graphics::{Color, Logo, LogoArmPose, LogoPose, Window, lvgl};
-use testing::MemoryManager;
+use testing_support::MemoryManager;
 
 #[test]
 fn deleting_a_window_frees_its_logo() {

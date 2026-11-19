@@ -4,7 +4,7 @@
 
 extern crate abi_definitions;
 
-testing::instantiate_global_allocator!();
+testing_support::instantiate_global_allocator!();
 
 use core::{
     task::{Context as TaskContext, Poll},
@@ -94,12 +94,14 @@ struct System {
 
 async fn boot(disk: Option<&'static Disk>) -> System {
     if !log::is_initialized() {
-        let _ = log::initialize(&testing::Logger);
+        let _ = log::initialize(&testing_support::Logger);
     }
     let task_manager = task::test_manager();
     let task = task_manager.get_current_task_identifier().await;
     let users = Box::leak(Box::new(users::Manager::new()));
-    let time = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+    let time = Box::leak(Box::new(
+        time::Manager::new(&testing_support::TimeDevice).unwrap(),
+    ));
     let fresh = disk.is_none();
     let disk = disk.unwrap_or_else(|| {
         Box::leak(Box::new(Disk {

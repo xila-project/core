@@ -3,7 +3,7 @@
 
 extern crate abi_definitions;
 
-testing::instantiate_global_allocator!();
+testing_support::instantiate_global_allocator!();
 
 use graphics::{Color, Logo, LogoStyle, lvgl};
 

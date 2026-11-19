@@ -30,7 +30,7 @@ pub mod tests {
 
     extern crate abi_definitions;
 
-    testing::instantiate_global_allocator!();
+    testing_support::instantiate_global_allocator!();
 
     pub(crate) static TEST_TASK_MANAGER: synchronization::once_lock::OnceLock<
         &'static task::Manager,
@@ -47,14 +47,14 @@ pub mod tests {
 
         *initialized = true;
 
-        static RANDOM_DEVICE: testing::RandomDevice = testing::RandomDevice;
-        static TIME_DEVICE: testing::TimeDevice = testing::TimeDevice;
+        static RANDOM_DEVICE: testing_support::RandomDevice = testing_support::RandomDevice;
+        static TIME_DEVICE: testing_support::TimeDevice = testing_support::TimeDevice;
 
         let task_manager = Box::leak(Box::new(task::Manager::new()));
         TEST_TASK_MANAGER.get_or_init(|| task_manager);
         // Tests run on separate test-harness executors, unknown to this manager.
         // Its root and the stack runner live on one shared executor thread.
-        let spawner = testing::new_thread_executor(task_manager).await;
+        let spawner = testing_support::new_thread_executor(task_manager).await;
         let (_, task) = task_manager
             .spawn_send(
                 task::Manager::ROOT_TASK_IDENTIFIER,
@@ -65,7 +65,7 @@ pub mod tests {
             .await
             .unwrap();
 
-        log::initialize(&testing::Logger).unwrap();
+        log::initialize(&testing_support::Logger).unwrap();
 
         let user_manager = Box::leak(Box::new(users::Manager::new()));
 

@@ -21,7 +21,7 @@ embedded-io-async = { workspace = true }
 stackful = { workspace = true }
 
 [dev-dependencies]
-testing = { workspace = true }
+testing_support = { workspace = true }
 drivers_core = { workspace = true }
 executable = { workspace = true }
 little_fs = { workspace = true }

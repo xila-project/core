@@ -12,7 +12,7 @@ use alloc::boxed::Box;
 use core::time::Duration;
 use virtual_file_system::Error;
 
-testing::instantiate_global_allocator!();
+testing_support::instantiate_global_allocator!();
 
 #[task::test]
 async fn clock_values_and_expired_condition_deadlines_use_milliseconds() {

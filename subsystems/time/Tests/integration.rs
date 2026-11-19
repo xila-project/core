@@ -7,7 +7,7 @@
 extern crate alloc;
 use core::time::Duration;
 use log::information;
-use testing::TimeDevice;
+use testing_support::TimeDevice;
 
 #[test]
 fn test_realtime_now() {

@@ -31,7 +31,7 @@ task = { workspace = true }
 [dev-dependencies]
 # Tests render in XRGB8888; production builds still select a format explicitly.
 graphics = { workspace = true, features = ["rendering_xrgb8888"] }
-testing = { workspace = true }
+testing_support = { workspace = true }
 little_fs = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }
 drivers_core = { workspace = true }

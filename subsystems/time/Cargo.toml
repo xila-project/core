@@ -13,7 +13,7 @@ synchronization = { workspace = true }
 embedded-i18n = { workspace = true }
 
 [dev-dependencies]
-testing = { workspace = true }
+testing_support = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }
 log = { workspace = true }
 

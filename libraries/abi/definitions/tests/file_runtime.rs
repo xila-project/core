@@ -13,11 +13,13 @@ use core::time::Duration;
 use file_system::{AccessFlags, CreateFlags, Flags, MemoryDevice, Position, StateFlags, Time};
 use virtual_file_system::{Error, SynchronousFile};
 
-testing::instantiate_global_allocator!();
+testing_support::instantiate_global_allocator!();
 
 #[task::test]
 async fn file_operations_preserve_the_cursor_and_apply_requested_metadata() {
-    let time_manager = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+    let time_manager = Box::leak(Box::new(
+        time::Manager::new(&testing_support::TimeDevice).unwrap(),
+    ));
     let task_manager = Box::leak(Box::new(task::Manager::new()));
     let users_manager = Box::leak(Box::new(users::Manager::new()));
     let task = task_manager.get_current_task_identifier().await;

@@ -5,14 +5,14 @@
 
 extern crate abi_definitions;
 
-testing::instantiate_global_allocator!();
+testing_support::instantiate_global_allocator!();
 
 use graphics::lvgl;
 
 const BLOCK: usize = 16 * 1024;
 
-fn thread_allocated() -> testing::ThreadAllocations {
-    testing::MemoryManager::thread_allocations()
+fn thread_allocated() -> testing_support::ThreadAllocations {
+    testing_support::MemoryManager::thread_allocations()
 }
 
 fn monitor() -> lvgl::lv_mem_monitor_t {

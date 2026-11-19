@@ -20,7 +20,6 @@ time = { workspace = true }
 synchronization = { workspace = true }
 
 [dev-dependencies]
-testing = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }
 drivers_core = { workspace = true }
 

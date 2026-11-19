@@ -20,7 +20,7 @@ little_fs = { workspace = true }
 log = { workspace = true }
 peripherals = { workspace = true, features = ["power"] }
 shared = { workspace = true }
-testing = { workspace = true }
+testing_support = { workspace = true }
 users = { workspace = true }
 
 [[test]]
