@@ -101,7 +101,6 @@ pub(crate) unsafe fn path_input<'a>(path: *const c_char, length: usize) -> Resul
 /// # Safety
 /// Non-null objects must be live. Path must be readable for its length and output
 /// writable and aligned. Outputs must not overlap inputs. Calls must be serialized.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_directory_open(
     parent: *const Directory,
     path: *const c_char,
@@ -137,11 +136,11 @@ pub unsafe extern "C" fn xila_directory_open(
 /// Release a directory capability. Null is a no-op.
 /// # Safety
 /// Non-null pointer must be owned, live, and released exactly once; no concurrent calls.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn xila_directory_close(directory: *mut Directory) {
+pub unsafe extern "C" fn xila_directory_close(directory: *mut Directory) -> Status {
     if !directory.is_null() {
         drop(unsafe { Directory::from_raw(directory) });
     }
+    Status::Ok
 }
 
 impl Directory {
@@ -169,7 +168,6 @@ impl Directory {
 /// Create a relative directory with the WRITE right.
 /// # Safety
 /// Directory must be live; path readable for length. Calls must be serialized.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_directory_create(
     directory: *const Directory,
     path: *const c_char,
@@ -194,7 +192,6 @@ pub const XILA_REMOVE_DIRECTORY: u32 = 1;
 /// Remove a relative entry; XILA_REMOVE_DIRECTORY permits directory removal.
 /// # Safety
 /// Directory must be live; path readable for length. Calls must be serialized.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_directory_remove(
     directory: *const Directory,
     path: *const c_char,
@@ -229,7 +226,6 @@ pub unsafe extern "C" fn xila_directory_remove(
 /// Existing destinations follow the underlying filesystem's replacement semantics.
 /// # Safety
 /// Objects must be live and paths readable for their lengths. Calls must be serialized.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_directory_rename(
     from: *const Directory,
     from_path: *const c_char,

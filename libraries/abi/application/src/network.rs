@@ -1,32 +1,15 @@
-use crate::{Status, path_input, suspend_on};
-use ::network::{
-    IpAddress, IpEndpoint, IpListenEndpoint, Ipv6, Manager, Port, TcpSocket, UdpSocket,
+use crate::{
+    Network, NetworkAddress, Status, Tcp, TcpListener, Udp, XILA_ADDRESS_IPV4, XILA_ADDRESS_IPV6,
+    XILA_NETWORK_CONNECT, XILA_NETWORK_LISTEN, XILA_NETWORK_RESOLVE, XILA_SHUTDOWN_WRITE,
+    path_input, suspend_on,
 };
+use ::network::{IpAddress, IpEndpoint, IpListenEndpoint, Ipv6, Manager, Port, TcpSocket};
 use alloc::boxed::Box;
 use core::{
     ffi::{c_char, c_void},
     slice,
 };
 
-pub const XILA_NETWORK_CONNECT: u32 = 1;
-pub const XILA_NETWORK_LISTEN: u32 = 2;
-pub const XILA_NETWORK_RESOLVE: u32 = 4;
-pub const XILA_ADDRESS_IPV4: u32 = 4;
-pub const XILA_ADDRESS_IPV6: u32 = 6;
-pub const XILA_SHUTDOWN_WRITE: u32 = 1;
-
-/// Fixed-width address. Bytes are in network order; integer fields are host order.
-/// IPv4 uses the first four bytes and requires the remaining bytes to be zero.
-/// Scope must be zero: Core does not support scoped IPv6 endpoints.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NetworkAddress {
-    pub family: u32,
-    pub bytes: [u8; 16],
-    pub port: u16,
-    pub reserved: u16,
-    pub scope_id: u32,
-}
 impl NetworkAddress {
     fn endpoint(self) -> Result<IpEndpoint, Status> {
         if self.scope_id != 0 || self.reserved != 0 {
@@ -34,7 +17,8 @@ impl NetworkAddress {
         }
         let ip = match self.family {
             XILA_ADDRESS_IPV4 if self.bytes[4..] == [0; 12] => {
-                IpAddress::new_ipv4(self.bytes[..4].try_into().unwrap())
+                let [a, b, c, d, ..] = self.bytes;
+                IpAddress::new_ipv4([a, b, c, d])
             }
             XILA_ADDRESS_IPV6 => IpAddress::IPv6(Ipv6::from_inner(self.bytes)),
             _ => return Err(Status::InvalidArgument),
@@ -63,11 +47,6 @@ impl NetworkAddress {
     }
 }
 
-/// Host-granted network authority. Future host/port restrictions belong here.
-pub struct Network {
-    manager: &'static Manager,
-    rights: u8,
-}
 impl Network {
     pub fn new(manager: &'static Manager, rights: u32) -> Result<Self, Status> {
         if rights & !7 != 0 {
@@ -85,21 +64,6 @@ impl Network {
             Ok(())
         }
     }
-}
-/// Owned TCP connection. Its creation grants bidirectional I/O authority.
-pub struct Tcp {
-    inner: TcpSocket,
-}
-/// One pending connection, with no additional backlog. Accept replenishes the socket.
-pub struct TcpListener {
-    network: Network,
-    address: NetworkAddress,
-    inner: TcpSocket,
-}
-/// Owned UDP socket. Sending additionally requires CONNECT on its parent capability.
-pub struct Udp {
-    inner: UdpSocket,
-    rights: u8,
 }
 
 macro_rules! ownership {
@@ -173,7 +137,6 @@ fn listen(socket: &TcpSocket, address: NetworkAddress) -> Result<(), Status> {
 /// Objects must be live and calls serialized. Inputs must be readable and outputs
 /// aligned, writable and disjoint from inputs and objects. Buffers must be valid
 /// for their lengths. Owned objects must be released exactly once.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_network_close(network: *mut Network) -> Status {
     status(unsafe {
         if !network.is_null() {
@@ -188,7 +151,6 @@ pub unsafe extern "C" fn xila_network_close(network: *mut Network) -> Status {
 /// Objects must be live and calls serialized. Inputs must be readable and outputs
 /// aligned, writable and disjoint from inputs and objects. Buffers must be valid
 /// for their lengths. Owned objects must be released exactly once.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_tcp_connect(
     network: *const Network,
     address: *const NetworkAddress,
@@ -254,7 +216,6 @@ pub unsafe extern "C" fn xila_tcp_connect(
 /// Objects must be live and calls serialized. Inputs must be readable and outputs
 /// aligned, writable and disjoint from inputs and objects. Buffers must be valid
 /// for their lengths. Owned objects must be released exactly once.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_tcp_listen(
     network: *const Network,
     address: *const NetworkAddress,
@@ -296,7 +257,6 @@ pub unsafe extern "C" fn xila_tcp_listen(
 /// Objects must be live and calls serialized. Inputs must be readable and outputs
 /// aligned, writable and disjoint from inputs and objects. Buffers must be valid
 /// for their lengths. Owned objects must be released exactly once.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_tcp_accept(
     listener: *mut TcpListener,
     connection: *mut *mut Tcp,
@@ -340,7 +300,6 @@ pub unsafe extern "C" fn xila_tcp_accept(
 /// Objects must be live and calls serialized. Inputs must be readable and outputs
 /// aligned, writable and disjoint from inputs and objects. Buffers must be valid
 /// for their lengths. Owned objects must be released exactly once.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_tcp_close(socket: *mut Tcp) -> Status {
     status(unsafe {
         if !socket.is_null() {
@@ -356,7 +315,6 @@ pub unsafe extern "C" fn xila_tcp_close(socket: *mut Tcp) -> Status {
 /// Objects must be live and calls serialized. Inputs must be readable and outputs
 /// aligned, writable and disjoint from inputs and objects. Buffers must be valid
 /// for their lengths. Owned objects must be released exactly once.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_tcp_listener_close(socket: *mut TcpListener) -> Status {
     status(unsafe {
         if !socket.is_null() {
@@ -372,7 +330,6 @@ pub unsafe extern "C" fn xila_tcp_listener_close(socket: *mut TcpListener) -> St
 /// Objects must be live and calls serialized. Inputs must be readable and outputs
 /// aligned, writable and disjoint from inputs and objects. Buffers must be valid
 /// for their lengths. Owned objects must be released exactly once.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_tcp_shutdown(socket: *mut Tcp, direction: u32) -> Status {
     status((|| unsafe {
         let socket = object(socket)?;
@@ -389,7 +346,6 @@ pub unsafe extern "C" fn xila_tcp_shutdown(socket: *mut Tcp, direction: u32) -> 
 /// Objects must be live and calls serialized. Inputs must be readable and outputs
 /// aligned, writable and disjoint from inputs and objects. Buffers must be valid
 /// for their lengths. Owned objects must be released exactly once.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_tcp_send(
     socket: *mut Tcp,
     buffer: *const c_void,
@@ -425,7 +381,6 @@ pub unsafe extern "C" fn xila_tcp_send(
 /// Objects must be live and calls serialized. Inputs must be readable and outputs
 /// aligned, writable and disjoint from inputs and objects. Buffers must be valid
 /// for their lengths. Owned objects must be released exactly once.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_tcp_receive(
     socket: *mut Tcp,
     buffer: *mut c_void,
@@ -461,7 +416,6 @@ pub unsafe extern "C" fn xila_tcp_receive(
 /// Objects must be live and calls serialized. Inputs must be readable and outputs
 /// aligned, writable and disjoint from inputs and objects. Buffers must be valid
 /// for their lengths. Owned objects must be released exactly once.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_tcp_local_address(
     socket: *const Tcp,
     address: *mut NetworkAddress,
@@ -492,7 +446,6 @@ pub unsafe extern "C" fn xila_tcp_local_address(
 /// Objects must be live and calls serialized. Inputs must be readable and outputs
 /// aligned, writable and disjoint from inputs and objects. Buffers must be valid
 /// for their lengths. Owned objects must be released exactly once.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_tcp_peer_address(
     socket: *const Tcp,
     address: *mut NetworkAddress,
@@ -523,7 +476,6 @@ pub unsafe extern "C" fn xila_tcp_peer_address(
 /// Objects must be live and calls serialized. Inputs must be readable and outputs
 /// aligned, writable and disjoint from inputs and objects. Buffers must be valid
 /// for their lengths. Owned objects must be released exactly once.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_udp_bind(
     network: *const Network,
     address: *const NetworkAddress,
@@ -572,7 +524,6 @@ pub unsafe extern "C" fn xila_udp_bind(
 /// Objects must be live and calls serialized. Inputs must be readable and outputs
 /// aligned, writable and disjoint from inputs and objects. Buffers must be valid
 /// for their lengths. Owned objects must be released exactly once.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_udp_close(socket: *mut Udp) -> Status {
     status(unsafe {
         if !socket.is_null() {
@@ -588,7 +539,6 @@ pub unsafe extern "C" fn xila_udp_close(socket: *mut Udp) -> Status {
 /// Objects must be live and calls serialized. Inputs must be readable and outputs
 /// aligned, writable and disjoint from inputs and objects. Buffers must be valid
 /// for their lengths. Owned objects must be released exactly once.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_udp_send_to(
     socket: *mut Udp,
     buffer: *const c_void,
@@ -634,7 +584,6 @@ pub unsafe extern "C" fn xila_udp_send_to(
 /// Objects must be live and calls serialized. Inputs must be readable and outputs
 /// aligned, writable and disjoint from inputs and objects. Buffers must be valid
 /// for their lengths. Owned objects must be released exactly once.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_udp_receive_from(
     socket: *mut Udp,
     buffer: *mut c_void,
@@ -685,7 +634,6 @@ pub unsafe extern "C" fn xila_udp_receive_from(
 /// Objects must be live and calls serialized. Inputs must be readable and outputs
 /// aligned, writable and disjoint from inputs and objects. Buffers must be valid
 /// for their lengths. Owned objects must be released exactly once.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_network_resolve(
     network: *const Network,
     host: *const c_char,
@@ -819,7 +767,7 @@ mod tests {
         assert_eq!(Status::from(::network::Error::TimedOut), Status::TimedOut);
         assert_eq!(
             Status::from(::network::Error::ResourceBusy),
-            Status::WouldBlock
+            Status::ResourceBusy
         );
     }
 }

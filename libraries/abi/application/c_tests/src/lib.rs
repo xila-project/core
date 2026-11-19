@@ -13,15 +13,52 @@ mod tests {
     // C only passes this opaque object through; it never reads the Rust layout.
     #[allow(improper_ctypes)]
     unsafe extern "C" {
-        fn application_c_round_trip(directory: *const Directory) -> i32;
-        fn application_c_file_system(directory: *const Directory) -> i32;
+        fn application_c_round_trip(api: *const XilaApi, directory: *const Directory) -> i32;
+        fn application_c_file_system(api: *const XilaApi, directory: *const Directory) -> i32;
         fn startup_test_main(startup: *const XilaStartup) -> i32;
+        fn sdk_test_startup(startup: *const XilaStartup) -> i32;
+        fn startup_heap_main(startup: *const XilaStartup) -> i32;
         fn startup_empty_main(startup: *const XilaStartup) -> i32;
         fn application_c_network(
+            api: *const XilaApi,
             network: *const Network,
             denied: *const Network,
             listen_only: *const Network,
         ) -> i32;
+    }
+
+    #[test]
+    fn process_heap_reclaims_c_allocations_on_return() {
+        let before = testing::MemoryManager::thread_allocations();
+        let mut heap = Heap::new();
+        let result = unsafe { run_main(startup_heap_main, &mut heap, &[], None, None, None, None) };
+        assert!(
+            testing::MemoryManager::thread_allocations()
+                .since(before)
+                .net_bytes()
+                > 0
+        );
+        drop(heap);
+        let delta = testing::MemoryManager::thread_allocations().since(before);
+        assert_eq!(result, 0);
+        assert!(delta.allocations() >= 2);
+        assert_eq!(delta.net_bytes(), 0);
+    }
+
+    #[test]
+    fn sdk_startup_dispatches_through_supplied_api() {
+        let result = unsafe {
+            run_main(
+                sdk_test_startup,
+                &mut Heap::new(),
+                &[],
+                None,
+                None,
+                None,
+                None,
+            )
+        };
+        assert_eq!(result, 42);
     }
 
     #[task::test]
@@ -86,7 +123,10 @@ mod tests {
         let denied = Network::new(network, 0).unwrap();
         let listen_only = Network::new(network, XILA_NETWORK_LISTEN).unwrap();
         unsafe {
-            assert_eq!(application_c_network(&authority, &denied, &listen_only), 0);
+            assert_eq!(
+                application_c_network(&XILA_API, &authority, &denied, &listen_only),
+                0
+            );
         }
 
         unsafe {
@@ -115,7 +155,15 @@ mod tests {
         .unwrap();
         unsafe {
             assert_eq!(
-                run_main(startup_empty_main, &[], None, None, None, None),
+                run_main(
+                    startup_empty_main,
+                    &mut Heap::new(),
+                    &[],
+                    None,
+                    None,
+                    None,
+                    None
+                ),
                 -7
             );
             let path = file_system::Path::from_str("/startup-output");
@@ -133,6 +181,7 @@ mod tests {
             assert_eq!(
                 run_main(
                     startup_test_main,
+                    &mut Heap::new(),
                     &["", "héllo"],
                     None,
                     Some(File::new(output)),
@@ -162,8 +211,8 @@ mod tests {
         }
         let directory = Directory::new(vfs, task, "/./", 3).unwrap().into_raw();
         unsafe {
-            assert_eq!(application_c_round_trip(directory), 0);
-            assert_eq!(application_c_file_system(directory), 0);
+            assert_eq!(application_c_round_trip(&XILA_API, directory), 0);
+            assert_eq!(application_c_file_system(&XILA_API, directory), 0);
             // Validate conversion independently from the C client, including overflow.
             let mut source = vfs
                 .get_statistics_for_task(task, &file_system::Path::ROOT)
@@ -218,7 +267,7 @@ mod tests {
             let mut buffer = [0u8; 5];
             assert_eq!(
                 xila_file_read(file, buffer.as_mut_ptr().cast(), 5, &mut count),
-                Status::PermissionDenied
+                Status::BadDescriptor
             );
             assert_eq!(count, 99);
             assert_eq!(

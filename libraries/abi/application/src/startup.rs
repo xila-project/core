@@ -1,5 +1,5 @@
 //! Startup capabilities borrowed by a linked native C application.
-use crate::{Directory, File};
+use crate::{Directory, File, Heap, XILA_API, XilaApi};
 use alloc::vec::Vec;
 use core::{ffi::c_char, ptr};
 
@@ -11,12 +11,15 @@ pub struct XilaString {
 }
 
 /// Host-owned startup data, valid only for the duration of the entry call.
-/// Any pointer may be null when not granted (with zero argument_count for arguments).
+/// The API is always present. Capability pointers may be null when not granted.
+/// A null argument array has argument_count zero.
 /// Applications must not close, retain or transfer these objects; closing them is
 /// undefined behavior. Objects opened by the application must still be closed.
 #[repr(C)]
 pub struct XilaStartup {
     pub size: u32,
+    pub api: *const XilaApi,
+    pub heap: *mut Heap,
     pub arguments: *const XilaString,
     pub argument_count: usize,
     pub standard_input: *mut File,
@@ -25,13 +28,16 @@ pub struct XilaStartup {
     pub home: *mut Directory,
 }
 
-/// Invoke a linked C entry, then drop all granted objects, closing their streams.
-/// Arguments use one small allocation; capabilities remain on the host stack.
+/// Invoke a linked C entry, then close its granted streams. The process owner
+/// provides the heap and drops it after all native execution ends. Keep the heap
+/// owner outside any coroutine stack that can be abandoned.
 /// # Safety
 /// Entry must obey the startup lifetime and ownership rules, serialize object
-/// access, and return normally without retaining any supplied pointers.
+/// access, and never unwind. The heap must remain live until native execution
+/// has permanently ended.
 pub unsafe fn run_main(
     entry: unsafe extern "C" fn(*const XilaStartup) -> i32,
+    heap: &mut Heap,
     arguments: &[&str],
     mut standard_input: Option<File>,
     mut standard_output: Option<File>,
@@ -47,6 +53,8 @@ pub unsafe fn run_main(
         .collect();
     let startup = XilaStartup {
         size: core::mem::size_of::<XilaStartup>() as u32,
+        api: &XILA_API,
+        heap,
         arguments: if arguments.is_empty() {
             ptr::null()
         } else {

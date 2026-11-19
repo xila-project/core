@@ -90,6 +90,28 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn("cargo test --locked --workspace", tasks["ci:host-tests"]["run"])
         self.assertNotIn("apt:libasound2-dev", ci_config()["bootstrap"]["packages"])
 
+    def test_native_abi_runs_without_network_and_checks_32_bit_layouts(self):
+        tasks = ci_config()["tasks"]
+        self.assertIn(
+            "cargo test --locked -p xila-abi-application --no-default-features",
+            tasks["ci:host-tests"]["run"],
+        )
+        bare = tasks["ci:bare-metal"]
+        self.assertIn("clippy", bare["tools"]["rust"]["components"])
+        for target in ("thumbv7em-none-eabihf", "riscv32imac-unknown-none-elf"):
+            self.assertIn(target, bare["tools"]["rust"]["targets"])
+        for features in ("--no-default-features", "--features network"):
+            self.assertIn(
+                f'cargo clippy --locked -p xila-abi-application {features} --target "$target" -- -D warnings',
+                bare["run"],
+            )
+
+    def test_ci_policy_uses_pinned_uv_dependencies(self):
+        self.assertIn("mise run ci:policy-tests", job("ci.yml", "quality"))
+        policy = ci_config()["tasks"]["ci:policy-tests"]
+        self.assertIn("uv", policy["tools"])
+        self.assertIn("uv run --no-project --with pyyaml==", policy["run"])
+
     def test_tool_versions_are_central_and_templates_do_not_install_tools_globally(self):
         shared = tomllib.loads((ROOT / "mise.toml").read_text())
         self.assertIn("rust_version", shared.get("vars", {}))

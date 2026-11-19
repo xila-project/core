@@ -91,7 +91,7 @@ have no package-setup dependency, and local development behavior is unchanged.
 Benchmarks run package setup, including GNU time, before their timed commands.
 
 ```sh
-python3 -m unittest discover -s tools/ci -v
+MISE_ENV=ci mise run ci:policy-tests
 actionlint .github/workflows/*.yml
 MISE_ENV=ci mise run ci:host
 MISE_ENV=ci mise run ci:wasm

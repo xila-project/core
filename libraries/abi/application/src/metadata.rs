@@ -96,7 +96,6 @@ unsafe fn write_output(output: *mut Statistics, value: &Statistics) {
 /// # Safety
 /// File must be live and exclusively accessed. Output must be aligned, writable
 /// for its declared size, initialized with size, and disjoint from the file.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_file_get_statistics(
     file: *mut File,
     output: *mut Statistics,
@@ -129,7 +128,6 @@ pub unsafe extern "C" fn xila_file_get_statistics(
 /// Directory must be live; path readable for length. Output must be aligned,
 /// writable for its declared size, initialized with size and disjoint from inputs.
 /// Calls must be serialized.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_directory_get_statistics(
     directory: *const Directory,
     path: *const c_char,

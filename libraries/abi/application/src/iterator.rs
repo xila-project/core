@@ -14,7 +14,6 @@ pub struct DirectoryIterator {
 /// # Safety
 /// Directory must be live; path readable for length. Output must be aligned,
 /// writable and disjoint from inputs. Calls must be serialized.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_directory_iterator_open(
     directory: *const Directory,
     path: *const c_char,
@@ -51,7 +50,6 @@ pub unsafe extern "C" fn xila_directory_iterator_open(
 /// Iterator must be live and exclusively accessed. Buffer must be writable for
 /// capacity bytes (null allowed only at zero capacity). Outputs must be aligned,
 /// writable and disjoint from each other, the buffer and iterator.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_directory_iterator_next(
     iterator: *mut DirectoryIterator,
     name_buffer: *mut c_char,
@@ -76,7 +74,9 @@ pub unsafe extern "C" fn xila_directory_iterator_next(
             Err(error) => return error.into(),
         }
     }
-    let entry = iterator.pending.as_ref().unwrap();
+    let Some(entry) = &iterator.pending else {
+        unreachable!();
+    };
     if entry.name.len() > capacity {
         unsafe {
             name_length.write(entry.name.len());
@@ -103,7 +103,6 @@ pub unsafe extern "C" fn xila_directory_iterator_next(
 /// Rewind, discarding a pending entry only on success.
 /// # Safety
 /// Iterator must be live and exclusively accessed.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_directory_iterator_rewind(
     iterator: *mut DirectoryIterator,
 ) -> Status {
@@ -123,7 +122,6 @@ pub unsafe extern "C" fn xila_directory_iterator_rewind(
 /// Close and free the iterator even on close error; null succeeds.
 /// # Safety
 /// Non-null iterator must be owned, live and released once; no concurrent calls.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn xila_directory_iterator_close(iterator: *mut DirectoryIterator) -> Status {
     if iterator.is_null() {
         return Status::Ok;

@@ -1,13 +1,13 @@
 # Native application ABI
 
-`xila-abi-application` is the stable C interface for native applications linked
-against Xila. It is `no_std` with `alloc`; Wasm guests keep their separate WASI
+`xila-abi-application` is the stable C interface for native applications running
+on Xila. It is `no_std` with `alloc`; Wasm guests keep their separate WASI
 implementation. The facade does not enable this crate by default.
 
 The interface prioritizes RAM, flash and CPU footprint. Files wrap an owned
 VFS file handle, and directories retain only a VFS reference, task identity,
 canonical absolute path and one byte of rights. There is no global handle table,
-lookup or context argument. Distinct opaque `XilaFile` and `XilaDirectory` pointer
+lookup or ambient context. Distinct opaque `XilaFile` and `XilaDirectory` pointer
 types catch accidental type confusion in C. Read and write use caller buffers
 directly, without temporary allocations or hot-path logging. Opening allocates
 only the joined path and returned object, in addition to underlying VFS costs.
@@ -48,7 +48,7 @@ OutOfMemory.
 
 ## Functions
 
-- `xila_abi_version`: packed major/minor version, currently 0.1.
+- `XilaApi.version`: packed major/minor version, currently 0.1.
 - `xila_directory_open`, `xila_directory_close`: attenuated path capabilities.
 - `xila_file_open`, `xila_file_close`: typed owned file objects.
 - `xila_file_read`, `xila_file_write`: direct buffer I/O.
@@ -59,6 +59,7 @@ OutOfMemory.
 - `xila_directory_create`, `xila_directory_remove`, `xila_directory_rename`: namespace changes.
 - `xila_file_set_size`: resize writable files without changing their cursor.
 - `xila_time_monotonic`, `xila_time_realtime`: checked nanosecond clock reads.
+- `xila_heap_allocate`, `xila_heap_reallocate`, `xila_heap_free`: process-owned allocation.
 
 The host constructs capabilities with `Directory::new` and wraps existing streams
 with `File::new`. `into_raw` transfers ownership and unsafe `from_raw` reclaims it
@@ -67,21 +68,35 @@ before initialization and unsynchronized realtime reads return Unavailable.
 
 ## Header and compatibility
 
-The build generates `application.h` into `OUT_DIR` using cbindgen, without macro
-expansion or nightly. The committed public header is `include/xila/application.h`.
-Run `XILA_UPDATE_HEADER=1 cargo test -p xila-abi-application generated_header` to
-refresh it; normal tests require an exact match. The separate unpublished
-`xila-abi-application-c-tests` member compiles and executes a strict C11 client,
-so ordinary consumers do not need a C compiler for this crate's header generation.
+The `#[repr(C)] XilaApi` struct in `src/api.rs` defines the slot order and
+signatures. All calls return the 32-bit `XilaStatus`. The table starts with
+the packed version and total byte size, then one function pointer per slot.
+Builds without the `network` feature keep the network slots and return
+`XILA_STATUS_UNSUPPORTED` from them.
 
-Until the first release the ABI stays at 0.1. After it, additive changes bump the minor version; breaking changes bump the major
-version. Never reuse or renumber constants or status values. Rust object layouts
-are private and must never be inspected or allocated by C callers.
+cbindgen generates `include/xila/application.h` without macro expansion. The
+build also parses `XilaApi` with syn to produce the SDK stubs and the zero-based
+slot snapshot `sdk/slots.tsv`. The build checks every slot offset and the table
+size on the compilation target. Refresh and verify the committed files with:
 
-## Future scope
+```sh
+XILA_UPDATE_HEADER=1 cargo test -p xila-abi-application generated_header
+cargo test -p xila-abi-application-c-tests
+```
 
-Tasks/threads, networking and graphics are not included. Dynamic loading belongs to the future native loader ([Core issue #334](https://github.com/xila-project/core/issues/334)).
-A POSIX compatibility layer can be built above this native interface later.
+ABI 0.1 is pre-release. Rebuild native apps against the matching SDK when the
+table or status numbers change. After the first release, append slots for minor
+versions and increment the major version for incompatible changes. Keep Rust
+object layouts opaque to C callers.
+
+Status zero is success. The unified status ranges are `0x0100–0x01FF` for
+common errors, `0x0200–0x02FF` for storage and paths, `0x0300–0x03FF` for
+device and task errors, `0x0400–0x04FF` for transport, and `0x0500–0x05FF`
+for DNS. The `0x0600–0x06FF` band is reserved and `0x0700–0x07FF` contains
+native-only outcomes. ExecFormat, NoChild, ArgumentListTooLong, Deadlock and
+InappropriateIoControl hold the IDs for ENOEXEC, ECHILD, E2BIG, EDEADLK and
+ENOTTY. Existing Rust subsystems are still translated into the status space at
+the ABI boundary.
 
 ## Filesystem metadata and listings
 
@@ -111,35 +126,78 @@ larger callers' trailing bytes are untouched. The returned size identifies the
 callee's layout. Future fields will preserve the 72-byte prefix and minimum size.
 
 Listing copies UTF-8 names without a trailing NUL and skips `.` and `..`.
-End (14) leaves outputs unchanged. BufferTooSmall (15) is the sole exception to
+End (0x0701) leaves outputs unchanged. BufferTooSmall (0x0702) is the sole exception to
 success-only outputs: it writes the required `name_length`, leaves kind and buffer
 unchanged, and retains the entry for retry. A null buffer is allowed at zero
 capacity. Rewind resets the listing and any pending entry only on success.
-DirectoryNotEmpty (16) reports removal of a nonempty directory. Closing always
+DirectoryNotEmpty (0x0209) reports removal of a nonempty directory. Closing always
 consumes an iterator, even on error; closing null succeeds. The VFS supplies owned
 String names, so one allocation per entry is unavoidable; retries add none.
 
 ## Linked application startup
 
-The C entry convention is `int32_t xila_main(const XilaStartup *startup)`.
-Firmware links applications statically today. Each application therefore exports
-its own unique entry name (for example `c_demo_main`), and the Rust host passes
-that function pointer to `run_main`; there is no required global `xila_main` symbol.
-Wasm remains the installable application format; this convention adds no loader.
+A linked C entry has the signature `int32_t c_demo_main(const XilaStartup *startup)`.
+Rust passes the entry pointer to `run_main`. Built-in applications such as
+`c_demo` include `application.h` and call through the instance's `startup->api`.
+For example, `startup->api->file_write(startup->standard_output, data, length, &written)`
+writes to the borrowed output stream. Read the ABI version from
+`startup->api->version`.
 
-`XilaStartup.size` is the structure size in bytes; check it before reading fields.
-Arguments are UTF-8 `XilaString` pointer/length pairs, without NUL terminators.
-Any pointer may be null when not granted; a null argument array has count zero.
-The host owns the startup structure, strings and initial file/directory objects.
-They are borrowed only until the entry returns: do not retain or close them.
-Closing a startup object is undefined behavior. Close objects opened by the app.
-The Rust-only unsafe `run_main` helper consumes optional capabilities, lends them
-to the entry, and drops them after return (closing streams). It allocates only the
-argument descriptor array; no capability boxes or global handle table are needed.
-Directory listing, statistics, rename/remove, tasks/threads and graphics
-are not included. Program entry and handing initial capabilities to an application
-belong to the future native loader ([Core issue #334](https://github.com/xila-project/core/issues/334)).
-A POSIX compatibility layer can be built above this native interface later.
+`XilaStartup.size` is the structure size in bytes. Check it before reading its
+fields, and check `api->version` and `api->size` against the required slots.
+The API pointer is always present. Optional capability pointers may be null.
+Arguments are UTF-8 `XilaString` pairs without NUL terminators. The argument
+array is null at count zero.
+
+The host lends the startup data, strings and initial capabilities for the call.
+The app may close its own file and directory objects. It must leave borrowed
+objects open and release access when the entry returns. The Rust helper drops
+the startup resources when the entry returns. The caller supplies the process
+heap and owns its teardown.
+
+## SDK startup
+
+A separately linked C image defines `int32_t xila_main(const XilaStartup *)` and
+links `sdk/crt0.c` and `sdk/stubs.c`, using `-Iinclude/xila -Isdk` and including
+`stubs.h`. The host calls `_xila_start` once per image. crt0 checks the startup
+and table sizes and the ABI version, installs the image-local table pointer,
+then calls `xila_main`. Before startup and after `xila_main` returns, all stubs
+return `XILA_STATUS_UNAVAILABLE`. The entry must join any users of the stubs
+before returning. Invalid startup returns -1.
+Built-in callers use their startup pointer directly so concurrent executions can
+borrow different capabilities.
+
+## Process heap
+
+Each startup can grant a `XilaHeap`. Heap calls take the capability explicitly
+and callers serialize operations on it. Heap storage is uninitialized, including
+new bytes after a resize. Allocation of zero bytes reserves one byte.
+Reallocation with a null pointer allocates, and a new size of zero frees and
+stores null. Free accepts null. An unrepresentable size or allocator failure
+returns OutOfMemory and preserves the original block and output. Free and
+resize return `XILA_STATUS_INVALID_ARGUMENT` for a pointer that this heap does
+not own, an interior pointer or a block that was already freed, including through
+a pointer that a moving resize left stale. A foreign-heap pointer is missed only
+if the two heaps' keys collide, which is unlikely.
+
+Each block starts with a 16-byte header on 32-bit targets (Arm and RV32) and
+32 bytes on 64-bit targets: previous and next links, the size and an owner tag.
+The doubly linked list gives constant-time free and resize. The tag is a
+per-heap key XOR the block address. Free clears it, and so does a moving
+resize before it releases the old block. Free and resize check
+the alignment and the tag before they unlink anything. The heap keeps no side
+table: its metadata never allocates, never fails and never outlives the block,
+so a shrinking resize cannot fail because of it.
+
+Native applications are trusted, so this is cheap misuse detection rather than
+hardening. Like a C allocator, the check reads the header below the pointer, so
+the pointer must address readable memory. A freed block whose memory a later
+allocation of the same heap reuses identifies that new allocation, as with
+malloc.
+
+The process owner drops the heap after all C execution ends. A loader must
+keep that owner outside the native coroutine stack, including when it cancels
+an unfinished coroutine.
 
 ## Optional networking (`network`)
 
@@ -180,11 +238,6 @@ must be zero; scoped IPv6 is unsupported. Core rejects port zero for binding.
 DNS selects IPv4 or IPv6 explicitly and returns port zero. Core allocates a vector
 for DNS results. Count is capacity on input, number returned on success. Capacity
 zero queries the required size; an undersized nonempty array returns Overflow
-without changing outputs. A second query may yield a different count. Network
-errors have dedicated status numbers 26–35; existing values are unchanged.
-
-The generated header always declares networking, independent of Cargo features;
-linking those functions requires `network`. cbindgen parses the unexpanded source,
-so the committed header is identical with and without the feature. The C test
-member explicitly enables it and exercises smoltcp loopback TCP echo, UDP round
-trip, capability failures and numeric DNS.
+without changing outputs. A second query may yield a different count. The C test
+member enables networking and exercises smoltcp loopback TCP echo, UDP round
+trips, capability failures and numeric DNS.

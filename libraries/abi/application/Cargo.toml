@@ -27,6 +27,8 @@ stackful = { workspace = true }
 
 [build-dependencies]
 cbindgen.workspace = true
+syn = { workspace = true, features = ["full"] }
+quote.workspace = true
 
 [dev-dependencies]
 testing.workspace = true
