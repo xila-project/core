@@ -1,14 +1,30 @@
-/* LVGL's LV_INTTYPES_INCLUDE. Freestanding and bare-metal targets (Wasm, Arm,
- * RISC-V, Xtensa, ...) may have no C library, so their format macros are
- * defined here from compiler-provided <stdint.h>. Prefer the compiler's own
- * __*_FMT*__ macros (Clang) and fall back to GCC's __INT*_C literal suffixes
- * and pointer width so each target's actual `int` vs `long` types match. */
+/* LVGL's LV_INTTYPES_INCLUDE: the PRI* format macros LVGL needs.
+ *
+ * Bare-metal and freestanding targets (Wasm, Arm, RISC-V, ...) may ship no C
+ * library, so there is no <inttypes.h> to include. This header then defines
+ * the macros from the compiler's own <stdint.h>, preferring Clang's
+ * __*_FMT*__ macros and falling back to GCC's __INT*_C literal suffixes and
+ * __INTPTR_TYPE__, so each target's actual `int` vs `long` types match.
+ *
+ * Hosted environments that ship a C library keep the real <inttypes.h>, even
+ * when the compiler defines no __unix__/__linux__/__APPLE__/_WIN32 macro:
+ * ESP-IDF (newlib), NuttX and Zephyr (newlib or picolibc) are such cases.
+ * Redefining PRI* beside their <inttypes.h> is an error under -Werror, so a C
+ * library is detected through the macros its headers define once <stdint.h>
+ * is included (_NEWLIB_VERSION, __PICOLIBC__). Do not add a bare-metal
+ * target's compiler macros to the shim condition below; widen the C library
+ * detection instead. */
 #ifndef XILA_INTTYPES_H
 #define XILA_INTTYPES_H
 
-#if (defined(__STDC_HOSTED__) && !__STDC_HOSTED__) || \
-    (!defined(__unix__) && !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32))
+/* Included first: with a C library, its <stdint.h> pulls in <newlib.h> or
+ * <picolibc.h> and defines the macros tested below. */
 #include <stdint.h>
+
+#if defined(_NEWLIB_VERSION) || defined(__PICOLIBC__)
+#include <inttypes.h>
+#elif (defined(__STDC_HOSTED__) && !__STDC_HOSTED__) || \
+    (!defined(__unix__) && !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32))
 
 /* 8- and 16-bit arguments are promoted to int. */
 #define PRId8 "d"
@@ -89,6 +105,7 @@
 #define PRIxPTR __UINTPTR_FMTx__
 #define PRIXPTR __UINTPTR_FMTX__
 #elif defined(__SIZEOF_POINTER__) && defined(__SIZEOF_LONG__) && (__SIZEOF_POINTER__ == 8)
+/* 64-bit pointers: `long` (LP64) or `long long` (LLP64). */
 #if __SIZEOF_LONG__ == 8
 #define PRIdPTR "ld"
 #define PRIuPTR "lu"
@@ -100,7 +117,15 @@
 #define PRIxPTR "llx"
 #define PRIXPTR "llX"
 #endif
-#elif defined(__LP64__) || defined(_LP64)
+#elif defined(__SIZEOF_POINTER__) && (__SIZEOF_POINTER__ == 4) && defined(__INTPTR_TYPE__)
+/* 32-bit pointers: `int` and `long` have the same width, and GCC's
+ * __INTPTR_TYPE__ is not tied to int32_t (newlib targets pair `long` int32_t
+ * with `int` intptr_t), so test the type's spelling: it is either `int` or
+ * `long int`. The first token selects a macro; the leftover `int` evaluates to
+ * 0 in #if. */
+#define XILA_INTTYPES_PTR_int 0
+#define XILA_INTTYPES_PTR_long 1 ||
+#if XILA_INTTYPES_PASTE(XILA_INTTYPES_PTR_, __INTPTR_TYPE__)
 #define PRIdPTR "ld"
 #define PRIuPTR "lu"
 #define PRIxPTR "lx"
@@ -110,6 +135,11 @@
 #define PRIuPTR "u"
 #define PRIxPTR "x"
 #define PRIXPTR "X"
+#endif
+#undef XILA_INTTYPES_PTR_long
+#undef XILA_INTTYPES_PTR_int
+#else
+#error "xila_inttypes.h: cannot derive PRIdPTR; this compiler defines neither __INTPTR_FMTd__ nor __SIZEOF_POINTER__/__INTPTR_TYPE__"
 #endif
 
 #undef XILA_INTTYPES_IS_LONG_1ll

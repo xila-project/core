@@ -5,6 +5,7 @@ import functools
 import json
 import pathlib
 import re
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -309,6 +310,55 @@ class WorkflowPolicy(unittest.TestCase):
                 rust = tasks[name]["tools"]["rust"]
                 components = rust.get("components", []) if isinstance(rust, dict) else []
                 self.assertIn("rustfmt", components, "wasm build scripts execute rustfmt on generated bindings")
+
+    def test_graphics_inttypes_shim_yields_to_a_c_library(self):
+        """Hosted bare-metal toolchains (ESP-IDF, NuttX, Zephyr) ship <inttypes.h>.
+
+        They define no __unix__, so the shim must recognise their C library instead
+        (newlib, picolibc); redefining PRI* beside it fails under -Werror. A stub
+        <stdint.h> stands in for the library headers, so no ESP toolchain is needed.
+        """
+        clang = shutil.which("clang")
+        if clang is None:
+            self.skipTest("clang is not installed")
+        include = ROOT / "subsystems/graphics/include"
+        probe = '#include <xila_inttypes.h>\n#ifdef XILA_REAL_INTTYPES\nxila_probe real\n#else\nxila_probe shim\n#endif\n'
+        stdint = '#define {macro}\n#include_next <stdint.h>\n'
+        library = '#include_next <stdint.h>\n#define XILA_REAL_INTTYPES 1\n#define PRId8 "hhd"\n'
+        cases = [
+            # (target, extra clang arguments, C library macro, expected header)
+            ("riscv32-esp-espidf", [], '_NEWLIB_VERSION "4.6.0"', "real"),
+            ("xtensa-esp32s3-none-elf", [], "__PICOLIBC__ 1", "real"),
+            ("thumbv7em-none-eabihf", [], '_NEWLIB_VERSION "4.6.0"', "real"),
+            ("wasm32-unknown-emscripten", [], None, "real"),
+            ("riscv32-esp-espidf", [], None, "shim"),
+            ("riscv32", [], None, "shim"),
+            ("riscv32", ["-ffreestanding"], None, "shim"),
+            ("riscv64", [], None, "shim"),
+            ("thumbv7em-none-eabihf", ["-ffreestanding"], None, "shim"),
+            ("wasm32-unknown-unknown", [], None, "shim"),
+            ("wasm32-unknown-unknown", ["-ffreestanding"], None, "shim"),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "probe.c").write_text(probe)
+            for index, (target, extra, macro, expected) in enumerate(cases):
+                with self.subTest(target=target, extra=extra, library=macro):
+                    stubs = root / f"stubs-{index}"
+                    stubs.mkdir()
+                    if macro:
+                        (stubs / "stdint.h").write_text(stdint.format(macro=macro))
+                        (stubs / "inttypes.h").write_text(library)
+                    elif expected == "real":
+                        # Emscripten: musl provides <inttypes.h> and the target defines __unix__.
+                        (stubs / "inttypes.h").write_text(library)
+                    result = subprocess.run(
+                        [clang, f"--target={target}", *extra, "-nostdlibinc", "-isystem", str(stubs), f"-I{include}",
+                         "-E", "-P", str(root / "probe.c")],
+                        capture_output=True, text=True,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout.strip().splitlines()[-1], f"xila_probe {expected}")
 
     def test_graphics_builds_for_bare_metal_arm_and_riscv(self):
         task = ci_config()["tasks"]["ci:bare-metal"]
