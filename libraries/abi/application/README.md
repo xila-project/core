@@ -176,7 +176,9 @@ Reallocation with a null pointer allocates, and a new size of zero frees and
 stores null. Free accepts null. An unrepresentable size or allocator failure
 returns OutOfMemory and preserves the original block and output. Free and
 resize return `XILA_STATUS_INVALID_ARGUMENT` for a pointer that this heap does
-not own, an interior pointer or a block that was already freed.
+not own, an interior pointer or a block that was already freed, including through
+a pointer that a moving resize left stale. A foreign-heap pointer is missed only
+if the two heaps' keys collide, which is unlikely.
 
 Each block starts with a 16-byte header on 32-bit targets (Arm and RV32) and
 32 bytes on 64-bit targets: previous and next links, the size and an owner tag.

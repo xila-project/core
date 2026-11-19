@@ -32,6 +32,12 @@ fn layout(size: usize) -> Result<Layout, Status> {
 }
 
 const KEY_SALT: usize = 0x5A17_A11C;
+// Fibonacci hashing constant. Multiplying spreads nearby addresses apart, so
+// heaps whose struct and first block sit at the same distance get different keys.
+#[cfg(target_pointer_width = "32")]
+const KEY_MULTIPLIER: usize = 0x9E37_79B9;
+#[cfg(target_pointer_width = "64")]
+const KEY_MULTIPLIER: usize = 0x9E37_79B9_7F4A_7C15;
 
 /// Opaque native heap capability. The process owner drops it after all native
 /// execution ends. Keep ownership outside any stack that can be abandoned.
@@ -40,8 +46,9 @@ const KEY_SALT: usize = 0x5A17_A11C;
 /// hardened. Every block starts with a header whose tag is the heap's key XOR
 /// the block address. Free and resize read the header that would precede the
 /// pointer and reject it as `InvalidArgument` unless it is aligned and its tag
-/// matches: a foreign-heap pointer, an interior pointer or a double free is
-/// caught. Like a C allocator, this reads through the pointer, so it needs
+/// matches: an interior pointer or a double free (including one through a
+/// pointer that a moving resize left stale) is caught, and so is a
+/// foreign-heap pointer unless the two heaps' keys collide, which is unlikely. Like a C allocator, this reads through the pointer, so it needs
 /// readable memory below it. It cannot detect a freed block whose memory was
 /// reused by a later allocation of this heap, which then identifies the new
 /// block. Metadata lives in the block, so no operation allocates it and a
@@ -100,8 +107,10 @@ impl Heap {
         }
         if self.key == 0 {
             // Live blocks have distinct addresses, so mixing in the first one
-            // keeps heaps that reuse an address apart.
-            self.key = (ptr::from_mut(self).addr() ^ block.addr() ^ KEY_SALT) | 1;
+            // keeps heaps that reuse an address apart. A plain XOR would only
+            // depend on their distance, which is the same for every process.
+            let mixed = ptr::from_mut(self).addr().wrapping_mul(KEY_MULTIPLIER) ^ block.addr();
+            self.key = (mixed.wrapping_mul(KEY_MULTIPLIER) ^ KEY_SALT) | 1;
         }
         // SAFETY: The block is a fresh allocation with room for the header and
         // the head is null or a live block of this heap.
@@ -133,10 +142,16 @@ impl Heap {
         let Ok(old_layout) = old_layout else {
             unreachable!();
         };
+        // A moving resize frees the old block without this heap writing to it
+        // again, so clear its tag first: a stale pointer must not match.
+        // SAFETY: The tag matched, so the old block is live.
+        unsafe { (*old).tag = 0 };
         // SAFETY: The old layout is the one the block was allocated with.
         let block = unsafe { realloc(old.cast(), old_layout, new_layout.size()).cast::<Block>() };
         if block.is_null() {
-            // The old block is untouched.
+            // The old block is untouched apart from its tag, restored here.
+            // SAFETY: Realloc failed, so the old block is still live.
+            unsafe { (*old).tag = self.tag(old) };
             return Err(Status::OutOfMemory);
         }
         // SAFETY: Realloc moved the header with the block and the neighbors
@@ -469,5 +484,59 @@ mod regression_tests {
             assert_consistent(&heap, live);
         }
         assert!(heap.head.is_null());
+    }
+
+    // `free(p)` after `q = realloc(p, bigger)` moved the block is the most
+    // common C double free. The stale header must not match any more.
+    #[test]
+    #[cfg_attr(miri, ignore = "reads the freed block's header")]
+    fn stale_pointer_after_moving_reallocate_is_rejected() {
+        let mut heap = Heap::new();
+        for _ in 0..16 {
+            let keep = heap
+                .allocate(32)
+                .unwrap_or_else(|_| panic!("allocation failed"));
+            let old = heap
+                .allocate(32)
+                .unwrap_or_else(|_| panic!("allocation failed"));
+            let new = heap
+                .reallocate(old, 1 << 20)
+                .unwrap_or_else(|_| panic!("grow failed"));
+            if new != old {
+                assert_eq!(heap.free(old), Err(Status::InvalidArgument));
+            }
+            assert_eq!(heap.free(new), Ok(()));
+            assert_eq!(heap.free(keep), Ok(()));
+        }
+    }
+
+    // Process owners laid out one after another put each heap at the same
+    // distance from its first block. Their keys must still differ.
+    #[test]
+    fn heaps_at_equal_distances_get_distinct_keys() {
+        extern crate std;
+        use std::{boxed::Box, vec::Vec};
+        struct Process {
+            _state: [u8; 48],
+            heap: Heap,
+        }
+        let mut processes = Vec::new();
+        let mut firsts = Vec::new();
+        for _ in 0..64 {
+            let mut process = Box::new(Process {
+                _state: [0; 48],
+                heap: Heap::new(),
+            });
+            let first = process.heap.allocate(24);
+            firsts.push(first.unwrap_or_else(|_| panic!("allocation failed")));
+            processes.push(process);
+        }
+        let mut keys: Vec<usize> = processes.iter().map(|process| process.heap.key).collect();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), processes.len());
+        for (process, first) in processes.iter_mut().zip(firsts) {
+            assert_eq!(process.heap.free(first), Ok(()));
+        }
     }
 }

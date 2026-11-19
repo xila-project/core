@@ -413,7 +413,9 @@ for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imafc-unkno
   cargo build --locked -p xila-stackful --target "$target" --release
 done
 """
-tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", targets = [
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "clippy",
+], targets = [
   "thumbv7em-none-eabihf",
   "thumbv8m.main-none-eabihf",
   "riscv32imac-unknown-none-elf",

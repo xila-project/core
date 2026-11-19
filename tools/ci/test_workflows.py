@@ -97,6 +97,7 @@ class WorkflowPolicy(unittest.TestCase):
             tasks["ci:host-tests"]["run"],
         )
         bare = tasks["ci:bare-metal"]
+        self.assertIn("clippy", bare["tools"]["rust"]["components"])
         for target in ("thumbv7em-none-eabihf", "riscv32imac-unknown-none-elf"):
             self.assertIn(target, bare["tools"]["rust"]["targets"])
         for features in ("--no-default-features", "--features network"):
