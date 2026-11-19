@@ -75,6 +75,11 @@ env = { MBX_CARGO_SHIM_MODE = "1" }
 "apt:libx11-dev" = { env = "host" }
 "apt:libxkbcommon-x11-dev" = { env = "host" }
 "apt:time" = { env = "benchmark" }
+"apt:lld" = { env = "sdk" }
+"apt:llvm" = { env = "sdk" }
+"apt:cmake" = { env = "sdk" }
+"apt:zstd" = { env = "sdk" }
+"apt:gcc-arm-none-eabi" = { env = "sdk-arm" }
 
 [tasks."ci:packages-linker"]
 description = "Install CI linker packages only when a build task needs them"
@@ -121,6 +126,14 @@ fi
 [tasks."ci:packages-host"]
 description = "Install CI native GUI and linker packages"
 run = "mise -E ci,host bootstrap packages apply --manager apt --update --yes"
+
+[tasks."ci:packages-sdk"]
+description = "Install the native SDK build packages (LLVM linker and tools, CMake, zstd)"
+run = "mise -E ci,sdk bootstrap packages apply --manager apt --update --yes"
+
+[tasks."ci:packages-sdk-arm"]
+description = "Install the native SDK build packages and the Arm GNU toolchain (libgcc for Cortex-M)"
+run = "mise -E ci,sdk,sdk-arm bootstrap packages apply --manager apt --update --yes"
 
 [tasks."ci:packages-benchmark"]
 description = "Install benchmark packages before timed commands"
@@ -290,7 +303,7 @@ run = "uv run --no-project --with pyyaml=={{ vars.pyyaml_version }} python -m un
 [tasks."ci:host-tests"]
 extends = "ci:rust-wasi"
 description = "Test the host workspace"
-depends = ["ci:packages-host"]
+depends = ["ci:packages-host", "ci:packages-sdk"]
 run = """
 set -eu
 cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888
@@ -501,6 +514,18 @@ cargo test --locked -p xila-task --lib --features test_harness,metrics,profiling
 
 [tasks."test:native-loader"]
 extends = "ci:rust-lint"
+
+[tasks."ci:sdk-build"]
+description = "Build the native SDK archive for XILA_SDK_TARGET"
+run = "mise run sdk:build"
+
+[tasks."ci:sdk-verify"]
+description = "Check the SDK hello example's ELF contract and report its size for XILA_SDK_TARGET"
+run = "mise run sdk:verify"
+
+[tasks."ci:sdk-test"]
+description = "Test the SDK's ELF checker"
+run = "mise run sdk:test"
 
 [tasks."ci:native-loader-targets"]
 description = "Check and build native ELF loading on Cortex-M4, RV32IMAC and RV32IMAFC"

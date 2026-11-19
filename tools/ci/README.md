@@ -6,6 +6,14 @@ status. On PRs, localization checks select affected catalogs and always expand
 to all locales for shared localization/build infrastructure. Main runs all seven
 locales.
 
+The `sdk` job (one run per SDK target) builds the native SDK archive with `mise run ci:sdk-build`,
+checks the example image's ELF contract with `ci:sdk-verify` and uploads
+`xila-sdk-<abi>-<target>.tar.zst` as a workflow artifact; publishing it as a release asset is
+not automated yet. Its packages (`lld`, `llvm`, `cmake`, `zstd`, and the Arm GNU toolchain
+for Cortex-M) come from mise bootstrap packages in the `sdk` and `sdk-arm` environments.
+`ci:host-tests` also builds the host SDK, because `test:native-loader` compiles the example
+with it and runs it through the loader.
+
 `extended.yml` runs coverage, ABI coverage/Miri, and profiling checks nightly or
 manually. Version-tag image publication calls this workflow on the tag commit and
 requires its exact SHA to pass. Main image publication waits for successful

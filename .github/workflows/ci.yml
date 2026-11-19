@@ -301,10 +301,49 @@ jobs:
           CARGO_TARGET_ROOT: ${{ github.workspace }}/target/localization
         run: mise run ci:localization
 
+  sdk:
+    name: SDK (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            packages: ci:packages-sdk
+          - target: thumbv7em-none-eabihf
+            packages: ci:packages-sdk-arm
+    env:
+      MISE_ENV: ci
+      XILA_SDK_TARGET: ${{ matrix.target }}
+    steps:
+      - name: "Setup | Checkout sources"
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: "Setup | Activate mise"
+        uses: jdx/mise-action@v5.2.8
+      - name: "Setup | SDK build packages"
+        env:
+          SDK_PACKAGES: ${{ matrix.packages }}
+        run: mise run "$SDK_PACKAGES"
+      - name: "Test | SDK ELF checker"
+        run: mise run ci:sdk-test
+      - name: "Build | SDK archive"
+        run: mise run ci:sdk-build
+      - name: "Test | SDK example image"
+        run: mise run ci:sdk-verify
+      - name: "Report | Upload SDK archive"
+        uses: actions/upload-artifact@v7
+        with:
+          name: xila-sdk-${{ matrix.target }}
+          path: target/sdk/xila-sdk-*.tar.zst
+          if-no-files-found: error
+
   required:
     name: required
     if: always()
-    needs: [quality, verification, host, xtensa, wasm, abi, localization]
+    needs: [quality, verification, host, xtensa, wasm, abi, localization, sdk]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -317,9 +356,10 @@ jobs:
           WASM_RESULT: ${{ needs.wasm.result }}
           ABI_RESULT: ${{ needs.abi.result }}
           LOCALIZATION_RESULT: ${{ needs.localization.result }}
+          SDK_RESULT: ${{ needs.sdk.result }}
         run: |
           set -euo pipefail
-          for result in "$QUALITY_RESULT" "$VERIFICATION_RESULT" "$HOST_RESULT" "$XTENSA_RESULT" "$WASM_RESULT" "$ABI_RESULT" "$LOCALIZATION_RESULT"; do
+          for result in "$QUALITY_RESULT" "$VERIFICATION_RESULT" "$HOST_RESULT" "$XTENSA_RESULT" "$WASM_RESULT" "$ABI_RESULT" "$LOCALIZATION_RESULT" "$SDK_RESULT"; do
             if [[ "$result" != success ]]; then
               echo "::error::A required validation job finished with result: $result"
               exit 1
