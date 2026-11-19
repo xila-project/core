@@ -37,7 +37,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: xila-project/applications
-          ref: 283e774f31564639785142a0e1550164faec6dbd
+          ref: 3f6c71017a543cfefc19bd54d2d8fdd59ebc8098
           path: .application-src
           persist-credentials: false
       - name: "Setup | Activate mise"
@@ -93,7 +93,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: xila-project/applications
-          ref: 283e774f31564639785142a0e1550164faec6dbd
+          ref: 3f6c71017a543cfefc19bd54d2d8fdd59ebc8098
           path: .application-src
           persist-credentials: false
       - name: "Setup | Rust toolchain and build cache"
@@ -144,7 +144,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: xila-project/applications
-          ref: 283e774f31564639785142a0e1550164faec6dbd
+          ref: 3f6c71017a543cfefc19bd54d2d8fdd59ebc8098
           path: .application-src
           persist-credentials: false
       - name: "Setup | Rust toolchain and build cache"
@@ -180,7 +180,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: xila-project/applications
-          ref: 283e774f31564639785142a0e1550164faec6dbd
+          ref: 3f6c71017a543cfefc19bd54d2d8fdd59ebc8098
           path: .application-src
           persist-credentials: false
       - name: "Setup | Rust toolchain and build cache"
@@ -213,7 +213,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: xila-project/applications
-          ref: 283e774f31564639785142a0e1550164faec6dbd
+          ref: 3f6c71017a543cfefc19bd54d2d8fdd59ebc8098
           path: .application-src
           persist-credentials: false
       - name: "Setup | Select changed locales"
