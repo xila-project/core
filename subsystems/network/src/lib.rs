@@ -28,8 +28,6 @@ pub mod tests {
 
     use super::*;
 
-    extern crate abi_definitions;
-
     testing_support::instantiate_global_allocator!();
 
     pub(crate) static TEST_TASK_MANAGER: synchronization::once_lock::OnceLock<

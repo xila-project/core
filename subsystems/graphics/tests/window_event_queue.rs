@@ -1,8 +1,6 @@
 //! A window's event queue is bounded: bursts neither allocate nor grow it.
 #![cfg(target_os = "linux")]
 
-extern crate abi_definitions;
-
 testing_support::instantiate_global_allocator!();
 
 use graphics::{EventKind, WINDOW_EVENT_QUEUE_CAPACITY, Window, lvgl};

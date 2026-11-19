@@ -2,8 +2,6 @@
 #![cfg(target_os = "linux")]
 #![allow(clippy::disallowed_types, reason = "host-only test")]
 
-extern crate abi_definitions;
-
 testing::instantiate_global_allocator!();
 
 use core::ffi::c_void;

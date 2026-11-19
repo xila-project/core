@@ -27,6 +27,14 @@ pub use startup::*;
 pub use status::*;
 pub use time::*;
 
+/// Compatibility level of the application ABI, as recorded in package
+/// manifests (`minimum_xila_abi`) and registry entries. Version 1 is the first
+/// level that package manifests declare; unversioned historical builds have no
+/// declared compatibility. Increment it for a breaking ABI change.
+///
+/// cbindgen:ignore
+pub const APPLICATION_ABI_VERSION: u32 = 1;
+
 pub const XILA_ABI_VERSION_MAJOR: u32 = 0;
 pub const XILA_ABI_VERSION_MINOR: u32 = 1;
 

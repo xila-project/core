@@ -1,0 +1,19 @@
+[package]
+name = "xila-c-support"
+version.workspace = true
+edition = "2024"
+rust-version.workspace = true
+description = "Internal libc-style memory and string helpers for the C libraries Xila links (LVGL, LittleFS); not a public ABI"
+
+[dependencies]
+task = { workspace = true }
+memory = { workspace = true }
+synchronization = { workspace = true }
+log = { workspace = true }
+
+[dev-dependencies]
+testing_support = { workspace = true }
+task = { workspace = true, features = ["test_harness"] }
+
+[lib]
+name = "c_support"

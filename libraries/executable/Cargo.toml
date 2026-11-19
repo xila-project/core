@@ -49,6 +49,5 @@ strict = true
 
 [target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dev-dependencies]
 libc = "0.2"
-abi_definitions.workspace = true
 little_fs.workspace = true
 portable-atomic.workspace = true

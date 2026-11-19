@@ -59,14 +59,7 @@ pub extern "C" fn strcpy(destination: *mut c_char, source: *const c_char) -> *mu
 /// using `lfs_free` to avoid memory leaks.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lfs_malloc(size: usize) -> *mut c_void {
-    unsafe {
-        abi_declarations::xila_memory_allocate(
-            null_mut(),
-            size,
-            1,
-            abi_declarations::XILA_MEMORY_CAPABILITIES_NONE,
-        )
-    }
+    unsafe { c_support::memory_allocate(null_mut(), size, 1, c_support::MEMORY_CAPABILITIES_NONE) }
 }
 
 /// Frees memory allocated with lfs_malloc
@@ -78,6 +71,6 @@ pub unsafe extern "C" fn lfs_malloc(size: usize) -> *mut c_void {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lfs_free(p: *mut c_void) {
     unsafe {
-        abi_declarations::xila_memory_deallocate(p);
+        c_support::memory_deallocate(p);
     }
 }

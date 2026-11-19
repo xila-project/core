@@ -23,7 +23,6 @@ embedded-i18n = { workspace = true }
 
 [dev-dependencies]
 testing_support = { workspace = true }
-abi_definitions = { workspace = true }
 little_fs = { workspace = true }
 time = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }

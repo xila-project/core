@@ -1,8 +1,6 @@
 //! A self-drawing logo must be freed with its LVGL window.
 #![cfg(target_os = "linux")]
 
-extern crate abi_definitions;
-
 testing_support::instantiate_global_allocator!();
 
 use graphics::{Color, Logo, LogoArmPose, LogoPose, Window, lvgl};

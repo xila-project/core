@@ -20,7 +20,7 @@ run = "npm ci"
 
 [tasks."check:host"]
 description = "Check the Linux host target"
-run = "cargo check --target x86_64-unknown-linux-gnu --features graphics,abi_definitions,graphics_rendering_xrgb8888"
+run = "cargo check --target x86_64-unknown-linux-gnu --features graphics,graphics_rendering_xrgb8888"
 
 [tasks."check:guest"]
 description = "Check the WASM guest target"
@@ -28,7 +28,7 @@ run = "cargo check --manifest-path \"${XILA_APPLICATIONS_ROOT:-.application-src}
 
 [tasks."localization:host-check"]
 description = "Strictly check host localization"
-run = "cargo check --workspace --all-targets --target x86_64-unknown-linux-gnu --features xila/graphics,xila/abi_definitions,xila/graphics_rendering_xrgb8888"
+run = "cargo check --workspace --all-targets --target x86_64-unknown-linux-gnu --features xila/graphics,xila/graphics_rendering_xrgb8888"
 
 [tasks."localization:guest-check"]
 description = "Strictly check Wasm guest API localization"
@@ -44,7 +44,7 @@ depends = ["localization:host-check", "localization:guest-check"]
 
 [tasks."clippy:host"]
 description = "Run Clippy for the Linux host target"
-run = "cargo clippy --workspace --target x86_64-unknown-linux-gnu --features xila/graphics,xila/abi_definitions,xila/graphics_rendering_xrgb8888 --all-targets -- -D warnings"
+run = "cargo clippy --workspace --target x86_64-unknown-linux-gnu --features xila/graphics,xila/graphics_rendering_xrgb8888 --all-targets -- -D warnings"
 
 [tasks."clippy:guest"]
 description = "Run Clippy for the WASM guest target"
@@ -56,7 +56,7 @@ depends = ["clippy:host", "clippy:guest"]
 
 [tasks."docs:host"]
 description = "Build host documentation"
-run = "cargo doc --workspace --features xila/graphics,xila/abi_definitions,xila/graphics_rendering_xrgb8888,xila/audio,xila/neural_network,xila/bootsplash,xila-testing/graphics --target x86_64-unknown-linux-gnu"
+run = "cargo doc --workspace --features xila/graphics,xila/graphics_rendering_xrgb8888,xila/audio,xila/neural_network,xila/bootsplash,xila-testing/graphics --target x86_64-unknown-linux-gnu"
 
 [tasks."docs:guest"]
 description = "Build guest documentation"

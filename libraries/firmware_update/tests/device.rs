@@ -5,7 +5,6 @@ use firmware_update::{
 };
 use users::{GroupIdentifier, UserIdentifier};
 use virtual_file_system::{Error, File, ItemStatic, VirtualFileSystem};
-extern crate abi_definitions;
 testing::instantiate_global_allocator!();
 
 #[derive(Default)]

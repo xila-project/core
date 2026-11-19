@@ -20,7 +20,6 @@ native = [
   "dep:users",
   "dep:time",
   "dep:little_fs",
-  "dep:abi_definitions",
   "dep:critical-section",
 ]
 
@@ -35,7 +34,6 @@ task = { workspace = true, optional = true }
 users = { workspace = true, optional = true }
 time = { workspace = true, optional = true }
 little_fs = { workspace = true, optional = true }
-abi_definitions = { workspace = true, optional = true }
 critical-section = { workspace = true, optional = true, features = ["std"] }
 
 [dev-dependencies]

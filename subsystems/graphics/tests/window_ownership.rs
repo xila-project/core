@@ -3,8 +3,6 @@
 //! safe code deleted them (xila-project/core#661).
 #![cfg(target_os = "linux")]
 
-extern crate abi_definitions;
-
 testing_support::instantiate_global_allocator!();
 
 use core::task::{Context, Poll};

@@ -26,7 +26,6 @@ drivers_core = { workspace = true }
 executable = { workspace = true }
 little_fs = { workspace = true }
 memory_file_system = { workspace = true }
-abi_definitions = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }
 
 [[test]]

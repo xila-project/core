@@ -9,8 +9,7 @@ use core::{
 ///
 /// # Safety
 /// This function is unsafe because it dereferences raw pointers.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn xila_memory_copy(
+pub unsafe fn memory_copy(
     destination: *mut c_void,
     source: *const c_void,
     size: usize,
@@ -30,12 +29,7 @@ pub unsafe extern "C" fn xila_memory_copy(
 ///
 /// # Safety
 /// This function is unsafe because it dereferences raw pointers.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn xila_memory_compare(
-    ptr1: *const c_void,
-    ptr2: *const c_void,
-    num: usize,
-) -> c_int {
+pub unsafe fn memory_compare(ptr1: *const c_void, ptr2: *const c_void, num: usize) -> c_int {
     if ptr1.is_null() || ptr2.is_null() || num == 0 {
         return 0;
     }
@@ -56,8 +50,7 @@ pub unsafe extern "C" fn xila_memory_compare(
 ///
 /// # Safety
 /// This function is unsafe because it dereferences raw pointers.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn xila_memory_move(
+pub unsafe fn memory_move(
     destination: *mut c_void,
     source: *const c_void,
     size: usize,
@@ -77,12 +70,7 @@ pub unsafe extern "C" fn xila_memory_move(
 ///
 /// # Safety
 /// This function is unsafe because it dereferences raw pointers.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn xila_memory_set(
-    ptr: *mut c_void,
-    value: c_int,
-    num: usize,
-) -> *mut c_void {
+pub unsafe fn memory_set(ptr: *mut c_void, value: c_int, num: usize) -> *mut c_void {
     if ptr.is_null() || num == 0 {
         return ptr;
     }

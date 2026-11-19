@@ -3,7 +3,6 @@
 //! I2C device nodes backed by `MockI2cController`, driven through the VFS `File` API
 //! and the I2C control commands.
 
-extern crate abi_definitions;
 extern crate alloc;
 
 #[path = "support/allocation.rs"]

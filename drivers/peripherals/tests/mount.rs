@@ -3,7 +3,6 @@
 //! Proof: a test-only loopback byte device is mounted as `/devices/uart/test0`
 //! and driven only through the VFS `File` API.
 
-extern crate abi_definitions;
 extern crate alloc;
 
 #[path = "support/allocation.rs"]

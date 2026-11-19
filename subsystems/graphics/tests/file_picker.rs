@@ -1,5 +1,4 @@
 #![cfg(target_os = "linux")]
-extern crate abi_definitions;
 extern crate alloc;
 testing_support::instantiate_global_allocator!();
 use graphics::{FilePickerMode, FilePickerStatus};

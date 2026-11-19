@@ -89,7 +89,7 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertNotIn("--package xila-drivers-headless", lint)
         self.assertNotIn("drivers_native/audio", lint)
         self.assertIn("cargo test --locked --workspace", tasks["ci:host-tests"]["run"])
-        # Guards #711: environment crates must not link abi_definitions twice.
+        # Guards #711: environment crates must not link the C glue symbols twice.
         self.assertIn(
             "--features xila/graphics_rendering_xrgb8888,xila-testing/graphics --no-run",
             tasks["ci:host-tests"]["run"],

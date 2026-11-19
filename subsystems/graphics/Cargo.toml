@@ -22,7 +22,7 @@ time = { workspace = true }
 shared = { workspace = true }
 synchronization = { workspace = true }
 log = { workspace = true }
-abi_declarations = { workspace = true }
+c_support = { workspace = true }
 memory = { workspace = true }
 embedded-i18n = { workspace = true }
 portable-atomic = { workspace = true }
@@ -37,7 +37,6 @@ task = { workspace = true, features = ["test_harness"] }
 drivers_core = { workspace = true }
 users = { workspace = true }
 
-abi_definitions = { workspace = true }
 
 [build-dependencies]
 toml = "1"

@@ -1,7 +1,7 @@
 //! Host test helpers for Core crates that the full test environment depends on.
 //!
-//! This crate must not depend on `abi_definitions` or on any other crate that
-//! exports `#[no_mangle]` symbols. Crates in the `environment` dependency tree
+//! This crate must not depend on `little_fs`, `graphics` or on any other crate
+//! that exports `#[no_mangle]` symbols. Crates in the `environment` dependency tree
 //! use it instead of `xila-testing` in their own tests: otherwise their unit-test
 //! binary links a second copy of those symbols and fails. The workspace link
 //! check in `ci:host-tests` (with `xila-testing/graphics`) enforces this.

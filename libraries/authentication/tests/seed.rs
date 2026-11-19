@@ -1,5 +1,4 @@
 #![cfg(target_os = "linux")]
-use abi_definitions as _;
 use authentication::{Context, initialize_seeded};
 use users::{GroupIdentifier, UserIdentifier};
 use virtual_file_system::{File, ItemStatic};

@@ -8,7 +8,6 @@ description = "Minimal std test support for Xila: test devices, allocator and en
 [dependencies]
 testing_support = { workspace = true }
 # `environment`: initialize() and load_file().
-abi_definitions = { workspace = true, optional = true }
 authentication = { workspace = true, optional = true }
 drivers_core = { workspace = true, optional = true }
 executable = { workspace = true, optional = true }
@@ -28,9 +27,8 @@ shared = { workspace = true, optional = true }
 default = []
 # Complete in-memory environment. Crates in its dependency tree must use
 # xila-testing-support, not xila-testing, in their own tests: linking
-# abi_definitions' #[no_mangle] symbols twice fails. ci:host-tests checks this.
+# the #[no_mangle] symbols of little_fs and graphics twice fails. ci:host-tests checks this.
 environment = [
-  "dep:abi_definitions",
   "dep:authentication",
   "dep:drivers_core",
   "dep:executable",

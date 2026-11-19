@@ -96,32 +96,13 @@ dependencies = [
  "clang-sys",
  "itertools",
  "log",
- "prettyplease 0.2.37",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "regex",
  "rustc-hash 2.1.3",
  "shlex 1.3.0",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "bindgen"
-version = "0.73.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "787ef8ef523575546b106a58213d6e6b06198a05c2f757258c68a74273670cfa"
-dependencies = [
- "bitflags 2.13.2",
- "cexpr",
- "clang-sys",
- "log",
- "prettyplease 0.3.0",
- "proc-macro2",
- "quote",
- "regex",
- "rustc-hash 2.1.3",
- "shlex 2.0.1",
- "syn 3.0.9",
 ]
 
 [[package]]
@@ -906,7 +887,7 @@ name = "lvgl-rust-gen"
 version = "0.1.1"
 source = "git+https://github.com/AlixANNERAUD/lvgl_rust.git?rev=e86d6ae02f1d8aefebd92755119c6ba90c5dacd9#e86d6ae02f1d8aefebd92755119c6ba90c5dacd9"
 dependencies = [
- "prettyplease 0.2.37",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "serde",
@@ -1172,16 +1153,6 @@ checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
 dependencies = [
  "proc-macro2",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "prettyplease"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bfe0f4c752e450fc2faf62654f1c134747922825d5b04ca717b8874f41a40c0"
-dependencies = [
- "proc-macro2",
- "syn 3.0.9",
 ]
 
 [[package]]
@@ -1838,8 +1809,6 @@ name = "xila"
 version = "0.1.0"
 dependencies = [
  "embedded-i18n",
- "xila-abi-declarations",
- "xila-abi-definitions",
  "xila-audio",
  "xila-authentication",
  "xila-bootsplash",
@@ -1889,40 +1858,12 @@ dependencies = [
  "cc",
  "portable-atomic",
  "xila-abi-application",
- "xila-abi-definitions",
  "xila-file-system",
  "xila-little-fs",
  "xila-network",
  "xila-stackful",
  "xila-task",
  "xila-testing",
- "xila-time",
- "xila-users",
- "xila-virtual-file-system",
-]
-
-[[package]]
-name = "xila-abi-declarations"
-version = "0.1.0"
-dependencies = [
- "bindgen 0.73.2",
- "cbindgen",
-]
-
-[[package]]
-name = "xila-abi-definitions"
-version = "0.1.0"
-dependencies = [
- "libc",
- "xila-drivers-core",
- "xila-file-system",
- "xila-little-fs",
- "xila-log",
- "xila-memory",
- "xila-shared",
- "xila-synchronization",
- "xila-task",
- "xila-testing-support",
  "xila-time",
  "xila-users",
  "xila-virtual-file-system",
@@ -1947,7 +1888,6 @@ version = "0.1.0"
 dependencies = [
  "embedded-i18n",
  "miniserde",
- "xila-abi-definitions",
  "xila-device",
  "xila-file-system",
  "xila-little-fs",
@@ -1962,13 +1902,23 @@ dependencies = [
 name = "xila-bootsplash"
 version = "0.1.0"
 dependencies = [
- "xila-abi-definitions",
  "xila-file-system",
  "xila-graphics",
  "xila-shared",
  "xila-task",
  "xila-testing",
  "xila-time",
+]
+
+[[package]]
+name = "xila-c-support"
+version = "0.1.0"
+dependencies = [
+ "xila-log",
+ "xila-memory",
+ "xila-synchronization",
+ "xila-task",
+ "xila-testing-support",
 ]
 
 [[package]]
@@ -2016,7 +1966,6 @@ dependencies = [
  "embedded-hal 1.0.0",
  "embedded-io",
  "portable-atomic",
- "xila-abi-definitions",
  "xila-device",
  "xila-file-system",
  "xila-little-fs",
@@ -2039,7 +1988,6 @@ dependencies = [
  "libc",
  "portable-atomic",
  "xila-abi-application",
- "xila-abi-definitions",
  "xila-device",
  "xila-drivers-core",
  "xila-file-system",
@@ -2079,7 +2027,6 @@ name = "xila-firmware-update"
 version = "0.1.0"
 dependencies = [
  "critical-section",
- "xila-abi-definitions",
  "xila-device",
  "xila-file-system",
  "xila-little-fs",
@@ -2104,8 +2051,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "toml 1.2.1+spec-1.1.0",
- "xila-abi-declarations",
- "xila-abi-definitions",
+ "xila-c-support",
  "xila-device",
  "xila-drivers-core",
  "xila-file-system",
@@ -2137,7 +2083,6 @@ name = "xila-lifecycle"
 version = "0.1.0"
 dependencies = [
  "portable-atomic",
- "xila-abi-definitions",
  "xila-device",
  "xila-drivers-peripherals",
  "xila-file-system",
@@ -2157,8 +2102,7 @@ name = "xila-little-fs"
 version = "0.1.0"
 dependencies = [
  "littlefs2-sys",
- "xila-abi-declarations",
- "xila-abi-definitions",
+ "xila-c-support",
  "xila-drivers-core",
  "xila-file-system",
  "xila-log",
@@ -2217,7 +2161,6 @@ dependencies = [
  "embedded-io-async",
  "heapless",
  "smoltcp",
- "xila-abi-definitions",
  "xila-device",
  "xila-file-system",
  "xila-little-fs",
@@ -2312,7 +2255,6 @@ dependencies = [
 name = "xila-testing"
 version = "0.1.0"
 dependencies = [
- "xila-abi-definitions",
  "xila-authentication",
  "xila-drivers-core",
  "xila-executable",
@@ -2376,7 +2318,6 @@ dependencies = [
  "embedded-i18n",
  "embedded-io-async",
  "portable-atomic",
- "xila-abi-definitions",
  "xila-drivers-core",
  "xila-executable",
  "xila-file-system",

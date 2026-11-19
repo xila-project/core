@@ -1,6 +1,5 @@
 #[cfg(test)]
 mod tests {
-    extern crate abi_definitions;
     use abi_application::*;
     use core::ptr;
     testing::instantiate_global_allocator!();

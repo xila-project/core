@@ -1,8 +1,6 @@
 //! Render the logo into a small headless LVGL snapshot.
 #![cfg(target_os = "linux")]
 
-extern crate abi_definitions;
-
 testing_support::instantiate_global_allocator!();
 
 use graphics::{Color, Logo, LogoStyle, lvgl};
