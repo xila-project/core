@@ -36,6 +36,7 @@ Shared tasks are defined in `mise.toml`, developer-only tasks and tools in `mise
 
 # Non-Negotiables
 
+- **Rust version.** Pin Rust 1.97.0 for development and CI and declare 1.97 as the MSRV (`rust-version`), following the esp-rs Xtensa toolchain base. Use only language features and `std` or `core` APIs available in Rust 1.97. Raise the version only when esp-rs publishes a new base, and update every Xila repository together. Rust native executables that use `build-std` use a separate nightly toolchain (xila-project/core#687).
 - Keep `docs/superpowers/` planning and design documents local-only. Never stage or commit them; preserve local copies when removing them from Git tracking.
 - Make the smallest focused change that follows the existing crate structure and conventions.
 - Validate changes with the narrowest relevant checks, using CI's host/guest checks as the source of truth for those targets. Host and guest checks do not establish hardware-target correctness; report what was actually checked and any target/toolchain limitations.

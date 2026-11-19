@@ -2,7 +2,7 @@
 name = "xila-firmware-update"
 version.workspace = true
 edition = "2024"
-rust-version = "1.90"
+rust-version = "1.97"
 license = "Apache-2.0"
 description = "Bounded firmware update transactions and VFS device adapter"
 

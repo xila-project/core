@@ -15,8 +15,5 @@ the corresponding pixel format. The baseline still includes networking through
 `executable`; disabling graphics does not make the full façade a minimal MCU
 runtime. Use the individual libraries for smaller configurations.
 
-The façade retains its declared Rust 1.90 floor, but the full workspace has
-not established that MSRV: Cargo 1.90 currently rejects existing inherited Wasm
-`default-features` overrides before compilation. CI's newer toolchain does not
-establish Rust 1.90 compatibility. Host checks also do not establish support on
-any particular MCU.
+The minimum supported Rust version is 1.97. Development and CI use Rust
+1.97.0. Host checks do not establish support on any particular MCU.

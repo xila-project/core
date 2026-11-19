@@ -43,11 +43,11 @@ medians. OS scheduling, CPU frequency and load affect results; rerun on the same
 machine for comparisons. It measures hashing without I/O/copying and verifies
 with an already validated key. Key validation is timed separately.
 
-To check the library's Rust 1.90 minimum independently of unrelated workspace
+To check the verifier with Rust 1.97 independently of unrelated workspace
 manifests, run:
 
 ```sh
-cargo +1.90.0 check --locked --release --manifest-path tools/verification_probe/Cargo.toml --features sha256,ed25519
+cargo +1.97.0 check --locked --release --manifest-path tools/verification_probe/Cargo.toml --features sha256,ed25519
 ```
 
-This is a compiler check, not a link proof or a test suite on Rust 1.90.
+This is a compiler check, not a link proof or a test suite on Rust 1.97.
