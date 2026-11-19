@@ -117,7 +117,20 @@ impl<'a> File<'a> {
         path: impl AsRef<Path>,
         buffer: &mut [u8],
     ) -> Result<()> {
-        Self::read_slice_from_path_inner(virtual_file_system, task, path.as_ref(), buffer).await
+        Self::read_slice_from_path_inner(virtual_file_system, task, path.as_ref(), buffer, false)
+            .await
+    }
+
+    /// Fill the entire slice from a mounted character device. A missing device
+    /// or an opened handle of another kind returns `UnavailableDriver`.
+    pub async fn read_slice_from_character_device(
+        virtual_file_system: &VirtualFileSystem,
+        task: TaskIdentifier,
+        path: impl AsRef<Path>,
+        buffer: &mut [u8],
+    ) -> Result<()> {
+        Self::read_slice_from_path_inner(virtual_file_system, task, path.as_ref(), buffer, true)
+            .await
     }
 
     async fn read_slice_from_path_inner(
@@ -125,16 +138,28 @@ impl<'a> File<'a> {
         task: TaskIdentifier,
         path: &Path,
         buffer: &mut [u8],
+        require_character_device: bool,
     ) -> Result<()> {
-        let mut file = File::open(
+        let mut file = match File::open(
             virtual_file_system,
             task,
             path,
             Flags::new(AccessFlags::Read, None, None),
         )
-        .await?;
+        .await
+        {
+            Err(Error::FileSystem(file_system::Error::NotFound) | Error::InvalidInode)
+                if require_character_device =>
+            {
+                return Err(Error::UnavailableDriver);
+            }
+            opened => opened?,
+        };
 
         let result = async {
+            if require_character_device && !matches!(file.0.item, ItemStatic::CharacterDevice(_)) {
+                return Err(Error::UnavailableDriver);
+            }
             let mut offset = 0;
             while offset < buffer.len() {
                 let count = file.read(&mut buffer[offset..]).await?;

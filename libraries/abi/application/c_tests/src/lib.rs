@@ -68,9 +68,34 @@ mod tests {
     }
     impl file_system::MountOperations for ScriptedEntropy {}
     impl file_system::DirectCharacterDevice for ScriptedEntropy {}
-    fn install_entropy() {
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| initialize_random(&ENTROPY));
+    async fn install_entropy() {
+        use virtual_file_system::{ItemStatic, VirtualFileSystem};
+
+        // The task test harness serializes these tests and reuses its manager.
+        static VFS: std::sync::OnceLock<&'static VirtualFileSystem> = std::sync::OnceLock::new();
+        if VFS.get().is_none() {
+            let tasks = task::test_manager();
+            let parent = tasks.get_current_task_identifier().await;
+            let users = Box::leak(Box::new(users::Manager::new()));
+            let time = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+            let device = file_system::MemoryDevice::<512>::new_static(128 * 1024);
+            let fs =
+                little_fs::FileSystem::new_format(device, little_fs::Options::new(128)).unwrap();
+            let vfs = Box::leak(Box::new(VirtualFileSystem::new(tasks, users, time, fs)));
+            vfs.create_directory(parent, &"/devices").await.unwrap();
+            vfs.create_directory(parent, &"/devices/random")
+                .await
+                .unwrap();
+            vfs.mount_static(
+                parent,
+                "/devices/random/source",
+                ItemStatic::CharacterDevice(&ENTROPY),
+            )
+            .await
+            .unwrap();
+            assert!(VFS.set(vfs).is_ok());
+        }
+        initialize_random(VFS.get().unwrap()).await;
     }
 
     #[test]
@@ -175,12 +200,12 @@ mod tests {
             );
         }
 
+        install_entropy().await;
         unsafe {
             let mut mono = 0;
             let mut real = 17;
             assert_eq!(xila_time_monotonic(&mut mono), Status::Ok);
             time.invalidate();
-            install_entropy();
             assert_eq!(
                 run_main(
                     startup_clock_random_main,
@@ -553,7 +578,7 @@ mod tests {
     async fn stackful_sleep_and_random_yield_to_executor_peer() {
         use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
 
-        install_entropy();
+        install_entropy().await;
         let tasks = task::test_manager();
         let task = tasks.get_current_task_identifier().await;
         let spawner = tasks.get_spawner(task).await.unwrap();

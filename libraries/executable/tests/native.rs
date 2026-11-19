@@ -10,8 +10,9 @@ use std::{process::Command, sync::Mutex};
 
 use executable::{Error, ExecutableContext, NativeFormat, Standard, execute};
 use file_system::{
-    AccessFlags, BaseOperations, CharacterDevice, Context as DeviceContext, CreateFlags, Flags,
-    MountOperations, Permissions, Position, Size, Special,
+    AccessFlags, BaseOperations, CharacterDevice, Context as DeviceContext, CreateFlags,
+    DirectBaseOperations, DirectCharacterDevice, Flags, MountOperations, Permissions, Position,
+    Size, Special,
 };
 use native_loader::{Error as LoaderError, ExecutableMemory, LoadedImage, Region};
 use virtual_file_system::File;
@@ -140,6 +141,30 @@ impl BaseOperations for PendingDevice {
 impl MountOperations for PendingDevice {}
 impl CharacterDevice for PendingDevice {}
 
+struct FixtureEntropy;
+impl DirectBaseOperations for FixtureEntropy {
+    fn read(
+        &self,
+        _: &mut Context<'_>,
+        buffer: &mut [u8],
+        _: Size,
+    ) -> Poll<file_system::Result<usize>> {
+        let count = buffer.len().min(3);
+        buffer[..count].fill(0xa5);
+        Poll::Ready(Ok(count))
+    }
+
+    fn write(&self, _: &mut Context<'_>, _: &[u8], _: Size) -> Poll<file_system::Result<usize>> {
+        Poll::Ready(Err(file_system::Error::UnsupportedOperation))
+    }
+}
+impl MountOperations for FixtureEntropy {
+    fn unmount(&self) -> file_system::Result<()> {
+        Ok(())
+    }
+}
+impl DirectCharacterDevice for FixtureEntropy {}
+
 fn build_fixture(name: &str, flags: &str) -> Vec<u8> {
     let output = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
     let recipe = concat!(
@@ -189,7 +214,7 @@ fn rejects_c_images_with_constructors_before_allocating() {
 }
 
 #[task::test]
-async fn executes_c_elf_from_vfs_with_suspending_abi_read() {
+async fn executes_c_elf_from_vfs_with_host_services() {
     let bytes = build_fixture("xila-start.elf", "");
 
     let time = Box::leak(Box::new(
@@ -244,15 +269,39 @@ async fn executes_c_elf_from_vfs_with_suspending_abi_read() {
         .await
         .unwrap();
 
-    let reader = execute(context, "/program", vec![], make_standard().await, None)
+    let without_entropy = execute(context, "/program", vec![], make_standard().await, None)
         .await
         .unwrap();
+    assert_eq!(
+        without_entropy.join().await,
+        73,
+        "ELF without an entropy device"
+    );
+
+    vfs.create_directory(parent, &"/devices").await.unwrap();
+    vfs.create_directory(parent, &"/devices/random")
+        .await
+        .unwrap();
+    vfs.mount_character_device(parent, "/devices/random/source", FixtureEntropy)
+        .await
+        .unwrap();
+    let reader = execute(
+        context,
+        "/program",
+        vec!["entropy".into()],
+        make_standard().await,
+        None,
+    )
+    .await
+    .unwrap();
     assert_eq!(MAPPINGS.load(Ordering::Relaxed), 1);
 
     // Wait for the actual ABI read to register a waker. This task is on the
     // same executor as the C program and can run only after it yields.
     let waker = loop {
-        assert!(!reader.is_finished(), "the ELF returned before suspending");
+        if reader.is_finished() {
+            panic!("the ELF returned {} before suspending", reader.join().await);
+        }
         if let Some(waker) = read_state.waker.lock().unwrap().take() {
             break waker;
         }
@@ -263,6 +312,23 @@ async fn executes_c_elf_from_vfs_with_suspending_abi_read() {
 
     assert_eq!(reader.join().await, 73);
     assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
+
+    // Replacing the source path with a file must never supply entropy.
+    vfs.unmount("/devices/random/source", false).await.unwrap();
+    let mut replacement = File::open(vfs, parent, "/devices/random/source", create)
+        .await
+        .unwrap();
+    assert_eq!(replacement.write(&[0xa5; 8]).await.unwrap(), 8);
+    replacement.close(vfs).await.unwrap();
+    let with_replacement = execute(context, "/program", vec![], make_standard().await, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        with_replacement.join().await,
+        73,
+        "ELF with a regular file in place of entropy"
+    );
+
     output.set_position(&Position::Start(0)).await.unwrap();
     let mut received = [0; 2];
     assert_eq!(output.read(&mut received).await.unwrap(), 2);

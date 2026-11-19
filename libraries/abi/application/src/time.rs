@@ -2,7 +2,8 @@ use crate::{Status, is_in_coroutine};
 use synchronization::once_lock::OnceLock;
 
 static TIME: OnceLock<&'static time::Manager<'static>> = OnceLock::new();
-/// Install the runtime's clock once. Earlier reads return Unavailable.
+/// Install the runtime's clock once. The native executable handler calls this
+/// before launch. Earlier reads return Unavailable.
 pub fn initialize(time_manager: &'static time::Manager<'static>) {
     TIME.get_or_init(|| time_manager);
 }
