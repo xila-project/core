@@ -154,8 +154,8 @@ async fn execute_inner(
 
     let virtual_file_system = &context.virtual_file_system;
 
-    let mut file = File::open(virtual_file_system, task, path, AccessFlags::Read.into()).await?;
-    let statistics = file.get_statistics().await?;
+    // Query by path: mounted executables do not implement attribute operations on their handles.
+    let statistics = virtual_file_system.get_statistics(&path).await?;
 
     // - Check the executable bit
     if !is_execute_allowed(
@@ -167,6 +167,8 @@ async fn execute_inner(
     {
         return Err(Error::PermissionDenied);
     }
+
+    let mut file = File::open(virtual_file_system, task, path, AccessFlags::Read.into()).await?;
 
     let file_name = path
         .get_file_name()
