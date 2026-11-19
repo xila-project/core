@@ -13,10 +13,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-typedef unsigned int uint32_t;
-typedef int int32_t;
-typedef unsigned char uint8_t;
-
 //#ifndef LFS_NO_MALLOC
 //#include <stdlib.h>
 //#endif

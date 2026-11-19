@@ -129,6 +129,26 @@ jobs:
           path: target/font-pipeline-evidence/
           if-no-files-found: warn
 
+  xtensa:
+    name: Xtensa
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      MISE_ENV: ci
+    steps:
+      - name: "Setup | Checkout sources"
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: "Setup | Activate mise"
+        uses: jdx/mise-action@v5.2.8
+      - name: "Setup | Xtensa Rust, GCC and libclang"
+        run: mise run ci:toolchain-xtensa
+      - name: "Setup | Locked npm dependencies"
+        run: mise run deps:npm
+      - name: "Build | Bare-metal ESP32-S3 LittleFS and graphics"
+        run: mise run ci:xtensa
+
   wasm:
     name: WASM
     runs-on: ubuntu-latest
@@ -284,7 +304,7 @@ jobs:
   required:
     name: required
     if: always()
-    needs: [quality, verification, host, wasm, abi, localization]
+    needs: [quality, verification, host, xtensa, wasm, abi, localization]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -293,12 +313,13 @@ jobs:
           QUALITY_RESULT: ${{ needs.quality.result }}
           VERIFICATION_RESULT: ${{ needs.verification.result }}
           HOST_RESULT: ${{ needs.host.result }}
+          XTENSA_RESULT: ${{ needs.xtensa.result }}
           WASM_RESULT: ${{ needs.wasm.result }}
           ABI_RESULT: ${{ needs.abi.result }}
           LOCALIZATION_RESULT: ${{ needs.localization.result }}
         run: |
           set -euo pipefail
-          for result in "$QUALITY_RESULT" "$VERIFICATION_RESULT" "$HOST_RESULT" "$WASM_RESULT" "$ABI_RESULT" "$LOCALIZATION_RESULT"; do
+          for result in "$QUALITY_RESULT" "$VERIFICATION_RESULT" "$HOST_RESULT" "$XTENSA_RESULT" "$WASM_RESULT" "$ABI_RESULT" "$LOCALIZATION_RESULT"; do
             if [[ "$result" != success ]]; then
               echo "::error::A required validation job finished with result: $result"
               exit 1
