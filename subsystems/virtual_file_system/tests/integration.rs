@@ -1968,6 +1968,38 @@ async fn synchronous_handles_support_offset_io_timestamps_and_status_flags() {
 
 #[cfg(target_os = "linux")]
 #[test]
+async fn asynchronous_writes_honour_append_set_after_opening() {
+    let (task, vfs) = initialize().await;
+    let mut file = vfs
+        .open(
+            &"/append",
+            Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None),
+            task,
+        )
+        .await
+        .unwrap();
+    assert_eq!(file.write(b"0123456789").await.unwrap(), 10);
+
+    // Append is set on the open handle, then the asynchronous path writes.
+    let mut synchronous = file.into_synchronous_file();
+    synchronous.set_state(StateFlags::Append).unwrap();
+    let mut file = File::from_synchronous_file(synchronous);
+    file.set_position(&Position::Start(0)).await.unwrap();
+    assert_eq!(file.write(b"Z").await.unwrap(), 1);
+    assert_eq!(file.get_statistics().await.unwrap().size, 11);
+
+    // Without Append, the write lands at the cursor and the size is unchanged.
+    let mut synchronous = file.into_synchronous_file();
+    synchronous.set_state(StateFlags::empty()).unwrap();
+    let mut file = File::from_synchronous_file(synchronous);
+    file.set_position(&Position::Start(0)).await.unwrap();
+    assert_eq!(file.write(b"Y").await.unwrap(), 1);
+    assert_eq!(file.get_statistics().await.unwrap().size, 11);
+    file.close(vfs).await.unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 async fn little_fs_data_survives_storage_shutdown_and_remount() {
     let device = flaky_device();
     {

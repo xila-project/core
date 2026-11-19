@@ -90,6 +90,12 @@ impl Coroutine {
     /// Entry must never unwind. On bare metal, all coroutines must run on a single core
     /// and must never be entered or suspended from an interrupt. Do not migrate a live
     /// coroutine or its handles to another OS thread, including via foreign code.
+    ///
+    /// On bare metal the current coroutine is one global, so while any coroutine is
+    /// live, no other core may call an API that reaches [`suspend_on`]: the native
+    /// application ABI and the synchronous VFS files and directories. That core would
+    /// see the live coroutine as its own and switch onto its stack. A per-core current
+    /// pointer (xila-project/core#682) lifts this restriction.
     pub unsafe fn new<F: FnOnce() -> i32 + 'static>(mut stack: Stack, entry: F) -> Self {
         unsafe fn run<F: FnOnce() -> i32>(p: *mut u8) -> i32 {
             unsafe { p.cast::<F>().read()() }
