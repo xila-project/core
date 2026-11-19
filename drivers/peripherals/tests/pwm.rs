@@ -3,7 +3,6 @@
 //! PWM device nodes: a `PwmMock` controller is mounted as `/devices/pwm/pwm0`
 //! and driven through the VFS `File` API, plain writes and control commands.
 
-extern crate abi_definitions;
 extern crate alloc;
 
 #[path = "support/allocation.rs"]

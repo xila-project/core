@@ -27,7 +27,6 @@ time = { workspace = true }
 users = { workspace = true }
 log = { workspace = true }
 critical-section = { workspace = true, features = ["std"] }
-abi_definitions = { workspace = true }
 
 [features]
 default = ["vfs"]

@@ -2,8 +2,6 @@
 #![cfg(target_os = "linux")]
 #![allow(clippy::disallowed_types, reason = "host-only test uses std atomics")]
 
-extern crate abi_definitions;
-
 testing_support::instantiate_global_allocator!();
 
 use core::{

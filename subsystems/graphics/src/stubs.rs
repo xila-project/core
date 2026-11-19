@@ -1,14 +1,13 @@
 use core::ffi::{c_char, c_int, c_void};
 
 #[cfg(lvgl_system_heap)]
-use abi_declarations::{xila_memory_allocate_core, xila_memory_deallocate, xila_memory_reallocate};
-use abi_declarations::{
-    xila_memory_compare, xila_memory_copy, xila_memory_move, xila_memory_set, xila_string_compare,
-    xila_string_compare_bounded, xila_string_concatenate, xila_string_copy,
-    xila_string_copy_bounded, xila_string_get_length,
+use c_support::{memory_allocate_core, memory_deallocate, memory_reallocate};
+use c_support::{
+    memory_compare, memory_copy, memory_move, memory_set, string_compare, string_compare_bounded,
+    string_concatenate, string_copy, string_copy_bounded, string_get_length,
 };
 #[cfg(lvgl_system_heap)]
-use abi_declarations::{xila_string_duplicate, xila_string_duplicate_bounded};
+use c_support::{string_duplicate, string_duplicate_bounded};
 
 /// Set a block of memory to a specific value
 ///
@@ -16,7 +15,7 @@ use abi_declarations::{xila_string_duplicate, xila_string_duplicate_bounded};
 /// This function is unsafe because it dereferences raw pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lv_memset(destination: *mut c_void, value: u8, size: usize) {
-    unsafe { xila_memory_set(destination, value as c_int, size) };
+    unsafe { memory_set(destination, value as c_int, size) };
 }
 
 // LVGL's heap. With `LV_STDLIB_CUSTOM` (hosts, `lvgl_system_heap`) every LVGL
@@ -64,7 +63,7 @@ pub unsafe extern "C" fn lv_mem_init() {
 #[cfg(lvgl_system_heap)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lv_malloc_core(size: usize) -> *mut c_void {
-    unsafe { xila_memory_allocate_core(size) }
+    unsafe { memory_allocate_core(size) }
 }
 
 /// Free a block of memory
@@ -74,7 +73,7 @@ pub unsafe extern "C" fn lv_malloc_core(size: usize) -> *mut c_void {
 #[cfg(lvgl_system_heap)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lv_free_core(pointer: *mut c_void) {
-    unsafe { xila_memory_deallocate(pointer) }
+    unsafe { memory_deallocate(pointer) }
 }
 
 /// Reallocate a block of memory
@@ -84,7 +83,7 @@ pub unsafe extern "C" fn lv_free_core(pointer: *mut c_void) {
 #[cfg(lvgl_system_heap)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lv_realloc_core(pointer: *mut c_void, new_size: usize) -> *mut c_void {
-    unsafe { xila_memory_reallocate(pointer, new_size) }
+    unsafe { memory_reallocate(pointer, new_size) }
 }
 
 /// Report the memory usage through `lv_mem_monitor()`.
@@ -130,7 +129,7 @@ pub unsafe extern "C" fn lv_memcpy(
     source: *const c_void,
     size: usize,
 ) -> *mut c_void {
-    unsafe { xila_memory_copy(destination, source, size) }
+    unsafe { memory_copy(destination, source, size) }
 }
 
 /// Compare two strings
@@ -139,7 +138,7 @@ pub unsafe extern "C" fn lv_memcpy(
 /// This function is unsafe because it dereferences raw pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lv_strcmp(str1: *const c_char, str2: *const c_char) -> c_int {
-    unsafe { xila_string_compare(str1, str2) }
+    unsafe { string_compare(str1, str2) }
 }
 
 /// Get the length of a string
@@ -148,7 +147,7 @@ pub unsafe extern "C" fn lv_strcmp(str1: *const c_char, str2: *const c_char) -> 
 /// This function is unsafe because it dereferences raw pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lv_strlen(string: *const c_char) -> usize {
-    unsafe { xila_string_get_length(string) }
+    unsafe { string_get_length(string) }
 }
 
 /// Format a string
@@ -189,7 +188,7 @@ pub unsafe extern "C" fn lv_vsnprintf(
 /// This function is unsafe because it dereferences raw pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lv_strcpy(destination: *mut c_char, source: *const c_char) -> *mut c_char {
-    unsafe { xila_string_copy(destination, source) }
+    unsafe { string_copy(destination, source) }
 }
 
 /// Copy a string up to a given size
@@ -202,7 +201,7 @@ pub unsafe extern "C" fn lv_strncpy(
     source: *const c_char,
     size: usize,
 ) -> *mut c_char {
-    unsafe { xila_string_copy_bounded(destination, source, size) }
+    unsafe { string_copy_bounded(destination, source, size) }
 }
 
 /// Duplicate a string.
@@ -214,7 +213,7 @@ pub unsafe extern "C" fn lv_strncpy(
 #[cfg(lvgl_system_heap)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lv_strdup(string: *const c_char) -> *mut c_char {
-    unsafe { xila_string_duplicate(string) }
+    unsafe { string_duplicate(string) }
 }
 
 /// Duplicate a string.
@@ -227,7 +226,7 @@ pub unsafe extern "C" fn lv_strdup(string: *const c_char) -> *mut c_char {
 #[cfg(not(lvgl_system_heap))]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lv_strdup(string: *const c_char) -> *mut c_char {
-    unsafe { duplicate_into_pool(string, xila_string_get_length(string)) }
+    unsafe { duplicate_into_pool(string, string_get_length(string)) }
 }
 
 /// Copy `length` bytes of `string` plus a terminator into a new LVGL allocation.
@@ -239,7 +238,7 @@ unsafe fn duplicate_into_pool(string: *const c_char, length: usize) -> *mut c_ch
     let copy = unsafe { crate::lvgl::lv_malloc(length + 1) } as *mut c_char;
     if !copy.is_null() {
         unsafe {
-            xila_memory_copy(copy.cast(), string.cast(), length);
+            memory_copy(copy.cast(), string.cast(), length);
             *copy.add(length) = 0;
         }
     }
@@ -256,7 +255,7 @@ pub unsafe extern "C" fn lv_memmove(
     source: *const c_void,
     size: usize,
 ) -> *mut c_void {
-    unsafe { xila_memory_move(destination, source, size) }
+    unsafe { memory_move(destination, source, size) }
 }
 
 /// Duplicate a string up to a given size
@@ -268,7 +267,7 @@ pub unsafe extern "C" fn lv_memmove(
 #[cfg(lvgl_system_heap)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lv_strndup(string: *const c_char, size: usize) -> *mut c_char {
-    unsafe { xila_string_duplicate_bounded(string, size) }
+    unsafe { string_duplicate_bounded(string, size) }
 }
 
 /// Duplicate a string up to a given size.
@@ -294,7 +293,7 @@ pub unsafe extern "C" fn lv_strndup(string: *const c_char, size: usize) -> *mut 
 /// This function is unsafe because it dereferences raw pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lv_memcmp(ptr1: *const c_void, ptr2: *const c_void, size: usize) -> c_int {
-    unsafe { xila_memory_compare(ptr1, ptr2, size) }
+    unsafe { memory_compare(ptr1, ptr2, size) }
 }
 
 /// Concatenate two strings
@@ -303,7 +302,7 @@ pub unsafe extern "C" fn lv_memcmp(ptr1: *const c_void, ptr2: *const c_void, siz
 /// This function is unsafe because it dereferences raw pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn lv_strcat(destination: *mut c_char, source: *const c_char) -> *mut c_char {
-    unsafe { xila_string_concatenate(destination, source) }
+    unsafe { string_concatenate(destination, source) }
 }
 
 /// Compare two strings up to a given size
@@ -317,5 +316,5 @@ pub unsafe extern "C" fn lv_strncmp(
     str2: *const c_char,
     size: usize,
 ) -> c_int {
-    unsafe { xila_string_compare_bounded(str1, str2, size) }
+    unsafe { string_compare_bounded(str1, str2, size) }
 }

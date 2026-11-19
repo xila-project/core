@@ -24,9 +24,8 @@ audio = { package = "xila-audio", path = "libraries/audio" }
 drivers_neural_network = { package = "xila-drivers-neural-network", path = "drivers/neural_network" }
 neural_network = { package = "xila-neural-network", path = "libraries/neural_network" }
 nanoaudio = { git = "https://github.com/AlixANNERAUD/nanoaudio.git", rev = "596076c64827fd8bf9e8319addc2f215e0cde8be", default-features = false }
-abi_declarations = { package = "xila-abi-declarations", path = "libraries/abi/declarations" }
+c_support = { package = "xila-c-support", path = "libraries/c_support" }
 abi_application = { package = "xila-abi-application", path = "libraries/abi/application" }
-abi_definitions = { package = "xila-abi-definitions", path = "libraries/abi/definitions" }
 little_fs = { package = "xila-little-fs", path = "libraries/little_fs" }
 memory_file_system = { package = "xila-memory-file-system", path = "libraries/memory_file_system" }
 virtual_file_system = { package = "xila-virtual-file-system", path = "subsystems/virtual_file_system" }
@@ -63,7 +62,6 @@ drivers_peripherals = { package = "xila-drivers-peripherals", path = "drivers/pe
 embedded-hal = { version = "1", default-features = false }
 embedded-hal-async = { version = "1", default-features = false }
 miniserde = { version = "0.1", default-features = false }
-bindgen = { version = "0.73" }
 cbindgen = { version = "0.29" }
 syn = { version = "3.0" }
 quote = { version = "1.0" }
@@ -120,8 +118,7 @@ members = [
   "subsystems/time",
   "libraries/abi/application",
   "libraries/abi/application/c_tests",
-  "libraries/abi/definitions",
-  "libraries/abi/declarations",
+  "libraries/c_support",
   "subsystems/virtual_file_system",
   "libraries/little_fs",
   "libraries/memory_file_system",

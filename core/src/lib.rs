@@ -10,8 +10,7 @@
 //!   [`file_system`], [`little_fs`], [`memory_file_system`], [`internationalization`],
 //!   [`shared`], and [`synchronization`].
 //! - **Optional capabilities**: [`audio`] (`audio`), [`neural_network`] and
-//!   [`drivers_neural_network`] (`neural_network`), [`bootsplash`] (`bootsplash`),
-//!   and [`abi_definitions`] (`abi_definitions`).
+//!   [`drivers_neural_network`] (`neural_network`), and [`bootsplash`] (`bootsplash`).
 
 #![no_std]
 
@@ -25,7 +24,6 @@ pub use drivers_neural_network;
 #[cfg(feature = "neural_network")]
 pub use neural_network;
 
-pub use abi_declarations;
 pub use authentication;
 pub use embedded_i18n as internationalization;
 pub use executable;
@@ -49,6 +47,3 @@ pub use bootsplash;
 
 #[cfg(feature = "graphics")]
 pub use graphics;
-
-#[cfg(feature = "abi_definitions")]
-pub use abi_definitions;

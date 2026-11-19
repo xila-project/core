@@ -151,7 +151,6 @@ pub unsafe fn get_palette_color(object: *mut lvgl::lv_obj_t, color: PaletteColor
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
-    extern crate abi_definitions;
     use super::*;
 
     testing_support::instantiate_global_allocator!();

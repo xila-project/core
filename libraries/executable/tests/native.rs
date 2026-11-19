@@ -1,6 +1,5 @@
 #![cfg(all(feature = "native-dev", target_os = "linux", target_arch = "x86_64"))]
 
-extern crate abi_definitions;
 use core::{
     alloc::Layout,
     ptr::NonNull,

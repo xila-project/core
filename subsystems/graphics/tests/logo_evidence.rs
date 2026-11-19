@@ -1,8 +1,6 @@
 //! Opt-in headless capture and measurement for the logo renderer.
 #![cfg(all(target_os = "linux", lvgl_system_heap))]
 
-extern crate abi_definitions;
-
 use std::{cell::Cell, fmt::Write as _, fs, path::Path, ptr::NonNull, sync::Mutex, time::Instant};
 
 use graphics::{Color, Logo, LogoStyle, lvgl};

@@ -11,10 +11,6 @@
 extern crate alloc;
 extern crate std;
 
-// Pull in the ABI exports LittleFS and guests link against.
-#[cfg(feature = "environment")]
-extern crate abi_definitions;
-
 #[cfg(feature = "graphics")]
 mod screen;
 /// Deterministic Wi-Fi control-plane mock (`drivers_core::wifi`); it never changes the host's Wi-Fi.

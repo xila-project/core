@@ -80,7 +80,7 @@ Placement policy is **platform behavior** configured via [`RegionManager::new`](
 - **Fallback:** If the preferred region is uninitialized (e.g. a board without PSRAM), lacks a requested capability (`AlwaysAccessible`, `DirectMemoryAccess`), rejects the caller's DMA alignment, or is full, the manager continues across the remaining capable regions in order before returning `None`.
 - **Reallocation** preserves the requested capability flags and resizes in place when possible.
   Rust callers pass the original flags to `Manager::reallocate` or `ManagerTrait::reallocate`.
-  The C ABI stores the flags in the existing one-word allocation header, leaving 25 size bits
+  The C allocator glue (`xila-c-support`) stores the flags in the existing one-word allocation header, leaving 25 size bits
   on 32-bit targets for the layout including its header and alignment padding.
   - A **shrink** keeps the pointer when the new layout still satisfies the original region's
     alignment and DMA requirements. The freed tail returns to that region.
@@ -94,9 +94,8 @@ Placement policy is **platform behavior** configured via [`RegionManager::new`](
 
 Boards without initialized PSRAM continue to place ordinary allocations in
 their primary region. The host keeps its existing lazy mappings and growth
-policy. The C ABI keeps the same `uint8_t` capability type and existing bits.
-The declaration generator emits `XILA_MEMORY_CAPABILITIES_ALWAYS_ACCESSIBLE`
-for bit 2 from the Rust definition.
+policy. The C allocator glue keeps the same `uint8_t` capability type and existing bits
+(`MEMORY_CAPABILITIES_ALWAYS_ACCESSIBLE` is bit 2).
 
 ## Overhead Budget
 

@@ -5,8 +5,6 @@
 
 extern crate alloc;
 
-extern crate abi_definitions;
-
 use task::TaskIdentifier;
 
 use file_system::{

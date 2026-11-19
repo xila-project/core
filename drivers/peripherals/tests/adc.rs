@@ -3,7 +3,6 @@
 //! ADC device nodes: a simulated converter is mounted as `/devices/adc/adc0`
 //! and driven through the VFS `File` API and control commands.
 
-extern crate abi_definitions;
 extern crate alloc;
 
 #[path = "support/allocation.rs"]

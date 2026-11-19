@@ -9,7 +9,6 @@ rust-version.workspace = true
 graphics = { workspace = true }
 
 [dev-dependencies]
-abi_definitions = { workspace = true }
 graphics = { workspace = true, features = ["rendering_xrgb8888"] }
 task = { workspace = true, features = ["test_harness"] }
 testing = { workspace = true }

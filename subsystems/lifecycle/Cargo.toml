@@ -14,7 +14,6 @@ virtual_file_system = { workspace = true }
 
 [dev-dependencies]
 task = { workspace = true, features = ["test_harness"] }
-abi_definitions = { workspace = true }
 drivers_peripherals = { workspace = true, features = ["power"] }
 little_fs = { workspace = true }
 log = { workspace = true }

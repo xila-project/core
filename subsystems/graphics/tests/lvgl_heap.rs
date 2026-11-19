@@ -3,8 +3,6 @@
 //! `LVGL_CFLAGS=XILA_LVGL_MEM_POOL=1` (run by `mise run test:graphics-pool`).
 #![cfg(target_os = "linux")]
 
-extern crate abi_definitions;
-
 testing_support::instantiate_global_allocator!();
 
 use graphics::lvgl;

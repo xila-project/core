@@ -8,7 +8,6 @@
 //! `/devices/uart/loop1` and driven through the VFS `File` API and control
 //! commands.
 
-extern crate abi_definitions;
 extern crate alloc;
 
 #[path = "support/allocation.rs"]

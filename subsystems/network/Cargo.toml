@@ -48,7 +48,6 @@ heapless = { version = "0.9" }
 testing_support = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }
 little_fs = { workspace = true }
-abi_definitions = { workspace = true }
 
 [lib]
 name = "network"

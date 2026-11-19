@@ -4,7 +4,6 @@
 //! SPI device nodes mounted over a bus backed by `peripherals::spi::SpiMock`,
 //! driven through the VFS `File` API and the control commands.
 
-extern crate abi_definitions;
 extern crate alloc;
 
 #[path = "support/allocation.rs"]

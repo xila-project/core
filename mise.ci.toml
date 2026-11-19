@@ -411,7 +411,7 @@ env = { CC_thumbv7em_none_eabihf = "clang", CC_riscv32imac_unknown_none_elf = "c
 run = """
 set -eu
 cargo check --locked -p xila --target thumbv7em-none-eabihf
-cargo check --locked -p xila --no-default-features --features abi_definitions --target thumbv7em-none-eabihf
+cargo check --locked -p xila --no-default-features --target thumbv7em-none-eabihf
 # Graphics is C-backed and its FFI differs by target: `c_char` is unsigned on ARM and RISC-V.
 cargo check --locked -p xila-graphics --features rendering_rgb565 --target thumbv7em-none-eabihf
 cargo check --locked -p xila-graphics --features rendering_rgb565 --target riscv32imac-unknown-none-elf
@@ -449,7 +449,7 @@ env = { CC_riscv32imc_unknown_none_elf = "clang", CARGO_TARGET_RISCV32IMC_UNKNOW
 run = """
 set -eu
 cargo check --locked -p xila --target riscv32imc-unknown-none-elf
-cargo check --locked -p xila --no-default-features --features abi_definitions --target riscv32imc-unknown-none-elf
+cargo check --locked -p xila --no-default-features --target riscv32imc-unknown-none-elf
 cargo check --locked -p xila-drivers-peripherals --all-features --target riscv32imc-unknown-none-elf
 cargo check --locked -p xila-peripherals --all-features --target riscv32imc-unknown-none-elf
 cargo check --locked -p xila-audio --target riscv32imc-unknown-none-elf

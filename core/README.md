@@ -7,8 +7,7 @@ main-workspace libraries and subsystems inherit their version from the root;
 applications, drivers and standalone workspaces keep their own versions.
 
 The services re-exported unconditionally are available with
-`--no-default-features`. ABI definitions are enabled by default and can be
-selected with `abi_definitions`; audio, bootsplash and graphics remain opt-in.
+`--no-default-features`. Audio, bootsplash and graphics remain opt-in.
 `graphics` forwards to the executable's graphics support, and the
 `graphics_rendering_rgb565` and `graphics_rendering_xrgb8888` features select
 the corresponding pixel format. The baseline still includes networking through
