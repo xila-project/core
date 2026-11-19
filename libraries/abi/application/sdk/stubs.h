@@ -49,6 +49,9 @@ XilaStatus xila_network_resolve(XilaNetwork const * network, char const * host, 
 XilaStatus xila_heap_allocate(XilaHeap * heap, size_t size, void * * allocation);
 XilaStatus xila_heap_reallocate(XilaHeap * heap, void * pointer, size_t size, void * * allocation);
 XilaStatus xila_heap_free(XilaHeap * heap, void * pointer);
+XilaStatus xila_time_resolution(uint32_t clock, uint64_t * nanoseconds);
+XilaStatus xila_time_sleep(uint64_t nanoseconds);
+XilaStatus xila_random_fill(void * buffer, size_t size);
 
 #ifdef __cplusplus
 }

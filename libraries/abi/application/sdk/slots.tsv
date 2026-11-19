@@ -38,3 +38,6 @@
 36	xila_heap_allocate
 37	xila_heap_reallocate
 38	xila_heap_free
+39	xila_time_resolution
+40	xila_time_sleep
+41	xila_random_fill
