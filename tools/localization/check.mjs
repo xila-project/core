@@ -6,7 +6,7 @@
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { flattenCatalog } from "./catalog.mjs";
+import { flattenCatalog, frenchTypographyIssues } from "./catalog.mjs";
 import { execFileSync } from "node:child_process";
 import extract from "../../tolgee.extractor.mjs";
 
@@ -39,6 +39,11 @@ function catalog(pathName) {
   const flat = flattenCatalog(json);
   for (const [key, value] of Object.entries(flat)) {
     if (typeof value !== "string") failures.push(pathName + ": nonstring value " + key);
+    else if (path.basename(pathName) === "fr.json") {
+      for (const issue of frenchTypographyIssues(value)) {
+        failures.push(pathName + ": " + key + ": " + issue);
+      }
+    }
     if (!KEY.test(key)) failures.push(pathName + ": nonsemantic key " + key);
     const segments = key.split(".");
     for (let n = 1; n < segments.length; n++) {

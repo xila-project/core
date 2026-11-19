@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { flattenCatalog } from "./catalog.mjs";
+import { flattenCatalog, frenchTypographyIssues } from "./catalog.mjs";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const KEY = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/;
@@ -86,4 +86,36 @@ test("all Xila locale files are nested and round-trip without changing messages"
     }
   }
   assert.deepEqual([...unconverted].sort(), [], "Remaining flat catalogs");
+});
+
+test("French typography accepts no-break spaces, ’ and « » and skips placeholders", () => {
+  for (const value of [
+    "Erreur\u00a0: {arg0}",
+    "Alarme\u00a0! ",
+    "Répéter\u00a0; aucun",
+    "Impossible de résoudre «\u00a0{arg1}\u00a0»",
+    "Erreur\u00a0: {arg0:?}",
+    "Il est 12:30 sur http://exemple.fr",
+    "Durée\u00a0: {count, plural, one {# s} other {# s : x}}",
+    "Vérifier l’état",
+  ]) {
+    assert.deepEqual(frenchTypographyIssues(value), [], value);
+  }
+});
+
+test("French typography rejects plain spaces, missing spaces and straight apostrophes", () => {
+  for (const value of [
+    "Erreur : {arg0}",
+    "Erreur: {arg0}",
+    "Erreur\u202f: {arg0}",
+    "Alarme ! ",
+    "Répéter ; aucun",
+    "«{arg1}»",
+    "« {arg1} »",
+    "L'erreur",
+    "Dit \"oui\"",
+    "Quoi\u202f?",
+  ]) {
+    assert.notDeepEqual(frenchTypographyIssues(value), [], value);
+  }
 });
