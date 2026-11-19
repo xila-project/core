@@ -1,7 +1,7 @@
 #![cfg(target_os = "linux")]
 extern crate abi_definitions;
 extern crate alloc;
-testing::instantiate_global_allocator!();
+testing_support::instantiate_global_allocator!();
 use graphics::{FilePickerMode, FilePickerStatus};
 #[path = "../src/file_picker/model.rs"]
 mod model;
@@ -14,7 +14,9 @@ async fn privileged_worker_cannot_browse_or_select_for_unprivileged_caller() {
     let manager = task::test_manager();
     let caller = manager.get_current_task_identifier().await;
     let users = Box::leak(Box::new(users::Manager::new()));
-    let time = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+    let time = Box::leak(Box::new(
+        time::Manager::new(&testing_support::TimeDevice).unwrap(),
+    ));
     let device = MemoryDevice::<512>::new_static(1024 * 512);
     let options = little_fs::Options::new(256);
     little_fs::FileSystem::format(device, options).unwrap();

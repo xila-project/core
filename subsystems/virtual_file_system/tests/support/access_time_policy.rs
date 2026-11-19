@@ -93,7 +93,7 @@ async fn initialize_counting(
     let task_manager = Box::leak(Box::new(task::Manager::new()));
     let users_manager = Box::leak(Box::new(users::Manager::new()));
     if !log::is_initialized() {
-        log::initialize(&testing::Logger).unwrap();
+        log::initialize(&testing_support::Logger).unwrap();
     }
     let task = task_manager.get_current_task_identifier().await;
 

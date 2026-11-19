@@ -15,26 +15,14 @@ extern crate std;
 #[cfg(feature = "environment")]
 extern crate abi_definitions;
 
-mod devices;
-mod hash;
-mod logger;
-mod memory_manager;
 #[cfg(feature = "graphics")]
 mod screen;
 /// Deterministic Wi-Fi control-plane mock (`drivers_core::wifi`); it never changes the host's Wi-Fi.
 #[cfg(feature = "environment")]
 pub use drivers_core::wifi;
-
-pub use devices::{ConsoleDevice, RandomDevice, TimeDevice};
-pub use hash::HashDevice;
-pub use logger::Logger;
-pub use memory_manager::{MemoryManager, ThreadAllocations};
 #[cfg(feature = "graphics")]
 pub use screen::{HeadlessError, HeadlessScreenDevice};
-pub use task::test_executor::{Executor, new_thread_executor};
-
-#[doc(hidden)]
-pub use ::memory as memory_crate;
+pub use testing_support::*;
 
 #[cfg(feature = "environment")]
 use alloc::boxed::Box;

@@ -28,7 +28,9 @@ mod access_time_policy;
 mod metadata_authorization;
 
 async fn initialize() -> (TaskIdentifier, &'static VirtualFileSystem) {
-    let time_manager = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+    let time_manager = Box::leak(Box::new(
+        time::Manager::new(&testing_support::TimeDevice).unwrap(),
+    ));
     initialize_with_time(time_manager).await
 }
 
@@ -39,7 +41,7 @@ async fn initialize_with_time(
     let users_manager = Box::leak(Box::new(users::Manager::new()));
 
     if !log::is_initialized() {
-        log::initialize(&testing::Logger).unwrap();
+        log::initialize(&testing_support::Logger).unwrap();
     }
 
     let task = task_instance.get_current_task_identifier().await;
@@ -1378,7 +1380,9 @@ async fn invalid_or_pre_epoch_utc_does_not_become_unsigned_file_metadata() {
 #[cfg(target_os = "linux")]
 #[test]
 async fn existing_files_remain_accessible_without_representable_utc() {
-    let clock = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+    let clock = Box::leak(Box::new(
+        time::Manager::new(&testing_support::TimeDevice).unwrap(),
+    ));
     let (task, vfs) = initialize_with_time(clock).await;
     let mut file = File::open(
         vfs,
@@ -1847,11 +1851,13 @@ impl file_system::DirectBlockDevice for FlakyDevice {}
 async fn initialize_on(
     device: &'static FlakyDevice,
 ) -> (TaskIdentifier, &'static VirtualFileSystem) {
-    let time_manager = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+    let time_manager = Box::leak(Box::new(
+        time::Manager::new(&testing_support::TimeDevice).unwrap(),
+    ));
     let task_manager = Box::leak(Box::new(task::Manager::new()));
     let users_manager = Box::leak(Box::new(users::Manager::new()));
     if !log::is_initialized() {
-        log::initialize(&testing::Logger).unwrap();
+        log::initialize(&testing_support::Logger).unwrap();
     }
     let task = task_manager.get_current_task_identifier().await;
     let file_system =
@@ -2182,11 +2188,13 @@ async fn embedded_boot_writes_nothing_after_a_reset() {
     const NULL_DEVICE_PATH: &str = "/devices/standard_io/null";
     const PERSISTENT_EXECUTABLE_PATH: &str = "/applications/executables/persistent.wasm";
 
-    let time_manager = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+    let time_manager = Box::leak(Box::new(
+        time::Manager::new(&testing_support::TimeDevice).unwrap(),
+    ));
     let task_manager = task::get_instance();
     let users_manager = Box::leak(Box::new(users::Manager::new()));
     if !log::is_initialized() {
-        log::initialize(&testing::Logger).unwrap();
+        log::initialize(&testing_support::Logger).unwrap();
     }
     let task = task_manager.get_current_task_identifier().await;
     let counting_device = CountingBlockDevice::new_static();
@@ -2292,11 +2300,13 @@ async fn embedded_boot_writes_nothing_after_a_reset() {
 #[cfg(target_os = "linux")]
 #[test]
 async fn default_hierarchy_over_memory_devices_writes_nothing_on_second_boot() {
-    let time_manager = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+    let time_manager = Box::leak(Box::new(
+        time::Manager::new(&testing_support::TimeDevice).unwrap(),
+    ));
     let task_manager = Box::leak(Box::new(task::Manager::new()));
     let users_manager = Box::leak(Box::new(users::Manager::new()));
     if !log::is_initialized() {
-        log::initialize(&testing::Logger).unwrap();
+        log::initialize(&testing_support::Logger).unwrap();
     }
 
     let task = task_manager.get_current_task_identifier().await;
@@ -2342,11 +2352,13 @@ async fn default_hierarchy_over_memory_devices_writes_nothing_on_second_boot() {
 #[cfg(target_os = "linux")]
 #[test]
 async fn memory_file_system_mounted_on_devices_avoids_little_fs_writes() {
-    let time_manager = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+    let time_manager = Box::leak(Box::new(
+        time::Manager::new(&testing_support::TimeDevice).unwrap(),
+    ));
     let task_manager = Box::leak(Box::new(task::Manager::new()));
     let users_manager = Box::leak(Box::new(users::Manager::new()));
     if !log::is_initialized() {
-        log::initialize(&testing::Logger).unwrap();
+        log::initialize(&testing_support::Logger).unwrap();
     }
 
     let task = task_manager.get_current_task_identifier().await;

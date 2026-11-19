@@ -5,7 +5,7 @@
 
 extern crate abi_definitions;
 
-testing::instantiate_global_allocator!();
+testing_support::instantiate_global_allocator!();
 
 use core::task::{Context, Poll};
 use file_system::{
@@ -86,7 +86,9 @@ fn safe_edits_of_first_child(manager: &Manager) -> [Result<(), lvgl_rust::Error>
 
 #[test]
 fn safe_code_cannot_delete_an_owned_window() {
-    let time = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+    let time = Box::leak(Box::new(
+        time::Manager::new(&testing_support::TimeDevice).unwrap(),
+    ));
     let manager: &'static Manager = Box::leak(Box::new(task::block_on(
         graphics::initialize_with_input_devices(time, &Screen, &[], 1024, false),
     )));

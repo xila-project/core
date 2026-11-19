@@ -49,6 +49,7 @@ embedded-i18n = { version = "=0.2.0", default-features = false, features = [
   "backend-json",
 ] }
 testing = { package = "xila-testing", path = "libraries/testing" }
+testing_support = { package = "xila-testing-support", path = "libraries/testing/support" }
 device = { package = "xila-device", path = "devices" }
 
 # - Drivers
@@ -100,6 +101,7 @@ members = [
   "libraries/stackful",
   "core",
   "libraries/testing",
+  "libraries/testing/support",
   "libraries/shared",
   "libraries/http",
   "libraries/firmware_update",

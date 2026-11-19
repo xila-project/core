@@ -45,7 +45,7 @@ smoltcp = { workspace = true, features = [
 heapless = { version = "0.9" }
 
 [dev-dependencies]
-testing = { workspace = true }
+testing_support = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }
 little_fs = { workspace = true }
 abi_definitions = { workspace = true }

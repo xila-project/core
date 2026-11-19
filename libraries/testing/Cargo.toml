@@ -6,39 +6,39 @@ rust-version.workspace = true
 description = "Minimal std test support for Xila: test devices, allocator and environment setup, without platform drivers"
 
 [dependencies]
-# Always: test devices, allocator, logger and executor.
-device = { workspace = true }
-file_system = { workspace = true }
-log = { workspace = true }
-memory = { workspace = true }
-shared = { workspace = true }
-task = { workspace = true, features = ["test_harness"] }
-time = { workspace = true }
-getrandom = "0.4"
-sha2 = "0.11"
+testing_support = { workspace = true }
 # `environment`: initialize() and load_file().
 abi_definitions = { workspace = true, optional = true }
 authentication = { workspace = true, optional = true }
 drivers_core = { workspace = true, optional = true }
 executable = { workspace = true, optional = true }
+file_system = { workspace = true, optional = true }
 little_fs = { workspace = true, optional = true }
+log = { workspace = true, optional = true }
 network = { workspace = true, optional = true }
+task = { workspace = true, optional = true }
+time = { workspace = true, optional = true }
 users = { workspace = true, optional = true }
 virtual_file_system = { workspace = true, optional = true }
 # `graphics`: headless screen.
 graphics = { workspace = true, optional = true }
+shared = { workspace = true, optional = true }
 
 [features]
 default = []
-# Complete in-memory environment. Crates that `environment` depends on should
-# not enable it in their own unit tests (they would be compiled twice).
+# Complete in-memory environment. Its runtime dependencies use
+# xila-testing-support in their own tests to avoid a dependency cycle.
 environment = [
   "dep:abi_definitions",
   "dep:authentication",
   "dep:drivers_core",
   "dep:executable",
+  "dep:file_system",
   "dep:little_fs",
+  "dep:log",
   "dep:network",
+  "dep:task",
+  "dep:time",
   "dep:users",
   "dep:virtual_file_system",
   "drivers_core/wifi_mock",
@@ -48,6 +48,7 @@ environment = [
 graphics = [
   "environment",
   "dep:graphics",
+  "dep:shared",
   "graphics/rendering_xrgb8888",
   "executable/graphics",
 ]

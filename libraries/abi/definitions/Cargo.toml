@@ -24,7 +24,7 @@ default = []
 allocation_redundancy_check = []
 
 [dev-dependencies]
-testing = { workspace = true }
+testing_support = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }
 drivers_core = { workspace = true }
 little_fs = { workspace = true }

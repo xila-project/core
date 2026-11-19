@@ -4,10 +4,10 @@ use std::{
     alloc::{GlobalAlloc, Layout},
     cell::Cell,
 };
-static NATIVE: testing::MemoryManager = testing::MemoryManager::new();
+static NATIVE: testing_support::MemoryManager = testing_support::MemoryManager::new();
 #[unsafe(no_mangle)]
-pub static __XILA_MEMORY_MANAGER: testing::memory_crate::Manager<'static> =
-    testing::memory_crate::Manager::new(&NATIVE);
+pub static __XILA_MEMORY_MANAGER: testing_support::memory_crate::Manager<'static> =
+    testing_support::memory_crate::Manager::new(&NATIVE);
 
 std::thread_local! { static REQUESTS: Cell<Option<usize>> = const { Cell::new(None) }; }
 struct Tracking;

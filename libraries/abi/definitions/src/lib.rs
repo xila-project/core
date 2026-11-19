@@ -43,5 +43,5 @@ pub use user::*;
 #[cfg(test)]
 mod tests {
     #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-    testing::instantiate_global_allocator!();
+    testing_support::instantiate_global_allocator!();
 }
