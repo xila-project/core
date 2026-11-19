@@ -63,6 +63,29 @@ impl Manager {
         Ok(())
     }
 
+    /// Replace the whole environment of a task with `variables`, as one atomic
+    /// update. A later entry overrides an earlier one of the same name. A spawned
+    /// task starts with a copy of its parent's environment; this gives it an
+    /// explicit one instead.
+    pub async fn replace_environment_variables<N: AsRef<str>, V: AsRef<str>>(
+        &self,
+        task_identifier: TaskIdentifier,
+        variables: impl IntoIterator<Item = (N, V)>,
+    ) -> Result<()> {
+        // Build the new list before taking the lock, so the lock covers no allocation
+        // beyond the replaced list's release.
+        let mut replacement: Vec<EnvironmentVariable> = Vec::new();
+        for (name, value) in variables {
+            let variable = EnvironmentVariable::new(name.as_ref(), value.as_ref());
+            replacement.retain(|existing| existing.get_name() != name.as_ref());
+            replacement.push(variable);
+        }
+        let mut inner = self.0.write().await;
+        Self::get_task_mutable(&mut inner, task_identifier)?.environment_variables = replacement;
+
+        Ok(())
+    }
+
     pub async fn remove_environment_variable(
         &self,
         task_identifier: TaskIdentifier,
