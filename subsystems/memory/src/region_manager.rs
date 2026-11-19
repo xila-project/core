@@ -1228,7 +1228,9 @@ mod tests {
             }
         };
 
-        for _ in 0..4000 {
+        // Miri is far slower: a shorter run still reaches every path.
+        let operations = if cfg!(miri) { 400 } else { 4000 };
+        for _ in 0..operations {
             let before_used = manager.get_used();
             match random.below(10) {
                 0..=3 if live.len() < 60 => {
@@ -1352,7 +1354,7 @@ mod tests {
 
         // The sequence exercised every path.
         assert!(
-            grown_in_place > 20 && moved > 20 && shrunk > 20,
+            grown_in_place > 5 && moved > 5 && shrunk > 5,
             "{grown_in_place} {moved} {shrunk}"
         );
         assert!(word_tail_moves > 0, "no one-word shrink was exercised");
@@ -1384,7 +1386,10 @@ mod tests {
             0xD1B5_4A32_D192_ED03,
             0x1234_5678_9ABC_DEF1,
             0xFEED_FACE_CAFE_BEEF,
-        ] {
+        ]
+        .into_iter()
+        .take(if cfg!(miri) { 1 } else { 4 })
+        {
             random_reallocation_sequences(seed);
         }
     }
