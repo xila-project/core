@@ -11,8 +11,8 @@ use graphics::lvgl;
 
 const BLOCK: usize = 16 * 1024;
 
-fn system_used() -> usize {
-    testing::memory_crate::global_manager().get_used()
+fn thread_allocated() -> testing::ThreadAllocations {
+    testing::MemoryManager::thread_allocations()
 }
 
 fn monitor() -> lvgl::lv_mem_monitor_t {
@@ -35,11 +35,11 @@ fn configured_pool_size() -> usize {
 fn lvgl_allocations_come_from_the_selected_allocator() {
     unsafe { lvgl::lv_init() };
 
-    let system_before = system_used();
+    let system_before = thread_allocated();
     let before = monitor();
     let block = unsafe { lvgl::lv_malloc(BLOCK) };
     assert!(!block.is_null());
-    let system_growth = system_used().saturating_sub(system_before);
+    let system_growth = thread_allocated().since(system_before).allocated_bytes();
     let after = monitor();
 
     assert!(

@@ -11,8 +11,8 @@ use std::sync::Mutex;
 /// LVGL is not thread safe and the tests share its global state.
 static LVGL: Mutex<()> = Mutex::new(());
 
-fn system_used() -> usize {
-    testing::memory_crate::global_manager().get_used()
+fn thread_allocated_bytes() -> usize {
+    testing::MemoryManager::thread_allocations().allocated_bytes()
 }
 
 #[test]
@@ -30,22 +30,27 @@ fn event_bursts_do_not_allocate_and_keep_clicks() {
     while window.pop_event().is_some() {}
 
     // Pointer moves coalesce into one event, whatever the burst size.
-    let before = system_used();
+    let before = thread_allocated_bytes();
     for _ in 0..10_000 {
         send(lvgl::lv_event_code_t_LV_EVENT_PRESSING);
     }
-    assert_eq!(system_used(), before, "pointer moves must not allocate");
+    assert_eq!(
+        thread_allocated_bytes(),
+        before,
+        "pointer moves must not allocate"
+    );
     assert_eq!(window.pop_event().unwrap().code, EventKind::Pressing);
     assert!(window.pop_event().is_none());
     assert_eq!(window.dropped_event_count(), 0);
 
     // Distinct events fill the ring and are then dropped and counted: the queue
     // never grows and the first events stay in order.
+    let before = thread_allocated_bytes();
     for _ in 0..10_000 {
         send(lvgl::lv_event_code_t_LV_EVENT_CLICKED);
     }
     assert_eq!(
-        system_used(),
+        thread_allocated_bytes(),
         before,
         "events past the capacity must not allocate"
     );

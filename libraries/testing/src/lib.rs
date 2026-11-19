@@ -28,7 +28,7 @@ pub use drivers_core::wifi;
 pub use devices::{ConsoleDevice, RandomDevice, TimeDevice};
 pub use hash::HashDevice;
 pub use logger::Logger;
-pub use memory_manager::MemoryManager;
+pub use memory_manager::{MemoryManager, ThreadAllocations};
 #[cfg(feature = "graphics")]
 pub use screen::{HeadlessError, HeadlessScreenDevice};
 pub use task::test_executor::{Executor, new_thread_executor};
