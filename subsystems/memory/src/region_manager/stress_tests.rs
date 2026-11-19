@@ -106,6 +106,8 @@ fn provenance_in_place_grow_through_a_narrowed_pointer() {
     let block = unsafe { manager.allocate(CapabilityFlags::empty(), small) }.unwrap();
     let grown = unsafe { manager.reallocate(narrowed(block, 16), small, large) }.unwrap();
     assert_eq!(grown, block);
+    // The returned pointer must cover the grown block, not just the caller's 16 bytes.
+    unsafe { grown.as_ptr().add(16).write_bytes(0xA5, 48) };
     unsafe { manager.deallocate(grown, large) };
 }
 

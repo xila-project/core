@@ -79,12 +79,14 @@ Placement policy is **platform behavior** configured via [`RegionManager::new`](
   - Allocations at or above the threshold probe regions in reverse (`(0..N).rev()`), steering large buffers into external PSRAM first when available.
 - **Fallback:** If the preferred region is uninitialized (e.g. a board without PSRAM), lacks a requested capability (`AlwaysAccessible`, `DirectMemoryAccess`), rejects the caller's DMA alignment, or is full, the manager continues across the remaining capable regions in order before returning `None`.
 - **Reallocation** resizes in place when it can, and its placement follows the same threshold:
-  - A **shrink** keeps the pointer whatever the sizes: the freed tail returns to the region and
-    merges with the hole that follows it. It never fails and never moves.
+  - A **shrink** keeps the pointer: the freed tail returns to the region and merges with the hole
+    that follows it. When the block is already aligned for the new layout, which is always the
+    case through `GlobalAlloc::realloc` and `xila_memory_reallocate`, it never fails and never moves.
   - A **growth below the threshold** keeps the block in the region it is in: the region grows it in
     place when the memory right after the block is free, otherwise the block moves elsewhere in
     the same region, and only when that region cannot hold it do the other regions follow, in
-    forward order. The block keeps the capabilities and DMA alignment of its region.
+    forward order. While it stays in its region, the block keeps that region's capabilities and DMA
+    alignment.
   - A **growth to the threshold or above** follows the placement policy of an allocation of that
     size, so a buffer that grows (a `Vec` doubling, a framebuffer) moves to the large region
     (PSRAM) instead of filling the internal SRAM that `AlwaysAccessible` and DMA requests depend

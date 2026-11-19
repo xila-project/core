@@ -260,8 +260,8 @@ impl<const N: usize> RegionManagerInner<N> {
 
 /// Outcome of [`RegionManagerInner::reallocate`].
 enum Reallocation {
-    /// The block was resized where it is.
-    InPlace,
+    /// The block was resized where it is; the pointer carries the heap's provenance.
+    InPlace(NonNull<u8>),
     /// A new block was allocated; the caller copies the data and frees the old block.
     Moved(NonNull<u8>),
 }
@@ -279,13 +279,16 @@ impl<const N: usize> RegionManagerInner<N> {
         pointer: NonNull<u8>,
         old_layout: Layout,
         new_layout: Layout,
-    ) -> bool {
-        pointer.as_ptr().addr().is_multiple_of(new_layout.align())
-            && unsafe {
-                self.regions[index]
-                    .heap
-                    .resize_in_place(pointer, old_layout, new_layout)
-            } == Resize::Done
+    ) -> Option<NonNull<u8>> {
+        if !pointer.as_ptr().addr().is_multiple_of(new_layout.align()) {
+            return None;
+        }
+        let heap = &mut self.regions[index].heap;
+        if unsafe { heap.resize_in_place(pointer, old_layout, new_layout) } != Resize::Done {
+            return None;
+        }
+        // The caller's pointer may only cover the old block: hand back one that covers the new.
+        NonNull::new(heap.bottom().with_addr(pointer.as_ptr().addr()))
     }
 
     /// Decides where a reallocated block goes, and resizes or allocates accordingly.
@@ -319,9 +322,10 @@ impl<const N: usize> RegionManagerInner<N> {
         let outcome = 'placed: {
             if let Some(index) = old_index
                 && shrinks
-                && unsafe { self.resize_in_region(index, old_pointer, old_layout, new_layout) }
+                && let Some(pointer) =
+                    unsafe { self.resize_in_region(index, old_pointer, old_layout, new_layout) }
             {
-                break 'placed Some(Reallocation::InPlace);
+                break 'placed Some(Reallocation::InPlace(pointer));
             }
 
             let large = new_layout.size() >= self.large_allocation_threshold;
@@ -335,11 +339,11 @@ impl<const N: usize> RegionManagerInner<N> {
             for index in order {
                 let layout = if Some(index) == old_index {
                     if !shrinks
-                        && unsafe {
+                        && let Some(pointer) = unsafe {
                             self.resize_in_region(index, old_pointer, old_layout, new_layout)
                         }
                     {
-                        break 'placed Some(Reallocation::InPlace);
+                        break 'placed Some(Reallocation::InPlace(pointer));
                     }
                     // A block moved inside its region keeps the DMA alignment it had there.
                     let alignment = new_layout
@@ -576,13 +580,14 @@ impl<const N: usize> ManagerTrait for RegionManager<N> {
 
     /// Resizes a block, in place when possible.
     ///
-    /// * A shrink keeps the pointer; the freed tail returns to the region's free list. It never
-    ///   fails and never moves, whatever the sizes involved.
+    /// * A shrink keeps the pointer; the freed tail returns to the region's free list. When the
+    ///   block is already aligned for the new layout, which is always the case through
+    ///   `GlobalAlloc::realloc` and `xila_memory_reallocate`, it never fails and never moves.
     /// * Below the large-allocation threshold, the block stays in its region while it fits. The
     ///   region grows it in place when the memory right after the block is free, otherwise it
     ///   moves to another place of the same region. Only when the region cannot hold the block do
-    ///   the other regions follow, in the ordinary order. A block therefore keeps the capabilities
-    ///   and the DMA alignment of its region.
+    ///   the other regions follow, in the ordinary order. While it stays in its region, a block keeps
+    ///   the capabilities and the DMA alignment of that region.
     /// * At or above the threshold, placement follows the ordinary policy, as for an allocation:
     ///   regions are probed in reverse order, so a large buffer moves to the large region (PSRAM)
     ///   instead of filling the primary one. A block already in the region that policy picks is
@@ -613,7 +618,7 @@ impl<const N: usize> ManagerTrait for RegionManager<N> {
         })?;
 
         let new_pointer = match outcome {
-            Reallocation::InPlace => return Some(old_pointer),
+            Reallocation::InPlace(pointer) => return Some(pointer),
             Reallocation::Moved(new_pointer) => new_pointer,
         };
 

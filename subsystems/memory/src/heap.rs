@@ -18,8 +18,7 @@
 //!   and no operation can strand bytes that are neither in a block nor in a hole. The price is
 //!   up to [`MIN_BLOCK`] `- 1` bytes of rounding per block (half of that on average).
 //! * Free holes are kept sorted by address and are never adjacent (they are merged on free).
-//! * A region never holds bytes that are neither in a hole nor in a block, so
-//!   `used + free == size` is exact.
+//! * Accounting is therefore exact: `used + free == size`.
 
 use core::{
     alloc::Layout,
@@ -38,6 +37,8 @@ struct Hole {
 /// is left between two blocks can always be a hole.
 pub(crate) const BLOCK_ALIGN: usize = size_of::<Hole>();
 const _: () = assert!(BLOCK_ALIGN.is_multiple_of(align_of::<Hole>()));
+// The rounding masks (`& !(BLOCK_ALIGN - 1)`) need a power of two.
+const _: () = assert!(BLOCK_ALIGN.is_power_of_two());
 
 /// Smallest block, and smallest hole: a hole must be able to store its own header.
 pub(crate) const MIN_BLOCK: usize = BLOCK_ALIGN;
