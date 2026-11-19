@@ -433,6 +433,23 @@ class WorkflowPolicy(unittest.TestCase):
                 result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0 if status == "success" else 1, result.stdout + result.stderr)
 
+    def test_xtensa_build_uses_pinned_toolchain_setup(self):
+        xtensa = job("ci.yml", "xtensa")
+        setup = "run: mise run ci:toolchain-xtensa"
+        build = "run: mise run ci:xtensa"
+        self.assertIn(setup, xtensa)
+        self.assertIn(build, xtensa)
+        self.assertLess(xtensa.index(setup), xtensa.index(build))
+        self.assertNotIn("esp-rs/xtensa-toolchain@", xtensa)
+
+        task = ci_config()["tasks"]["ci:toolchain-xtensa"]
+        pins = tomllib.loads((ROOT / "mise.toml").read_text())["vars"]
+        self.assertRegex(pins["espup_version"], r"^\d+\.\d+\.\d+$")
+        self.assertRegex(pins["esp_gcc_version"], r"^\d+\.\d+\.\d+_\d{8}$")
+        self.assertEqual(task["tools"]["github:esp-rs/espup"], pins["espup_version"])
+        self.assertIn('--toolchain-version "{{ vars.rust_version }}.0"', task["run"])
+        self.assertIn('--crosstool-toolchain-version "{{ vars.esp_gcc_version }}"', task["run"])
+
     def test_primary_abi_matrix_checks_both_memory_modes_on_every_event(self):
         abi = job("ci.yml", "abi")
         self.assertIn("memory_32", abi)

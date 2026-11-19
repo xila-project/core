@@ -142,17 +142,8 @@ jobs:
           persist-credentials: false
       - name: "Setup | Activate mise"
         uses: jdx/mise-action@v5.2.8
-      - name: "Setup | Resolve pinned Rust version"
-        id: rust
-        run: mise run ci:toolchain
       - name: "Setup | Xtensa Rust, GCC and libclang"
-        uses: esp-rs/xtensa-toolchain@v1.7.0
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          buildtargets: esp32s3
-          version: ${{ steps.rust.outputs.version }}.0
-          override: false
+        run: mise run ci:toolchain-xtensa
       - name: "Setup | Locked npm dependencies"
         run: mise run deps:npm
       - name: "Build | Bare-metal ESP32-S3 LittleFS and graphics"

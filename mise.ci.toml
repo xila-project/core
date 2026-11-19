@@ -91,6 +91,22 @@ if [ -n "${GITHUB_OUTPUT:-}" ]; then
 fi
 """
 
+[tasks."ci:toolchain-xtensa"]
+description = "Install the pinned ESP32-S3 Rust, GCC and libclang toolchain"
+tools."github:esp-rs/espup" = "{{ vars.espup_version }}"
+run = """
+set -eu
+export_file=target/espup/export-esp.sh
+mkdir -p target/espup
+espup install --targets esp32s3 --toolchain-version "{{ vars.rust_version }}.0" --skip-version-parse --crosstool-toolchain-version "{{ vars.esp_gcc_version }}" --export-file "$export_file"
+if [ -n "${GITHUB_PATH:-}" ] && [ -n "${GITHUB_ENV:-}" ]; then
+  . "$export_file"
+  gcc=$(command -v xtensa-esp32s3-elf-gcc)
+  printf '%s\\n' "${gcc%/*}" >> "$GITHUB_PATH"
+  printf 'LIBCLANG_PATH=%s\\n' "$LIBCLANG_PATH" >> "$GITHUB_ENV"
+fi
+"""
+
 [tasks."ci:toolchain-nightly"]
 description = "Prepare the pinned nightly compiler and report its cache key"
 tools.rust = { version = "{{ vars.nightly_version }}", profile = "minimal" }
@@ -442,6 +458,10 @@ tools.node = "{{ vars.node_version }}"
 [tasks."ci:xtensa"]
 description = "Build LittleFS and RGB565 graphics for bare-metal ESP32-S3"
 extends = "ci:node"
+# Locally, run ci:toolchain-xtensa and source target/espup/export-esp.sh to put
+# Xtensa GCC on PATH and point LIBCLANG_PATH at Espressif's libclang.
+# As in ci:bare-metal, -ffreestanding makes Clang's <stdint.h> define the
+# integer types for LVGL bindgen instead of deferring to later include paths.
 env = { CC_xtensa_esp32s3_none_elf = "xtensa-esp32s3-elf-gcc", BINDGEN_EXTRA_CLANG_ARGS_xtensa_esp32s3_none_elf = "-ffreestanding" }
 # Run Cargo directly with the esp toolchain, which supplies Xtensa Rust and rust-src.
 run = "rustup run esp cargo build --locked -Zbuild-std=core,alloc --target xtensa-esp32s3-none-elf -p xila-little-fs -p xila-graphics --features xila-graphics/rendering_rgb565"
