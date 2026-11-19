@@ -1,11 +1,16 @@
 //! Stackful, executor-affine native coroutines. See README.md for the safety contract.
 #![no_std]
+// The FPU control registers are read with Xtensa inline assembly.
+#![cfg_attr(
+    all(target_arch = "xtensa", stackful_corosensei, stackful_xtensa_fp),
+    feature(asm_experimental_arch)
+)]
 
 extern crate alloc;
 #[cfg(target_os = "linux")]
 extern crate std;
 
-#[cfg(target_arch = "xtensa")]
+#[cfg(all(target_arch = "xtensa", not(stackful_corosensei)))]
 compile_error!(
     "stackful: Xtensa windowed ABI is not supported yet (window spill/restore required)"
 );
@@ -28,7 +33,8 @@ compile_error!("stackful: supported operating systems are Linux and bare metal")
         target_arch = "x86_64",
         target_arch = "aarch64",
         target_arch = "arm",
-        target_arch = "riscv32"
+        target_arch = "riscv32",
+        all(target_arch = "xtensa", stackful_corosensei)
     ),
     any(target_os = "linux", target_os = "none")
 ))]
@@ -38,7 +44,8 @@ mod runtime;
         target_arch = "x86_64",
         target_arch = "aarch64",
         target_arch = "arm",
-        target_arch = "riscv32"
+        target_arch = "riscv32",
+        all(target_arch = "xtensa", stackful_corosensei)
     ),
     any(target_os = "linux", target_os = "none")
 ))]

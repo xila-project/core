@@ -49,9 +49,10 @@ impl Stack {
         unsafe { memory.as_ptr().write_bytes(PAINT, layout.size()) };
         Some(Self { memory, layout })
     }
-    pub(crate) fn top(&mut self) -> usize {
+    pub(crate) fn top(&self) -> usize {
         self.memory.as_ptr() as usize + self.layout.size()
     }
+    #[cfg(not(stackful_corosensei))]
     pub(crate) fn usable_limit(&self) -> usize {
         self.memory.as_ptr() as usize + GUARD
     }
@@ -59,16 +60,34 @@ impl Stack {
         self.layout.size() - GUARD
     }
     pub fn guard_intact(&self) -> bool {
-        (0..GUARD).all(|i| unsafe { self.memory.as_ptr().add(i).read_volatile() == PAINT })
+        // SAFETY: this Stack still owns the allocation containing the guard.
+        unsafe { guard_intact_at(self.memory) }
     }
+    #[cfg(stackful_corosensei)]
+    pub(crate) fn guard(&self) -> NonNull<u8> {
+        self.memory
+    }
+
+    #[cfg(not(stackful_corosensei))]
     pub(crate) fn check_guard(&self) {
-        // C ABI ensures fatal termination instead of unwinding over a damaged stack.
-        extern "C" fn overflow() -> ! {
-            panic!("stackful stack guard corrupted");
-        }
-        if !self.guard_intact() {
-            overflow();
-        }
+        // SAFETY: this Stack still owns the allocation containing the guard.
+        unsafe { check_guard_at(self.memory) };
+    }
+}
+
+// SAFETY: the caller must keep the guard allocation alive for the read.
+unsafe fn guard_intact_at(guard: NonNull<u8>) -> bool {
+    (0..GUARD).all(|i| unsafe { guard.as_ptr().add(i).read_volatile() == PAINT })
+}
+
+/// Check a live guard without borrowing a suspended backend's stack owner.
+pub(crate) unsafe fn check_guard_at(guard: NonNull<u8>) {
+    // C ABI ensures fatal termination instead of unwinding over a damaged stack.
+    extern "C" fn overflow() -> ! {
+        panic!("stackful stack guard corrupted");
+    }
+    if !unsafe { guard_intact_at(guard) } {
+        overflow();
     }
 }
 impl Drop for Stack {

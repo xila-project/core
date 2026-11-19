@@ -100,15 +100,14 @@ reclaim leaked host memory. Native code must never longjmp across these boundari
 
 ## Switch implementation and targets
 
-[corosensei 0.3.4](https://docs.rs/corosensei/0.3.4/corosensei/) was evaluated.
-It supports no_std with all default features disabled and is MIT OR Apache-2.0;
-its default allocator and unwind support require std. It supports ELF x86_64,
-AArch64, ARM and RISC-V, but not Xtensa/Wasm. Its unsafe Stack trait explicitly
-requires a protected guard page, which a painted embedded heap stack cannot
-satisfy. We therefore use a small independent naked-assembly switch and do not
-add that dependency or its allocator/unwinding machinery. No comparable linked
-code-size measurement was made for corosensei because its stack contract excludes
-this configuration.
+The default backend uses naked assembly. The
+[corosensei 0.3.4 probe](probe/README.md) keeps Xila's runtime and swaps the
+switching backend for measurements. The crates.io release requires a protected
+guard page and 4 KiB of usable stack. Xila's 64-byte painted guard and 2 KiB
+minimum require a separate audited-stack contract. The probe also requires a
+Cortex-M floating-point clobber patch. Normal builds and unsupported probe
+targets use the existing backend. With the corosensei fork's Xtensa backend the
+probe also builds and runs on ESP32 and ESP32-S3 (see the probe README).
 
 * x86_64 Linux SysV: six saved integer registers, SP/return PC, MXCSR and x87
   control word. No red-zone data is live across the ordinary switch call.
@@ -124,7 +123,8 @@ this configuration.
   The build script accounts for Rust not exposing unstable FP features in cfg,
   using built-in target names plus explicit +f/-f flags. Custom target specs
   need an audit of feature selection. RV32D and other custom ABIs are not claimed.
-* Xtensa ESP32/ESP32-S3: deliberate compile-time error. Windowed ABI requires
+* Xtensa ESP32/ESP32-S2/ESP32-S3: deliberate compile-time error without the
+  corosensei probe (the probe uses the fork's Xtensa backend). Windowed ABI requires
   spilling every live register window to its owning stack before switching,
   restoring window base/start and return state using a verified call-window
   protocol, preserving ABI callee state/SAR as applicable, and handling spill

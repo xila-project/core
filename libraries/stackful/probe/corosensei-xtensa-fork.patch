@@ -1,0 +1,72 @@
+diff --git a/src/arch/arm.rs b/src/arch/arm.rs
+index 12bb1a6..c80f50f 100644
+--- a/src/arch/arm.rs
++++ b/src/arch/arm.rs
+@@ -85,7 +85,8 @@ cfg_if::cfg_if! {
+                     $($asm)*
+                     lateout("r11") _,
+                     lateout("r4") _, lateout("r5") _, lateout("r8") _, lateout("r10") _,
+-                    lateout("q4") _, lateout("q5") _, lateout("q6") _, lateout("q7") _,
++                    lateout("d8") _, lateout("d9") _, lateout("d10") _, lateout("d11") _,
++                    lateout("d12") _, lateout("d13") _, lateout("d14") _, lateout("d15") _,
+                     clobber_abi("C"),
+                     options($($opt),*)
+                 )
+@@ -98,7 +99,8 @@ cfg_if::cfg_if! {
+                     $($asm)*
+                     lateout("r11") _, lateout("r9") _,
+                     lateout("r4") _, lateout("r5") _, lateout("r8") _, lateout("r10") _,
+-                    lateout("q4") _, lateout("q5") _, lateout("q6") _, lateout("q7") _,
++                    lateout("d8") _, lateout("d9") _, lateout("d10") _, lateout("d11") _,
++                    lateout("d12") _, lateout("d13") _, lateout("d14") _, lateout("d15") _,
+                     clobber_abi("C"),
+                     options($($opt),*)
+                 )
+@@ -122,7 +124,8 @@ cfg_if::cfg_if! {
+                     $($asm)*
+                     lateout("r7") _,
+                     lateout("r4") _, lateout("r5") _, lateout("r8") _, lateout("r10") _,
+-                    lateout("q4") _, lateout("q5") _, lateout("q6") _, lateout("q7") _,
++                    lateout("d8") _, lateout("d9") _, lateout("d10") _, lateout("d11") _,
++                    lateout("d12") _, lateout("d13") _, lateout("d14") _, lateout("d15") _,
+                     clobber_abi("C"),
+                     options($($opt),*)
+                 )
+@@ -135,7 +138,8 @@ cfg_if::cfg_if! {
+                     $($asm)*
+                     lateout("r7") _, lateout("r9") _,
+                     lateout("r4") _, lateout("r5") _, lateout("r8") _, lateout("r10") _,
+-                    lateout("q4") _, lateout("q5") _, lateout("q6") _, lateout("q7") _,
++                    lateout("d8") _, lateout("d9") _, lateout("d10") _, lateout("d11") _,
++                    lateout("d12") _, lateout("d13") _, lateout("d14") _, lateout("d15") _,
+                     clobber_abi("C"),
+                     options($($opt),*)
+                 )
+diff --git a/src/stack/mod.rs b/src/stack/mod.rs
+index 8dfe011..9026e98 100644
+--- a/src/stack/mod.rs
++++ b/src/stack/mod.rs
+@@ -32,15 +32,19 @@ pub type StackPointer = NonZeroUsize;
+ pub const STACK_ALIGNMENT: usize = crate::arch::STACK_ALIGNMENT;
+ 
+ /// Minimum size of a stack, excluding guard pages.
+-pub const MIN_STACK_SIZE: usize = 4096;
++pub const MIN_STACK_SIZE: usize = 2048;
++
++/// Acknowledges the local audited-stack contract for the Xila measurement.
++pub const XILA_AUDITED_HEAP_STACK_PROBE: () = ();
+ 
+ /// A trait for objects that hold ownership of a stack.
+ ///
+ /// # Safety
+ ///
+-/// To preserve memory safety, a stack must have a guard page which catches
+-/// stack overflows. It must also contain at least [`MIN_STACK_SIZE`] bytes of
+-/// usable memory.
++/// For this measurement-only fork, stacks without a protected guard require
++/// the caller of the enclosing unsafe API to bound all native stack use,
++/// including startup, all callees and interrupt frames. The stack must contain
++/// at least [`MIN_STACK_SIZE`] bytes of usable memory.
+ ///
+ /// # Windows
+ ///

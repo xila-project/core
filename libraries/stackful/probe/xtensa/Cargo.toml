@@ -1,0 +1,47 @@
+[workspace]
+
+[package]
+name = "stackful-xtensa-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+stackful = { package = "xila-stackful", path = "../..", features = [
+  "corosensei-probe",
+] }
+task = { package = "xila-task", path = "../../../../subsystems/task" }
+embassy-futures = "=0.1.2"
+embassy-time-driver = "=0.2.2"
+critical-section = "=1.2.0"
+# Same pins as corosensei's Xtensa runner: esp-hal >= 1.1 waits for the
+# ESP32-S3 BBPLL calibration, which Espressif's QEMU does not emulate.
+esp-hal = { version = "=1.0.0", features = ["unstable"] }
+esp-bootloader-esp-idf = "=0.4.0"
+esp-println = { version = "=0.16.1", default-features = false, features = [
+  "uart",
+  "critical-section",
+] }
+xtensa-lx-rt = "=0.21.0"
+
+[features]
+esp32 = ["esp-hal/esp32", "esp-bootloader-esp-idf/esp32", "esp-println/esp32"]
+esp32s2 = [
+  "esp-hal/esp32s2",
+  "esp-bootloader-esp-idf/esp32s2",
+  "esp-println/esp32s2",
+]
+esp32s3 = [
+  "esp-hal/esp32s3",
+  "esp-bootloader-esp-idf/esp32s3",
+  "esp-println/esp32s3",
+]
+# Run the runtime scenarios before the footprint workload.
+scenarios = []
+# Boot and print only, to measure the firmware without any coroutine.
+baseline = []
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+debug = false

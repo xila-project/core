@@ -1,5 +1,9 @@
+#[cfg(not(stackful_corosensei))]
 #[path = "arch.rs"]
 mod arch;
+#[cfg(stackful_corosensei)]
+#[path = "corosensei_probe.rs"]
+mod corosensei_probe;
 #[path = "stack.rs"]
 mod stack;
 pub use stack::{DEFAULT_MIN_STACK_SIZE, MIN_STACK_SIZE, Stack};
@@ -31,11 +35,23 @@ struct Pending {
     cancel: bool,
 }
 struct Control {
+    #[cfg(stackful_corosensei)]
+    native: UnsafeCell<corosensei_probe::Native>,
+    #[cfg(stackful_corosensei)]
+    guard: core::ptr::NonNull<u8>,
+    #[cfg(stackful_corosensei)]
+    yielder: Cell<*const corosensei_probe::Yielder>,
+    #[cfg(not(stackful_corosensei))]
     stack: Stack,
+    #[cfg(not(stackful_corosensei))]
     coroutine_sp: UnsafeCell<usize>,
+    #[cfg(not(stackful_corosensei))]
     caller_sp: UnsafeCell<usize>,
+    #[cfg(not(stackful_corosensei))]
     entry: Cell<*mut u8>,
+    #[cfg(not(stackful_corosensei))]
     run: unsafe fn(*mut u8) -> i32,
+    #[cfg(not(stackful_corosensei))]
     destroy: unsafe fn(*mut u8),
     pending: Cell<Option<Pending>>,
     started: Cell<bool>,
@@ -44,6 +60,7 @@ struct Control {
     tls: [Cell<usize>; TLS_SLOTS],
     native_context: Cell<*const ()>,
 }
+#[cfg(not(stackful_corosensei))]
 impl Drop for Control {
     fn drop(&mut self) {
         if !self.started.get() {
@@ -102,32 +119,55 @@ impl Coroutine {
     /// application ABI and the synchronous VFS files and directories. That core would
     /// see the live coroutine as its own and switch onto its stack. A per-core current
     /// pointer (xila-project/core#682) lifts this restriction.
-    pub unsafe fn new<F: FnOnce() -> i32 + 'static>(mut stack: Stack, entry: F) -> Self {
-        unsafe fn run<F: FnOnce() -> i32>(p: *mut u8) -> i32 {
-            unsafe { p.cast::<F>().read()() }
-        }
-        unsafe fn destroy<F>(p: *mut u8) {
-            unsafe { p.cast::<F>().drop_in_place() };
-        }
-        let top = stack.top();
-        let entry_address = (top
-            .checked_sub(core::mem::size_of::<F>())
-            .expect("entry too large"))
-            & !(core::mem::align_of::<F>() - 1);
-        assert!(
-            entry_address >= stack.usable_limit() + 1024,
-            "entry leaves too little stack"
-        );
-        let sp = unsafe { arch::initialize(entry_address & !15, trampoline as *const () as usize) };
-        unsafe { (entry_address as *mut F).write(entry) };
+    pub unsafe fn new<F: FnOnce() -> i32 + 'static>(stack: Stack, entry: F) -> Self {
+        #[cfg(stackful_corosensei)]
+        // SAFETY: the caller provides the audited stack bound and native
+        // execution contract for the experimental backend.
+        let (guard, native) = (stack.guard(), unsafe {
+            corosensei_probe::new(stack, entry)
+        });
+        #[cfg(not(stackful_corosensei))]
+        let (sp, entry_address, run, destroy) = {
+            unsafe fn run<F: FnOnce() -> i32>(p: *mut u8) -> i32 {
+                unsafe { p.cast::<F>().read()() }
+            }
+            unsafe fn destroy<F>(p: *mut u8) {
+                unsafe { p.cast::<F>().drop_in_place() };
+            }
+            let top = stack.top();
+            let entry_address = (top
+                .checked_sub(core::mem::size_of::<F>())
+                .expect("entry too large"))
+                & !(core::mem::align_of::<F>() - 1);
+            assert!(
+                entry_address >= stack.usable_limit() + 1024,
+                "entry leaves too little stack"
+            );
+            let sp =
+                unsafe { arch::initialize(entry_address & !15, trampoline as *const () as usize) };
+            unsafe { (entry_address as *mut F).write(entry) };
+            (sp, entry_address, run::<F>, destroy::<F>)
+        };
         Self {
             control: Rc::new(Control {
+                #[cfg(stackful_corosensei)]
+                native: UnsafeCell::new(native),
+                #[cfg(stackful_corosensei)]
+                guard,
+                #[cfg(stackful_corosensei)]
+                yielder: Cell::new(core::ptr::null()),
+                #[cfg(not(stackful_corosensei))]
                 stack,
+                #[cfg(not(stackful_corosensei))]
                 coroutine_sp: UnsafeCell::new(sp),
+                #[cfg(not(stackful_corosensei))]
                 caller_sp: UnsafeCell::new(0),
+                #[cfg(not(stackful_corosensei))]
                 entry: Cell::new(entry_address as *mut u8),
-                run: run::<F>,
-                destroy: destroy::<F>,
+                #[cfg(not(stackful_corosensei))]
+                run,
+                #[cfg(not(stackful_corosensei))]
+                destroy,
                 pending: Cell::new(None),
                 started: Cell::new(false),
                 result: Cell::new(None),
@@ -174,10 +214,25 @@ impl Coroutine {
                 }
                 self.control.pending.set(None);
             }
-            self.control.stack.check_guard();
+            self.control.check_guard();
             let previous = current();
             set_current(c);
             self.control.started.set(true);
+            #[cfg(stackful_corosensei)]
+            // SAFETY: the native switch is exclusive to this driver. The native
+            // side accesses only the separate interior-mutable control fields.
+            unsafe {
+                let native = &mut *self.control.native.get();
+                corosensei_probe::preserving_fp(|| {
+                    native.resume(());
+                });
+                if matches!(self.control.result.get(), Some(Ok(_))) {
+                    // SAFETY: finish() abandoned the coroutine frames for good,
+                    // as documented by exit(). Nothing on them is dropped.
+                    native.force_reset();
+                }
+            }
+            #[cfg(not(stackful_corosensei))]
             unsafe {
                 arch::switch(
                     self.control.caller_sp.get(),
@@ -185,7 +240,7 @@ impl Coroutine {
                 )
             };
             set_current(previous);
-            self.control.stack.check_guard();
+            self.control.check_guard();
         }
     }
 }
@@ -292,10 +347,13 @@ unsafe fn suspend_pending(control: *const Control, pending: Pending) {
     // SAFETY: the caller is on this control's coroutine stack and the pending
     // future remains pinned until completion or cancellation of that stack.
     unsafe {
-        (*control).stack.check_guard();
+        (*control).check_guard();
         (*control).pending.set(Some(pending));
+        #[cfg(stackful_corosensei)]
+        corosensei_probe::preserving_fp(|| (&*(*control).yielder.get()).suspend(()));
+        #[cfg(not(stackful_corosensei))]
         arch::switch((*control).coroutine_sp.get(), (*control).caller_sp.get());
-        (*control).stack.check_guard();
+        (*control).check_guard();
     }
 }
 
@@ -349,6 +407,18 @@ pub fn tls_set(slot: usize, value: usize) -> Result<(), TlsError> {
     Ok(())
 }
 
+impl Control {
+    fn check_guard(&self) {
+        #[cfg(stackful_corosensei)]
+        // SAFETY: native owns the Stack containing the guard for our lifetime.
+        unsafe {
+            stack::check_guard_at(self.guard);
+        }
+        #[cfg(not(stackful_corosensei))]
+        self.stack.check_guard();
+    }
+}
+
 /// Publish `status`, wake the join observer and leave the coroutine for good.
 ///
 /// # Safety
@@ -361,7 +431,11 @@ unsafe fn finish(c: *const Control, status: i32) -> ! {
         if let Some(w) = waker {
             w.wake();
         }
-        (*c).stack.check_guard();
+        (*c).check_guard();
+        // The driver discards the abandoned corosensei frames with force_reset.
+        #[cfg(stackful_corosensei)]
+        (&*(*c).yielder.get()).suspend(());
+        #[cfg(not(stackful_corosensei))]
         arch::switch((*c).coroutine_sp.get(), (*c).caller_sp.get());
     }
     panic!("completed coroutine resumed");
@@ -387,6 +461,7 @@ pub unsafe fn exit(status: i32) -> ! {
     unsafe { finish(c, status) }
 }
 
+#[cfg(not(stackful_corosensei))]
 // C ABI makes escaping panics abort on hosts even when the application uses unwind.
 extern "C" fn trampoline() -> ! {
     let c = current();

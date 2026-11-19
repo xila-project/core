@@ -260,6 +260,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "corosensei"
+version = "0.3.4"
+source = "git+https://github.com/AlixANNERAUD/corosensei.git?rev=4d0a022e99728e3b028af4b1497e2d926cdb9d2d#4d0a022e99728e3b028af4b1497e2d926cdb9d2d"
+dependencies = [
+ "autocfg",
+ "cfg-if",
+ "scopeguard",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2335,6 +2345,7 @@ dependencies = [
 name = "xila-stackful"
 version = "0.1.0"
 dependencies = [
+ "corosensei",
  "critical-section",
  "embassy-futures",
  "embassy-sync",

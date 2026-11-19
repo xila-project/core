@@ -7,6 +7,8 @@ rust-version.workspace = true
 [features]
 # Preserve FP callee state for native soft-float/softfp callers using an FPU.
 fpu = []
+# Experimental backend. Also requires the local dependency patch and rustc cfg.
+corosensei-probe = ["dep:corosensei"]
 
 [lib]
 name = "stackful"
@@ -19,8 +21,12 @@ embassy-sync = { workspace = true }
 embassy-futures = { workspace = true }
 critical-section = { workspace = true, features = ["std"] }
 
-[target.'cfg(not(any(target_arch = "xtensa", target_arch = "wasm32")))'.dependencies]
+[target.'cfg(any(not(any(target_arch = "xtensa", target_arch = "wasm32")), all(target_arch = "xtensa", stackful_corosensei_probe)))'.dependencies]
 task = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 task = { workspace = true, features = ["test_harness"] }
+
+# Fork branch `xtensa-support` (corosensei 0.3.4 plus the Xtensa backend).
+[target.'cfg(all(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "arm", target_arch = "riscv32", target_arch = "xtensa"), any(target_os = "linux", target_os = "none")))'.dependencies]
+corosensei = { git = "https://github.com/AlixANNERAUD/corosensei.git", rev = "4d0a022e99728e3b028af4b1497e2d926cdb9d2d", default-features = false, optional = true }

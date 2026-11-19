@@ -12,6 +12,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 EXPECTED_PACKAGE_NAMES = {
     "libraries/stackful/Cargo.toml": "xila-stackful",
+    "libraries/stackful/probe/Cargo.toml": "stackful-firmware-probe",
+    "libraries/stackful/probe/xtensa/Cargo.toml": "stackful-xtensa-probe",
     "libraries/native_loader/Cargo.toml": "xila-native-loader",
     "core/Cargo.toml": "xila",
     "devices/Cargo.toml": "xila-device",
@@ -125,6 +127,9 @@ class CargoPackageNames(unittest.TestCase):
                 "libraries/http/Cargo.toml",
                 "libraries/littlefs2_sys/Cargo.toml",
                 "tools/verification_probe/Cargo.toml",
+                # Unpublished research probes for the corosensei backend.
+                "libraries/stackful/probe/Cargo.toml",
+                "libraries/stackful/probe/xtensa/Cargo.toml",
             }:
                 self.assertTrue(name.startswith("xila-"), f"{path} has unprefixed name {name}")
 

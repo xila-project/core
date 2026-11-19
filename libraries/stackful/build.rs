@@ -1,7 +1,10 @@
 use std::env;
 fn main() {
+    println!("cargo:rustc-check-cfg=cfg(stackful_corosensei)");
+    println!("cargo:rustc-check-cfg=cfg(stackful_corosensei_probe)");
     println!("cargo:rustc-check-cfg=cfg(stackful_float)");
     println!("cargo:rustc-check-cfg=cfg(stackful_fpv5)");
+    println!("cargo:rustc-check-cfg=cfg(stackful_xtensa_fp)");
     println!("cargo:rerun-if-env-changed=CARGO_ENCODED_RUSTFLAGS");
     let target = env::var("TARGET").unwrap();
     let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
@@ -44,6 +47,27 @@ fn main() {
             || target.starts_with("thumbv8m.main-"))
     {
         panic!("stackful: only Cortex-M thumbv6m, thumbv7em and thumbv8m.main are supported");
+    }
+    let supported = match arch.as_str() {
+        "x86_64" => target.ends_with("-linux-gnu"),
+        "aarch64" => true,
+        "riscv32" => !float || target == "riscv32imafc-unknown-none-elf",
+        // Rust's soft-float ABI does not guarantee preservation of the softfp
+        // C caller's callee-saved VFP registers. Retain the explicit saves.
+        "arm" => !float || target.ends_with("eabihf"),
+        // Windowed ABI, ESP32, ESP32-S2 and ESP32-S3 (fork branch only).
+        "xtensa" => true,
+        _ => false,
+    };
+    if supported
+        && env::var_os("CARGO_FEATURE_COROSENSEI_PROBE").is_some()
+        && env::var_os("CARGO_CFG_STACKFUL_COROSENSEI_PROBE").is_some()
+    {
+        println!("cargo:rustc-cfg=stackful_corosensei");
+    }
+    // ESP32 and ESP32-S3 have the single-precision FPU; the ESP32-S2 has none.
+    if arch == "xtensa" && features.split(',').any(|f| f == "fp") {
+        println!("cargo:rustc-cfg=stackful_xtensa_fp");
     }
     if float {
         println!("cargo:rustc-cfg=stackful_float");
