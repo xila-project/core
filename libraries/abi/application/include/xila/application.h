@@ -197,7 +197,8 @@ typedef struct XilaFile XilaFile;
  * pointer and reject it as `InvalidArgument` unless it is aligned and its tag
  * matches: an interior pointer or a double free (including one through a
  * pointer that a moving resize left stale) is caught, and so is a
- * foreign-heap pointer unless the two heaps' keys collide, which is unlikely. Like a C allocator, this reads through the pointer, so it needs
+ * foreign-heap pointer unless the two heaps' keys collide, which is
+ * unlikely. Like a C allocator, this reads through the pointer, so it needs
  * readable memory below it. It cannot detect a freed block whose memory was
  * reused by a later allocation of this heap, which then identifies the new
  * block. Metadata lives in the block, so no operation allocates it and a

@@ -48,7 +48,8 @@ const KEY_MULTIPLIER: usize = 0x9E37_79B9_7F4A_7C15;
 /// pointer and reject it as `InvalidArgument` unless it is aligned and its tag
 /// matches: an interior pointer or a double free (including one through a
 /// pointer that a moving resize left stale) is caught, and so is a
-/// foreign-heap pointer unless the two heaps' keys collide, which is unlikely. Like a C allocator, this reads through the pointer, so it needs
+/// foreign-heap pointer unless the two heaps' keys collide, which is
+/// unlikely. Like a C allocator, this reads through the pointer, so it needs
 /// readable memory below it. It cannot detect a freed block whose memory was
 /// reused by a later allocation of this heap, which then identifies the new
 /// block. Metadata lives in the block, so no operation allocates it and a
@@ -107,7 +108,7 @@ impl Heap {
         }
         if self.key == 0 {
             // Live blocks have distinct addresses, so mixing in the first one
-            // keeps heaps that reuse an address apart. A plain XOR would only
+            // keeps heaps that reuse an address apart. A plain XOR would mostly
             // depend on their distance, which is the same for every process.
             let mixed = ptr::from_mut(self).addr().wrapping_mul(KEY_MULTIPLIER) ^ block.addr();
             self.key = (mixed.wrapping_mul(KEY_MULTIPLIER) ^ KEY_SALT) | 1;
@@ -144,8 +145,10 @@ impl Heap {
         };
         // A moving resize frees the old block without this heap writing to it
         // again, so clear its tag first: a stale pointer must not match.
+        // Volatile: the allocator may free the block, and a plain store just
+        // before that could be removed as dead.
         // SAFETY: The tag matched, so the old block is live.
-        unsafe { (*old).tag = 0 };
+        unsafe { ptr::addr_of_mut!((*old).tag).write_volatile(0) };
         // SAFETY: The old layout is the one the block was allocated with.
         let block = unsafe { realloc(old.cast(), old_layout, new_layout.size()).cast::<Block>() };
         if block.is_null() {
@@ -186,8 +189,9 @@ impl Heap {
             if !next.is_null() {
                 (*next).previous = previous;
             }
-            // A second free of this pointer then fails the tag check.
-            (*block).tag = 0;
+            // A second free of this pointer then fails the tag check. Volatile,
+            // so the store before dealloc is never removed as dead.
+            ptr::addr_of_mut!((*block).tag).write_volatile(0);
             let Ok(layout) = layout(size) else {
                 unreachable!();
             };
@@ -492,6 +496,7 @@ mod regression_tests {
     #[cfg_attr(miri, ignore = "reads the freed block's header")]
     fn stale_pointer_after_moving_reallocate_is_rejected() {
         let mut heap = Heap::new();
+        let mut moves = 0;
         for _ in 0..16 {
             let keep = heap
                 .allocate(32)
@@ -503,11 +508,15 @@ mod regression_tests {
                 .reallocate(old, 1 << 20)
                 .unwrap_or_else(|_| panic!("grow failed"));
             if new != old {
+                moves += 1;
                 assert_eq!(heap.free(old), Err(Status::InvalidArgument));
             }
             assert_eq!(heap.free(new), Ok(()));
             assert_eq!(heap.free(keep), Ok(()));
         }
+        // Growing a small block to 1 MiB must move it at least once, or this
+        // test checks nothing.
+        assert!(moves > 0);
     }
 
     // Process owners laid out one after another put each heap at the same

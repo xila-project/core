@@ -183,7 +183,8 @@ if the two heaps' keys collide, which is unlikely.
 Each block starts with a 16-byte header on 32-bit targets (Arm and RV32) and
 32 bytes on 64-bit targets: previous and next links, the size and an owner tag.
 The doubly linked list gives constant-time free and resize. The tag is a
-per-heap key XOR the block address, and free clears it. Free and resize check
+per-heap key XOR the block address. Free clears it, and so does a moving
+resize before it releases the old block. Free and resize check
 the alignment and the tag before they unlink anything. The heap keeps no side
 table: its metadata never allocates, never fails and never outlives the block,
 so a shrinking resize cannot fail because of it.
