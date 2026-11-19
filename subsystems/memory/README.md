@@ -32,7 +32,7 @@ accessed data must also be available in that path.
 
 ### DMA Alignment Without Per-Allocation Headers
 
-`ManagerTrait::deallocate` receives `(pointer, layout)` without `CapabilityFlags` and `RegionManager` stores zero per-allocation headers. Silently rounding up `layout.size()` or `layout.align()` inside `allocate` would cause `linked_list_allocator::Heap::deallocate` to recompute a different block size and corrupt free-list accounting—and on cached targets, sharing a cache line between a DMA buffer and adjacent heap metadata causes data corruption during cache invalidation.
+`ManagerTrait::deallocate` receives `(pointer, layout)` without `CapabilityFlags` and `RegionManager` stores zero per-allocation headers. Silently rounding up `layout.size()` or `layout.align()` inside `allocate` would cause the region heap's `deallocate` to recompute a different block size and corrupt free-list accounting—and on cached targets, sharing a cache line between a DMA buffer and adjacent heap metadata causes data corruption during cache invalidation.
 
 Instead, each [`RegionDescriptor`](./src/region_manager.rs) encodes a power-of-two DMA alignment in one byte. When `CapabilityFlags::DirectMemoryAccess` is requested, a region qualifies only if:
 - its `CapabilityFlags` contain `DirectMemoryAccess`, and
@@ -78,10 +78,17 @@ Placement policy is **platform behavior** configured via [`RegionManager::new`](
   - Allocations strictly smaller than the threshold probe regions forward (`0..N`), placing small general-purpose objects in fast internal RAM first.
   - Allocations at or above the threshold probe regions in reverse (`(0..N).rev()`), steering large buffers into external PSRAM first when available.
 - **Fallback:** If the preferred region is uninitialized (e.g. a board without PSRAM), lacks a requested capability (`AlwaysAccessible`, `DirectMemoryAccess`), rejects the caller's DMA alignment, or is full, the manager continues across the remaining capable regions in order before returning `None`.
-- Reallocation can move blocks between regions and uses ordinary placement.
-  Callers that need capabilities after resizing allocate a replacement with the
-  same flags, copy the data and free the original block. Deallocation finds the
-  owning region by its address range.
+- Reallocation resizes in place when it can, so a block keeps the region it was
+  allocated in. A shrink keeps the pointer and returns the freed tail to the
+  region. A growth keeps the pointer when the memory right after the block is
+  free. Otherwise the block moves: the region of the old block is tried first,
+  then the ordinary placement order applies, so a block only leaves its region
+  when that region cannot hold it. A block does not record its capabilities, so
+  a block that has to leave a full region can lose the capabilities of that
+  region; callers that must never lose them allocate a replacement with the same
+  flags, copy the data and free the original block. A block in a DMA-capable
+  region that sits at a DMA-aligned address keeps that alignment when it moves
+  within the region. Deallocation finds the owning region by its address range.
 
 Boards without initialized PSRAM continue to place ordinary allocations in
 their primary region. The host keeps its existing lazy mappings and growth
@@ -91,7 +98,7 @@ for bit 2 from the Rust definition.
 
 ## Overhead Budget
 
-`RegionManager<N>` uses static `[Region; N]` storage backed by `linked_list_allocator::Heap` under `critical_section::Mutex`, with **zero per-allocation headers** and **zero heap allocation** for its own bookkeeping.
+`RegionManager<N>` uses static `[Region; N]` storage backed by an address-ordered first-fit free list ([`heap.rs`](./src/heap.rs), the block model of `linked_list_allocator::Heap` with the hole list kept reachable so a block can be resized in place) under `critical_section::Mutex`, with **zero per-allocation headers** and **zero heap allocation** for its own bookkeeping. A region costs 20 B on 32-bit targets (a 16 B heap and the descriptor).
 
 Measured with a freestanding ELF probe built with Rust
 `1.102.0-nightly (8eb778d04 2026-11-12)`, `opt-level = "z"`, LTO, one
@@ -102,21 +109,28 @@ stub critical-section hooks and takes the backing addresses as inputs.
 the ELF section sizes. Heap backing bytes and the firmware runtime are
 outside the measurement.
 
-| Configuration | Target | Manager RAM | ELF `.text` | ELF `.data` / `.bss` |
+| Configuration | Target | Manager RAM | ELF `.text` (before in-place resize) | ELF `.data` / `.bss` |
 |---|---|---:|---:|---:|
-| `RegionManager<1>` (without `Debug`) | `thumbv7em-none-eabihf` | 36 B | 1,976 B | 36 B / 0 B |
-| `RegionManager<1>` (without `Debug`) | `riscv32imac-unknown-none-elf` | 36 B | 1,902 B | 36 B / 0 B |
-| `RegionManager<2>` (without `Debug`) | `thumbv7em-none-eabihf` | 64 B | 2,056 B | 64 B / 0 B |
-| `RegionManager<2>` (without `Debug`) | `riscv32imac-unknown-none-elf` | 64 B | 2,002 B | 64 B / 0 B |
-| `RegionManager<2>` (with `Debug`) | `thumbv7em-none-eabihf` | 76 B | 2,202 B | 76 B / 0 B |
-| `RegionManager<2>` (with `Debug`) | `riscv32imac-unknown-none-elf` | 76 B | 2,174 B | 76 B / 0 B |
+| `RegionManager<1>` (without `Debug`) | `thumbv7em-none-eabihf` | 28 B | 1,976 B | 28 B / 0 B |
+| `RegionManager<1>` (without `Debug`) | `riscv32imac-unknown-none-elf` | 28 B | 1,902 B | 28 B / 0 B |
+| `RegionManager<2>` (without `Debug`) | `thumbv7em-none-eabihf` | 48 B | 2,056 B | 48 B / 0 B |
+| `RegionManager<2>` (without `Debug`) | `riscv32imac-unknown-none-elf` | 48 B | 2,002 B | 48 B / 0 B |
+| `RegionManager<2>` (with `Debug`) | `thumbv7em-none-eabihf` | 60 B | 2,202 B | 60 B / 0 B |
+| `RegionManager<2>` (with `Debug`) | `riscv32imac-unknown-none-elf` | 60 B | 2,174 B | 60 B / 0 B |
 | `esp_alloc::EspHeap` (0.11.0, LLFF) | `riscv32imac-unknown-none-elf` | 100 B | 2,082 B | 0 B / 100 B |
 
 Each probe had 0 B of `.rodata`. `Debug`, enabled by default, adds three
 32-bit statistics counters. With those counters, the two-region manager uses
-24 B less static RAM than the measured three-slot `EspHeap`. Disabling
+40 B less static RAM than the measured three-slot `EspHeap`. Disabling
 `Debug` saves another 12 B. These link sizes are probe-specific and omit
 board startup, critical-section and cache maintenance costs.
+
+The RAM figures and `.data` were updated for the in-place heap: it drops the
+unused dummy hole size and the pending-extend byte of `linked_list_allocator`,
+so a region is 8 B smaller. The `.text` column was measured before the heap
+changed. In-place reallocation and the owned heap add flash: the same kind of
+probe (Rust 1.100.0, `thumbv7em-none-eabi`, the options above, `RegionManager<2>`)
+grew from 2,164 B to 2,394 B without `Debug` and from 2,294 B to 2,600 B with it.
 
 [metadata]: https://docs.rs/crate/esp-metadata-generated/0.5.3/source/src/_build_script_utils.rs
 [region-alignment]: https://docs.rs/crate/esp-hal/1.2.2/source/src/dma/aligned.rs

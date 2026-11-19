@@ -83,9 +83,6 @@ portable-atomic-util = { version = "0.2", default-features = false, features = [
   "alloc",
 ] }
 smoltcp = { version = "0.14", default-features = false }
-linked_list_allocator = { version = "0.10", default-features = false, features = [
-  "const_mut_refs",
-] }
 darling = { version = "0.24" }
 regex = { version = "1" }
 embedded-io-async = { version = "0.7", features = ["alloc"] }

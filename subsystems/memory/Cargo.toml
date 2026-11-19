@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 bitflags = { version = "2", default-features = false }
-linked_list_allocator = { workspace = true }
 critical-section = { workspace = true }
 
 [target.'cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))'.dev-dependencies]
