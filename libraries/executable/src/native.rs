@@ -10,6 +10,7 @@ pub struct NativeFormat {
     stack_size: usize,
     file_limit: usize,
     image_limit: usize,
+    home: Option<(&'static str, u32)>,
 }
 
 impl NativeFormat {
@@ -33,7 +34,19 @@ impl NativeFormat {
             stack_size,
             file_limit,
             image_limit,
+            home: None,
         }
+    }
+
+    /// Grant every launched program a directory capability at an absolute path with
+    /// the given `XILA_RIGHT_*` bits. It becomes `XilaStartup.home`, which the SDK's
+    /// POSIX layer resolves absolute and relative paths against. Without it, programs
+    /// receive no filesystem authority beyond their standard streams. Opening the
+    /// capability must complete without suspending, like any other native ABI call
+    /// made before the program starts.
+    pub const fn with_home(mut self, path: &'static str, rights: u32) -> Self {
+        self.home = Some((path, rights));
+        self
     }
 
     pub const fn registration(&'static self) -> ExecutableFormat {
@@ -87,6 +100,18 @@ impl FormatHandler for NativeFormat {
             let stack = Stack::try_with_min_size(self.stack_size, MIN_STACK_SIZE)
                 .ok_or(Error::Native(native_loader::Error::AllocationFailed))?;
             let image = self.load(&mut request).await?;
+            let home = match self.home {
+                Some((path, rights)) => Some(
+                    abi_application::Directory::new(
+                        context.virtual_file_system,
+                        request.parent,
+                        path,
+                        rights,
+                    )
+                    .map_err(|_| Error::FileSystem(virtual_file_system::Error::InvalidPath))?,
+                ),
+                None => None,
+            };
             let (input, output, error) = request.standard.split();
             let wrap = |file: virtual_file_system::File<'static>| {
                 Some(abi_application::File::new(file.into_synchronous_file()))
@@ -96,7 +121,7 @@ impl FormatHandler for NativeFormat {
                 standard_input: wrap(input),
                 standard_output: wrap(output),
                 standard_error: wrap(error),
-                home: None,
+                home,
             };
             let spawned = unsafe {
                 image.spawn(
