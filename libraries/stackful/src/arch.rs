@@ -128,6 +128,11 @@ pub unsafe fn initialize(top: usize, entry: usize) -> usize {
 #[unsafe(naked)]
 pub unsafe extern "C" fn switch(_from: *mut usize, _to: *const usize) {
     naked_asm!(
+        // Rust 1.97 assembles naked functions without the target's FPU
+        // features, so the VFP instructions below need an explicit `.fpu`.
+        // fpv4-sp-d16 (Cortex-M4F) is a subset of fpv5-sp-d16 (Cortex-M33),
+        // and covers every instruction used here.
+        ".fpu fpv4-sp-d16",
         "push {{r4-r7, lr}}",
         "mov r4, r8",
         "mov r5, r9",
