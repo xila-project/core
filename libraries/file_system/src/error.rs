@@ -244,15 +244,51 @@ impl Display for Error {
 
 impl embedded_io_async::Error for Error {
     fn kind(&self) -> embedded_io_async::ErrorKind {
+        use embedded_io_async::ErrorKind;
+
         match self {
-            Error::PermissionDenied => embedded_io_async::ErrorKind::PermissionDenied,
-            Error::NotFound => embedded_io_async::ErrorKind::NotFound,
-            Error::AlreadyExists | Error::DirectoryAlreadyExists => {
-                embedded_io_async::ErrorKind::AlreadyExists
-            }
-            Error::FileSystemFull | Error::NoSpaceLeft => embedded_io_async::ErrorKind::OutOfMemory,
-            Error::InputOutput => embedded_io_async::ErrorKind::Interrupted,
-            _ => embedded_io_async::ErrorKind::Other,
+            Error::PermissionDenied => ErrorKind::PermissionDenied,
+            Error::NotFound | Error::NoAttribute | Error::NotMounted => ErrorKind::NotFound,
+            Error::AlreadyExists
+            | Error::DirectoryAlreadyExists
+            | Error::AlreadyInitialized
+            | Error::AlreadyMounted => ErrorKind::AlreadyExists,
+            Error::InvalidPath
+            | Error::InvalidIdentifier
+            | Error::InvalidMode
+            | Error::InvalidParameter
+            | Error::InvalidFlags
+            | Error::NotDirectory
+            | Error::IsDirectory
+            | Error::DirectoryNotEmpty
+            | Error::FileTooLarge
+            | Error::NameTooLong
+            | Error::InvalidInode
+            | Error::InvalidContext => ErrorKind::InvalidInput,
+            Error::InvalidFile
+            | Error::InvalidDirectory
+            | Error::InvalidSymbolicLink
+            | Error::Corrupted => ErrorKind::InvalidData,
+            Error::UnsupportedOperation => ErrorKind::Unsupported,
+            Error::NoMemory => ErrorKind::OutOfMemory,
+            // embedded-io has no generic I/O, storage exhaustion or busy kind.
+            Error::FailedToInitializeFileSystem
+            | Error::FileSystemFull
+            | Error::FileSystemError
+            | Error::Unknown
+            | Error::FailedToGetTaskInformations
+            | Error::FailedToGetUsersInformations
+            | Error::TooManyMountedFileSystems
+            | Error::TooManyOpenFiles
+            | Error::InternalError
+            | Error::RessourceBusy
+            | Error::NotInitialized
+            | Error::FailedToGetUsersManagerInstance
+            | Error::FailedToGetTaskManagerInstance
+            | Error::InputOutput
+            | Error::NoSpaceLeft
+            | Error::TimeError
+            | Error::Other => ErrorKind::Other,
         }
     }
 }
@@ -261,6 +297,61 @@ impl embedded_io_async::Error for Error {
 mod tests {
     use super::*;
     use alloc::format;
+
+    #[test]
+    fn embedded_io_error_kinds() {
+        use embedded_io_async::{Error as _, ErrorKind};
+
+        let cases = [
+            (Error::PermissionDenied, ErrorKind::PermissionDenied),
+            (Error::NotFound, ErrorKind::NotFound),
+            (Error::NoAttribute, ErrorKind::NotFound),
+            (Error::NotMounted, ErrorKind::NotFound),
+            (Error::AlreadyExists, ErrorKind::AlreadyExists),
+            (Error::DirectoryAlreadyExists, ErrorKind::AlreadyExists),
+            (Error::AlreadyInitialized, ErrorKind::AlreadyExists),
+            (Error::AlreadyMounted, ErrorKind::AlreadyExists),
+            (Error::InvalidPath, ErrorKind::InvalidInput),
+            (Error::InvalidIdentifier, ErrorKind::InvalidInput),
+            (Error::InvalidMode, ErrorKind::InvalidInput),
+            (Error::InvalidParameter, ErrorKind::InvalidInput),
+            (Error::InvalidFlags, ErrorKind::InvalidInput),
+            (Error::NotDirectory, ErrorKind::InvalidInput),
+            (Error::IsDirectory, ErrorKind::InvalidInput),
+            (Error::DirectoryNotEmpty, ErrorKind::InvalidInput),
+            (Error::FileTooLarge, ErrorKind::InvalidInput),
+            (Error::NameTooLong, ErrorKind::InvalidInput),
+            (Error::InvalidInode, ErrorKind::InvalidInput),
+            (Error::InvalidContext, ErrorKind::InvalidInput),
+            (Error::InvalidFile, ErrorKind::InvalidData),
+            (Error::InvalidDirectory, ErrorKind::InvalidData),
+            (Error::InvalidSymbolicLink, ErrorKind::InvalidData),
+            (Error::Corrupted, ErrorKind::InvalidData),
+            (Error::UnsupportedOperation, ErrorKind::Unsupported),
+            (Error::NoMemory, ErrorKind::OutOfMemory),
+            (Error::FailedToInitializeFileSystem, ErrorKind::Other),
+            (Error::FileSystemFull, ErrorKind::Other),
+            (Error::FileSystemError, ErrorKind::Other),
+            (Error::Unknown, ErrorKind::Other),
+            (Error::FailedToGetTaskInformations, ErrorKind::Other),
+            (Error::FailedToGetUsersInformations, ErrorKind::Other),
+            (Error::TooManyMountedFileSystems, ErrorKind::Other),
+            (Error::TooManyOpenFiles, ErrorKind::Other),
+            (Error::InternalError, ErrorKind::Other),
+            (Error::RessourceBusy, ErrorKind::Other),
+            (Error::NotInitialized, ErrorKind::Other),
+            (Error::FailedToGetUsersManagerInstance, ErrorKind::Other),
+            (Error::FailedToGetTaskManagerInstance, ErrorKind::Other),
+            (Error::InputOutput, ErrorKind::Other),
+            (Error::NoSpaceLeft, ErrorKind::Other),
+            (Error::TimeError, ErrorKind::Other),
+            (Error::Other, ErrorKind::Other),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(error.kind(), expected, "{error:?}");
+        }
+    }
 
     #[test]
     fn test_error_discriminants() {

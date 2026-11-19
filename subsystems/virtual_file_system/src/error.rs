@@ -130,13 +130,93 @@ impl core::error::Error for Error {}
 impl embedded_io_async::Error for Error {
     fn kind(&self) -> ErrorKind {
         match self {
-            Error::PermissionDenied => ErrorKind::PermissionDenied,
-            Error::NotADirectory => ErrorKind::InvalidInput,
-            Error::NotAFile => ErrorKind::InvalidInput,
-            Error::InvalidMode => ErrorKind::InvalidInput,
-            Error::InvalidOpen => ErrorKind::InvalidInput,
+            Error::FileSystem(error) => embedded_io_async::Error::kind(error),
+            Error::PermissionDenied | Error::PathEscapesRoot => ErrorKind::PermissionDenied,
+            Error::AlreadyInitialized | Error::AlreadyExists => ErrorKind::AlreadyExists,
+            Error::InvalidParameter
+            | Error::InvalidIdentifier
+            | Error::InvalidPath
+            | Error::NotADirectory
+            | Error::NotAFile
+            | Error::InvalidInode
+            | Error::InvalidMode
+            | Error::InvalidOpen => ErrorKind::InvalidInput,
+            Error::InvalidFileSystem | Error::MissingAttribute | Error::DelimiterNotFound => {
+                ErrorKind::InvalidData
+            }
             Error::UnsupportedOperation => ErrorKind::Unsupported,
-            _ => ErrorKind::Other,
+            // FailedToWrite can also wrap a generic failure, so it cannot imply WriteZero.
+            Error::UnavailableDriver
+            | Error::TooManyOpenFiles
+            | Error::FailedToGetTaskInformations
+            | Error::TooManyInodes
+            | Error::RessourceBusy
+            | Error::FailedToWrite
+            | Error::Orphaned
+            | Error::Time(_)
+            | Error::Users(_)
+            | Error::Task(_)
+            | Error::CrossDevice => ErrorKind::Other,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Error;
+
+    #[test]
+    fn embedded_io_error_kinds() {
+        use embedded_io_async::{Error as _, ErrorKind};
+
+        let cases = [
+            (Error::PermissionDenied, ErrorKind::PermissionDenied),
+            (Error::PathEscapesRoot, ErrorKind::PermissionDenied),
+            (Error::AlreadyInitialized, ErrorKind::AlreadyExists),
+            (Error::AlreadyExists, ErrorKind::AlreadyExists),
+            (Error::InvalidParameter, ErrorKind::InvalidInput),
+            (Error::InvalidIdentifier, ErrorKind::InvalidInput),
+            (Error::InvalidPath, ErrorKind::InvalidInput),
+            (Error::NotADirectory, ErrorKind::InvalidInput),
+            (Error::NotAFile, ErrorKind::InvalidInput),
+            (Error::InvalidInode, ErrorKind::InvalidInput),
+            (Error::InvalidMode, ErrorKind::InvalidInput),
+            (Error::InvalidOpen, ErrorKind::InvalidInput),
+            (Error::InvalidFileSystem, ErrorKind::InvalidData),
+            (Error::MissingAttribute, ErrorKind::InvalidData),
+            (Error::DelimiterNotFound, ErrorKind::InvalidData),
+            (Error::UnsupportedOperation, ErrorKind::Unsupported),
+            (Error::UnavailableDriver, ErrorKind::Other),
+            (Error::TooManyOpenFiles, ErrorKind::Other),
+            (Error::FailedToGetTaskInformations, ErrorKind::Other),
+            (Error::TooManyInodes, ErrorKind::Other),
+            (Error::RessourceBusy, ErrorKind::Other),
+            (Error::FailedToWrite, ErrorKind::Other),
+            (Error::Orphaned, ErrorKind::Other),
+            (Error::CrossDevice, ErrorKind::Other),
+            (Error::Time(time::Error::Unsynchronized), ErrorKind::Other),
+            (Error::Users(users::Error::PoisonedLock), ErrorKind::Other),
+            (Error::Task(task::Error::NoThreadForTask), ErrorKind::Other),
+            (
+                Error::FileSystem(file_system::Error::NotFound),
+                ErrorKind::NotFound,
+            ),
+            (
+                Error::FileSystem(file_system::Error::PermissionDenied),
+                ErrorKind::PermissionDenied,
+            ),
+            (
+                Error::FileSystem(file_system::Error::NoMemory),
+                ErrorKind::OutOfMemory,
+            ),
+            (
+                Error::FileSystem(file_system::Error::NoSpaceLeft),
+                ErrorKind::Other,
+            ),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(error.kind(), expected, "{error:?}");
         }
     }
 }
