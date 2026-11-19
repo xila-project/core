@@ -30,12 +30,14 @@ pub(crate) fn dns_result_error(error: dns::GetQueryResultError) -> ResolveError 
     }
 }
 
-/// An ICMP or UDP bind failed: the socket is already open, or the local
-/// address cannot be used.
+/// An ICMP or UDP bind failed: the socket is already open, or the endpoint is
+/// refused. smoltcp reports `Unaddressable` only for UDP port 0 and an
+/// unspecified ICMP endpoint, which are invalid arguments, not an address the
+/// host lacks.
 pub(crate) fn icmp_bind_error(error: icmp::BindError) -> IoErrorKind {
     match error {
         icmp::BindError::InvalidState => IoErrorKind::InvalidState,
-        icmp::BindError::Unaddressable => IoErrorKind::AddressNotAvailable,
+        icmp::BindError::Unaddressable => IoErrorKind::InvalidArgument,
     }
 }
 
@@ -43,7 +45,7 @@ pub(crate) fn icmp_bind_error(error: icmp::BindError) -> IoErrorKind {
 pub(crate) fn udp_bind_error(error: udp::BindError) -> IoErrorKind {
     match error {
         udp::BindError::InvalidState => IoErrorKind::InvalidState,
-        udp::BindError::Unaddressable => IoErrorKind::AddressNotAvailable,
+        udp::BindError::Unaddressable => IoErrorKind::InvalidArgument,
     }
 }
 
@@ -111,14 +113,14 @@ mod tests {
     }
 
     #[test]
-    fn bind_errors_split_state_and_address() {
+    fn bind_errors_split_state_and_argument() {
         assert_eq!(
             icmp_bind_error(icmp::BindError::InvalidState),
             IoErrorKind::InvalidState
         );
         assert_eq!(
             icmp_bind_error(icmp::BindError::Unaddressable),
-            IoErrorKind::AddressNotAvailable
+            IoErrorKind::InvalidArgument
         );
         assert_eq!(
             udp_bind_error(udp::BindError::InvalidState),
@@ -126,7 +128,7 @@ mod tests {
         );
         assert_eq!(
             udp_bind_error(udp::BindError::Unaddressable),
-            IoErrorKind::AddressNotAvailable
+            IoErrorKind::InvalidArgument
         );
     }
 
