@@ -165,7 +165,8 @@ fn snapshot_describes_widget_roles_labels_and_explicit_state() {
     }
     // Shell mounting must not hide screen siblings or overlay roots from Debug.
     let body = unsafe { lvgl::lv_obj_create(screen) };
-    task::block_on(manager.set_window_parent(body)).unwrap();
+    // SAFETY: `body` lives as long as the test, and no window is created in it.
+    task::block_on(unsafe { manager.set_window_parent(body) }).unwrap();
     let snapshot = task::block_on(manager.inspect_ui_tree(64, 16)).unwrap();
     let overlay = unsafe {
         let overlay = lvgl::lv_obj_create(lvgl::lv_layer_top());

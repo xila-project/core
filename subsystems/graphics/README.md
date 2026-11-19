@@ -90,6 +90,17 @@ capacity, with no separate allocation or growth. The whole host `Window` is
 board RAM. This trades a slightly larger initial reservation for a fixed
 upper bound and fewer heap blocks.
 
+## Window ownership
+
+A window has exactly one owner, its `OwnedWindow`, which deletes it when dropped (or with `OwnedWindow::delete` from inside a safe session, where dropping would deadlock on the graphics lock). Nothing else may delete it:
+
+- The window class is `ChildrenOnly` in lvgl-rust's external class policy: safe code can build and delete a window's content, but the safe layer refuses to delete, clean away, own, reparent or reorder a window or anything that contains one. Core's other classes (the file picker) are fully protected.
+- Safe code gets `&Window` and the owner's methods, never `&mut Window`. Taking ownership of a raw window (`OwnedWindow::from_raw`) and moving the window parent (`Manager::set_window_parent`) are `unsafe`; `Window` has no public delete.
+
+Code that takes a window out of its owner (`OwnedWindow::into_raw`, as the Wasm host does) becomes its owner and deletes it once, under the graphics lock.
+
+An event's target may have been deleted, by safe code too, after the window queued the event. `Event::is_target` compares addresses. To use the target, `Event::find_target_in(root)` returns it only once found in `root`'s live tree; never keep a target otherwise.
+
 ## LVGL bindings (lvgl-rust)
 
 Graphics builds LVGL 9.6 through `lvgl-rust-sys`, using `include/lv_conf.h`.

@@ -100,7 +100,7 @@ fn event_bursts_do_not_allocate_and_keep_clicks() {
     );
 
     window.discard_events_for_target(child);
-    window.delete();
+    unsafe { lvgl::lv_obj_delete(window.as_object_mutable()) };
 }
 
 /// A double tap queues two clicks on a button; handling the first one rebuilds
@@ -166,5 +166,5 @@ fn queued_events_never_match_widgets_created_after_a_rebuild() {
     assert!(queued.iter().all(|e| !e.is_target(after)));
     assert!(queued.iter().all(|e| !e.is_target(moved_out)));
 
-    window.delete();
+    unsafe { lvgl::lv_obj_delete(window.as_object_mutable()) };
 }

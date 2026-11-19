@@ -218,18 +218,17 @@ unsafe extern "C" fn window_event_callback(
 impl Window {
     /// Create a new window.
     ///
+    /// The caller owns the new window: give it to [`OwnedWindow::from_raw`],
+    /// or delete it itself with `lv_obj_delete`, exactly once.
+    ///
     /// # Arguments
     ///
-    /// * `Parent_object` - The parent object of the window.
-    ///
-    /// # Returns
-    ///
-    /// * `Result<Self>` - The result of the operation.
+    /// * `parent` - The parent object of the window.
     ///
     /// # Safety
     ///
-    /// This function is unsafe because it may dereference raw pointers (e.g. `Parent_object`).
-    ///
+    /// `parent` must be a live LVGL object, and the caller must hold the
+    /// graphics lock.
     pub unsafe fn new(parent: *mut lvgl::lv_obj_t) -> Result<NonNull<Self>> {
         let obj = unsafe { lvgl::lv_obj_class_create_obj(get_window_class(), parent) };
 
@@ -327,12 +326,6 @@ impl Window {
 
         NonNull::new(window as *mut Self)
     }
-
-    pub fn delete(&mut self) {
-        unsafe {
-            lvgl::lv_obj_delete(&mut self.object);
-        }
-    }
 }
 
 impl AsRef<lvgl::lv_obj_t> for Window {
@@ -365,29 +358,125 @@ impl DerefMut for Window {
     }
 }
 
-/// A wrapper around Window that automatically deletes the window when dropped.
+/// The single owner of a [`Window`]: it deletes the window when dropped.
+///
+/// Nothing else deletes an owned window. The safe layer refuses to delete,
+/// clean away, own, reparent or reorder a window or an object containing one
+/// (see `lvgl_rust_external_class_policy`), raw code needs `unsafe`, and
+/// [`Window`] has no public delete. A window therefore lives exactly as long
+/// as its owner, which deletes it once.
+///
+/// Safe code gets shared access through [`Deref`] and the mutating methods
+/// below, never `&mut Window`: with it, [`core::mem::swap`] could exchange
+/// two windows' LVGL objects behind LVGL's back.
+///
+/// Taking ownership of a raw window requires `unsafe`:
+///
+/// ```compile_fail,E0133
+/// fn adopt(window: core::ptr::NonNull<graphics::Window>) -> graphics::OwnedWindow {
+///     graphics::OwnedWindow::from_raw(window)
+/// }
+/// ```
+///
+/// Safe code cannot borrow the window mutably:
+///
+/// ```compile_fail,E0596
+/// fn exchange(first: &mut graphics::OwnedWindow, second: &mut graphics::OwnedWindow) {
+///     core::mem::swap::<graphics::Window>(&mut *first, &mut *second);
+/// }
+/// ```
+///
+/// Nor delete it behind its owner's back:
+///
+/// ```compile_fail,E0599
+/// fn delete(window: &graphics::Window) {
+///     window.delete();
+/// }
+/// ```
 pub struct OwnedWindow(NonNull<Window>);
 
 impl OwnedWindow {
-    pub fn new(window: NonNull<Window>) -> Self {
+    /// Take ownership of a raw window.
+    ///
+    /// # Safety
+    ///
+    /// `window` must point to a live window (see [`Window::new`]) that
+    /// nothing else owns or deletes: the result deletes it when dropped. Every
+    /// window created inside it must be deleted first.
+    pub unsafe fn from_raw(window: NonNull<Window>) -> Self {
         Self(window)
+    }
+
+    /// Give up ownership without deleting the window. The caller becomes its
+    /// owner: it deletes the window once, under the graphics lock, or hands it
+    /// back to [`OwnedWindow::from_raw`].
+    pub fn into_raw(self) -> NonNull<Window> {
+        ManuallyDrop::new(self).0
+    }
+
+    /// Delete the window now, from a session of the safe API, where dropping
+    /// it would deadlock on the graphics lock the session already holds.
+    pub fn delete(self, _lvgl: &mut lvgl_rust::Lvgl) {
+        let window = self.into_raw();
+        // SAFETY: `&mut Lvgl` proves exclusive access to LVGL (the graphics
+        // lock), and this value owned the window.
+        unsafe { delete(window) };
+    }
+
+    /// The window's LVGL object, for the raw bindings.
+    pub fn as_object_mutable(&mut self) -> *mut lvgl::lv_obj_t {
+        self.0.as_ptr().cast()
+    }
+
+    pub fn pop_event(&mut self) -> Option<Event> {
+        self.window_mut().pop_event()
+    }
+
+    /// See [`Window::discard_events_for_target`].
+    pub fn discard_events_for_target(&mut self, target: *mut lvgl::lv_obj_t) {
+        self.window_mut().discard_events_for_target(target);
+    }
+
+    /// See [`Window::clear_event_targets_for`].
+    pub fn clear_event_targets_for(&mut self, target: *mut lvgl::lv_obj_t) {
+        self.window_mut().clear_event_targets_for(target);
+    }
+
+    /// See [`Window::set_icon`].
+    pub fn set_icon(&mut self, icon_string: &str, icon_color: Color) {
+        self.window_mut().set_icon(icon_string, icon_color);
+    }
+
+    pub fn wake_up(&mut self) {
+        self.window_mut().wake_up();
+    }
+
+    pub fn register_waker(&mut self, waker: &core::task::Waker) {
+        self.window_mut().register_waker(waker);
+    }
+
+    /// Private: callers outside this module could swap the window away.
+    fn window_mut(&mut self) -> &mut Window {
+        // SAFETY: this value owns the live window, and `&mut self` makes the
+        // borrow unique.
+        unsafe { self.0.as_mut() }
     }
 }
 
 impl From<OwnedWindow> for NonNull<Window> {
-    fn from(val: OwnedWindow) -> Self {
-        let this = ManuallyDrop::new(val);
-        this.0
+    fn from(window: OwnedWindow) -> Self {
+        window.into_raw()
     }
 }
 
 impl Drop for OwnedWindow {
     fn drop(&mut self) {
+        let window = self.0;
         crate::ffi_manager()
             .lock_function_sync(|| {
-                unsafe {
-                    self.0.as_mut().delete();
-                }
+                // SAFETY: the graphics lock is held, and this value owns the
+                // window.
+                unsafe { delete(window) };
                 Ok(())
             })
             .expect("Failed to delete window");
@@ -399,13 +488,17 @@ impl Deref for OwnedWindow {
 
     #[inline]
     fn deref(&self) -> &Self::Target {
+        // SAFETY: this value owns the live window.
         unsafe { self.0.as_ref() }
     }
 }
 
-impl DerefMut for OwnedWindow {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { self.0.as_mut() }
-    }
+/// Delete `window` and everything it contains.
+///
+/// # Safety
+///
+/// The caller holds the graphics lock and owns `window`, which it does not
+/// use afterwards.
+unsafe fn delete(window: NonNull<Window>) {
+    unsafe { lvgl::lv_obj_delete(window.as_ptr().cast()) };
 }

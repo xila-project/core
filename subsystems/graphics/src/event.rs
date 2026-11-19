@@ -1,5 +1,19 @@
 use crate::{Key, lvgl};
+use core::{ffi::c_void, ptr::NonNull};
 
+/// An event a window queued for one of its objects.
+///
+/// The target may have been deleted, by safe code too, between the moment the
+/// window queued the event and the moment it is read. The target is therefore
+/// private: [`Event::is_target`] compares addresses, and
+/// [`Event::find_target_in`] gives a pointer only once it has found the target
+/// in a live object tree.
+///
+/// ```compile_fail,E0616
+/// fn target(event: &graphics::Event) -> *mut graphics::lvgl::lv_obj_t {
+///     event.target
+/// }
+/// ```
 #[derive(Debug, Clone)]
 pub struct Event {
     pub code: EventKind,
@@ -20,6 +34,57 @@ impl Event {
     /// candidate.
     pub fn is_target(&self, candidate: *const lvgl::lv_obj_t) -> bool {
         !self.target.is_null() && core::ptr::eq(self.target, candidate)
+    }
+
+    /// The target, if it is `root` or one of its descendants.
+    ///
+    /// Walks `root`'s live subtree and compares addresses, so a deleted target
+    /// is never dereferenced, and the object returned is live while the
+    /// graphics lock stays held. Unlike the window's own clearing (see
+    /// [`Event::is_target`]), this holds whatever ran between the deletion
+    /// and the read.
+    ///
+    /// # Safety
+    ///
+    /// `root` must be a live LVGL object, and the caller must hold the
+    /// graphics lock.
+    pub unsafe fn find_target_in(
+        &self,
+        root: *mut lvgl::lv_obj_t,
+    ) -> Option<NonNull<lvgl::lv_obj_t>> {
+        unsafe extern "C" fn visit(
+            object: *mut lvgl::lv_obj_t,
+            search: *mut c_void,
+        ) -> lvgl::lv_obj_tree_walk_res_t {
+            // SAFETY: `search` is the `Search` the walk below was given.
+            let search = unsafe { &mut *search.cast::<Search>() };
+            if object == search.target {
+                search.found = true;
+                lvgl::lv_obj_tree_walk_res_t_LV_OBJ_TREE_WALK_END
+            } else {
+                lvgl::lv_obj_tree_walk_res_t_LV_OBJ_TREE_WALK_NEXT
+            }
+        }
+
+        struct Search {
+            target: *mut lvgl::lv_obj_t,
+            found: bool,
+        }
+
+        let target = NonNull::new(self.target)?;
+        if root.is_null() {
+            return None;
+        }
+        let mut search = Search {
+            target: target.as_ptr(),
+            found: false,
+        };
+        // SAFETY: the caller guarantees that `root` is live and that it holds
+        // the graphics lock; `search` outlives the walk.
+        unsafe {
+            lvgl::lv_obj_tree_walk(root, Some(visit), (&raw mut search).cast());
+        }
+        search.found.then_some(target)
     }
 
     pub fn new(code: EventKind, target: *mut lvgl::lv_obj_t, key: Option<Key>) -> Self {
@@ -275,5 +340,7 @@ mod tests {
         let address = (&raw mut object).cast();
         assert!(!cleared.is_target(address));
         assert!(Event::new(EventKind::Pressed, address, None).is_target(address));
+        // A cleared target is never searched for, even in an invalid tree.
+        assert_eq!(unsafe { cleared.find_target_in(address) }, None);
     }
 }
