@@ -310,18 +310,21 @@ class WorkflowPolicy(unittest.TestCase):
                 components = rust.get("components", []) if isinstance(rust, dict) else []
                 self.assertIn("rustfmt", components, "wasm build scripts execute rustfmt on generated bindings")
 
-    def test_graphics_builds_for_cortex_m_where_c_char_is_unsigned(self):
+    def test_graphics_builds_for_bare_metal_arm_and_riscv(self):
         task = ci_config()["tasks"]["ci:bare-metal"]
-        self.assertIn(
-            "cargo check --locked -p xila-graphics --features rendering_rgb565 --target thumbv7em-none-eabihf",
-            task["run"],
-        )
         raw = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]["ci:bare-metal"]
-        self.assertEqual(raw["env"]["CC_thumbv7em_none_eabihf"], "clang")
-        # The runner ships several LLVM versions; bindgen sees each one's <stdint.h>, and in
-        # hosted mode the copies cancel each other out through a shared include guard.
-        self.assertEqual(raw["env"]["BINDGEN_EXTRA_CLANG_ARGS_thumbv7em_none_eabihf"], "-ffreestanding")
-        self.assertIn("thumbv7em-none-eabihf", task["tools"]["rust"]["targets"])
+        for target in ("thumbv7em-none-eabihf", "riscv32imac-unknown-none-elf"):
+            env_target = target.replace("-", "_")
+            with self.subTest(target=target):
+                self.assertIn(
+                    f"cargo check --locked -p xila-graphics --features rendering_rgb565 --target {target}",
+                    task["run"],
+                )
+                self.assertEqual(raw["env"][f"CC_{env_target}"], "clang")
+                # The runner ships several LLVM versions; bindgen sees each one's <stdint.h>, and in
+                # hosted mode the copies cancel each other out through a shared include guard.
+                self.assertEqual(raw["env"][f"BINDGEN_EXTRA_CLANG_ARGS_{env_target}"], "-ffreestanding")
+                self.assertIn(target, task["tools"]["rust"]["targets"])
         # The graphics build script runs the pinned Node font converter.
         self.assertEqual(raw["tools"]["node"], "{{ vars.node_version }}")
 

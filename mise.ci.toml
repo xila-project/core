@@ -398,7 +398,7 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", compone
 ] }
 
 [tasks."ci:bare-metal"]
-description = "Check the Cortex-M façade and graphics and the 32-bit native ABI, with and without network"
+description = "Check the Cortex-M façade, bare-metal graphics and the 32-bit native ABI, with and without network"
 shell = "bash -c"
 depends = ["ci:packages-host"]
 # No C library on bare metal: build LittleFS with clang's freestanding headers.
@@ -407,13 +407,14 @@ depends = ["ci:packages-host"]
 # of clang's <stdint.h> defers to the next one through #include_next while sharing
 # one include guard, so the second copy is empty and no integer type is defined.
 # -ffreestanding makes the first copy define them itself, whatever libclang loads.
-env = { CC_thumbv7em_none_eabihf = "clang", CC_riscv32imac_unknown_none_elf = "clang", BINDGEN_EXTRA_CLANG_ARGS_thumbv7em_none_eabihf = "-ffreestanding" }
+env = { CC_thumbv7em_none_eabihf = "clang", CC_riscv32imac_unknown_none_elf = "clang", BINDGEN_EXTRA_CLANG_ARGS_thumbv7em_none_eabihf = "-ffreestanding", BINDGEN_EXTRA_CLANG_ARGS_riscv32imac_unknown_none_elf = "-ffreestanding" }
 run = """
 set -eu
 cargo check --locked -p xila --target thumbv7em-none-eabihf
 cargo check --locked -p xila --no-default-features --features abi_definitions --target thumbv7em-none-eabihf
-# Graphics is C-backed and its FFI differs by target: `c_char` is unsigned on ARM.
+# Graphics is C-backed and its FFI differs by target: `c_char` is unsigned on ARM and RISC-V.
 cargo check --locked -p xila-graphics --features rendering_rgb565 --target thumbv7em-none-eabihf
+cargo check --locked -p xila-graphics --features rendering_rgb565 --target riscv32imac-unknown-none-elf
 for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf; do
   cargo clippy --locked -p xila-abi-application --no-default-features --target "$target" -- -D warnings
   cargo clippy --locked -p xila-abi-application --features network --target "$target" -- -D warnings
