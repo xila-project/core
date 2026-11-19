@@ -134,7 +134,8 @@ fn check_abi(version: u16, reserved_is_zero: bool) -> Result<()> {
 fn map_error(error: AdcError) -> IoErrorKind {
     match error {
         AdcError::InvalidChannel => IoErrorKind::InvalidArgument,
-        AdcError::Busy => IoErrorKind::ResourceBusy,
+        // A conversion cannot start now; the caller may retry.
+        AdcError::Busy => IoErrorKind::WouldBlock,
         AdcError::Unsupported => IoErrorKind::Unsupported,
         AdcError::Other => IoErrorKind::InputOutput,
     }
@@ -175,4 +176,14 @@ where
     )?;
 
     crate::mount_peripheral(virtual_file_system, task, path, handle).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contention_is_retryable() {
+        assert_eq!(map_error(AdcError::Busy), IoErrorKind::WouldBlock);
+    }
 }

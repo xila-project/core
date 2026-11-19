@@ -2,13 +2,14 @@
 //!
 //! Plain file I/O:
 //! - The node has one selected target address. `SELECT_ADDRESS` sets it. Until
-//!   an address is selected, `read` and `write` fail with `NotInitialized`.
+//!   an address is selected, `read` and `write` fail with `DeviceUnavailable`.
 //! - `write` sends one write transfer containing the whole buffer to the
 //!   selected address and returns `buffer.len()` on success.
 //! - `read` receives `buffer.len()` bytes from the selected address.
 //! - Each call is one non-blocking attempt. It opens the bus with the node's
 //!   configured frequency, runs one transaction and drops the bus. A bus held
-//!   by another handle returns `ResourceBusy`.
+//!   by another handle returns `WouldBlock`; opening the node while it is open
+//!   returns `ResourceBusy`.
 //!
 //! Control commands (kind `b'i'`), all with a `version` field first that must
 //! equal [`ABI_VERSION`] and reserved fields that must be zero:
@@ -20,7 +21,7 @@
 //!   START, against the selected address. Lengths are at most
 //!   [`MAX_TRANSFER_LENGTH`] and at least one of them must be non-zero.
 //!
-//! Error mapping: `Busy` becomes `ResourceBusy`, a NACK on the address becomes
+//! Error mapping: `Busy` becomes `WouldBlock`, a NACK on the address becomes
 //! `NotFound`, other bus failures become `InputOutput`, and `Unsupported`
 //! becomes `Unsupported`.
 
@@ -169,7 +170,8 @@ fn validate_frequency(
 
 fn map_error(error: BusError) -> IoErrorKind {
     match error {
-        BusError::Busy => IoErrorKind::ResourceBusy,
+        // The bus is held by another handle; the caller may retry.
+        BusError::Busy => IoErrorKind::WouldBlock,
         BusError::NoAcknowledge(NoAcknowledge::Address) => IoErrorKind::NotFound,
         BusError::NoAcknowledge(_)
         | BusError::ArbitrationLoss
@@ -277,5 +279,15 @@ async fn ensure_directory(
         Ok(()) => Ok(()),
         Err(IoErrorKind::AlreadyExists) => Ok(()),
         Err(error) => Err(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contention_is_retryable() {
+        assert_eq!(map_error(BusError::Busy), IoErrorKind::WouldBlock);
     }
 }

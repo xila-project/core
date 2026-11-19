@@ -82,7 +82,8 @@ fn configuration_from_abi(abi: SpiConfigurationAbi) -> Result<DeviceConfig> {
 /// Maps a contract error to the closest file system error.
 fn map_error(error: SpiError) -> IoErrorKind {
     match error {
-        SpiError::Busy => IoErrorKind::ResourceBusy,
+        // The bus is reserved for another transaction; the caller may retry.
+        SpiError::Busy => IoErrorKind::WouldBlock,
         SpiError::InvalidChipSelect => IoErrorKind::NotFound,
         SpiError::ModeNotSupported
         | SpiError::FrequencyNotSupported
@@ -292,4 +293,14 @@ where
         SpiDevice::new(controller, ChipSelect::new(chip_select), config),
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contention_is_retryable() {
+        assert_eq!(map_error(SpiError::Busy), IoErrorKind::WouldBlock);
+    }
 }

@@ -295,7 +295,7 @@ impl MockWifiController {
                         return Err(IoErrorKind::InvalidArgument);
                     }
                     if state.pending.is_some() {
-                        return Err(IoErrorKind::ResourceBusy);
+                        return Err(IoErrorKind::AlreadyInProgress);
                     }
                     state.pending = Some(match command {
                         START_WIFI_SCAN::IDENTIFIER => {

@@ -4,7 +4,7 @@
 //! [`PeripheralHandle`]. A plain read returns the line level as one byte, `0` or
 //! `1`. A plain write sets the level of an output line from one byte, `0` or
 //! `1`; writes to an input line are unsupported. Reads and writes before the
-//! line is configured fail with `NotInitialized`.
+//! line is configured fail with `DeviceUnavailable`.
 //!
 //! # Control commands (kind `b'g'`)
 //!

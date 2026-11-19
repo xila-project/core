@@ -427,10 +427,7 @@ async fn bus_held_by_another_master_surfaces_as_busy() {
     let mut file = open(vfs, task, "/devices/spi/spi0.0").await.unwrap();
 
     bus.external_master.store(true, Ordering::Release);
-    assert_eq!(
-        file.write(&[1]).await.err(),
-        Some(IoErrorKind::ResourceBusy)
-    );
+    assert_eq!(file.write(&[1]).await.err(), Some(IoErrorKind::WouldBlock));
     bus.external_master.store(false, Ordering::Release);
 
     assert_eq!(file.write(&[1]).await.unwrap(), 1);
