@@ -6,7 +6,11 @@
  * during an import/export round trip.
  */
 export function flattenCatalog(catalog) {
-  if (catalog === null || Array.isArray(catalog) || typeof catalog !== "object") {
+  if (
+    catalog === null ||
+    Array.isArray(catalog) ||
+    typeof catalog !== "object"
+  ) {
     throw new TypeError("expected a translation JSON object");
   }
 
@@ -14,7 +18,11 @@ export function flattenCatalog(catalog) {
   function visit(node, prefix = "") {
     for (const [segment, value] of Object.entries(node)) {
       const key = prefix ? prefix + "." + segment : segment;
-      if (value !== null && !Array.isArray(value) && typeof value === "object") {
+      if (
+        value !== null &&
+        !Array.isArray(value) &&
+        typeof value === "object"
+      ) {
         visit(value, key);
       } else {
         if (Object.hasOwn(translations, key)) {
@@ -30,7 +38,9 @@ export function flattenCatalog(catalog) {
     for (let i = 1; i < segments.length; i++) {
       const ancestor = segments.slice(0, i).join(".");
       if (Object.hasOwn(translations, ancestor)) {
-        throw new Error("translation path collision: " + ancestor + " / " + key);
+        throw new Error(
+          "translation path collision: " + ancestor + " / " + key,
+        );
       }
     }
   }
@@ -43,22 +53,34 @@ export function flattenCatalog(catalog) {
  * French uses a no-break space (U+00A0) before ":", ";", "!", "?" and "»" and
  * after "«", and typographic apostrophes. U+202F is rejected because the
  * shipped Montserrat and Unscii fonts have no glyph for it. Placeholders such
- * as {arg0:?} and URLs are skipped.
+ * as {arg0:?} and URLs with a scheme followed by // are skipped. Straight
+ * quotes and apostrophes inside backtick code spans are also ignored.
  */
 export function frenchTypographyIssues(value) {
   let text = value;
   for (let previous = ""; previous !== text;) {
     previous = text;
-    text = text.replace(/\{[^{}]*\}/g, "");
+    text = text.replace(/\{[^{}]*\}/g, "\uE000");
   }
+  const prose = text.replace(/\b[a-z][a-z\d+.-]*:\/\/[^\s<>"«»`]+/gi, "x");
+  const outsideCode = prose.replace(/`[^`\r\n]*`/g, "");
   const rules = [
-    [/[  ](?=[:;!?»])/, "use U+00A0, not a plain or narrow space, before : ; ! ? or »"],
-    [/[^\s ;!?][:;!?](?=\s|$)/, "missing U+00A0 before : ; ! or ?"],
+    [
+      /[  ](?=[:;!?»])/,
+      "use U+00A0, not a plain or narrow space, before : ; ! ? or »",
+    ],
+    // A colon between two placeholders can be a time separator, as in {h}:{m}.
+    [
+      /(?!\uE000:\uE000)[^\s;!?][:;!?](?=[\s;!?\uE000]|$)/,
+      "missing U+00A0 before : ; ! or ?",
+    ],
     [/«(?! )/, "missing U+00A0 after «"],
     [/[^ ]»/, "missing U+00A0 before »"],
-    [/'/, "use the typographic apostrophe ’"],
-    [/"/, "use « » for quotation marks"],
+    [/'/, "use the typographic apostrophe ’", outsideCode],
+    [/"/, "use « » for quotation marks", outsideCode],
     [/ /, "U+202F has no glyph in the shipped fonts; use U+00A0"],
   ];
-  return rules.filter(([pattern]) => pattern.test(text)).map(([, message]) => message);
+  return rules
+    .filter(([pattern, , input = prose]) => pattern.test(input))
+    .map(([, message]) => message);
 }
