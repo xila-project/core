@@ -2,7 +2,7 @@
 mod arch;
 #[path = "stack.rs"]
 mod stack;
-pub use stack::Stack;
+pub use stack::{DEFAULT_MIN_STACK_SIZE, MIN_STACK_SIZE, Stack};
 
 use alloc::rc::Rc;
 use core::{
@@ -11,6 +11,18 @@ use core::{
     pin::Pin,
     task::{Context, Poll, Waker},
 };
+
+/// Number of coroutine-local storage slots stored inline in each coroutine control block.
+pub const TLS_SLOTS: usize = 4;
+
+/// Failure accessing coroutine-local storage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TlsError {
+    /// Called outside a running coroutine.
+    NotInCoroutine,
+    /// Requested slot index is greater than or equal to [`TLS_SLOTS`].
+    InvalidSlot,
+}
 
 type ErasedFuture = *mut (dyn Future<Output = ()> + 'static);
 struct Control {
@@ -24,6 +36,7 @@ struct Control {
     started: Cell<bool>,
     result: Cell<Option<Result<i32, Cancelled>>>,
     waker: RefCell<Option<Waker>>,
+    tls: [Cell<usize>; TLS_SLOTS],
 }
 impl Drop for Control {
     fn drop(&mut self) {
@@ -77,6 +90,12 @@ impl Coroutine {
     /// Entry must never unwind. On bare metal, all coroutines must run on a single core
     /// and must never be entered or suspended from an interrupt. Do not migrate a live
     /// coroutine or its handles to another OS thread, including via foreign code.
+    ///
+    /// On bare metal the current coroutine is one global, so while any coroutine is
+    /// live, no other core may call an API that reaches [`suspend_on`]: the native
+    /// application ABI and the synchronous VFS files and directories. That core would
+    /// see the live coroutine as its own and switch onto its stack. A per-core current
+    /// pointer (xila-project/core#682) lifts this restriction.
     pub unsafe fn new<F: FnOnce() -> i32 + 'static>(mut stack: Stack, entry: F) -> Self {
         unsafe fn run<F: FnOnce() -> i32>(p: *mut u8) -> i32 {
             unsafe { p.cast::<F>().read()() }
@@ -107,6 +126,7 @@ impl Coroutine {
                 started: Cell::new(false),
                 result: Cell::new(None),
                 waker: RefCell::new(None),
+                tls: [const { Cell::new(0) }; TLS_SLOTS],
             }),
         }
     }
@@ -193,6 +213,11 @@ pub async fn drive(coroutine: Coroutine) -> i32 {
     coroutine.await
 }
 
+/// Whether execution is currently on a native coroutine stack.
+pub fn is_in_coroutine() -> bool {
+    !current().is_null()
+}
+
 /// Await from native code. Outside a coroutine this preserves task::block_on behavior.
 /// No heap allocation occurs here. The future and output stay on the native stack.
 /// Do not call this from a future's poll method: poll methods must return Pending.
@@ -222,6 +247,41 @@ pub fn suspend_on<F: Future>(future: F) -> F::Output {
         // End the future's mutable borrow before reading its result.
     }
     output.expect("coroutine resumed before future completed")
+}
+
+/// Read a coroutine-local storage slot for the currently running coroutine.
+/// Slots start at `0`. No heap allocation occurs.
+/// Returns [`TlsError::InvalidSlot`] if `slot >= TLS_SLOTS`, or
+/// [`TlsError::NotInCoroutine`] outside a running coroutine.
+pub fn tls_get(slot: usize) -> Result<usize, TlsError> {
+    if slot >= TLS_SLOTS {
+        return Err(TlsError::InvalidSlot);
+    }
+    let c = current();
+    if c.is_null() {
+        return Err(TlsError::NotInCoroutine);
+    }
+    // SAFETY: `c` points to the live control block of the currently executing coroutine.
+    let tls = unsafe { &(*c).tls };
+    Ok(tls[slot].get())
+}
+
+/// Write a coroutine-local storage slot for the currently running coroutine.
+/// No heap allocation occurs.
+/// Returns [`TlsError::InvalidSlot`] if `slot >= TLS_SLOTS`, or
+/// [`TlsError::NotInCoroutine`] outside a running coroutine.
+pub fn tls_set(slot: usize, value: usize) -> Result<(), TlsError> {
+    if slot >= TLS_SLOTS {
+        return Err(TlsError::InvalidSlot);
+    }
+    let c = current();
+    if c.is_null() {
+        return Err(TlsError::NotInCoroutine);
+    }
+    // SAFETY: `c` points to the live control block of the currently executing coroutine.
+    let tls = unsafe { &(*c).tls };
+    tls[slot].set(value);
+    Ok(())
 }
 
 // C ABI makes escaping panics abort on hosts even when the application uses unwind.

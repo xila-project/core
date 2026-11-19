@@ -2,7 +2,9 @@
 
 `xila-stackful` (`stackful`) runs synchronous native code as executor-affine
 coroutines. It is `no_std` + `alloc`; Linux alone uses std thread-local storage.
-No application ABI callers are changed.
+Blocking calls in `xila-abi-application` and `xila-virtual-file-system` route
+through `suspend_on` on supported targets, suspending the coroutine instead of
+busy-polling the executor.
 
 ```rust,no_run
 use stackful::{Coroutine, Stack, suspend_on};
@@ -28,8 +30,14 @@ its real waker. There is no polling loop on Pending. Calls through arbitrarily
 nested synchronous functions work. Future poll methods must remain asynchronous:
 do not call `suspend_on` inside a future's poll method. Outside native execution,
 `suspend_on` forwards to `task::block_on` (the existing busy-polling fallback).
-On targets without pointer atomics it calls the identical Embassy implementation
-directly, because Core's current task manager cannot compile there.
+
+Each coroutine control block also carries `TLS_SLOTS` (4) inline `usize`
+coroutine-local storage slots, zero-initialized on creation with no extra heap
+allocation. `tls_get(slot)` and `tls_set(slot, value)` isolate per-coroutine
+state (for example future libc `errno`, `strtok`, or `rand` pointers) without
+coupling it to an OS thread. Calling either function outside a coroutine returns
+`Err(TlsError::NotInCoroutine)`; out-of-range indices return
+`Err(TlsError::InvalidSlot)`.
 
 A single `JoinHandle` observes completion and implements a future returning
 `Result<i32, Cancelled>`; it can be awaited or passed to `suspend_on`. A second
@@ -44,18 +52,24 @@ pointer access protected by short critical sections; interrupts remain enabled
 while native code runs. Never invoke coroutine APIs from an ISR. Dual-core MCU
 execution needs a per-core current-pointer hook before it is supported.
 The platform supplies the allocator, critical-section implementation, and time
-and executor drivers as usual. The manager adapter is absent without pointer
-atomics; the coroutine/driver/join primitives remain available on thumbv6m.
+and executor drivers as usual.
 
 ## Safety and lifetime
 
 Construction is unsafe: native stack usage must fit the supplied stack, including
-closure storage, callees and any interrupt frames sharing its SP. Requests are
-rounded up to 16 bytes with a minimum of 4096 usable bytes; a separate 64-byte
-painted guard lies below the usable area. Guard corruption is checked before and
-after every switch and terminates via a non-unwinding panic boundary. A canary
-cannot prevent an out-of-bounds write or detect an overflow that skips its guard;
-this is detection, not memory protection. Do not treat it as a safe sandbox for
+closure storage, callees and any interrupt frames sharing its SP. `Stack::new`
+rounds requests up to 16 bytes with a default minimum of `DEFAULT_MIN_STACK_SIZE`
+(4096) usable bytes. For shallow call chains on RAM-constrained devices,
+`Stack::with_min_size(size, min_usable)` allows configuring the minimum usable
+size down to `MIN_STACK_SIZE` (2048 bytes). Smaller stacks reduce per-coroutine
+RAM overhead at the cost of much tighter headroom for nested callees, register
+save frames, and bare-metal interrupt frames sharing the stack; callers must
+audit the full call graph before lowering the minimum below 4 KiB. Regardless of
+the configured minimum, a separate 64-byte painted guard lies
+below the usable area. Guard corruption is checked before and after every switch
+and terminates via a non-unwinding panic boundary. A canary cannot prevent an
+out-of-bounds write or detect an overflow that skips its guard; this is
+detection, not memory protection. Do not treat it as a safe sandbox for
 untrusted C. A protected guard page/MPU region is a future platform extension.
 
 The heap control and stack never move while executing, even if the small driver
@@ -111,37 +125,41 @@ this configuration.
 
 Host tests cover real Embassy executor interleaving, signal wakeups and poll
 counts, nested synchronous calls, async/native joins, results, thread isolation,
-canary corruption detection, fallback and cancellation. The allocation-budget
-test asserts exactly two runtime allocations and zero allocations over 100
-suspend/resume cycles. Generic waker implementations may allocate themselves.
-The task-manager adapter adds the manager's existing pool, metadata and join
-allocations (including its current leaked task-pool behavior).
+coroutine-local TLS slot isolation, 2 KiB minimum stacks, canary corruption
+detection, fallback and cancellation. The allocation-budget test asserts
+exactly two runtime allocations and zero allocations over 100 suspend/resume
+cycles (and zero allocations for TLS reads/writes). Generic waker
+implementations may allocate themselves. The task-manager adapter adds the
+manager's existing pool, metadata and join allocations (including its current
+leaked task-pool behavior).
 
-On x86_64: Stack is 24 bytes; Coroutine and JoinHandle are each 8 bytes; the shared
-control allocation is 136 bytes including Rc counts. Each stack adds 64 guard
-bytes plus up to 15 rounding bytes; the closure and initial register frame occupy
-usable stack space. The x86_64 switch is 51 bytes and has 21 instructions per direction, including
-FP control save/restore. `footprint_and_switch_timing` reports end-to-end
-suspend/resume cost with TLS, polling and guard scans; run it in release mode for
-representative timings (154 ns per round trip observed on the development host).
-This measures two switches plus runtime work, not just
-assembly latency. FP/context frame sizes are 72 bytes initially on x86_64,
-176 on AArch64, 40/112 on ARM, and 64/128 on RV32 (integer/FP).
+On x86_64: `Stack` is 24 bytes; `Coroutine` and `JoinHandle` are each 8 bytes;
+the shared control allocation is 168 bytes including `Rc` counts (up from 136
+bytes by 32 bytes for `4 * usize` inline TLS slots). On 32-bit ARM
+(`thumbv7em-none-eabihf`), the shared control allocation is 88 bytes including
+`Rc` counts (up from 72 bytes by 16 bytes for the 4 TLS slots; `Control` itself
+grew from 64 to 80 bytes). Each stack adds 64 guard bytes plus up to 15
+rounding bytes; the closure and initial register frame occupy usable stack
+space. The x86_64 switch is 51 bytes and has 21 instructions per direction,
+including FP control save/restore. `footprint_and_switch_timing` measures
+two switches plus runtime work per suspend/resume round trip. Run it in release
+mode for representative timings. FP/context frame sizes are 72 bytes initially on x86_64, 176
+on AArch64, 40/112 on ARM, and 64/128 on RV32 (integer/FP).
 
-## ABI integration decisions still needed
+## ABI integration status and remaining decisions
 
-Native thread creation must construct and spawn a driver on the owning executor,
-set a bounded stack size and resource policy, and map integer results/join state
-to the C ABI. Decide detach/cancel semantics before exposing thread termination;
-forced cancellation currently leaks. Thread-local application state should follow
-the coroutine identity, not the executor's OS thread. Interrupt/signal delivery,
-foreign callbacks and TLS libraries need an explicit policy.
+Synchronous VFS calls that bridge async operations and the native application
+ABI use `suspend_on` on supported targets. The synchronous VFS polling
+adapters still return resource-busy on pending device I/O. The application ABI
+waits cooperatively for blocking file I/O when called from a coroutine.
 
-Mutex/condition-variable adapters need real async wait queues, atomic unlock plus
-wait registration, wake-one/wake-all semantics and cancellation handling. Existing
-OS-thread blocking mutexes cannot be used on a cooperative executor. Recursive
-locks and ownership must identify coroutines. Blocking I/O should wrap the VFS
-polling future via suspend_on, preserve borrowed buffer lifetimes and propagate
-errors/partial transfers. Never block the executor's OS thread or use the fallback
-inside managed native calls. Per-core current state and the Xtensa windowed switch
-remain prerequisites for the reference ESP32-S3 hardware.
+Remaining work for later milestones: native thread creation must construct and
+spawn a driver on the owning executor, set a bounded stack size and resource
+policy, and map integer results/join state to the C ABI. Decide detach/cancel
+semantics before exposing thread termination; forced cancellation currently
+leaks. Interrupt/signal delivery, foreign callbacks and libc TLS slot
+assignments need an explicit policy. Mutex/condition-variable adapters need
+real async wait queues, atomic unlock plus wait registration, wake-one/wake-all
+semantics and cancellation handling; recursive locks and ownership must
+identify coroutines. Per-core current state and the Xtensa windowed switch
+remain prerequisites for multi-core (core#682) and ESP32-S3 (core#648).

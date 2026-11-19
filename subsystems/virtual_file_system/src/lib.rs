@@ -39,3 +39,37 @@ pub async fn poll<O>(operation: impl FnOnce() -> Result<O>) -> Result<O> {
 pub fn blocking_operation<O>(_flags: Flags, operation: impl FnOnce() -> Result<O>) -> Result<O> {
     operation()
 }
+
+#[cfg(any(
+    all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_os = "linux"
+    ),
+    all(
+        any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "arm",
+            target_arch = "riscv32"
+        ),
+        target_os = "none"
+    )
+))]
+use stackful::suspend_on;
+
+#[cfg(not(any(
+    all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_os = "linux"
+    ),
+    all(
+        any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "arm",
+            target_arch = "riscv32"
+        ),
+        target_os = "none"
+    )
+)))]
+use task::block_on as suspend_on;

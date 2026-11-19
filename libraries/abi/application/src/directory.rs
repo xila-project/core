@@ -182,7 +182,8 @@ pub unsafe extern "C" fn xila_directory_create(
     let directory = unsafe { &*directory };
     let result = (|| {
         let path = unsafe { directory.resolve(path, length, XILA_RIGHT_WRITE, true)? };
-        task::block_on(directory.vfs.create_directory(directory.task, &path)).map_err(Status::from)
+        crate::suspend_on(directory.vfs.create_directory(directory.task, &path))
+            .map_err(Status::from)
     })();
     result.map_or_else(|error| error, |()| Status::Ok)
 }
@@ -209,7 +210,7 @@ pub unsafe extern "C" fn xila_directory_remove(
         let path = unsafe { directory.resolve(path, length, XILA_RIGHT_WRITE, true)? };
         // The VFS has a single remove primitive. A caller must explicitly permit directories.
         if flags & XILA_REMOVE_DIRECTORY == 0
-            && task::block_on(
+            && crate::suspend_on(
                 directory
                     .vfs
                     .get_link_statistics_for_task(directory.task, &path),
@@ -219,7 +220,7 @@ pub unsafe extern "C" fn xila_directory_remove(
         {
             return Err(Status::IsADirectory);
         }
-        task::block_on(directory.vfs.remove(directory.task, &path)).map_err(Status::from)
+        crate::suspend_on(directory.vfs.remove(directory.task, &path)).map_err(Status::from)
     })();
     result.map_or_else(|error| error, |()| Status::Ok)
 }
@@ -248,7 +249,7 @@ pub unsafe extern "C" fn xila_directory_rename(
         if !core::ptr::eq(from.vfs, to.vfs) || from.task != to.task {
             return Err(Status::InvalidArgument);
         }
-        task::block_on(from.vfs.rename(from.task, &from_path, &to_path)).map_err(Status::from)
+        crate::suspend_on(from.vfs.rename(from.task, &from_path, &to_path)).map_err(Status::from)
     })();
     result.map_or_else(|error| error, |()| Status::Ok)
 }

@@ -273,3 +273,102 @@ fn floating_point_control_is_local() {
     assert_eq!(std::pin::Pin::new(&mut c).poll(&mut cx), Poll::Ready(1));
     assert_eq!(read(), original);
 }
+
+#[test]
+fn tls_slots_are_isolated_and_zero_allocation() {
+    use stackful::{TLS_SLOTS, TlsError, tls_get, tls_set};
+
+    // Outside a coroutine: valid slots report NotInCoroutine, out-of-range report InvalidSlot.
+    for slot in 0..TLS_SLOTS {
+        assert_eq!(tls_get(slot), Err(TlsError::NotInCoroutine));
+        assert_eq!(tls_set(slot, 123), Err(TlsError::NotInCoroutine));
+    }
+    assert_eq!(tls_get(TLS_SLOTS), Err(TlsError::InvalidSlot));
+    assert_eq!(tls_set(TLS_SLOTS, 123), Err(TlsError::InvalidSlot));
+
+    // Multiple interleaved coroutines on the same executor keep independent TLS slots.
+    let mut drivers = Vec::new();
+    for id in 1..=8usize {
+        drivers.push(coroutine(move || {
+            for slot in 0..TLS_SLOTS {
+                assert_eq!(tls_get(slot), Ok(0));
+            }
+            assert_eq!(tls_get(TLS_SLOTS), Err(TlsError::InvalidSlot));
+            assert_eq!(tls_set(TLS_SLOTS, 99), Err(TlsError::InvalidSlot));
+
+            for slot in 0..TLS_SLOTS {
+                tls_set(slot, id * 100 + slot).unwrap();
+            }
+
+            // Polling a future on the executor stack must not see any coroutine's TLS.
+            let poll_saw_not_in_coroutine = suspend_on(core::future::poll_fn({
+                let mut yielded = false;
+                move |cx| {
+                    assert_eq!(tls_get(0), Err(TlsError::NotInCoroutine));
+                    assert_eq!(tls_set(0, 0xdead), Err(TlsError::NotInCoroutine));
+                    if !yielded {
+                        yielded = true;
+                        cx.waker().wake_by_ref();
+                        Poll::Pending
+                    } else {
+                        Poll::Ready(true)
+                    }
+                }
+            }));
+            assert!(poll_saw_not_in_coroutine);
+
+            // Values survive suspension and other coroutines running in between.
+            for slot in 0..TLS_SLOTS {
+                assert_eq!(tls_get(slot), Ok(id * 100 + slot));
+            }
+            id as i32
+        }));
+    }
+
+    let before = ALLOCATIONS.with(Cell::get);
+    let mut cx = Context::from_waker(Waker::noop());
+    for c in &mut drivers {
+        assert_eq!(std::pin::Pin::new(c).poll(&mut cx), Poll::Pending);
+    }
+    for (index, c) in drivers.iter_mut().enumerate() {
+        assert_eq!(
+            std::pin::Pin::new(c).poll(&mut cx),
+            Poll::Ready((index + 1) as i32)
+        );
+    }
+    assert_eq!(ALLOCATIONS.with(Cell::get), before);
+}
+
+#[test]
+fn two_kib_stack_runs_simple_call_chain() {
+    #[inline(never)]
+    fn leaf(x: i32) -> i32 {
+        let mut buf = [0u8; 64];
+        for (i, byte) in buf.iter_mut().enumerate() {
+            *byte = (x as u8).wrapping_add(i as u8);
+        }
+        let acc = i32::from(buf[0]) + i32::from(buf[63]);
+        stackful::tls_set(0, acc as usize).unwrap();
+        let resumed = suspend_on(async move { acc + 1 });
+        resumed + stackful::tls_get(0).unwrap() as i32
+    }
+
+    #[inline(never)]
+    fn middle(x: i32) -> i32 {
+        leaf(x + 3) + 10
+    }
+
+    #[inline(never)]
+    fn outer(x: i32) -> i32 {
+        middle(x * 2) - 1
+    }
+
+    let stack = Stack::with_min_size(stackful::MIN_STACK_SIZE, stackful::MIN_STACK_SIZE);
+    assert_eq!(stack.usable_size(), 2048);
+    assert!(stack.guard_intact());
+
+    // SAFETY: bounded small call chain fits comfortably inside 2 KiB and never unwinds.
+    let c = unsafe { Coroutine::new(stack, || outer(5)) };
+    // outer(5) -> middle(10) -> leaf(13): buf[0]=13, buf[63]=76 -> acc=89 -> resumed=90 -> leaf=179 -> middle=189 -> outer=188
+    assert_eq!(embassy_futures::block_on(c), 188);
+}

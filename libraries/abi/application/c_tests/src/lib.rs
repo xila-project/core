@@ -273,4 +273,156 @@ mod tests {
             xila_directory_close(directory);
         }
     }
+
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    #[task::test]
+    async fn stackful_file_read_yields_to_executor_peer() {
+        use core::task::{Context as TaskContext, Poll, Waker};
+        use file_system::{
+            BaseOperations, CharacterDevice, Context as DeviceContext, MountOperations, Operation,
+            Size,
+        };
+        use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::Mutex;
+
+        #[derive(Default)]
+        struct ReadState {
+            ready: AtomicBool,
+            polls: AtomicUsize,
+            waker: Mutex<Option<Waker>>,
+        }
+        struct PendingDevice(&'static ReadState);
+        impl BaseOperations for PendingDevice {
+            fn read(
+                &self,
+                _: &mut DeviceContext,
+                cx: &mut TaskContext<'_>,
+                buffer: &mut [u8],
+                _: Size,
+            ) -> Poll<file_system::Result<usize>> {
+                let polls = self.0.polls.fetch_add(1, Ordering::Relaxed);
+                if self.0.ready.load(Ordering::Relaxed) {
+                    buffer.copy_from_slice(b"ok");
+                    return Poll::Ready(Ok(2));
+                }
+                // Fail promptly if the caller polls again without letting the peer run.
+                if polls != 0 {
+                    return Poll::Ready(Err(file_system::Error::UnsupportedOperation));
+                }
+                *self.0.waker.lock().unwrap() = Some(cx.waker().clone());
+                Poll::Pending
+            }
+
+            fn write(
+                &self,
+                _: &mut DeviceContext,
+                _: &mut TaskContext<'_>,
+                _: &[u8],
+                _: Size,
+            ) -> Poll<file_system::Result<usize>> {
+                Poll::Ready(Err(file_system::Error::UnsupportedOperation))
+            }
+
+            fn clone_context(&self, _: &DeviceContext) -> file_system::Result<DeviceContext> {
+                Ok(DeviceContext::new_empty())
+            }
+
+            fn cancel_operation(&self, _: &mut DeviceContext, _: Operation) {
+                self.0.waker.lock().unwrap().take();
+            }
+        }
+        impl MountOperations for PendingDevice {}
+        impl CharacterDevice for PendingDevice {}
+
+        let time = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+        let tasks = task::test_manager();
+        let users = Box::leak(Box::new(users::Manager::new()));
+        let task = tasks.get_current_task_identifier().await;
+        let spawner = tasks.get_spawner(task).await.unwrap();
+        let device = file_system::MemoryDevice::<512>::new_static(1024 * 512);
+        let fs = little_fs::FileSystem::new_format(device, little_fs::Options::new(256)).unwrap();
+        let vfs = Box::leak(Box::new(
+            virtual_file_system::initialize(tasks, users, time, fs).unwrap(),
+        ));
+        virtual_file_system::create_default_hierarchy(vfs, task)
+            .await
+            .unwrap();
+
+        let state: &'static ReadState = Box::leak(Box::new(ReadState::default()));
+        vfs.mount_character_device(task, "/devices/pending", PendingDevice(state))
+            .await
+            .unwrap();
+
+        let root = Directory::new(vfs, task, "/", XILA_RIGHT_READ).unwrap();
+        let path = c"devices/pending";
+        let mut file = ptr::null_mut();
+        unsafe {
+            assert_eq!(
+                xila_file_open(
+                    &root,
+                    path.as_ptr(),
+                    path.count_bytes(),
+                    XILA_OPEN_READ,
+                    &mut file
+                ),
+                Status::Ok
+            );
+            let mut buffer = [0; 2];
+            let mut count = 99;
+            let status = xila_file_read(file, buffer.as_mut_ptr().cast(), buffer.len(), &mut count);
+            assert_eq!(status, Status::WouldBlock);
+            assert_eq!(count, 99);
+        }
+        assert_eq!(state.polls.swap(0, Ordering::Relaxed), 1);
+        assert!(state.waker.lock().unwrap().is_none());
+
+        // SAFETY: The bounded ABI call chain fits within the supplied stack.
+        // The resulting task owns the handle until xila_file_close.
+        let (reader, _) = unsafe {
+            stackful::spawn(
+                tasks,
+                task,
+                "ABI reader",
+                stackful::Stack::new(64 * 1024),
+                move || {
+                    let mut buffer = [0; 2];
+                    let mut count = 0;
+                    let status =
+                        xila_file_read(file, buffer.as_mut_ptr().cast(), buffer.len(), &mut count);
+                    let close = xila_file_close(file);
+                    i32::from(
+                        status != Status::Ok
+                            || close != Status::Ok
+                            || count != 2
+                            || &buffer != b"ok",
+                    )
+                },
+            )
+            .await
+            .unwrap()
+        };
+        let (peer, _) = tasks
+            .spawn(
+                task,
+                "device readiness",
+                Some(spawner),
+                move |_| async move {
+                    while state.polls.load(Ordering::Relaxed) == 0 {
+                        task::yield_now().await;
+                    }
+                    assert_eq!(state.polls.load(Ordering::Relaxed), 1);
+                    state.ready.store(true, Ordering::Relaxed);
+                    state.waker.lock().unwrap().take().unwrap().wake();
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(reader.join().await, 0);
+        peer.join().await;
+        assert_eq!(state.polls.load(Ordering::Relaxed), 2);
+    }
 }

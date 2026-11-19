@@ -111,7 +111,7 @@ pub unsafe extern "C" fn xila_file_get_statistics(
             validate_output(output)?;
         }
         // Metadata is not file content: like POSIX fstat, any open file may be queried.
-        Statistics::try_from(file.inner.get_statistics()?)
+        Statistics::try_from(file.inner.as_synchronous_file_mut().get_statistics()?)
     })();
     match result {
         Ok(value) => {
@@ -148,13 +148,13 @@ pub unsafe extern "C" fn xila_directory_get_statistics(
         }
         let path = unsafe { directory.resolve(path, length, XILA_RIGHT_READ, false)? };
         let value = if flags & XILA_STATISTICS_NO_FOLLOW != 0 {
-            task::block_on(
+            crate::suspend_on(
                 directory
                     .vfs
                     .get_link_statistics_for_task(directory.task, &path),
             )?
         } else {
-            task::block_on(directory.vfs.get_statistics_for_task(directory.task, &path))?
+            crate::suspend_on(directory.vfs.get_statistics_for_task(directory.task, &path))?
         };
         Statistics::try_from(value)
     })();
