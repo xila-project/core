@@ -2,6 +2,7 @@
 name = "xila-drivers-neural-network"
 version.workspace = true
 edition = "2024"
+rust-version.workspace = true
 
 [lib]
 name = "drivers_neural_network"

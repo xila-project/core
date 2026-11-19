@@ -2,6 +2,7 @@
 name = "xila-task"
 version.workspace = true
 edition = "2024"
+rust-version.workspace = true
 
 [dependencies]
 task_macros = { package = "xila-task-macros", path = "./task_macros" }

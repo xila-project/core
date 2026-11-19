@@ -2,6 +2,7 @@
 name = "xila-stackful"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [features]
 # Preserve FP callee state for native soft-float/softfp callers using an FPU.

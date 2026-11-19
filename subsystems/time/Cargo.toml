@@ -2,6 +2,7 @@
 name = "xila-time"
 version.workspace = true
 edition = "2024"
+rust-version.workspace = true
 
 [dependencies]
 embassy-time = { workspace = true }

@@ -2,6 +2,7 @@
 name = "xila-memory"
 version.workspace = true
 edition = "2024"
+rust-version.workspace = true
 
 [dependencies]
 bitflags = { version = "2", default-features = false }
