@@ -100,6 +100,10 @@ const RISCV_TARGET_FLOAT_ABIS: &[(&str, u32)] = &[
     ("riscv32imac-esp-espidf", 0),
     ("riscv32imc-esp-espidf", 0),
     ("riscv32imafc-unknown-none-elf", 2),
+    ("riscv32imafc-esp-espidf", 2),
+    ("riscv32e-unknown-none-elf", 0),
+    ("riscv32em-unknown-none-elf", 0),
+    ("riscv32emc-unknown-none-elf", 0),
 ];
 
 /// The `EF_RISCV_FLOAT_ABI` value of the Rust target `target`, or `None` for a
@@ -134,9 +138,8 @@ const fn str_eq(left: &str, right: &str) -> bool {
 }
 
 // Pin the detection of every known RISC-V target, so a wrong float ABI fails
-// the build of that target instead of silently rejecting correct images. An
-// explicit `-C target-feature` float flag overrides the target.
-#[cfg(all(target_arch = "riscv32", not(native_loader_float_flags)))]
+// the build of that target instead of silently rejecting correct images.
+#[cfg(target_arch = "riscv32")]
 const _: () = {
     if let Some(expected) = riscv_target_float_abi(env!("NATIVE_LOADER_TARGET")) {
         assert!(
