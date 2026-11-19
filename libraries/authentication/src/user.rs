@@ -16,7 +16,7 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use file_system::{AccessFlags, Path, PathOwned};
+use file_system::{AccessFlags, Kind, Path, PathOwned};
 use miniserde::{Deserialize, Serialize};
 use users::{GroupIdentifier, GroupIdentifierInner, UserIdentifier, UserIdentifierInner};
 use virtual_file_system::{Directory, File};
@@ -32,8 +32,13 @@ use crate::{
 /// predate it and are read as version 0, whose home is `/users/<identifier>`.
 pub const USER_RECORD_VERSION: u8 = 1;
 
-/// Temporary file used to replace a renamed account record atomically.
-const RENAME_TEMPORARY_PATH: &str = "/system/accounts/.rename-user.tmp";
+/// Temporary file used to replace an account record atomically.
+///
+/// It is named after the account's identifier, so concurrent rewrites of
+/// different accounts never share it.
+fn temporary_record_path(identifier: UserIdentifier) -> String {
+    format!("/system/accounts/.user-{}.tmp", identifier.as_u16())
+}
 
 /// Represents a user account with all associated metadata.
 ///
@@ -75,9 +80,11 @@ impl UserRecord {
         let home = match (self.version, self.home) {
             // Version 0 never recorded a home: its home was derived from the
             // identifier. This fallback happens in memory only.
-            (None, None) => legacy_user_home(UserIdentifier::new(self.identifier)),
+            (None | Some(0), None) => legacy_user_home(UserIdentifier::new(self.identifier)),
             (Some(USER_RECORD_VERSION), Some(home)) if users::is_valid_user_home(&home) => home,
-            (None, Some(_)) | (Some(USER_RECORD_VERSION), _) => return Err(Error::InvalidUserHome),
+            (None | Some(0), Some(_)) | (Some(USER_RECORD_VERSION), _) => {
+                return Err(Error::InvalidUserHome);
+            }
             (Some(_), _) => return Err(Error::UnsupportedUserRecordVersion),
         };
         Ok(User {
@@ -290,7 +297,10 @@ pub async fn authenticate_user(
 ///
 /// - `InvalidUserName` - The name does not satisfy [`users::is_valid_user_name`]
 /// - `UserHomeAlreadyUsed` - Another account records that home (for example a
-///   renamed account that kept it), or it exists and belongs to another user
+///   renamed account that kept it), or it exists and is not a directory owned
+///   by the new account
+/// - `FailedToCreateUser(DuplicateUserName)` - An account record with that
+///   name already exists, even one this firmware could not load
 /// - User identifier generation or assignment failures
 /// - File system operations (directory creation, file writing)
 /// - Random salt generation failures
@@ -321,10 +331,23 @@ pub async fn create_user(
         return Err(Error::UserHomeAlreadyUsed);
     }
     match virtual_file_system.get_statistics(&home.as_str()).await {
-        Ok(statistics) if statistics.user != user_identifier => {
+        Ok(statistics)
+            if statistics.user != user_identifier || statistics.kind != Kind::Directory =>
+        {
             return Err(Error::UserHomeAlreadyUsed);
         }
         Ok(_) | Err(virtual_file_system::Error::FileSystem(file_system::Error::NotFound)) => {}
+        Err(error) => return Err(Error::FailedToReadUserFile(error)),
+    }
+
+    // - Never overwrite an existing record, including one that was skipped
+    //   at load time (unsupported version, invalid home).
+    let user_file_path = get_user_file_path(user_name)?;
+    match virtual_file_system.get_statistics(&user_file_path).await {
+        Ok(_) => {
+            return Err(Error::FailedToCreateUser(users::Error::DuplicateUserName));
+        }
+        Err(virtual_file_system::Error::FileSystem(file_system::Error::NotFound)) => {}
         Err(error) => return Err(Error::FailedToReadUserFile(error)),
     }
 
@@ -355,8 +378,6 @@ pub async fn create_user(
         Ok(_) | Err(virtual_file_system::Error::AlreadyExists) => {}
         Err(error) => Err(Error::FailedToCreateUsersDirectory(error))?,
     }
-
-    let user_file_path = get_user_file_path(user_name)?;
 
     let user_json = miniserde::json::to_string(&user);
 
@@ -408,33 +429,32 @@ pub async fn change_user_password(
     user.set_hash(hash);
     user.set_salt(salt);
 
-    let user_json = miniserde::json::to_string(&user);
-
-    File::write_to_path(
-        virtual_file_system,
-        task,
-        &user_file_path,
-        user_json.as_bytes(),
+    // Replaced atomically: a power loss leaves the old or the new password,
+    // never a truncated record.
+    atomic_write(
+        context,
+        &temporary_record_path(user.get_identifier()),
+        user_file_path.as_str(),
+        miniserde::json::to_string(&user).as_bytes(),
     )
     .await
-    .map_err(Error::FailedToWriteUserFile)?;
-
-    Ok(())
 }
 
 /// Renames a user account.
 ///
 /// Like Linux `usermod --login` without `--move-home`, renaming keeps the
 /// recorded home: `alice` renamed to `alicia` keeps `/users/alice`, and its
-/// contents are neither moved nor lost. Because that home stays recorded, a
-/// new account named `alice` is refused with `UserHomeAlreadyUsed` until the
-/// renamed account is removed.
+/// contents are neither moved nor lost. Because that home stays recorded, the
+/// name `alice` cannot be given to a new account: `create_user` refuses it
+/// with `UserHomeAlreadyUsed`.
 ///
-/// The record file is moved to its new name first, which commits the rename;
-/// its contents are then replaced atomically with the new name (and, for a
-/// version 0 record, upgraded to version 1 with its `/users/<identifier>`
-/// home). An interruption between the two steps is harmless because the
-/// record's file name is authoritative.
+/// The record file is moved to its new name first, which commits the rename,
+/// and the registry is updated right away. The record's contents are then
+/// replaced atomically with the new name (and, for a version 0 record,
+/// upgraded to version 1 with its `/users/<identifier>` home). That rewrite is
+/// best effort: the record's file name is authoritative, so if it fails, or
+/// power is lost before it, the account still loads under its new name. A
+/// failed rewrite is logged and the rename still succeeds.
 ///
 /// # Errors
 ///
@@ -491,20 +511,30 @@ pub async fn change_user_name(
         .await
         .map_err(Error::FailedToWriteUserFile)?;
 
-    user.set_name(new_name.to_string());
-
-    atomic_write(
-        context,
-        RENAME_TEMPORARY_PATH,
-        new_path.as_str(),
-        miniserde::json::to_string(&user).as_bytes(),
-    )
-    .await?;
-
+    // The rename is committed on disk: the registry must follow at once, so a
+    // failed rewrite below cannot leave the new name looking free.
     users_manager
         .rename_user(identifier, new_name)
         .await
-        .map_err(Error::FailedToRenameUser)
+        .map_err(Error::FailedToRenameUser)?;
+
+    user.set_name(new_name.to_string());
+
+    if let Err(error) = atomic_write(
+        context,
+        &temporary_record_path(identifier),
+        new_path.as_str(),
+        miniserde::json::to_string(&user).as_bytes(),
+    )
+    .await
+    {
+        log::warning!(
+            "Account {} renamed, but its record could not be rewritten: {error}",
+            identifier.as_u16()
+        );
+    }
+
+    Ok(())
 }
 
 /// Reads and parses a user file from the filesystem.

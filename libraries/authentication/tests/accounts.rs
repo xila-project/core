@@ -316,7 +316,13 @@ async fn renaming_keeps_the_recorded_home() {
     );
     assert_eq!(read(&context, "/users/alice/notes").await, "kept");
     assert!(!exists(&context, "/system/accounts/users/alice").await);
-    assert!(!exists(&context, "/system/accounts/.rename-user.tmp").await);
+    assert!(
+        !exists(
+            &context,
+            &format!("/system/accounts/.user-{}.tmp", alice.as_u16())
+        )
+        .await
+    );
     assert!(!exists(&context, "/users/alicia").await);
     assert_eq!(
         authentication::authenticate_user(&context, "alicia", &password)
@@ -331,7 +337,7 @@ async fn renaming_keeps_the_recorded_home() {
     );
 
     // The renamed account still owns /users/alice, so the old name cannot be
-    // reused for a new account until that home is released.
+    // given to a new account.
     assert!(matches!(
         authentication::create_user(&context, "alice", &password, group, None).await,
         Err(Error::UserHomeAlreadyUsed)
@@ -414,5 +420,123 @@ async fn a_home_owned_by_someone_else_is_not_reused() {
             .exists_user(UserIdentifier::new(1500))
             .await
             .unwrap()
+    );
+}
+
+#[task::test]
+async fn a_failed_rewrite_still_commits_the_rename() {
+    let context = fixture().await;
+    let group = GroupIdentifier::new(1000);
+    let password = random_password(&context).await;
+    let alice = authentication::create_user(&context, "alice", &password, group, None)
+        .await
+        .unwrap();
+    // A directory in place of the temporary record makes the rewrite fail.
+    let vfs = context.virtual_file_system;
+    let temporary = format!("/system/accounts/.user-{}.tmp", alice.as_u16());
+    vfs.create_directory(context.task, &temporary.as_str())
+        .await
+        .unwrap();
+
+    authentication::change_user_name(&context, "alice", "alicia")
+        .await
+        .unwrap();
+
+    // The rewrite failed: the moved record still holds the old name.
+    let record = read(&context, "/system/accounts/users/alicia").await;
+    assert!(record.contains(r#""name":"alice""#), "{record}");
+    // The registry follows the moved record, so the new name is not free.
+    assert_eq!(
+        context.users_manager.get_user_name(alice).await.unwrap(),
+        "alicia"
+    );
+    assert!(matches!(
+        authentication::create_user(&context, "alicia", &password, group, None).await,
+        Err(Error::FailedToCreateUser(users::Error::DuplicateUserName))
+    ));
+    assert_eq!(
+        authentication::authenticate_user(&context, "alicia", &password)
+            .await
+            .unwrap(),
+        alice
+    );
+    let users_manager = reload(&context).await;
+    assert_eq!(users_manager.get_user_name(alice).await.unwrap(), "alicia");
+}
+
+#[task::test]
+async fn an_existing_record_is_never_overwritten() {
+    let context = fixture().await;
+    let password = random_password(&context).await;
+    // Written by newer firmware: skipped at load time, so not registered.
+    let record = r#"{"version":2,"identifier":60,"name":"dave","primary_group":1000,"home":"/users/dave","hash":"h","salt":"s"}"#;
+    File::write_to_path(
+        context.virtual_file_system,
+        context.task,
+        &"/system/accounts/users/dave",
+        record.as_bytes(),
+    )
+    .await
+    .unwrap();
+
+    assert!(matches!(
+        authentication::create_user(
+            &context,
+            "dave",
+            &password,
+            GroupIdentifier::new(1000),
+            None
+        )
+        .await,
+        Err(Error::FailedToCreateUser(users::Error::DuplicateUserName))
+    ));
+    assert_eq!(read(&context, "/system/accounts/users/dave").await, record);
+}
+
+#[task::test]
+async fn a_home_that_is_not_a_directory_is_not_used() {
+    let context = fixture().await;
+    let password = random_password(&context).await;
+    let identifier = UserIdentifier::new(1600);
+    let vfs = context.virtual_file_system;
+    File::write_to_path(vfs, context.task, &"/users/erin", b"file")
+        .await
+        .unwrap();
+    vfs.set_ownership(context.task, &"/users/erin", Some(identifier), None)
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        authentication::create_user(
+            &context,
+            "erin",
+            &password,
+            GroupIdentifier::new(1000),
+            Some(identifier)
+        )
+        .await,
+        Err(Error::UserHomeAlreadyUsed)
+    ));
+    assert!(!context.users_manager.exists_user(identifier).await.unwrap());
+}
+
+#[task::test]
+async fn an_explicit_version_zero_is_read_like_a_missing_version() {
+    let context = fixture().await;
+    File::write_to_path(
+        context.virtual_file_system,
+        context.task,
+        &"/system/accounts/users/frank",
+        br#"{"version":0,"identifier":43,"name":"frank","primary_group":1000,"hash":"h","salt":"s"}"#,
+    )
+    .await
+    .unwrap();
+    let users_manager = reload(&context).await;
+    assert_eq!(
+        users_manager
+            .get_user_home(UserIdentifier::new(43))
+            .await
+            .unwrap(),
+        "/users/43"
     );
 }

@@ -162,13 +162,14 @@ pub async fn load_all_users_and_groups(context: &Context<'_>) -> Result<()> {
 
         // Read all users.
         for user_entry in users_directory {
-            let user =
-                if let Ok(user) = read_user_file(context, &mut buffer, &user_entry.name).await {
-                    user
-                } else {
-                    // ? : Log error ?
+            let user = match read_user_file(context, &mut buffer, &user_entry.name).await {
+                Ok(user) => user,
+                Err(error) => {
+                    // The name is not logged: it is personal data.
+                    log::warning!("Skipped an account record that cannot be loaded: {error}");
                     continue;
-                };
+                }
+            };
 
             users_manager
                 .add_user(

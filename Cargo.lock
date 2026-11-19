@@ -1891,6 +1891,7 @@ dependencies = [
  "xila-device",
  "xila-file-system",
  "xila-little-fs",
+ "xila-log",
  "xila-task",
  "xila-testing-support",
  "xila-time",
