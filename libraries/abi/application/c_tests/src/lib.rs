@@ -569,9 +569,9 @@ mod tests {
                 "ABI sleeper",
                 stackful::Stack::new(64 * 1024),
                 move || {
-                    let start = std::time::Instant::now();
+                    let start = ::time::MonotonicClock::now(&::time::EmbassyClock);
                     let slept = xila_time_sleep(20_000_000);
-                    let elapsed = start.elapsed();
+                    let elapsed = ::time::MonotonicClock::now(&::time::EmbassyClock) - start;
                     // The entropy source is pending on alternate reads, so this fill
                     // suspends the coroutine as well.
                     let mut buffer = [0u8; 8];
@@ -601,5 +601,51 @@ mod tests {
         assert_eq!(sleeper.join().await, 0);
         peer.join().await;
         assert!(peer_turns.load(Ordering::Relaxed) > 1);
+    }
+
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    #[task::test]
+    async fn stackful_sleep_forever_does_not_return() {
+        use core::{future::poll_fn, pin::pin, task::Poll};
+        use portable_atomic::{AtomicBool, Ordering};
+
+        static RETURNED: AtomicBool = AtomicBool::new(false);
+        let tasks = task::test_manager();
+        let task = tasks.get_current_task_identifier().await;
+        let spawner = tasks.get_spawner(task).await.unwrap();
+        // The task races the coroutine against a timer and then drops it, so
+        // the test ends with no task left behind.
+        let (watcher, _) = tasks
+            .spawn(
+                task,
+                "forever sleeper",
+                Some(spawner),
+                move |_| async move {
+                    // SAFETY: The bounded ABI call chain fits within the supplied stack.
+                    let coroutine = unsafe {
+                        stackful::Coroutine::new(stackful::Stack::new(64 * 1024), || {
+                            let status = xila_time_sleep(u64::MAX);
+                            RETURNED.store(true, Ordering::Relaxed);
+                            i32::from(status != Status::Ok)
+                        })
+                    };
+                    let mut sleeper = pin!(stackful::drive(coroutine));
+                    let mut limit = pin!(task::sleep(core::time::Duration::from_millis(50)));
+                    poll_fn(|context| {
+                        if sleeper.as_mut().poll(context).is_ready() {
+                            return Poll::Ready(true);
+                        }
+                        limit.as_mut().poll(context).map(|()| false)
+                    })
+                    .await
+                },
+            )
+            .await
+            .unwrap();
+        assert!(!watcher.join().await, "sleep(u64::MAX) returned");
+        assert!(!RETURNED.load(Ordering::Relaxed));
     }
 }

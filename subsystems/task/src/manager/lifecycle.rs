@@ -221,10 +221,8 @@ impl Manager {
     }
 
     pub async fn sleep(duration: Duration) {
-        Timer::after(embassy_time::Duration::from_nanos(
-            duration.as_nanos() as u64
-        ))
-        .await
+        let nanoseconds = u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX);
+        Timer::at(deadline_after_nanoseconds(nanoseconds)).await
     }
 
     /// Return an error under block_on or any executor with a foreign waker.

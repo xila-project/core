@@ -79,13 +79,16 @@ the monotonic clock, and stays readable while UTC is unsynchronized, when it
 equals the monotonic one. An unknown clock or a null output returns
 InvalidArgument; no installed time manager returns Unavailable.
 
-`xila_time_sleep(nanoseconds)` waits at least that long on the monotonic clock,
+`xila_time_sleep(nanoseconds)` waits at least that long on the executor's clock,
+which is the monotonic clock unless the host installed a custom one, and is
 unaffected by UTC corrections. Inside a coroutine it suspends on the executor's
 Embassy timer, so peers on the same executor keep running; zero yields once.
 Embassy timers need an executor waker that the `task::block_on` fallback lacks,
 so outside a coroutine the call polls the clock instead (and zero returns at
-once). It needs no time manager and always returns Ok: there is no signal
-delivery, so nothing interrupts it.
+once). Durations are converted to ticks with saturating arithmetic, rounded up
+plus one tick, so `UINT64_MAX` waits practically forever instead of wrapping. It
+needs no time manager and returns Ok on hosts whose Embassy time driver works
+(there is no signal delivery, so nothing interrupts it).
 
 `xila_random_fill(buffer, size)` fills the buffer from the entropy source that the
 host installs once with `initialize_random`, typically the character device

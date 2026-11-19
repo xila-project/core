@@ -387,14 +387,17 @@ typedef struct XilaApi {
   XilaStatus (*heap_free)(struct XilaHeap *heap, void *pointer);
   /**
    * Read a clock's nominal resolution: XILA_CLOCK_MONOTONIC or XILA_CLOCK_REALTIME.
+   * Returns Unavailable when the host installed no clock.
    */
   XilaStatus (*time_resolution)(uint32_t clock, uint64_t *nanoseconds);
   /**
-   * Suspend for at least the given monotonic nanoseconds. Zero yields once.
+   * Suspend for at least the given nanoseconds on the executor's clock. A zero wait
+   * yields once inside a coroutine and returns at once outside one.
    */
   XilaStatus (*time_sleep)(uint64_t nanoseconds);
   /**
-   * Fill a buffer from the host-granted entropy source. Zero size succeeds.
+   * Fill a buffer from the host-granted entropy source. Zero size succeeds. The
+   * buffer contents are unspecified after a failure.
    */
   XilaStatus (*random_fill)(void *buffer, size_t size);
 } XilaApi;

@@ -1,5 +1,5 @@
-use crate::{Status, suspend_on};
-use core::{ffi::c_void, future::poll_fn, slice};
+use crate::Status;
+use core::{ffi::c_void, future::poll_fn, pin::pin, slice};
 use file_system::{DirectCharacterDevice, Operation};
 use synchronization::once_lock::OnceLock;
 
@@ -31,7 +31,17 @@ pub unsafe extern "C" fn xila_random_fill(buffer: *mut c_void, size: usize) -> S
     // SAFETY: non-null and at most isize::MAX bytes; the caller guarantees validity.
     let mut remaining: &mut [u8] = unsafe { slice::from_raw_parts_mut(buffer.cast(), size) };
     while !remaining.is_empty() {
-        let result = suspend_on(poll_fn(|context| device.read(context, remaining, 0)));
+        // The shared suspension only returns `()`, so the read result travels
+        // through this slot.
+        let mut result = Ok(0);
+        {
+            let future = pin!(poll_fn(|context| {
+                device
+                    .read(context, remaining, 0)
+                    .map(|value| result = value)
+            }));
+            crate::suspend_dynamic(future);
+        }
         device.cancel_operation(Operation::Read);
         match result {
             // A source that makes no progress would otherwise loop forever.

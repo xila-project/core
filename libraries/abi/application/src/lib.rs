@@ -88,6 +88,13 @@ const fn is_in_coroutine() -> bool {
     false
 }
 
+/// The one shared, non-generic `suspend_on` instantiation for unit-output futures.
+/// Sleep and random fill both go through it so the generic code exists once.
+#[inline(never)]
+fn suspend_dynamic(future: core::pin::Pin<&mut dyn core::future::Future<Output = ()>>) {
+    suspend_on(future)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)] // Fixture setup may report errors through Debug.
 mod tests {

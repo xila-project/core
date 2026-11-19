@@ -1,5 +1,4 @@
-use crate::{Status, is_in_coroutine, suspend_on};
-use core::time::Duration;
+use crate::{Status, is_in_coroutine};
 use synchronization::once_lock::OnceLock;
 
 static TIME: OnceLock<&'static time::Manager<'static>> = OnceLock::new();
@@ -81,19 +80,19 @@ pub unsafe extern "C" fn xila_time_resolution(clock: u32, nanoseconds: *mut u64)
     }
 }
 
-/// Suspend the caller for at least the given nanoseconds on the monotonic clock.
+/// Suspend the caller for at least the given nanoseconds on the executor's clock.
 /// Inside a coroutine this suspends it on the executor's timer, so other tasks
 /// run meanwhile; zero yields once. Outside a coroutine there is no executor
 /// waker for the timer, so the call polls the clock and zero returns at once.
-/// UTC corrections do not affect the wait.
+/// UTC corrections do not affect the wait, and `u64::MAX` waits practically
+/// forever.
 pub extern "C" fn xila_time_sleep(nanoseconds: u64) -> Status {
-    let duration = Duration::from_nanos(nanoseconds);
+    use embassy_time::{Instant, Timer};
+    let deadline = task::deadline_after_nanoseconds(nanoseconds);
     if is_in_coroutine() {
-        // An Embassy timer always yields once before it can complete.
-        suspend_on(task::sleep(duration));
+        crate::suspend_dynamic(core::pin::pin!(Timer::at(deadline)));
     } else {
-        let start = time::MonotonicClock::now(&time::EmbassyClock);
-        while time::MonotonicClock::now(&time::EmbassyClock).saturating_sub(start) < duration {
+        while Instant::now() < deadline {
             core::hint::spin_loop();
         }
     }
