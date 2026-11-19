@@ -16,7 +16,8 @@ const mappingRoot = path.join(ROOT, "tools/localization/mappings");
 const args = process.argv.slice(2);
 const baselineIndex = args.indexOf("--baseline");
 const baseline = baselineIndex >= 0 ? args[baselineIndex + 1] : null;
-if (baselineIndex >= 0 && !baseline) throw Error("--baseline requires a Git ref");
+if (baselineIndex >= 0 && !baseline)
+  throw Error("--baseline requires a Git ref");
 const failures = [];
 const CATEGORY = /\.(zero|one|two|few|many|other)$/;
 const KEY = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/;
@@ -38,7 +39,8 @@ function catalog(pathName) {
   }
   const flat = flattenCatalog(json);
   for (const [key, value] of Object.entries(flat)) {
-    if (typeof value !== "string") failures.push(pathName + ": nonstring value " + key);
+    if (typeof value !== "string")
+      failures.push(pathName + ": nonstring value " + key);
     else if (path.basename(pathName) === "fr.json") {
       for (const issue of frenchTypographyIssues(value)) {
         failures.push(pathName + ": " + key + ": " + issue);
@@ -48,7 +50,8 @@ function catalog(pathName) {
     const segments = key.split(".");
     for (let n = 1; n < segments.length; n++) {
       const prefix = segments.slice(0, n).join(".");
-      if (Object.hasOwn(flat, prefix)) failures.push(pathName + ": dotted collision " + prefix);
+      if (Object.hasOwn(flat, prefix))
+        failures.push(pathName + ": dotted collision " + prefix);
     }
   }
   return flat;
@@ -57,9 +60,12 @@ function catalog(pathName) {
 function baselineCatalog(file) {
   const relative = path.relative(ROOT, file).replace(/\\/g, "/");
   try {
-    return JSON.parse(execFileSync("git", ["show", baseline + ":" + relative], {
-      cwd: ROOT, encoding: "utf8",
-    }));
+    return JSON.parse(
+      execFileSync("git", ["show", baseline + ":" + relative], {
+        cwd: ROOT,
+        encoding: "utf8",
+      }),
+    );
   } catch {
     failures.push("Unable to read baseline catalog: " + relative);
     return {};
@@ -67,23 +73,37 @@ function baselineCatalog(file) {
 }
 
 let namespaceCount = 0;
-for (const file of readdirSync(mappingRoot).filter(name => name.endsWith(".json")).sort()) {
-  const mapping = JSON.parse(readFileSync(path.join(mappingRoot, file), "utf8"));
+for (const file of readdirSync(mappingRoot)
+  .filter((name) => name.endsWith(".json"))
+  .sort()) {
+  const mapping = JSON.parse(
+    readFileSync(path.join(mappingRoot, file), "utf8"),
+  );
   const namespace = mapping.namespace;
   const prefix = path.join(ROOT, namespace);
   const locales = visit(path.join(prefix, "locales"), ".json");
-  const values = new Map(locales.map(file => [file, catalog(file)]));
+  const values = new Map(locales.map((file) => [file, catalog(file)]));
   const oldToNew = mapping.old_to_new;
   namespaceCount++;
   const destinations = Object.values(oldToNew);
   if (new Set(destinations).size !== destinations.length) {
-    failures.push(namespace + ": duplicate semantic destinations in migration mapping");
+    failures.push(
+      namespace + ": duplicate semantic destinations in migration mapping",
+    );
   }
-  const allKeys = new Set([...values.values()].flatMap(data => Object.keys(data)));
+  const allKeys = new Set(
+    [...values.values()].flatMap((data) => Object.keys(data)),
+  );
   for (const [oldKey, newKey] of Object.entries(oldToNew)) {
-    if (!KEY.test(newKey)) failures.push(namespace + ": invalid mapped key " + newKey);
-    if (!allKeys.has(newKey) && ![...allKeys].some(k => k.startsWith(newKey + "."))) {
-      failures.push(namespace + ": missing mapped key " + oldKey + " -> " + newKey);
+    if (!KEY.test(newKey))
+      failures.push(namespace + ": invalid mapped key " + newKey);
+    if (
+      !allKeys.has(newKey) &&
+      ![...allKeys].some((k) => k.startsWith(newKey + "."))
+    ) {
+      failures.push(
+        namespace + ": missing mapped key " + oldKey + " -> " + newKey,
+      );
     }
   }
   const used = new Set();
@@ -91,14 +111,30 @@ for (const file of readdirSync(mappingRoot).filter(name => name.endsWith(".json"
     for (const key of extract(readFileSync(source, "utf8"), source).keys) {
       used.add(key.keyName);
       if (!KEY.test(key.keyName)) {
-        failures.push(namespace + ": nonsemantic source key " + key.keyName + " referenced by " + path.relative(ROOT, source) + ":" + key.line);
+        failures.push(
+          namespace +
+            ": nonsemantic source key " +
+            key.keyName +
+            " referenced by " +
+            path.relative(ROOT, source) +
+            ":" +
+            key.line,
+        );
       }
       if (!allKeys.has(key.keyName)) {
-        failures.push(namespace + ": missing key " + key.keyName + " referenced by " + path.relative(ROOT, source));
+        failures.push(
+          namespace +
+            ": missing key " +
+            key.keyName +
+            " referenced by " +
+            path.relative(ROOT, source),
+        );
       }
     }
   }
-  const english = [...values.entries()].find(([file]) => file.endsWith("/en.json"))?.[1] || {};
+  const english =
+    [...values.entries()].find(([file]) => file.endsWith("/en.json"))?.[1] ||
+    {};
   for (const [file, data] of values) {
     for (const key of Object.keys(english)) {
       // CLDR plural coverage is locale-specific; compile-time strict checks
@@ -124,9 +160,19 @@ for (const file of readdirSync(mappingRoot).filter(name => name.endsWith(".json"
       }
     }
   }
-  const unused = [...allKeys].filter(k => !used.has(k));
-  console.log(namespace + ": " + allKeys.size + " keys across " + locales.length +
-    " locales; " + used.size + " extracted references; " + unused.length + " unused catalog keys");
+  const unused = [...allKeys].filter((k) => !used.has(k));
+  console.log(
+    namespace +
+      ": " +
+      allKeys.size +
+      " keys across " +
+      locales.length +
+      " locales; " +
+      used.size +
+      " extracted references; " +
+      unused.length +
+      " unused catalog keys",
+  );
   if (unused.length) console.log("  Review unused: " + unused.join(", "));
 }
 
@@ -152,17 +198,35 @@ const guestUiTests = [
 ];
 for (const { application, file, calls } of guestUiTests) {
   const sourcePath = path.join(APPLICATIONS_ROOT, file);
-  const english = catalog(path.join(APPLICATIONS_ROOT, "executables", application, "locales", "en.json"));
+  const english = catalog(
+    path.join(
+      APPLICATIONS_ROOT,
+      "executables",
+      application,
+      "locales",
+      "en.json",
+    ),
+  );
   const source = readFileSync(sourcePath, "utf8");
   let count = 0;
   for (const match of source.matchAll(calls)) {
     const key = match[1];
     count++;
-    if (!KEY.test(key)) failures.push(file + ": nonsemantic guest UI test key " + JSON.stringify(key));
-    if (!Object.hasOwn(english, key)) failures.push(file + ": missing guest UI test key " + JSON.stringify(key));
+    if (!KEY.test(key))
+      failures.push(
+        file + ": nonsemantic guest UI test key " + JSON.stringify(key),
+      );
+    if (!Object.hasOwn(english, key))
+      failures.push(
+        file + ": missing guest UI test key " + JSON.stringify(key),
+      );
   }
-  if (!count) failures.push(file + ": no guest UI translation assertions found");
-  else console.log(file + ": validated " + count + " guest UI translation references");
+  if (!count)
+    failures.push(file + ": no guest UI translation assertions found");
+  else
+    console.log(
+      file + ": validated " + count + " guest UI translation references",
+    );
 }
 
 console.log("Checked " + namespaceCount + " namespaces.");
