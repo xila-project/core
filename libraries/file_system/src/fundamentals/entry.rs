@@ -26,7 +26,10 @@ pub struct Entry {
     pub kind: Kind,
     /// The size of the file system object in bytes
     pub size: Size,
-    /// The last modification time of the file system object
+    /// The last modification time, in UTC seconds since the Unix epoch.
+    ///
+    /// `0` means unknown: the time was never set (no UTC clock was available)
+    /// or the object was created without Xila attributes.
     pub modification: Time,
 }
 
