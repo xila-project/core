@@ -456,6 +456,7 @@ extends = "ci:rust-lint"
 
 [tasks."ci:native-loader-targets"]
 description = "Check and build native ELF loading on Cortex-M4 and RV32IMAC"
+depends = ["ci:packages-host"]
 run = """
 set -eu
 for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf; do
