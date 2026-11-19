@@ -32,6 +32,10 @@ pub use time::*;
 /// level that package manifests declare; unversioned historical builds have no
 /// declared compatibility. Increment it for a breaking ABI change.
 ///
+/// It versions the whole application contract, Wasm and native, as seen by
+/// the package manager. `XILA_ABI_VERSION_MAJOR`/`MINOR` version only the
+/// native `XilaApi` table layout.
+///
 /// cbindgen:ignore
 pub const APPLICATION_ABI_VERSION: u32 = 1;
 

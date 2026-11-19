@@ -62,7 +62,6 @@ drivers_peripherals = { package = "xila-drivers-peripherals", path = "drivers/pe
 embedded-hal = { version = "1", default-features = false }
 embedded-hal-async = { version = "1", default-features = false }
 miniserde = { version = "0.1", default-features = false }
-bindgen = { version = "0.73" }
 cbindgen = { version = "0.29" }
 syn = { version = "3.0" }
 quote = { version = "1.0" }

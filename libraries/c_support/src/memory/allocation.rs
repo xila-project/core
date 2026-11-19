@@ -1,35 +1,3 @@
-//! # Memory Management Module
-//!
-//! This module provides low-level memory management functionality for the Xila operating system.
-//! It exposes a C-compatible ABI for memory allocation, deallocation, and memory operations
-//! that can be used by applications and other system components.
-//!
-//! ## Features
-//!
-//! - **Memory Allocation**: Allocate memory blocks with specific size, alignment, and capabilities
-//! - **Memory Deallocation**: Free allocated memory blocks
-//! - **Memory Reallocation**: Resize existing memory blocks
-//! - **Cache Management**: Flush data and instruction caches
-//! - **Memory Protection**: Support for read, write, and execute permissions
-//! - **Memory Capabilities**: Support for executable memory and DMA-capable memory
-//!
-//! ## Safety
-//!
-//! This module provides unsafe functions that directly manipulate memory. Callers must ensure:
-//! - Pointers are valid and properly aligned
-//! - Memory is not accessed after deallocation
-//! - Concurrent access is properly synchronized
-//!
-//! ## Example Usage
-//!
-//! ```c
-//! // Allocate 1024 bytes with 8-byte alignment
-//! void* ptr = memory_allocate(NULL, 1024, 8, 0);
-//! if (ptr != NULL) {
-//!     // Use the memory...
-//!     memory_deallocate(ptr);
-//! }
-//! ```
 //! Allocation through the system memory manager, with the C allocator
 //! contract LVGL and LittleFS expect (`malloc`-style pointers carrying their
 //! own metadata header, `realloc` semantics, null on failure).
@@ -341,7 +309,6 @@ mod tests {
     //! - **Basic Operations**: Standard allocation, deallocation, and reallocation
     //! - **Edge Cases**: Zero-size allocations, large alignments, null pointers
     //! - **Capabilities**: Testing executable and DMA-capable memory
-    //! - **Cache Operations**: Data and instruction cache flushing
     //! - **Stress Testing**: Multiple allocations and allocation tracking
     //! - **Error Handling**: Invalid inputs and error recovery
     use alloc::vec::Vec;
