@@ -1,11 +1,10 @@
 use super::VirtualFileSystem;
-use crate::{Error, ItemStatic, Result, SynchronousFile, poll};
+use crate::{Error, ItemStatic, Result, SynchronousFile, poll, suspend_on};
 use alloc::{vec, vec::Vec};
 use embedded_io_async::ErrorType;
 use exported_file_system::{AccessFlags, ControlCommand, CreateFlags, Permissions};
 use file_system::{Context, Flags, Path, Position, Size, StateFlags, Statistics};
 use task::TaskIdentifier;
-use task::block_on;
 use users::{GroupIdentifier, UserIdentifier};
 
 /// File structure.
@@ -16,6 +15,11 @@ use users::{GroupIdentifier, UserIdentifier};
 pub struct File<'a>(SynchronousFile<'a>);
 
 impl<'a> File<'a> {
+    /// Wrap an existing file for async I/O, preserving its cursor, flags and authority.
+    pub const fn from_synchronous_file(file: SynchronousFile<'a>) -> Self {
+        Self(file)
+    }
+
     pub fn as_synchronous_file_mut(&mut self) -> &mut SynchronousFile<'a> {
         &mut self.0
     }
@@ -37,7 +41,7 @@ impl embedded_io_async::Write for File<'_> {
 
 impl core::fmt::Write for File<'_> {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        if let Err(e) = block_on(self.write(s.as_bytes())) {
+        if let Err(e) = suspend_on(self.write(s.as_bytes())) {
             log::error!("Error writing string to file: {}", e);
             return Err(core::fmt::Error);
         }

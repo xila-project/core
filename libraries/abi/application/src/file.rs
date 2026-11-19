@@ -2,7 +2,7 @@ use crate::{Directory, Status, XILA_RIGHT_READ, XILA_RIGHT_WRITE, canonical, pat
 use alloc::boxed::Box;
 use core::{ffi::c_char, slice};
 use file_system::{AccessFlags, CreateFlags, Flags, Position, StateFlags};
-use virtual_file_system::SynchronousFile;
+use virtual_file_system::{File as VfsFile, SynchronousFile};
 
 pub const XILA_OPEN_READ: u32 = 1;
 pub const XILA_OPEN_WRITE: u32 = 2;
@@ -17,11 +17,14 @@ pub const XILA_SEEK_END: u32 = 2;
 
 /// Opaque owned file. No handle lookup or buffer allocation is required for I/O.
 pub struct File {
-    pub(crate) inner: SynchronousFile<'static>,
+    // Async I/O can suspend a coroutine. Other callers still probe once.
+    pub(crate) inner: VfsFile<'static>,
 }
 impl File {
     pub fn new(inner: SynchronousFile<'static>) -> Self {
-        Self { inner }
+        Self {
+            inner: VfsFile::from_synchronous_file(inner),
+        }
     }
     pub fn into_raw(self) -> *mut Self {
         Box::into_raw(Box::new(self))
@@ -133,7 +136,13 @@ pub unsafe extern "C" fn xila_file_read(
     } else {
         unsafe { slice::from_raw_parts_mut(buffer.cast(), size) }
     };
-    match unsafe { &mut *file }.inner.read(buffer) {
+    let file = &mut unsafe { &mut *file }.inner;
+    let result = if crate::is_in_coroutine() {
+        crate::suspend_on(file.read(buffer))
+    } else {
+        file.as_synchronous_file_mut().read(buffer)
+    };
+    match result {
         Ok(value) => {
             unsafe { count.write(value) };
             Status::Ok
@@ -164,7 +173,13 @@ pub unsafe extern "C" fn xila_file_write(
     } else {
         unsafe { slice::from_raw_parts(buffer.cast(), size) }
     };
-    match unsafe { &mut *file }.inner.write(buffer) {
+    let file = &mut unsafe { &mut *file }.inner;
+    let result = if crate::is_in_coroutine() {
+        crate::suspend_on(file.write(buffer))
+    } else {
+        file.as_synchronous_file_mut().write(buffer)
+    };
+    match result {
         Ok(value) => {
             unsafe { count.write(value) };
             Status::Ok
@@ -192,7 +207,11 @@ pub unsafe extern "C" fn xila_file_seek(
         2 => Position::End(offset),
         _ => return Status::InvalidArgument,
     };
-    match unsafe { &mut *file }.inner.set_position(&seek) {
+    match unsafe { &mut *file }
+        .inner
+        .as_synchronous_file_mut()
+        .set_position(&seek)
+    {
         Ok(value) => {
             if !position.is_null() {
                 unsafe { position.write(value) };
@@ -210,10 +229,13 @@ pub unsafe extern "C" fn xila_file_flush(file: *mut File) -> Status {
     if file.is_null() {
         return Status::InvalidArgument;
     }
-    unsafe { &mut *file }
-        .inner
-        .flush()
-        .map_or_else(Status::from, |()| Status::Ok)
+    let file = &mut unsafe { &mut *file }.inner;
+    let result = if crate::is_in_coroutine() {
+        crate::suspend_on(file.flush())
+    } else {
+        file.as_synchronous_file_mut().flush()
+    };
+    result.map_or_else(Status::from, |()| Status::Ok)
 }
 /// Close and free the object even if closing fails. Null succeeds.
 /// # Safety
@@ -225,6 +247,7 @@ pub unsafe extern "C" fn xila_file_close(file: *mut File) -> Status {
     }
     let File { inner } = *unsafe { File::from_raw(file) };
     inner
+        .into_synchronous_file()
         .close_owned()
         .map_or_else(Status::from, |()| Status::Ok)
 }
@@ -239,6 +262,7 @@ pub unsafe extern "C" fn xila_file_set_size(file: *mut File, size: u64) -> Statu
     }
     unsafe { &mut *file }
         .inner
+        .as_synchronous_file_mut()
         .set_size(size)
         .map_or_else(Status::from, |()| Status::Ok)
 }

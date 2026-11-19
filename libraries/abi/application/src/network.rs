@@ -1,4 +1,4 @@
-use crate::{Status, path_input};
+use crate::{Status, path_input, suspend_on};
 use ::network::{
     IpAddress, IpEndpoint, IpListenEndpoint, Ipv6, Manager, Port, TcpSocket, UdpSocket,
 };
@@ -7,7 +7,6 @@ use core::{
     ffi::{c_char, c_void},
     slice,
 };
-use task::block_on;
 
 pub const XILA_NETWORK_CONNECT: u32 = 1;
 pub const XILA_NETWORK_LISTEN: u32 = 2;
@@ -154,7 +153,7 @@ unsafe fn write_buffer<'a>(p: *mut c_void, size: usize) -> Result<&'a mut [u8], 
 // Small fixed socket buffers; no ABI-side staging buffer on I/O paths.
 const BUFFER_SIZE: usize = 1024;
 fn tcp_socket(network: &Network) -> Result<TcpSocket, Status> {
-    block_on(
+    suspend_on(
         network
             .manager
             .new_tcp_socket(BUFFER_SIZE, BUFFER_SIZE, None),
@@ -163,7 +162,7 @@ fn tcp_socket(network: &Network) -> Result<TcpSocket, Status> {
 }
 fn listen(socket: &TcpSocket, address: NetworkAddress) -> Result<(), Status> {
     let endpoint = address.endpoint()?;
-    block_on(socket.with_mutable(|s| {
+    suspend_on(socket.with_mutable(|s| {
         s.listen(IpListenEndpoint::new(Some(endpoint.address), endpoint.port).into_smoltcp())
     }))
     .map_err(|_| Status::InvalidArgument)
@@ -205,7 +204,7 @@ pub unsafe extern "C" fn xila_tcp_connect(
         let endpoint = input(address)?.endpoint()?;
         network.require(XILA_NETWORK_CONNECT)?;
         let mut inner = tcp_socket(network)?;
-        let result = block_on(async {
+        let result = suspend_on(async {
             if timeout_ms == 0 {
                 return inner.connect(endpoint.address, endpoint.port).await;
             }
@@ -214,8 +213,9 @@ pub unsafe extern "C" fn xila_tcp_connect(
             match select(
                 inner.connect(endpoint.address, endpoint.port),
                 // A plain deadline check: embassy-time timers need an Embassy executor
-                // waker, which `block_on` does not provide. Waking itself keeps the
-                // deadline live under executors that sleep until woken.
+                // waker, which the non-coroutine `block_on` fallback does not provide.
+                // Re-waking yields cleanly inside a coroutine and keeps the deadline
+                // live under executors that sleep until woken.
                 core::future::poll_fn(|context| {
                     if time::MonotonicClock::now(&time::EmbassyClock).saturating_sub(start)
                         >= core::time::Duration::from_millis(u64::from(timeout_ms))
@@ -234,7 +234,7 @@ pub unsafe extern "C" fn xila_tcp_connect(
             }
         });
         if let Err(error) = result {
-            block_on(inner.close_forced());
+            suspend_on(inner.close_forced());
             return Err(error.into());
         }
         Ok(Tcp { inner }.into_raw())
@@ -271,7 +271,7 @@ pub unsafe extern "C" fn xila_tcp_listen(
         network.require(XILA_NETWORK_LISTEN)?;
         let mut inner = tcp_socket(network)?;
         if let Err(error) = listen(&inner, address) {
-            block_on(inner.close_forced());
+            suspend_on(inner.close_forced());
             return Err(error);
         }
         Ok(TcpListener {
@@ -309,9 +309,9 @@ pub unsafe extern "C" fn xila_tcp_accept(
         let listener = object(listener)?;
         listener.network.require(XILA_NETWORK_LISTEN)?;
         let endpoint = listener.address.endpoint()?;
-        block_on(listener.inner.accept(Some(endpoint.address), endpoint.port))
+        suspend_on(listener.inner.accept(Some(endpoint.address), endpoint.port))
             .map_err(Status::from)?;
-        if block_on(listener.inner.get_remote_endpoint())
+        if suspend_on(listener.inner.get_remote_endpoint())
             .map_err(Status::from)?
             .is_none()
         {
@@ -319,7 +319,7 @@ pub unsafe extern "C" fn xila_tcp_accept(
         }
         let mut replacement = tcp_socket(&listener.network)?;
         if let Err(error) = listen(&replacement, listener.address) {
-            block_on(replacement.close_forced());
+            suspend_on(replacement.close_forced());
             return Err(error);
         }
         let inner = core::mem::replace(&mut listener.inner, replacement);
@@ -345,7 +345,7 @@ pub unsafe extern "C" fn xila_tcp_close(socket: *mut Tcp) -> Status {
     status(unsafe {
         if !socket.is_null() {
             let mut socket = Tcp::from_raw(socket);
-            block_on(socket.inner.close_forced());
+            suspend_on(socket.inner.close_forced());
         }
         Ok(())
     })
@@ -361,7 +361,7 @@ pub unsafe extern "C" fn xila_tcp_listener_close(socket: *mut TcpListener) -> St
     status(unsafe {
         if !socket.is_null() {
             let mut socket = TcpListener::from_raw(socket);
-            block_on(socket.inner.close_forced());
+            suspend_on(socket.inner.close_forced());
         }
         Ok(())
     })
@@ -379,7 +379,7 @@ pub unsafe extern "C" fn xila_tcp_shutdown(socket: *mut Tcp, direction: u32) -> 
         if direction != XILA_SHUTDOWN_WRITE {
             return Err(Status::InvalidArgument);
         }
-        block_on(socket.inner.close());
+        suspend_on(socket.inner.close());
         Ok(())
     })())
 }
@@ -406,7 +406,7 @@ pub unsafe extern "C" fn xila_tcp_send(
         let n = if size == 0 {
             0
         } else {
-            block_on(socket.inner.write(buffer)).map_err(Status::from)?
+            suspend_on(socket.inner.write(buffer)).map_err(Status::from)?
         };
         Ok(n)
     })();
@@ -442,7 +442,7 @@ pub unsafe extern "C" fn xila_tcp_receive(
         let n = if size == 0 {
             0
         } else {
-            block_on(socket.inner.read(buffer)).map_err(Status::from)?
+            suspend_on(socket.inner.read(buffer)).map_err(Status::from)?
         };
         Ok(n)
     })();
@@ -472,7 +472,7 @@ pub unsafe extern "C" fn xila_tcp_local_address(
     }
     let result = (|| unsafe {
         let socket = input(socket)?;
-        let (ip, port) = block_on(socket.inner.get_local_endpoint())
+        let (ip, port) = suspend_on(socket.inner.get_local_endpoint())
             .map_err(Status::from)?
             .ok_or(Status::NotConnected)?;
         Ok(NetworkAddress::new(ip, port))
@@ -503,7 +503,7 @@ pub unsafe extern "C" fn xila_tcp_peer_address(
     }
     let result = (|| unsafe {
         let socket = input(socket)?;
-        let (ip, port) = block_on(socket.inner.get_remote_endpoint())
+        let (ip, port) = suspend_on(socket.inner.get_remote_endpoint())
             .map_err(Status::from)?
             .ok_or(Status::NotConnected)?;
         Ok(NetworkAddress::new(ip, port))
@@ -537,17 +537,18 @@ pub unsafe extern "C" fn xila_udp_bind(
         let network = input(network)?;
         let endpoint = input(address)?.endpoint()?;
         network.require(XILA_NETWORK_LISTEN)?;
-        let inner = block_on(
-            network
-                .manager
-                .new_udp_socket(BUFFER_SIZE, BUFFER_SIZE, 1, 1, None),
-        )
-        .map_err(Status::from)?;
-        let result = block_on(inner.with_mutable(|s| {
+        let inner =
+            suspend_on(
+                network
+                    .manager
+                    .new_udp_socket(BUFFER_SIZE, BUFFER_SIZE, 1, 1, None),
+            )
+            .map_err(Status::from)?;
+        let result = suspend_on(inner.with_mutable(|s| {
             s.bind(IpListenEndpoint::new(Some(endpoint.address), endpoint.port).into_smoltcp())
         }));
         if result.is_err() {
-            block_on(inner.close());
+            suspend_on(inner.close());
             return Err(Status::InvalidArgument);
         }
         Ok(Udp {
@@ -576,7 +577,7 @@ pub unsafe extern "C" fn xila_udp_close(socket: *mut Udp) -> Status {
     status(unsafe {
         if !socket.is_null() {
             let Udp { inner, .. } = *Udp::from_raw(socket);
-            block_on(inner.close());
+            suspend_on(inner.close());
         }
         Ok(())
     })
@@ -606,7 +607,7 @@ pub unsafe extern "C" fn xila_udp_send_to(
         if u32::from(socket.rights) & XILA_NETWORK_CONNECT == 0 {
             return Err(Status::PermissionDenied);
         }
-        block_on(socket.inner.with_mutable(|s| {
+        suspend_on(socket.inner.with_mutable(|s| {
             if size > s.payload_send_capacity() {
                 return Err(Status::Overflow);
             }
@@ -649,7 +650,7 @@ pub unsafe extern "C" fn xila_udp_receive_from(
         unsafe {
             let socket = object(socket)?;
             let buffer = write_buffer(buffer, size)?;
-            let (n, endpoint) = block_on(socket.inner.with_mutable(|s| {
+            let (n, endpoint) = suspend_on(socket.inner.with_mutable(|s| {
                 // Peek first so overflow preserves the datagram and caller buffer.
                 let (data, _) = s.peek().map_err(|_| Status::WouldBlock)?;
                 if data.len() > size {
@@ -716,7 +717,7 @@ pub unsafe extern "C" fn xila_network_resolve(
         };
         network.require(XILA_NETWORK_RESOLVE)?;
         let resolved =
-            block_on(network.manager.resolve(host, kind, false, None)).map_err(Status::from)?;
+            suspend_on(network.manager.resolve(host, kind, false, None)).map_err(Status::from)?;
         let matches = |ip: &&IpAddress| {
             matches!(
                 (family, ip),

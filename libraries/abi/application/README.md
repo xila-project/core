@@ -5,12 +5,26 @@ against Xila. It is `no_std` with `alloc`; Wasm guests keep their separate WASI
 implementation. The facade does not enable this crate by default.
 
 The interface prioritizes RAM, flash and CPU footprint. Files wrap an owned
-synchronous VFS file, and directories retain only a VFS reference, task identity,
+VFS file handle, and directories retain only a VFS reference, task identity,
 canonical absolute path and one byte of rights. There is no global handle table,
 lookup or context argument. Distinct opaque `XilaFile` and `XilaDirectory` pointer
 types catch accidental type confusion in C. Read and write use caller buffers
 directly, without temporary allocations or hot-path logging. Opening allocates
 only the joined path and returned object, in addition to underlying VFS costs.
+
+## Cooperative async bridging
+
+On Linux x86_64/AArch64 and supported single-core bare-metal targets,
+native ABI calls await VFS and network futures through
+`xila-stackful::suspend_on`. A pending operation suspends the coroutine and
+lets other tasks run on the same executor. A device or subsystem wakes the
+coroutine when the operation can progress.
+
+Outside a coroutine, including on targets without stack switching, async
+bridges retain the `task::block_on` fallback. File read, write and flush
+keep their single-poll behavior outside a coroutine. Nonblocking file I/O
+keeps that behavior inside coroutines as well. A pending file operation or
+an unavailable UDP datagram returns `WouldBlock` on these probe paths.
 
 Directory capabilities bound filesystem authority: paths are UTF-8 pointer/length
 pairs, relative to the supplied capability. Absolute paths, parent components,
@@ -138,12 +152,16 @@ revoke its sockets. Host/port restrictions can later be added to the capability'
 Rust representation and checked at connect, bind, send and resolve.
 
 The ABI uses Core's smoltcp network manager, not OS sockets. The host must mount
-and configure an interface and keep its runner on an independent executor/thread:
-synchronous calls use `task::block_on`, like synchronous VFS calls (the current
-adapter spins while pending). Do not call blocking operations on the runner's
-thread. TCP connect waits indefinitely when timeout_ms is zero; a nonzero value
-bounds the handshake in milliseconds. TCP read/write and accept block, TCP sends
-may be partial, receive zero means EOF, and zero-length I/O succeeds immediately.
+and configure an interface. When called from inside a `xila-stackful` coroutine
+on a supported target, blocking TCP and DNS calls suspend via
+`stackful::suspend_on`, so native callers can share the same single-threaded
+executor with the smoltcp interface runner without starving it. Outside a
+coroutine (or on targets using the `task::block_on` fallback), keep the
+interface runner on an independent executor/thread and do not call blocking
+operations on the runner's thread. TCP connect waits indefinitely when
+timeout_ms is zero; a nonzero value bounds the handshake in milliseconds. TCP
+read/write and accept block, TCP sends may be partial, receive zero means EOF,
+and zero-length I/O succeeds immediately.
 Only write shutdown is supported (FIN); close aborts and may discard queued data.
 A listener holds one socket, then replenishes it on accept; there is no backlog.
 If replenishment fails the accepted connection remains in the listener for retry.

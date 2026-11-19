@@ -33,6 +33,59 @@ pub unsafe extern "C" fn xila_abi_version() -> u32 {
     (XILA_ABI_VERSION_MAJOR << 16) | XILA_ABI_VERSION_MINOR
 }
 
+#[cfg(any(
+    all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_os = "linux"
+    ),
+    all(
+        any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "arm",
+            target_arch = "riscv32"
+        ),
+        target_os = "none"
+    )
+))]
+use stackful::{is_in_coroutine, suspend_on};
+
+#[cfg(not(any(
+    all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_os = "linux"
+    ),
+    all(
+        any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "arm",
+            target_arch = "riscv32"
+        ),
+        target_os = "none"
+    )
+)))]
+use task::block_on as suspend_on;
+
+#[cfg(not(any(
+    all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_os = "linux"
+    ),
+    all(
+        any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "arm",
+            target_arch = "riscv32"
+        ),
+        target_os = "none"
+    )
+)))]
+const fn is_in_coroutine() -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;

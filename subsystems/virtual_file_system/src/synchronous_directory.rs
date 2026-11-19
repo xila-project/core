@@ -4,9 +4,8 @@ use exported_file_system::{
 };
 use file_system::{Context, DirectoryOperations, Entry, Flags, Path, Size};
 use task::TaskIdentifier;
-use task::block_on;
 
-use crate::{Error, ItemStatic, Result, VirtualFileSystem, blocking_operation};
+use crate::{Error, ItemStatic, Result, VirtualFileSystem, blocking_operation, suspend_on};
 
 pub struct SynchronousDirectory<'a> {
     virtual_file_system: &'a VirtualFileSystem,
@@ -42,7 +41,7 @@ impl<'a> SynchronousDirectory<'a> {
         task: TaskIdentifier,
         path: impl AsRef<Path>,
     ) -> Result<()> {
-        block_on(virtual_file_system.create_directory(task, &path.as_ref()))
+        suspend_on(virtual_file_system.create_directory(task, &path.as_ref()))
     }
 
     pub fn open(
@@ -50,7 +49,7 @@ impl<'a> SynchronousDirectory<'a> {
         task: TaskIdentifier,
         path: impl AsRef<Path>,
     ) -> Result<Self> {
-        let mut directory = block_on(virtual_file_system.open_directory(task, &path.as_ref()))?
+        let mut directory = suspend_on(virtual_file_system.open_directory(task, &path.as_ref()))?
             .into_synchronous_directory();
 
         directory.flags = directory.flags.set_status(StateFlags::empty());
@@ -122,7 +121,7 @@ impl<'a> SynchronousDirectory<'a> {
     }
 
     pub fn close_internal(&mut self, virtual_file_system: &VirtualFileSystem) -> Result<()> {
-        block_on(
+        suspend_on(
             virtual_file_system.close(&ItemStatic::Directory(self.directory), &mut self.context),
         )
     }

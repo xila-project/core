@@ -3,9 +3,8 @@ use core::mem::forget;
 use exported_file_system::{FileSystemOperations, StateFlags};
 use file_system::{Context, Entry, Flags, Path, Size};
 use task::TaskIdentifier;
-use task::block_on;
 
-use crate::{ItemStatic, Result, SynchronousDirectory, VirtualFileSystem, poll};
+use crate::{ItemStatic, Result, SynchronousDirectory, VirtualFileSystem, poll, suspend_on};
 
 pub struct Directory<'a>(SynchronousDirectory<'a>);
 
@@ -87,6 +86,6 @@ impl Iterator for Directory<'_> {
     type Item = Entry;
 
     fn next(&mut self) -> Option<Self::Item> {
-        block_on(self.read()).unwrap()
+        suspend_on(self.read()).unwrap()
     }
 }

@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 
-use crate::{Error, ItemStatic, Result, VirtualFileSystem};
+use crate::{Error, ItemStatic, Result, VirtualFileSystem, suspend_on};
 use alloc::{vec, vec::Vec};
 use exported_file_system::StateFlags;
 use exported_file_system::{ControlCommand, ControlCommandIdentifier, Permissions};
@@ -9,7 +9,6 @@ use file_system::{
 };
 use shared::AnyByLayout;
 use task::TaskIdentifier;
-use task::block_on;
 use users::{GroupIdentifier, UserIdentifier};
 
 pub struct SynchronousFile<'a> {
@@ -62,7 +61,7 @@ impl<'a> SynchronousFile<'a> {
         path: impl AsRef<Path>,
         flags: Flags,
     ) -> Result<Self> {
-        let file_identifier = block_on(virtual_file_system.open(&path.as_ref(), flags, task))?;
+        let file_identifier = suspend_on(virtual_file_system.open(&path.as_ref(), flags, task))?;
 
         Ok(file_identifier.into_synchronous_file())
     }
@@ -147,6 +146,15 @@ impl<'a> SynchronousFile<'a> {
         })
     }
 
+    fn append_position(&mut self) -> Option<Size> {
+        // Some devices cannot report a size. Keep the cursor for those devices.
+        if self.flags.get_state().contains(StateFlags::Append) {
+            self.get_statistics().ok().map(|statistics| statistics.size)
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn poll_write(
         &mut self,
         cx: &mut core::task::Context<'_>,
@@ -155,12 +163,14 @@ impl<'a> SynchronousFile<'a> {
         if !self.flags.get_access().contains(AccessFlags::Write) {
             return core::task::Poll::Ready(Err(Error::InvalidMode));
         }
+        let append_position = self.append_position();
         let operations = self
             .item
             .as_base_operations()
             .ok_or(Error::UnsupportedOperation)?;
         let context = &mut self.context;
         self.cursor.poll_update(|position| {
+            let position = append_position.unwrap_or(position);
             operations
                 .write(context, cx, buffer, position)
                 .map(|result| {
@@ -207,14 +217,7 @@ impl<'a> SynchronousFile<'a> {
         if !self.flags.get_access().contains(AccessFlags::Write) {
             return Err(Error::InvalidMode);
         }
-        // Backends opened with `Append` position writes themselves. A status
-        // flag set later has to be honored here; devices that cannot report a
-        // size have no end to append to and keep the cursor.
-        let append_position = if self.flags.get_state().contains(StateFlags::Append) {
-            self.get_statistics().ok().map(|statistics| statistics.size)
-        } else {
-            None
-        };
+        let append_position = self.append_position();
         let operations = self
             .item
             .as_base_operations()
@@ -315,7 +318,7 @@ impl<'a> SynchronousFile<'a> {
             .as_base_operations()
             .ok_or(Error::UnsupportedOperation)?
             .clone_context(&self.context)?;
-        block_on(self.virtual_file_system.retain(&self.item))?;
+        suspend_on(self.virtual_file_system.retain(&self.item))?;
 
         Ok(Self {
             closed: false,
@@ -502,7 +505,7 @@ impl<'a> SynchronousFile<'a> {
             return Ok(());
         }
         self.closed = true;
-        block_on(virtual_file_system.close(&self.item, &mut self.context))
+        suspend_on(virtual_file_system.close(&self.item, &mut self.context))
     }
 
     /// Close using the VFS retained by this file, reporting any close error.
