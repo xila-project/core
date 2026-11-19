@@ -51,7 +51,7 @@ jobs:
       - name: "Lint | JavaScript and translation assets"
         run: mise run ci:quality-js
       - name: "Test | CI policy regressions"
-        run: python3 -m unittest discover -s tools/ci -v
+        run: mise run ci:policy-tests
       - name: "Lint | GitHub Actions"
         run: mise run ci:lint-workflows
 

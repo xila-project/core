@@ -66,10 +66,16 @@
 
 #define XILA_SHUTDOWN_WRITE 1
 
+#if defined(__arm__)
 /**
  * Alignment guaranteed for every allocation, including zero-length requests.
  */
+#define XILA_HEAP_ALIGNMENT 8
+#endif
+
+#if !defined(__arm__)
 #define XILA_HEAP_ALIGNMENT 16
+#endif
 
 /**
  * Native status values mirror the unified error kinds one-to-one. Zero is success.

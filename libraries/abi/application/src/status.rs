@@ -112,12 +112,25 @@ impl From<file_system::Error> for Status {
             NoAttribute => Self::MissingAttribute,
             InvalidFile | InvalidDirectory | Corrupted => Self::CorruptData,
             InvalidInode => Self::StaleHandle,
-            TooManyOpenFiles => Self::ProcessFileLimit,
+            // Exhaustion of shared poll or pipe slots maps to ENFILE.
+            TooManyOpenFiles => Self::SystemFileLimit,
             NotInitialized
             | NotMounted
             | FailedToGetTaskManagerInstance
             | FailedToGetUsersManagerInstance => Self::Unavailable,
-            _ => Self::InputOutput,
+            FailedToInitializeFileSystem
+            | FileSystemError
+            | InvalidSymbolicLink
+            | Unknown
+            | FailedToGetTaskInformations
+            | FailedToGetUsersInformations
+            | TooManyMountedFileSystems
+            | InternalError
+            | AlreadyInitialized
+            | InputOutput
+            | TimeError
+            | AlreadyMounted
+            | Other => Self::InputOutput,
         }
     }
 }
@@ -131,7 +144,8 @@ impl From<virtual_file_system::Error> for Status {
             AlreadyExists => Self::AlreadyExists,
             NotADirectory => Self::NotADirectory,
             NotAFile => Self::IsADirectory,
-            TooManyOpenFiles => Self::ProcessFileLimit,
+            // Exhaustion of shared poll or pipe slots maps to ENFILE.
+            TooManyOpenFiles => Self::SystemFileLimit,
             TooManyInodes => Self::NoSpace,
             RessourceBusy => Self::ResourceBusy,
             UnsupportedOperation => Self::Unsupported,
@@ -143,7 +157,13 @@ impl From<virtual_file_system::Error> for Status {
             MissingAttribute => Self::MissingAttribute,
             PathEscapesRoot => Self::PathEscapesRoot,
             CrossDevice => Self::CrossDevice,
-            _ => Self::InputOutput,
+            AlreadyInitialized
+            | FailedToGetTaskInformations
+            | Time(_)
+            | Users(_)
+            | Task(_)
+            | FailedToWrite
+            | DelimiterNotFound => Self::InputOutput,
         }
     }
 }
@@ -188,7 +208,7 @@ impl From<::network::Error> for Status {
             InvalidIdentifier => Self::BadDescriptor,
             FailedToGenerateSeed(error) => error.into(),
             FailedToMountDevice(error) => error.into(),
-            _ => Self::InputOutput,
+            UnexpectedEndOfFile | FailedToSpawnNetworkTask(_) | Other => Self::InputOutput,
         }
     }
 }

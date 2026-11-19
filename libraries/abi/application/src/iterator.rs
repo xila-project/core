@@ -74,7 +74,9 @@ pub unsafe extern "C" fn xila_directory_iterator_next(
             Err(error) => return error.into(),
         }
     }
-    let entry = iterator.pending.as_ref().unwrap();
+    let Some(entry) = &iterator.pending else {
+        unreachable!();
+    };
     if entry.name.len() > capacity {
         unsafe {
             name_length.write(entry.name.len());

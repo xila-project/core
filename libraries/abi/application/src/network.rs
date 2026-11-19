@@ -17,7 +17,8 @@ impl NetworkAddress {
         }
         let ip = match self.family {
             XILA_ADDRESS_IPV4 if self.bytes[4..] == [0; 12] => {
-                IpAddress::new_ipv4(self.bytes[..4].try_into().unwrap())
+                let [a, b, c, d, ..] = self.bytes;
+                IpAddress::new_ipv4([a, b, c, d])
             }
             XILA_ADDRESS_IPV6 => IpAddress::IPv6(Ipv6::from_inner(self.bytes)),
             _ => return Err(Status::InvalidArgument),

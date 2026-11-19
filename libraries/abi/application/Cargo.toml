@@ -13,6 +13,7 @@ default = []
 network = ["dep:network", "dep:smoltcp", "dep:embassy-futures"]
 
 [dependencies]
+hashbrown = { version = "0.17.1", default-features = false }
 network = { workspace = true, optional = true }
 smoltcp = { workspace = true, optional = true }
 embassy-futures = { workspace = true, optional = true }

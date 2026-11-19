@@ -28,13 +28,16 @@ pub struct XilaStartup {
     pub home: *mut Directory,
 }
 
-/// Invoke a linked C entry, then drop all granted objects, closing their streams.
-/// Arguments use one small allocation; capabilities remain on the host stack.
+/// Invoke a linked C entry, then close its granted streams. The process owner
+/// provides the heap and drops it after all native execution ends. Keep the heap
+/// owner outside any coroutine stack that can be abandoned.
 /// # Safety
 /// Entry must obey the startup lifetime and ownership rules, serialize object
-/// access, and return normally without retaining any supplied pointers.
+/// access, and never unwind. The heap must remain live until native execution
+/// has permanently ended.
 pub unsafe fn run_main(
     entry: unsafe extern "C" fn(*const XilaStartup) -> i32,
+    heap: &mut Heap,
     arguments: &[&str],
     mut standard_input: Option<File>,
     mut standard_output: Option<File>,
@@ -48,11 +51,10 @@ pub unsafe fn run_main(
             length: argument.len(),
         })
         .collect();
-    let mut heap = Heap::new();
     let startup = XilaStartup {
         size: core::mem::size_of::<XilaStartup>() as u32,
         api: &XILA_API,
-        heap: &mut heap,
+        heap,
         arguments: if arguments.is_empty() {
             ptr::null()
         } else {

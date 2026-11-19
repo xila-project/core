@@ -152,7 +152,8 @@ array is null at count zero.
 The host lends the startup data, strings and initial capabilities for the call.
 The app may close its own file and directory objects. It must leave borrowed
 objects open and release access when the entry returns. The Rust helper drops
-the startup resources when the entry returns.
+the startup resources when the entry returns. The caller supplies the process
+heap and owns its teardown.
 
 ## SDK startup
 
@@ -160,8 +161,9 @@ A separately linked C image defines `int32_t xila_main(const XilaStartup *)` and
 links `sdk/crt0.c` and `sdk/stubs.c`, using `-Iinclude/xila -Isdk` and including
 `stubs.h`. The host calls `_xila_start` once per image. crt0 checks the startup
 and table sizes and the ABI version, installs the image-local table pointer,
-then calls `xila_main`. The stubs require this initialized pointer. The entry
-must join any users of the stubs before returning. Invalid startup returns -1.
+then calls `xila_main`. Before startup and after `xila_main` returns, all stubs
+return `XILA_STATUS_UNAVAILABLE`. The entry must join any users of the stubs
+before returning. Invalid startup returns -1.
 Built-in callers use their startup pointer directly so concurrent executions can
 borrow different capabilities.
 
@@ -171,17 +173,23 @@ Each startup can grant a `XilaHeap`. Heap calls take the capability explicitly
 and callers serialize operations on it. Heap storage is uninitialized, including
 new bytes after a resize. Allocation of zero bytes reserves one byte.
 Reallocation with a null pointer allocates, and a new size of zero frees and
-stores null. Free accepts null. An overflow or allocator failure leaves the
-original block and output unchanged. Free and resize accept blocks only from
-the supplied heap.
+stores null. Free accepts null. An unrepresentable size or allocator failure
+returns OutOfMemory and preserves the original block and output. Free and
+resize reject addresses that are absent from the heap's live allocation index.
 
-The heap uses an intrusive allocation list with one global allocation per
-block. Its metadata and alignment padding add 16 bytes per block on 32-bit and
-64-bit targets, excluding the platform allocator's own metadata. Free and
-resize scan the list. The process owner drops the heap after all C execution
-ends. A loader must keep that owner outside the native coroutine stack,
-including when it cancels an unfinished coroutine. `run_main` owns a heap for
-its linked entry and requires normal return.
+A doubly linked list supports constant-time unlinking and relinking. The
+header is 8 bytes on 32-bit Arm and 16 bytes elsewhere, including RV32. The
+per-heap hash table provides expected constant-time address validation before
+any header access. Each bucket holds a block pointer and a control byte. On
+Arm and 64-bit targets the two links fill the header, so each bucket also
+stores the size. RV32 stores the size in its header's spare space. The index
+allocates only when needed and retains its capacity until heap teardown.
+As with malloc, an address reused by a later allocation identifies that new
+allocation.
+
+The process owner drops the heap after all C execution ends. A loader must
+keep that owner outside the native coroutine stack, including when it cancels
+an unfinished coroutine.
 
 ## Optional networking (`network`)
 

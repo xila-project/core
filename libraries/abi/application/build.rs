@@ -42,6 +42,9 @@ fn main() {
             .rename
             .insert(name.into(), format!("Xila{name}"));
     }
+    config
+        .defines
+        .insert("target_arch = arm".into(), "__arm__".into());
     config.enumeration.rename_variants = cbindgen::RenameRule::ScreamingSnakeCase;
     config.enumeration.prefix_with_name = true;
     generate_api::generate(&root, &out, &config.export);

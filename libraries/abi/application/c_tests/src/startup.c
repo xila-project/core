@@ -43,10 +43,12 @@ int32_t startup_heap_main(const XilaStartup *startup) {
     assert(first != NULL && last != NULL && first != last);
     assert((uintptr_t)first % XILA_HEAP_ALIGNMENT == 0);
     memset(first, 0x63, 24);
-    assert(api->heap_reallocate(startup->heap, first, SIZE_MAX, &first) == XILA_STATUS_OVERFLOW);
+    assert(api->heap_reallocate(startup->heap, first, SIZE_MAX, &first) == XILA_STATUS_OUT_OF_MEMORY);
     assert(api->heap_reallocate(startup->heap, first, 96, &first) == XILA_STATUS_OK);
     assert((uintptr_t)first % XILA_HEAP_ALIGNMENT == 0);
     for (size_t i = 0; i < 24; i++) assert(((unsigned char *)first)[i] == 0x63);
+    assert(api->heap_reallocate(startup->heap, first, 4, &first) == XILA_STATUS_OK);
+    for (size_t i = 0; i < 4; ++i) assert(((unsigned char *)first)[i] == 0x63);
     assert(api->heap_reallocate(startup->heap, last, 0, &last) == XILA_STATUS_OK);
     assert(last == NULL);
     assert(api->heap_reallocate(startup->heap, NULL, 7, &last) == XILA_STATUS_OK);

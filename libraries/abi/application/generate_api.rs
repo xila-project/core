@@ -1,6 +1,26 @@
 //! Build-time SDK generation from the unexpanded Rust ABI.
-use std::{fmt::Write, fs, path::Path};
+use std::{collections::BTreeSet, fmt::Write, fs, path::Path};
 use syn::{Fields, Item, Type};
+
+// These slots remain in the table when the runtime omits networking.
+const NETWORK_SLOTS: &[&str] = &[
+    "network_close",
+    "tcp_connect",
+    "tcp_listen",
+    "tcp_accept",
+    "tcp_close",
+    "tcp_listener_close",
+    "tcp_shutdown",
+    "tcp_send",
+    "tcp_receive",
+    "tcp_local_address",
+    "tcp_peer_address",
+    "udp_bind",
+    "udp_close",
+    "udp_send_to",
+    "udp_receive_from",
+    "network_resolve",
+];
 
 pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig) {
     let source = fs::read_to_string(root.join("src/api.rs")).unwrap();
@@ -30,6 +50,12 @@ pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig) {
         #include \"stubs.h\"\n\n\
         extern const XilaApi *xila_sdk_api;\n"
     );
+    let mut fallback = String::from(
+        "\nconst XilaApi xila_sdk_fallback_api = {\n    \
+         .version = (XILA_ABI_VERSION_MAJOR << 16) | XILA_ABI_VERSION_MINOR,\n    \
+         .size = sizeof(XilaApi),\n",
+    );
+    let mut network_slots: BTreeSet<_> = NETWORK_SLOTS.iter().copied().collect();
     let mut slots = String::from("# Zero-based slot\tC symbol\n");
     let mut disabled_network = String::new();
     let mut layout = String::from(
@@ -86,6 +112,19 @@ pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig) {
         } else {
             parameters.join(", ")
         };
+        // Generate a correctly typed fallback for each slot. Calling through a
+        // cast to a single function with a different signature would be UB.
+        writeln!(
+            stubs,
+            "\nstatic XilaStatus unavailable_{name}({parameters}) {{"
+        )
+        .unwrap();
+        for argument in &arguments {
+            writeln!(stubs, "    (void){argument};").unwrap();
+        }
+        writeln!(stubs, "    return XILA_STATUS_UNAVAILABLE;\n}}").unwrap();
+        writeln!(fallback, "    .{name} = unavailable_{name},").unwrap();
+
         let arguments = arguments.join(", ");
         let declaration = format!("XilaStatus xila_{name}({parameters})");
         writeln!(header, "{declaration};").unwrap();
@@ -101,12 +140,7 @@ pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig) {
         )
         .unwrap();
 
-        // These namespaces are present in all builds. Omit their implementation
-        // and networking dependencies together when the feature is disabled.
-        if ["network_", "tcp_", "udp_"]
-            .iter()
-            .any(|prefix| name.starts_with(prefix))
-        {
+        if network_slots.remove(name.as_str()) {
             let mut parameters = Vec::new();
             for input in &signature.inputs {
                 let ty = &input.ty;
@@ -120,6 +154,12 @@ pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig) {
             ).unwrap();
         }
     }
+    assert!(
+        network_slots.is_empty(),
+        "Unknown network slots: {network_slots:?}"
+    );
+    fallback.push_str("};\n");
+    stubs.push_str(&fallback);
     header.push_str("\n#ifdef __cplusplus\n}\n#endif\n\n#endif\n");
     writeln!(
         layout,

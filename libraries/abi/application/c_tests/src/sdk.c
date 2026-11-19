@@ -12,3 +12,12 @@ int32_t xila_main(const XilaStartup *startup) {
     assert(xila_heap_free(startup->heap, allocation) == XILA_STATUS_OK);
     return 42;
 }
+
+int32_t sdk_test_startup(const XilaStartup *startup) {
+    assert(xila_file_flush(NULL) == XILA_STATUS_UNAVAILABLE);
+    assert(_xila_start(NULL) == -1);
+    assert(xila_file_flush(NULL) == XILA_STATUS_UNAVAILABLE);
+    int32_t result = _xila_start(startup);
+    assert(xila_file_flush(NULL) == XILA_STATUS_UNAVAILABLE);
+    return result;
+}

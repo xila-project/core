@@ -1,7 +1,8 @@
 #include "stubs.h"
 
 /* One instance per loaded image. The host calls _xila_start once per image. */
-const XilaApi *xila_sdk_api;
+extern const XilaApi xila_sdk_fallback_api;
+const XilaApi *xila_sdk_api = &xila_sdk_fallback_api;
 
 extern int32_t xila_main(const XilaStartup *startup);
 
@@ -12,8 +13,9 @@ int32_t _xila_start(const XilaStartup *startup) {
         return -1;
     }
 
+    /* Install the table before executing any application code, including init arrays. */
     xila_sdk_api = startup->api;
     int32_t result = xila_main(startup);
-    xila_sdk_api = NULL;
+    xila_sdk_api = &xila_sdk_fallback_api;
     return result;
 }

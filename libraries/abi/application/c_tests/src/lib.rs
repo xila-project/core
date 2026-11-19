@@ -16,7 +16,7 @@ mod tests {
         fn application_c_round_trip(api: *const XilaApi, directory: *const Directory) -> i32;
         fn application_c_file_system(api: *const XilaApi, directory: *const Directory) -> i32;
         fn startup_test_main(startup: *const XilaStartup) -> i32;
-        fn _xila_start(startup: *const XilaStartup) -> i32;
+        fn sdk_test_startup(startup: *const XilaStartup) -> i32;
         fn startup_heap_main(startup: *const XilaStartup) -> i32;
         fn startup_empty_main(startup: *const XilaStartup) -> i32;
         fn application_c_network(
@@ -30,7 +30,15 @@ mod tests {
     #[test]
     fn process_heap_reclaims_c_allocations_on_return() {
         let before = testing::MemoryManager::thread_allocations();
-        let result = unsafe { run_main(startup_heap_main, &[], None, None, None, None) };
+        let mut heap = Heap::new();
+        let result = unsafe { run_main(startup_heap_main, &mut heap, &[], None, None, None, None) };
+        assert!(
+            testing::MemoryManager::thread_allocations()
+                .since(before)
+                .net_bytes()
+                > 0
+        );
+        drop(heap);
         let delta = testing::MemoryManager::thread_allocations().since(before);
         assert_eq!(result, 0);
         assert!(delta.allocations() >= 2);
@@ -39,9 +47,18 @@ mod tests {
 
     #[test]
     fn sdk_startup_dispatches_through_supplied_api() {
-        let result = unsafe { run_main(_xila_start, &[], None, None, None, None) };
+        let result = unsafe {
+            run_main(
+                sdk_test_startup,
+                &mut Heap::new(),
+                &[],
+                None,
+                None,
+                None,
+                None,
+            )
+        };
         assert_eq!(result, 42);
-        assert_eq!(unsafe { _xila_start(ptr::null()) }, -1);
     }
 
     #[task::test]
@@ -138,7 +155,15 @@ mod tests {
         .unwrap();
         unsafe {
             assert_eq!(
-                run_main(startup_empty_main, &[], None, None, None, None),
+                run_main(
+                    startup_empty_main,
+                    &mut Heap::new(),
+                    &[],
+                    None,
+                    None,
+                    None,
+                    None
+                ),
                 -7
             );
             let path = file_system::Path::from_str("/startup-output");
@@ -156,6 +181,7 @@ mod tests {
             assert_eq!(
                 run_main(
                     startup_test_main,
+                    &mut Heap::new(),
                     &["", "héllo"],
                     None,
                     Some(File::new(output)),

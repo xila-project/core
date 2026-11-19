@@ -1,4 +1,5 @@
 #![no_std]
+#![deny(clippy::unwrap_used, clippy::expect_used)]
 
 extern crate alloc;
 
@@ -86,6 +87,7 @@ const fn is_in_coroutine() -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)] // Fixture setup may report errors through Debug.
 mod tests {
     extern crate std;
     use super::*;
@@ -261,6 +263,10 @@ mod tests {
     }
     #[test]
     fn mapping() {
+        assert_eq!(
+            Status::from(virtual_file_system::Error::TooManyOpenFiles),
+            Status::SystemFileLimit
+        );
         use file_system::Error as E;
         for (error, expected) in [
             (E::NotFound, Status::NotFound),
@@ -277,6 +283,7 @@ mod tests {
             (E::NameTooLong, Status::NameTooLong),
             (E::FileTooLarge, Status::FileTooLarge),
             (E::Corrupted, Status::CorruptData),
+            (E::TooManyOpenFiles, Status::SystemFileLimit),
         ] {
             assert_eq!(Status::from(error), expected);
             assert_eq!(
