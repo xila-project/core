@@ -137,12 +137,13 @@ const fn str_eq(left: &str, right: &str) -> bool {
 // the build of that target instead of silently rejecting correct images. An
 // explicit `-C target-feature` float flag overrides the target.
 #[cfg(all(target_arch = "riscv32", not(native_loader_float_flags)))]
-const _: () = match riscv_target_float_abi(env!("NATIVE_LOADER_TARGET")) {
-    Some(expected) => assert!(
-        RISCV_FLOAT_ABI == expected,
-        "the detected RISC-V float ABI does not match the target"
-    ),
-    None => {}
+const _: () = {
+    if let Some(expected) = riscv_target_float_abi(env!("NATIVE_LOADER_TARGET")) {
+        assert!(
+            RISCV_FLOAT_ABI == expected,
+            "the detected RISC-V float ABI does not match the target"
+        );
+    }
 };
 
 /// Whether the target is RV32E. `rustc` reports it as `target_abi = "ilp32e"`,

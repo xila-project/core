@@ -17,7 +17,7 @@ use file_system::{
 use native_loader::{Error as LoaderError, ExecutableMemory, LoadedImage, Region};
 use virtual_file_system::File;
 
-testing::instantiate_global_allocator!();
+testing_support::instantiate_global_allocator!();
 
 const PAGE: usize = 4096;
 static MAPPINGS: AtomicUsize = AtomicUsize::new(0);
@@ -193,7 +193,9 @@ fn rejects_c_images_with_constructors_before_allocating() {
 async fn executes_c_elf_from_vfs_with_suspending_abi_read() {
     let bytes = build_fixture("xila-start.elf", "");
 
-    let time = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+    let time = Box::leak(Box::new(
+        time::Manager::new(&testing_support::TimeDevice).unwrap(),
+    ));
     let tasks = task::test_manager();
     let users = Box::leak(Box::new(users::Manager::new()));
     let parent = tasks.get_current_task_identifier().await;
