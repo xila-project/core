@@ -29,8 +29,10 @@ jobs:
       MISE_ENV: ci
       XILA_APPLICATIONS_ROOT: ${{ github.workspace }}/.application-src
     steps:
-      - name: "Setup | Checkout pinned applications"
+      - name: "Setup | Checkout sources"
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: "Setup | Checkout pinned applications"
         uses: actions/checkout@v7
         with:
@@ -134,8 +136,10 @@ jobs:
       CARGO_TERM_COLOR: always
       XILA_MBX: "1"
     steps:
-      - name: "Setup | Checkout pinned applications"
+      - name: "Setup | Checkout sources"
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: "Setup | Checkout pinned applications"
         uses: actions/checkout@v7
         with:
@@ -168,8 +172,10 @@ jobs:
       CI_ABI_MEMORY: ${{ matrix.memory }}
       XILA_MBX: "1"
     steps:
-      - name: "Setup | Checkout pinned applications"
+      - name: "Setup | Checkout sources"
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: "Setup | Checkout pinned applications"
         uses: actions/checkout@v7
         with:
@@ -198,10 +204,11 @@ jobs:
       XILA_MBX: "1"
       XILA_FONT_CATALOG_ROOTS: ${{ github.workspace }}/.application-src
     steps:
-      - name: "Setup | Checkout pinned applications"
+      - name: "Setup | Checkout sources"
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: "Setup | Checkout pinned applications"
         uses: actions/checkout@v7
         with:
