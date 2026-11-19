@@ -310,6 +310,27 @@ class WorkflowPolicy(unittest.TestCase):
                 components = rust.get("components", []) if isinstance(rust, dict) else []
                 self.assertIn("rustfmt", components, "wasm build scripts execute rustfmt on generated bindings")
 
+    def test_graphics_builds_for_cortex_m_where_c_char_is_unsigned(self):
+        task = ci_config()["tasks"]["ci:bare-metal"]
+        self.assertIn(
+            "cargo check --locked -p xila-graphics --features rendering_rgb565 --target thumbv7em-none-eabihf",
+            task["run"],
+        )
+        raw = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]["ci:bare-metal"]
+        self.assertEqual(raw["env"]["CC_thumbv7em_none_eabihf"], "clang")
+        # The runner ships several LLVM versions; bindgen sees each one's <stdint.h>, and in
+        # hosted mode the copies cancel each other out through a shared include guard.
+        self.assertEqual(raw["env"]["BINDGEN_EXTRA_CLANG_ARGS_thumbv7em_none_eabihf"], "-ffreestanding")
+        self.assertIn("thumbv7em-none-eabihf", task["tools"]["rust"]["targets"])
+        # The graphics build script runs the pinned Node font converter.
+        self.assertEqual(raw["tools"]["node"], "{{ vars.node_version }}")
+
+    def test_host_clippy_lints_graphics_test_targets(self):
+        lint = ci_config()["tasks"]["clippy:host"]["run"]
+        self.assertIn("--all-targets", lint)
+        self.assertIn("-D warnings", lint)
+        self.assertRegex(lint, r"--features[ =][^ ]*xila/graphics")
+
     def test_host_tests_install_wasi_for_nested_guest_builds(self):
         rust = ci_config()["tasks"]["ci:host-tests"]["tools"]["rust"]
         self.assertIn("wasm32-wasip1", rust.get("targets", []))
