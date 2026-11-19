@@ -64,7 +64,7 @@ mod user;
 
 use alloc::{vec, vec::Vec};
 pub use error::*;
-use file_system::{AccessFlags, CreateFlags, Flags, Permissions};
+use file_system::{AccessFlags, CreateFlags, Entry, Flags, Kind, Permissions};
 pub use group::*;
 use task::TaskIdentifier;
 pub use user::*;
@@ -137,14 +137,14 @@ pub async fn load_all_users_and_groups(context: &Context<'_>) -> Result<()> {
             .map_err(Error::FailedToReadGroupDirectory)?;
 
         // Read all groups.
-        for group_entry in groups_directory {
-            let group =
-                if let Ok(group) = read_group_file(context, &mut buffer, &group_entry.name).await {
-                    group
-                } else {
-                    // ? : Log error ?
+        for group_entry in groups_directory.filter(is_record) {
+            let group = match read_group_file(context, &mut buffer, &group_entry.name).await {
+                Ok(group) => group,
+                Err(error) => {
+                    log::warning!("Skipped a group record that cannot be loaded: {error}");
                     continue;
-                };
+                }
+            };
 
             users_manager
                 .add_group(group.get_identifier(), group.get_name(), group.get_users())
@@ -161,7 +161,7 @@ pub async fn load_all_users_and_groups(context: &Context<'_>) -> Result<()> {
             .map_err(Error::FailedToReadUsersDirectory)?;
 
         // Read all users.
-        for user_entry in users_directory {
+        for user_entry in users_directory.filter(is_record) {
             let user = match read_user_file(context, &mut buffer, &user_entry.name).await {
                 Ok(user) => user,
                 Err(error) => {
@@ -184,6 +184,13 @@ pub async fn load_all_users_and_groups(context: &Context<'_>) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Whether a directory entry can be an account or group record: a regular
+/// file. Directory iterators also report `.` and `..`, and a stray directory
+/// is not a record either.
+fn is_record(entry: &Entry) -> bool {
+    entry.kind == Kind::File && !matches!(entry.name.as_str(), "." | "..")
 }
 
 /// Write `contents` to `temporary`, then rename it over `destination`, so the
