@@ -11,8 +11,8 @@ static const struct {
 /* Test-only transport until XilaStartup gains its API table. */
 typedef struct {
     uint32_t (*version)(void);
-    XilaStatus (*read)(XilaFile *, char *, size_t, size_t *);
-    XilaStatus (*write)(XilaFile *, const char *, size_t, size_t *);
+    XilaStatus (*read)(XilaFile *, void *, size_t, size_t *);
+    XilaStatus (*write)(XilaFile *, const void *, size_t, size_t *);
 } FixtureApi;
 
 static const char answer[] = "ok";
