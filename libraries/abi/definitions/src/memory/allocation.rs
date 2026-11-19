@@ -166,11 +166,9 @@ pub unsafe extern "C" fn xila_memory_deallocate(pointer: *mut c_void) {
 /// is larger, the additional memory is uninitialized. If the new size is smaller, the
 /// excess memory is freed. The original data is preserved up to the minimum of the old
 /// and new sizes. The platform resizes the block in place when it can, and a shrink that keeps
-/// the alignment never moves it. A grown block stays in the memory region it is in while the new size is below the
-/// platform's large-allocation threshold and the region can hold it; otherwise, and always from
-/// the threshold up, the platform's ordinary placement policy applies and the block can lose the
-/// capabilities of its region. To retain specific capabilities, allocate a replacement with those
-/// flags, copy the data and free the old block.
+/// the alignment and DMA constraints can stay in place. Growth follows the platform's placement
+/// policy and always preserves the capability flags requested at allocation time. If no suitable
+/// region can serve the new size and alignment, reallocation fails and the old block is unchanged.
 ///
 /// # Safety
 ///
@@ -182,7 +180,8 @@ pub unsafe extern "C" fn xila_memory_deallocate(pointer: *mut c_void) {
 /// # Parameters
 ///
 /// * `Pointer` - Pointer to the memory block to reallocate, or null for new allocation
-/// * `Size` - New size in bytes (0 is equivalent to deallocation)
+/// * `Size` - New size in bytes (0 is equivalent to deallocation). On 32-bit
+///   targets a block, including its header and padding, is limited to 32 MiB.
 ///
 /// # Returns
 ///
@@ -222,15 +221,20 @@ pub unsafe extern "C" fn xila_memory_reallocate(pointer: *mut c_void, size: usiz
         };
 
         let old_layout = allocated.get_layout().unwrap();
-        let new_layout = Allocated::get_layout_for_allocation(size, old_layout.align());
+        let Some(new_layout) = Allocated::get_layout_for_allocation(size, old_layout.align())
+        else {
+            return null_mut();
+        };
+        let capabilities = allocated.get_capabilities();
 
         let pointer = memory::global_manager().reallocate(
+            capabilities,
             allocated.get_base_pointer(),
             old_layout,
             new_layout.size(),
         );
 
-        let allocated = match Allocated::from_layout(pointer, &new_layout) {
+        let allocated = match Allocated::from_layout(pointer, &new_layout, capabilities) {
             Some(alloc) => alloc,
             None => {
                 warning!(
@@ -257,12 +261,13 @@ pub unsafe extern "C" fn xila_memory_reallocate(pointer: *mut c_void, size: usiz
 /// This function is unsafe because:
 /// - The returned memory is uninitialized
 /// - The caller must ensure proper deallocation
-/// - The hint address, if providalignment enumed, must be a valid memory address
+/// - The hint address, if provided, must be a valid memory address
 ///
 /// # Parameters
 ///
 /// * `Hint_address` - Preferred memory address (hint only, may be ignored), or null
-/// * `Size` - Size of the memory block in bytes
+/// * `Size` - Size of the memory block in bytes. On 32-bit targets a block,
+///   including its header and padding, is limited to 32 MiB.
 /// * `Alignment` - Required memory alignment in bytes (must be a power of 2)
 /// * `Capabilities` - Memory capabilities flags (see `xila_memory_capabilities_*` constants)
 ///
@@ -304,7 +309,9 @@ pub unsafe extern "C" fn xila_memory_allocate(
     //    "xila_memory_allocate called with Size: {size}, Alignment: {alignment}, Capabilities: {capabilities:?}"
     //);
 
-    let layout = Allocated::get_layout_for_allocation(size, alignment);
+    let Some(layout) = Allocated::get_layout_for_allocation(size, alignment) else {
+        return null_mut();
+    };
 
     let capabilities = match CapabilityFlags::from_bits(capabilities) {
         Some(flags) => flags,
@@ -318,7 +325,7 @@ pub unsafe extern "C" fn xila_memory_allocate(
 
     let pointer = unsafe { memory::global_manager().allocate(capabilities, layout) };
 
-    let allocated = match Allocated::from_layout(pointer, &layout) {
+    let allocated = match unsafe { Allocated::from_layout(pointer, &layout, capabilities) } {
         Some(alloc) => alloc,
         None => {
             warning!(
@@ -751,6 +758,42 @@ mod tests {
             }
 
             xila_memory_deallocate(new_pointer);
+        }
+    }
+
+    #[test]
+    fn test_invalid_size_and_capability_metadata_on_reallocation() {
+        let caps = CapabilityFlags::DirectMemoryAccess | CapabilityFlags::AlwaysAccessible;
+        unsafe {
+            assert!(xila_memory_allocate(null_mut(), usize::MAX - 7, 8, caps.bits()).is_null());
+            let pointer =
+                core::ptr::NonNull::new(xila_memory_allocate(null_mut(), 64, 64, caps.bits()))
+                    .expect("allocation failed")
+                    .as_ptr();
+            pointer.cast::<u8>().write_bytes(0x5a, 64);
+
+            for size in [usize::MAX - 7, isize::MAX as usize] {
+                assert!(xila_memory_reallocate(pointer, size).is_null());
+                assert_eq!(
+                    core::slice::from_raw_parts(pointer.cast::<u8>(), 64),
+                    &[0x5a; 64]
+                );
+            }
+
+            let grown = xila_memory_reallocate(pointer, 4096);
+            assert!(!grown.is_null());
+            assert!(grown.addr().is_multiple_of(64));
+            assert_eq!(
+                core::slice::from_raw_parts(grown.cast::<u8>(), 64),
+                &[0x5a; 64]
+            );
+            assert_eq!(
+                Allocated::from_user_pointer(grown.cast())
+                    .unwrap()
+                    .get_capabilities(),
+                caps
+            );
+            xila_memory_deallocate(grown);
         }
     }
 

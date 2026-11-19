@@ -1,5 +1,7 @@
 use core::{alloc::Layout, fmt::Debug};
 
+use memory::CapabilityFlags;
+
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct CompactLayout(usize);
@@ -8,9 +10,10 @@ impl Debug for CompactLayout {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
-            "CompactLayout {{ size: {}, alignment: {} }}",
+            "CompactLayout {{ size: {}, alignment: {}, capabilities: {:?} }}",
             self.get_size(),
-            self.get_alignment()
+            self.get_alignment(),
+            self.get_capabilities()
         )
     }
 }
@@ -18,37 +21,37 @@ impl Debug for CompactLayout {
 impl CompactLayout {
     /// Alignment is stored in the upper 4 bits in a log2 format
     const ALIGNMENT_BITS: u8 = 4;
-    /// Size uses the remaining bits
-    const SIZE_BITS: u8 = (size_of::<usize>() as u8 * 8) - Self::ALIGNMENT_BITS;
+    /// Capability flags occupy the next three bits, leaving the low bits for size.
+    const CAPABILITY_BITS: u8 = 3;
+    const SIZE_BITS: u8 = usize::BITS as u8 - Self::ALIGNMENT_BITS - Self::CAPABILITY_BITS;
+    const CAPABILITY_SHIFT: u8 = Self::SIZE_BITS;
+    const ALIGNMENT_SHIFT: u8 = Self::SIZE_BITS + Self::CAPABILITY_BITS;
+    const CAPABILITY_MASK: u8 = (1 << Self::CAPABILITY_BITS) - 1;
 
-    const SIZE_SHIFT: usize = 0;
-    const ALIGNMENT_SHIFT: usize = Self::SIZE_BITS as usize;
+    pub(super) const MAXIMUM_SIZE: usize = (1 << Self::SIZE_BITS) - 1;
 
-    const MAXIMUM_SIZE: usize = (1 << Self::SIZE_BITS) - 1;
+    // A new capability flag must widen the field, or blocks that carry it
+    // would be allocated and then lose their metadata.
+    const _CAPABILITIES_FIT: () =
+        assert!(CapabilityFlags::all().bits() as usize <= Self::CAPABILITY_MASK as usize);
+    pub(super) const MAXIMUM_ALIGNMENT: usize = 1 << ((1 << Self::ALIGNMENT_BITS) - 1);
 
-    const MINIMUM_ALIGNMENT: usize = 1;
-    const MAXIMUM_ALIGNMENT: usize = 1 << ((1 << Self::ALIGNMENT_BITS) - 1);
-
-    pub fn from_size_alignment(size: usize, alignment: usize) -> Option<Self> {
-        let layout = Layout::from_size_align(size, alignment).ok()?;
-        Self::from_layout(&layout)
-    }
-
-    pub const fn from_layout(layout: &Layout) -> Option<Self> {
+    pub const fn from_layout(layout: &Layout, capabilities: CapabilityFlags) -> Option<Self> {
         let size = layout.size();
         let alignment = layout.align();
 
         if size > Self::MAXIMUM_SIZE
-            || alignment < Self::MINIMUM_ALIGNMENT
             || alignment > Self::MAXIMUM_ALIGNMENT
-            || !alignment.is_power_of_two()
+            || capabilities.bits() > Self::CAPABILITY_MASK
         {
             return None;
         }
 
         let alignment_log2 = alignment.ilog2() as usize;
 
-        let compacted = (size << Self::SIZE_SHIFT) | (alignment_log2 << Self::ALIGNMENT_SHIFT);
+        let compacted = size
+            | ((capabilities.bits() as usize) << Self::CAPABILITY_SHIFT)
+            | (alignment_log2 << Self::ALIGNMENT_SHIFT);
         Some(Self(compacted))
     }
 
@@ -63,7 +66,7 @@ impl CompactLayout {
     }
 
     pub const fn get_size(&self) -> usize {
-        (self.0 >> Self::SIZE_SHIFT) & Self::MAXIMUM_SIZE
+        self.0 & Self::MAXIMUM_SIZE
     }
 
     pub const fn get_alignment_log2(&self) -> usize {
@@ -78,19 +81,27 @@ impl CompactLayout {
         self.0.to_le_bytes()
     }
 
-    pub fn from_le_bytes(bytes: [u8; size_of::<Self>()]) -> Option<Self> {
-        let layout = Self(usize::from_le_bytes(bytes));
+    pub const fn get_capabilities(&self) -> CapabilityFlags {
+        let bits = (self.0 >> Self::CAPABILITY_SHIFT) as u8 & Self::CAPABILITY_MASK;
+        CapabilityFlags::from_bits_retain(bits)
+    }
 
-        if layout.get_size() > Self::MAXIMUM_SIZE
-            || layout.get_alignment() < Self::MINIMUM_ALIGNMENT
-            || layout.get_alignment() > Self::MAXIMUM_ALIGNMENT
-        {
-            return None;
-        }
-
-        Some(layout)
+    pub const fn from_le_bytes(bytes: [u8; size_of::<Self>()]) -> Self {
+        Self(usize::from_le_bytes(bytes))
     }
 }
+
+// 32-bit targets keep 25 size bits, so a block is at most 32 MiB - 1, and one
+// byte more is rejected rather than spilling into the capability bits.
+// Checked at compile time so the bare-metal CI build enforces it.
+#[cfg(target_pointer_width = "32")]
+const _: () = {
+    assert!(CompactLayout::MAXIMUM_SIZE == (1 << 25) - 1);
+    let Ok(too_large) = Layout::from_size_align(CompactLayout::MAXIMUM_SIZE + 1, 8) else {
+        panic!("invalid probe layout");
+    };
+    assert!(CompactLayout::from_layout(&too_large, CapabilityFlags::all()).is_none());
+};
 
 #[cfg(test)]
 mod tests {
@@ -99,7 +110,7 @@ mod tests {
     #[test]
     fn test_basic_layout_conversion() {
         let layout = Layout::from_size_align(64, 8).unwrap();
-        let compact = CompactLayout::from_layout(&layout).unwrap();
+        let compact = CompactLayout::from_layout(&layout, CapabilityFlags::empty()).unwrap();
         let restored = compact.into_layout().unwrap();
         assert_eq!(restored, layout);
     }
@@ -107,41 +118,55 @@ mod tests {
     #[test]
     fn test_minimum_size() {
         let layout = Layout::from_size_align(0, 1).unwrap();
-        let compact = CompactLayout::from_layout(&layout).unwrap();
+        let compact = CompactLayout::from_layout(&layout, CapabilityFlags::empty()).unwrap();
         assert_eq!(compact.get_size(), 0);
     }
 
     #[test]
     fn test_maximum_size() {
         let layout = Layout::from_size_align(CompactLayout::MAXIMUM_SIZE, 1).unwrap();
-        let compact = CompactLayout::from_layout(&layout).unwrap();
+        let compact = CompactLayout::from_layout(&layout, CapabilityFlags::empty()).unwrap();
         assert_eq!(compact.get_size(), CompactLayout::MAXIMUM_SIZE);
+    }
+
+    // 32-bit targets keep 25 size bits: a block is at most 32 MiB - 1.
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn test_32_bit_packing() {
+        assert_eq!(CompactLayout::MAXIMUM_SIZE, (1 << 25) - 1);
+        let layout = Layout::from_size_align(CompactLayout::MAXIMUM_SIZE, 8).unwrap();
+        let compact = CompactLayout::from_layout(&layout, CapabilityFlags::all()).unwrap();
+        assert_eq!(compact.get_size(), CompactLayout::MAXIMUM_SIZE);
+        assert_eq!(compact.get_capabilities(), CapabilityFlags::all());
+        assert_eq!(compact.get_alignment(), 8);
+        let too_large = Layout::from_size_align(CompactLayout::MAXIMUM_SIZE + 1, 8).unwrap();
+        assert!(CompactLayout::from_layout(&too_large, CapabilityFlags::all()).is_none());
     }
 
     #[test]
     fn test_size_overflow() {
         let layout = Layout::from_size_align(CompactLayout::MAXIMUM_SIZE + 1, 1).unwrap();
-        assert!(CompactLayout::from_layout(&layout).is_none());
+        assert!(CompactLayout::from_layout(&layout, CapabilityFlags::empty()).is_none());
     }
 
     #[test]
     fn test_minimum_alignment() {
-        let layout = Layout::from_size_align(8, CompactLayout::MINIMUM_ALIGNMENT).unwrap();
-        let compact = CompactLayout::from_layout(&layout).unwrap();
-        assert_eq!(compact.get_alignment(), CompactLayout::MINIMUM_ALIGNMENT);
+        let layout = Layout::from_size_align(8, 1).unwrap();
+        let compact = CompactLayout::from_layout(&layout, CapabilityFlags::empty()).unwrap();
+        assert_eq!(compact.get_alignment(), 1);
     }
 
     #[test]
     fn test_maximum_alignment() {
         let layout = Layout::from_size_align(8, CompactLayout::MAXIMUM_ALIGNMENT).unwrap();
-        let compact = CompactLayout::from_layout(&layout).unwrap();
+        let compact = CompactLayout::from_layout(&layout, CapabilityFlags::empty()).unwrap();
         assert_eq!(compact.get_alignment(), CompactLayout::MAXIMUM_ALIGNMENT);
     }
 
     #[test]
     fn test_alignment_overflow() {
         let layout = Layout::from_size_align(8, CompactLayout::MAXIMUM_ALIGNMENT * 2).unwrap();
-        assert!(CompactLayout::from_layout(&layout).is_none());
+        assert!(CompactLayout::from_layout(&layout, CapabilityFlags::empty()).is_none());
     }
 
     #[test]
@@ -149,7 +174,7 @@ mod tests {
         // Layout::from_size_align already validates power of two, so we can't directly test
         // but we verify the check is in place
         let layout = Layout::from_size_align(16, 8).unwrap();
-        assert!(CompactLayout::from_layout(&layout).is_some());
+        assert!(CompactLayout::from_layout(&layout, CapabilityFlags::empty()).is_some());
     }
 
     #[test]
@@ -158,7 +183,8 @@ mod tests {
             let align = 1 << exp;
             if align <= CompactLayout::MAXIMUM_ALIGNMENT {
                 let layout = Layout::from_size_align(16, align).unwrap();
-                let compact = CompactLayout::from_layout(&layout).unwrap();
+                let compact =
+                    CompactLayout::from_layout(&layout, CapabilityFlags::empty()).unwrap();
                 assert_eq!(compact.get_alignment(), align);
                 assert_eq!(compact.get_alignment_log2(), exp as usize);
             }
@@ -168,10 +194,14 @@ mod tests {
     #[test]
     fn test_serialization_roundtrip() {
         let layout = Layout::from_size_align(128, 16).unwrap();
-        let compact = CompactLayout::from_layout(&layout).unwrap();
+        let capabilities = CapabilityFlags::all();
+        let compact = CompactLayout::from_layout(&layout, capabilities).unwrap();
         let bytes = compact.to_le_bytes();
-        let restored = CompactLayout::from_le_bytes(bytes).unwrap();
+        let restored = CompactLayout::from_le_bytes(bytes);
         assert_eq!(compact, restored);
+        assert_eq!(restored.get_capabilities(), capabilities);
+        assert_eq!(restored.into_layout(), Some(layout));
+        assert_eq!(size_of::<CompactLayout>(), size_of::<usize>());
         assert_eq!(restored.get_size(), 128);
         assert_eq!(restored.get_alignment(), 16);
     }
@@ -180,7 +210,7 @@ mod tests {
     #[allow(clippy::clone_on_copy)]
     fn test_clone_and_copy() {
         let layout = Layout::from_size_align(32, 4).unwrap();
-        let compact = CompactLayout::from_layout(&layout).unwrap();
+        let compact = CompactLayout::from_layout(&layout, CapabilityFlags::empty()).unwrap();
         let cloned = compact.clone();
         let copied = compact;
         assert_eq!(compact, cloned);
@@ -197,7 +227,8 @@ mod tests {
                 if size <= CompactLayout::MAXIMUM_SIZE && align <= CompactLayout::MAXIMUM_ALIGNMENT
                 {
                     let layout = Layout::from_size_align(size, align).unwrap();
-                    let compact = CompactLayout::from_layout(&layout).unwrap();
+                    let compact =
+                        CompactLayout::from_layout(&layout, CapabilityFlags::empty()).unwrap();
                     assert_eq!(compact.get_size(), size);
                     assert_eq!(compact.get_alignment(), align);
                 }

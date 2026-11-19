@@ -269,7 +269,7 @@ pub fn test_reallocation_grow(allocator: impl ManagerTrait) {
     }
 
     // Reallocate to larger size
-    let new_ptr = unsafe { manager.reallocate(ptr, layout, new_size) };
+    let new_ptr = unsafe { manager.reallocate(CapabilityFlags::empty(), ptr, layout, new_size) };
     assert!(!new_ptr.is_null(), "Reallocation should succeed");
 
     // Verify original data is preserved
@@ -314,7 +314,7 @@ pub fn test_reallocation_shrink(allocator: impl ManagerTrait) {
     }
 
     // Reallocate to smaller size
-    let new_ptr = unsafe { manager.reallocate(ptr, layout, new_size) };
+    let new_ptr = unsafe { manager.reallocate(CapabilityFlags::empty(), ptr, layout, new_size) };
     assert!(!new_ptr.is_null(), "Reallocation should succeed");
 
     // Verify data up to new size is preserved
@@ -355,7 +355,7 @@ pub fn test_reallocation_same_size(allocator: impl ManagerTrait) {
     }
 
     // Reallocate with same size
-    let new_ptr = unsafe { manager.reallocate(ptr, layout, size) };
+    let new_ptr = unsafe { manager.reallocate(CapabilityFlags::empty(), ptr, layout, size) };
     assert!(!new_ptr.is_null(), "Reallocation should succeed");
 
     // Verify data is preserved

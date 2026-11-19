@@ -75,14 +75,14 @@ impl<'a> Manager<'a> {
         }
     }
 
-    /// Reallocates memory with a new layout.
+    /// Resizes memory with its original alignment and capabilities.
     ///
-    /// This method changes the size or alignment of a previously allocated memory block.
-    /// If the pointer is `None`, this behaves like a normal allocation.
-    /// If reallocation is successful, the contents of the old memory are preserved
-    /// up to the minimum of the old and new sizes.
+    /// A null pointer requests a fresh allocation. On success, the contents of the old
+    /// block are preserved up to the smaller of the old and new sizes. On failure, the
+    /// original block remains valid.
     ///
     /// # Parameters
+    /// * `capabilities` - The capability requirements of the allocation
     /// * `Pointer` - Pointer to the memory to reallocate. If null, acts as a new allocation
     /// * `Old_layout` - The layout that was used for the original allocation
     /// * `New_size` - The new size for the memory
@@ -93,15 +93,25 @@ impl<'a> Manager<'a> {
     /// # Safety
     /// This function is unsafe because the caller must ensure that:
     /// - If `Pointer` is not null, it was allocated by this allocator
-    /// - The `Old_layout` matches the one used for the original allocation
+    /// - The layout and capabilities match those used for the original allocation
     /// - The old memory is not used after successful reallocation
     /// - The returned memory is properly initialized before use
-    pub unsafe fn reallocate(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        let new_layout = Layout::from_size_align(new_size, layout.align()).unwrap_or(layout);
+    pub unsafe fn reallocate(
+        &self,
+        capabilities: CapabilityFlags,
+        pointer: *mut u8,
+        layout: Layout,
+        new_size: usize,
+    ) -> *mut u8 {
+        let Ok(new_layout) = Layout::from_size_align(new_size, layout.align()) else {
+            return null_mut();
+        };
 
         let pointer = match NonNull::new(pointer) {
-            Some(pointer) => unsafe { self.0.reallocate(pointer, layout, new_layout) },
-            None => unsafe { self.0.allocate(CapabilityFlags::empty(), new_layout) },
+            Some(pointer) => unsafe {
+                self.0.reallocate(capabilities, pointer, layout, new_layout)
+            },
+            None => return unsafe { self.allocate(capabilities, new_layout) },
         };
 
         pointer.map_or(null_mut(), |ptr| ptr.as_ptr())
@@ -178,7 +188,7 @@ unsafe impl<'a> GlobalAlloc for Manager<'a> {
     }
 
     unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        unsafe { self.reallocate(pointer, layout, new_size) }
+        unsafe { self.reallocate(CapabilityFlags::empty(), pointer, layout, new_size) }
     }
 }
 

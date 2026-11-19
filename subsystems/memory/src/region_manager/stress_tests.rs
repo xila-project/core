@@ -65,15 +65,18 @@ fn a_one_word_shrink_in_a_full_region_leaks_nothing() {
 
     // Shrinking by one granule hands it back, growing again takes it back.
     let granule = Layout::from_size_align(total / 2 - 2 * WORD, WORD).unwrap();
-    let shrunk = unsafe { manager.reallocate(a, half, granule) }.unwrap();
+    let shrunk = unsafe { manager.reallocate(CapabilityFlags::empty(), a, half, granule) }.unwrap();
     assert_eq!(shrunk, a);
     assert_eq!(manager.get_free(), 2 * WORD);
     validate(&manager);
-    assert_eq!(unsafe { manager.reallocate(a, granule, half) }, Some(a));
+    assert_eq!(
+        unsafe { manager.reallocate(CapabilityFlags::empty(), a, granule, half) },
+        Some(a)
+    );
     assert_eq!(manager.get_free(), 0);
 
     let smaller = Layout::from_size_align(total / 2 - WORD, WORD).unwrap();
-    let shrunk = unsafe { manager.reallocate(a, half, smaller) }.unwrap();
+    let shrunk = unsafe { manager.reallocate(CapabilityFlags::empty(), a, half, smaller) }.unwrap();
     assert_eq!(shrunk, a);
     unsafe {
         manager.deallocate(shrunk, smaller);
@@ -104,7 +107,9 @@ fn provenance_in_place_grow_through_a_narrowed_pointer() {
     let small = Layout::from_size_align(16, 8).unwrap();
     let large = Layout::from_size_align(64, 8).unwrap();
     let block = unsafe { manager.allocate(CapabilityFlags::empty(), small) }.unwrap();
-    let grown = unsafe { manager.reallocate(narrowed(block, 16), small, large) }.unwrap();
+    let grown =
+        unsafe { manager.reallocate(CapabilityFlags::empty(), narrowed(block, 16), small, large) }
+            .unwrap();
     assert_eq!(grown, block);
     // The returned pointer must cover the grown block, not just the caller's 16 bytes.
     unsafe { grown.as_ptr().add(16).write_bytes(0xA5, 48) };
@@ -266,16 +271,16 @@ fn stress(seed: u64, operations: usize, counts: &mut Counts) {
                         .layout
                         .size()
                         .saturating_sub((random.below(8) + 1) * unit),
-                    _ => block.layout.size().saturating_sub(WORD),
+                    _ => block.layout.size().saturating_sub(unit),
                 }
                 .max(unit);
                 let new_layout = Layout::from_size_align(new_size, block.layout.align()).unwrap();
                 let old_pointer = block.pointer;
                 let old_size = block.layout.size();
 
-                let Some(pointer) =
-                    (unsafe { manager.reallocate(old_pointer, block.layout, new_layout) })
-                else {
+                let Some(pointer) = (unsafe {
+                    manager.reallocate(block.capabilities, old_pointer, block.layout, new_layout)
+                }) else {
                     counts.reallocation_failures += 1;
                     assert_eq!(manager.get_used(), before_used);
                     assert!(stamped(old_pointer, old_size, block.seed));
@@ -287,6 +292,12 @@ fn stress(seed: u64, operations: usize, counts: &mut Counts) {
                     .find(|i| manager.region_contains(*i, pointer))
                     .unwrap();
 
+                if block
+                    .capabilities
+                    .contains(CapabilityFlags::AlwaysAccessible)
+                {
+                    assert_eq!(region, 0);
+                }
                 if new_size <= old_size {
                     // A shrink never moves.
                     assert_eq!(pointer, old_pointer, "a shrink moved");
@@ -432,7 +443,9 @@ fn concurrent_reallocations_keep_data() {
                             let (p, layout, s) = blocks[index];
                             let new_layout =
                                 Layout::from_size_align(random.below(2000) + 1, 8).unwrap();
-                            if let Some(q) = unsafe { manager.reallocate(p, layout, new_layout) } {
+                            if let Some(q) = unsafe {
+                                manager.reallocate(CapabilityFlags::empty(), p, layout, new_layout)
+                            } {
                                 assert!(
                                     stamped(q, layout.size().min(new_layout.size()), s),
                                     "data corrupted by a concurrent operation"
@@ -483,10 +496,26 @@ fn a_one_word_shrink_keeps_an_always_accessible_block_in_internal_ram() {
     assert!(manager.region_contains(0, block) && manager.region_contains(0, neighbour));
 
     let smaller = Layout::from_size_align(1000 - WORD, 8).unwrap();
-    let shrunk = unsafe { manager.reallocate(block, block_layout, smaller) }.unwrap();
+    let shrunk = unsafe {
+        manager.reallocate(
+            CapabilityFlags::AlwaysAccessible,
+            block,
+            block_layout,
+            smaller,
+        )
+    }
+    .unwrap();
     assert_eq!(shrunk, block);
     let smaller_still = Layout::from_size_align(1000 - 4 * WORD, 8).unwrap();
-    let shrunk = unsafe { manager.reallocate(shrunk, smaller, smaller_still) }.unwrap();
+    let shrunk = unsafe {
+        manager.reallocate(
+            CapabilityFlags::AlwaysAccessible,
+            shrunk,
+            smaller,
+            smaller_still,
+        )
+    }
+    .unwrap();
     assert_eq!(shrunk, block);
     assert!(manager.region_contains(0, shrunk));
     assert_eq!(
