@@ -3,7 +3,7 @@ use crate as graphics;
 use crate::{Color, lvgl};
 use file_system::{AccessFlags, CreateFlags, Flags, Permissions};
 use task::TaskIdentifier;
-use virtual_file_system::{self, File, VirtualFileSystem, user_home};
+use virtual_file_system::{self, File, VirtualFileSystem};
 
 const RECORD_SIZE: usize = 11;
 pub const PRESET_COUNT: u8 = 6;
@@ -92,7 +92,9 @@ impl Appearance {
         task: TaskIdentifier,
     ) -> virtual_file_system::Result<Self> {
         let user = vfs.task_manager().get_user(task).await?;
-        let path = user_home(user)
+        let path = vfs
+            .get_user_home(user)
+            .await?
             .append(".appearance")
             .ok_or(virtual_file_system::Error::InvalidPath)?;
         let mut file = match File::open(vfs, task, &path, AccessFlags::Read.into()).await {

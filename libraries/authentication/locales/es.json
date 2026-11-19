@@ -24,8 +24,14 @@
     "failed_to_read_random_device": "No se pudo leer el dispositivo aleatorio: {arg0}",
     "failed_to_read_user_file": "No se pudo leer el archivo de usuario: {arg0}",
     "failed_to_read_users_directory": "No se pudo leer el directorio de usuarios: {arg0}",
+    "failed_to_rename_user": "No se pudo renombrar el usuario: {arg0}",
     "failed_to_write_group_file": "No se pudo escribir el archivo de grupo: {arg0}",
     "failed_to_write_user_file": "No se pudo escribir el archivo de usuario: {arg0}",
-    "invalid_password": "Contraseña incorrecta"
+    "invalid_password": "Contraseña incorrecta",
+    "invalid_user_home": "Carpeta personal del usuario no válida",
+    "invalid_user_name": "Nombre de usuario no válido",
+    "invalid_user_record": "Registro de usuario no válido",
+    "unsupported_user_record_version": "Versión del registro de usuario no compatible",
+    "user_home_already_used": "La carpeta personal ya está en uso"
   }
 }

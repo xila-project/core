@@ -24,8 +24,14 @@
     "failed_to_read_random_device": "读取随机数设备失败：{arg0}",
     "failed_to_read_user_file": "读取用户文件失败：{arg0}",
     "failed_to_read_users_directory": "读取用户目录失败：{arg0}",
+    "failed_to_rename_user": "重命名用户失败：{arg0}",
     "failed_to_write_group_file": "写入用户组文件失败：{arg0}",
     "failed_to_write_user_file": "写入用户文件失败：{arg0}",
-    "invalid_password": "密码无效"
+    "invalid_password": "密码无效",
+    "invalid_user_home": "用户主目录无效",
+    "invalid_user_name": "用户名无效",
+    "invalid_user_record": "用户记录无效",
+    "unsupported_user_record_version": "不支持的用户记录版本",
+    "user_home_already_used": "用户主目录已被使用"
   }
 }

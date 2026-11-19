@@ -4,7 +4,7 @@ use crate::{Context, Error, Result};
 pub const SEED_PENDING_PATH: &str = "/system/accounts/.seed-pending";
 pub const SEED_PENDING_CONTENT: &[u8] = b"xila-seed-v1\n";
 use alloc::vec::Vec;
-use file_system::{AccessFlags, CreateFlags, Flags, Permissions};
+use file_system::AccessFlags;
 use users::{GroupIdentifier, UserIdentifier};
 use virtual_file_system::{Error as FsError, File};
 
@@ -57,7 +57,7 @@ pub async fn initialize_seeded(context: &Context<'_>) -> Result<()> {
             return Err(invalid());
         }
         let group = crate::Group::new(1000, "administrator".into(), Vec::new());
-        atomic_write(
+        crate::atomic_write(
             context,
             "/system/accounts/.seed-group.tmp",
             "/system/accounts/groups/administrator",
@@ -82,10 +82,14 @@ pub async fn initialize_seeded(context: &Context<'_>) -> Result<()> {
         if context.users_manager.get_user_name(user_id).await.is_ok() {
             return Err(invalid());
         }
+        let home = crate::new_user_home("administrator")?;
+        if context.users_manager.is_user_home(&home).await {
+            return Err(Error::UserHomeAlreadyUsed);
+        }
         let salt = crate::hash::generate_salt(vfs, task).await?;
         let hash = crate::hash::hash_password(vfs, task, "", &salt).await?;
-        let user = crate::User::new(1000, "administrator".into(), 1000, hash, salt);
-        atomic_write(
+        let user = crate::User::new(1000, "administrator".into(), 1000, home, hash, salt);
+        crate::atomic_write(
             context,
             "/system/accounts/.seed-user.tmp",
             "/system/accounts/users/administrator",
@@ -94,7 +98,7 @@ pub async fn initialize_seeded(context: &Context<'_>) -> Result<()> {
         .await?;
         context
             .users_manager
-            .add_user(user_id, "administrator", group_id)
+            .add_user(user_id, "administrator", group_id, user.get_home())
             .await
             .map_err(Error::FailedToAddUser)?;
     }
@@ -104,7 +108,7 @@ pub async fn initialize_seeded(context: &Context<'_>) -> Result<()> {
     Ok(())
 }
 
-fn invalid() -> Error {
+pub(crate) fn invalid() -> Error {
     Error::FailedToReadUserFile(FsError::FileSystem(file_system::Error::InvalidFile))
 }
 async fn exists(context: &Context<'_>, path: &str) -> Result<bool> {
@@ -113,39 +117,4 @@ async fn exists(context: &Context<'_>, path: &str) -> Result<bool> {
         Err(FsError::FileSystem(file_system::Error::NotFound)) => Ok(false),
         Err(error) => Err(Error::FailedToReadUserFile(error)),
     }
-}
-async fn atomic_write(
-    context: &Context<'_>,
-    temporary: &str,
-    destination: &str,
-    contents: &[u8],
-) -> Result<()> {
-    let vfs = context.virtual_file_system;
-    let mut file = File::open(
-        vfs,
-        context.task,
-        temporary,
-        Flags::new(AccessFlags::Write, Some(CreateFlags::CREATE_TRUNCATE), None),
-    )
-    .await
-    .map_err(Error::FailedToWriteUserFile)?;
-    file.set_permissions(Permissions::USER_READ_WRITE)
-        .await
-        .map_err(Error::FailedToWriteUserFile)?;
-    let mut offset = 0;
-    while offset < contents.len() {
-        let count = file
-            .write(&contents[offset..])
-            .await
-            .map_err(Error::FailedToWriteUserFile)?;
-        if count == 0 {
-            return Err(invalid());
-        }
-        offset += count;
-    }
-    file.flush().await.map_err(Error::FailedToWriteUserFile)?;
-    file.close(vfs).await.map_err(Error::FailedToCloseFile)?;
-    vfs.rename(context.task, &temporary, &destination)
-        .await
-        .map_err(Error::FailedToWriteUserFile)
 }

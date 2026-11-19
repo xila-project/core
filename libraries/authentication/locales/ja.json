@@ -24,8 +24,14 @@
     "failed_to_read_random_device": "乱数デバイスの読み取りに失敗しました: {arg0}",
     "failed_to_read_user_file": "ユーザーファイルの読み取りに失敗しました: {arg0}",
     "failed_to_read_users_directory": "ユーザーディレクトリの読み取りに失敗しました: {arg0}",
+    "failed_to_rename_user": "ユーザー名の変更に失敗しました: {arg0}",
     "failed_to_write_group_file": "グループファイルの書き込みに失敗しました: {arg0}",
     "failed_to_write_user_file": "ユーザーファイルの書き込みに失敗しました: {arg0}",
-    "invalid_password": "無効なパスワード"
+    "invalid_password": "無効なパスワード",
+    "invalid_user_home": "無効なホームディレクトリです",
+    "invalid_user_name": "無効なユーザー名です",
+    "invalid_user_record": "無効なユーザーレコードです",
+    "unsupported_user_record_version": "サポートされていないユーザーレコードのバージョンです",
+    "user_home_already_used": "ホームディレクトリは既に使用されています"
   }
 }

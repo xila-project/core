@@ -122,7 +122,10 @@ async fn privileged_worker_cannot_browse_or_select_for_unprivileged_caller() {
     let group = users::GroupIdentifier::new(1000);
     let user = users::UserIdentifier::new(1000);
     users.add_group(group, "picker-user", &[]).await.unwrap();
-    users.add_user(user, "picker-user", group).await.unwrap();
+    users
+        .add_user(user, "picker-user", group, "/users/picker-user")
+        .await
+        .unwrap();
     let spawner = manager.get_spawner(caller).await.unwrap();
     manager.set_user(caller, user).await.unwrap();
     manager

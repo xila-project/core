@@ -10,7 +10,7 @@ async fn fixture() -> (TaskIdentifier, &'static VirtualFileSystem, UserIdentifie
         .unwrap();
     let user = UserIdentifier::new(1001);
     vfs.users_manager()
-        .add_user(user, "owner", GroupIdentifier::ROOT)
+        .add_user(user, "owner", GroupIdentifier::ROOT, "/users/owner")
         .await
         .unwrap();
     File::write_to_path(vfs, task, "/file", b"data")

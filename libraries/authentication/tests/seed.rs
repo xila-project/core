@@ -78,6 +78,13 @@ async fn first_install_and_restarts_preserve_existing_credentials() {
                 .unwrap(),
             UserIdentifier::new(1000)
         );
+        assert_eq!(
+            users
+                .get_user_home(UserIdentifier::new(1000))
+                .await
+                .unwrap(),
+            "/users/administrator"
+        );
         authentication::change_user_password(&boot, "administrator", "keep-me")
             .await
             .unwrap();

@@ -76,6 +76,18 @@ pub enum Error {
     FailedToCloseFile(virtual_file_system::Error),
     /// Failed to hash
     FailedToHashPassword(virtual_file_system::Error),
+    /// The user name is not accepted for a new or renamed account
+    InvalidUserName,
+    /// An account record has no valid recorded home
+    InvalidUserHome,
+    /// An account record is not valid UTF-8 text
+    InvalidUserRecord,
+    /// An account record uses a format version this firmware does not know
+    UnsupportedUserRecordVersion,
+    /// Another account already uses the home a new account would get
+    UserHomeAlreadyUsed,
+    /// Failed to rename a user in the Users manager
+    FailedToRenameUser(users::Error),
 }
 
 impl Display for Error {
@@ -256,6 +268,32 @@ impl Display for Error {
                     formatter,
                     "{}",
                     t!("errors.failed_to_hash_password", arg0 = error)
+                )
+            }
+            Self::InvalidUserName => {
+                write!(formatter, "{}", t!("errors.invalid_user_name"))
+            }
+            Self::InvalidUserHome => {
+                write!(formatter, "{}", t!("errors.invalid_user_home"))
+            }
+            Self::InvalidUserRecord => {
+                write!(formatter, "{}", t!("errors.invalid_user_record"))
+            }
+            Self::UnsupportedUserRecordVersion => {
+                write!(
+                    formatter,
+                    "{}",
+                    t!("errors.unsupported_user_record_version")
+                )
+            }
+            Self::UserHomeAlreadyUsed => {
+                write!(formatter, "{}", t!("errors.user_home_already_used"))
+            }
+            Self::FailedToRenameUser(error) => {
+                write!(
+                    formatter,
+                    "{}",
+                    t!("errors.failed_to_rename_user", arg0 = error)
                 )
             }
         }

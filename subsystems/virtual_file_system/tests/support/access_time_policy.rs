@@ -389,7 +389,7 @@ async fn identical_metadata_writes_are_skipped_without_changing_errors() {
         .unwrap();
     virtual_file_system
         .users_manager()
-        .add_user(user, "metadata_user", group)
+        .add_user(user, "metadata_user", group, "/users/metadata_user")
         .await
         .unwrap();
 
@@ -480,7 +480,7 @@ async fn identical_metadata_writes_are_skipped_without_changing_errors() {
     let other_user = UserIdentifier::new(1003);
     virtual_file_system
         .users_manager()
-        .add_user(other_user, "other_user", group)
+        .add_user(other_user, "other_user", group, "/users/other_user")
         .await
         .unwrap();
     virtual_file_system

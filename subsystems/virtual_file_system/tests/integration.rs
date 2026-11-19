@@ -506,6 +506,76 @@ async fn hierarchy_reports_non_directory_conflicts() {
 
 #[cfg(target_os = "linux")]
 #[test]
+async fn homes_come_from_the_account_record_not_the_current_name() {
+    let (task, vfs) = initialize().await;
+    virtual_file_system::create_default_hierarchy(vfs, task)
+        .await
+        .unwrap();
+    let users_manager = vfs.users_manager();
+    let group = users::GroupIdentifier::new(1000);
+    users_manager.add_group(group, "people", &[]).await.unwrap();
+
+    // Root has no account record and a fixed home.
+    assert_eq!(
+        vfs.get_user_home(users::UserIdentifier::ROOT)
+            .await
+            .unwrap()
+            .as_str(),
+        users::ROOT_HOME
+    );
+
+    let alice = users::UserIdentifier::new(1000);
+    users_manager
+        .add_user(alice, "alice", group, "/users/alice")
+        .await
+        .unwrap();
+    let home = vfs.ensure_user_home(task, alice).await.unwrap();
+    assert_eq!(home.as_str(), "/users/alice");
+    assert_eq!(vfs.get_statistics(&home).await.unwrap().user, alice);
+
+    // Renaming keeps the recorded home and its contents.
+    users_manager.rename_user(alice, "alicia").await.unwrap();
+    assert_eq!(
+        vfs.ensure_user_home(task, alice).await.unwrap().as_str(),
+        "/users/alice"
+    );
+    assert_eq!(
+        vfs.get_user_application_directory(alice, "clock")
+            .await
+            .unwrap()
+            .as_str(),
+        "/users/alice/applications/clock"
+    );
+    assert_eq!(
+        vfs.get_user_application_directory(alice, "..").await,
+        Err(virtual_file_system::Error::InvalidPath)
+    );
+
+    // An account saved before homes were recorded keeps its numeric home.
+    let legacy = users::UserIdentifier::new(1001);
+    users_manager
+        .add_user(legacy, "legacy", group, "/users/1001")
+        .await
+        .unwrap();
+    assert_eq!(
+        vfs.ensure_user_home(task, legacy).await.unwrap().as_str(),
+        "/users/1001"
+    );
+
+    // A recorded home outside /users is never used.
+    let escaped = users::UserIdentifier::new(1002);
+    users_manager
+        .add_user(escaped, "escaped", group, "/system")
+        .await
+        .unwrap();
+    assert_eq!(
+        vfs.ensure_user_home(task, escaped).await,
+        Err(virtual_file_system::Error::InvalidPath)
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 async fn global_application_storage_follows_posix_and_user_app_storage_is_separate() {
     let (task, vfs) = initialize().await;
     virtual_file_system::create_default_hierarchy(vfs, task)
@@ -519,7 +589,7 @@ async fn global_application_storage_follows_posix_and_user_app_storage_is_separa
         .await
         .unwrap();
     vfs.users_manager()
-        .add_user(user, "test-user", group)
+        .add_user(user, "test-user", group, "/users/test-user")
         .await
         .unwrap();
 
@@ -545,7 +615,7 @@ async fn global_application_storage_follows_posix_and_user_app_storage_is_separa
         .ensure_user_application_directories(task, second_user, "clock")
         .await;
     assert!(second_home.is_err(), "unknown accounts must not get homes");
-    assert_eq!(first_home.as_str(), "/users/1000/applications/clock");
+    assert_eq!(first_home.as_str(), "/users/test-user/applications/clock");
     let user_data = first_home.append("data").unwrap();
     assert_eq!(vfs.get_statistics(&user_data).await.unwrap().user, user);
     assert_ne!(global_directory.as_str(), user_data.as_str());
@@ -967,7 +1037,12 @@ async fn unprivileged_user(vfs: &VirtualFileSystem) -> users::UserIdentifier {
     .unwrap();
     let user = users::UserIdentifier::new(1001);
     vfs.users_manager()
-        .add_user(user, "unprivileged", users::GroupIdentifier::ROOT)
+        .add_user(
+            user,
+            "unprivileged",
+            users::GroupIdentifier::ROOT,
+            "/users/unprivileged",
+        )
         .await
         .unwrap();
     user
@@ -1125,7 +1200,7 @@ async fn shared_and_temporary_directories_allow_user_writes_and_enforce_sticky_b
         .await
         .unwrap();
     vfs.users_manager()
-        .add_user(user_a, "alice", group_a)
+        .add_user(user_a, "alice", group_a, "/users/alice")
         .await
         .unwrap();
     vfs.users_manager()
@@ -1133,7 +1208,7 @@ async fn shared_and_temporary_directories_allow_user_writes_and_enforce_sticky_b
         .await
         .unwrap();
     vfs.users_manager()
-        .add_user(user_b, "bob", group_b)
+        .add_user(user_b, "bob", group_b, "/users/bob")
         .await
         .unwrap();
 

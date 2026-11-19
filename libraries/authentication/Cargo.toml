@@ -17,6 +17,7 @@ users = { workspace = true }
 task = { workspace = true }
 file_system = { workspace = true }
 device = { workspace = true }
+log = { workspace = true }
 
 miniserde = { workspace = true }
 embedded-i18n = { workspace = true }

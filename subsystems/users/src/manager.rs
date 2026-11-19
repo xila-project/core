@@ -10,6 +10,8 @@ use super::*;
 struct InternalUser {
     pub name: String,
     pub primary_group: GroupIdentifier,
+    /// Home recorded in the account, never derived from the current name.
+    pub home: String,
 }
 
 struct InternalGroup {
@@ -47,6 +49,7 @@ impl Manager {
             InternalUser {
                 name: "root".to_string(),
                 primary_group: GroupIdentifier::ROOT,
+                home: ROOT_HOME.to_string(),
             },
         );
 
@@ -85,11 +88,17 @@ impl Manager {
         Ok(identifier)
     }
 
+    /// Register an account with the home recorded for it.
+    ///
+    /// Names are not validated here, so accounts saved before
+    /// [`is_valid_user_name`] existed still load; account stores validate
+    /// names when they create or rename accounts.
     pub async fn add_user(
         &self,
         identifier: UserIdentifier,
         name: &str,
         primary_group: GroupIdentifier,
+        home: &str,
     ) -> Result<()> {
         let mut inner = self.0.write().await;
 
@@ -107,6 +116,7 @@ impl Manager {
         let user = InternalUser {
             name: name.to_string(),
             primary_group,
+            home: home.to_string(),
         };
 
         if inner.users.insert(identifier, user).is_some() {
@@ -290,6 +300,47 @@ impl Manager {
             .primary_group)
     }
 
+    /// The home recorded in the user's account.
+    pub async fn get_user_home(&self, identifier: UserIdentifier) -> Result<String> {
+        Ok(self
+            .0
+            .read()
+            .await
+            .users
+            .get(&identifier)
+            .ok_or(Error::InvalidUserIdentifier)?
+            .home
+            .clone())
+    }
+
+    /// Whether a registered account already records `home` as its home.
+    pub async fn is_user_home(&self, home: &str) -> bool {
+        self.0
+            .read()
+            .await
+            .users
+            .values()
+            .any(|user| user.home == home)
+    }
+
+    /// Change a user's name. The recorded home is kept unchanged.
+    pub async fn rename_user(&self, identifier: UserIdentifier, name: &str) -> Result<()> {
+        let mut inner = self.0.write().await;
+        if inner
+            .users
+            .iter()
+            .any(|(other, user)| *other != identifier && user.name == name)
+        {
+            return Err(Error::DuplicateUserName);
+        }
+        inner
+            .users
+            .get_mut(&identifier)
+            .ok_or(Error::InvalidUserIdentifier)?
+            .name = name.to_string();
+        Ok(())
+    }
+
     pub fn check_credentials(&self, _user_name: &str, _password: &str) -> bool {
         true
     }
@@ -309,7 +360,7 @@ mod tests {
         let user_name = "Alice";
         let identifier = UserIdentifier::new(1000);
         manager
-            .add_user(identifier, user_name, GroupIdentifier::ROOT)
+            .add_user(identifier, user_name, GroupIdentifier::ROOT, "/users/test")
             .await
             .unwrap();
         assert!(manager.exists_user(identifier).await.unwrap());
@@ -321,11 +372,14 @@ mod tests {
         let user = UserIdentifier::new(42);
         let group = GroupIdentifier::new(1000);
         manager.add_group(group, "saved", &[user]).await.unwrap();
-        assert_eq!(manager.add_user(user, "bob", group).await, Ok(()));
+        assert_eq!(
+            manager.add_user(user, "bob", group, "/users/bob").await,
+            Ok(())
+        );
         assert_eq!(manager.get_user_name(user).await.unwrap(), "bob");
         assert_eq!(manager.get_group_users(group).await.unwrap(), [user]);
         assert_eq!(
-            manager.add_user(user, "bob", group).await,
+            manager.add_user(user, "bob", group, "/users/bob").await,
             Err(Error::DuplicateUserIdentifier)
         );
     }
@@ -342,12 +396,22 @@ mod tests {
         let manager = Manager::new();
 
         manager
-            .add_user(identifier_1, user_name_1, GroupIdentifier::ROOT)
+            .add_user(
+                identifier_1,
+                user_name_1,
+                GroupIdentifier::ROOT,
+                "/users/test",
+            )
             .await
             .unwrap();
 
         let result = manager
-            .add_user(identifier_1, user_name_2, GroupIdentifier::ROOT)
+            .add_user(
+                identifier_1,
+                user_name_2,
+                GroupIdentifier::ROOT,
+                "/users/test",
+            )
             .await;
         assert_eq!(result, Err(Error::DuplicateUserIdentifier));
 
@@ -355,12 +419,22 @@ mod tests {
         let manager = Manager::new();
 
         manager
-            .add_user(identifier_1, user_name_1, GroupIdentifier::ROOT)
+            .add_user(
+                identifier_1,
+                user_name_1,
+                GroupIdentifier::ROOT,
+                "/users/test",
+            )
             .await
             .unwrap();
 
         let result = manager
-            .add_user(identifier_2, user_name_1, GroupIdentifier::ROOT)
+            .add_user(
+                identifier_2,
+                user_name_1,
+                GroupIdentifier::ROOT,
+                "/users/test",
+            )
             .await;
         assert_eq!(result, Err(Error::DuplicateUserName));
 
@@ -368,12 +442,22 @@ mod tests {
         let manager = Manager::new();
 
         manager
-            .add_user(identifier_1, user_name_1, GroupIdentifier::ROOT)
+            .add_user(
+                identifier_1,
+                user_name_1,
+                GroupIdentifier::ROOT,
+                "/users/test",
+            )
             .await
             .unwrap();
 
         manager
-            .add_user(identifier_1, user_name_1, GroupIdentifier::ROOT)
+            .add_user(
+                identifier_1,
+                user_name_1,
+                GroupIdentifier::ROOT,
+                "/users/test",
+            )
             .await
             .unwrap_err();
     }
@@ -444,7 +528,7 @@ mod tests {
         let user_name = "Bob";
         let identifier = UserIdentifier::new(1000);
         manager
-            .add_user(identifier, user_name, GroupIdentifier::ROOT)
+            .add_user(identifier, user_name, GroupIdentifier::ROOT, "/users/test")
             .await
             .unwrap();
         let group_name = "Admins";
@@ -462,7 +546,7 @@ mod tests {
         let user_name = "Charlie";
         let identifier = UserIdentifier::new(1000);
         manager
-            .add_user(identifier, user_name, GroupIdentifier::ROOT)
+            .add_user(identifier, user_name, GroupIdentifier::ROOT, "/users/test")
             .await
             .unwrap();
         let group_name1 = "TeamA";
@@ -507,7 +591,7 @@ mod tests {
         let user_name = "Dave";
         let identifier = UserIdentifier::new(1000);
         manager
-            .add_user(identifier, user_name, GroupIdentifier::ROOT)
+            .add_user(identifier, user_name, GroupIdentifier::ROOT, "/users/test")
             .await
             .unwrap();
         let group_name = "Engineers";
@@ -525,11 +609,51 @@ mod tests {
         let user_name = "Eve";
         let identifier = UserIdentifier::new(1000);
         manager
-            .add_user(identifier, user_name, GroupIdentifier::ROOT)
+            .add_user(identifier, user_name, GroupIdentifier::ROOT, "/users/test")
             .await
             .unwrap();
         let retrieved_name = manager.get_user_name(identifier).await.unwrap();
         assert_eq!(user_name, retrieved_name);
+    }
+
+    #[test]
+    async fn homes_are_recorded_and_kept_across_renames() {
+        let manager = Manager::new();
+        assert_eq!(
+            manager.get_user_home(UserIdentifier::ROOT).await.unwrap(),
+            ROOT_HOME
+        );
+        let alice = UserIdentifier::new(1000);
+        let bob = UserIdentifier::new(1001);
+        manager
+            .add_user(alice, "alice", GroupIdentifier::ROOT, "/users/alice")
+            .await
+            .unwrap();
+        manager
+            .add_user(bob, "bob", GroupIdentifier::ROOT, "/users/1001")
+            .await
+            .unwrap();
+        assert_eq!(manager.get_user_home(bob).await.unwrap(), "/users/1001");
+        assert!(manager.is_user_home("/users/alice").await);
+        assert!(!manager.is_user_home("/users/alicia").await);
+
+        assert_eq!(
+            manager.rename_user(alice, "bob").await,
+            Err(Error::DuplicateUserName)
+        );
+        manager.rename_user(alice, "alicia").await.unwrap();
+        assert_eq!(manager.get_user_name(alice).await.unwrap(), "alicia");
+        assert_eq!(manager.get_user_identifier("alicia").await, Ok(alice));
+        assert!(manager.get_user_identifier("alice").await.is_err());
+        assert_eq!(manager.get_user_home(alice).await.unwrap(), "/users/alice");
+        // Renaming to the current name is a no-op rather than a duplicate.
+        manager.rename_user(alice, "alicia").await.unwrap();
+        assert_eq!(
+            manager
+                .rename_user(UserIdentifier::new(4242), "nobody")
+                .await,
+            Err(Error::InvalidUserIdentifier)
+        );
     }
 
     #[test]

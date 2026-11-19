@@ -24,8 +24,14 @@
     "failed_to_read_random_device": "Não foi possível ler o dispositivo aleatório: {arg0}",
     "failed_to_read_user_file": "Não foi possível ler o arquivo de usuário: {arg0}",
     "failed_to_read_users_directory": "Não foi possível ler o diretório de usuários: {arg0}",
+    "failed_to_rename_user": "Não foi possível renomear o usuário: {arg0}",
     "failed_to_write_group_file": "Não foi possível gravar o arquivo de grupo: {arg0}",
     "failed_to_write_user_file": "Não foi possível gravar o arquivo de usuário: {arg0}",
-    "invalid_password": "Senha inválida"
+    "invalid_password": "Senha inválida",
+    "invalid_user_home": "Pasta pessoal do usuário inválida",
+    "invalid_user_name": "Nome de usuário inválido",
+    "invalid_user_record": "Registro de usuário inválido",
+    "unsupported_user_record_version": "Versão do registro de usuário não suportada",
+    "user_home_already_used": "A pasta pessoal já está em uso"
   }
 }
