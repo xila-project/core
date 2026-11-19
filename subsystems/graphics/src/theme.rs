@@ -15,6 +15,12 @@ unsafe fn initialize_display(display: *mut lvgl::lv_display_t) -> Result<()> {
         normal: fonts::get_font_medium(),
         large: fonts::get_font_large(),
         mono: fonts::get_font_monospace_medium(),
+        // Left unset: heading fonts fall back to `large`, and a missing medium font
+        // to `normal`, so Xila keeps its single Montserrat weight and today's look.
+        h1: core::ptr::null(),
+        h2: core::ptr::null(),
+        h3: core::ptr::null(),
+        medium: core::ptr::null(),
     };
     // The theme copies the palette/fonts and releases its state when the display
     // is deleted. No Rust-owned callback, parent theme or leaked Box is needed.
