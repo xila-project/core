@@ -41,6 +41,7 @@ network = { workspace = true, optional = true }
 default = ["abi_definitions", "network"]
 
 executable_building = ["executable/building"]
+native-dev = ["executable/native-dev"]
 audio = ["dep:audio"]
 neural_network = ["dep:neural_network", "dep:drivers_neural_network"]
 abi_definitions = ["dep:abi_definitions"]

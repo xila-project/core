@@ -2,6 +2,8 @@
   "errors": {
     "failed_to_get_main_function": "Failed to get main function",
     "invalid_stack_size": "Invalid stack size",
+    "native_load": "Failed to load native executable",
+    "native_file_too_large": "Native executable file exceeds its size limit",
     "permission_denied": "Permission denied"
   }
 }

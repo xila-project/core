@@ -28,6 +28,7 @@ pub struct ExecutableContext {
     pub graphics_manager: Option<&'static graphics::Manager>,
     #[cfg(feature = "network")]
     pub network_manager: Option<&'static network::Manager>,
+    pub formats: &'static [crate::ExecutableFormat],
     pub time_manager: &'static time::Manager<'static>,
 }
 
@@ -48,6 +49,7 @@ impl ExecutableContext {
             graphics_manager: None,
             #[cfg(feature = "network")]
             network_manager: None,
+            formats: &[],
             time_manager,
         }
     }

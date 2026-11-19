@@ -2,6 +2,8 @@
   "errors": {
     "failed_to_get_main_function": "Nie udało się uzyskać funkcji głównej",
     "invalid_stack_size": "Nieprawidłowy rozmiar stosu",
+    "native_load": "Nie udało się załadować natywnego pliku wykonywalnego",
+    "native_file_too_large": "Natywny plik wykonywalny przekracza limit rozmiaru",
     "permission_denied": "Odmowa dostępu"
   }
 }

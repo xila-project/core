@@ -312,11 +312,33 @@ pub async unsafe fn spawn<F: FnOnce() -> i32 + 'static>(
     stack: Stack,
     entry: F,
 ) -> task::Result<(task::JoinHandle<i32>, task::TaskIdentifier)> {
+    unsafe { spawn_with_result(manager, parent, name, stack, entry, core::convert::identity).await }
+}
+
+/// Like [`spawn`], converting the exit status before signaling the task join handle.
+///
+/// # Safety
+/// Same contract as [`spawn`].
+pub async unsafe fn spawn_with_result<F, Map, T>(
+    manager: &'static task::Manager,
+    parent: task::TaskIdentifier,
+    name: &str,
+    stack: Stack,
+    entry: F,
+    map: Map,
+) -> task::Result<(task::JoinHandle<T>, task::TaskIdentifier)>
+where
+    F: FnOnce() -> i32 + 'static,
+    Map: FnOnce(i32) -> T + 'static,
+    T: 'static,
+{
     let caller = manager.get_current_task_identifier().await;
     let spawner = manager.get_spawner(caller).await?;
     let coroutine = unsafe { Coroutine::new(stack, entry) };
     manager
-        .spawn(parent, name, Some(spawner), move |_| drive(coroutine))
+        .spawn(parent, name, Some(spawner), move |_| async move {
+            map(drive(coroutine).await)
+        })
         .await
 }
 

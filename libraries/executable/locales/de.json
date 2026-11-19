@@ -2,6 +2,8 @@
   "errors": {
     "failed_to_get_main_function": "Hauptfunktion konnte nicht abgerufen werden",
     "invalid_stack_size": "Ungültige Stackgröße",
+    "native_load": "Native Anwendung konnte nicht geladen werden",
+    "native_file_too_large": "Die native Anwendungsdatei überschreitet das Größenlimit",
     "permission_denied": "Zugriff verweigert"
   }
 }

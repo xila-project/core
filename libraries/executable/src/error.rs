@@ -10,6 +10,10 @@ pub enum Error {
     FailedToGetMainFunction,
     InvalidStackSize,
     PermissionDenied,
+    #[cfg(feature = "native-dev")]
+    Native(native_loader::Error),
+    #[cfg(feature = "native-dev")]
+    NativeFileTooLarge,
 }
 
 impl Display for Error {
@@ -21,6 +25,12 @@ impl Display for Error {
                 write!(formatter, "{}", t!("errors.failed_to_get_main_function"))
             }
             Error::InvalidStackSize => write!(formatter, "{}", t!("errors.invalid_stack_size")),
+            #[cfg(feature = "native-dev")]
+            Error::Native(error) => write!(formatter, "{} ({error:?})", t!("errors.native_load")),
+            #[cfg(feature = "native-dev")]
+            Error::NativeFileTooLarge => {
+                write!(formatter, "{}", t!("errors.native_file_too_large"))
+            }
             Error::PermissionDenied => write!(formatter, "{}", t!("errors.permission_denied")),
         }
     }

@@ -18,6 +18,11 @@ graphics = { workspace = true, optional = true }
 network = { workspace = true, optional = true }
 time = { workspace = true }
 synchronization = { workspace = true }
+native_loader = { workspace = true, optional = true }
+
+[target.'cfg(any(all(any(target_arch = "x86_64", target_arch = "aarch64"), target_os = "linux"), all(any(target_arch = "x86_64", target_arch = "aarch64", target_arch = "arm", target_arch = "riscv32"), target_os = "none")))'.dependencies]
+abi_application = { workspace = true, optional = true }
+stackful = { workspace = true, optional = true }
 
 [dev-dependencies]
 task = { workspace = true, features = ["test_harness"] }
@@ -26,6 +31,7 @@ drivers_core = { workspace = true }
 [features]
 default = []
 building = []
+native-dev = ["dep:abi_application", "dep:native_loader", "dep:stackful"]
 graphics = ["dep:graphics"]
 network = ["dep:network"]
 
@@ -37,3 +43,9 @@ load-path = "locales"
 default-locale = "en"
 fallback = ["en"]
 strict = true
+
+[target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dev-dependencies]
+libc = "0.2"
+abi_definitions.workspace = true
+little_fs.workspace = true
+portable-atomic.workspace = true
