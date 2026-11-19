@@ -4,6 +4,7 @@ extern crate alloc;
 
 mod cache;
 mod capability;
+mod heap;
 mod r#macro;
 mod manager;
 mod protection;
