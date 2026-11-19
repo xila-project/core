@@ -101,7 +101,7 @@ class WorkflowPolicy(unittest.TestCase):
             self.assertIn(target, bare["tools"]["rust"]["targets"])
         for features in ("--no-default-features", "--features network"):
             self.assertIn(
-                f'cargo check --locked -p xila-abi-application {features} --target "$target"',
+                f'cargo clippy --locked -p xila-abi-application {features} --target "$target" -- -D warnings',
                 bare["run"],
             )
 

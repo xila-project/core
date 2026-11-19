@@ -13,7 +13,8 @@ int32_t _xila_start(const XilaStartup *startup) {
         return -1;
     }
 
-    /* Install the table before executing any application code, including init arrays. */
+    /* Install the table before calling the application. Code that runs before _xila_start sees
+       the fallback table. */
     xila_sdk_api = startup->api;
     int32_t result = xila_main(startup);
     xila_sdk_api = &xila_sdk_fallback_api;

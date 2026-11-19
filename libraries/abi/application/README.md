@@ -175,17 +175,22 @@ new bytes after a resize. Allocation of zero bytes reserves one byte.
 Reallocation with a null pointer allocates, and a new size of zero frees and
 stores null. Free accepts null. An unrepresentable size or allocator failure
 returns OutOfMemory and preserves the original block and output. Free and
-resize reject addresses that are absent from the heap's live allocation index.
+resize return `XILA_STATUS_INVALID_ARGUMENT` for a pointer that this heap does
+not own, an interior pointer or a block that was already freed.
 
-A doubly linked list supports constant-time unlinking and relinking. The
-header is 8 bytes on 32-bit Arm and 16 bytes elsewhere, including RV32. The
-per-heap hash table provides expected constant-time address validation before
-any header access. Each bucket holds a block pointer and a control byte. On
-Arm and 64-bit targets the two links fill the header, so each bucket also
-stores the size. RV32 stores the size in its header's spare space. The index
-allocates only when needed and retains its capacity until heap teardown.
-As with malloc, an address reused by a later allocation identifies that new
-allocation.
+Each block starts with a 16-byte header on 32-bit targets (Arm and RV32) and
+32 bytes on 64-bit targets: previous and next links, the size and an owner tag.
+The doubly linked list gives constant-time free and resize. The tag is a
+per-heap key XOR the block address, and free clears it. Free and resize check
+the alignment and the tag before they unlink anything. The heap keeps no side
+table: its metadata never allocates, never fails and never outlives the block,
+so a shrinking resize cannot fail because of it.
+
+Native applications are trusted, so this is cheap misuse detection rather than
+hardening. Like a C allocator, the check reads the header below the pointer, so
+the pointer must address readable memory. A freed block whose memory a later
+allocation of the same heap reuses identifies that new allocation, as with
+malloc.
 
 The process owner drops the heap after all C execution ends. A loader must
 keep that owner outside the native coroutine stack, including when it cancels

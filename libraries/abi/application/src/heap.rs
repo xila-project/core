@@ -1,74 +1,55 @@
 use crate::Status;
 use alloc::alloc::{alloc, dealloc, realloc};
-use core::{alloc::Layout, ffi::c_void, mem::size_of, ptr, ptr::NonNull};
-use hashbrown::HashTable;
+use core::{alloc::Layout, ffi::c_void, mem::size_of, ptr};
 
+// The doc comment appears on both cfg branches: cbindgen copies it per branch.
 /// Alignment guaranteed for every allocation, including zero-length requests.
 #[cfg(target_arch = "arm")]
 pub const XILA_HEAP_ALIGNMENT: usize = 8;
+/// Alignment guaranteed for every allocation, including zero-length requests.
 #[cfg(not(target_arch = "arm"))]
 pub const XILA_HEAP_ALIGNMENT: usize = 16;
 
+/// In-band block header: a doubly linked list keeps free and resize constant
+/// time, and the tag identifies the owning heap.
 struct Block {
     previous: *mut Block,
     next: *mut Block,
-    // Use the extra header word on 32-bit targets with 16-byte alignment.
-    #[cfg(all(target_pointer_width = "32", not(target_arch = "arm")))]
     size: usize,
+    // Heap key XOR block address. Zero once the block is freed; a live tag is
+    // never zero because the key is odd and block addresses are even.
+    tag: usize,
 }
 
 const HEADER_SIZE: usize = size_of::<Block>().next_multiple_of(XILA_HEAP_ALIGNMENT);
-const _: () = assert!(HEADER_SIZE == XILA_HEAP_ALIGNMENT);
+// Four words must stay the whole per-block cost on 32-bit targets.
+#[cfg(target_pointer_width = "32")]
+const _: () = assert!(HEADER_SIZE == 16);
 
 fn layout(size: usize) -> Result<Layout, Status> {
     let total = HEADER_SIZE.checked_add(size).ok_or(Status::OutOfMemory)?;
     Layout::from_size_align(total, XILA_HEAP_ALIGNMENT).map_err(|_| Status::OutOfMemory)
 }
 
-#[derive(Clone, Copy)]
-struct Allocation {
-    block: NonNull<Block>,
-    // On Arm and 64-bit targets both links fill the header.
-    #[cfg(any(target_arch = "arm", not(target_pointer_width = "32")))]
-    size: usize,
-}
-
-impl Allocation {
-    fn payload(self) -> *mut c_void {
-        // SAFETY: Every indexed block has at least one payload byte.
-        unsafe { self.block.as_ptr().cast::<u8>().add(HEADER_SIZE).cast() }
-    }
-
-    fn hash(&self) -> u64 {
-        address_hash(self.block.addr().get())
-    }
-
-    // SAFETY: The block must still be live.
-    unsafe fn layout(self) -> Layout {
-        #[cfg(all(target_pointer_width = "32", not(target_arch = "arm")))]
-        let size = unsafe { self.block.as_ref().size };
-        #[cfg(any(target_arch = "arm", not(target_pointer_width = "32")))]
-        let size = self.size;
-        let Ok(layout) = layout(size) else {
-            unreachable!();
-        };
-        layout
-    }
-}
-
-fn address_hash(address: usize) -> u64 {
-    // Drop the alignment bits and mix both ends of the address for SwissTable.
-    let address = address / XILA_HEAP_ALIGNMENT;
-    (address ^ (address >> 16)).wrapping_mul(0x9E37_79B9) as u64
-}
+const KEY_SALT: usize = 0x5A17_A11C;
 
 /// Opaque native heap capability. The process owner drops it after all native
 /// execution ends. Keep ownership outside any stack that can be abandoned.
+///
+/// Native applications are trusted, so misuse detection is cheap rather than
+/// hardened. Every block starts with a header whose tag is the heap's key XOR
+/// the block address. Free and resize read the header that would precede the
+/// pointer and reject it as `InvalidArgument` unless it is aligned and its tag
+/// matches: a foreign-heap pointer, an interior pointer or a double free is
+/// caught. Like a C allocator, this reads through the pointer, so it needs
+/// readable memory below it. It cannot detect a freed block whose memory was
+/// reused by a later allocation of this heap, which then identifies the new
+/// block. Metadata lives in the block, so no operation allocates it and a
+/// shrinking resize never fails because of it.
 pub struct Heap {
     head: *mut Block,
-    // Validate the exact address before accessing memory. An in-band owner tag
-    // would require reading through possibly freed or foreign pointers.
-    blocks: HashTable<Allocation>,
+    // Zero until the first allocation. Never zero afterwards.
+    key: usize,
 }
 
 impl Default for Heap {
@@ -81,44 +62,59 @@ impl Heap {
     pub const fn new() -> Self {
         Self {
             head: ptr::null_mut(),
-            blocks: HashTable::new(),
+            key: 0,
         }
     }
 
-    fn reserve_slot(&mut self) -> Result<(), Status> {
-        self.blocks
-            .try_reserve(1, Allocation::hash)
-            .map_err(|_| Status::OutOfMemory)
+    fn tag(&self, block: *mut Block) -> usize {
+        self.key ^ block.addr()
+    }
+
+    /// Return the block that owns `pointer`, which must be non-null.
+    ///
+    /// Trusted native contract: this reads the header below `pointer` before
+    /// it can know the pointer is valid.
+    fn block(&self, pointer: *mut c_void) -> Result<*mut Block, Status> {
+        // An empty heap owns nothing, so there is no reason to read memory.
+        if self.head.is_null()
+            || !pointer.addr().is_multiple_of(XILA_HEAP_ALIGNMENT)
+            || pointer.addr() <= HEADER_SIZE
+        {
+            return Err(Status::InvalidArgument);
+        }
+        let block = pointer.wrapping_byte_sub(HEADER_SIZE).cast::<Block>();
+        // SAFETY: Trusted native contract. The pointer comes from some
+        // allocation, so the bytes below it are readable.
+        if unsafe { (*block).tag } != self.tag(block) {
+            return Err(Status::InvalidArgument);
+        }
+        Ok(block)
     }
 
     fn allocate(&mut self, size: usize) -> Result<*mut c_void, Status> {
         let layout = layout(size)?;
-        self.reserve_slot()?;
-        let block =
-            NonNull::new(unsafe { alloc(layout).cast::<Block>() }).ok_or(Status::OutOfMemory)?;
+        // SAFETY: The layout is never zero-sized.
+        let block = unsafe { alloc(layout).cast::<Block>() };
+        if block.is_null() {
+            return Err(Status::OutOfMemory);
+        }
+        if self.key == 0 {
+            // Live blocks have distinct addresses, so mixing in the first one
+            // keeps heaps that reuse an address apart.
+            self.key = (ptr::from_mut(self).addr() ^ block.addr() ^ KEY_SALT) | 1;
+        }
+        // SAFETY: The block is a fresh allocation with room for the header and
+        // the head is null or a live block of this heap.
         unsafe {
-            block.as_ptr().write(Block {
+            block.write(Block {
                 previous: ptr::null_mut(),
                 next: self.head,
-                #[cfg(all(target_pointer_width = "32", not(target_arch = "arm")))]
                 size,
+                tag: self.tag(block),
             });
-            self.update_links(ptr::null_mut(), block.as_ptr(), self.head);
+            self.update_links(ptr::null_mut(), block, self.head);
+            Ok(block.cast::<u8>().add(HEADER_SIZE).cast())
         }
-        Ok(self.record(block, size))
-    }
-
-    fn record(&mut self, block: NonNull<Block>, size: usize) -> *mut c_void {
-        #[cfg(all(target_pointer_width = "32", not(target_arch = "arm")))]
-        let _ = size;
-        let allocation = Allocation {
-            block,
-            #[cfg(any(target_arch = "arm", not(target_pointer_width = "32")))]
-            size,
-        };
-        self.blocks
-            .insert_unique(allocation.hash(), allocation, Allocation::hash);
-        allocation.payload()
     }
 
     fn reallocate(&mut self, pointer: *mut c_void, size: usize) -> Result<*mut c_void, Status> {
@@ -129,59 +125,58 @@ impl Heap {
         if pointer.is_null() {
             return self.allocate(size);
         }
-        let address = pointer.addr().wrapping_sub(HEADER_SIZE);
-        let hash = address_hash(address);
-        let matches = |entry: &Allocation| entry.block.addr().get() == address;
-        let old = self
-            .blocks
-            .find(hash, matches)
-            .copied()
-            .ok_or(Status::InvalidArgument)?;
+        let old = self.block(pointer)?;
         let new_layout = layout(size)?;
-        // Reserve before realloc can invalidate the old address. Moving the
-        // entry may leave a tombstone and require a fresh bucket.
-        self.reserve_slot()?;
-        let block = NonNull::new(unsafe {
-            realloc(old.block.as_ptr().cast(), old.layout(), new_layout.size()).cast::<Block>()
-        })
-        .ok_or(Status::OutOfMemory)?;
-        let Ok(entry) = self.blocks.find_entry(hash, matches) else {
+        // SAFETY: The tag matched, so the header belongs to a live block of
+        // this heap that was allocated with the stored size.
+        let old_layout = unsafe { layout((*old).size) };
+        let Ok(old_layout) = old_layout else {
             unreachable!();
         };
-        entry.remove();
-        unsafe {
-            let header = &mut *block.as_ptr();
-            #[cfg(all(target_pointer_width = "32", not(target_arch = "arm")))]
-            {
-                header.size = size;
-            }
-            self.update_links(header.previous, block.as_ptr(), header.next);
+        // SAFETY: The old layout is the one the block was allocated with.
+        let block = unsafe { realloc(old.cast(), old_layout, new_layout.size()).cast::<Block>() };
+        if block.is_null() {
+            // The old block is untouched.
+            return Err(Status::OutOfMemory);
         }
-        Ok(self.record(block, size))
+        // SAFETY: Realloc moved the header with the block and the neighbors
+        // are live blocks of this heap that still point at the old address.
+        unsafe {
+            (*block).size = size;
+            (*block).tag = self.tag(block);
+            self.update_links((*block).previous, block, (*block).next);
+            Ok(block.cast::<u8>().add(HEADER_SIZE).cast())
+        }
     }
 
     fn free(&mut self, pointer: *mut c_void) -> Result<(), Status> {
         if pointer.is_null() {
             return Ok(());
         }
-        let address = pointer.addr().wrapping_sub(HEADER_SIZE);
-        let Ok(entry) = self.blocks.find_entry(address_hash(address), |entry| {
-            entry.block.addr().get() == address
-        }) else {
-            return Err(Status::InvalidArgument);
-        };
-        let (allocation, _) = entry.remove();
+        let block = self.block(pointer)?;
+        // SAFETY: The tag matched, so the block and its neighbors are live
+        // blocks of this heap.
         unsafe {
-            let block = allocation.block.as_ref();
-            if block.previous.is_null() {
-                self.head = block.next;
+            let Block {
+                previous,
+                next,
+                size,
+                ..
+            } = block.read();
+            if previous.is_null() {
+                self.head = next;
             } else {
-                (*block.previous).next = block.next;
+                (*previous).next = next;
             }
-            if !block.next.is_null() {
-                (*block.next).previous = block.previous;
+            if !next.is_null() {
+                (*next).previous = previous;
             }
-            dealloc(allocation.block.as_ptr().cast(), allocation.layout());
+            // A second free of this pointer then fails the tag check.
+            (*block).tag = 0;
+            let Ok(layout) = layout(size) else {
+                unreachable!();
+            };
+            dealloc(block.cast(), layout);
         }
         Ok(())
     }
@@ -204,7 +199,7 @@ impl Heap {
 impl Drop for Heap {
     fn drop(&mut self) {
         while !self.head.is_null() {
-            // SAFETY: The head is a live, indexed allocation.
+            // SAFETY: The head is a live block of this heap.
             let pointer = unsafe { self.head.cast::<u8>().add(HEADER_SIZE).cast() };
             let Ok(()) = self.free(pointer) else {
                 unreachable!();
@@ -228,7 +223,9 @@ pub unsafe extern "C" fn xila_heap_allocate(
 /// Resize a block, preserving its contents up to the smaller of the old and
 /// new sizes. Failure leaves the old allocation and output unchanged. Size
 /// zero frees the block and stores null. A null pointer with nonzero size
-/// allocates a new block.
+/// allocates a new block. A pointer that this heap does not own, an interior
+/// pointer or a freed block returns `InvalidArgument`, with the same trusted
+/// native contract as [`xila_heap_free`].
 /// # Safety
 /// Heap must be live and exclusively accessed. Output must be aligned, writable
 /// and disjoint from the heap and its allocations.
@@ -253,7 +250,11 @@ pub unsafe extern "C" fn xila_heap_reallocate(
     }
 }
 
-/// Free a block owned by this heap. Null succeeds.
+/// Free a block owned by this heap. Null succeeds. A pointer that this heap
+/// does not own, an interior pointer or a block that was already freed returns
+/// `InvalidArgument`. This check reads the block header through the pointer, so
+/// the pointer must at least address readable memory (the trusted native
+/// contract; see [`Heap`]).
 /// # Safety
 /// Heap must be live and exclusively accessed.
 pub unsafe extern "C" fn xila_heap_free(heap: *mut Heap, pointer: *mut c_void) -> Status {
@@ -272,7 +273,9 @@ pub unsafe extern "C" fn xila_heap_free(heap: *mut Heap, pointer: *mut c_void) -
 mod tests {
     use super::*;
 
+    // Stackful switches stacks with inline assembly, which Miri cannot run.
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn owner_reclaims_heap_after_coroutine_cancellation() {
         let mut heap = Heap::new();
         let capability = &mut heap as *mut Heap;
@@ -289,8 +292,9 @@ mod tests {
         let mut context = core::task::Context::from_waker(core::task::Waker::noop());
         assert!(coroutine.resume(&mut context).is_pending());
         let delta = testing::MemoryManager::thread_allocations().since(before_resume);
-        assert_eq!(delta.allocations(), 3);
-        assert!(delta.allocated_bytes() > 123 + 45 + 2 * HEADER_SIZE);
+        // Exactly the two blocks: the heap allocates no metadata.
+        assert_eq!(delta.allocations(), 2);
+        assert_eq!(delta.allocated_bytes(), 123 + 45 + 2 * HEADER_SIZE);
 
         // Stackful retains the suspended stack. Check only the allocations
         // made after entering it, which belong to the external heap.
@@ -306,40 +310,93 @@ mod regression_tests {
     use super::*;
 
     #[test]
-    fn double_free_and_foreign_pointer_are_rejected() {
+    fn header_stays_within_the_per_block_budget() {
+        // 16 B of metadata per block on 32-bit targets; two words per link
+        // pair, the size and the tag on 64-bit ones.
+        assert_eq!(size_of::<Block>(), 4 * size_of::<usize>());
+        assert!(HEADER_SIZE >= size_of::<Block>());
+        assert!(HEADER_SIZE < size_of::<Block>() + XILA_HEAP_ALIGNMENT);
+        #[cfg(target_pointer_width = "32")]
+        assert_eq!(HEADER_SIZE, 16);
+    }
+
+    // Initialize the payload so that header probes through interior pointers
+    // never read uninitialized bytes.
+    unsafe fn allocate_zeroed(heap: &mut Heap, size: usize) -> *mut c_void {
+        let mut pointer = ptr::null_mut();
+        unsafe {
+            assert_eq!(xila_heap_allocate(heap, size, &mut pointer), Status::Ok);
+            pointer.cast::<u8>().write_bytes(0, size);
+        }
+        pointer
+    }
+
+    #[test]
+    fn foreign_and_interior_pointers_are_rejected() {
         let mut a = Heap::new();
         let mut b = Heap::new();
         unsafe {
-            let mut p = ptr::null_mut();
-            let mut q = ptr::null_mut();
-            assert_eq!(xila_heap_allocate(&mut a, 32, &mut p), Status::Ok);
-            assert_eq!(xila_heap_allocate(&mut b, 32, &mut q), Status::Ok);
+            let mut p = allocate_zeroed(&mut a, 64);
+            let q = allocate_zeroed(&mut b, 64);
             // Foreign pointer: rejected, both heaps intact.
             assert_eq!(xila_heap_free(&mut a, q), Status::InvalidArgument);
             assert_eq!(
                 xila_heap_reallocate(&mut a, q, 64, &mut p),
                 Status::InvalidArgument
             );
-            // Interior pointer: rejected.
+            // Misaligned interior pointer: rejected without reading memory.
             assert_eq!(
                 xila_heap_free(&mut a, p.cast::<u8>().add(1).cast()),
                 Status::InvalidArgument
             );
-            // An aligned interior address must also be rejected before looking at any header.
+            // An aligned interior address is rejected by its tag.
             let interior = p.cast::<u8>().add(XILA_HEAP_ALIGNMENT).cast();
             assert_eq!(xila_heap_free(&mut a, interior), Status::InvalidArgument);
             assert_eq!(
                 xila_heap_reallocate(&mut a, interior, 64, &mut p),
                 Status::InvalidArgument
             );
-            // Double free: second call rejected, no UB.
+            // Nothing was disturbed.
             assert_eq!(xila_heap_free(&mut a, p), Status::Ok);
-            assert_eq!(xila_heap_free(&mut a, p), Status::InvalidArgument);
             assert_eq!(xila_heap_free(&mut b, q), Status::Ok);
         }
     }
 
+    // Reads freed memory, which is the trusted native contract of the tag
+    // check and undefined behavior as far as Miri is concerned.
     #[test]
+    #[cfg_attr(miri, ignore)]
+    fn double_free_is_rejected() {
+        let mut heap = Heap::new();
+        unsafe {
+            let first = allocate_zeroed(&mut heap, 32);
+            let second = allocate_zeroed(&mut heap, 32);
+            assert_eq!(xila_heap_free(&mut heap, first), Status::Ok);
+            assert_eq!(xila_heap_free(&mut heap, first), Status::InvalidArgument);
+            let mut out = ptr::null_mut();
+            assert_eq!(
+                xila_heap_reallocate(&mut heap, first, 64, &mut out),
+                Status::InvalidArgument
+            );
+            assert!(out.is_null());
+            assert_eq!(xila_heap_free(&mut heap, second), Status::Ok);
+        }
+    }
+
+    #[test]
+    fn empty_heap_rejects_without_reading() {
+        let mut heap = Heap::new();
+        // Not dereferenceable: an empty heap owns nothing.
+        let wild = ptr::without_provenance_mut(0x1000_0000);
+        assert_eq!(
+            unsafe { xila_heap_free(&mut heap, wild) },
+            Status::InvalidArgument
+        );
+    }
+
+    // Miri aborts on the near-isize::MAX request instead of failing it.
+    #[test]
+    #[cfg_attr(miri, ignore)]
     fn reallocate_failure_keeps_old_block_and_output() {
         let mut heap = Heap::new();
         unsafe {
@@ -362,30 +419,55 @@ mod regression_tests {
         }
     }
 
-    #[test]
-    fn free_cost_scales_linearly() {
-        extern crate std;
-        fn free_all(n: usize) -> std::time::Duration {
-            let mut heap = Heap::new();
-            let mut blocks = std::vec::Vec::with_capacity(n);
-            for _ in 0..n {
-                blocks.push(
-                    heap.allocate(16)
-                        .unwrap_or_else(|_| panic!("test allocation failed")),
-                );
+    // Walk the list and check every block against its neighbors.
+    fn assert_consistent(heap: &Heap, expected: usize) {
+        let mut count = 0;
+        let mut previous = ptr::null_mut();
+        let mut block = heap.head;
+        while !block.is_null() {
+            // SAFETY: Every linked block is live.
+            unsafe {
+                assert_eq!((*block).previous, previous);
+                assert_eq!((*block).tag, heap.tag(block));
+                previous = block;
+                block = (*block).next;
             }
-            let start = std::time::Instant::now();
-            for block in blocks {
-                assert_eq!(heap.free(block), Ok(()));
-            }
-            start.elapsed()
+            count += 1;
         }
+        assert_eq!(count, expected);
+    }
 
-        // Oldest-first is the worst case for a list scan. Take the fastest of
-        // three runs at each size to reduce the effect of scheduler preemption.
-        let small = (0..3).map(|_| free_all(4096)).min().unwrap_or_default();
-        let large = (0..3).map(|_| free_all(16384)).min().unwrap_or_default();
-        std::println!("oldest-first free: 4096={small:?}, 16384={large:?}");
-        assert!(large < 10 * small, "expected near-linear scaling");
+    #[test]
+    fn blocks_unlink_from_any_position_and_survive_resizes() {
+        let mut heap = Heap::new();
+        let mut blocks = [ptr::null_mut(); 6];
+        for (index, block) in blocks.iter_mut().enumerate() {
+            *block = heap
+                .allocate(16 + index)
+                .unwrap_or_else(|_| panic!("test allocation failed"));
+            // SAFETY: The block has at least one byte.
+            unsafe { block.cast::<u8>().write(index as u8) };
+        }
+        assert_consistent(&heap, 6);
+        // Grow and shrink the newest, the oldest and a middle block. The
+        // neighbors must follow a block that moves.
+        for index in [5, 0, 3] {
+            let grown = heap.reallocate(blocks[index], 4096);
+            blocks[index] = grown.unwrap_or_else(|_| panic!("grow failed"));
+            assert_consistent(&heap, 6);
+            let shrunk = heap.reallocate(blocks[index], 1);
+            blocks[index] = shrunk.unwrap_or_else(|_| panic!("shrink failed"));
+            assert_consistent(&heap, 6);
+            // SAFETY: The first byte survives both resizes.
+            assert_eq!(unsafe { blocks[index].cast::<u8>().read() }, index as u8);
+        }
+        // Free the head, the tail, a middle block and then the rest.
+        let mut live = 6;
+        for index in [5, 0, 3, 1, 4, 2] {
+            assert_eq!(heap.free(blocks[index]), Ok(()));
+            live -= 1;
+            assert_consistent(&heap, live);
+        }
+        assert!(heap.head.is_null());
     }
 }

@@ -74,6 +74,9 @@
 #endif
 
 #if !defined(__arm__)
+/**
+ * Alignment guaranteed for every allocation, including zero-length requests.
+ */
 #define XILA_HEAP_ALIGNMENT 16
 #endif
 
@@ -187,6 +190,17 @@ typedef struct XilaFile XilaFile;
 /**
  * Opaque native heap capability. The process owner drops it after all native
  * execution ends. Keep ownership outside any stack that can be abandoned.
+ *
+ * Native applications are trusted, so misuse detection is cheap rather than
+ * hardened. Every block starts with a header whose tag is the heap's key XOR
+ * the block address. Free and resize read the header that would precede the
+ * pointer and reject it as `InvalidArgument` unless it is aligned and its tag
+ * matches: a foreign-heap pointer, an interior pointer or a double free is
+ * caught. Like a C allocator, this reads through the pointer, so it needs
+ * readable memory below it. It cannot detect a freed block whose memory was
+ * reused by a later allocation of this heap, which then identifies the new
+ * block. Metadata lives in the block, so no operation allocates it and a
+ * shrinking resize never fails because of it.
  */
 typedef struct XilaHeap XilaHeap;
 
