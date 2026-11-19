@@ -2,7 +2,7 @@ use core::{ffi::CStr, mem::MaybeUninit};
 
 use crate::{attributes::InternalAttributes, error::convert_result, littlefs};
 use alloc::{borrow::ToOwned, boxed::Box, ffi::CString, string::ToString};
-use file_system::{Attributes, Entry, Error, Kind, Path, PathOwned, Result, Size};
+use file_system::{Attributes, Entry, Error, Kind, Path, PathOwned, Result, Size, Time};
 
 pub struct Directory {
     directory: littlefs::lfs_dir_t,
@@ -123,37 +123,81 @@ impl Directory {
         let name = unsafe { CStr::from_ptr(informations.name.as_ptr()) };
         let name = name.to_str().unwrap().to_string();
 
-        let r#type = if informations.type_ == littlefs::lfs_type_LFS_TYPE_DIR as u8 {
-            Kind::Directory
-        } else {
-            let entry_path = self
-                .path
-                .clone()
-                .join(Path::from_str(&name))
-                .ok_or(Error::InvalidPath)?;
-            let entry_path =
-                CString::new(entry_path.as_str()).map_err(|_| Error::InvalidParameter)?;
-            let mut stored_attributes =
-                unsafe { InternalAttributes::new_uninitialized().assume_init() };
-            let result = unsafe {
-                littlefs::lfs_getattr(
-                    file_system,
-                    entry_path.as_ptr(),
-                    InternalAttributes::IDENTIFIER,
-                    &mut stored_attributes as *mut _ as *mut _,
-                    size_of::<InternalAttributes>() as u32,
-                )
-            };
-            match convert_result(result) {
-                Ok(_) if stored_attributes.kind == Kind::SymbolicLink => Kind::SymbolicLink,
-                Ok(_) | Err(Error::NoAttribute) => Kind::File,
-                Err(error) => return Err(error),
-            }
+        let entry_path = Self::resolve_entry_path(&self.path, &name)?;
+        let mut stored_attributes =
+            unsafe { InternalAttributes::new_uninitialized().assume_init() };
+        let result = unsafe {
+            littlefs::lfs_getattr(
+                file_system,
+                entry_path.as_ptr(),
+                InternalAttributes::IDENTIFIER,
+                &mut stored_attributes as *mut _ as *mut _,
+                size_of::<InternalAttributes>() as u32,
+            )
+        };
+        let (inode, modification, has_attributes) = match convert_result(result) {
+            Ok(_) => (
+                stored_attributes.inode,
+                stored_attributes.modification,
+                true,
+            ),
+            Err(Error::NoAttribute) => (0, Time::new(0), false),
+            Err(error) => return Err(error),
         };
 
-        let entry = Entry::new(0, name, r#type, informations.size as _);
+        let r#type = if informations.type_ == littlefs::lfs_type_LFS_TYPE_DIR as u8 {
+            Kind::Directory
+        } else if has_attributes && stored_attributes.kind == Kind::SymbolicLink {
+            Kind::SymbolicLink
+        } else {
+            Kind::File
+        };
+
+        let entry = Entry::new(inode, name, r#type, informations.size as _, modification);
 
         Ok(Some(entry))
+    }
+
+    fn resolve_entry_path(directory: &Path, name: &str) -> Result<CString> {
+        match name {
+            "." => {
+                let target = if directory.is_empty() {
+                    "/"
+                } else {
+                    directory.as_str()
+                };
+                CString::new(target).map_err(|_| Error::InvalidParameter)
+            }
+            ".." => {
+                let mut components = alloc::vec::Vec::new();
+                for component in directory.as_str().split('/') {
+                    match component {
+                        "" | "." => {}
+                        ".." => {
+                            components.pop();
+                        }
+                        other => components.push(other),
+                    }
+                }
+                components.pop();
+                if components.is_empty() {
+                    CString::new("/").map_err(|_| Error::InvalidParameter)
+                } else {
+                    let mut parent = alloc::string::String::new();
+                    for component in components {
+                        parent.push('/');
+                        parent.push_str(component);
+                    }
+                    CString::new(parent).map_err(|_| Error::InvalidParameter)
+                }
+            }
+            _ => {
+                let entry_path = directory
+                    .join(Path::from_str(name))
+                    .ok_or(Error::InvalidPath)?;
+                CString::new(entry_path.as_str()).map_err(|_| Error::InvalidParameter)
+            }
+        }
     }
 
     pub fn close(&mut self, file_system: &mut littlefs::lfs_t) -> Result<()> {

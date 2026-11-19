@@ -1026,6 +1026,152 @@ mod tests {
             .unwrap();
         assert_eq!(block_cycles, -1);
     }
+
+    fn find_entry(fs: &FileSystem, directory_path: &Path, name: &str) -> Entry {
+        let mut directory = Context::new_empty();
+        fs.lookup_directory(&mut directory, directory_path).unwrap();
+        let mut found = None;
+        while let Some(entry) = DirectoryOperations::read(fs, &mut directory).unwrap() {
+            if entry.name == name {
+                found = Some(entry);
+                break;
+            }
+        }
+        DirectoryOperations::close(fs, &mut directory).unwrap();
+        found.unwrap_or_else(|| panic!("entry {name:?} not found in {directory_path:?}"))
+    }
+
+    #[test]
+    fn directory_listing_reports_file_inode_and_modification_time() {
+        let fs = initialize();
+        let path = Path::new("/note.txt");
+        FileSystemOperations::create_file(&fs, path).unwrap();
+
+        let payload = b"hello littlefs";
+        let mut file = Context::new_empty();
+        fs.lookup_file(&mut file, path, file_system::AccessFlags::Write.into())
+            .unwrap();
+        assert_eq!(
+            BaseOperations::write_sync(&fs, &mut file, payload, 0).unwrap(),
+            payload.len()
+        );
+        BaseOperations::flush_sync(&fs, &mut file).unwrap();
+        BaseOperations::close(&fs, &mut file).unwrap();
+
+        let initial_mtime = file_system::Time::new(1_700_000_100);
+        FileSystemOperations::set_attributes(
+            &fs,
+            path,
+            &Attributes::new()
+                .set_inode(42)
+                .set_modification(initial_mtime),
+        )
+        .unwrap();
+
+        let entry = find_entry(&fs, Path::ROOT, "note.txt");
+        assert_eq!(entry.inode, 42);
+        assert_eq!(entry.kind, Kind::File);
+        assert_eq!(entry.size, payload.len() as Size);
+        assert_eq!(entry.modification, initial_mtime);
+
+        let updated_mtime = file_system::Time::new(1_700_000_500);
+        FileSystemOperations::set_attributes(
+            &fs,
+            path,
+            &Attributes::new().set_modification(updated_mtime),
+        )
+        .unwrap();
+
+        let updated = find_entry(&fs, Path::ROOT, "note.txt");
+        assert_eq!(updated.inode, 42);
+        assert_eq!(updated.kind, Kind::File);
+        assert_eq!(updated.size, payload.len() as Size);
+        assert_eq!(updated.modification, updated_mtime);
+    }
+
+    #[test]
+    fn directory_listing_reports_subdirectory_inode_and_modification_time() {
+        let fs = initialize();
+        let root_mtime = file_system::Time::new(1_700_000_000);
+        FileSystemOperations::set_attributes(
+            &fs,
+            Path::ROOT,
+            &Attributes::new().set_inode(1).set_modification(root_mtime),
+        )
+        .unwrap();
+
+        let subdir = Path::new("/folder");
+        FileSystemOperations::create_directory(&fs, subdir).unwrap();
+
+        let initial_mtime = file_system::Time::new(1_700_000_200);
+        FileSystemOperations::set_attributes(
+            &fs,
+            subdir,
+            &Attributes::new()
+                .set_inode(77)
+                .set_modification(initial_mtime),
+        )
+        .unwrap();
+
+        let entry = find_entry(&fs, Path::ROOT, "folder");
+        assert_eq!(entry.inode, 77);
+        assert_eq!(entry.kind, Kind::Directory);
+        assert_eq!(entry.modification, initial_mtime);
+
+        let updated_mtime = file_system::Time::new(1_700_000_900);
+        FileSystemOperations::set_attributes(
+            &fs,
+            subdir,
+            &Attributes::new().set_modification(updated_mtime),
+        )
+        .unwrap();
+
+        let updated = find_entry(&fs, Path::ROOT, "folder");
+        assert_eq!(updated.inode, 77);
+        assert_eq!(updated.kind, Kind::Directory);
+        assert_eq!(updated.modification, updated_mtime);
+
+        let dot = find_entry(&fs, subdir, ".");
+        assert_eq!(dot.inode, 77);
+        assert_eq!(dot.kind, Kind::Directory);
+        assert_eq!(dot.modification, updated_mtime);
+
+        let dot_dot = find_entry(&fs, subdir, "..");
+        assert_eq!(dot_dot.inode, 1);
+        assert_eq!(dot_dot.kind, Kind::Directory);
+        assert_eq!(dot_dot.modification, root_mtime);
+    }
+
+    #[test]
+    fn directory_listing_falls_back_to_zero_when_attributes_are_missing() {
+        let fs = initialize();
+        fs.operation(|native| {
+            let mut raw_file = littlefs::lfs_file_t::default();
+            unsafe {
+                convert_result(littlefs::lfs_file_open(
+                    native,
+                    &mut raw_file,
+                    c"/external-file".as_ptr(),
+                    littlefs::lfs_open_flags_LFS_O_CREAT as i32
+                        | littlefs::lfs_open_flags_LFS_O_WRONLY as i32,
+                ))?;
+                convert_result(littlefs::lfs_file_close(native, &mut raw_file))?;
+                convert_result(littlefs::lfs_mkdir(native, c"/external-dir".as_ptr()))?;
+            }
+            Ok(())
+        })
+        .unwrap();
+
+        let file_entry = find_entry(&fs, Path::ROOT, "external-file");
+        assert_eq!(file_entry.inode, 0);
+        assert_eq!(file_entry.kind, Kind::File);
+        assert_eq!(file_entry.modification, file_system::Time::new(0));
+
+        let dir_entry = find_entry(&fs, Path::ROOT, "external-dir");
+        assert_eq!(dir_entry.inode, 0);
+        assert_eq!(dir_entry.kind, Kind::Directory);
+        assert_eq!(dir_entry.modification, file_system::Time::new(0));
+    }
 }
 
 #[cfg(test)]
