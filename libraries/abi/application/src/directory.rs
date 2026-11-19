@@ -46,6 +46,21 @@ impl Directory {
             rights,
         })
     }
+    /// A capability a process was granted for a directory the granter holds already,
+    /// bound to the process's own task. The granter validated it, so this does not.
+    pub(crate) fn granted(
+        vfs: &'static VirtualFileSystem,
+        task: task::TaskIdentifier,
+        path: PathOwned,
+        rights: u8,
+    ) -> Self {
+        Self {
+            vfs,
+            task,
+            path,
+            rights,
+        }
+    }
     pub fn into_raw(self) -> *mut Self {
         Box::into_raw(Box::new(self))
     }

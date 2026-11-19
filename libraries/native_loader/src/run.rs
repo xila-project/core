@@ -3,7 +3,7 @@ extern crate alloc;
 use alloc::{alloc::alloc, boxed::Box, string::String, vec::Vec};
 use core::{alloc::Layout, cell::UnsafeCell, ptr::NonNull};
 
-use abi_application::{Directory, File, Heap, XilaStartup, run_main};
+use abi_application::{File, Heap, ProcessLaunch, XilaStartup, run_main};
 
 use crate::{Error, LoadedImage};
 
@@ -14,7 +14,10 @@ pub struct Startup {
     pub standard_input: Option<File>,
     pub standard_output: Option<File>,
     pub standard_error: Option<File>,
-    pub home: Option<Directory>,
+    /// Makes the program a process: it gets a process capability, its explicit
+    /// environment if any and its home directory. Without it the program is
+    /// started like a linked one, with none of these, and cannot exit early.
+    pub process: Option<ProcessLaunch>,
 }
 
 /// The image and process heap of one running program, in a single allocation.
@@ -118,19 +121,40 @@ impl LoadedImage {
     }
 }
 
+/// Everything owned moves into the callee, so a process that exits early abandons
+/// this frame without leaking: see `xila_process_exit`.
 unsafe fn run(entry: NonNull<u8>, mut heap: NonNull<Heap>, startup: Startup) -> i32 {
     let entry: unsafe extern "C" fn(*const XilaStartup) -> i32 =
         unsafe { core::mem::transmute(entry.as_ptr()) };
-    let args: Vec<&str> = startup.arguments.iter().map(String::as_str).collect();
+    let Startup {
+        arguments,
+        standard_input,
+        standard_output,
+        standard_error,
+        process,
+    } = startup;
+    if let Some(process) = process {
+        return unsafe {
+            process.run(
+                entry,
+                heap.as_mut(),
+                arguments,
+                standard_input,
+                standard_output,
+                standard_error,
+            )
+        };
+    }
+    let args: Vec<&str> = arguments.iter().map(String::as_str).collect();
     unsafe {
         run_main(
             entry,
             heap.as_mut(),
             &args,
-            startup.standard_input,
-            startup.standard_output,
-            startup.standard_error,
-            startup.home,
+            standard_input,
+            standard_output,
+            standard_error,
+            None,
         )
     }
 }

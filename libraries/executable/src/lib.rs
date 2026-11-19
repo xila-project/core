@@ -133,7 +133,21 @@ pub async fn execute(
     standard: Standard<'static>,
     spawner: Option<SpawnerIdentifier>,
 ) -> Result<JoinHandle<isize>> {
-    execute_inner(context, path.as_ref(), inputs, standard, spawner).await
+    execute_with(context, path, inputs, standard, spawner, Launch::default()).await
+}
+
+/// Like [`execute`], with launch parameters: an explicit environment for the new task
+/// (any executable) and a home capability (native executables). The new task is a
+/// child of the calling task and starts with a copy of its environment otherwise.
+pub async fn execute_with(
+    context: &'static ExecutableContext,
+    path: impl AsRef<Path>,
+    inputs: Vec<String>,
+    standard: Standard<'static>,
+    spawner: Option<SpawnerIdentifier>,
+    launch: Launch,
+) -> Result<JoinHandle<isize>> {
+    execute_inner(context, path.as_ref(), inputs, standard, spawner, launch).await
 }
 
 async fn execute_inner(
@@ -142,6 +156,7 @@ async fn execute_inner(
     inputs: Vec<String>,
     standard: Standard<'static>,
     spawner: Option<SpawnerIdentifier>,
+    launch: Launch,
 ) -> Result<JoinHandle<isize>> {
     // Admission barrier: once a lifecycle request is accepted, no new
     // executable may start and race the shutdown pipeline.
@@ -208,6 +223,7 @@ async fn execute_inner(
                     spawner,
                     standard,
                     arguments: inputs,
+                    launch,
                 })
                 .await;
         }
@@ -223,6 +239,18 @@ async fn execute_inner(
         .spawn(task, file_name, spawner, async move |task| {
             if let Some(new_user) = new_user {
                 context.task_manager.set_user(task, new_user).await.unwrap();
+            }
+            if let Some(environment) = launch.environment {
+                // The task was registered a moment ago, so replacement cannot fail.
+                let _ = context
+                    .task_manager
+                    .replace_environment_variables(
+                        task,
+                        environment
+                            .iter()
+                            .map(|(name, value)| (name.as_str(), value.as_str())),
+                    )
+                    .await;
             }
 
             match main(context, standard, inputs).await {

@@ -52,6 +52,15 @@ XilaStatus xila_heap_free(XilaHeap * heap, void * pointer);
 XilaStatus xila_time_resolution(uint32_t clock, uint64_t * nanoseconds);
 XilaStatus xila_time_sleep(uint64_t nanoseconds);
 XilaStatus xila_random_fill(void * buffer, size_t size);
+XilaStatus xila_process_id(XilaProcess const * process, uint32_t * id);
+XilaStatus xila_process_parent_id(XilaProcess const * process, uint32_t * id);
+XilaStatus xila_process_exit(XilaProcess const * process, int32_t status);
+XilaStatus xila_process_spawn(XilaProcess const * process, XilaDirectory const * directory, char const * path, size_t path_length, XilaSpawn const * spawn, XilaChild * * child);
+XilaStatus xila_process_wait(XilaProcess const * process, XilaChild * child, uint32_t flags, int32_t * status);
+XilaStatus xila_process_child_close(XilaChild * child);
+XilaStatus xila_env_get(XilaProcess const * process, char const * name, size_t name_length, char * buffer, size_t capacity, size_t * value_length);
+XilaStatus xila_env_set(XilaProcess const * process, char const * name, size_t name_length, char const * value, size_t value_length);
+XilaStatus xila_env_remove(XilaProcess const * process, char const * name, size_t name_length);
 
 #ifdef __cplusplus
 }

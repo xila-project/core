@@ -134,6 +134,25 @@ impl From<file_system::Error> for Status {
         }
     }
 }
+impl From<task::Error> for Status {
+    fn from(error: task::Error) -> Self {
+        use task::Error::*;
+        match error {
+            InvalidTaskIdentifier => Self::NoSuchTask,
+            InvalidEnvironmentVariable => Self::NotFound,
+            // The task table is full: retry after another task exits.
+            TooManyTasks | TooManySpawners | NoSpawnerAvailable => Self::ResourceBusy,
+            InvalidSpawnerIdentifier
+            | ThreadNotRegistered
+            | ThreadAlreadyRegistered
+            | NoThreadForTask
+            | AlreadyInitialized
+            | AlreadySet => Self::InvalidState,
+            NotInitialized => Self::Unavailable,
+            FailedToCreateThread | FailedToSpawnThread => Self::InputOutput,
+        }
+    }
+}
 impl From<virtual_file_system::Error> for Status {
     fn from(error: virtual_file_system::Error) -> Self {
         use virtual_file_system::Error::*;

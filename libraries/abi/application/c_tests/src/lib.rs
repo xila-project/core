@@ -19,12 +19,93 @@ mod tests {
         fn startup_heap_main(startup: *const XilaStartup) -> i32;
         fn startup_empty_main(startup: *const XilaStartup) -> i32;
         fn startup_clock_random_main(startup: *const XilaStartup) -> i32;
+        fn process_parent_main(startup: *const XilaStartup) -> i32;
+        fn process_test_entry(name: *const core::ffi::c_char, length: usize) -> Option<ChildEntry>;
         fn application_c_network(
             api: *const XilaApi,
             network: *const Network,
             denied: *const Network,
             listen_only: *const Network,
         ) -> i32;
+    }
+
+    type ChildEntry = unsafe extern "C" fn(*const XilaStartup) -> i32;
+
+    /// Starts the C children of `process.c` as coroutine tasks of the caller's executor,
+    /// choosing the entry by the file name of the spawned path, as Core's host does
+    /// with the executable it finds there.
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    struct TestHost {
+        tasks: &'static task::Manager,
+        vfs: &'static virtual_file_system::VirtualFileSystem,
+    }
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    impl ProcessHost for TestHost {
+        fn task_manager(&self) -> &'static task::Manager {
+            self.tasks
+        }
+        fn virtual_file_system(&self) -> &'static virtual_file_system::VirtualFileSystem {
+            self.vfs
+        }
+        fn spawn(&'static self, request: SpawnRequest) -> SpawnFuture {
+            Box::pin(async move {
+                let name = request
+                    .path
+                    .as_str()
+                    .rsplit('/')
+                    .next()
+                    .unwrap()
+                    .to_string();
+                // SAFETY: the C table only reads the name.
+                let entry = unsafe { process_test_entry(name.as_ptr().cast(), name.len()) }
+                    .ok_or(Status::NotFound)?;
+                let SpawnRequest {
+                    parent,
+                    arguments,
+                    environment,
+                    standard_input,
+                    standard_output,
+                    standard_error,
+                    home,
+                    ..
+                } = request;
+                let launch = ProcessLaunch {
+                    host: self,
+                    environment,
+                    home,
+                };
+                let heap: &'static mut Heap = Box::leak(Box::new(Heap::new()));
+                let stream = |file: virtual_file_system::File<'static>| {
+                    Some(File::new(file.into_synchronous_file()))
+                };
+                let (input, output, error) = (
+                    stream(standard_input),
+                    stream(standard_output),
+                    stream(standard_error),
+                );
+                // SAFETY: the bounded C children fit the stack and never unwind; the closure
+                // moves every owned value into `run`, as the exit contract requires.
+                let (handle, _) = unsafe {
+                    stackful::spawn_with_result(
+                        self.tasks,
+                        parent,
+                        &name,
+                        stackful::Stack::new(64 * 1024),
+                        move || launch.run(entry, heap, arguments, input, output, error),
+                        |status| status as isize,
+                    )
+                    .await
+                }
+                .map_err(Status::from)?;
+                Ok(handle)
+            })
+        }
     }
 
     /// Entropy source that reads at most three bytes at a time, is pending on every
@@ -671,5 +752,90 @@ mod tests {
             .unwrap();
         assert!(!watcher.join().await, "sleep(u64::MAX) returned");
         assert!(!RETURNED.load(Ordering::Relaxed));
+    }
+
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    #[task::test]
+    async fn stackful_processes_spawn_wait_exit_and_inherit_environment() {
+        use file_system::{AccessFlags, CreateFlags, Flags, Path, PathOwned};
+        use virtual_file_system::SynchronousFile;
+
+        let time = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+        let tasks = task::test_manager();
+        let users = Box::leak(Box::new(users::Manager::new()));
+        let task = tasks.get_current_task_identifier().await;
+        let device = file_system::MemoryDevice::<512>::new_static(1024 * 512);
+        let fs = little_fs::FileSystem::new_format(device, little_fs::Options::new(256)).unwrap();
+        let vfs = Box::leak(Box::new(
+            virtual_file_system::initialize(tasks, users, time, fs).unwrap(),
+        ));
+        virtual_file_system::create_default_hierarchy(vfs, task)
+            .await
+            .unwrap();
+        let host: &'static TestHost = Box::leak(Box::new(TestHost { tasks, vfs }));
+        let open = || {
+            File::new(
+                SynchronousFile::open(
+                    vfs,
+                    task,
+                    Path::from_str("/process-output"),
+                    Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None),
+                )
+                .unwrap(),
+            )
+        };
+        let launch = ProcessLaunch {
+            host,
+            environment: Some(vec![("SHARED".into(), "parent".into())]),
+            home: Some(HomeGrant {
+                path: PathOwned::new("/".into()).unwrap(),
+                rights: 3,
+            }),
+        };
+        let heap: &'static mut Heap = Box::leak(Box::new(Heap::new()));
+        let (input, output, error) = (open(), open(), open());
+        // SAFETY: the bounded C parent fits the stack and never unwinds.
+        let (parent, _) = unsafe {
+            stackful::spawn_with_result(
+                tasks,
+                task,
+                "process parent",
+                stackful::Stack::new(128 * 1024),
+                move || {
+                    launch.run(
+                        process_parent_main,
+                        heap,
+                        Vec::new(),
+                        Some(input),
+                        Some(output),
+                        Some(error),
+                    )
+                },
+                |status| status as isize,
+            )
+            .await
+            .unwrap()
+        };
+        // A nonzero status is the line of the failed check in process.c.
+        assert_eq!(parent.join().await, 0);
+
+        // The exiting child's stream was closed (flushed) by exit, and the child's home
+        // capability created a file under the root.
+        let mut written = [0u8; 3];
+        let mut file = SynchronousFile::open(
+            vfs,
+            task,
+            Path::from_str("/exit-output"),
+            AccessFlags::Read.into(),
+        )
+        .unwrap();
+        assert_eq!(file.read(&mut written).unwrap(), 3);
+        assert_eq!(&written, b"bye");
+        vfs.get_statistics_for_task(task, &Path::from_str("/child-home"))
+            .await
+            .unwrap();
     }
 }

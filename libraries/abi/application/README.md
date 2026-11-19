@@ -62,6 +62,9 @@ OutOfMemory.
 - `xila_time_resolution`, `xila_time_sleep`: clock quantization and cooperative sleep.
 - `xila_random_fill`: bytes from the host-granted entropy source.
 - `xila_heap_allocate`, `xila_heap_reallocate`, `xila_heap_free`: process-owned allocation.
+- `xila_process_id`, `xila_process_parent_id`, `xila_process_exit`: identity and termination.
+- `xila_process_spawn`, `xila_process_wait`, `xila_process_child_close`: children.
+- `xila_env_get`, `xila_env_set`, `xila_env_remove`: the process's environment.
 
 The host constructs capabilities with `Directory::new` and wraps existing streams
 with `File::new`. `into_raw` transfers ownership and unsafe `from_raw` reclaims it
@@ -102,6 +105,115 @@ nonempty fills return Unavailable. A later launch can discover a device mounted
 after the first launch. A source that reports no progress returns InputOutput
 and other errors map through the usual status translation. After a failed fill,
 the buffer contents are unspecified and must not be used.
+
+## Processes and environment
+
+A native process is the Core task that runs a native entry on a stackful
+coroutine. There is no second table: the task registry already owns the identity,
+the parent link, the user and group, the environment and the join signal, so the
+calls read and write it. The host creates the task, either with
+`executable::execute` or through `xila_process_spawn`, and hands the entry
+`XilaStartup.process`, an opaque `XilaProcess` capability. It is borrowed for the
+entry call like the other startup objects and is null for an application that is not
+a process, such as a built-in one run through `run_main`; process calls then return
+InvalidArgument. Every process call takes the capability explicitly, so nothing is
+ambient: a child gets exactly the streams, home directory, arguments and
+environment its parent passes.
+
+`xila_process_id` and `xila_process_parent_id` return the Core task identifiers as
+`uint32_t`. A process whose parent has exited is adopted by the root task and
+reports identifier zero as its parent; Core already does this when a task
+unregisters. A task identifier can be reused after the task ends, so hold a
+`XilaChild`, not an identifier, to refer to a child.
+
+### Exit
+
+`xila_process_exit(process, status)` ends the process at once and does not return.
+It does not unwind. It closes the standard streams and frees the startup strings,
+home capability and arguments that the host handed over, then switches off the
+coroutine for good: the coroutine finishes with `status` exactly as if the entry
+had returned it, the join handle reports it, and the host frees the stack with the
+coroutine control block (`stackful::exit`). The frames between the call and the
+entry are abandoned without running anything, like a `longjmp` that never lands, so
+buffered stdio, `atexit` handlers and objects the application opened or allocated
+itself stay unreleased, exactly as when `_xila_start` returns without closing them.
+The process heap and the loaded image belong to the task's owner, not the coroutine
+stack, and are released when the task ends, so the rule in the heap section holds. A
+Rust native application that exits abandons its live destructors the same way.
+
+Only a process on its own coroutine can exit. Elsewhere (a built-in application, or a
+target without stack switching) the call returns Unsupported and the entry must
+return. Passing another process's capability returns InvalidArgument without effect.
+
+Cancellation is a different path. Core has no kill call: signals are advisory, and
+a task is dropped only by executor teardown. Dropping the task releases the image and
+the heap and leaks the coroutine stack, the startup streams and the objects the
+application opened, as stackful and
+[Core #731](https://github.com/xila-project/core/issues/731) describe.
+`xila_process_exit` is the clean way out.
+
+### Spawn, wait and ownership
+
+`xila_process_spawn(process, directory, path, path_length, &spawn, &child)` starts the
+file `path` below the directory capability, which needs the READ right, as a child
+of the calling process. The directory plays the role of a search path: a process
+cannot name an executable outside the capabilities it holds. The call goes through
+`executable::execute`, so the host's format registrations, the execute permission
+check and the setuid refusal apply as for any other launch, and the child is an
+ordinary Core task: a child of the caller's task, on the caller's executor, running as
+the **same user and group**. Setuid files are refused for native images.
+
+`XilaSpawn` carries `size` (set it to `sizeof(XilaSpawn)`) and reserved `flags` (zero),
+the child's arguments (no implicit program name), an optional explicit environment,
+the three standard streams and an optional home directory. The streams are required,
+because Core's `Standard` has no absent stream; pass a platform null device to give a
+child nothing. The call duplicates each stream, so the child owns its copies and the
+parent keeps its own, and the child gets a copy of the home capability bound to the
+child's own task. The call suspends the caller while the host reads the file, then
+writes the owned `XilaChild` handle. Failures use the usual statuses: NotFound,
+PermissionDenied, ExecFormat for a file that is no image the host can run, OutOfMemory,
+and ResourceBusy when the task table is full. Native children run on the same
+single executor, so a child progresses only while its parent is suspended.
+
+`XilaChild` is the capability to wait for one child, and the only way to do it. Only
+the process that spawned the child may wait: another process holding the pointer gets
+NoChild. `xila_process_wait(process, child, flags, &status)` collects the exit status
+and reaps the child; a second wait on the same handle returns NoChild. Inside a
+coroutine it suspends on the child's join signal like a blocking file read, so
+peers on the executor keep running. `XILA_WAIT_NO_HANG`, or a caller that is not on a
+coroutine and so cannot suspend, makes a running child return WouldBlock. Unknown flag
+bits are InvalidArgument. The status is the child's `int32_t` return or exit value; a
+non-native child's wider status is truncated. The status output is optional and only
+written on success.
+
+A child that has exited and was not waited for is a zombie in the only sense Core
+has: its task is gone (Core unregisters it before it signals), and its status waits in
+the signal owned by its `XilaChild`, a few bytes released by `xila_process_child_close`.
+Closing a handle of a running child detaches it: it keeps running, is adopted by the
+root task if its parent ends first, and its status is dropped. Null closes succeed. A
+parent that returns with unclosed handles leaks them, like any object it opened.
+
+### Environment
+
+The environment is the task's own list of `NAME=VALUE` pairs in Core's task manager,
+so an empty environment allocates nothing and nothing is reserved per process. A
+task copies its parent's environment when it is registered. That is the inheritance
+rule: **copy on spawn**. A variable the parent sets later never reaches an existing
+child, and the child's changes never reach the parent. `XilaSpawn.environment` instead
+gives the child an explicit, complete environment (`NAME=VALUE` strings, a later entry
+overriding an earlier one); a null array keeps the copy, and a non-null array with count
+zero is an empty environment. The host applies it before the child's entry runs. The
+variables go away with the task.
+
+`xila_env_get(process, name, name_length, buffer, capacity, &value_length)` copies the
+value without a terminator. A missing variable returns NotFound and leaves the output
+alone. A buffer that is too small returns BufferTooSmall, stores the required
+length and leaves the buffer unchanged; a null buffer is allowed at capacity zero.
+`xila_env_set` replaces any value, and a null value is valid at length zero.
+`xila_env_remove` of a missing variable succeeds. Names are non-empty UTF-8 without
+`=` or NUL and values are UTF-8 without NUL, otherwise InvalidArgument. Entries are not
+bounded: the memory comes from the system allocator, which follows its usual
+failure policy, and applications are trusted not to flood it.
 
 ## Header and compatibility
 
@@ -184,7 +296,8 @@ writes to the borrowed output stream. Read the ABI version from
 fields, and check `api->version` and `api->size` against the required slots.
 The API pointer is always present. Optional capability pointers may be null.
 Arguments are UTF-8 `XilaString` pairs without NUL terminators. The argument
-array is null at count zero.
+array is null at count zero. `XilaStartup.process` is the process capability, null
+for an application that is not a process.
 
 The host lends the startup data, strings and initial capabilities for the call.
 The app may close its own file and directory objects. It must leave borrowed

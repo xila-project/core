@@ -29,6 +29,9 @@ fn main() {
         ("Statistics", "XilaStatistics"),
         ("Heap", "XilaHeap"),
         ("DirectoryIterator", "XilaDirectoryIterator"),
+        ("Process", "XilaProcess"),
+        ("Child", "XilaChild"),
+        ("Spawn", "XilaSpawn"),
     ] {
         config.export.rename.insert(rust.into(), c.into());
     }

@@ -172,6 +172,56 @@ pub struct XilaApi {
     /// Fill a buffer from the host-granted entropy source. Zero size succeeds. The
     /// buffer contents are unspecified after a failure.
     pub random_fill: unsafe extern "C" fn(buffer: *mut c_void, size: usize) -> Status,
+    /// Read the process's identifier.
+    pub process_id: unsafe extern "C" fn(process: *const Process, id: *mut u32) -> Status,
+    /// Read the identifier of the process that spawned this one, or zero (the root
+    /// task) once that process has exited.
+    pub process_parent_id: unsafe extern "C" fn(process: *const Process, id: *mut u32) -> Status,
+    /// End the process with an exit status. Does not return on success; outside a
+    /// native process coroutine it returns Unsupported.
+    pub process_exit: unsafe extern "C" fn(process: *const Process, status: i32) -> Status,
+    /// Start an executable below a directory capability as a child process.
+    pub process_spawn: unsafe extern "C" fn(
+        process: *const Process,
+        directory: *const Directory,
+        path: *const c_char,
+        path_length: usize,
+        spawn: *const Spawn,
+        child: *mut *mut Child,
+    ) -> Status,
+    /// Collect a child's exit status. Only the spawning process may wait; flags:
+    /// XILA_WAIT_NO_HANG.
+    pub process_wait: unsafe extern "C" fn(
+        process: *const Process,
+        child: *mut Child,
+        flags: u32,
+        status: *mut i32,
+    ) -> Status,
+    /// Release a child handle. Null succeeds.
+    pub process_child_close: unsafe extern "C" fn(child: *mut Child) -> Status,
+    /// Read an environment variable; BufferTooSmall stores the required length.
+    pub env_get: unsafe extern "C" fn(
+        process: *const Process,
+        name: *const c_char,
+        name_length: usize,
+        buffer: *mut c_char,
+        capacity: usize,
+        value_length: *mut usize,
+    ) -> Status,
+    /// Set an environment variable of this process.
+    pub env_set: unsafe extern "C" fn(
+        process: *const Process,
+        name: *const c_char,
+        name_length: usize,
+        value: *const c_char,
+        value_length: usize,
+    ) -> Status,
+    /// Remove an environment variable of this process. A missing one succeeds.
+    pub env_remove: unsafe extern "C" fn(
+        process: *const Process,
+        name: *const c_char,
+        name_length: usize,
+    ) -> Status,
 }
 
 include!(concat!(env!("OUT_DIR"), "/api_layout.rs"));
@@ -225,4 +275,13 @@ pub static XILA_API: XilaApi = XilaApi {
     time_resolution: xila_time_resolution,
     time_sleep: xila_time_sleep,
     random_fill: xila_random_fill,
+    process_id: xila_process_id,
+    process_parent_id: xila_process_parent_id,
+    process_exit: xila_process_exit,
+    process_spawn: xila_process_spawn,
+    process_wait: xila_process_wait,
+    process_child_close: xila_process_child_close,
+    env_get: xila_env_get,
+    env_set: xila_env_set,
+    env_remove: xila_env_remove,
 };
