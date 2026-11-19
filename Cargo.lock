@@ -1965,7 +1965,13 @@ dependencies = [
 name = "xila-bootsplash"
 version = "0.1.0"
 dependencies = [
+ "xila-abi-definitions",
+ "xila-file-system",
  "xila-graphics",
+ "xila-shared",
+ "xila-task",
+ "xila-testing",
+ "xila-time",
 ]
 
 [[package]]
