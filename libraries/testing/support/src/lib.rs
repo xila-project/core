@@ -1,7 +1,10 @@
 //! Host test helpers for Core crates that the full test environment depends on.
 //!
-//! Keep the environment's runtime dependencies out of this crate so their
-//! unit-test binaries do not link a second copy of the crate under test.
+//! This crate must not depend on `abi_definitions` or on any other crate that
+//! exports `#[no_mangle]` symbols. Crates in the `environment` dependency tree
+//! use it instead of `xila-testing` in their own tests: otherwise their unit-test
+//! binary links a second copy of those symbols and fails. The workspace link
+//! check in `ci:host-tests` (with `xila-testing/graphics`) enforces this.
 
 #![allow(clippy::disallowed_types, reason = "host-only std test support crate")]
 

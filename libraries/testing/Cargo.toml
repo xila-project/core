@@ -16,7 +16,7 @@ file_system = { workspace = true, optional = true }
 little_fs = { workspace = true, optional = true }
 log = { workspace = true, optional = true }
 network = { workspace = true, optional = true }
-task = { workspace = true, optional = true }
+task = { workspace = true, optional = true, features = ["test_harness"] }
 time = { workspace = true, optional = true }
 users = { workspace = true, optional = true }
 virtual_file_system = { workspace = true, optional = true }
@@ -26,8 +26,9 @@ shared = { workspace = true, optional = true }
 
 [features]
 default = []
-# Complete in-memory environment. Its runtime dependencies use
-# xila-testing-support in their own tests to avoid a dependency cycle.
+# Complete in-memory environment. Crates in its dependency tree must use
+# xila-testing-support, not xila-testing, in their own tests: linking
+# abi_definitions' #[no_mangle] symbols twice fails. ci:host-tests checks this.
 environment = [
   "dep:abi_definitions",
   "dep:authentication",

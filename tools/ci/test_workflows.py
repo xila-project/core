@@ -88,6 +88,11 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertNotIn("--package xila-drivers-headless", lint)
         self.assertNotIn("drivers_native/audio", lint)
         self.assertIn("cargo test --locked --workspace", tasks["ci:host-tests"]["run"])
+        # Guards #711: environment crates must not link abi_definitions twice.
+        self.assertIn(
+            "--features xila/graphics_rendering_xrgb8888,xila-testing/graphics --no-run",
+            tasks["ci:host-tests"]["run"],
+        )
         self.assertNotIn("apt:libasound2-dev", ci_config()["bootstrap"]["packages"])
 
     def test_native_abi_runs_without_network_and_checks_32_bit_layouts(self):
