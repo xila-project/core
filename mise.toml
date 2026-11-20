@@ -15,6 +15,10 @@ llvm_cov_version = "0.9.1"
 abi_coverage_minimum = "90"
 binstall_version = "1.15.7"
 nextest_version = "0.9.148"
+picolibc_version = "1.8.12"
+picolibc_sha256 = "64e8c412e1c40fa6eb1a72d2b5cdbcbfe6ceca4cbea454edbad54557ffc747fa"
+meson_version = "1.9.1"
+ninja_version = "1.13.0"
 # Must match the `wasm-bindgen` crate version in Cargo.lock.
 wasm_bindgen_version = "0.2.129"
 
@@ -123,8 +127,24 @@ run = "cargo test --locked -p xila-firmware-update"
 description = "Test firmware VFS permissions"
 run = "cargo test --locked -p xila-firmware-update --features native"
 
+[tasks."sdk:build"]
+description = "Build the native SDK archive (XILA_SDK_TARGET, default x86_64-unknown-linux-gnu) under target/sdk"
+tools.uv = "{{ vars.uv_version }}"
+run = "uv run --no-project --with meson=={{ vars.meson_version }} --with ninja=={{ vars.ninja_version }} python tools/sdk/build.py build --target \"${XILA_SDK_TARGET:-x86_64-unknown-linux-gnu}\""
+
+[tasks."sdk:verify"]
+description = "After sdk:build, build the SDK hello example with its CMake toolchain, check the ELF contract and report sizes"
+tools.uv = "{{ vars.uv_version }}"
+run = "uv run --no-project --with meson=={{ vars.meson_version }} --with ninja=={{ vars.ninja_version }} python tools/sdk/build.py verify --target \"${XILA_SDK_TARGET:-x86_64-unknown-linux-gnu}\""
+
+[tasks."sdk:test"]
+description = "Test the SDK's ELF checker"
+tools.uv = "{{ vars.uv_version }}"
+run = "uv run --no-project python -m unittest discover -s tools/sdk -v"
+
 [tasks."test:native-loader"]
-description = "Test ELF validation, executable dispatch and native C startup on Linux x86-64"
+description = "Test ELF validation, executable dispatch, native C startup and the SDK's C library on Linux x86-64"
+depends = ["sdk:build"]
 run = """
 set -eu
 cargo test --locked -p xila-executable --features native-dev

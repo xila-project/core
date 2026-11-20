@@ -408,7 +408,7 @@ class WorkflowPolicy(unittest.TestCase):
     def test_primary_ci_jobs_are_parallel_and_required_aggregates_results(self):
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
         self.assertIn("workflow_call:", ci)
-        primary = ["quality", "verification", "host", "xtensa", "wasm", "abi", "localization"]
+        primary = ["quality", "verification", "host", "xtensa", "wasm", "abi", "localization", "sdk"]
         for name in primary:
             with self.subTest(job=name):
                 self.assertNotRegex(job("ci.yml", name), r"(?m)^    needs:")
@@ -421,6 +421,33 @@ class WorkflowPolicy(unittest.TestCase):
         for name in primary:
             with self.subTest(required_job=name):
                 self.assertIn(f"needs.{name}.result", required)
+
+    def test_sdk_job_builds_every_target_through_pinned_tasks_and_uploads_archives(self):
+        sdk = job("ci.yml", "sdk")
+        for target in ["x86_64-unknown-linux-gnu", "thumbv7em-none-eabihf"]:
+            self.assertIn(f"target: {target}", sdk)
+        self.assertNotIn("apt-get", sdk)
+        steps = re.findall(r"run: (?:mise run )?(\S+)", sdk)
+        self.assertEqual(steps, ['"$SDK_PACKAGES"', "ci:sdk-test", "ci:sdk-build", "ci:sdk-verify"])
+        self.assertIn("actions/upload-artifact@v7", sdk)
+        self.assertIn("target/sdk/xila-sdk-*.tar.zst", sdk)
+        self.assertIn("if-no-files-found: error", sdk)
+        self.assertIn("persist-credentials: false", sdk)
+        shared = tomllib.loads((ROOT / "mise.toml").read_text())
+        for name in ["sdk:build", "sdk:verify", "sdk:test"]:
+            run = shared["tasks"][name]["run"]
+            self.assertEqual(shared["tasks"][name]["tools"]["uv"], "{{ vars.uv_version }}", name)
+            if name != "sdk:test":
+                self.assertIn("meson=={{ vars.meson_version }}", run)
+                self.assertIn("ninja=={{ vars.ninja_version }}", run)
+        self.assertRegex(shared["vars"]["picolibc_sha256"], r"^[0-9a-f]{64}$")
+        packages = ci_config()["bootstrap"]["packages"]
+        for package in ["apt:lld", "apt:llvm", "apt:cmake", "apt:zstd"]:
+            self.assertEqual(packages[package]["env"], "sdk")
+        self.assertEqual(packages["apt:gcc-arm-none-eabi"]["env"], "sdk-arm")
+        # The host job builds the example for the Linux loader test.
+        self.assertIn("ci:packages-sdk", ci_config()["tasks"]["ci:host-tests"]["depends"])
+        self.assertIn("sdk:build", configured_tasks("ci")["test:native-loader"]["depends"])
 
     def test_verification_failure_blocks_required_check(self):
         required = job("ci.yml", "required")
