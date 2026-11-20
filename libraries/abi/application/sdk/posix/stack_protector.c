@@ -34,16 +34,16 @@ NO_PROTECTOR void xila_stack_guard_seed(void) {
    Like abort(), nothing is flushed (stream buffers may be corrupt) and no handler runs.
    The process ends through the process capability, whose pointer is kept in static
    storage. The capability itself, the startup block and the host's process resources
-   still live on the coroutine stack (#766), so a large enough overflow can still crash
-   the host before this handler finishes. */
+   are host-owned and live off the main thread's coroutine stack, so an overflow there
+   that stays inside the stack cannot reach them. A worker thread's own state still lives
+   on the worker's stack (#778). */
 NO_PROTECTOR __attribute__((noreturn)) void __stack_chk_fail(void) {
     static const char message[] = "*** stack smashing detected ***\n";
     /* Straight to the host's standard error, through the descriptor table on the heap. */
     (void)write(2, message, sizeof message - 1);
     /* The pointer is copied to static storage at startup so it is not read from the
-       startup block on the coroutine stack. What it points to is still on that stack
-       (#766), as are the startup block read by xila_posix_shutdown() and the stderr
-       stream behind write(2). */
+       startup block. What it points to, that block and the stderr stream behind
+       write(2) belong to the host and are not on the main thread's coroutine stack. */
     const XilaProcess *process = xila_process.process;
     if (process != NULL) {
         xila_posix_shutdown();
