@@ -14,6 +14,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -68,7 +69,7 @@ COMMON_FLAGS = [
     "-D_GNU_SOURCE", "-Wall", "-Wextra", "-Werror",
 ]
 
-POSIX_SOURCES = ["errno", "fd", "file", "heap", "path", "startup", "status", "stderr", "stdin", "stdout", "time",
+POSIX_SOURCES = ["errno", "exit_flush", "fd", "file", "heap", "onexit", "path", "startup", "status", "stderr", "stdin", "stdout", "time",
                  "unsupported"]
 
 
@@ -199,24 +200,78 @@ def build_picolibc(source, target, work):
     return install
 
 
-def strip_constructor(install, work):
-    """picolibc registers its exit-time stdio flush from a constructor, which the loader
-    rejects. Drop that one .init_array section: the flush function stays, and the POSIX
-    layer calls it from exit (see startup.c)."""
-    objcopy = find_tool("llvm-objcopy")
+# picolibc archive members the SDK removes from libc.a, by member name substring: (substring,
+# reason). Each holds a constructor section the loader rejects, so an image that used any
+# symbol of the member could not be loaded; a program that needs one then fails at link time,
+# by name, instead.
+#   bufio_exit_flush: registers the exit-time stdio flush with atexit() from a constructor,
+#     and its flush unlinks every stream from the list as it goes, so a program that called
+#     fflush(NULL) lost its later writes at exit. The POSIX layer defines _bufio_exit_flush
+#     and __stdio_file_list itself (posix/exit_flush.c), with a flush that only walks the list.
+#   exitprocs: picolibc's atexit table, run from a .fini_array_onexit entry that only a C
+#     runtime which walks the fini array would call. The POSIX layer provides _on_exit and
+#     runs the handlers from exit() itself (posix/onexit.c).
+#   libc_ssp_stack_protector: seeds __stack_chk_guard from a constructor. Applications are
+#     built with -fno-stack-protector.
+#   interrupt.c: the x86_64 interrupt descriptor table setup (__idt), a constructor that is
+#     only reachable from bare-metal x86 start-up code the SDK does not use.
+DROPPED_MEMBERS = ("bufio_exit_flush", "exitprocs", "libc_ssp_stack_protector", "interrupt.c")
+
+
+def drop_members(install):
+    """Remove DROPPED_MEMBERS from the installed libc.a (llvm-ar d), when present: a member
+    can be absent on a target (interrupt.c is x86 only) or already removed by an earlier run
+    on the same installed copy. The constructor scan fails the build if anything else with a
+    constructor remains, and the link fails if a second __stdio_file_list appears."""
     ar = find_tool("llvm-ar")
-    scratch = work / "libc-patch"
-    scratch.mkdir(exist_ok=True)
     archive = install / "lib/libc.a"
     members = subprocess.run([ar, "t", archive], capture_output=True, text=True, check=True)
-    member = next((m for m in members.stdout.split() if m.startswith("libc.a.p_libc_stdio_bufio_exit_flush")
-                   or "bufio_exit_flush" in m), None)
-    if member is None:
-        sys.exit("error: picolibc has no bufio_exit_flush member; update strip_constructor")
-    run([ar, "x", archive, member], cwd=scratch)
-    run([objcopy, "--remove-section=.init_array", "--remove-section=.rel.init_array",
-         "--remove-section=.rela.init_array", scratch / member])
-    run([ar, "r", archive, scratch / member], cwd=scratch)
+    found = [m for m in members.stdout.split() if any(name in m for name in DROPPED_MEMBERS)]
+    if found:
+        run([ar, "d", archive, *dict.fromkeys(found)])
+    if not any("bufio_exit_flush" in m for m in found):
+        nm = subprocess.run([find_tool("llvm-nm"), "--defined-only", archive],
+                            capture_output=True, text=True, check=True).stdout
+        if "_bufio_exit_register" in nm:
+            sys.exit("error: picolibc's exit-flush constructor is still in libc.a; "
+                     "update DROPPED_MEMBERS")
+
+
+# Sections the loader never runs. A constructor, destructor or init/fini hook in any
+# member of any SDK archive would be linked into an image as soon as a symbol of that
+# member is used, and the loader would reject the image (or, worse, silently skip it).
+CONSTRUCTOR_SECTIONS = re.compile(
+    r"^(\.rela?)?(\.(init|fini|preinit)_array\w*|\.ctors|\.dtors|\.init|\.fini)(\..*)?$")
+
+# (archive, member, section) triples that are allowed to exist because the member can never
+# be linked. Prefer deleting the member; anything listed here needs a reason.
+CONSTRUCTOR_ALLOWLIST = {}
+
+
+def scan_constructors(libraries):
+    """Fail if any member of any archive (or crt0.o) holds a constructor section."""
+    readelf = find_tool("llvm-readelf")
+    offenders = []
+    for path in sorted(libraries):
+        output = subprocess.run([readelf, "--section-headers", "--wide", path],
+                                capture_output=True, text=True, check=True).stdout
+        member = path.name
+        for line in output.splitlines():
+            header = re.match(r"File: .*\((.+)\)$", line)
+            if header:
+                member = header.group(1)
+                continue
+            section = re.match(r"\s*\[\s*\d+\]\s+(\S+)\s+\S+", line)
+            if section and CONSTRUCTOR_SECTIONS.match(section.group(1)):
+                key = (path.name, member, section.group(1))
+                if key not in CONSTRUCTOR_ALLOWLIST:
+                    offenders.append(key)
+    if offenders:
+        for archive, member, section in offenders:
+            print(f"error: {archive}({member}) has {section}: the loader runs no constructors",
+                  file=sys.stderr)
+        sys.exit(1)
+    print(f"constructor scan: {len(libraries)} files, no constructor, destructor or init section")
 
 
 def compile_sdk(target, install, work):
@@ -359,9 +414,10 @@ def build(args):
     work = OUTPUT / target
     work.mkdir(parents=True, exist_ok=True)
     install = build_picolibc(source, target, work)
-    strip_constructor(install, work)
+    drop_members(install)
     crt0, libraries = compile_sdk(target, install, work)
     name, root = assemble(target, pin, install, crt0, libraries, work)
+    scan_constructors([root / "lib/crt0.o", *sorted((root / "lib").glob("*.a"))])
     archive = pack(name, root)
     print(f"sdk directory: {root}")
     print(f"sdk archive:   {archive}")
@@ -371,8 +427,6 @@ def build(args):
 def map_sizes(text):
     """Bytes per origin and output section from an lld map: {origin: {section: size}}.
     Origins are the application object, crt0, and each SDK archive."""
-    import re
-
     sizes = {}
     output_section = None
     for line in text.splitlines():

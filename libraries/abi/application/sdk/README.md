@@ -53,8 +53,10 @@ rejects an image with `DT_INIT`, a non-empty `DT_INIT_ARRAY` or `PT_TLS`.
 Copy `hello.elf` to a filesystem the platform's native format reads (Core's
 `NativeFormat`, the `native-dev` feature) and execute it. `main(int argc, char **argv)`
 receives the arguments; `argv[0]` is empty until the host passes the program name.
-Returning from `main`, `exit` and `_exit` end the program; the layer flushes every
-stream and closes every descriptor first.
+Returning from `main` and `exit` end the program after the `atexit` handlers have run and
+every stream is flushed; `_exit` ends it at once, without handlers and without flushing,
+as POSIX requires (the descriptors the program left open are still closed). A stream
+written and not flushed before `_exit` loses its data.
 
 ### The example
 
@@ -72,7 +74,8 @@ the ABI table (`libraries/executable/tests/sdk.rs`).
   current-directory string, normalizes paths lexically (`.` and `..` never reach Core;
   `..` does not look through symbolic links), and resolves absolute paths against the
   *root capability*, which today is `XilaStartup.home`. The host grants it with
-  `NativeFormat::with_home(path, rights)`. Without it, path calls fail with `EACCES`.
+  `NativeFormat::with_home(path, rights)` until the per-launch home of the process ABI
+  (core#759) replaces it. Without a home, path calls fail with `EACCES`.
   When the ABI adds `root` and `cwd` handles (core#717) the layer prefers them.
 * **Descriptors.** Slots 0-2 are the startup streams; `close(0)` detaches without
   closing host-owned objects. The table is on the process heap: eight slots (8 bytes
@@ -84,9 +87,9 @@ the ABI table (`libraries/executable/tests/sdk.rs`).
   `XILA_HEAP_ALIGNMENT` fail.
 * **stdio.** `stdin`, `stdout` and `stderr` are descriptors 0-2 through picolibc's
   buffered POSIX streams, each in its own object, so a program that never reads
-  `stdin` carries neither its `FILE` nor its buffer. `stdout` and `stderr` are line
-  buffered (128 and 64 bytes by default; override with `-DXILA_STDOUT_BUFFER=n` when
-  building the SDK). `printf` and `scanf` are integer-only by default;
+  `stdin` carries neither its `FILE` nor its buffer. `stdout` is line buffered (128
+  bytes by default; override with `-DXILA_STDOUT_BUFFER=n` when building the SDK);
+  `stderr` is unbuffered, so each write reaches the host when it is made. `printf` and `scanf` are integer-only by default;
   configure with `-DXILA_PRINTF_FORMAT=double` (or `float`, `long-long`, `minimal`)
   to link picolibc's other variants. Floating point costs several KB of flash.
 * **errno and libc state.** picolibc is built with `-Dthread-local-storage=false
@@ -94,9 +97,27 @@ the ABI table (`libraries/executable/tests/sdk.rs`).
   today, so `errno` is process-wide; `__xila_errno_location` is the only function to
   change when the ABI exposes coroutine-local storage (core#718). `strtok`, `rand`
   and the other libc statics stay process-wide until then.
-* **Exit.** `exit` runs `atexit` handlers, then `_exit` jumps back to `xila_main`,
-  which flushes every `FILE` picolibc tracked (`stdio-exit-flush`), closes the
-  descriptors and returns the status.
+* **Exit.** `exit` runs the `atexit`, `on_exit` and `__cxa_atexit` handlers in reverse
+  order, then `fflush(NULL)`, which flushes every `FILE` picolibc tracked
+  (`stdio-exit-flush`) and `stdout` and `stderr`, then calls `_exit`. `_exit` jumps back
+  to `xila_main`, which closes the descriptors and returns the status. picolibc's own
+  exit-time machinery is replaced because it cannot run here: its handler table runs from
+  a `.fini_array` entry and its stdio flush registers itself from a constructor, and
+  that flush also forgot each stream it flushed, so a program that called `fflush(NULL)`
+  lost its later writes at exit. The build removes those archive members from `libc.a`
+  (`DROPPED_MEMBERS` in `tools/sdk/build.py`) and the layer defines the replacements
+  (`posix/onexit.c`, `posix/exit_flush.c`). The build also scans every member of every
+  SDK archive and fails on any `.init_array`, `.fini_array`, `.preinit_array`, `.ctors`
+  or `.dtors` section, so no future picolibc update can hand an application a
+  constructor.
+* **Directories.** Reading a directory stream gives `d_ino` a stable nonzero value
+  derived from the directory's path and the entry's name (the iterator reports no
+  inode; it is not `st_ino`). `open` of `/` or `.` read-only gives a directory
+  descriptor (`fstat`, `openat` base); with write access, or `O_DIRECTORY` with write
+  access, it fails with `EISDIR`.
+* **Path escapes.** `openat` with a directory descriptor cannot leave that directory;
+  the error is the errno of Core's `PATH_ESCAPES_ROOT` status (`EACCES`, as the
+  `io_error` catalog projects it).
 
 ## POSIX subset
 

@@ -3,20 +3,24 @@
  * crt0's _xila_start installs the API table and calls xila_main, which lives here so
  * that an image links the POSIX layer only when it uses it. exit() and _exit() leave
  * from any depth by jumping back to this frame: a Xila application ends by returning
- * from its entry point, never by killing the coroutine. */
+ * from its entry point, never by killing the coroutine.
+ *
+ * exit() runs the registered handlers and flushes every open stream before it calls
+ * _exit(); _exit() flushes nothing, as POSIX requires, and only the descriptors the
+ * program left open are closed on the way out. */
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "internal.h"
 
 extern int main(int argc, char **argv);
 
-/* Weak, so that an image which never touches a standard stream does not link its FILE
-   and buffer just to flush it. */
-extern FILE *const stdout __attribute__((weak));
-extern FILE *const stderr __attribute__((weak));
+/* The atexit() table (onexit.c); weak so that an image which never registers a handler
+   does not link the table. */
+extern void xila_run_exit_handlers(int status) __attribute__((weak));
 
 static jmp_buf *exit_target;
 static int exit_status;
@@ -55,14 +59,9 @@ int xila_posix_initialize(const XilaStartup *startup, int *argc, char ***argv) {
     return *argv != NULL ? 0 : -1;
 }
 
+/* What is left after the program stopped, whichever way it did: the descriptors it left
+   open and the process state. Stream buffers are not touched here (see exit()). */
 void xila_posix_shutdown(void) {
-    /* picolibc tracks every FILE the application opened (stdio-exit-flush), so a stream
-       that was never closed still reaches its file, as POSIX exit() requires. */
-    (void)fflush(NULL);
-    if (&stdout != NULL)
-        (void)fflush(stdout);
-    if (&stderr != NULL)
-        (void)fflush(stderr);
     xila_fd_close_all();
     xila_heap_release(xila_process.cwd);
     xila_process.cwd = NULL;
@@ -86,10 +85,21 @@ int32_t xila_main(const XilaStartup *startup) {
     return status;
 }
 
+/* picolibc tracks every FILE the application opened (stdio-exit-flush; see
+   exit_flush.c), so fflush(NULL) reaches the streams that were never closed, as POSIX
+   exit() requires, and stdout and stderr. It does not forget them: a program that
+   called fflush(NULL) itself still gets its later writes flushed here. */
+void exit(int status) {
+    if (xila_run_exit_handlers != NULL)
+        xila_run_exit_handlers(status);
+    (void)fflush(NULL);
+    _exit(status);
+}
+
 void _exit(int status) {
     exit_status = status;
     if (exit_target != NULL)
         longjmp(*exit_target, 1);
-    for (;;) {
-    } /* _exit outside an application cannot return: there is nowhere to go. */
+    /* Outside an application there is nowhere to go back to: stop instead of spinning. */
+    __builtin_trap();
 }

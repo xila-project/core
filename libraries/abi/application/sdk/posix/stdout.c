@@ -2,7 +2,7 @@
  * image which never touches it carries neither the FILE nor its buffer. The buffer
  * size is a build-time constant (XILA_STDOUT_BUFFER). Line buffered. Defined
  * here rather than by picolibc's POSIX console, whose destructor the loader rejects;
- * xila_posix_shutdown flushes it. */
+ * exit() flushes it. */
 #include <stdio.h>
 #include <stdio-bufio.h>
 #include <stdio-posix.h>

@@ -1,6 +1,6 @@
-//! Builds the SDK's hello example with the SDK's CMake toolchain, then runs the resulting
-//! static PIE through the host path: the VFS, the executable dispatch table, the native
-//! loader, the ABI table and the C library with its POSIX layer on top.
+//! Builds the SDK's hello example and a probe program with the SDK's CMake toolchain, then
+//! runs the resulting static PIEs through the host path: the VFS, the executable dispatch
+//! table, the native loader, the ABI table and the C library with its POSIX layer on top.
 //!
 //! The SDK comes from `mise run sdk:build`, which `test:native-loader` runs first. It lives
 //! in `target/sdk/<target>/xila-sdk-<abi>-<target>` under the workspace; set
@@ -12,7 +12,7 @@ mod common;
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Command,
 };
 
@@ -20,7 +20,8 @@ use common::{FixtureEntropy, MAPPINGS, Mmap};
 use core::sync::atomic::Ordering;
 use executable::{ExecutableContext, NativeFormat, Standard, execute};
 use file_system::{AccessFlags, CreateFlags, Flags, Permissions, Position};
-use virtual_file_system::File;
+use task::TaskIdentifier;
+use virtual_file_system::{File, VirtualFileSystem};
 
 testing_support::instantiate_global_allocator!();
 
@@ -62,20 +63,30 @@ fn sdk_directory() -> PathBuf {
         .unwrap_or_else(|| panic!("no SDK in {}: run `mise run sdk:build`", parent.display()))
 }
 
-/// Configure and build `share/xila/example/hello` with the SDK's toolchain file.
-fn build_sdk_example(format: &str) -> Vec<u8> {
+/// Configure and build a CMake project that produces `<name>.elf` with the SDK's toolchain
+/// file.
+fn build_sdk_program(source: &Path, name: &str, format: &str) -> Vec<u8> {
     let sdk = sdk_directory();
-    // CMake caches its flags: key the build directory by the toolchain file so a rebuilt
-    // SDK never reuses a stale configuration.
-    let toolchain = std::fs::read(sdk.join("cmake/xila-toolchain.cmake")).unwrap();
+    // CMake caches its flags and does not track the SDK's libraries as dependencies: key
+    // the build directory by the toolchain file and every library, so a rebuilt SDK never
+    // reuses a stale configuration or a stale link.
     let mut hasher = DefaultHasher::new();
-    toolchain.hash(&mut hasher);
+    for file in [
+        "cmake/xila-toolchain.cmake",
+        "lib/crt0.o",
+        "lib/libxila.a",
+        "lib/libxila_posix.a",
+        "lib/libc.a",
+    ] {
+        std::fs::read(sdk.join(file)).unwrap().hash(&mut hasher);
+    }
     format.hash(&mut hasher);
+    name.hash(&mut hasher);
     let build = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-        .join(format!("sdk-hello-{:016x}", hasher.finish()));
+        .join(format!("sdk-{name}-{:016x}", hasher.finish()));
     run(Command::new("cmake")
         .arg("-S")
-        .arg(sdk.join("share/xila/example/hello"))
+        .arg(source)
         .arg("-B")
         .arg(&build)
         .arg(format!(
@@ -85,7 +96,96 @@ fn build_sdk_example(format: &str) -> Vec<u8> {
         .arg(format!("-DXILA_PRINTF_FORMAT={format}"))
         .arg("-DCMAKE_BUILD_TYPE=MinSizeRel"));
     run(Command::new("cmake").arg("--build").arg(&build));
-    std::fs::read(build.join("hello.elf")).unwrap()
+    std::fs::read(build.join(format!("{name}.elf"))).unwrap()
+}
+
+fn build_sdk_example(format: &str) -> Vec<u8> {
+    build_sdk_program(
+        &sdk_directory().join("share/xila/example/hello"),
+        "hello",
+        format,
+    )
+}
+
+/// The probe is a test program of this repository, not part of the SDK's examples.
+fn build_probe() -> Vec<u8> {
+    build_sdk_program(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../abi/application/sdk/test/probe"),
+        "probe",
+        "integer",
+    )
+}
+
+async fn read_all(vfs: &'static VirtualFileSystem, parent: TaskIdentifier, path: &str) -> Vec<u8> {
+    let mut file = File::open(vfs, parent, path, AccessFlags::Read.into())
+        .await
+        .unwrap();
+    let mut text = Vec::new();
+    let mut chunk = [0; 256];
+    loop {
+        let count = file.read(&mut chunk).await.unwrap();
+        if count == 0 {
+            break;
+        }
+        text.extend_from_slice(&chunk[..count]);
+    }
+    file.close(vfs).await.unwrap();
+    text
+}
+
+async fn install(
+    vfs: &'static VirtualFileSystem,
+    parent: TaskIdentifier,
+    path: &str,
+    bytes: &[u8],
+) {
+    let create = Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None);
+    let mut program = File::open(vfs, parent, path, create).await.unwrap();
+    assert_eq!(program.write(bytes).await.unwrap(), bytes.len());
+    program.close(vfs).await.unwrap();
+    vfs.set_permissions(parent, path, Permissions::EXECUTABLE)
+        .await
+        .unwrap();
+}
+
+/// Run the program at `path` with `arguments`; stdout and stderr go to their own files.
+/// Returns the exit status, stdout and stderr.
+async fn launch(
+    context: &'static ExecutableContext,
+    parent: TaskIdentifier,
+    path: &str,
+    label: &str,
+    arguments: &[&str],
+) -> (isize, Vec<u8>, Vec<u8>) {
+    let vfs = context.virtual_file_system;
+    let create = Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None);
+    let (stdout, stderr) = (format!("/{label}.out"), format!("/{label}.err"));
+    let input = File::open(vfs, parent, "/input", create).await.unwrap();
+    let output = File::open(vfs, parent, stdout.as_str(), create)
+        .await
+        .unwrap();
+    let error = File::open(vfs, parent, stderr.as_str(), create)
+        .await
+        .unwrap();
+    let handle = execute(
+        context,
+        path,
+        arguments
+            .iter()
+            .map(|argument| (*argument).into())
+            .collect(),
+        Standard::new(context, input, output, error),
+        None,
+    )
+    .await
+    .unwrap();
+    let status = handle.join().await;
+    assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
+    (
+        status,
+        read_all(vfs, parent, &stdout).await,
+        read_all(vfs, parent, &stderr).await,
+    )
 }
 
 #[task::test]
@@ -114,56 +214,21 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
         .unwrap();
 
     let create = Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None);
+    File::open(vfs, parent, "/input", create)
+        .await
+        .unwrap()
+        .close(vfs)
+        .await
+        .unwrap();
 
     // Integer-only printf (the default) and the double variant, each a separate build.
     for format in ["integer", "double"] {
-        let bytes = build_sdk_example(format);
         let program_path = format!("/program-{format}");
-        let output_path = format!("/output-{format}");
-        let mut program = File::open(vfs, parent, program_path.as_str(), create)
-            .await
-            .unwrap();
-        assert_eq!(program.write(&bytes).await.unwrap(), bytes.len());
-        program.close(vfs).await.unwrap();
-        vfs.set_permissions(parent, program_path.as_str(), Permissions::EXECUTABLE)
-            .await
-            .unwrap();
-
-        let input = File::open(vfs, parent, "/input", create).await.unwrap();
-        let mut output = File::open(vfs, parent, output_path.as_str(), create)
-            .await
-            .unwrap();
-
-        let standard = Standard::new(
-            context,
-            input,
-            output.duplicate().await.unwrap(),
-            output.duplicate().await.unwrap(),
-        );
+        install(vfs, parent, &program_path, &build_sdk_example(format)).await;
         // The program exits with the status given as its first argument.
-        let handle = execute(
-            context,
-            program_path.as_str(),
-            vec!["3".into()],
-            standard,
-            None,
-        )
-        .await
-        .unwrap();
-        assert_eq!(handle.join().await, 3);
-        assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
-
-        output.set_position(&Position::Start(0)).await.unwrap();
-        let mut text = Vec::new();
-        let mut chunk = [0; 256];
-        loop {
-            let count = output.read(&mut chunk).await.unwrap();
-            if count == 0 {
-                break;
-            }
-            text.extend_from_slice(&chunk[..count]);
-        }
-        let text = String::from_utf8(text).unwrap();
+        let (status, stdout, stderr) = launch(context, parent, &program_path, format, &["3"]).await;
+        assert_eq!(status, 3, "{}", String::from_utf8_lossy(&stderr));
+        let text = String::from_utf8(stdout).unwrap();
         println!("{text}");
         assert!(text.contains("hello from Xila, 1 argument(s)\n"), "{text}");
         assert!(text.contains("entropy: a5a5a5a5\n"), "{text}");
@@ -172,13 +237,46 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
         // The program removed everything it created, except the stream it never closed:
         // exit flushed that one.
         assert!(vfs.get_statistics(&"/sdk-hello").await.is_err());
-        let mut flushed = File::open(vfs, parent, "/sdk-exit.txt", AccessFlags::Read.into())
-            .await
-            .unwrap();
-        let mut buffer = [0; 32];
-        let count = flushed.read(&mut buffer).await.unwrap();
-        assert_eq!(&buffer[..count], b"flushed at exit\n");
-        flushed.close(vfs).await.unwrap();
-        output.close(vfs).await.unwrap();
+        assert_eq!(
+            read_all(vfs, parent, "/sdk-exit.txt").await,
+            b"flushed at exit\n"
+        );
     }
+
+    install(vfs, parent, "/probe", &build_probe()).await;
+
+    // _exit flushes nothing: the buffered writes are lost, the file the program created
+    // stays empty, the unbuffered stderr write got through.
+    let (status, stdout, stderr) = launch(
+        context,
+        parent,
+        "/probe",
+        "underscore",
+        &["underscore-exit"],
+    )
+    .await;
+    assert_eq!(status, 7);
+    assert_eq!(stderr, b"seen");
+    assert_eq!(stdout, b"", "stdout was flushed by _exit");
+    assert_eq!(read_all(vfs, parent, "/probe-underscore.txt").await, b"");
+
+    // fflush(NULL) does not make exit forget the streams: everything written afterwards,
+    // an atexit handler's too, is kept, and stdout's unterminated tail is flushed.
+    let (status, stdout, stderr) =
+        launch(context, parent, "/probe", "flush", &["flush-then-exit"]).await;
+    assert_eq!(status, 8, "{}", String::from_utf8_lossy(&stderr));
+    assert_eq!(stdout, b"tail");
+    assert_eq!(
+        read_all(vfs, parent, "/probe-flush.txt").await,
+        b"one\ntwo\nhandler\n"
+    );
+    assert_eq!(
+        read_all(vfs, parent, "/probe-flush-other.txt").await,
+        b"g1g2"
+    );
+
+    // The root directory, directory entries and errno values.
+    let (status, stdout, stderr) = launch(context, parent, "/probe", "root", &["root"]).await;
+    assert_eq!(status, 0, "{}", String::from_utf8_lossy(&stderr));
+    assert_eq!(stdout, b"probe: ok\n");
 }
