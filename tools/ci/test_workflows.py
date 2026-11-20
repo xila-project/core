@@ -161,7 +161,7 @@ class WorkflowPolicy(unittest.TestCase):
         tasks = ci_config()["tasks"]
         groups = {
             ("ci.yml", "host"): ["ci:host-clippy", "ci:host-wasm-clippy", "ci:host-tests", "ci:firmware", "ci:bare-metal", "ci:bare-metal-no-cas", "ci:native-loader-targets", "ci:profiling-task-tests", "ci:host-font-tests"],
-            ("ci.yml", "wasm"): ["ci:wasm-clippy", "ci:wasm-audio-check"],
+            ("ci.yml", "wasm"): ["ci:wasm-clippy", "ci:wasm-audio-check", "ci:wasm-task-tests"],
             ("extended.yml", "abi-deep"): ["ci:abi-coverage", "ci:abi-miri", "ci:abi-miri-cross"],
         }
         for (workflow, group), leaves in groups.items():
@@ -304,7 +304,7 @@ class WorkflowPolicy(unittest.TestCase):
             "ci:host", "ci:wasm", "ci:localization", "ci:coverage",
             "clippy:host", "clippy:guest", "docs:host", "docs:guest",
             "ci:host-clippy", "ci:host-wasm-clippy", "ci:host-tests",
-            "ci:host-font-tests", "ci:wasm-clippy", "ci:wasm-audio-check",
+            "ci:host-font-tests", "ci:wasm-clippy", "ci:wasm-audio-check", "ci:wasm-task-tests",
         ]:
             with self.subTest(task=name):
                 rust = tasks[name]["tools"]["rust"]

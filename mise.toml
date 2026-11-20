@@ -15,6 +15,8 @@ llvm_cov_version = "0.9.1"
 abi_coverage_minimum = "90"
 binstall_version = "1.15.7"
 nextest_version = "0.9.148"
+# Must match the `wasm-bindgen` crate version in Cargo.lock.
+wasm_bindgen_version = "0.2.129"
 
 [tasks."deps:npm"]
 description = "Install locked npm dependencies"
@@ -71,6 +73,23 @@ depends = ["docs:host", "docs:guest"]
 [tasks."check:all"]
 description = "Check host and guest targets"
 depends = ["check:host", "check:guest"]
+
+[tasks."test:browser-task"]
+description = "Run the browser task tests (yield and timers) in headless Chrome"
+env.CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER = "wasm-bindgen-test-runner"
+# GitHub-hosted runners ship Chrome and a matching chromedriver in $CHROMEWEBDRIVER. Elsewhere, put a chromedriver that matches your Chrome on PATH or set CHROMEDRIVER.
+run = """
+set -eu
+if [ -z "${CHROMEDRIVER:-}" ] && [ -n "${CHROMEWEBDRIVER:-}" ]; then
+  export CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver"
+fi
+# Each file is its own page: the no-`MessageChannel` scenarios must start clean. The
+# library's unit tests are host tests (plain `#[test]`) and do not run here.
+cargo test --locked -p xila-task --target wasm32-unknown-unknown \
+  --test browser_yield \
+  --test browser_yield_without_message_channel \
+  --test browser_yield_without_timers
+"""
 
 [tasks."test:workspace"]
 description = "Test the Cargo workspace"
