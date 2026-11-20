@@ -31,6 +31,8 @@ io_error.workspace = true
 cbindgen.workspace = true
 syn = { workspace = true, features = ["full"] }
 quote.workspace = true
+prettyplease = "0.2"
+syn2 = { package = "syn", version = "2", features = ["full"] }
 
 [dev-dependencies]
 testing.workspace = true

@@ -142,6 +142,18 @@ description = "Test the SDK's ELF checker"
 tools.uv = "{{ vars.uv_version }}"
 run = "uv run --no-project python -m unittest discover -s tools/sdk -v"
 
+[tasks."sdk:rust-example"]
+description = "Build and verify standalone Rust native ELFs, then run the Linux image through execute"
+tools.uv = "{{ vars.uv_version }}"
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal" }
+run = """
+set -eu
+rustup toolchain install {{ vars.nightly_version }} --profile minimal --component rust-src
+uv run --no-project python tools/sdk/build.py rust-example
+XILA_RUST_HELLO="$PWD/target/sdk/rust-hello/x86_64-unknown-linux-gnu/release/xila-rust-hello" \
+  cargo test --locked -p xila-executable --features native-dev --test sdk -- runs_sdk_rust_hello --ignored --exact
+"""
+
 [tasks."test:native-loader"]
 description = "Test ELF validation, executable dispatch, native C startup and the SDK's C library on Linux x86-64"
 depends = ["sdk:build"]

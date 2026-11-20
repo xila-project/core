@@ -33,6 +33,11 @@ pub use network_types::*;
 mod random;
 mod status;
 mod threads;
+
+#[allow(dead_code)]
+mod guest_bindings {
+    include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+}
 mod time;
 pub use threads::*;
 
@@ -222,6 +227,7 @@ mod tests {
             ("stubs.c", "sdk/stubs.c"),
             // This snapshot pins both the symbol names and the slot order.
             ("slots.tsv", "sdk/slots.tsv"),
+            ("bindings.rs", "sdk/rust/xila-sys/src/bindings.rs"),
         ] {
             let generated = std::fs::read(out.join(generated)).unwrap();
             let committed = root.join(committed);

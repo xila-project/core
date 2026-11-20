@@ -33,6 +33,7 @@ pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig) {
             _ => None,
         })
         .expect("XilaApi struct");
+    crate::generate_rust::generate(root, out, export, table);
     let Fields::Named(fields) = &table.fields else {
         panic!("XilaApi must have named fields");
     };

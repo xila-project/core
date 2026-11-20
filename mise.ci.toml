@@ -142,7 +142,13 @@ run = "mise -E ci,host,benchmark bootstrap packages apply --manager apt --update
 [tasks."ci:format-rust"]
 description = "Check Rust formatting without native build dependencies"
 extends = "ci:rust-format"
-run = "cargo fmt --all -- --check"
+run = """
+set -eu
+cargo fmt --all -- --check
+for crate in xila-sys hello; do
+  cargo fmt --manifest-path "libraries/abi/application/sdk/rust/$crate/Cargo.toml" -- --check
+done
+"""
 
 [tasks."ci:format-toml"]
 description = "Check TOML formatting without native build dependencies"
@@ -312,6 +318,7 @@ cargo test --locked -p xila-abi-application --no-default-features
 # The graphics feature also enables environment.
 cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888,xila-testing/graphics --no-run
 mise run test:native-loader
+mise run sdk:rust-example
 mise run test:graphics-pool
 """
 
@@ -547,7 +554,7 @@ description = "Test the SDK's ELF checker"
 run = "mise run sdk:test"
 
 [tasks."ci:native-loader-targets"]
-description = "Check and build native ELF loading on Cortex-M4, RV32IMAC and RV32IMAFC"
+description = "Check native ABI layouts and build the bare-metal ELF loader"
 depends = ["ci:packages-host"]
 run = """
 set -eu
@@ -555,8 +562,16 @@ for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf riscv32imafc-un
   cargo check --locked -p xila-executable --features native-dev --target "$target"
   cargo build --locked --release -p xila-executable --features native-dev --target "$target"
 done
+cargo check --locked -p xila-abi-application --target aarch64-unknown-linux-gnu
+for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu thumbv7em-none-eabihf riscv32imac-unknown-none-elf; do
+  cargo clippy --locked --manifest-path libraries/abi/application/sdk/rust/xila-sys/Cargo.toml \
+    --all-features --target-dir target/sdk/rust-bindings --target "$target" -- -D warnings
+done
 """
-tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", targets = [
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "clippy",
+], targets = [
+  "aarch64-unknown-linux-gnu",
   "thumbv7em-none-eabihf",
   "riscv32imac-unknown-none-elf",
   "riscv32imafc-unknown-none-elf",
