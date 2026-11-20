@@ -544,9 +544,11 @@ static int environment(const char *program) {
           getenv("AB") == ab);
     CHECK("getenv allocation failure", uncached == NULL && allocation_errno == ENOMEM);
 
+    char **before_last_unset = environ;
     CHECK("remove all table entries",
           unsetenv("SDK_GREETING") == 0 && unsetenv("SDK_OTHER") == 0 &&
-          unsetenv("SDK_EMPTY") == 0 && unsetenv("AB") == 0 && environ[0] == NULL);
+          unsetenv("SDK_EMPTY") == 0 && unsetenv("AB") == 0 &&
+          environ == before_last_unset && before_last_unset[0] == NULL);
     CHECK("add after emptying the table",
           setenv("A", "again", 1) == 0 && environment_value_is("A", "again") &&
           environ[1] == NULL);
@@ -556,6 +558,15 @@ static int environment(const char *program) {
     static char *custom[] = {
         "SDK_CUSTOM=a=b", "malformed", "SDK_CUSTOM=later", "SDK_STATIC=keep", NULL,
     };
+    char **saved = environ;
+    environ = custom;
+    const char *temporary = getenv("SDK_CUSTOM");
+    CHECK("getenv adopts the temporary table", temporary != NULL && strcmp(temporary, "a=b") == 0);
+    environ = saved;
+    const char *restored = getenv("A");
+    CHECK("getenv adopts a saved SDK table",
+          restored != NULL && strcmp(restored, "again") == 0 &&
+          environment_value_is("A", "again") && getenv("SDK_CUSTOM") == NULL);
     environ = custom;
     const char *adopted = getenv("SDK_CUSTOM");
     CHECK("getenv reads the assigned environment", adopted != NULL && strcmp(adopted, "a=b") == 0);
@@ -567,19 +578,24 @@ static int environment(const char *program) {
           setenv("SDK_CUSTOM", "updated", 1) == 0 && unsetenv("SDK_STATIC") == 0 &&
           environment_value_is("SDK_CUSTOM", "updated") && environ[1] == NULL &&
           strcmp(custom[0], "SDK_CUSTOM=a=b") == 0 && strcmp(custom[3], "SDK_STATIC=keep") == 0);
-    static char *invalid[] = {"SDK_PARTIAL=temporary", "SDK_INVALID=\xff", NULL};
+    static char *invalid[] = {
+        "SDK_INVALID=\xff", "SDK_OVERLONG=\xe0\x80\x80", "SDK_SURROGATE=\xed\xa0\x80",
+        "SDK_TOO_HIGH=\xf4\x90\x80\x80", "SDK_TRUNCATED=\xc2", "\xff=value",
+        "SDK_UTF8=\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80", NULL,
+    };
     environ = invalid;
-    char restored[sizeof("updated") - 1];
-    CHECK("an invalid ABI entry leaves the original host environment available",
-          unsetenv("SDK_CUSTOM") == -1 && errno == EINVAL && environ == invalid &&
-          xila_env_get(process, "SDK_CUSTOM", 10, restored, sizeof(restored), &length) == XILA_STATUS_OK &&
-          length == sizeof(restored) && memcmp(restored, "updated", length) == 0 &&
-          xila_env_get(process, "SDK_PARTIAL", 11, raw, sizeof(raw), &length) == XILA_STATUS_NOT_FOUND);
+    const char *utf8 = getenv("SDK_UTF8");
+    CHECK("adoption skips invalid UTF-8 and installs the valid entries",
+          utf8 != NULL && strcmp(utf8, "\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80") == 0 &&
+          environment_value_is("SDK_UTF8", utf8) && environ[1] == NULL &&
+          getenv("SDK_INVALID") == NULL && getenv("SDK_CUSTOM") == NULL);
 
     static char *remove_first[] = {"SDK_REMOVE=present", NULL};
     environ = remove_first;
     CHECK("unsetenv adopts before removing the name",
-          unsetenv("SDK_REMOVE") == 0 && environ[0] == NULL && getenv("SDK_CUSTOM") == NULL);
+          unsetenv("SDK_REMOVE") == 0 && environ[0] == NULL && getenv("SDK_UTF8") == NULL);
+    environ = NULL;
+    CHECK("adopting another table discards the oldest table", getenv("SDK_REMOVE") == NULL);
     size_t empty_blocks = live_blocks;
 
     char **allocated = malloc(2 * sizeof(*allocated));
@@ -599,8 +615,7 @@ static int environment(const char *program) {
           environment_value_is("SDK_ALLOCATED", "original"));
     CHECK("only the caller owns the supplied table and string",
           allocated[0] == allocated_entry && allocated[1] == NULL &&
-          strcmp(allocated_entry, "SDK_ALLOCATED=original") == 0 &&
-          live_blocks == empty_blocks + 4);
+          strcmp(allocated_entry, "SDK_ALLOCATED=original") == 0);
     free(allocated_entry);
     free(allocated);
 
@@ -612,8 +627,12 @@ static int environment(const char *program) {
     CHECK("NULL assignment clears the host environment",
           after_clear != NULL && strcmp(after_clear, "present") == 0 &&
           getenv("SDK_ALLOCATED") == NULL);
-    CHECK("adopted environments release all SDK-owned storage",
-          unsetenv("SDK_AFTER_CLEAR") == 0 && environ[0] == NULL && live_blocks == empty_blocks);
+    CHECK("only the current empty array and one previous table remain allocated",
+          unsetenv("SDK_AFTER_CLEAR") == 0 && environ[0] == NULL &&
+          live_blocks == empty_blocks + 2);
+    environ = NULL;
+    CHECK("another adoption frees the previous table",
+          getenv("SDK_AFTER_CLEAR") == NULL && live_blocks == empty_blocks);
 
     puts("environment: ok");
     return 0;

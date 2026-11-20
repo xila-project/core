@@ -29,6 +29,7 @@ xila-sdk-0.1-<target>/
   COPYING.picolibc          picolibc's licence (BSD); LICENSE-xila.md is Core's (Apache-2.0)
   include/                  picolibc headers, xila/application.h, xila/stubs.h,
                             xila/posix.h, sys/random.h, sys/socket.h, pthread.h
+    posix/stdlib.h          wrapper for the SDK's getenv declaration
   lib/
     crt0.o                  _xila_start: checks the startup, installs the API table
     libxila.a               indirect-call stubs for every XilaApi slot
@@ -67,6 +68,10 @@ then `libxila_posix`, `libxila`, `libc` and the compiler runtime as one group) a
 names executables `*.elf`. `CMAKE_EXE_LINKER_FLAGS` takes `ld.lld` flags, without
 `-Wl,`. Constructors, `__thread` variables and `dlopen` are not supported: the loader
 rejects an image with `DT_INIT`, a non-empty `DT_INIT_ARRAY` or `PT_TLS`.
+
+For custom C builds, put `<sdk>/include/posix` before `<sdk>/include` on the
+system include path. The SDK's `<stdlib.h>` wrapper includes picolibc's header
+and binds `getenv` to a symbol the compiler treats as an ordinary function.
 
 Copy `hello.elf` to a filesystem the platform's native format reads (Core's
 `NativeFormat`, the `native-dev` feature) and execute it. `main(int argc, char **argv)`
@@ -196,8 +201,9 @@ diagnostic and exit status.
 * **Environment.** `getenv`, `setenv` and `unsetenv` use the process capability
   and see inherited or explicitly supplied launch values. Names and values
   follow the ABI's UTF-8 rules. `getenv` returns NULL for a missing name
-  without changing `errno`, and returns NULL with `errno = ENOMEM` if allocation
-  fails. `setenv` honors its overwrite flag and `unsetenv` succeeds for an
+  without changing `errno`. It can return NULL with `ENOMEM` if allocation
+  fails or with `ENOMEM` or `EINVAL` if adoption of an assigned table fails.
+  `setenv` honors its overwrite flag and `unsetenv` succeeds for an
   absent name. Mutations reject a NULL or invalid name with `EINVAL`.
   Without a process capability, `getenv` returns NULL and valid mutations fail
   with `ENOSYS`. Picolibc's `putenv` copies the assignment and calls `setenv`.
@@ -218,12 +224,18 @@ diagnostic and exit status.
   A program may assign a different NULL-terminated table to `environ`, or
   assign NULL for an empty environment. With a process capability, the next
   environment accessor replaces the host environment and publishes an SDK-owned
-  copy. Entries without a nonempty name followed by `=` are skipped. For
-  duplicate names the first entry wins. Keep the supplied array and strings
+  table. Entries without a nonempty name followed by `=` or with invalid UTF-8
+  are skipped. For duplicate names the first valid entry wins. Keep the supplied array and strings
   alive until adoption succeeds. The program retains ownership of both.
   Coordinate adoption with direct task or ABI writes to the environment.
-  The SDK CMake toolchain compiles with `-ffreestanding` so the compiler
-  accounts for the table update in `getenv`. Use the same flag in custom C builds.
+
+  The SDK retains one previous table after adoption. Save `environ` before
+  assigning a temporary table and restore it before adopting another table.
+  Restoring the saved table reinstalls its contents and retains the outgoing
+  table. A mutation of the current table can invalidate saved pointers to
+  its array or strings. Removing the last entry leaves the current array
+  in place with a NULL first slot.
+
   To observe direct task or ABI changes, use `getenv` or enumerate through
   `xila_env_entry`.
   Referencing `environ` pulls in the archive member that overrides the SDK's

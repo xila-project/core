@@ -333,6 +333,7 @@ def compile_sdk(target, install, work):
     objects.mkdir(exist_ok=True)
     include = [
         "-nostdinc",
+        f"-isystem{SDK_SOURCE / 'sdk/posix/include/posix'}",
         f"-isystem{SDK_SOURCE / 'sdk/posix/include'}",
         f"-isystem{install / 'include'}",
         f"-isystem{resource_dir(target)}/include",

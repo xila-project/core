@@ -110,10 +110,10 @@ xila_environ_change(const char *name, size_t name_length, const char *value) {
     return xila_posix_env_commit(name, name_length, value);
 }
 
-/* Keep the opt-in table and ownership handling in environ.o. The old SDK
+/* Keep the opt-in table and ownership handling in environ.o. An evicted SDK
  * table can contain an argument to this call, so release it after the call. */
-__attribute__((weak, visibility("hidden"), noinline)) int xila_environ_sync(char ***previous) {
-    (void)previous;
+__attribute__((weak, visibility("hidden"), noinline)) int xila_environ_sync(char ***evicted) {
+    (void)evicted;
     return 0;
 }
 
@@ -121,7 +121,7 @@ __attribute__((weak, visibility("hidden"), noinline)) void xila_environ_release(
     (void)table;
 }
 
-char *getenv(const char *name) {
+char *xila_getenv(const char *name) {
     if (xila_process.process == NULL) {
         if (name == NULL)
             xila_fail_errno(EINVAL);
@@ -129,19 +129,23 @@ char *getenv(const char *name) {
     }
 
     __LIBC_LOCK();
-    char **previous = NULL;
+    char **evicted = NULL;
     char *value = NULL;
-    if (xila_environ_sync(&previous) == 0) {
+    if (xila_environ_sync(&evicted) == 0) {
         if (name != NULL)
             value = get_value(name);
         else
             xila_fail_errno(EINVAL);
     }
-    if (previous != NULL)
-        xila_environ_release(previous);
+    if (evicted != NULL)
+        xila_environ_release(evicted);
     __LIBC_UNLOCK();
     return value;
 }
+
+/* Picolibc was compiled with its own headers and still calls getenv. */
+extern __typeof__(xila_getenv) xila_libc_getenv __asm__("getenv")
+    __attribute__((alias("xila_getenv")));
 
 static int set_value(const char *name, const char *value, int overwrite) {
     size_t name_length = strlen(name);
@@ -166,12 +170,12 @@ static int change_value(const char *name, const char *value, int overwrite, bool
         return xila_fail_errno(valid ? ENOSYS : EINVAL);
 
     __LIBC_LOCK();
-    char **previous = NULL;
-    int result = xila_environ_sync(&previous);
+    char **evicted = NULL;
+    int result = xila_environ_sync(&evicted);
     if (result == 0)
         result = valid ? set_value(name, value, overwrite) : xila_fail_errno(EINVAL);
-    if (previous != NULL)
-        xila_environ_release(previous);
+    if (evicted != NULL)
+        xila_environ_release(evicted);
     __LIBC_UNLOCK();
     return result;
 }

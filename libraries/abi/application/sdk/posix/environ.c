@@ -9,6 +9,7 @@
 
 static char *empty_environment[1];
 static char **owned = empty_environment;
+static char **retained;
 char **environ = empty_environment;
 
 static void publish(char **table) {
@@ -89,6 +90,31 @@ static bool matches(const char *entry, const char *name, size_t name_length) {
     return strncmp(entry, name, name_length) == 0 && entry[name_length] == '=';
 }
 
+/* The host accepts UTF-8 names and values regardless of the C locale. */
+static bool valid_utf8(const unsigned char *entry) {
+    while (*entry != '\0') {
+        unsigned char lead = *entry++;
+        if (lead < 0x80)
+            continue;
+        if (lead < 0xc2 || lead > 0xf4)
+            return false;
+
+        unsigned int remaining = lead < 0xe0 ? 1 : lead < 0xf0 ? 2 : 3;
+        /* Constrain the first continuation to exclude overlong encodings,
+         * surrogates and code points above U+10FFFF. */
+        unsigned char minimum = lead == 0xe0 ? 0xa0 : lead == 0xf0 ? 0x90 : 0x80;
+        unsigned char maximum = lead == 0xed ? 0x9f : lead == 0xf4 ? 0x8f : 0xbf;
+        do {
+            unsigned char byte = *entry++;
+            if (byte < minimum || byte > maximum)
+                return false;
+            minimum = 0x80;
+            maximum = 0xbf;
+        } while (--remaining != 0);
+    }
+    return true;
+}
+
 static int copy_assigned(char ***output) {
     size_t count = 0;
     if (environ != NULL)
@@ -106,7 +132,7 @@ static int copy_assigned(char ***output) {
     for (size_t index = 0; index < count; ++index) {
         const char *entry = environ[index];
         const char *equals = strchr(entry, '=');
-        if (equals == NULL || equals == entry)
+        if (equals == NULL || equals == entry || !valid_utf8((const unsigned char *)entry))
             continue;
         /* getenv on a supplied array would read the first match. */
         size_t match = 0;
@@ -148,18 +174,20 @@ static XilaStatus write_host(char **table, bool remove) {
     return XILA_STATUS_OK;
 }
 
-__attribute__((visibility("hidden"))) int xila_environ_sync(char ***previous) {
+__attribute__((visibility("hidden"))) int xila_environ_sync(char ***evicted) {
     if (environ == owned)
         return 0;
 
-    char **replacement;
-    if (copy_assigned(&replacement) != 0)
+    bool restoring = environ != NULL && environ == retained;
+    char **replacement = retained;
+    if (!restoring && copy_assigned(&replacement) != 0)
         return -1;
     /* Include raw ABI changes, which need not be reflected in the owned table.
      * Finish all guest allocations before the first host mutation. */
     char **host;
     if (read_host(&host) != 0) {
-        xila_environ_release(replacement);
+        if (!restoring)
+            xila_environ_release(replacement);
         return -1;
     }
     XilaStatus status = write_host(host, true);
@@ -174,12 +202,16 @@ __attribute__((visibility("hidden"))) int xila_environ_sync(char ***previous) {
     if (status != XILA_STATUS_OK) {
         write_host(host, false);
         xila_environ_release(host);
-        xila_environ_release(replacement);
+        if (!restoring)
+            xila_environ_release(replacement);
         return xila_fail(status);
     }
     xila_environ_release(host);
-    /* Keep the old strings alive until this accessor has used its arguments. */
-    *previous = owned;
+    /* Keep one previous SDK table available for save/assign/restore. A
+     * restore swaps the two SDK tables without copying either. */
+    if (!restoring)
+        *evicted = retained;
+    retained = owned;
     publish(replacement);
     return 0;
 }
@@ -225,7 +257,7 @@ __attribute__((visibility("hidden"))) int xila_environ_change(const char *name, 
         return -1;
     }
     if (extended != NULL) {
-        if (count != 0)
+        if (owned != empty_environment)
             xila_heap_release(owned);
         publish(extended);
     } else if (previous != NULL) {
@@ -245,10 +277,6 @@ __attribute__((visibility("hidden"))) int xila_environ_change(const char *name, 
         }
         xila_heap_release(previous);
         owned[remaining] = NULL;
-        if (remaining == 0) {
-            xila_heap_release(owned);
-            publish(NULL);
-        }
     }
     return 0;
 }

@@ -45,9 +45,8 @@ execute_process(
 set(XILA_ARCH_FLAGS "@XILA_ARCH_FLAGS@")
 string(REPLACE ";" " " XILA_ARCH_FLAGS_TEXT "${XILA_ARCH_FLAGS}")
 
-# A freestanding guest libc can publish a new environ during getenv. Hosted
-# optimization assumes getenv only reads memory.
-set(CMAKE_C_FLAGS_INIT "--target=@XILA_CLANG_TRIPLE@ ${XILA_ARCH_FLAGS_TEXT} -nostdinc -isystem ${XILA_SDK_ROOT}/include -isystem ${XILA_RESOURCE_DIR}/include -D_GNU_SOURCE -ffreestanding -fPIE -ffunction-sections -fdata-sections -fno-stack-protector -fno-unwind-tables -fno-asynchronous-unwind-tables")
+# Search the SDK's stdlib.h wrapper before the picolibc headers.
+set(CMAKE_C_FLAGS_INIT "--target=@XILA_CLANG_TRIPLE@ ${XILA_ARCH_FLAGS_TEXT} -nostdinc -isystem ${XILA_SDK_ROOT}/include/posix -isystem ${XILA_SDK_ROOT}/include -isystem ${XILA_RESOURCE_DIR}/include -D_GNU_SOURCE -fPIE -ffunction-sections -fdata-sections -fno-stack-protector -fno-unwind-tables -fno-asynchronous-unwind-tables")
 set(CMAKE_C_FLAGS_RELEASE_INIT "-Os")
 set(CMAKE_C_FLAGS_MINSIZEREL_INIT "-Os")
 set(CMAKE_EXECUTABLE_SUFFIX_C ".elf")

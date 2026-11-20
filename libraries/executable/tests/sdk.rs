@@ -208,7 +208,8 @@ async fn setup() -> (&'static ExecutableContext, TaskIdentifier) {
     let tasks = task::test_manager();
     let users = Box::leak(Box::new(users::Manager::new()));
     let parent = tasks.get_current_task_identifier().await;
-    let device = file_system::MemoryDevice::<512>::new_static(256 * 1024);
+    // This host-only filesystem holds all six SDK ELFs and their output files.
+    let device = file_system::MemoryDevice::<512>::new_static(320 * 1024);
     let fs = little_fs::FileSystem::new_format(device, little_fs::Options::new(256)).unwrap();
     let vfs = Box::leak(Box::new(
         virtual_file_system::initialize(tasks, users, time, fs).unwrap(),
