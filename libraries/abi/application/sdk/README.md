@@ -164,16 +164,27 @@ Rust entry shim provides the ABI note and needs no C startup object or libc.
   `NAME=VALUE` strings. It reflects the launch environment and subsequent
   changes made by `setenv`, `unsetenv` and `putenv`. It starts empty if the program
   has no process capability. Treat the array and strings
-  as read-only and coordinate iteration with POSIX mutations. To observe
-  direct task or ABI changes, use `getenv` or enumerate through `xila_env_entry`.
+  as read-only and coordinate iteration and assignments with POSIX accessors.
+  A program may assign a different NULL-terminated table to `environ`, or
+  assign NULL for an empty environment. With a process capability, the next
+  environment accessor replaces the host environment and publishes an SDK-owned
+  copy. Entries without a nonempty name followed by `=` are skipped. For
+  duplicate names the first entry wins. Keep the supplied array and strings
+  alive until adoption succeeds. The program retains ownership of both.
+  Coordinate adoption with direct task or ABI writes to the environment.
+  The SDK CMake toolchain compiles with `-ffreestanding` so the compiler
+  accounts for the table update in `getenv`. Use the same flag in custom C builds.
+  To observe direct task or ABI changes, use `getenv` or enumerate through
+  `xila_env_entry`.
   Referencing `environ` pulls in the archive member that overrides the SDK's
-  hidden weak startup and mutation hooks. The startup hook builds the table
+  hidden weak startup and accessor hooks. The startup hook builds the table
   before `main`. Each mutation reserves any needed memory before updating the
   host. Accessor-only programs retain the default hooks and use zero RAM for
   this table.
 * **Process IDs.** `getpid` and `getppid` read the current and parent process IDs
   from the native process capability. A process adopted by the root task has
-  parent ID zero. The SDK provides no user or group ID wrappers such as
+  parent ID zero. Without a process capability, `getpid` returns 1 and
+  `getppid` returns 0. The SDK provides no user or group ID wrappers such as
   `getuid`, `geteuid`, `getgid`, `getegid`, `getgroups`, `setuid` or `setgid`.
 * **stdio.** `stdin`, `stdout` and `stderr` are descriptors 0-2 through picolibc's
   buffered POSIX streams, each in its own object, so a program that never reads

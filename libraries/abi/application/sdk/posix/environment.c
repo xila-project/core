@@ -110,53 +110,76 @@ xila_environ_change(const char *name, size_t name_length, const char *value) {
     return xila_posix_env_commit(name, name_length, value);
 }
 
+/* Keep the opt-in table and ownership handling in environ.o. The old SDK
+ * table can contain an argument to this call, so release it after the call. */
+__attribute__((weak, visibility("hidden"), noinline)) int xila_environ_sync(char ***previous) {
+    (void)previous;
+    return 0;
+}
+
+__attribute__((weak, visibility("hidden"), noinline)) void xila_environ_release(char **table) {
+    (void)table;
+}
+
 char *getenv(const char *name) {
-    if (name == NULL) {
-        xila_fail_errno(EINVAL);
+    if (xila_process.process == NULL) {
+        if (name == NULL)
+            xila_fail_errno(EINVAL);
         return NULL;
     }
-    if (xila_process.process == NULL)
-        return NULL;
+
     __LIBC_LOCK();
-    char *value = get_value(name);
+    char **previous = NULL;
+    char *value = NULL;
+    if (xila_environ_sync(&previous) == 0) {
+        if (name != NULL)
+            value = get_value(name);
+        else
+            xila_fail_errno(EINVAL);
+    }
+    if (previous != NULL)
+        xila_environ_release(previous);
     __LIBC_UNLOCK();
     return value;
 }
 
-int setenv(const char *name, const char *value, int overwrite) {
-    if (value == NULL || name == NULL || *name == '\0' || strchr(name, '=') != NULL)
-        return xila_fail_errno(EINVAL);
-    if (xila_process.process == NULL)
-        return xila_fail_errno(ENOSYS);
-
+static int set_value(const char *name, const char *value, int overwrite) {
     size_t name_length = strlen(name);
-    __LIBC_LOCK();
     if (!overwrite) {
         /* A zero-capacity read distinguishes missing, empty and nonempty. */
         size_t length;
         char unused;
         XilaStatus status =
             xila_env_get(xila_process.process, name, name_length, &unused, 0, &length);
-        if (status != XILA_STATUS_NOT_FOUND) {
-            __LIBC_UNLOCK();
+        if (status != XILA_STATUS_NOT_FOUND)
             return status == XILA_STATUS_OK || status == XILA_STATUS_BUFFER_TOO_SMALL
                        ? 0
                        : xila_fail(status);
-        }
     }
-    int result = xila_environ_change(name, name_length, value);
+    return xila_environ_change(name, name_length, value);
+}
+
+static int change_value(const char *name, const char *value, int overwrite, bool remove) {
+    bool valid = (value != NULL || remove) && name != NULL && *name != '\0' &&
+                 strchr(name, '=') == NULL;
+    if (xila_process.process == NULL)
+        return xila_fail_errno(valid ? ENOSYS : EINVAL);
+
+    __LIBC_LOCK();
+    char **previous = NULL;
+    int result = xila_environ_sync(&previous);
+    if (result == 0)
+        result = valid ? set_value(name, value, overwrite) : xila_fail_errno(EINVAL);
+    if (previous != NULL)
+        xila_environ_release(previous);
     __LIBC_UNLOCK();
     return result;
 }
 
-int unsetenv(const char *name) {
-    if (name == NULL || *name == '\0' || strchr(name, '=') != NULL)
-        return xila_fail_errno(EINVAL);
-    if (xila_process.process == NULL)
-        return xila_fail_errno(ENOSYS);
+int setenv(const char *name, const char *value, int overwrite) {
+    return change_value(name, value, overwrite, false);
+}
 
-    __LIBC_LOCK();
-    int result = xila_environ_change(name, strlen(name), NULL);
-    __LIBC_UNLOCK();
-    return result;
+int unsetenv(const char *name) {
+    return change_value(name, NULL, 1, true);
 }

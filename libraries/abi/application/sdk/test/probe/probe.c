@@ -358,6 +358,25 @@ static const XilaProcess *process;
 /* Count live SDK allocations across raw rewrites and inject guest heap failures. */
 static size_t live_blocks;
 static bool fail_allocation;
+static bool shrank_probe;
+static bool retried_entry;
+
+XilaStatus __real_xila_env_entry(const XilaProcess *, size_t, char *, size_t, size_t *);
+
+XilaStatus __wrap_xila_env_entry(const XilaProcess *capability, size_t index, char *buffer,
+                                size_t capacity, size_t *length) {
+    XilaStatus status = __real_xila_env_entry(capability, index, buffer, capacity, length);
+    if (status == XILA_STATUS_BUFFER_TOO_SMALL && index == 0) {
+        if (buffer == NULL && !shrank_probe && *length > 1) {
+            /* Simulate an entry that grows before startup copies it. */
+            --*length;
+            shrank_probe = true;
+        } else if (buffer != NULL && shrank_probe) {
+            retried_entry = true;
+        }
+    }
+    return status;
+}
 
 XilaStatus __real_xila_heap_allocate(XilaHeap *, size_t, void **);
 XilaStatus __real_xila_heap_reallocate(XilaHeap *, void *, size_t, void **);
@@ -413,6 +432,7 @@ static bool environment_value_is(const char *name, const char *expected) {
 }
 
 static int environment(const char *program) {
+    CHECK("retry a growing startup entry", retried_entry);
     CHECK("iterate inherited environ",
           environ != NULL && environment_value_is("SDK_PROBE", "inherited") &&
           environment_value_is("SDK_OTHER", "a=b"));
@@ -530,6 +550,70 @@ static int environment(const char *program) {
     CHECK("add after emptying the table",
           setenv("A", "again", 1) == 0 && environment_value_is("A", "again") &&
           environ[1] == NULL);
+
+    CHECK("write a host-only variable",
+          xila_env_set(process, "RAW", 3, "present", 7) == XILA_STATUS_OK);
+    static char *custom[] = {
+        "SDK_CUSTOM=a=b", "malformed", "SDK_CUSTOM=later", "SDK_STATIC=keep", NULL,
+    };
+    environ = custom;
+    const char *adopted = getenv("SDK_CUSTOM");
+    CHECK("getenv reads the assigned environment", adopted != NULL && strcmp(adopted, "a=b") == 0);
+    CHECK("getenv publishes an SDK-owned copy", environ != custom);
+    CHECK("adoption removes the old environment", getenv("A") == NULL && getenv("RAW") == NULL);
+    CHECK("adoption keeps valid entries and skips malformed ones",
+          environment_value_is("SDK_STATIC", "keep") && environ[2] == NULL);
+    CHECK("replace and remove entries after adopting a static environ",
+          setenv("SDK_CUSTOM", "updated", 1) == 0 && unsetenv("SDK_STATIC") == 0 &&
+          environment_value_is("SDK_CUSTOM", "updated") && environ[1] == NULL &&
+          strcmp(custom[0], "SDK_CUSTOM=a=b") == 0 && strcmp(custom[3], "SDK_STATIC=keep") == 0);
+    static char *invalid[] = {"SDK_PARTIAL=temporary", "SDK_INVALID=\xff", NULL};
+    environ = invalid;
+    char restored[sizeof("updated") - 1];
+    CHECK("an invalid ABI entry leaves the original host environment available",
+          unsetenv("SDK_CUSTOM") == -1 && errno == EINVAL && environ == invalid &&
+          xila_env_get(process, "SDK_CUSTOM", 10, restored, sizeof(restored), &length) == XILA_STATUS_OK &&
+          length == sizeof(restored) && memcmp(restored, "updated", length) == 0 &&
+          xila_env_get(process, "SDK_PARTIAL", 11, raw, sizeof(raw), &length) == XILA_STATUS_NOT_FOUND);
+
+    static char *remove_first[] = {"SDK_REMOVE=present", NULL};
+    environ = remove_first;
+    CHECK("unsetenv adopts before removing the name",
+          unsetenv("SDK_REMOVE") == 0 && environ[0] == NULL && getenv("SDK_CUSTOM") == NULL);
+    size_t empty_blocks = live_blocks;
+
+    char **allocated = malloc(2 * sizeof(*allocated));
+    char *allocated_entry = strdup("SDK_ALLOCATED=original");
+    CHECK("allocate a caller-owned environ", allocated != NULL && allocated_entry != NULL);
+    allocated[0] = allocated_entry;
+    allocated[1] = NULL;
+    environ = allocated;
+    fail_allocation = true;
+    int adoption_result = setenv("SDK_ALLOCATED", "ignored", 0);
+    fail_allocation = false;
+    CHECK("allocation failure leaves the assigned table available for retry",
+          adoption_result == -1 && errno == ENOMEM && environ == allocated &&
+          live_blocks == empty_blocks + 2);
+    CHECK("setenv adopts before checking overwrite",
+          setenv("SDK_ALLOCATED", "ignored", 0) == 0 && environ != allocated &&
+          environment_value_is("SDK_ALLOCATED", "original"));
+    CHECK("only the caller owns the supplied table and string",
+          allocated[0] == allocated_entry && allocated[1] == NULL &&
+          strcmp(allocated_entry, "SDK_ALLOCATED=original") == 0 &&
+          live_blocks == empty_blocks + 4);
+    free(allocated_entry);
+    free(allocated);
+
+    environ = NULL;
+    CHECK("setenv adopts a NULL environ",
+          setenv("SDK_AFTER_CLEAR", "present", 1) == 0 &&
+          environment_value_is("SDK_AFTER_CLEAR", "present"));
+    const char *after_clear = getenv("SDK_AFTER_CLEAR");
+    CHECK("NULL assignment clears the host environment",
+          after_clear != NULL && strcmp(after_clear, "present") == 0 &&
+          getenv("SDK_ALLOCATED") == NULL);
+    CHECK("adopted environments release all SDK-owned storage",
+          unsetenv("SDK_AFTER_CLEAR") == 0 && environ[0] == NULL && live_blocks == empty_blocks);
 
     puts("environment: ok");
     return 0;
