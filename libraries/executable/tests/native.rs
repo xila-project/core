@@ -131,7 +131,7 @@ impl BaseOperations for PendingDevice {
         _: &[u8],
         _: Size,
     ) -> Poll<file_system::Result<usize>> {
-        Poll::Ready(Err(file_system::Error::UnsupportedOperation))
+        Poll::Ready(Err(file_system::IoErrorKind::Unsupported))
     }
 
     fn clone_context(&self, _: &DeviceContext) -> file_system::Result<DeviceContext> {
@@ -155,7 +155,7 @@ impl DirectBaseOperations for FixtureEntropy {
     }
 
     fn write(&self, _: &mut Context<'_>, _: &[u8], _: Size) -> Poll<file_system::Result<usize>> {
-        Poll::Ready(Err(file_system::Error::UnsupportedOperation))
+        Poll::Ready(Err(file_system::IoErrorKind::Unsupported))
     }
 }
 impl MountOperations for FixtureEntropy {
@@ -171,7 +171,7 @@ static SINK: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 struct Sink;
 impl DirectBaseOperations for Sink {
     fn read(&self, _: &mut Context<'_>, _: &mut [u8], _: Size) -> Poll<file_system::Result<usize>> {
-        Poll::Ready(Err(file_system::Error::UnsupportedOperation))
+        Poll::Ready(Err(file_system::IoErrorKind::Unsupported))
     }
 
     fn write(

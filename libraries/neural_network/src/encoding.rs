@@ -1,5 +1,5 @@
 //! Supported model file encodings for runtime loaders.
-use file_system::{Error, Result};
+use file_system::{IoErrorKind, Result};
 
 /// Model serialization formats supported by inference backends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -25,10 +25,10 @@ impl ModelEncoding {
 }
 
 impl TryFrom<u32> for ModelEncoding {
-    type Error = Error;
+    type Error = IoErrorKind;
 
     fn try_from(value: u32) -> Result<Self> {
-        Self::from_raw(value).ok_or(Error::InvalidParameter)
+        Self::from_raw(value).ok_or(IoErrorKind::InvalidArgument)
     }
 }
 
@@ -55,7 +55,7 @@ mod tests {
         );
         assert_eq!(
             ModelEncoding::try_from(42),
-            Err(file_system::Error::InvalidParameter)
+            Err(file_system::IoErrorKind::InvalidArgument)
         );
         assert_eq!(ModelEncoding::TensorFlowLite.raw(), 0);
         assert_eq!(u32::from(ModelEncoding::TensorFlowLite), 0);

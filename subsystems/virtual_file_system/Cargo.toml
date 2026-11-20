@@ -13,7 +13,6 @@ synchronization = { workspace = true }
 shared = { workspace = true }
 log = { workspace = true }
 portable-atomic = { workspace = true }
-embedded-i18n = { workspace = true }
 
 embedded-io-async = { workspace = true }
 
@@ -34,9 +33,3 @@ path = "tests/integration.rs"
 
 [lib]
 name = "virtual_file_system"
-
-[package.metadata.i18n]
-load-path = "locales"
-default-locale = "en"
-fallback = ["en"]
-strict = true

@@ -1,4 +1,5 @@
 mod generate_api;
+mod generate_status;
 
 use std::{env, path::PathBuf};
 fn main() {
@@ -50,9 +51,12 @@ fn main() {
         .insert("target_arch = arm".into(), "__arm__".into());
     config.enumeration.rename_variants = cbindgen::RenameRule::ScreamingSnakeCase;
     config.enumeration.prefix_with_name = true;
+    let status = out.join("status.rs");
+    generate_status::generate(&status);
     generate_api::generate(&root, &out, &config.export);
     cbindgen::Builder::new()
         .with_crate(&root)
+        .with_src(status)
         .with_config(config)
         .generate()
         .unwrap()

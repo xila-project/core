@@ -12,12 +12,12 @@ use alloc::vec::Vec;
 
 use drivers_peripherals::{PeripheralHandle, mount_peripheral};
 use file_system::{
-    AccessFlags, ControlCommand, ControlCommandIdentifier, Error as FileSystemError, Flags,
-    MemoryDevice, Position,
+    AccessFlags, ControlCommand, ControlCommandIdentifier, Flags, IoErrorKind, MemoryDevice,
+    Position,
 };
 use shared::AnyByLayout;
 use task::TaskIdentifier;
-use virtual_file_system::{Error, File, VirtualFileSystem};
+use virtual_file_system::{File, VirtualFileSystem};
 
 file_system::define_command!(BYTES_QUEUED, Read, device::kind::UART, 0, (), usize);
 
@@ -47,7 +47,7 @@ impl PeripheralHandle for Loopback {
         output: &mut AnyByLayout,
     ) -> file_system::Result<()> {
         if command != BYTES_QUEUED::IDENTIFIER {
-            return Err(FileSystemError::UnsupportedOperation);
+            return Err(IoErrorKind::Unsupported);
         }
         let output = BYTES_QUEUED::cast_output(output)?;
         *output = self.queue.len();
@@ -114,7 +114,7 @@ async fn mounted_loopback_is_exclusive_and_round_trips_bytes() {
     // A second opening while the first is held is refused.
     assert_eq!(
         open(vfs, task, path).await.err(),
-        Some(Error::FileSystem(FileSystemError::RessourceBusy))
+        Some(IoErrorKind::ResourceBusy)
     );
 
     assert_eq!(file.write(b"ping").await.unwrap(), 4);

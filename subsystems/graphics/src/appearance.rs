@@ -3,6 +3,7 @@ use crate as graphics;
 use crate::{Color, lvgl};
 use file_system::{AccessFlags, CreateFlags, Flags, Permissions};
 use task::TaskIdentifier;
+use virtual_file_system::ResultExt as _;
 use virtual_file_system::{self, File, VirtualFileSystem};
 
 const RECORD_SIZE: usize = 11;
@@ -91,15 +92,15 @@ impl Appearance {
         vfs: &VirtualFileSystem,
         task: TaskIdentifier,
     ) -> virtual_file_system::Result<Self> {
-        let user = vfs.task_manager().get_user(task).await?;
+        let user = vfs.task_manager().get_user(task).await.map_io_error()?;
         let path = vfs
             .get_user_home(user)
             .await?
             .append(".appearance")
-            .ok_or(virtual_file_system::Error::InvalidPath)?;
+            .ok_or(virtual_file_system::IoErrorKind::InvalidPath)?;
         let mut file = match File::open(vfs, task, &path, AccessFlags::Read.into()).await {
             Ok(file) => file,
-            Err(virtual_file_system::Error::FileSystem(file_system::Error::NotFound)) => {
+            Err(file_system::IoErrorKind::NotFound) => {
                 return Ok(Self::default());
             }
             Err(error) => return Err(error),
@@ -115,7 +116,7 @@ impl Appearance {
             length += read;
         }
         file.close(vfs).await?;
-        Self::decode(&bytes[..length]).ok_or(virtual_file_system::Error::InvalidParameter)
+        Self::decode(&bytes[..length]).ok_or(virtual_file_system::IoErrorKind::InvalidArgument)
     }
 
     /// Persist this user's choices. Callers must serialize saves for that user;
@@ -125,19 +126,19 @@ impl Appearance {
         vfs: &VirtualFileSystem,
         task: TaskIdentifier,
     ) -> virtual_file_system::Result<()> {
-        let user = vfs.task_manager().get_user(task).await?;
+        let user = vfs.task_manager().get_user(task).await.map_io_error()?;
         let home = vfs.ensure_user_home(task, user).await?;
         let path = home
             .clone()
             .append(".appearance")
-            .ok_or(virtual_file_system::Error::InvalidPath)?;
+            .ok_or(virtual_file_system::IoErrorKind::InvalidPath)?;
         let temporary = home
             .append(".appearance.tmp")
-            .ok_or(virtual_file_system::Error::InvalidPath)?;
+            .ok_or(virtual_file_system::IoErrorKind::InvalidPath)?;
         // The graphics lock serializes Settings writers. Remove any temporary
         // file left by an interrupted save.
         match vfs.remove(task, &temporary).await {
-            Ok(()) | Err(virtual_file_system::Error::FileSystem(file_system::Error::NotFound)) => {}
+            Ok(()) | Err(file_system::IoErrorKind::NotFound) => {}
             Err(error) => return Err(error),
         }
         let mut file = File::open(
@@ -149,14 +150,14 @@ impl Appearance {
         .await?;
         let bytes = self.encode();
         if Self::decode(&bytes).is_none() {
-            return Err(virtual_file_system::Error::InvalidParameter);
+            return Err(virtual_file_system::IoErrorKind::InvalidArgument);
         }
         file.set_permissions(Permissions::USER_READ_WRITE).await?;
         let mut written = 0;
         while written < bytes.len() {
             let count = file.write(&bytes[written..]).await?;
             if count == 0 {
-                return Err(virtual_file_system::Error::FailedToWrite);
+                return Err(virtual_file_system::IoErrorKind::WriteZero);
             }
             written += count;
         }

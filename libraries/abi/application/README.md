@@ -180,8 +180,11 @@ child nothing. The call duplicates each stream, so the child owns its copies and
 parent keeps its own, and the child gets a copy of the home capability bound to the
 child's own task. The call suspends the caller while the host reads the file, then
 writes the owned `XilaChild` handle. Failures use the usual statuses: NotFound,
-PermissionDenied, ExecFormat for a file that is no image the host can run, OutOfMemory,
-and ResourceBusy when the task table is full. Native children run on the same
+PermissionDenied, ExecFormat for a file that is no image the host can run, and
+OutOfMemory when the task table is full. Task manager errors use the canonical I/O
+kind mapping: a full task table or no free spawner slot is OutOfMemory, no spawner
+available is Unavailable, an unknown spawner is InvalidArgument and a task or thread
+that is gone is NoSuchTask. Native children run on the same
 single executor, so a child progresses only while its parent is suspended. The
 capability must be the calling task's own, as for exit: another process's capability
 returns InvalidArgument without effect. A child that fails before its entry runs

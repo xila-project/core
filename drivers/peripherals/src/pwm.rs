@@ -16,11 +16,11 @@
 //!
 //! Every struct starts with a `version` field equal to [`ABI_VERSION`] and
 //! carries zeroed `reserved` fields. A wrong version, a non-zero reserved field
-//! or an out-of-range value is `InvalidParameter`. A frequency the controller
-//! cannot express, or a fixed-period controller, is `UnsupportedOperation`.
+//! or an out-of-range value is `InvalidArgument`. A frequency the controller
+//! cannot express, or a fixed-period controller, is `Unsupported`.
 
 use embedded_hal::pwm::SetDutyCycle;
-use file_system::{ControlCommand, ControlCommandIdentifier, Error, Result};
+use file_system::{ControlCommand, ControlCommandIdentifier, IoErrorKind, Result};
 use peripherals::pwm::{ChannelId, Error as PwmError, PwmController};
 use shared::AnyByLayout;
 
@@ -44,8 +44,8 @@ pub struct PwmHandle<'a, C: PwmController> {
 }
 
 impl<'a, C: PwmController> PwmHandle<'a, C> {
-    /// Opens `id` on `controller`. Fails with `RessourceBusy` if the channel is
-    /// already held and with `InvalidParameter` if it does not exist.
+    /// Opens `id` on `controller`. Fails with `ResourceBusy` if the channel is
+    /// already held and with `InvalidArgument` if it does not exist.
     pub fn new(controller: &'a C, id: ChannelId) -> Result<Self> {
         let channel = controller.open(id).map_err(map_error)?;
         Ok(Self {
@@ -59,7 +59,7 @@ impl<'a, C: PwmController> PwmHandle<'a, C> {
     /// Validates `duty` against this channel's maximum and applies it.
     fn set_duty(&mut self, duty: u16) -> Result<()> {
         if duty > self.channel.max_duty_cycle() {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         self.channel.set_duty_cycle(duty).map_err(map_error)?;
         self.duty = duty;
@@ -85,7 +85,7 @@ where
     /// Copies the last duty written through this handle as little-endian `u16`.
     /// The buffer must hold at least two bytes.
     fn read(&mut self, buffer: &mut [u8]) -> Result<usize> {
-        let bytes = buffer.get_mut(..2).ok_or(Error::InvalidParameter)?;
+        let bytes = buffer.get_mut(..2).ok_or(IoErrorKind::InvalidArgument)?;
         bytes.copy_from_slice(&self.duty.to_le_bytes());
         Ok(2)
     }
@@ -93,7 +93,9 @@ where
     /// Applies one little-endian `u16` duty. Partial writes are refused: the
     /// buffer must be exactly two bytes, so the returned count is always two.
     fn write(&mut self, buffer: &[u8]) -> Result<usize> {
-        let bytes: [u8; 2] = buffer.try_into().map_err(|_| Error::InvalidParameter)?;
+        let bytes: [u8; 2] = buffer
+            .try_into()
+            .map_err(|_| IoErrorKind::InvalidArgument)?;
         self.set_duty(u16::from_le_bytes(bytes))?;
         Ok(2)
     }
@@ -118,7 +120,7 @@ where
         } else if command == SET_DUTY_PERMILLE::IDENTIFIER {
             let request = SET_DUTY_PERMILLE::cast_input(input)?;
             if request.version != ABI_VERSION || request.permille > PERMILLE_FULL_SCALE {
-                return Err(Error::InvalidParameter);
+                return Err(IoErrorKind::InvalidArgument);
             }
             let max = self.channel.max_duty_cycle();
             let duty =
@@ -127,7 +129,7 @@ where
             self.set_duty(duty as u16)?;
             *SET_DUTY_PERMILLE::cast_output(output)? = self.info()?;
         } else {
-            return Err(Error::UnsupportedOperation);
+            return Err(IoErrorKind::Unsupported);
         }
         Ok(())
     }
@@ -137,19 +139,19 @@ fn check_header(version: u16, reserved: u16) -> Result<()> {
     if version == ABI_VERSION && reserved == 0 {
         Ok(())
     } else {
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     }
 }
 
 /// Maps a PWM error to the file system error seen by applications.
-fn map_error(error: PwmError) -> Error {
+fn map_error(error: PwmError) -> IoErrorKind {
     match error {
         PwmError::InvalidChannel | PwmError::InvalidFrequency | PwmError::InvalidDuty => {
-            Error::InvalidParameter
+            IoErrorKind::InvalidArgument
         }
-        PwmError::Busy => Error::RessourceBusy,
-        PwmError::Unsupported => Error::UnsupportedOperation,
-        PwmError::Other => Error::InputOutput,
+        PwmError::Busy => IoErrorKind::ResourceBusy,
+        PwmError::Unsupported => IoErrorKind::Unsupported,
+        PwmError::Other => IoErrorKind::InputOutput,
     }
 }
 
@@ -172,13 +174,12 @@ where
     use file_system::Path;
 
     if name.is_empty() || name == "." || name == ".." || name.contains('/') {
-        return Err(virtual_file_system::Error::FileSystem(Error::InvalidPath));
+        return Err(IoErrorKind::InvalidPath);
     }
     let path = Path::PWM_DEVICES
         .join(name)
-        .ok_or(virtual_file_system::Error::FileSystem(Error::InvalidPath))?;
-    let handle =
-        PwmHandle::new(controller, channel).map_err(virtual_file_system::Error::FileSystem)?;
+        .ok_or(IoErrorKind::InvalidPath)?;
+    let handle = PwmHandle::new(controller, channel)?;
 
     virtual_file_system::ignore_already_exists_error(
         virtual_file_system

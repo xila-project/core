@@ -15,7 +15,7 @@ use core::{
     pin::{Pin, pin},
     ptr, slice, str,
 };
-use file_system::PathOwned;
+use file_system::{IntoIoErrorKind, PathOwned};
 use task::{EnvironmentVariable, JoinHandle, TaskIdentifier};
 use virtual_file_system::{File as VfsFile, VirtualFileSystem};
 
@@ -29,6 +29,11 @@ pub const XILA_WAIT_NO_HANG: u32 = 1;
 /// parent that needs to tell them apart must have the child report success some
 /// other way, such as a line on its standard output.
 const START_FAILURE: i32 = -1;
+
+/// The native status of a task manager failure: the canonical I/O kind mapping.
+fn task_status(error: task::Error) -> Status {
+    error.into_io_error_kind().into()
+}
 
 /// A directory capability granted to a child as its home.
 pub struct HomeGrant {
@@ -118,7 +123,7 @@ impl ProcessLaunch {
                 Ok::<_, task::Error>(task)
             }
             .await
-            .map_err(Status::from);
+            .map_err(task_status);
         }));
         let Ok(task) = identity else {
             return START_FAILURE;
@@ -241,7 +246,7 @@ pub unsafe extern "C" fn xila_process_parent_id(process: *const Process, id: *mu
                 .task_manager()
                 .get_parent(process.task)
                 .await
-                .map_err(Status::from);
+                .map_err(task_status);
         }));
         unsafe { id.write(identifier(parent?)) };
         Ok(())
@@ -341,7 +346,11 @@ pub unsafe extern "C" fn xila_env_get(
                 .task_manager()
                 .get_environment_variable(process.task, name)
                 .await
-                .map_err(Status::from);
+                .map_err(|error| match error {
+                    // The getter's only way to say that the variable does not exist.
+                    task::Error::InvalidEnvironmentVariable => Status::NotFound,
+                    error => task_status(error),
+                });
         }));
         let variable = found?;
         let value = variable.get_value();
@@ -380,7 +389,7 @@ pub unsafe extern "C" fn xila_env_set(
                 .task_manager()
                 .set_environment_variable(process.task, name, value)
                 .await
-                .map_err(Status::from);
+                .map_err(task_status);
         }));
         set
     })();
@@ -405,7 +414,7 @@ pub unsafe extern "C" fn xila_env_remove(
                 .task_manager()
                 .remove_environment_variable(process.task, name)
                 .await
-                .map_err(Status::from);
+                .map_err(task_status);
         }));
         removed
     })();
@@ -475,7 +484,9 @@ unsafe fn environment(
 /// process's environment unless the request gives an explicit one. Spawning
 /// suspends the caller while the host reads the executable. Failures map to the
 /// usual statuses: `NotFound`, `PermissionDenied`, `ExecFormat` for an image the host
-/// cannot run, `OutOfMemory` and `ResourceBusy` when the task table is full. The
+/// cannot run, and `OutOfMemory` when the task table is full. Task manager errors use
+/// the canonical I/O kind mapping (`NoSpawnerAvailable` is `Unavailable`,
+/// `InvalidSpawnerIdentifier` is `InvalidArgument`). The
 /// process must be the running process's capability, otherwise the call returns
 /// `InvalidArgument`. The handle is written only on success.
 /// # Safety

@@ -88,8 +88,7 @@ impl Supervisor<'_> {
             {
                 Ok(device) => return Some(device),
                 // A concurrent privileged request briefly holds the device.
-                Err(virtual_file_system::Error::FileSystem(file_system::Error::RessourceBusy))
-                | Err(virtual_file_system::Error::RessourceBusy) => {
+                Err(file_system::IoErrorKind::ResourceBusy) => {
                     task::Manager::sleep(OPEN_RETRY).await
                 }
                 Err(_) => return None,
@@ -143,8 +142,7 @@ impl<D: Drivers> Stages for SystemStages<'_, '_, D> {
             Action::Sleep => device.control(SLEEP, &()).await,
         };
         result.map_err(|error| match error {
-            virtual_file_system::Error::FileSystem(file_system::Error::UnsupportedOperation)
-            | virtual_file_system::Error::UnsupportedOperation => Error::Unsupported,
+            file_system::IoErrorKind::Unsupported => Error::Unsupported,
             _ => Error::Power,
         })
     }

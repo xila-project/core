@@ -342,34 +342,158 @@ mod tests {
         }
     }
     #[test]
-    fn mapping() {
+    fn resolver_errors_report_the_status_of_their_kind() {
+        use file_system::io_error::ResolveError;
         assert_eq!(
-            Status::from(virtual_file_system::Error::TooManyOpenFiles),
-            Status::SystemFileLimit
+            Status::from(ResolveError::NoAnswer),
+            Status::NameNotResolved
         );
-        use file_system::Error as E;
-        for (error, expected) in [
-            (E::NotFound, Status::NotFound),
-            (E::NoMemory, Status::OutOfMemory),
-            (E::NoSpaceLeft, Status::NoSpace),
-            (E::IsDirectory, Status::IsADirectory),
-            (E::NotDirectory, Status::NotADirectory),
-            (E::RessourceBusy, Status::ResourceBusy),
-            (E::InvalidMode, Status::BadDescriptor),
-            (E::UnsupportedOperation, Status::Unsupported),
-            (E::InputOutput, Status::InputOutput),
-            (E::InvalidFlags, Status::InvalidFlags),
-            (E::InvalidPath, Status::InvalidPath),
-            (E::NameTooLong, Status::NameTooLong),
-            (E::FileTooLarge, Status::FileTooLarge),
-            (E::Corrupted, Status::CorruptData),
-            (E::TooManyOpenFiles, Status::SystemFileLimit),
+        assert_eq!(Status::from(ResolveError::Failure), Status::ResolverFailure);
+        assert_eq!(
+            Status::from(ResolveError::InvalidName),
+            Status::InvalidDnsName
+        );
+        assert_eq!(Status::from(ResolveError::NoInterface), Status::Unavailable);
+        for &error in ResolveError::ALL {
+            assert_eq!(Status::from(error) as u32, u32::from(error.id()));
+            assert_eq!(Status::from(error), Status::from(error.kind()));
+        }
+    }
+
+    #[test]
+    fn status_and_kind_match_frozen_wire_table() {
+        use file_system::IoErrorKind as Kind;
+        let rows = [
+            (Kind::InvalidArgument, Status::InvalidArgument, 0x0101),
+            (Kind::InvalidData, Status::InvalidData, 0x0102),
+            (Kind::PermissionDenied, Status::PermissionDenied, 0x0103),
+            (
+                Kind::OperationNotPermitted,
+                Status::OperationNotPermitted,
+                0x0104,
+            ),
+            (Kind::InputOutput, Status::InputOutput, 0x0105),
+            (Kind::OutOfMemory, Status::OutOfMemory, 0x0106),
+            (Kind::WouldBlock, Status::WouldBlock, 0x0107),
+            (Kind::ResourceBusy, Status::ResourceBusy, 0x0108),
+            (Kind::Interrupted, Status::Interrupted, 0x0109),
+            (Kind::TimedOut, Status::TimedOut, 0x010A),
+            (Kind::Unsupported, Status::Unsupported, 0x010B),
+            (Kind::Overflow, Status::Overflow, 0x010C),
+            (Kind::WriteZero, Status::WriteZero, 0x010D),
+            (Kind::NoBuffers, Status::NoBuffers, 0x010E),
+            (Kind::NotFound, Status::NotFound, 0x010F),
+            (Kind::AlreadyExists, Status::AlreadyExists, 0x0110),
+            (Kind::InvalidFlags, Status::InvalidFlags, 0x0111),
+            (Kind::InvalidState, Status::InvalidState, 0x0112),
+            (Kind::NotImplemented, Status::NotImplemented, 0x0113),
+            (Kind::ExecFormat, Status::ExecFormat, 0x0114),
+            (Kind::NoChild, Status::NoChild, 0x0115),
+            (
+                Kind::ArgumentListTooLong,
+                Status::ArgumentListTooLong,
+                0x0116,
+            ),
+            (Kind::Deadlock, Status::Deadlock, 0x0117),
+            (Kind::BadDescriptor, Status::BadDescriptor, 0x0201),
+            (Kind::InvalidPath, Status::InvalidPath, 0x0202),
+            (
+                Kind::MissingPathComponent,
+                Status::MissingPathComponent,
+                0x0203,
+            ),
+            (Kind::MissingFinalEntry, Status::MissingFinalEntry, 0x0204),
+            (Kind::NameTooLong, Status::NameTooLong, 0x0205),
+            (Kind::SymlinkLoop, Status::SymlinkLoop, 0x0206),
+            (Kind::NotADirectory, Status::NotADirectory, 0x0207),
+            (Kind::IsADirectory, Status::IsADirectory, 0x0208),
+            (Kind::DirectoryNotEmpty, Status::DirectoryNotEmpty, 0x0209),
+            (Kind::NoSpace, Status::NoSpace, 0x020A),
+            (Kind::FileTooLarge, Status::FileTooLarge, 0x020B),
+            (Kind::ProcessFileLimit, Status::ProcessFileLimit, 0x020C),
+            (Kind::SystemFileLimit, Status::SystemFileLimit, 0x020D),
+            (Kind::CrossDevice, Status::CrossDevice, 0x020E),
+            (Kind::PathEscapesRoot, Status::PathEscapesRoot, 0x020F),
+            (Kind::CorruptData, Status::CorruptData, 0x0210),
+            (Kind::MissingAttribute, Status::MissingAttribute, 0x0211),
+            (Kind::StaleHandle, Status::StaleHandle, 0x0212),
+            (Kind::ReadOnlyFileSystem, Status::ReadOnlyFileSystem, 0x0213),
+            (Kind::InvalidSeek, Status::InvalidSeek, 0x0214),
+            (Kind::DeviceUnavailable, Status::Unavailable, 0x0301),
+            (Kind::NoSuchTask, Status::NoSuchTask, 0x0302),
+            (
+                Kind::InappropriateIoControl,
+                Status::InappropriateIoControl,
+                0x0303,
+            ),
+            (Kind::ConnectionRefused, Status::ConnectionRefused, 0x0401),
+            (Kind::ConnectionReset, Status::ConnectionReset, 0x0402),
+            (Kind::ConnectionAborted, Status::ConnectionAborted, 0x0403),
+            (Kind::NotConnected, Status::NotConnected, 0x0404),
+            (Kind::AlreadyConnected, Status::AlreadyConnected, 0x0405),
+            (Kind::AddressInUse, Status::AddressInUse, 0x0406),
+            (
+                Kind::AddressNotAvailable,
+                Status::AddressNotAvailable,
+                0x0407,
+            ),
+            (
+                Kind::DestinationRequired,
+                Status::DestinationRequired,
+                0x0408,
+            ),
+            (Kind::HostUnreachable, Status::HostUnreachable, 0x0409),
+            (Kind::NetworkUnreachable, Status::NetworkUnreachable, 0x040A),
+            (Kind::NetworkDown, Status::NetworkDown, 0x040B),
+            (Kind::BrokenPipe, Status::BrokenPipe, 0x040C),
+            (Kind::MessageTooLarge, Status::MessageTooLarge, 0x040D),
+            (Kind::DatagramTruncated, Status::DatagramTruncated, 0x040E),
+            (
+                Kind::SocketOperationUnsupported,
+                Status::SocketOperationUnsupported,
+                0x040F,
+            ),
+            (
+                Kind::ProtocolUnsupported,
+                Status::ProtocolUnsupported,
+                0x0410,
+            ),
+            (
+                Kind::AddressFamilyUnsupported,
+                Status::AddressFamilyUnsupported,
+                0x0411,
+            ),
+            (Kind::InProgress, Status::InProgress, 0x0412),
+            (Kind::AlreadyInProgress, Status::AlreadyInProgress, 0x0413),
+            (Kind::ProtocolError, Status::ProtocolError, 0x0414),
+            (Kind::NotASocket, Status::NotASocket, 0x0415),
+            (Kind::InvalidDnsName, Status::InvalidDnsName, 0x0501),
+            (
+                Kind::UnsupportedDnsQuery,
+                Status::UnsupportedDnsQuery,
+                0x0502,
+            ),
+            (Kind::NameNotResolved, Status::NameNotResolved, 0x0503),
+            (
+                Kind::ResolverTemporaryFailure,
+                Status::ResolverTemporaryFailure,
+                0x0504,
+            ),
+            (Kind::ResolverFailure, Status::ResolverFailure, 0x0505),
+        ];
+        assert_eq!(rows.len(), Kind::ALL.len());
+        for (kind, status, id) in rows {
+            assert_eq!(Status::from(kind), status);
+            assert_eq!(status.io_kind(), Some(kind));
+            assert_eq!(status as u32, id);
+        }
+        for (status, id) in [
+            (Status::Ok, 0),
+            (Status::End, 0x0701),
+            (Status::BufferTooSmall, 0x0702),
         ] {
-            assert_eq!(Status::from(error), expected);
-            assert_eq!(
-                Status::from(virtual_file_system::Error::FileSystem(error)),
-                expected
-            );
+            assert_eq!(status.io_kind(), None);
+            assert_eq!(status as u32, id);
         }
     }
     #[test]

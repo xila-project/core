@@ -37,6 +37,7 @@ users = { package = "xila-users", path = "subsystems/users" }
 memory = { package = "xila-memory", path = "subsystems/memory" }
 executable = { package = "xila-executable", path = "libraries/executable" }
 file_system = { package = "xila-file-system", path = "libraries/file_system" }
+io_error = { package = "xila-io-error", path = "libraries/io_error" }
 authentication = { package = "xila-authentication", path = "libraries/authentication" }
 log = { package = "xila-log", path = "subsystems/log" }
 shared = { package = "xila-shared", path = "libraries/shared" }
@@ -68,8 +69,8 @@ quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 # Raw bindings and the safe layer come from the same lvgl-rust revision: the
 # safe layer defines LVGL's OBJ_ID hooks for the bindings' library.
-lvgl_rust_sys = { git = "https://github.com/AlixANNERAUD/lvgl_rust.git", rev = "e86d6ae02f1d8aefebd92755119c6ba90c5dacd9", package = "lvgl-rust-sys", default-features = false }
-lvgl-rust = { git = "https://github.com/AlixANNERAUD/lvgl_rust.git", rev = "e86d6ae02f1d8aefebd92755119c6ba90c5dacd9", default-features = false }
+lvgl_rust_sys = { git = "https://github.com/AlixANNERAUD/lvgl_rust.git", rev = "7f95bed0e7bd75b4ac78e57ee0911910aa5cf3b7", package = "lvgl-rust-sys", default-features = false }
+lvgl-rust = { git = "https://github.com/AlixANNERAUD/lvgl_rust.git", rev = "7f95bed0e7bd75b4ac78e57ee0911910aa5cf3b7", default-features = false }
 embassy-executor = { version = "0.10", default-features = false }
 embassy-futures = { version = "0.1" }
 embassy-sync = { version = "0.8" }
@@ -109,6 +110,7 @@ members = [
   "libraries/neural_network",
   "drivers/neural_network",
   "libraries/file_system",
+  "libraries/io_error",
   "subsystems/graphics",
   "subsystems/task",
   "subsystems/users",

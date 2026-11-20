@@ -47,7 +47,10 @@ pub unsafe extern "C" fn xila_random_fill(buffer: *mut c_void, size: usize) -> S
     crate::suspend_dynamic(pin!(async {
         result = async {
             let task = if in_coroutine {
-                vfs.task_manager().try_get_current_task_identifier().await?
+                vfs.task_manager()
+                    .try_get_current_task_identifier()
+                    .await
+                    .map_err(file_system::IntoIoErrorKind::into_io_error_kind)?
             } else {
                 Manager::ROOT_TASK_IDENTIFIER
             };

@@ -192,7 +192,7 @@ pub unsafe extern "C" fn xila_tcp_connect(
             .await
             {
                 Either::First(result) => result,
-                Either::Second(_) => Err(::network::Error::TimedOut),
+                Either::Second(_) => Err(::network::IoErrorKind::TimedOut),
             }
         });
         if let Err(error) = result {
@@ -764,9 +764,12 @@ mod tests {
                 Status::InvalidArgument
             );
         }
-        assert_eq!(Status::from(::network::Error::TimedOut), Status::TimedOut);
         assert_eq!(
-            Status::from(::network::Error::ResourceBusy),
+            Status::from(::network::IoErrorKind::TimedOut),
+            Status::TimedOut
+        );
+        assert_eq!(
+            Status::from(::network::IoErrorKind::ResourceBusy),
             Status::ResourceBusy
         );
     }

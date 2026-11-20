@@ -11,7 +11,7 @@ use drivers_neural_network::{
     ModelBuffer, ModelEncoding, NeuralNetworkDevice, QuantizationEntry, SET_INPUT_INDEX,
     SET_OUTPUT_INDEX, TensorInfo,
 };
-use file_system::{BaseOperations, Context, ControlCommand, Error, Result};
+use file_system::{BaseOperations, Context, ControlCommand, IoErrorKind, Result};
 use shared::AnyByLayout;
 use std::sync::{
     Arc,
@@ -65,7 +65,7 @@ impl Backend for MockBackend {
 
     fn input_info(&self, index: usize) -> Result<TensorInfo> {
         if index != 0 {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         let mut dimensions = [0; drivers_neural_network::MAX_TENSOR_RANK];
         dimensions[0] = self.tensor_len as i32;
@@ -84,11 +84,11 @@ impl Backend for MockBackend {
     }
 
     fn input_quantization(&self, _: usize, _: usize) -> Result<QuantizationEntry> {
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     }
 
     fn output_quantization(&self, _: usize, _: usize) -> Result<QuantizationEntry> {
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     }
 
     fn input<'a>(&self, execution: &'a mut Self::Execution, index: usize) -> Result<&'a mut [u8]> {
@@ -119,10 +119,10 @@ impl Loader for MockLoader {
 
     fn load(&self, encoding: ModelEncoding, model: ModelBuffer) -> Result<Self::Backend> {
         if encoding != ModelEncoding::TensorFlowLite {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         if model.len() < 9 {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         let id = u32::from_le_bytes(model[0..4].try_into().unwrap());
         let tensor_len = u32::from_le_bytes(model[4..8].try_into().unwrap()) as usize;
@@ -270,14 +270,14 @@ fn oversize_model_is_rejected() {
     let large_chunk = [0u8; 11];
     assert_eq!(
         device.write_sync(&mut context, &large_chunk, 0),
-        Err(Error::FileTooLarge)
+        Err(IoErrorKind::FileTooLarge)
     );
 
     // Cumulative write exceeding limit
     assert_eq!(device.write_sync(&mut context, &[0; 6], 0), Ok(6));
     assert_eq!(
         device.write_sync(&mut context, &[0; 5], 6),
-        Err(Error::FileTooLarge)
+        Err(IoErrorKind::FileTooLarge)
     );
 
     device.close(&mut context).unwrap();
@@ -293,14 +293,14 @@ fn commands_before_load_are_rejected() {
     let mut context = Context::new_empty();
     device.open(&mut context).unwrap();
 
-    // Control commands before LOAD return InvalidContext
+    // Control commands before LOAD return InvalidState
     assert_eq!(
         get_input_count(&device, &mut context),
-        Err(Error::InvalidContext)
+        Err(IoErrorKind::InvalidState)
     );
     assert_eq!(
         send_compute(&device, &mut context),
-        Err(Error::InvalidContext)
+        Err(IoErrorKind::InvalidState)
     );
     assert_eq!(
         device.control_sync(
@@ -309,14 +309,14 @@ fn commands_before_load_are_rejected() {
             AnyByLayout::from(&0u32),
             AnyByLayout::NONE,
         ),
-        Err(Error::InvalidContext)
+        Err(IoErrorKind::InvalidState)
     );
 
-    // Read before LOAD returns InvalidContext
+    // Read before LOAD returns InvalidState
     let mut buf = [0u8; 4];
     assert_eq!(
         device.read_sync(&mut context, &mut buf, 0),
-        Err(Error::InvalidContext)
+        Err(IoErrorKind::InvalidState)
     );
 
     device.close(&mut context).unwrap();
@@ -336,10 +336,10 @@ fn double_load_is_rejected() {
     device.write_sync(&mut context, &model, 0).unwrap();
     send_load(&device, &mut context, LoadRequest::tensorflow_lite()).unwrap();
 
-    // Second LOAD must return InvalidContext
+    // Second LOAD must return InvalidState
     assert_eq!(
         send_load(&device, &mut context, LoadRequest::tensorflow_lite()),
-        Err(Error::InvalidContext)
+        Err(IoErrorKind::InvalidState)
     );
 
     device.close(&mut context).unwrap();
@@ -358,7 +358,7 @@ fn non_contiguous_write_is_rejected() {
     // First write with offset > 0 fails
     assert_eq!(
         device.write_sync(&mut context, &[1, 2], 2),
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     );
 
     // Initial write at 0 succeeds
@@ -367,7 +367,7 @@ fn non_contiguous_write_is_rejected() {
     // Next write leaving a gap fails (offset 4 when len is 2)
     assert_eq!(
         device.write_sync(&mut context, &[3, 4], 4),
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     );
 
     device.close(&mut context).unwrap();
@@ -439,9 +439,9 @@ fn close_frees_state() {
     // Access after close fails
     assert_eq!(
         device.write_sync(&mut context, &[0], 0),
-        Err(Error::InvalidContext)
+        Err(IoErrorKind::BadDescriptor)
     );
-    assert_eq!(device.close(&mut context), Err(Error::InvalidContext));
+    assert_eq!(device.close(&mut context), Err(IoErrorKind::BadDescriptor));
 }
 
 #[test]
@@ -464,7 +464,7 @@ fn neural_network_device_rejects_load() {
             AnyByLayout::from(&request),
             AnyByLayout::NONE,
         ),
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     );
 
     device.close(&mut context).unwrap();

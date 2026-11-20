@@ -2,13 +2,14 @@
 //!
 //! Plain file I/O:
 //! - The node has one selected target address. `SELECT_ADDRESS` sets it. Until
-//!   an address is selected, `read` and `write` fail with `NotInitialized`.
+//!   an address is selected, `read` and `write` fail with `DeviceUnavailable`.
 //! - `write` sends one write transfer containing the whole buffer to the
 //!   selected address and returns `buffer.len()` on success.
 //! - `read` receives `buffer.len()` bytes from the selected address.
 //! - Each call is one non-blocking attempt. It opens the bus with the node's
 //!   configured frequency, runs one transaction and drops the bus. A bus held
-//!   by another handle returns `RessourceBusy`.
+//!   by another handle returns `WouldBlock`; opening the node while it is open
+//!   returns `ResourceBusy`.
 //!
 //! Control commands (kind `b'i'`), all with a `version` field first that must
 //! equal [`ABI_VERSION`] and reserved fields that must be zero:
@@ -20,12 +21,12 @@
 //!   START, against the selected address. Lengths are at most
 //!   [`MAX_TRANSFER_LENGTH`] and at least one of them must be non-zero.
 //!
-//! Error mapping: `Busy` becomes `RessourceBusy`, a NACK on the address becomes
+//! Error mapping: `Busy` becomes `WouldBlock`, a NACK on the address becomes
 //! `NotFound`, other bus failures become `InputOutput`, and `Unsupported`
-//! becomes `UnsupportedOperation`.
+//! becomes `Unsupported`.
 
 use embedded_hal::i2c::{Operation, SevenBitAddress, TenBitAddress};
-use file_system::{ControlCommand, ControlCommandIdentifier, Error as FileSystemError, Result};
+use file_system::{ControlCommand, ControlCommandIdentifier, IoErrorKind, Result};
 use peripherals::i2c::{Address, BusConfig, Error as BusError, I2cController, NoAcknowledge};
 use shared::AnyByLayout;
 
@@ -36,7 +37,7 @@ use file_system::Path;
 #[cfg(feature = "vfs")]
 use task::TaskIdentifier;
 #[cfg(feature = "vfs")]
-use virtual_file_system::{Error, Result as VirtualFileSystemResult, VirtualFileSystem};
+use virtual_file_system::{Result as VirtualFileSystemResult, VirtualFileSystem};
 
 pub use device::i2c::{
     ABI_VERSION, FrequencyOutput, GET_FREQUENCY, MAX_TRANSFER_LENGTH, SELECT_ADDRESS,
@@ -56,7 +57,7 @@ pub struct I2cHandle<C> {
 
 impl<C: I2cController> I2cHandle<C> {
     /// Creates a handle with `config` as its bus frequency. Fails with
-    /// `InvalidParameter` for a zero frequency and `UnsupportedOperation` for a
+    /// `InvalidArgument` for a zero frequency and `Unsupported` for a
     /// frequency above the controller's maximum.
     pub fn new(controller: C, config: BusConfig) -> Result<Self> {
         let frequency_hz = validate_frequency(&controller.capabilities(), config.frequency_hz)?;
@@ -70,7 +71,7 @@ impl<C: I2cController> I2cHandle<C> {
     /// Opens the bus, runs `operations` against the selected address as one
     /// transaction and releases the bus.
     fn transfer(&mut self, operations: &mut [Operation<'_>]) -> Result<()> {
-        let address = self.address.ok_or(FileSystemError::NotInitialized)?;
+        let address = self.address.ok_or(IoErrorKind::DeviceUnavailable)?;
         let mut bus = self
             .controller
             .open(BusConfig::new(self.frequency_hz))
@@ -93,19 +94,19 @@ impl<C: I2cController> I2cHandle<C> {
         let address = match input.ten_bit {
             0 => {
                 let value =
-                    u8::try_from(input.address).map_err(|_| FileSystemError::InvalidParameter)?;
-                Address::seven_bit(value).ok_or(FileSystemError::InvalidParameter)?
+                    u8::try_from(input.address).map_err(|_| IoErrorKind::InvalidArgument)?;
+                Address::seven_bit(value).ok_or(IoErrorKind::InvalidArgument)?
             }
             1 => {
                 if !capabilities.ten_bit {
-                    return Err(FileSystemError::UnsupportedOperation);
+                    return Err(IoErrorKind::Unsupported);
                 }
-                Address::ten_bit(input.address).ok_or(FileSystemError::InvalidParameter)?
+                Address::ten_bit(input.address).ok_or(IoErrorKind::InvalidArgument)?
             }
-            _ => return Err(FileSystemError::InvalidParameter),
+            _ => return Err(IoErrorKind::InvalidArgument),
         };
         if !capabilities.supports_address(address) {
-            return Err(FileSystemError::UnsupportedOperation);
+            return Err(IoErrorKind::Unsupported);
         }
         self.address = Some(address);
         Ok(())
@@ -119,7 +120,7 @@ impl<C: I2cController> I2cHandle<C> {
             || read_length > MAX_TRANSFER_LENGTH
             || (write_length == 0 && read_length == 0)
         {
-            return Err(FileSystemError::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
 
         output.version = ABI_VERSION;
@@ -148,7 +149,7 @@ impl<C: I2cController> I2cHandle<C> {
 /// Rejects a version other than [`ABI_VERSION`] or a non-zero reserved field.
 fn check_header(version: u16, reserved: u16) -> Result<()> {
     if version != ABI_VERSION || reserved != 0 {
-        return Err(FileSystemError::InvalidParameter);
+        return Err(IoErrorKind::InvalidArgument);
     }
     Ok(())
 }
@@ -159,24 +160,25 @@ fn validate_frequency(
     frequency_hz: u32,
 ) -> Result<u32> {
     if frequency_hz == 0 {
-        return Err(FileSystemError::InvalidParameter);
+        return Err(IoErrorKind::InvalidArgument);
     }
     if !capabilities.supports_config(BusConfig::new(frequency_hz)) {
-        return Err(FileSystemError::UnsupportedOperation);
+        return Err(IoErrorKind::Unsupported);
     }
     Ok(frequency_hz)
 }
 
-fn map_error(error: BusError) -> FileSystemError {
+fn map_error(error: BusError) -> IoErrorKind {
     match error {
-        BusError::Busy => FileSystemError::RessourceBusy,
-        BusError::NoAcknowledge(NoAcknowledge::Address) => FileSystemError::NotFound,
+        // The bus is held by another handle; the caller may retry.
+        BusError::Busy => IoErrorKind::WouldBlock,
+        BusError::NoAcknowledge(NoAcknowledge::Address) => IoErrorKind::NotFound,
         BusError::NoAcknowledge(_)
         | BusError::ArbitrationLoss
         | BusError::Timeout
-        | BusError::Bus => FileSystemError::InputOutput,
-        BusError::Unsupported => FileSystemError::UnsupportedOperation,
-        BusError::Other => FileSystemError::Other,
+        | BusError::Bus => IoErrorKind::InputOutput,
+        BusError::Unsupported => IoErrorKind::Unsupported,
+        BusError::Other => IoErrorKind::InputOutput,
     }
 }
 
@@ -226,7 +228,7 @@ where
                 let (input, output) = WRITE_READ::cast(input, output)?;
                 self.write_read(input, output)
             }
-            _ => Err(FileSystemError::UnsupportedOperation),
+            _ => Err(IoErrorKind::Unsupported),
         }
     }
 }
@@ -254,7 +256,7 @@ where
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-');
     if !valid_name {
-        return Err(FileSystemError::InvalidPath.into());
+        return Err(IoErrorKind::InvalidPath);
     }
 
     ensure_directory(virtual_file_system, task, Path::DEVICES).await?;
@@ -262,7 +264,7 @@ where
 
     let path = Path::I2C_DEVICES
         .join(name)
-        .ok_or(FileSystemError::InvalidPath)?;
+        .ok_or(IoErrorKind::InvalidPath)?;
     let handle = I2cHandle::new(controller, config)?;
     crate::mount_peripheral(virtual_file_system, task, path, handle).await
 }
@@ -275,10 +277,17 @@ async fn ensure_directory(
 ) -> VirtualFileSystemResult<()> {
     match virtual_file_system.create_directory(task, &path).await {
         Ok(()) => Ok(()),
-        Err(Error::AlreadyExists)
-        | Err(Error::FileSystem(
-            FileSystemError::AlreadyExists | FileSystemError::DirectoryAlreadyExists,
-        )) => Ok(()),
+        Err(IoErrorKind::AlreadyExists) => Ok(()),
         Err(error) => Err(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contention_is_retryable() {
+        assert_eq!(map_error(BusError::Busy), IoErrorKind::WouldBlock);
     }
 }

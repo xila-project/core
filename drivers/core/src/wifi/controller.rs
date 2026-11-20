@@ -7,8 +7,8 @@ use core::{
     time::Duration,
 };
 use file_system::{
-    ControlCommand, ControlCommandIdentifier, DirectBaseOperations, DirectCharacterDevice, Error,
-    MountOperations, Result,
+    ControlCommand, ControlCommandIdentifier, DirectBaseOperations, DirectCharacterDevice,
+    IoErrorKind, MountOperations, Result,
 };
 use network::*;
 use shared::AnyByLayout;
@@ -163,12 +163,12 @@ pub struct MockWifiController {
 impl MockWifiController {
     pub fn new(mut configuration: MockWifiConfiguration) -> Result<(Self, MockWifiRunner)> {
         if configuration.access_points.len() > MAXIMUM_MOCK_ACCESS_POINTS {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         for fixture in &configuration.access_points {
             fixture.access_point.ssid.as_bytes()?;
             if fixture.access_point.channel == 0 || fixture.access_point.channel > 196 {
-                return Err(Error::InvalidParameter);
+                return Err(IoErrorKind::InvalidArgument);
             }
             // Extended/unsupported APs can be scanned but not connected.
             if fixture.access_point.authentication != WifiAuthentication::UNSUPPORTED {
@@ -242,10 +242,10 @@ impl MockWifiController {
                 SET_WIFI_RADIO_STATE::IDENTIFIER => {
                     let radio = *SET_WIFI_RADIO_STATE::cast_input(input)?;
                     if radio != WifiRadioState::ON && radio != WifiRadioState::OFF {
-                        return Err(Error::InvalidParameter);
+                        return Err(IoErrorKind::InvalidArgument);
                     }
                     if !state.alive {
-                        return Err(Error::InputOutput);
+                        return Err(IoErrorKind::InputOutput);
                     }
                     state.radio = radio;
                     if radio == WifiRadioState::OFF {
@@ -268,7 +268,7 @@ impl MockWifiController {
                     if request.generation != state.scan.generation
                         || request.index >= state.result_count
                     {
-                        return Err(Error::InvalidParameter);
+                        return Err(IoErrorKind::InvalidArgument);
                     }
                     *GET_WIFI_SCAN_RESULT::cast_output(output)? =
                         state.results[request.index as usize];
@@ -278,7 +278,7 @@ impl MockWifiController {
                 }
                 GET_WIFI_CONNECTION_INFO::IDENTIFIER => {
                     if state.connection != WifiConnectionState::CONNECTED {
-                        return Err(Error::NotFound);
+                        return Err(IoErrorKind::NotFound);
                     }
                     *GET_WIFI_CONNECTION_INFO::cast_output(output)? = state.info;
                 }
@@ -289,13 +289,13 @@ impl MockWifiController {
                 | CONNECT_WIFI_CLIENT::IDENTIFIER
                 | DISCONNECT_WIFI_CLIENT::IDENTIFIER => {
                     if !state.alive {
-                        return Err(Error::InputOutput);
+                        return Err(IoErrorKind::InputOutput);
                     }
                     if state.radio != WifiRadioState::ON {
-                        return Err(Error::InvalidParameter);
+                        return Err(IoErrorKind::InvalidArgument);
                     }
                     if state.pending.is_some() {
-                        return Err(Error::RessourceBusy);
+                        return Err(IoErrorKind::AlreadyInProgress);
                     }
                     state.pending = Some(match command {
                         START_WIFI_SCAN::IDENTIFIER => {
@@ -319,7 +319,7 @@ impl MockWifiController {
                     });
                     state.revision = state.revision.wrapping_add(1);
                 }
-                _ => return Err(Error::UnsupportedOperation),
+                _ => return Err(IoErrorKind::Unsupported),
             }
             Ok(())
         });
@@ -340,10 +340,10 @@ impl MockWifiController {
 }
 impl DirectBaseOperations for MockWifiController {
     fn read(&self, _: &mut Context<'_>, _: &mut [u8], _: file_system::Size) -> Poll<Result<usize>> {
-        Poll::Ready(Err(Error::UnsupportedOperation))
+        Poll::Ready(Err(IoErrorKind::Unsupported))
     }
     fn write(&self, _: &mut Context<'_>, _: &[u8], _: file_system::Size) -> Poll<Result<usize>> {
-        Poll::Ready(Err(Error::UnsupportedOperation))
+        Poll::Ready(Err(IoErrorKind::Unsupported))
     }
     fn control(
         &self,

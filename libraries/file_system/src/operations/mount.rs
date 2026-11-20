@@ -6,7 +6,7 @@ use synchronization::{
     mutex::{Mutex, MutexGuard},
 };
 
-use crate::{Error, Result};
+use crate::{IoErrorKind, Result};
 
 pub trait MountOperations {
     fn mount(&self) -> Result<()> {
@@ -14,7 +14,7 @@ pub trait MountOperations {
     }
 
     fn unmount(&self) -> Result<()> {
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     }
 }
 pub struct MountWrapper<T>(Option<Box<T>>);
@@ -32,7 +32,7 @@ impl<T> MountWrapper<T> {
 
     pub fn mount(&mut self, inner: T) -> Result<()> {
         if self.is_mounted() {
-            return Err(Error::AlreadyMounted);
+            return Err(IoErrorKind::ResourceBusy);
         }
         self.0 = Some(Box::new(inner));
 
@@ -41,7 +41,7 @@ impl<T> MountWrapper<T> {
 
     pub fn unmount(&mut self) -> Result<()> {
         if !self.is_mounted() {
-            return Err(Error::NotMounted);
+            return Err(IoErrorKind::DeviceUnavailable);
         }
 
         self.0 = None;
@@ -55,14 +55,14 @@ impl<T> MountWrapper<T> {
     pub fn try_get_mutable(&mut self) -> Result<&mut T> {
         match &mut self.0 {
             Some(inner) => Ok(inner.as_mut()),
-            None => Err(Error::NotMounted),
+            None => Err(IoErrorKind::DeviceUnavailable),
         }
     }
 
     pub fn try_get(&self) -> Result<&T> {
         match &self.0 {
             Some(inner) => Ok(inner.as_ref()),
-            None => Err(Error::NotMounted),
+            None => Err(IoErrorKind::DeviceUnavailable),
         }
     }
 }
@@ -108,26 +108,26 @@ impl<M: RawMutex, T> MutexMountWrapper<M, T> {
     }
 
     pub fn mount(&self, inner: T) -> Result<()> {
-        let mut guard = self.0.try_lock().map_err(|_| Error::RessourceBusy)?;
+        let mut guard = self.0.try_lock().map_err(|_| IoErrorKind::WouldBlock)?;
         guard.mount(inner)
     }
 
     pub fn unmount(&self) -> Result<()> {
-        let mut guard = self.0.try_lock().map_err(|_| Error::RessourceBusy)?;
+        let mut guard = self.0.try_lock().map_err(|_| IoErrorKind::WouldBlock)?;
         guard.unmount()
     }
 
     pub fn is_mounted(&self) -> Result<bool> {
-        let guard = self.0.try_lock().map_err(|_| Error::RessourceBusy)?;
+        let guard = self.0.try_lock().map_err(|_| IoErrorKind::WouldBlock)?;
         Ok(guard.is_mounted())
     }
 
     pub fn try_get(&self) -> Result<MutexMountWrapperGuard<'_, M, T>> {
-        let mut guard = self.0.try_lock().map_err(|_| Error::RessourceBusy)?;
+        let mut guard = self.0.try_lock().map_err(|_| IoErrorKind::WouldBlock)?;
 
         // Verify mount before creating the guard
         if !guard.is_mounted() {
-            return Err(Error::NotMounted);
+            return Err(IoErrorKind::DeviceUnavailable);
         }
 
         let inner_ptr = guard.try_get_mutable()? as *mut T;

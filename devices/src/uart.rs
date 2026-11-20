@@ -10,9 +10,9 @@
 //! | `0x03` | `FLUSH_TX`   | Write     | `VersionAbi` | `VersionAbi` | Discards queued, untransmitted data.|
 //!
 //! Every struct starts with a `version` field that must equal [`ABI_VERSION`];
-//! any other value is `InvalidParameter`. Enum fields use the numeric codes
-//! below; an unknown code is `InvalidParameter`, and a setting the driver
-//! cannot express is `UnsupportedOperation`.
+//! any other value is `InvalidArgument`. Enum fields use the numeric codes
+//! below; an unknown code is `InvalidArgument`, and a setting the driver
+//! cannot express is `Unsupported`.
 
 use file_system::{ControlCommand, define_command};
 

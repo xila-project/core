@@ -7,8 +7,8 @@ use crate::{
     manager::stack::{Stack, StackInner},
 };
 use file_system::{
-    ControlCommand, ControlCommandIdentifier, DirectBaseOperations, DirectCharacterDevice, Error,
-    MountOperations, Result,
+    ControlCommand, ControlCommandIdentifier, DirectBaseOperations, DirectCharacterDevice,
+    IoErrorKind, MountOperations, Result,
 };
 use shared::AnyByLayout;
 
@@ -19,13 +19,13 @@ pub struct NetworkDevice {
 
 impl NetworkDevice {
     pub fn with<R, F: FnOnce(&StackInner) -> R>(&self, f: F) -> Result<R> {
-        let stack = self.stack.try_lock().ok_or(Error::RessourceBusy)?;
+        let stack = self.stack.try_lock().ok_or(IoErrorKind::WouldBlock)?;
 
         Ok(f(&stack))
     }
 
     pub fn with_mut<R, F: FnOnce(&mut StackInner) -> R>(&self, f: F) -> Result<R> {
-        let mut stack = self.stack.try_lock().ok_or(Error::RessourceBusy)?;
+        let mut stack = self.stack.try_lock().ok_or(IoErrorKind::WouldBlock)?;
 
         Ok(f(&mut stack))
     }
@@ -44,7 +44,7 @@ impl DirectBaseOperations for NetworkDevice {
         _: &mut [u8],
         _: file_system::Size,
     ) -> core::task::Poll<file_system::Result<usize>> {
-        file_system::ready(|| Err(Error::UnsupportedOperation))
+        file_system::ready(|| Err(IoErrorKind::Unsupported))
     }
 
     fn write(
@@ -53,7 +53,7 @@ impl DirectBaseOperations for NetworkDevice {
         _: &[u8],
         _: file_system::Size,
     ) -> core::task::Poll<file_system::Result<usize>> {
-        file_system::ready(|| Err(Error::UnsupportedOperation))
+        file_system::ready(|| Err(IoErrorKind::Unsupported))
     }
 
     fn control(
@@ -104,12 +104,12 @@ impl DirectBaseOperations for NetworkDevice {
                     let (input, output) = GET_IP_ADDRESS::cast(input, output)?;
                     *output = self
                         .with(|s| s.get_ip_address(*input))?
-                        .ok_or(Error::InvalidParameter)?;
+                        .ok_or(IoErrorKind::InvalidArgument)?;
                 }
                 ADD_IP_ADDRESS::IDENTIFIER => {
                     let indexed: &IpCidr = ADD_IP_ADDRESS::cast_input(input)?;
                     self.with_mut(|s| s.add_ip_address(indexed.clone()))?
-                        .map_err(|_| Error::InternalError)?;
+                        .map_err(|_| IoErrorKind::InputOutput)?;
                 }
                 REMOVE_IP_ADDRESS::IDENTIFIER => {
                     let ip_address_index: &usize = REMOVE_IP_ADDRESS::cast_input(input)?;
@@ -123,12 +123,12 @@ impl DirectBaseOperations for NetworkDevice {
                     let (input, output) = GET_ROUTE::cast(input, output)?;
                     *output = self
                         .with_mut(|s| s.get_route(*input))?
-                        .ok_or(Error::InvalidParameter)?;
+                        .ok_or(IoErrorKind::InvalidArgument)?;
                 }
                 ADD_ROUTE::IDENTIFIER => {
                     let route_index: &Route = ADD_ROUTE::cast_input(input)?;
                     self.with_mut(|s| s.add_route(route_index.clone()))?
-                        .map_err(|_| Error::InternalError)?;
+                        .map_err(|_| IoErrorKind::InputOutput)?;
                 }
                 REMOVE_ROUTE::IDENTIFIER => {
                     let route_index: &usize = REMOVE_ROUTE::cast_input(input)?;
@@ -143,12 +143,12 @@ impl DirectBaseOperations for NetworkDevice {
 
                     *output = self
                         .with_mut(|s| s.get_dns_server(*input))?
-                        .ok_or(Error::InvalidParameter)?;
+                        .ok_or(IoErrorKind::InvalidArgument)?;
                 }
                 ADD_DNS_SERVER::IDENTIFIER => {
                     let dns_server: &IpAddress = ADD_DNS_SERVER::cast_input(input)?;
                     self.with_mut(|s| s.add_dns_server(dns_server.clone()))?
-                        .map_err(|_| Error::InternalError)?;
+                        .map_err(|_| IoErrorKind::InputOutput)?;
                 }
                 REMOVE_DNS_SERVER::IDENTIFIER => {
                     let index: &usize = REMOVE_DNS_SERVER::cast_input(input)?;

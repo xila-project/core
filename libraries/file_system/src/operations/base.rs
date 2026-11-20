@@ -1,6 +1,6 @@
 //! One object-safe polling contract for device I/O.
 use super::polling::Operation;
-use crate::{Context, ControlCommandIdentifier, Error, Position, Result, Size};
+use crate::{Context, ControlCommandIdentifier, IoErrorKind, Position, Result, Size};
 use core::task::{Context as TaskContext, Poll, Waker};
 use shared::AnyByLayout;
 
@@ -13,7 +13,8 @@ pub fn ready<T>(operation: impl FnOnce() -> Result<T>) -> Poll<Result<T>> {
 fn immediate<T>(result: Poll<Result<T>>) -> Result<T> {
     match result {
         Poll::Ready(result) => result,
-        Poll::Pending => Err(Error::RessourceBusy),
+        // A synchronous adapter probes once: pending means "not ready now".
+        Poll::Pending => Err(IoErrorKind::WouldBlock),
     }
 }
 
@@ -50,7 +51,7 @@ pub trait BaseOperations: Send + Sync {
         _input: &AnyByLayout,
         _output: &mut AnyByLayout,
     ) -> Poll<Result<()>> {
-        Poll::Ready(Err(Error::UnsupportedOperation))
+        Poll::Ready(Err(IoErrorKind::Unsupported))
     }
     fn read_until(
         &self,
@@ -61,7 +62,7 @@ pub trait BaseOperations: Send + Sync {
         delimiter: &[u8],
     ) -> Poll<Result<usize>> {
         if delimiter.is_empty() {
-            return Poll::Ready(Err(Error::InvalidParameter));
+            return Poll::Ready(Err(IoErrorKind::InvalidArgument));
         }
         let mut total = 0;
         while total < buffer.len() {
@@ -230,7 +231,7 @@ pub trait BaseOperations: Send + Sync {
         match position {
             Position::Start(value) => Ok(*value),
             Position::Current(offset) => Ok(current.wrapping_add(*offset as Size)),
-            Position::End(_) => Err(Error::UnsupportedOperation),
+            Position::End(_) => Err(IoErrorKind::Unsupported),
         }
     }
     fn clone_context(&self, context: &Context) -> Result<Context>;
@@ -266,7 +267,7 @@ pub trait DirectBaseOperations: Send + Sync {
         _input: &AnyByLayout,
         _output: &mut AnyByLayout,
     ) -> Poll<Result<()>> {
-        Poll::Ready(Err(Error::UnsupportedOperation))
+        Poll::Ready(Err(IoErrorKind::Unsupported))
     }
     fn read_until(
         &self,
@@ -276,7 +277,7 @@ pub trait DirectBaseOperations: Send + Sync {
         delimiter: &[u8],
     ) -> Poll<Result<usize>> {
         if delimiter.is_empty() {
-            return Poll::Ready(Err(Error::InvalidParameter));
+            return Poll::Ready(Err(IoErrorKind::InvalidArgument));
         }
         let mut total = 0;
         while total < buffer.len() {
@@ -417,7 +418,7 @@ pub trait DirectBaseOperations: Send + Sync {
         match position {
             Position::Start(value) => Ok(*value),
             Position::Current(offset) => Ok(current.wrapping_add(*offset as Size)),
-            Position::End(_) => Err(Error::UnsupportedOperation),
+            Position::End(_) => Err(IoErrorKind::Unsupported),
         }
     }
 }

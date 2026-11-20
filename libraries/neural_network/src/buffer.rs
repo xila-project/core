@@ -1,7 +1,7 @@
 //! Aligned, owned byte storage for neural network models.
 use alloc::alloc::{Layout, alloc, alloc_zeroed, dealloc, realloc};
 use core::ptr::NonNull;
-use file_system::{Error, Result};
+use file_system::{IoErrorKind, Result};
 
 /// An owned byte buffer guaranteed to be 16-byte aligned.
 ///
@@ -39,10 +39,10 @@ impl ModelBuffer {
         }
         let aligned_capacity = Self::align_capacity(capacity)?;
         let layout = Layout::from_size_align(aligned_capacity, Self::ALIGNMENT)
-            .map_err(|_| Error::NoMemory)?;
+            .map_err(|_| IoErrorKind::OutOfMemory)?;
         // SAFETY: `aligned_capacity` is non-zero and alignment is valid.
         let raw = unsafe { alloc(layout) };
-        let ptr = NonNull::new(raw).ok_or(Error::NoMemory)?;
+        let ptr = NonNull::new(raw).ok_or(IoErrorKind::OutOfMemory)?;
         Ok(Self {
             ptr,
             len: 0,
@@ -57,10 +57,10 @@ impl ModelBuffer {
         }
         let aligned_capacity = Self::align_capacity(len)?;
         let layout = Layout::from_size_align(aligned_capacity, Self::ALIGNMENT)
-            .map_err(|_| Error::NoMemory)?;
+            .map_err(|_| IoErrorKind::OutOfMemory)?;
         // SAFETY: `aligned_capacity` is non-zero and alignment is valid.
         let raw = unsafe { alloc_zeroed(layout) };
-        let ptr = NonNull::new(raw).ok_or(Error::NoMemory)?;
+        let ptr = NonNull::new(raw).ok_or(IoErrorKind::OutOfMemory)?;
         Ok(Self {
             ptr,
             len,
@@ -138,11 +138,13 @@ impl ModelBuffer {
     /// (rounded up to [`Self::ALIGNMENT`]), so amortized growth cannot overshoot a size cap.
     pub fn write_at_within(&mut self, offset: usize, data: &[u8], limit: usize) -> Result<()> {
         if offset > self.len {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
-        let end = offset.checked_add(data.len()).ok_or(Error::FileTooLarge)?;
+        let end = offset
+            .checked_add(data.len())
+            .ok_or(IoErrorKind::FileTooLarge)?;
         if end > limit {
-            return Err(Error::FileTooLarge);
+            return Err(IoErrorKind::FileTooLarge);
         }
         if end > self.capacity {
             self.reserve_within(end, limit)?;
@@ -172,17 +174,17 @@ impl ModelBuffer {
             .min(limit.max(minimum_capacity));
         let aligned_capacity = Self::align_capacity(target_capacity)?;
         let new_layout = Layout::from_size_align(aligned_capacity, Self::ALIGNMENT)
-            .map_err(|_| Error::NoMemory)?;
+            .map_err(|_| IoErrorKind::OutOfMemory)?;
         let new_ptr = if self.capacity == 0 {
             // SAFETY: `aligned_capacity` > 0 and layout is valid.
             unsafe { alloc(new_layout) }
         } else {
             let old_layout = Layout::from_size_align(self.capacity, Self::ALIGNMENT)
-                .map_err(|_| Error::NoMemory)?;
+                .map_err(|_| IoErrorKind::OutOfMemory)?;
             // SAFETY: `self.ptr` was allocated with `old_layout`.
             unsafe { realloc(self.ptr.as_ptr(), old_layout, aligned_capacity) }
         };
-        self.ptr = NonNull::new(new_ptr).ok_or(Error::NoMemory)?;
+        self.ptr = NonNull::new(new_ptr).ok_or(IoErrorKind::OutOfMemory)?;
         self.capacity = aligned_capacity;
         Ok(())
     }
@@ -210,7 +212,7 @@ impl ModelBuffer {
     const fn align_capacity(capacity: usize) -> Result<usize> {
         match capacity.checked_add(Self::ALIGNMENT - 1) {
             Some(aligned) => Ok(aligned & !(Self::ALIGNMENT - 1)),
-            None => Err(Error::NoMemory),
+            None => Err(IoErrorKind::OutOfMemory),
         }
     }
 }
@@ -284,7 +286,10 @@ mod tests {
         assert_eq!(buffer.as_slice(), &[]);
 
         // Writing at non-contiguous offset fails
-        assert_eq!(buffer.write_at(5, &[1, 2, 3]), Err(Error::InvalidParameter));
+        assert_eq!(
+            buffer.write_at(5, &[1, 2, 3]),
+            Err(IoErrorKind::InvalidArgument)
+        );
 
         // Write first chunk
         buffer.write_at(0, &[1, 2, 3, 4]).unwrap();

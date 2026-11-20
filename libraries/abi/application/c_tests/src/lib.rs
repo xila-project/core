@@ -103,7 +103,9 @@ mod tests {
                     )
                     .await
                 }
-                .map_err(Status::from)?;
+                .map_err(|error| {
+                    Status::from(file_system::IntoIoErrorKind::into_io_error_kind(error))
+                })?;
                 Ok(handle)
             })
         }
@@ -123,7 +125,11 @@ mod tests {
             _: file_system::Size,
         ) -> core::task::Poll<file_system::Result<usize>> {
             match buffer.len() {
-                13 => return core::task::Poll::Ready(Err(file_system::Error::NotInitialized)),
+                13 => {
+                    return core::task::Poll::Ready(Err(
+                        file_system::IoErrorKind::DeviceUnavailable,
+                    ));
+                }
                 17 => return core::task::Poll::Ready(Ok(0)),
                 _ => {}
             }
@@ -145,7 +151,7 @@ mod tests {
             _: &[u8],
             _: file_system::Size,
         ) -> core::task::Poll<file_system::Result<usize>> {
-            core::task::Poll::Ready(Err(file_system::Error::UnsupportedOperation))
+            core::task::Poll::Ready(Err(file_system::IoErrorKind::Unsupported))
         }
     }
     impl file_system::MountOperations for ScriptedEntropy {}
@@ -537,7 +543,7 @@ mod tests {
                 }
                 // Fail promptly if the caller polls again without letting the peer run.
                 if polls != 0 {
-                    return Poll::Ready(Err(file_system::Error::UnsupportedOperation));
+                    return Poll::Ready(Err(file_system::IoErrorKind::Unsupported));
                 }
                 *self.0.waker.lock().unwrap() = Some(cx.waker().clone());
                 Poll::Pending
@@ -550,7 +556,7 @@ mod tests {
                 _: &[u8],
                 _: Size,
             ) -> Poll<file_system::Result<usize>> {
-                Poll::Ready(Err(file_system::Error::UnsupportedOperation))
+                Poll::Ready(Err(file_system::IoErrorKind::Unsupported))
             }
 
             fn clone_context(&self, _: &DeviceContext) -> file_system::Result<DeviceContext> {

@@ -7,7 +7,7 @@
 //!
 //! Regular file contents are not supported: [`::file_system::FileSystemOperations::lookup_file`]
 //! and [`::file_system::BaseOperations`] I/O methods return
-//! [`::file_system::Error::UnsupportedOperation`].
+//! [`::file_system::IoErrorKind::Unsupported`].
 //!
 //! # Memory Layout and Per-Node Cost
 //!

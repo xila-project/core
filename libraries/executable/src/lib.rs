@@ -161,7 +161,7 @@ async fn execute_inner(
     // Admission barrier: once a lifecycle request is accepted, no new
     // executable may start and race the shutdown pipeline.
     if !lifecycle::SYSTEM.is_running() {
-        return Err(virtual_file_system::Error::RessourceBusy.into());
+        return Err(virtual_file_system::IoErrorKind::ResourceBusy.into());
     }
     let task_instance = &context.task_manager;
 
@@ -187,7 +187,7 @@ async fn execute_inner(
 
     let file_name = path
         .get_file_name()
-        .ok_or(virtual_file_system::Error::InvalidPath)?;
+        .ok_or(virtual_file_system::IoErrorKind::InvalidPath)?;
 
     if statistics.kind == Kind::File {
         let mut magic = [0; 4];

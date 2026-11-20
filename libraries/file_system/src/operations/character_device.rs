@@ -15,8 +15,8 @@
 //! requires write access only for commands declared `Write`.
 //!
 //! A device that has no line discipline answers both commands with
-//! `UnsupportedOperation`; callers then keep their usual behaviour. A device
-//! rejects flags it does not know with `InvalidParameter`, so a program can
+//! `Unsupported`; callers then keep their usual behaviour. A device
+//! rejects flags it does not know with `InvalidArgument`, so a program can
 //! tell when a setting it asked for is not available.
 
 use crate::{

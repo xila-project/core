@@ -46,7 +46,7 @@ impl DirectBaseOperations for Disk {
 
     fn flush(&self, cx: &mut TaskContext<'_>) -> Poll<file_system::Result<()>> {
         if self.fail_flush.load(Ordering::SeqCst) {
-            return Poll::Ready(Err(file_system::Error::InputOutput));
+            return Poll::Ready(Err(file_system::IoErrorKind::InputOutput));
         }
         self.memory.flush(cx)
     }

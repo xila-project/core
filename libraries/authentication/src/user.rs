@@ -336,7 +336,7 @@ pub async fn create_user(
         {
             return Err(Error::UserHomeAlreadyUsed);
         }
-        Ok(_) | Err(virtual_file_system::Error::FileSystem(file_system::Error::NotFound)) => {}
+        Ok(_) | Err(file_system::IoErrorKind::NotFound) => {}
         Err(error) => return Err(Error::FailedToReadUserFile(error)),
     }
 
@@ -347,7 +347,7 @@ pub async fn create_user(
         Ok(_) => {
             return Err(Error::FailedToCreateUser(users::Error::DuplicateUserName));
         }
-        Err(virtual_file_system::Error::FileSystem(file_system::Error::NotFound)) => {}
+        Err(file_system::IoErrorKind::NotFound) => {}
         Err(error) => return Err(Error::FailedToReadUserFile(error)),
     }
 
@@ -375,7 +375,7 @@ pub async fn create_user(
     );
 
     match Directory::create(virtual_file_system, task, USERS_FOLDER_PATH).await {
-        Ok(_) | Err(virtual_file_system::Error::AlreadyExists) => {}
+        Ok(_) | Err(virtual_file_system::IoErrorKind::AlreadyExists) => {}
         Err(error) => Err(Error::FailedToCreateUsersDirectory(error))?,
     }
 
@@ -502,7 +502,7 @@ pub async fn change_user_name(
         Ok(_) => {
             return Err(Error::FailedToRenameUser(users::Error::DuplicateUserName));
         }
-        Err(virtual_file_system::Error::FileSystem(file_system::Error::NotFound)) => {}
+        Err(file_system::IoErrorKind::NotFound) => {}
         Err(error) => return Err(Error::FailedToReadUserFile(error)),
     }
 

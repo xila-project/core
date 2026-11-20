@@ -27,7 +27,7 @@ impl BaseOperations for ShortDevice {
         file_system::ready(|| {
             if position as usize >= self.stop {
                 return if self.fail {
-                    Err(file_system::Error::InputOutput)
+                    Err(file_system::IoErrorKind::InputOutput)
                 } else {
                     Ok(0)
                 };
@@ -51,7 +51,7 @@ impl BaseOperations for ShortDevice {
         file_system::ready(|| {
             if position as usize >= self.stop {
                 return if self.fail {
-                    Err(file_system::Error::InputOutput)
+                    Err(file_system::IoErrorKind::InputOutput)
                 } else {
                     Ok(0)
                 };

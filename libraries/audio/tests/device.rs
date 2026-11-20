@@ -2,7 +2,7 @@ use audio::{
     AudioStreamDevice, AudioSystem, Configuration, GET_CONFIGURATION, GET_VOLUME, GET_WRITABLE,
     SET_CONFIGURATION, SET_VOLUME, START, STOP, SampleFormat,
 };
-use file_system::{BaseOperations, Context, ControlCommand, Error};
+use file_system::{BaseOperations, Context, ControlCommand, IoErrorKind};
 use shared::AnyByLayout;
 use std::{boxed::Box, pin::Pin};
 
@@ -88,7 +88,7 @@ fn failed_open_does_not_reserve_a_stream_slot() {
     let mut first = open(&device);
     let mut second = Context::new_empty();
 
-    assert_eq!(device.open(&mut second), Err(Error::RessourceBusy));
+    assert_eq!(device.open(&mut second), Err(IoErrorKind::ResourceBusy));
     device.close(&mut first).unwrap();
     assert_eq!(device.open(&mut second), Ok(()));
     device.close(&mut second).unwrap();
@@ -103,9 +103,12 @@ fn unopened_context_rejects_operations_and_read_is_unsupported() {
 
     assert_eq!(
         device.write_sync(&mut context, &[0; 8], 0),
-        Err(Error::InvalidContext)
+        Err(IoErrorKind::BadDescriptor)
     );
-    assert_eq!(device.flush_sync(&mut context), Err(Error::InvalidContext));
+    assert_eq!(
+        device.flush_sync(&mut context),
+        Err(IoErrorKind::BadDescriptor)
+    );
     assert_eq!(
         device.control_sync(
             &mut context,
@@ -113,11 +116,11 @@ fn unopened_context_rejects_operations_and_read_is_unsupported() {
             AnyByLayout::NONE,
             AnyByLayout::from_mutable(&mut 0u8),
         ),
-        Err(Error::InvalidContext)
+        Err(IoErrorKind::BadDescriptor)
     );
     assert_eq!(
         device.read_sync(&mut context, &mut output, 0),
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     );
 }
 
@@ -135,15 +138,15 @@ fn controls_validate_payloads_values_and_fixed_configuration() {
     control::<SET_CONFIGURATION>(&device, &mut context, &fixed, &mut ()).unwrap();
     assert_eq!(
         control::<SET_CONFIGURATION>(&device, &mut context, &other, &mut ()),
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     );
     assert_eq!(
         control::<SET_VOLUME>(&device, &mut context, &101, &mut ()),
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     );
     assert_eq!(
         device.write_sync(&mut context, &[0; 7], 0),
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     );
 
     let wrong_input = 0u32;
@@ -155,7 +158,7 @@ fn controls_validate_payloads_values_and_fixed_configuration() {
             AnyByLayout::from(&wrong_input),
             AnyByLayout::from_mutable(&mut empty),
         ),
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     );
 
     let mut wrong_output = 0u16;
@@ -166,7 +169,7 @@ fn controls_validate_payloads_values_and_fixed_configuration() {
             AnyByLayout::NONE,
             AnyByLayout::from_mutable(&mut wrong_output),
         ),
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     );
 
     let mut misaligned = [0u8; size_of::<Configuration>() + 1];
@@ -180,7 +183,7 @@ fn controls_validate_payloads_values_and_fixed_configuration() {
             unaligned_configuration,
             AnyByLayout::from_mutable(&mut empty),
         ),
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     );
 }
 
@@ -205,7 +208,10 @@ fn controls_start_stop_and_write_contribute_expected_mix() {
 
     device.write_sync(&mut context, &samples, 0).unwrap();
     control::<START>(&device, &mut context, &(), &mut ()).unwrap();
-    assert_eq!(device.flush_sync(&mut context), Err(Error::RessourceBusy));
+    assert_eq!(
+        device.flush_sync(&mut context),
+        Err(IoErrorKind::WouldBlock)
+    );
     system.as_ref().mix_next_block().unwrap();
     let mut rendered = [0.0f32; 4];
     output.with_consumer(|consumer| {
@@ -222,6 +228,6 @@ fn controls_start_stop_and_write_contribute_expected_mix() {
     assert_eq!(device.flush_sync(&mut context), Ok(()));
     assert!(matches!(
         device.clone_context(&context),
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     ));
 }

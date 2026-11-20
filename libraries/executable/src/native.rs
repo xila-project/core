@@ -1,5 +1,6 @@
 use abi_application::{HomeGrant, ProcessHost, ProcessLaunch, SpawnFuture, SpawnRequest, Status};
 use alloc::{boxed::Box, vec::Vec};
+use file_system::IntoIoErrorKind;
 use native_loader::{ExecutableMemory, LoadedImage, Startup};
 use stackful::{MIN_STACK_SIZE, Stack};
 use virtual_file_system::VirtualFileSystem;
@@ -12,8 +13,8 @@ use crate::{
 /// The status a failed spawn reports to the native caller.
 fn status(error: Error) -> Status {
     match error {
-        Error::FileSystem(error) => error.into(),
-        Error::Task(error) => error.into(),
+        Error::FileSystem(kind) => kind.into(),
+        Error::Task(error) => error.into_io_error_kind().into(),
         Error::PermissionDenied => Status::PermissionDenied,
         // The file is not an image this firmware can run.
         Error::FailedToGetMainFunction => Status::ExecFormat,

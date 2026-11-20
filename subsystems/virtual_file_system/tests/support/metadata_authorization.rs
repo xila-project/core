@@ -1,7 +1,7 @@
 use super::*;
 use file_system::Permissions;
 use users::{GroupIdentifier, UserIdentifier};
-use virtual_file_system::{Error, SynchronousFile};
+use virtual_file_system::{IoErrorKind, SynchronousFile};
 
 async fn fixture() -> (TaskIdentifier, &'static VirtualFileSystem, UserIdentifier) {
     let (task, vfs) = initialize().await;
@@ -29,17 +29,17 @@ async fn readable_foreign_handle_and_duplicate_cannot_mutate_metadata() {
     vfs.task_manager().set_user(task, user).await.unwrap();
     assert_eq!(
         file.set_permissions(Permissions::ALL_FULL).await,
-        Err(Error::PermissionDenied)
+        Err(IoErrorKind::PermissionDenied)
     );
     assert_eq!(
         duplicate.set_owner(Some(user), None).await,
-        Err(Error::PermissionDenied)
+        Err(IoErrorKind::PermissionDenied)
     );
     assert_eq!(
         duplicate
             .as_synchronous_file_mut()
             .set_permissions(Permissions::ALL_FULL),
-        Err(Error::PermissionDenied)
+        Err(IoErrorKind::PermissionDenied)
     );
 }
 
@@ -66,7 +66,7 @@ async fn retained_authority_tracks_demotion_and_current_owner() {
     vfs.task_manager().set_user(task, user).await.unwrap();
     assert_eq!(
         file.set_permissions(Permissions::ALL_FULL).await,
-        Err(Error::PermissionDenied)
+        Err(IoErrorKind::PermissionDenied)
     );
     vfs.task_manager()
         .set_user(task, UserIdentifier::ROOT)
@@ -87,11 +87,11 @@ async fn root_fd_ownership_is_explicitly_unsupported_and_path_chown_is_root_only
         .unwrap();
     assert_eq!(
         file.set_owner(Some(user), None).await,
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     );
     assert_eq!(
         file.set_owner(None, Some(GroupIdentifier::ROOT)).await,
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     );
     file.set_owner(None, None).await.unwrap();
     vfs.set_ownership(task, "/file", Some(user), None)
@@ -101,11 +101,11 @@ async fn root_fd_ownership_is_explicitly_unsupported_and_path_chown_is_root_only
     assert_eq!(
         vfs.set_ownership(task, "/file", Some(UserIdentifier::ROOT), None)
             .await,
-        Err(Error::PermissionDenied)
+        Err(IoErrorKind::PermissionDenied)
     );
     assert_eq!(
         file.set_owner(Some(UserIdentifier::ROOT), None).await,
-        Err(Error::PermissionDenied)
+        Err(IoErrorKind::PermissionDenied)
     );
 }
 
@@ -118,7 +118,7 @@ async fn root_readonly_littlefs_chmod_is_explicitly_unsupported() {
     let before = vfs.get_statistics(&"/file").await.unwrap().permissions;
     assert_eq!(
         file.set_permissions(Permissions::ALL_FULL).await,
-        Err(Error::FileSystem(file_system::Error::UnsupportedOperation))
+        Err(IoErrorKind::Unsupported)
     );
     assert_eq!(
         vfs.get_statistics(&"/file").await.unwrap().permissions,

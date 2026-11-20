@@ -1,5 +1,5 @@
 use core::mem::{align_of, size_of};
-use file_system::{ControlCommand, Error, Result};
+use file_system::{ControlCommand, IoErrorKind, Result};
 use shared::AnyByLayout;
 
 pub fn validate_command<C: ControlCommand>(
@@ -13,7 +13,7 @@ pub fn validate_command<C: ControlCommand>(
 fn validate_payload<T>(payload: &AnyByLayout) -> Result<()> {
     let address = core::ptr::from_ref(payload).cast::<u8>() as usize;
     if payload.get_size() != size_of::<T>() || !address.is_multiple_of(align_of::<T>()) {
-        return Err(Error::InvalidParameter);
+        return Err(IoErrorKind::InvalidArgument);
     }
     Ok(())
 }
@@ -41,7 +41,7 @@ mod tests {
                 AnyByLayout::from(&wrong_input),
                 AnyByLayout::from_mutable(&mut output),
             ),
-            Err(Error::InvalidParameter)
+            Err(IoErrorKind::InvalidArgument)
         );
 
         let wrong_output = 0u64;
@@ -50,7 +50,7 @@ mod tests {
                 AnyByLayout::from(&request),
                 AnyByLayout::from(&wrong_output),
             ),
-            Err(Error::InvalidParameter)
+            Err(IoErrorKind::InvalidArgument)
         );
 
         let load_req = LoadRequest::tensorflow_lite();
@@ -58,7 +58,7 @@ mod tests {
         let wrong_load_input = 0u32;
         assert_eq!(
             validate_command::<LOAD>(AnyByLayout::from(&wrong_load_input), AnyByLayout::NONE,),
-            Err(Error::InvalidParameter)
+            Err(IoErrorKind::InvalidArgument)
         );
     }
 
@@ -74,7 +74,7 @@ mod tests {
         let request = 0u32;
         assert_eq!(
             validate_command::<GET_INPUT_INFO>(AnyByLayout::from(&request), misaligned,),
-            Err(Error::InvalidParameter)
+            Err(IoErrorKind::InvalidArgument)
         );
     }
 }

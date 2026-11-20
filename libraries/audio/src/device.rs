@@ -2,8 +2,8 @@ use alloc::boxed::Box;
 use core::{mem::align_of, pin::Pin};
 
 use file_system::{
-    BaseOperations, CharacterDevice, Context, ControlCommand, ControlCommandIdentifier, Error,
-    MountOperations, Result, Size,
+    BaseOperations, CharacterDevice, Context, ControlCommand, ControlCommandIdentifier,
+    IoErrorKind, MountOperations, Result, Size,
 };
 use shared::AnyByLayout;
 
@@ -15,7 +15,7 @@ use crate::{
 fn validate_payload<T>(payload: &AnyByLayout) -> Result<()> {
     let address = core::ptr::from_ref(payload).cast::<u8>() as usize;
     if payload.get_size() != size_of::<T>() || !address.is_multiple_of(align_of::<T>()) {
-        return Err(Error::InvalidParameter);
+        return Err(IoErrorKind::InvalidArgument);
     }
     Ok(())
 }
@@ -30,7 +30,7 @@ fn validate_command<C: ControlCommand>(input: &AnyByLayout, output: &AnyByLayout
 /// The device borrows a pinned static audio service. Every successful VFS open
 /// reserves a separate stream and stores that reservation in its `Context`.
 /// Cloning an open context is unsupported; the VFS receives
-/// [`Error::UnsupportedOperation`] rather than two contexts sharing one stream.
+/// [`IoErrorKind::Unsupported`] rather than two contexts sharing one stream.
 pub struct AudioStreamDevice<
     const STREAMS: usize = 4,
     const STREAM_BYTES: usize = 2048,
@@ -52,7 +52,7 @@ impl<const S: usize, const B: usize, const F: usize, const O: usize, const Q: us
     fn stream<'c>(&self, context: &'c Context) -> Result<&'c StreamHandle<'static, S, B, F, O, Q>> {
         context
             .get_private_data_of_type::<StreamHandle<'static, S, B, F, O, Q>>()
-            .ok_or(Error::InvalidContext)
+            .ok_or(IoErrorKind::BadDescriptor)
     }
 }
 
@@ -61,7 +61,7 @@ impl<const S: usize, const B: usize, const F: usize, const O: usize, const Q: us
 {
     fn open(&self, context: &mut Context) -> Result<()> {
         if context.get_private_data().is_some() {
-            return Err(Error::InvalidContext);
+            return Err(IoErrorKind::BadDescriptor);
         }
         let stream = self.system.get_ref().open_stream()?;
         context.set_private_data(Box::new(stream));
@@ -72,7 +72,7 @@ impl<const S: usize, const B: usize, const F: usize, const O: usize, const Q: us
         context
             .take_private_data_of_type::<StreamHandle<'static, S, B, F, O, Q>>()
             .map(drop)
-            .ok_or(Error::InvalidContext)
+            .ok_or(IoErrorKind::BadDescriptor)
     }
 
     fn read(
@@ -82,7 +82,7 @@ impl<const S: usize, const B: usize, const F: usize, const O: usize, const Q: us
         _buffer: &mut [u8],
         _absolute_position: Size,
     ) -> core::task::Poll<Result<usize>> {
-        file_system::ready(|| Err(Error::UnsupportedOperation))
+        file_system::ready(|| Err(IoErrorKind::Unsupported))
     }
 
     fn write(
@@ -119,7 +119,7 @@ impl<const S: usize, const B: usize, const F: usize, const O: usize, const Q: us
                     let configuration = SET_CONFIGURATION::cast_input(input)?;
                     configuration.validate()?;
                     if *configuration != stream.configuration() {
-                        return Err(Error::UnsupportedOperation);
+                        return Err(IoErrorKind::Unsupported);
                     }
                 }
                 GET_CONFIGURATION::IDENTIFIER => {
@@ -147,14 +147,14 @@ impl<const S: usize, const B: usize, const F: usize, const O: usize, const Q: us
                     validate_command::<STOP>(input, output)?;
                     stream.stop()?;
                 }
-                _ => return Err(Error::UnsupportedOperation),
+                _ => return Err(IoErrorKind::Unsupported),
             }
             Ok(())
         })
     }
 
     fn clone_context(&self, _context: &Context) -> Result<Context> {
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     }
 }
 
