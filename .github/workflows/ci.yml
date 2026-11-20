@@ -181,7 +181,7 @@ jobs:
       - name: "Test | Browser audio"
         run: mise run ci:wasm-audio-check
       - name: "Test | Browser task yield"
-        run: mise run test:browser-task
+        run: mise run ci:wasm-task-tests
 
   abi:
     name: ABI (${{ matrix.memory }})
