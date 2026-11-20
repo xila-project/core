@@ -627,12 +627,57 @@ static int environment(const char *program) {
     CHECK("NULL assignment clears the host environment",
           after_clear != NULL && strcmp(after_clear, "present") == 0 &&
           getenv("SDK_ALLOCATED") == NULL);
-    CHECK("only the current empty array and one previous table remain allocated",
+    CHECK("the current empty array and one previous table remain allocated",
           unsetenv("SDK_AFTER_CLEAR") == 0 && environ[0] == NULL &&
-          live_blocks == empty_blocks + 2);
+          live_blocks <= empty_blocks + 4);
     environ = NULL;
-    CHECK("another adoption frees the previous table",
-          getenv("SDK_AFTER_CLEAR") == NULL && live_blocks == empty_blocks);
+    CHECK("another adoption releases the previous table's strings",
+          getenv("SDK_AFTER_CLEAR") == NULL && environ[0] == NULL);
+
+    /* Restoring a table saved before the most recent adoption is unsupported
+     * but safe: the array is kept, so it reads as that slot's current content. */
+    CHECK("set the base value", setenv("REVIEW_BASE", "base", 1) == 0);
+    static char *first[] = {"REVIEW_ONE=1", NULL};
+    static char *second[] = {"REVIEW_TWO=2", NULL};
+    char **older = environ;
+    environ = first;
+    CHECK("adopt the first temporary table",
+          getenv("REVIEW_ONE") != NULL && getenv("REVIEW_BASE") == NULL);
+    char **newer = environ;
+    environ = second;
+    CHECK("adopt the second temporary table",
+          getenv("REVIEW_TWO") != NULL && getenv("REVIEW_ONE") == NULL);
+    environ = older;
+    CHECK("restoring the older save reads its slot without crashing",
+          getenv("REVIEW_BASE") == NULL && getenv("REVIEW_ONE") == NULL &&
+          getenv("REVIEW_TWO") == NULL && environ[0] == NULL);
+    environ = newer;
+    CHECK("restoring the newer save reads its slot without crashing",
+          getenv("REVIEW_BASE") == NULL && getenv("REVIEW_ONE") == NULL &&
+          getenv("REVIEW_TWO") == NULL);
+    CHECK("the environment works after stale restores",
+          setenv("REVIEW_AFTER", "ok", 1) == 0 && environment_value_is("REVIEW_AFTER", "ok"));
+
+    /* Each cycle adopts a table, and every second one saves and restores. */
+    static char *cycle[] = {"CYCLE_A=a", "CYCLE_B=b", "CYCLE_C=c", "CYCLE_D=d", "CYCLE_E=e", NULL};
+    environ = cycle;
+    getenv("CYCLE_A");
+    size_t cycle_blocks = live_blocks;
+    bool cycles_ok = true;
+    for (int cycle_index = 0; cycle_index < 300; ++cycle_index) {
+        char **cycle_saved = environ;
+        environ = cycle;
+        cycles_ok = cycles_ok && getenv("CYCLE_E") != NULL;
+        if (cycle_index % 2 == 0) {
+            environ = cycle_saved;
+            cycles_ok = cycles_ok && getenv("CYCLE_E") != NULL;
+        }
+        cycles_ok = cycles_ok && live_blocks <= cycle_blocks + 16;
+    }
+    CHECK("hundreds of adoptions keep the heap bounded", cycles_ok &&
+          live_blocks <= cycle_blocks + 16);
+    environ = NULL;
+    getenv("CYCLE_A");
 
     puts("environment: ok");
     return 0;

@@ -1,27 +1,115 @@
 /* Optional POSIX view of the launch environment and subsequent POSIX changes.
  * A strong reference to environ extracts this member from libxila_posix.a.
  * Startup and the accessors supply weak defaults for its hooks. */
+#include <stddef.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <xila/posix.h>
 
 #include "internal.h"
 
+/* Every SDK-built array carries its capacity in a header. Once an array may
+ * have been exposed through environ, it is never returned to the heap: a
+ * program can still hold a saved pointer to it. A retired array is emptied
+ * (slot 0 becomes NULL) and kept in a pool, linked through slot 1, for a later
+ * table. A stale restore therefore reads an empty or live table, never freed
+ * memory, and the pool is bounded by the peak number of tables in use. */
+struct table {
+    size_t capacity;
+    char *slots[];
+};
+
+#define MINIMUM_SLOTS 4
+
 static char *empty_environment[1];
 static char **owned = empty_environment;
 static char **retained;
+static char **pool;
 char **environ = empty_environment;
 
 static void publish(char **table) {
     owned = environ = table != NULL ? table : empty_environment;
 }
 
+static struct table *header(char **slots) {
+    return (struct table *)((char *)slots - offsetof(struct table, slots));
+}
+
+static size_t capacity_of(char **slots) {
+    return header(slots)->capacity;
+}
+
+static char **next_pooled(char **slots) {
+    return (char **)slots[1];
+}
+
+static bool block_size(size_t capacity, size_t *bytes) {
+    return !__builtin_mul_overflow(capacity, sizeof(char *), bytes) &&
+           !__builtin_add_overflow(*bytes, sizeof(struct table), bytes);
+}
+
+/* Keep the array reachable for later tables. The strings must already belong
+ * to another table or have been released. */
+static void park(char **slots) {
+    slots[0] = NULL;
+    slots[1] = (char *)pool;
+    pool = slots;
+}
+
+/* Take the smallest pooled array with room for the slots, else allocate. */
+static char **table_alloc(size_t slots) {
+    char **best = NULL;
+    char **before_best = NULL;
+    char **before = NULL;
+    for (char **candidate = pool; candidate != NULL; before = candidate, candidate = next_pooled(candidate))
+        if (capacity_of(candidate) >= slots && (best == NULL || capacity_of(candidate) < capacity_of(best))) {
+            best = candidate;
+            before_best = before;
+        }
+    if (best != NULL) {
+        if (before_best != NULL)
+            before_best[1] = (char *)next_pooled(best);
+        else
+            pool = next_pooled(best);
+        best[0] = NULL;
+        return best;
+    }
+
+    size_t capacity = MINIMUM_SLOTS;
+    while (capacity < slots) {
+        if (capacity > SIZE_MAX / 2)
+            return xila_fail_errno(ENOMEM), NULL;
+        capacity *= 2;
+    }
+    size_t bytes;
+    if (!block_size(capacity, &bytes))
+        return xila_fail_errno(ENOMEM), NULL;
+    struct table *block = xila_heap_alloc(bytes);
+    if (block == NULL)
+        return NULL;
+    block->capacity = capacity;
+    block->slots[0] = NULL;
+    return block->slots;
+}
+
+/* Release the strings of an array and keep the array. Called for tables that
+ * left the environment and for unpublished candidates that own their strings. */
 __attribute__((visibility("hidden"))) void xila_environ_release(char **table) {
     if (table == NULL || table == empty_environment)
         return;
     for (size_t index = 0; table[index] != NULL; ++index)
         xila_heap_release(table[index]);
-    xila_heap_release(table);
+    park(table);
+}
+
+/* A host snapshot was never exposed, so it can return to the heap. */
+static void discard_host(char **table) {
+    if (table == NULL)
+        return;
+    for (size_t index = 0; table[index] != NULL; ++index)
+        xila_heap_release(table[index]);
+    xila_heap_release(header(table));
 }
 
 /* A host entry can grow between calls. Retry with the new length, just as
@@ -47,7 +135,7 @@ static int read_entry(size_t index, char **entry) {
     return status == XILA_STATUS_NOT_FOUND ? 0 : xila_fail(status);
 }
 
-/* Enumerate once, growing only at powers of two. The partial table is always
+/* Enumerate once, doubling the fresh array. The partial table is always
  * terminated so startup and adoption can release it if a later read fails. */
 static int read_host(char ***output) {
     char **table = NULL;
@@ -61,18 +149,24 @@ static int read_host(char ***output) {
         if (result < 0)
             break;
         size_t count = index + 1;
-        if ((count & (count - 1)) == 0) {
-            char **larger = reallocarray(table, count, 2 * sizeof(*larger));
-            if (larger == NULL) {
+        size_t capacity = table == NULL ? 0 : capacity_of(table);
+        if (count + 1 > capacity) {
+            size_t larger = capacity == 0 ? MINIMUM_SLOTS : 2 * capacity;
+            size_t bytes;
+            struct table *block = NULL;
+            if (block_size(larger, &bytes))
+                block = realloc(table == NULL ? NULL : header(table), bytes);
+            if (block == NULL) {
                 xila_heap_release(entry);
                 break;
             }
-            table = larger;
+            block->capacity = larger;
+            table = block->slots;
         }
         table[index] = entry;
         table[count] = NULL;
     }
-    xila_environ_release(table);
+    discard_host(table);
     return -1;
 }
 
@@ -124,11 +218,10 @@ static int copy_assigned(char ***output) {
     if (count == 0)
         return 0;
 
-    char **table = reallocarray(NULL, count + 1, sizeof(*table));
+    char **table = table_alloc(count + 1);
     if (table == NULL)
         return -1;
     size_t used = 0;
-    table[0] = NULL;
     for (size_t index = 0; index < count; ++index) {
         const char *entry = environ[index];
         const char *equals = strchr(entry, '=');
@@ -150,7 +243,7 @@ static int copy_assigned(char ***output) {
         table[used] = NULL;
     }
     if (used == 0)
-        xila_heap_release(table);
+        park(table);
     else
         *output = table;
     return 0;
@@ -201,14 +294,15 @@ __attribute__((visibility("hidden"))) int xila_environ_sync(char ***evicted) {
     }
     if (status != XILA_STATUS_OK) {
         write_host(host, false);
-        xila_environ_release(host);
+        discard_host(host);
         if (!restoring)
             xila_environ_release(replacement);
         return xila_fail(status);
     }
-    xila_environ_release(host);
+    discard_host(host);
     /* Keep one previous SDK table available for save/assign/restore. A
-     * restore swaps the two SDK tables without copying either. */
+     * restore swaps the two SDK tables without copying either. The evicted
+     * table's array stays in the pool, so an older saved pointer stays safe. */
     if (!restoring)
         *evicted = retained;
     retained = owned;
@@ -224,7 +318,9 @@ __attribute__((visibility("hidden"))) int xila_environ_change(const char *name, 
         if (previous == NULL && matches(owned[count], name, name_length))
             previous = owned[count];
 
-    /* Prepare replacements before committing so ENOMEM leaves both views intact. */
+    /* Prepare replacements before committing so ENOMEM leaves both views intact.
+     * An array with spare capacity grows in place, so a saved pointer to it
+     * stays valid. */
     char *entry = NULL;
     char **extended = NULL;
     if (value != NULL) {
@@ -239,8 +335,8 @@ __attribute__((visibility("hidden"))) int xila_environ_change(const char *name, 
         entry[name_length] = '=';
         memcpy(entry + name_length + 1, value, value_bytes);
 
-        if (previous == NULL) {
-            extended = xila_heap_alloc((count + 2) * sizeof(*extended));
+        if (previous == NULL && (owned == empty_environment || capacity_of(owned) < count + 2)) {
+            extended = table_alloc(count + 2);
             if (extended == NULL) {
                 xila_heap_release(entry);
                 return -1;
@@ -252,14 +348,20 @@ __attribute__((visibility("hidden"))) int xila_environ_change(const char *name, 
     }
 
     if (xila_posix_env_commit(name, name_length, value) != 0) {
-        xila_heap_release(extended);
+        if (extended != NULL)
+            park(extended);
         xila_heap_release(entry);
         return -1;
     }
     if (extended != NULL) {
+        /* The strings moved to the new array. Keep the old array for saved
+         * pointers; it now reads as empty. */
         if (owned != empty_environment)
-            xila_heap_release(owned);
+            park(owned);
         publish(extended);
+    } else if (value != NULL && previous == NULL) {
+        owned[count] = entry;
+        owned[count + 1] = NULL;
     } else if (previous != NULL) {
         /* The host removes every occurrence. Keep the old name alive until we
          * have scanned the remaining entries, even if name aliased the cache. */

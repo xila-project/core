@@ -231,10 +231,27 @@ diagnostic and exit status.
 
   The SDK retains one previous table after adoption. Save `environ` before
   assigning a temporary table and restore it before adopting another table.
-  Restoring the saved table reinstalls its contents and retains the outgoing
-  table. A mutation of the current table can invalidate saved pointers to
-  its array or strings. Removing the last entry leaves the current array
-  in place with a NULL first slot.
+  Restoring the retained table reinstalls its array as is, without UTF-8
+  validation or duplicate removal, and retains the outgoing table. Writing your
+  own pointers into slots of an SDK-owned array is unsupported.
+
+  The SDK never returns an array it built to the heap once `environ` has
+  exposed it. An array that leaves the environment loses its strings, reads as
+  empty (`array[0]` is NULL) and joins a small pool that later tables reuse, so
+  memory is bounded by the peak number of tables in use, not by the number of
+  adoptions. Restoring a table saved before the most recent adoption is
+  therefore safe but not supported: the next accessor adopts whatever that array
+  holds, which is empty unless a later table reused it, in which case it is that
+  table's current contents. A mutation of the current table can invalidate
+  saved pointers to its strings, and can change its entries in place or move
+  them to another array. Removing the last entry leaves the current array in
+  place with a NULL first slot.
+
+  Compile with `<stdlib.h>` from the SDK. Its `getenv` declaration carries an
+  asm-label wrapper that stops the compiler from assuming `environ` is unchanged
+  across the call. A program that declares `char *getenv(const char *);` itself,
+  or is built without the SDK's `include/posix` path, bypasses that wrapper, and
+  the compiler may then fold comparisons on `environ` after `getenv`.
 
   To observe direct task or ABI changes, use `getenv` or enumerate through
   `xila_env_entry`.
