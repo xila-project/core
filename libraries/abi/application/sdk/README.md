@@ -426,5 +426,12 @@ machine's `RELATIVE` dynamic relocations, and (on RISC-V) defines no
 Xtensa the link will use `-pie --no-dynamic-linker`, never `-static-pie`. The
 build needs `clang`, `lld`, `llvm-ar`, `cmake`, `zstd` and, for Cortex-M and RISC-V,
 the Arm GNU toolchain or `gcc-riscv64-unknown-elf`; CI installs them through mise
-bootstrap packages. The SDK only takes `libgcc.a` from the Arm package, so CI installs
-`gcc-arm-none-eabi` without its recommended newlib (about 490 MB).
+bootstrap packages. The SDK only takes `libgcc.a` from the Arm package, but apt installs the
+recommended newlib packages with `gcc-arm-none-eabi` (a 550 MB download instead of 61 MB, 489 MB of it
+unused). `mise run ci:packages-sdk-arm` therefore skips them on GitHub Actions runners only: when
+`GITHUB_ACTIONS=true` it first writes `/etc/apt/apt.conf.d/90xila-no-install-recommends`
+(`APT::Install-Recommends "false";`, from `mise.apt-no-recommends.toml`). That file stays in place and
+applies to every later `apt install` on the machine, which is harmless on a throwaway runner. Anywhere
+else the task changes no apt configuration and installs the recommended packages; to install only the
+two required packages on your own machine, run
+`sudo apt-get install --no-install-recommends gcc-arm-none-eabi binutils-arm-none-eabi`.

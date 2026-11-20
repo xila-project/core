@@ -1,0 +1,11 @@
+# System-wide apt setting for throwaway CI runners. Only ci:packages-sdk-arm loads this file (with
+# `mise -E apt-no-recommends bootstrap files apply`), and only when GITHUB_ACTIONS=true, because
+# the file persists in /etc/apt/apt.conf.d and changes every later `apt install` on the machine.
+# [bootstrap.files] cannot be limited to one task or environment, hence the dedicated env file.
+[bootstrap.files."/etc/apt/apt.conf.d/90xila-no-install-recommends"]
+mode = "0644"
+owner = "root"
+group = "root"
+content = """
+APT::Install-Recommends "false";
+"""

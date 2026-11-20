@@ -448,12 +448,25 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertEqual(packages["apt:gcc-riscv64-unknown-elf"]["env"], "sdk-riscv")
         self.assertIn("packages: ci:packages-sdk-riscv", sdk)
         # The SDK links picolibc and only takes libgcc.a from the Arm compiler package. mise cannot
-        # skip recommended packages, which would add 487 MB of newlib to every Arm SDK job.
+        # skip recommended packages, which would add 489 MB of newlib (550 MB instead of 61 MB) to every
+        # Arm SDK job. The apt setting is system-wide and permanent, so it must only be written on a
+        # GitHub Actions runner, from a dedicated env file, never from [bootstrap.files] in mise.ci.toml.
         arm = ci_config()["tasks"]["ci:packages-sdk-arm"]
         self.assertIn("ci:packages-sdk", arm["depends"])
-        self.assertLess(arm["run"].index("bootstrap files apply"), arm["run"].index("bootstrap packages apply"))
-        apt_config = ci_config()["bootstrap"]["files"]["/etc/apt/apt.conf.d/90xila-no-install-recommends"]
-        self.assertEqual(apt_config["content"].strip(), 'APT::Install-Recommends "false";')
+        self.assertNotIn("files", tomllib.loads((ROOT / "mise.ci.toml").read_text()).get("bootstrap", {}))
+        script = "\n".join(line for line in arm["run"].splitlines() if not line.startswith("#"))
+        self.assertIn('[ "${GITHUB_ACTIONS:-}" = "true" ]', script)
+        self.assertEqual(script.count("bootstrap files apply"), 1)
+        self.assertIn("mise -E apt-no-recommends bootstrap files apply --yes", script)
+        self.assertNotIn("-E ci bootstrap files", script)
+        self.assertNotIn("--update", script)
+        self.assertLess(script.index("bootstrap files apply"), script.index("bootstrap packages apply"))
+        apt_files = tomllib.loads((ROOT / "mise.apt-no-recommends.toml").read_text())["bootstrap"]["files"]
+        self.assertEqual(list(apt_files), ["/etc/apt/apt.conf.d/90xila-no-install-recommends"])
+        self.assertEqual(
+            apt_files["/etc/apt/apt.conf.d/90xila-no-install-recommends"]["content"].strip(),
+            'APT::Install-Recommends "false";',
+        )
         # The host job builds the example for the Linux loader test.
         self.assertIn("ci:packages-sdk", ci_config()["tasks"]["ci:host-tests"]["depends"])
         self.assertIn("sdk:build", configured_tasks("ci")["test:native-loader"]["depends"])
@@ -660,7 +673,11 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn("rust", task_tools["ci:host"])
         self.assertIn("wasm32-wasip1", task_tools["ci:wasm"]["rust"]["targets"])
         self.assertIn("aqua:taiki-e/cargo-llvm-cov", task_tools["ci:coverage"])
-        self.assertEqual({"mise.ci.toml", "mise.development.toml"}, {path.name for path in ROOT.glob("mise.*.toml")})
+        # mise.apt-no-recommends.toml only holds a system file that ci:packages-sdk-arm writes on GitHub runners.
+        self.assertEqual(
+            {"mise.apt-no-recommends.toml", "mise.ci.toml", "mise.development.toml"},
+            {path.name for path in ROOT.glob("mise.*.toml")},
+        )
 
         for workflow in ACTIVE_WORKFLOWS:
             if "MISE_ENV:" in workflow.read_text():
