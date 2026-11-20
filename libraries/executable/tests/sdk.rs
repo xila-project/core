@@ -19,7 +19,7 @@ use std::{
 use common::{FixtureEntropy, MAPPINGS, Mmap};
 use core::sync::atomic::Ordering;
 use executable::{ExecutableContext, NativeFormat, Standard, execute};
-use file_system::{AccessFlags, CreateFlags, Flags, Permissions, Position};
+use file_system::{AccessFlags, CreateFlags, Flags, Permissions};
 use task::TaskIdentifier;
 use virtual_file_system::{File, VirtualFileSystem};
 
