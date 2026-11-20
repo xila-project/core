@@ -10,3 +10,4 @@ description = "Raw bindings for Xila native applications"
 
 [features]
 runtime = []
+link = ["runtime"]

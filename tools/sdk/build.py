@@ -28,8 +28,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 ROOT = Path(__file__).resolve().parents[2]
 SDK_SOURCE = ROOT / "libraries/abi/application"
 RUST_CRATE = SDK_SOURCE / "sdk/rust/xila-sys"
-RUST_MANIFESTS = ("Cargo.toml", "Cargo.lock")
-LOADER = ROOT / "libraries/native_loader"
+LINKER_SCRIPT = RUST_CRATE / "xila-static-pie.ld"
+RUST_CRATE_FILES = ("Cargo.toml", "Cargo.lock", "build.rs", LINKER_SCRIPT.name)
 OUTPUT = ROOT / "target/sdk"
 
 HOST_TARGET = "x86_64-unknown-linux-gnu"
@@ -382,14 +382,14 @@ def assemble(target, pin, install, crt0, libraries, work):
         shutil.copy(libraries / archive, root / "lib" / archive)
     shutil.copy(install / "lib/libc.a", root / "lib/libc.a")
     shutil.copy(install / "lib/libm.a", root / "lib/libm.a")  # empty: libm is inside libc.a
-    shutil.copy(LOADER / "xila-static-pie.ld", root / "lib/xila-static-pie.ld")
+    shutil.copy(LINKER_SCRIPT, root / "lib/xila-static-pie.ld")
     for example in (SDK_SOURCE / "sdk/example/hello").iterdir():
         shutil.copy(example, root / "share/xila/example/hello" / example.name)
     shutil.copy(SDK_SOURCE / "sdk/README.md", root / "README.md")
     rust = root / "rust/xila-sys"
     shutil.copytree(RUST_CRATE / "src", rust / "src", dirs_exist_ok=True)
-    for manifest in RUST_MANIFESTS:
-        shutil.copy(RUST_CRATE / manifest, rust / manifest)
+    for filename in RUST_CRATE_FILES:
+        shutil.copy(RUST_CRATE / filename, rust / filename)
 
     config = TARGETS[target]
     template = (SDK_SOURCE / "sdk/cmake/xila-toolchain.cmake.in").read_text()
@@ -554,7 +554,7 @@ def verify_rust_crate(sdk):
     prefix = f"{sdk.name}/rust"
     crate = f"{prefix}/xila-sys"
     expected = {prefix: None, crate: None}
-    paths = [RUST_CRATE / name for name in RUST_MANIFESTS]
+    paths = [RUST_CRATE / name for name in RUST_CRATE_FILES]
     paths.extend([RUST_CRATE / "src", *(RUST_CRATE / "src").rglob("*")])
     for path in paths:
         name = f"{crate}/{path.relative_to(RUST_CRATE).as_posix()}"
@@ -610,37 +610,30 @@ def verify(args):
 
 def rust_example(args):
     """Build an independent PIC sysroot for each selected Rust guest and verify its image."""
+    from check_elf import Elf, PF_W, PT_LOAD
+
     nightly = tomllib.loads((ROOT / "mise.toml").read_text())["vars"]["nightly_version"]
     example = SDK_SOURCE / "sdk/rust/hello"
     output = OUTPUT / "rust-hello"
+    # Core's target rustflags take precedence over the example's build.rustflags.
+    # Pass the example's flags explicitly to override the host's mold driver option.
+    config = tomllib.loads((example / ".cargo/config.toml").read_text())
+    env = dict(os.environ, CARGO_ENCODED_RUSTFLAGS="\x1f".join(config["build"]["rustflags"]))
     for target in (args.target,) if args.target else TARGETS:
-        linker = [
-            "-pie", "--no-dynamic-linker", "-Bsymbolic", "-z", "max-page-size=16",
-            "--gc-sections", "--build-id=none",
-            f"--defsym=XILA_DATA_ALIGN={TARGETS[target]['data_alignment']}",
-            f"-T{LOADER / 'xila-static-pie.ld'}",
-        ]
-        flags = [
-            "-C", "relocation-model=pic",
-            "-C", f"linker={find_tool('ld.lld')}",
-            "-C", "linker-flavor=ld.lld",
-            *(f"-Clink-arg={arg}" for arg in linker),
-        ]
-        env = dict(os.environ, CARGO_ENCODED_RUSTFLAGS="\x1f".join(flags))
         run(["rustup", "run", nightly, "cargo", "build", "--locked", "--release",
-             "--target", target, "--target-dir", output, "-Z", "build-std=core,alloc,compiler_builtins",
-             "-Z", "build-std-features=compiler-builtins-mem"], cwd=example, env=env)
+             "--target", target, "--target-dir", output], cwd=example, env=env)
         image = output / target / "release/xila-rust-hello"
         verify_image(image, target)
+        alignment = TARGETS[target]["data_alignment"]
+        writable_loads = [segment for segment in Elf(image.read_bytes()).segments()
+                          if segment["type"] == PT_LOAD and segment["flags"] & PF_W]
+        if not writable_loads or any(segment["vaddr"] % alignment for segment in writable_loads):
+            sys.exit(f"{image}: expected writable PT_LOAD segments aligned to {alignment} bytes")
         run([find_tool("llvm-size"), image])
         print(f"ELF file: {image.stat().st_size} bytes")
 
 
 def main():
-    # LLVM tools may live in a versioned directory that is not on PATH (clang finds them
-    # next to itself): put lld's directory first so meson's and clang's linker probes work.
-    lld = find_tool("ld.lld")
-    os.environ["PATH"] = os.path.dirname(lld) + os.pathsep + os.environ["PATH"]
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     build_parser = commands.add_parser("build", help="build the SDK directory and archive")
@@ -653,6 +646,10 @@ def main():
     rust_parser.add_argument("--target", choices=sorted(TARGETS), help="build only this target")
     rust_parser.set_defaults(function=rust_example)
     args = parser.parse_args()
+    if args.command != "rust-example":
+        # Put the versioned LLVM directory on PATH for Meson and Clang's linker probes.
+        lld = find_tool("ld.lld")
+        os.environ["PATH"] = os.path.dirname(lld) + os.pathsep + os.environ["PATH"]
     args.function(args)
 
 
