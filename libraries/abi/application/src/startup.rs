@@ -144,9 +144,11 @@ impl Resources {
     /// The pointer addresses live resources and no reference to them is in use.
     #[inline(never)]
     pub(crate) unsafe fn release(resources: *mut Self) {
-        // SAFETY: the caller guarantees the pointer is valid; the old value is
-        // dropped in place, after the new empty one is written.
-        unsafe { *resources = Self::default() };
+        // SAFETY: the caller guarantees the pointer is valid. `take` writes the empty
+        // set before anything is dropped, so a destructor that suspends (a `File` closes
+        // through the VFS) and is then cancelled leaves an empty state behind, never a
+        // half-dropped one that a later release would drop again.
+        drop(unsafe { core::mem::take(&mut *resources) });
     }
 }
 
