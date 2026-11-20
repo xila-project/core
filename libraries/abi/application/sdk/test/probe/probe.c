@@ -235,6 +235,10 @@ static int descriptors(void) {
           memcmp(data, "bxy", 3) == 0);
     struct pollfd file = {copy, POLLIN | POLLOUT, 0};
     CHECK("file ready at EOF", poll(&file, 1, 0) == 1 && file.revents == (POLLIN | POLLOUT));
+    CHECK("write appends after setting O_APPEND on a duplicate",
+          fcntl(high, F_SETFL, O_APPEND) == 0 && lseek(copy, 0, SEEK_SET) == 0 &&
+          write(copy, "!", 1) == 1 && lseek(copy, 0, SEEK_CUR) == 5 &&
+          pread(high, data, sizeof(data), 0) == 5 && memcmp(data, "abxy!", 5) == 0);
     CHECK("regular file is not a terminal", isatty(copy) == 0 && errno == ENOTTY);
     CHECK("isatty invalid fd", isatty(fd) == 0 && errno == EBADF);
     CHECK("close copies", close(copy) == 0 && close(high) == 0);

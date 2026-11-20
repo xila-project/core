@@ -28,7 +28,7 @@ impl CharacterDevice for NullDevice {
     fn readiness(
         &self,
         interests: file_system::ReadyEvents,
-    ) -> file_system::Result<file_system::ReadyEvents> {
-        Ok(interests)
+    ) -> file_system::Result<Option<file_system::ReadyEvents>> {
+        Ok(Some(interests))
     }
 }

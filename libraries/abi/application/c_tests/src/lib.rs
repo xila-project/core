@@ -610,13 +610,16 @@ mod tests {
         }
         impl MountOperations for PendingDevice {}
         impl CharacterDevice for PendingDevice {
-            fn readiness(&self, interests: ReadyEvents) -> file_system::Result<ReadyEvents> {
+            fn readiness(
+                &self,
+                interests: ReadyEvents,
+            ) -> file_system::Result<Option<ReadyEvents>> {
                 self.0.readiness_seen.store(true, Ordering::Relaxed);
-                Ok(if self.0.ready.load(Ordering::Relaxed) {
+                Ok(Some(if self.0.ready.load(Ordering::Relaxed) {
                     interests
                 } else {
                     ReadyEvents::empty()
-                })
+                }))
             }
         }
 
@@ -780,6 +783,137 @@ mod tests {
         assert_eq!(state.polls.load(Ordering::Relaxed), 2);
         assert_eq!(state.control_polls.load(Ordering::Relaxed), 2);
     }
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    #[task::test]
+    async fn fallback_poll_yields_to_input_producer() {
+        use core::task::{Context, Poll};
+        use file_system::{DirectBaseOperations, DirectCharacterDevice, MountOperations, Size};
+        use portable_atomic::{AtomicUsize, Ordering};
+
+        struct Input(&'static AtomicUsize);
+        impl DirectBaseOperations for Input {
+            fn read(
+                &self,
+                _: &mut Context<'_>,
+                buffer: &mut [u8],
+                _: Size,
+            ) -> Poll<file_system::Result<usize>> {
+                if self.0.load(Ordering::Relaxed) == 2 {
+                    buffer[0] = b'x';
+                    Poll::Ready(Ok(1))
+                } else {
+                    self.0.store(1, Ordering::Relaxed);
+                    Poll::Pending
+                }
+            }
+
+            fn write(
+                &self,
+                _: &mut Context<'_>,
+                _: &[u8],
+                _: Size,
+            ) -> Poll<file_system::Result<usize>> {
+                Poll::Ready(Err(file_system::IoErrorKind::Unsupported))
+            }
+        }
+        impl MountOperations for Input {}
+        impl DirectCharacterDevice for Input {}
+
+        let tasks = task::test_manager();
+        let parent = tasks.get_current_task_identifier().await;
+        let spawner = tasks.get_spawner(parent).await.unwrap();
+        let users = Box::leak(Box::new(users::Manager::new()));
+        let time = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+        let device = file_system::MemoryDevice::<512>::new_static(128 * 1024);
+        let fs = little_fs::FileSystem::new_format(device, little_fs::Options::new(128)).unwrap();
+        let vfs = Box::leak(Box::new(virtual_file_system::VirtualFileSystem::new(
+            tasks, users, time, fs,
+        )));
+        let input: &'static AtomicUsize = Box::leak(Box::new(AtomicUsize::new(0)));
+        vfs.mount_character_device(parent, "/input", Input(input))
+            .await
+            .unwrap();
+        let root = Directory::new(vfs, parent, "/", XILA_RIGHT_READ).unwrap();
+        let mut file = ptr::null_mut();
+        let path = c"input";
+        assert_eq!(
+            unsafe {
+                xila_file_open(
+                    &root,
+                    path.as_ptr(),
+                    path.count_bytes(),
+                    XILA_OPEN_READ | XILA_OPEN_NON_BLOCKING,
+                    &mut file,
+                )
+            },
+            Status::Ok
+        );
+
+        for timeout in [-1, 0] {
+            input.store(0, Ordering::Relaxed);
+            let (producer, _) = tasks
+                .spawn(
+                    parent,
+                    "input producer",
+                    Some(spawner),
+                    move |_| async move {
+                        while input.load(Ordering::Relaxed) == 0 {
+                            task::yield_now().await;
+                        }
+                        input.store(2, Ordering::Relaxed);
+                    },
+                )
+                .await
+                .unwrap();
+            // SAFETY: The bounded ABI call chain fits on the stack. The file
+            // remains live and this reader is its only user.
+            let (reader, _) = unsafe {
+                stackful::spawn(
+                    tasks,
+                    parent,
+                    "fallback poll reader",
+                    stackful::Stack::new(64 * 1024),
+                    move || {
+                        let mut entry = PollEntry {
+                            handle: file.cast(),
+                            kind: XILA_POLL_FILE,
+                            events: XILA_POLL_IN,
+                            revents: 0,
+                        };
+                        // Bound retries so starvation fails the test without hanging.
+                        for _ in 0..32 {
+                            let mut ready = 0;
+                            if xila_poll_wait(&mut entry, 1, timeout, &mut ready) != Status::Ok
+                                || ready != 1
+                                || entry.revents != XILA_POLL_IN
+                            {
+                                return 1;
+                            }
+                            let mut byte = 0u8;
+                            let mut count = 0;
+                            match xila_file_read(file, (&mut byte as *mut u8).cast(), 1, &mut count)
+                            {
+                                Status::WouldBlock => {}
+                                Status::Ok if count == 1 && byte == b'x' => return 0,
+                                _ => return 2,
+                            }
+                        }
+                        3
+                    },
+                )
+                .await
+                .unwrap()
+            };
+
+            assert_eq!(reader.join().await, 0, "fallback poll timeout {timeout}");
+            producer.join().await;
+        }
+        assert_eq!(unsafe { xila_file_close(file) }, Status::Ok);
+    }
+
     #[cfg(all(
         target_os = "linux",
         any(target_arch = "x86_64", target_arch = "aarch64")

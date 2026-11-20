@@ -351,11 +351,12 @@ pub const XILA_CONTROL_SET_FILE_FLAGS: u32 = 3;
 /// A bounded command with one native-endian uint32_t input or output.
 /// BYTES_AVAILABLE returns the queued byte count on either pipe end.
 /// GET_FILE_FLAGS returns the access mode and status as XILA_OPEN_* bits.
-/// SET_FILE_FLAGS replaces the append and nonblocking bits.
+/// SET_FILE_FLAGS replaces the append and nonblocking bits shared by duplicates.
 /// # Safety
-/// File must be live and exclusively accessed. A used buffer must be aligned
-/// for a uint32_t and disjoint from the file. Input must be readable for
-/// input_size bytes and output writable for output_size bytes.
+/// File must be live. Serialize access to this handle with close and any other
+/// operations on this handle. A used buffer must be aligned for a uint32_t and
+/// disjoint from the file. Input must be readable for input_size bytes and
+/// output writable for output_size bytes.
 pub unsafe extern "C" fn xila_file_control(
     file: *mut File,
     command: u32,

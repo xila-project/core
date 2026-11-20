@@ -86,10 +86,15 @@ sleep in a coroutine. Regular files and block devices report readiness for
 operations allowed by the opening, including at EOF. A write-only regular file
 reports `XILA_POLL_OUT` when requested. A request for `XILA_POLL_IN` alone on
 that opening reports no events. Directory capabilities report read readiness.
-By default, character devices report readiness for the requested directions
-allowed by the opening, and their I/O can still suspend cooperatively. A driver
-can opt in to precise readiness by supplying a non-consuming snapshot and
-notifying the shared hub when readiness changes. With the `network` feature, TCP
+Character devices without a probe always report the requested directions
+allowed by the opening. Poll never waits for readiness on these devices. If
+all reported events come from this fallback, the coroutine yields once before
+returning, even for a zero-time probe. A blocking read can still suspend on
+the device after polling a set that includes both that device and a pipe.
+Use nonblocking reads to handle `WouldBlock`. Drivers should implement precise
+readiness with a non-consuming snapshot and notify the shared hub when
+readiness changes. Applications Terminal and the Platforms std console are
+follow-ups. With the `network` feature, TCP
 connections, TCP listeners and UDP sockets are pollable. The network runner
 notifies the hub when socket state changes, without taking over the individual
 socket's read or write waker. Keep sockets live and serialize their other ABI
@@ -110,8 +115,9 @@ Registering waiters per source is a follow-up.
 and write handle for a 512-byte unnamed pipe. Pass `XILA_OPEN_NON_BLOCKING` for
 probe-only I/O. Writes up to the SDK's 512-byte `PIPE_BUF` are atomic. If
 the whole write does not fit, a blocking writer waits and a nonblocking writer
-returns `WouldBlock` without queuing bytes. Larger writes and reads can be
-short. `XILA_POLL_OUT` on a pipe requires room for an atomic write.
+returns `WouldBlock` without queuing bytes. Writes larger than `PIPE_BUF` can
+transfer partially even in blocking mode. Blocked writers have no FIFO
+fairness guarantee. `XILA_POLL_OUT` on a pipe requires room for an atomic write.
 
 `xila_file_control` accepts an aligned native-endian `uint32_t` buffer.
 `XILA_CONTROL_BYTES_AVAILABLE` and `XILA_CONTROL_GET_FILE_FLAGS` take zero

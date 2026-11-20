@@ -84,26 +84,48 @@ impl<'a> Source<'a> {
         }
     }
 
-    fn events(&self, _cx: &mut Context<'_>, wanted: u16) -> u16 {
+    // The boolean marks events backed by an actual readiness check.
+    fn events(&self, _cx: &mut Context<'_>, wanted: u16) -> (u16, bool) {
         let interests = ReadyEvents::from_bits_truncate(wanted & (XILA_POLL_IN | XILA_POLL_OUT));
         let result = match self {
-            Self::Ignore => return 0,
-            Self::Invalid => return XILA_POLL_NVAL,
-            Self::Directory => return wanted & XILA_POLL_IN,
+            Self::Ignore => return (0, true),
+            Self::Invalid => return (XILA_POLL_NVAL, true),
+            Self::Directory => return (wanted & XILA_POLL_IN, true),
             Self::File(file) => file.events(interests),
             #[cfg(not(feature = "network"))]
-            Self::Disabled(_) => return XILA_POLL_NVAL,
+            Self::Disabled(_) => return (XILA_POLL_NVAL, true),
             #[cfg(feature = "network")]
             Self::Tcp(socket, listener) => {
-                return crate::network::tcp_readiness(socket, _cx, *listener, wanted);
+                return (
+                    crate::network::tcp_readiness(socket, _cx, *listener, wanted),
+                    true,
+                );
             }
             #[cfg(feature = "network")]
-            Self::Udp(socket) => return crate::network::udp_readiness(socket, _cx, wanted),
+            Self::Udp(socket) => return (crate::network::udp_readiness(socket, _cx, wanted), true),
         };
         match result {
-            Ok(events) => events.bits() & (wanted | XILA_POLL_ERR | XILA_POLL_HUP),
-            Err(IoErrorKind::BadDescriptor) => XILA_POLL_NVAL,
-            Err(_) => XILA_POLL_ERR,
+            Ok((events, precise)) => (
+                events.bits() & (wanted | XILA_POLL_ERR | XILA_POLL_HUP),
+                precise,
+            ),
+            Err(IoErrorKind::BadDescriptor) => (XILA_POLL_NVAL, true),
+            Err(_) => (XILA_POLL_ERR, true),
+        }
+    }
+}
+
+#[derive(Default)]
+struct Ready {
+    count: usize,
+    precise: bool,
+}
+
+impl Ready {
+    fn record(&mut self, events: u16, precise: bool) {
+        if events != 0 {
+            self.count += 1;
+            self.precise |= precise;
         }
     }
 }
@@ -136,13 +158,17 @@ pub unsafe extern "C" fn xila_poll_wait(
     };
 
     // No snapshot or waker allocation for the immediate probe.
-    let mut ready = 0;
-    if timeout_ms == 0 {
+    let in_coroutine = crate::is_in_coroutine();
+    let ready = if timeout_ms == 0 {
+        let mut ready = Ready::default();
         let mut cx = Context::from_waker(Waker::noop());
         for entry in entries {
-            entry.revents = unsafe { Source::from_entry(entry) }.events(&mut cx, entry.events);
-            ready += usize::from(entry.revents != 0);
+            let (events, precise) =
+                unsafe { Source::from_entry(entry) }.events(&mut cx, entry.events);
+            entry.revents = events;
+            ready.record(events, precise);
         }
+        ready
     } else {
         let mut sources = Vec::new();
         if sources.try_reserve_exact(count).is_err() {
@@ -154,7 +180,7 @@ pub unsafe extern "C" fn xila_poll_wait(
         let deadline = (timeout_ms > 0)
             .then(|| task::deadline_after_nanoseconds(timeout_ms as u64 * 1_000_000));
 
-        let result = if crate::is_in_coroutine() {
+        let result = if in_coroutine {
             crate::suspend_on_cancellable(wait(entries, sources, deadline))
         } else {
             let ready = scan(
@@ -162,7 +188,7 @@ pub unsafe extern "C" fn xila_poll_wait(
                 &mut sources,
                 &mut Context::from_waker(Waker::noop()),
             );
-            if ready == 0 {
+            if ready.count == 0 {
                 Err(Status::WouldBlock)
             } else {
                 publish(entries, &sources);
@@ -170,19 +196,25 @@ pub unsafe extern "C" fn xila_poll_wait(
             }
         };
         match result {
-            Ok(count) => ready = count,
+            Ok(ready) => ready,
             Err(error) => return error,
         }
+    };
+    if in_coroutine && ready.count != 0 && !ready.precise {
+        // Fallback events may be followed by WouldBlock on a nonblocking read.
+        // Give the input producer a chance to run before native code retries.
+        crate::suspend_on_cancellable(task::yield_now());
     }
-    unsafe { ready_count.write(ready) };
+    unsafe { ready_count.write(ready.count) };
     Status::Ok
 }
 
-fn scan(entries: &[PollEntry], sources: &mut [(Source<'_>, u16)], cx: &mut Context<'_>) -> usize {
-    let mut ready = 0;
+fn scan(entries: &[PollEntry], sources: &mut [(Source<'_>, u16)], cx: &mut Context<'_>) -> Ready {
+    let mut ready = Ready::default();
     for (entry, (source, events)) in entries.iter().zip(sources.iter_mut()) {
-        *events = source.events(cx, entry.events);
-        ready += usize::from(*events != 0);
+        let (reported, precise) = source.events(cx, entry.events);
+        *events = reported;
+        ready.record(reported, precise);
     }
     ready
 }
@@ -197,7 +229,7 @@ async fn wait(
     entries: &mut [PollEntry],
     mut sources: Vec<(Source<'_>, u16)>,
     deadline: Option<Instant>,
-) -> Result<usize, Status> {
+) -> Result<Ready, Status> {
     let waiter = pin!(ReadinessWaiter::default());
     let mut timer = deadline.map(Timer::at);
     poll_fn(|cx| {
@@ -205,7 +237,7 @@ async fn wait(
             waiter.as_ref().register(cx.waker())?;
         }
         let ready = scan(entries, &mut sources, cx);
-        if ready != 0
+        if ready.count != 0
             || timer
                 .as_mut()
                 .is_some_and(|timer| Pin::new(timer).poll(cx).is_ready())

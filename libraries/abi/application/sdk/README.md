@@ -169,13 +169,21 @@ and reject `F_SETFL`.
 `pipe2` accepts `O_NONBLOCK` and `O_CLOEXEC`. Pipes hold 512 bytes.
 Writes of up to `PIPE_BUF` (512 bytes) are atomic. A nonblocking atomic write
 returns `EAGAIN` without queuing bytes if the whole write does not fit.
-Larger writes and reads can be short. Core's pipe opening limit also applies
-to pipe duplicates.
+Writes larger than `PIPE_BUF` can return a partial count even in blocking
+mode, a deviation from POSIX. Blocked pipe writers have no FIFO fairness
+guarantee. Core's pipe opening limit also applies to pipe duplicates.
 
 `poll` supports read/write readiness, error, hangup and invalid descriptors.
 Pipe output readiness requires space for an atomic write. A write-only
-regular file reports output readiness when requested. Negative descriptors
-are ignored. A poll wait snapshots its descriptors at
+regular file reports output readiness when requested. Character devices
+without a readiness probe always report the requested directions allowed by
+the opening. Poll never waits for readiness on these devices. When the
+fallback supplies every reported event, poll yields once before returning.
+For example, polling a device and a pipe can report the device as readable
+while the pipe is empty. A blocking read then waits on the device. Use
+`O_NONBLOCK` and handle `EAGAIN` in a poll loop. Drivers should implement
+precise readiness. Applications Terminal and the Platforms std console are
+follow-ups. Negative descriptors are ignored. A poll wait snapshots its descriptors at
 entry. Applications should coordinate closing or replacing a descriptor with
 other threads that are waiting on it. `ioctl(fd, FIONREAD, &queued)` writes the
 number of bytes queued in a pipe to an `int`. Other ioctl requests fail with

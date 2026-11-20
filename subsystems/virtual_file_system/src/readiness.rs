@@ -24,7 +24,8 @@ impl FileReadiness {
         matches!(self.source, Source::Pipe(_))
     }
 
-    pub fn events(&self, mut interests: ReadyEvents) -> Result<ReadyEvents> {
+    /// Return the events and whether they came from a precise readiness probe.
+    pub fn events(&self, mut interests: ReadyEvents) -> Result<(ReadyEvents, bool)> {
         interests.set(
             ReadyEvents::READ,
             interests.contains(ReadyEvents::READ) && self.access.contains(AccessFlags::Read),
@@ -34,9 +35,12 @@ impl FileReadiness {
             interests.contains(ReadyEvents::WRITE) && self.access.contains(AccessFlags::Write),
         );
         match &self.source {
-            Source::Immediate => Ok(interests),
-            Source::Pipe(pipe) => Ok(pipe.readiness(self.access, interests)),
-            Source::Character(device) => device.readiness(interests),
+            Source::Immediate => Ok((interests, true)),
+            Source::Pipe(pipe) => Ok((pipe.readiness(self.access, interests), true)),
+            Source::Character(device) => Ok(match device.readiness(interests)? {
+                Some(events) => (events, true),
+                None => (interests, false),
+            }),
             Source::Invalid => Err(IoErrorKind::BadDescriptor),
         }
     }
