@@ -82,9 +82,22 @@ the ABI table (`libraries/executable/tests/sdk.rs`).
 
 ## Rust
 
-Add a path dependency on `rust/xila-sys` from the SDK archive (or
-`libraries/abi/application/sdk/rust/xila-sys` in Core). The crate has no
-dependencies and works with Rust 1.97. It exposes the same startup record,
+Add `xila-sys` to your application's `Cargo.toml`:
+
+```toml
+[dependencies]
+xila-sys = { git = "https://github.com/xila-project/core.git", features = ["runtime"] }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+```
+
+You can also use a path dependency on `rust/xila-sys` from the SDK archive.
+The raw bindings and runtime API can be checked with Rust 1.97. The crate
+has no dependencies and exposes the same startup record,
 opaque capabilities, ABI constants and table as the C header. Calls through the
 table are unsafe. Follow the ABI's buffer, lifetime and ownership rules,
 especially for the borrowed startup streams. `Status` preserves every 32-bit
@@ -101,7 +114,42 @@ returns `Some(&XilaApi)`, and it returns `None` outside entry. Define a
 `alloc`, you can install `xila_sys::runtime::ProcessAllocator` as your
 `#[global_allocator]`. The host reclaims the guest heap on exit.
 
-From a Core checkout on Linux x86-64 with Rustup and LLVM (including LLD):
+Save this as `.cargo/config.toml` in the application:
+
+```toml
+[unstable]
+build-std = ["core", "alloc", "compiler_builtins"]
+build-std-features = ["compiler-builtins-mem"]
+
+[build]
+rustflags = ["-C", "relocation-model=pic", "-C", "linker=rust-lld"]
+```
+
+Use the `nightly_version` pinned in Core's [`mise.toml`](../../../../mise.toml)
+and install its `rust-src` component. Build a `#![no_std]`, `#![no_main]`
+binary with an explicit target so the PIC flags also apply to the rebuilt
+sysroot while build scripts still use the host configuration.
+
+```sh
+rustup toolchain install nightly-2026-10-12 --profile minimal --component rust-src
+cargo +nightly-2026-10-12 build --release --target thumbv7em-none-eabihf
+```
+
+The supported targets are `x86_64-unknown-linux-gnu`, `thumbv7em-none-eabihf`
+and `riscv32imac-unknown-none-elf`. Cargo's nightly `build-std` is needed
+because the prebuilt bare-metal `core` is not position-independent.
+You can omit `alloc` if your application never uses it. A future dedicated
+Xila target with `std` would start as tier 3 and would still need a source
+build of its sysroot.
+
+On the guest nightly, `runtime` supplies the linker script and all Xila
+link arguments, including the target's data alignment. It uses rustc's
+nightly support for forwarding link arguments from a library to its
+consumer. Direct GNU-style linking uses the `rust-lld` bundled with Rustup,
+so the application needs no system LLVM install, custom linker script,
+C startup object, or libc.
+
+From a Core checkout on Linux x86-64 with Rustup and `llvm-size`:
 
 ```sh
 mise run sdk:rust-example
@@ -113,14 +161,6 @@ all three ELFs with `tools/sdk/check_elf.py`, and runs the Linux image through
 process heap by growing a `Vec` and resizing a 64-byte-aligned block, writes to
 its borrowed stdout and returns status 73. A second launch checks the panic
 diagnostic and exit status.
-
-For a standalone build, use the nightly pinned in Core's `mise.toml` with
-`rust-src` and `-Z build-std=core,compiler_builtins` (add `alloc` if used).
-Compile with `panic = "abort"` and `-C relocation-model=pic`, including the
-rebuilt sysroot. Link directly with LLD using the SDK's
-`lib/xila-static-pie.ld` and the options in `tools/sdk/build.py`, including
-`-pie --no-dynamic-linker -Bsymbolic` and the target's data alignment. The
-Rust entry shim provides the ABI note and needs no C startup object or libc.
 
 ## How it maps onto the native ABI
 

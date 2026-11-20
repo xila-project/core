@@ -28,7 +28,8 @@ through a relocated array, so this is a deliberate omission, not an oversight.
 ## Building an image
 
 C applications normally use the [SDK](../abi/application/sdk/README.md), which wraps
-everything below in a CMake toolchain file. To link by hand, use `xila-static-pie.ld` and define the C entry
+everything below in a CMake toolchain file. To link by hand, use the
+[linker script](../abi/application/sdk/rust/xila-sys/xila-static-pie.ld) and define the C entry
 `int32_t _xila_start(const XilaStartup *startup)`. The entry receives borrowed
 [application ABI capabilities](../abi/application/README.md). Emit a
 `PT_NOTE` record named `XILA\0` of type 1 with a four-byte version descriptor
