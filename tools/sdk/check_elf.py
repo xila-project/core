@@ -2,7 +2,7 @@
 """Assert that an SDK-built executable is something the Xila native loader accepts.
 
     python tools/sdk/check_elf.py IMAGE.elf [--machine arm|x86_64|riscv32|aarch64|xtensa]
-        [--float-abi soft|single|double|hard] [--no-compressed] [--embedded]
+        [--float-abi soft|softfp|single|double|hard] [--no-compressed] [--embedded]
 
 The checks mirror the loader (libraries/native_loader) and the SDK contract:
 
@@ -64,7 +64,14 @@ RELATIVE = {"arm": 23, "x86_64": 8, "aarch64": 1027, "riscv": 3, "xtensa": 5}
 EF_ARM_BE8, EF_ARM_ABI_FLOAT_SOFT, EF_ARM_ABI_FLOAT_HARD = 0x0080_0000, 0x200, 0x400
 EF_RISCV_RVC, EF_RISCV_FLOAT_ABI, EF_RISCV_RVE = 0x1, 0x6, 0x8
 RISCV_FLOAT_ABI = {"soft": 0, "single": 2, "double": 4}
-FLOAT_ABIS = ("soft", "single", "double", "hard")
+# The float ABIs a target can name, by architecture. "softfp" is the base (soft-float
+# calling convention) variant on an FPU, which the Arm flags cannot tell from "soft".
+# Other architectures have no float ABI to name.
+FLOAT_ABIS_BY_ARCH = {
+    "arm": ("soft", "softfp", "hard"),
+    "riscv": ("soft", "single", "double"),
+}
+FLOAT_ABIS = ("soft", "softfp", "single", "double", "hard")
 R_RISCV_RELAX = 51
 XILA_NOTE_NAME = b"XILA\0"
 
@@ -91,10 +98,17 @@ class Elf:
     def __init__(self, data):
         if data[:4] != b"\x7fELF":
             raise ElfError("not an ELF file")
+        if len(data) < 6:
+            raise ElfError("truncated ELF: no class and byte order")
+        if data[4] not in (1, 2):
+            raise ElfError(f"unknown ELF class {data[4]}")
         self.data = data
         self.is64 = data[4] == 2
         if data[5] != 1:
             raise ElfError("only little-endian images are supported")
+        header_size = 64 if self.is64 else 52
+        if len(data) < header_size:
+            raise ElfError(f"truncated ELF: {len(data)} bytes, the header takes {header_size}")
         e = "<"
         if self.is64:
             (self.type, self.machine, self.version, self.entry, self.phoff, self.shoff, self.flags, self.ehsize,
@@ -168,17 +182,23 @@ class Elf:
             yield name, kind, descriptor
             data = data[12 + name_end + desc_end:]
 
-    def virtual_to_offset(self, address):
-        for segment in self.segments():
-            if segment["type"] == 1 and segment["vaddr"] <= address < segment["vaddr"] + segment["filesz"]:
-                return segment["offset"] + address - segment["vaddr"]
-        raise ElfError(f"address {address:#x} is outside every PT_LOAD segment")
+
+def float_abi_problem(elf, float_abi):
+    """Why `float_abi` cannot describe an image of this architecture, or None."""
+    if float_abi is None:
+        return None
+    valid = FLOAT_ABIS_BY_ARCH.get(elf.arch)
+    if valid is None:
+        return f"float ABI {float_abi!r} does not apply to {elf.arch}, which has none to name"
+    if float_abi not in valid:
+        return f"float ABI {float_abi!r} is not one of {'/'.join(valid)} on {elf.arch}"
+    return None
 
 
 def flags_problem(elf, float_abi, compressed, embedded):
     """Why the loader would reject `e_flags`, or None. Mirrors Native::flags_supported.
-    `float_abi` is the target's ("hard" or "soft" on Arm, "soft", "single" or "double" on
-    RISC-V); None skips the float ABI comparison."""
+    `float_abi` is the target's ("soft", "softfp" or "hard" on Arm, "soft", "single" or
+    "double" on RISC-V; see float_abi_problem); None skips the float ABI comparison."""
     flags = elf.flags
     if elf.arch == "arm":
         if flags >> 24 != 5:
@@ -190,7 +210,7 @@ def flags_problem(elf, float_abi, compressed, embedded):
         allowed = {0, EF_ARM_ABI_FLOAT_SOFT, EF_ARM_ABI_FLOAT_HARD}
         if float_abi == "hard":
             allowed = {0, EF_ARM_ABI_FLOAT_HARD}
-        elif float_abi == "soft":
+        elif float_abi in ("soft", "softfp"):
             allowed = {0, EF_ARM_ABI_FLOAT_SOFT}
         if float_flags not in allowed:
             wanted = f", expected the {float_abi}-float ABI" if float_abi else ""
@@ -233,8 +253,15 @@ def check(data, machine=None, abi=None, float_abi=None, compressed=True, embedde
 def _check(data, machine, abi, float_abi, compressed, embedded):
     elf = Elf(data)
     problems = []
-    if machine and elf.arch != machine and not (machine == "riscv32" and elf.arch == "riscv"):
+    wrong_machine = machine and elf.arch != machine and not (machine == "riscv32" and elf.arch == "riscv")
+    if wrong_machine:
         problems.append(f"machine is {elf.arch}, expected {machine}")
+    else:
+        # A float ABI that its architecture does not have is a usage error, not a
+        # problem with the image.
+        usage = float_abi_problem(elf, float_abi)
+        if usage:
+            raise ElfError(usage)
     if elf.type != ET_DYN:
         problems.append(f"e_type is {elf.type}, expected ET_DYN (static-PIE)")
     if elf.version != 1:
@@ -369,8 +396,8 @@ def main():
     parser.add_argument("image")
     parser.add_argument("--machine", choices=["arm", "x86_64", "riscv32", "aarch64", "xtensa"])
     parser.add_argument("--float-abi", choices=FLOAT_ABIS,
-                        help="the target's float ABI, for the e_flags check (Arm: soft or hard; "
-                             "RISC-V: soft, single or double)")
+                        help="the target's float ABI, for the e_flags check (Arm: soft, softfp "
+                             "or hard; RISC-V: soft, single or double)")
     parser.add_argument("--no-compressed", action="store_true",
                         help="the RISC-V target has no C extension")
     parser.add_argument("--embedded", action="store_true", help="the RISC-V target is RV32E")

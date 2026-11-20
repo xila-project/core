@@ -231,6 +231,32 @@ class LoaderRules(unittest.TestCase):
                       machine="arm", float_abi="hard")
         self.problems(image(machine=EM_ARM, wide=False, flags=0), "EABI version 5", machine="arm")
 
+    def test_softfp_is_the_soft_variant_on_arm(self):
+        def arm(flags, **target):
+            return check(image(machine=EM_ARM, wide=False, flags=flags), "arm", **target)
+        self.assertEqual(arm(0x05000200, float_abi="softfp"), [])
+        self.assertEqual(arm(0x05000000, float_abi="softfp"), [])
+        self.problems(image(machine=EM_ARM, wide=False, flags=0x05000400), "float ABI",
+                      machine="arm", float_abi="softfp")
+
+    def test_the_float_abi_must_exist_on_the_architecture(self):
+        arm = image(machine=EM_ARM, wide=False, flags=0x05000400)
+        riscv = image(machine=EM_RISCV, wide=False, flags=0x5)
+        for data, machine, wrong in [
+            (arm, "arm", "single"), (arm, "arm", "double"),
+            (riscv, "riscv32", "hard"), (riscv, "riscv32", "softfp"),
+            (image(), "x86_64", "hard"), (image(machine=EM_XTENSA, wide=False), "xtensa", "soft"),
+        ]:
+            with self.subTest(machine=machine, float_abi=wrong):
+                with self.assertRaises(check_elf.ElfError) as raised:
+                    check(data, machine, float_abi=wrong)
+                self.assertIn(wrong, str(raised.exception))
+        # The image decides when no machine is named.
+        with self.assertRaises(check_elf.ElfError):
+            check(riscv, float_abi="hard")
+        # A wrong machine is the problem to report, not the float ABI.
+        self.problems(arm, "machine is arm, expected riscv32", machine="riscv32", float_abi="double")
+
     def test_the_arm_entry_selects_thumb(self):
         data = image(machine=EM_ARM, wide=False, flags=0x05000400, entry=0x80)
         self.problems(data, "Thumb", machine="arm")
@@ -275,6 +301,15 @@ class LoaderRules(unittest.TestCase):
         # Too short to hold the header.
         with self.assertRaises(check_elf.ElfError):
             check(image()[:40])
+
+    def test_a_truncated_header_is_an_error_not_a_crash(self):
+        for data in (b"\x7fELF", b"\x7fELF\x02", b"\x7fELF\x02\x01", b"\x7fELF\x02\x01\x01",
+                     image()[:63], image(machine=EM_ARM, wide=False)[:51]):
+            with self.subTest(length=len(data)):
+                with self.assertRaises(check_elf.ElfError):
+                    check(data)
+        with self.assertRaises(check_elf.ElfError):
+            check(b"\x7fELF\x07\x01" + bytes(60))
 
     def test_dynamic_entries_must_be_whole(self):
         self.problems(image(dynamic_tail=4), "whole number of entries")
