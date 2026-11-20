@@ -213,8 +213,8 @@ fn yield_once() {
 mod tests {
     extern crate std;
     use super::*;
-    use alloc::{boxed::Box, vec};
-    use core::ptr;
+    use alloc::{boxed::Box, vec, vec::Vec};
+    use core::ptr::{self, NonNull};
     use file_system::{AccessFlags, CreateFlags, StateFlags};
     testing::instantiate_global_allocator!();
     #[test]
@@ -828,12 +828,13 @@ mod tests {
             identifier(tasks.get_parent(task).await.unwrap()),
         ));
         let mut heap = Heap::new();
+        let mut state = HostState::new(Vec::new(), None, None, None);
         let status = unsafe {
             enter(
+                NonNull::from(&mut state),
                 probe_entry,
-                &mut heap,
+                NonNull::from(&mut heap),
                 Some((host, task)),
-                Resources::default(),
             )
         };
         assert_eq!(status, 0, "line of the failed check");
@@ -848,7 +849,7 @@ mod tests {
     }
 
     /// An empty environment and the process capability itself take no allocation:
-    /// the capability lives in the entry call's frame, and the environment is the
+    /// the capability lives in the caller's host state, and the environment is the
     /// task's own, empty until something sets a variable.
     #[task::test]
     async fn process_capability_and_empty_environment_allocate_nothing() {
@@ -856,18 +857,26 @@ mod tests {
         let task = tasks.get_current_task_identifier().await;
         let host: &'static NoSpawnHost = Box::leak(Box::new(NoSpawnHost(tasks)));
         let mut heap = Heap::new();
+        let mut state = HostState::new(Vec::new(), None, None, None);
         let before = testing::MemoryManager::thread_allocations();
         let status_with = unsafe {
             enter(
+                NonNull::from(&mut state),
                 quiet_entry,
-                &mut heap,
+                NonNull::from(&mut heap),
                 Some((host, task)),
-                Resources::default(),
             )
         };
         let with = testing::MemoryManager::thread_allocations().since(before);
         let before = testing::MemoryManager::thread_allocations();
-        let status_without = unsafe { enter(quiet_entry, &mut heap, None, Resources::default()) };
+        let status_without = unsafe {
+            enter(
+                NonNull::from(&mut state),
+                quiet_entry,
+                NonNull::from(&mut heap),
+                None,
+            )
+        };
         let without = testing::MemoryManager::thread_allocations().since(before);
         assert_eq!((status_with, status_without), (0, 0));
         assert_eq!(with.allocations(), 0);
@@ -913,6 +922,12 @@ mod tests {
         let run = async |entry: unsafe extern "C" fn(*const XilaStartup) -> i32| {
             let before = testing::MemoryManager::thread_allocations();
             let heap = Box::into_raw(Box::new(Heap::new()));
+            let state = Box::into_raw(Box::new(HostState::new(
+                vec!["argument".into()],
+                None,
+                None,
+                None,
+            )));
             let launch = ProcessLaunch {
                 host,
                 environment: Some(vec![
@@ -930,7 +945,11 @@ mod tests {
                     "process",
                     stackful::Stack::new(32 * 1024),
                     move || {
-                        launch.run(entry, &mut *heap, vec!["argument".into()], None, None, None)
+                        launch.run(
+                            NonNull::new_unchecked(state),
+                            entry,
+                            NonNull::new_unchecked(heap),
+                        )
                     },
                     |status| status as isize,
                 )
@@ -939,6 +958,7 @@ mod tests {
             };
             let status = handle.join().await;
             task::yield_now().await;
+            drop(unsafe { Box::from_raw(state) });
             drop(unsafe { Box::from_raw(heap) });
             let delta = testing::MemoryManager::thread_allocations().since(before);
             (status, delta.net_bytes())
@@ -951,5 +971,104 @@ mod tests {
         assert_eq!((returned, exited), (4, 5));
         assert_eq!(returned_bytes, 0);
         assert_eq!(exited_bytes, returned_bytes);
+    }
+
+    std::thread_local! {
+        /// Start and length of the host state under test.
+        static HOST_STATE: core::cell::Cell<(usize, usize)> = const { core::cell::Cell::new((0, 0)) };
+    }
+
+    /// Whether `address` lies in the host state, not on the calling coroutine's stack.
+    fn in_host_state(address: usize) -> bool {
+        let (start, length) = HOST_STATE.get();
+        (start..start + length).contains(&address)
+    }
+
+    unsafe fn startup_in_host_state(startup: *const XilaStartup) -> i32 {
+        check!(in_host_state(startup as usize));
+        let startup = unsafe { &*startup };
+        check!(in_host_state(startup.process as usize));
+        // The resources `xila_process_exit` empties are in the state, behind the capability.
+        let resources = unsafe { (*startup.process).resources };
+        check!(in_host_state(resources as usize));
+        check!(in_host_state(ptr::from_ref(&startup.program_name) as usize));
+        let name = unsafe { &(*resources).program_name };
+        check!(in_host_state(ptr::from_ref(name) as usize));
+        check!(name == "process");
+        check!(startup.program_name.data == name.as_ptr().cast());
+        check!(startup.program_name.length == name.len());
+        0
+    }
+
+    unsafe extern "C" fn located_return_entry(startup: *const XilaStartup) -> i32 {
+        let failed = unsafe { startup_in_host_state(startup) };
+        if failed != 0 { failed } else { 4 }
+    }
+
+    unsafe extern "C" fn located_exit_entry(startup: *const XilaStartup) -> i32 {
+        let failed = unsafe { startup_in_host_state(startup) };
+        if failed != 0 {
+            return failed;
+        }
+        let startup = unsafe { &*startup };
+        let api = unsafe { &*startup.api };
+        let _ = unsafe { (api.process_exit)(startup.process, 5) };
+        1 // Exit returned.
+    }
+
+    /// The startup block, the process capability and the resources it empties on exit
+    /// belong to the host state the loader owns, whichever way the entry ends, so nothing
+    /// the exit path or the SDK reads is stored in the coroutine's frames (#766). The
+    /// standard streams, which need a file system to open, are checked in the C tests
+    /// crate.
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    #[task::test]
+    async fn startup_block_and_capability_stay_off_the_coroutine_stack() {
+        let tasks = task::test_manager();
+        let task = tasks.get_current_task_identifier().await;
+        let host: &'static NoSpawnHost = Box::leak(Box::new(NoSpawnHost(tasks)));
+        for (entry, expected) in [
+            (
+                located_return_entry as unsafe extern "C" fn(*const XilaStartup) -> i32,
+                4,
+            ),
+            (located_exit_entry, 5),
+        ] {
+            let heap = Box::into_raw(Box::new(Heap::new()));
+            let state = Box::into_raw(Box::new(HostState::new(Vec::new(), None, None, None)));
+            HOST_STATE.set((state as usize, core::mem::size_of::<HostState>()));
+            let launch = ProcessLaunch {
+                host,
+                environment: None,
+                home: None,
+            };
+            // SAFETY: the bounded entries fit the stack and never unwind, and the closure
+            // holds only pointers to the state and heap, which outlive the run.
+            let (handle, _) = unsafe {
+                stackful::spawn_with_result(
+                    tasks,
+                    task,
+                    "process",
+                    stackful::Stack::new(32 * 1024),
+                    move || {
+                        launch.run(
+                            NonNull::new_unchecked(state),
+                            entry,
+                            NonNull::new_unchecked(heap),
+                        )
+                    },
+                    |status| status as isize,
+                )
+                .await
+                .unwrap()
+            };
+            assert_eq!(handle.join().await, expected, "line of the failed check");
+            task::yield_now().await;
+            drop(unsafe { Box::from_raw(state) });
+            drop(unsafe { Box::from_raw(heap) });
+        }
     }
 }

@@ -507,7 +507,16 @@ malloc.
 
 The process owner drops the heap after all C execution ends. A loader must
 keep that owner outside the native coroutine stack, including when it cancels
-an unfinished coroutine.
+an unfinished coroutine. The same holds for the host state of a run
+(`HostState`): the `XilaStartup` block, the process capability and the
+arguments and streams they point into. The loader allocates it beside the heap
+and passes the coroutine entry only a pointer to it, so the entry call keeps no
+host state in its frames and `xila_process_exit` finds none there. The
+resources are dropped exactly once: when the entry returns, or when
+`xila_process_exit` empties them before it abandons the coroutine. A loader that
+never starts the run drops the state itself. `run_main`
+is the exception: it is for a linked program on the caller's own stack and
+keeps the state in its frame.
 
 ## Optional networking (`network`)
 

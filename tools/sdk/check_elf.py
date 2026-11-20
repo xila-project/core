@@ -34,7 +34,7 @@ from pathlib import Path
 
 ET_DYN = 3
 PT_LOAD, PT_DYNAMIC, PT_INTERP, PT_NOTE, PT_TLS = 1, 2, 3, 4, 7
-PF_X = 1
+PF_X, PF_W = 1, 2
 # The loader's limits (libraries/native_loader/src/elf.rs).
 MAX_ALIGNMENT = 64 * 1024
 MAX_PROGRAM_HEADERS = 16

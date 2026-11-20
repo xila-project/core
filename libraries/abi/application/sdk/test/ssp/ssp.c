@@ -4,8 +4,10 @@
  *   ok     protected functions return normally; the guard was seeded from getentropy
  *   smash  overwrite the canary: the process ends with status 134 and a message
  *   large  overwrite `argv[2]` bytes (default 256) past the buffer, over main's saved
- *          return address and xila_main's frame with its jmp_buf: the process still ends
- *          with status 134 and the message, without returning through those frames
+ *          return address and xila_main's frame with its jmp_buf, and on up the coroutine
+ *          stack: the process still ends with status 134 and the message, without
+ *          returning through those frames. The host's own state is not on that stack, so
+ *          the size may be anything that stays inside the stack
  */
 #include <stdint.h>
 #include <stdio.h>

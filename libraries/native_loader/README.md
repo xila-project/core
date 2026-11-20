@@ -28,7 +28,8 @@ through a relocated array, so this is a deliberate omission, not an oversight.
 ## Building an image
 
 C applications normally use the [SDK](../abi/application/sdk/README.md), which wraps
-everything below in a CMake toolchain file. To link by hand, use `xila-static-pie.ld` and define the C entry
+everything below in a CMake toolchain file. To link by hand, use the
+[linker script](../abi/application/sdk/rust/xila-sys/xila-static-pie.ld) and define the C entry
 `int32_t _xila_start(const XilaStartup *startup)`. The entry receives borrowed
 [application ABI capabilities](../abi/application/README.md). Emit a
 `PT_NOTE` record named `XILA\0` of type 1 with a four-byte version descriptor
@@ -71,12 +72,26 @@ program that a native process spawned, its explicit environment and home
 directory. Set `Startup.process` to make a program a process; without it the
 program is started like a linked one, with no process capability. A spawned
 program's environment replaces the copy its task made of its parent's before
-the entry runs. The task future, not
-the coroutine stack, owns the image and the process `XilaHeap` granted through
-`startup->heap`. Both are released when the program returns or when the task is
-dropped. A cancelled coroutine's stack, arguments and startup streams stay
-leaked, as stackful documents. See
-[Core #731](https://github.com/xila-project/core/issues/731).
+the entry runs. The task future, not the coroutine stack, owns one allocation
+that holds the `LoadedImage` handle, the process `XilaHeap` granted through
+`startup->heap` and the host state: the `XilaStartup` block, the process
+capability and the launch name, arguments and startup streams they point into.
+The image bytes stay in the platform's `ExecutableMemory`, which the handle releases, and
+the C heap's blocks are separate allocations the `XilaHeap` tracks: neither is
+part of it. The state takes 384 B per process on 32-bit targets (424 B for the
+allocation, with the heap and the handle). The launch-name bytes are allocated
+separately, like the argument strings. The coroutine entry receives only a
+pointer to it, so a program that overruns its own frames cannot damage the state
+`xila_process_exit` and the SDK's heap and standard error access depend on, and
+the host can reach the streams whatever the coroutine was doing. The allocation
+is released when the program returns or when the task is dropped. The
+arguments and startup streams of a program that never started (the allocation
+failed, the spawn future was dropped before its first poll, or the task was
+cancelled before it ran) are dropped too. A coroutine cancelled after it
+started keeps its stack, arguments and startup streams leaked, as stackful
+documents: the host state is reachable but its resources are not dropped.
+Closing them and releasing the pipes a cancelled process holds
+is [Core #731](https://github.com/xila-project/core/issues/731).
 
 The platform implements `ExecutableMemory`, including cache synchronization
 and executable permissions appropriate to its hardware

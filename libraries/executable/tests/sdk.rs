@@ -445,10 +445,15 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
 
     // A larger overflow also destroys the frames above main: the saved return addresses
     // and xila_main's jmp_buf, which _exit() would jump through (it crashes the host when
-    // the handler uses it). The handler must leave through the process capability. The
-    // sizes stay within the program's own frames, the first ~400 bytes above the buffer;
-    // beyond them lie the host's startup block and capability on the same coroutine stack.
-    for size in ["224", "320"] {
+    // the handler uses it). The handler must leave through the process capability, whose
+    // state (startup block, capability, standard streams) is host-owned and off the
+    // coroutine stack (#766): sizes from 224 bytes to well past the 416 where it used to
+    // crash the host still end with status 134. How far an overflow can go before it
+    // leaves the coroutine stack depends on the build profile: in release 1024 bytes
+    // already write into the next heap chunk (glibc then aborts the test with
+    // "free(): invalid next size"), while debug holds up to 2 KiB. The largest size is
+    // one both profiles hold; past it the program writes outside any memory the host gave it.
+    for size in ["224", "320", "416", "512", "768"] {
         let (status, stdout, stderr) =
             launch(context, parent, "/ssp", "ssp-large", &["large", size]).await;
         assert_eq!(status, 134, "{size}");

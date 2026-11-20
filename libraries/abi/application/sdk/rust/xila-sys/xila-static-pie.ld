@@ -20,9 +20,18 @@ SECTIONS
   } :text
   .rodata : { *(.rodata .rodata.* .srodata .srodata.*) } :text
   .got.loc : { *(.got.loc) } :text
+  /* Keep optional linker notes, including 8-byte-aligned GNU properties,
+     outside the ABI note segment. */
+  .note.gnu.build-id : { *(.note.gnu.build-id) } :text
+  .note.gnu.property : { *(.note.gnu.property) } :text
   .note.xila.abi : ALIGN(4) { KEEP(*(.note.xila.abi)) } :text :abi
   .rel.dyn : { *(.rel.dyn) } :text
   .rela.dyn : { *(.rela.dyn) } :text
+  /* .dynsym resets PHDR inheritance even when there are no relocations. */
+  .dynsym : { *(.dynsym) } :text
+  .gnu.hash : { *(.gnu.hash) } :text
+  .hash : { *(.hash) } :text
+  .dynstr : { *(.dynstr) } :text
 
   PROVIDE(XILA_DATA_ALIGN = 16);
   . = ALIGN(XILA_DATA_ALIGN);

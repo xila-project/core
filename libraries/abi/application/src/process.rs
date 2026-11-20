@@ -5,15 +5,16 @@
 //! and the environment. This module adds no process table: it reads and writes
 //! the task manager, and starts children through the host's executable path.
 use crate::{
-    Directory, File, Heap, Resources, Status, XILA_RIGHT_READ, XilaString, canonical, enter,
-    is_in_coroutine, path_input, suspend_dynamic,
+    Directory, File, Heap, HostState, Resources, Status, XILA_RIGHT_READ, XilaString, canonical,
+    enter, is_in_coroutine, path_input, suspend_dynamic,
 };
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::{
     ffi::c_char,
     future::Future,
     pin::{Pin, pin},
-    ptr, slice, str,
+    ptr::{self, NonNull},
+    slice, str,
 };
 use file_system::{IntoIoErrorKind, PathOwned};
 use task::{EnvironmentVariable, JoinHandle, TaskIdentifier};
@@ -82,28 +83,29 @@ pub struct ProcessLaunch {
 }
 
 impl ProcessLaunch {
-    /// Run a native entry as a process, on the calling coroutine. The coroutine runs
-    /// inside the process's task, which is how the process learns its identity.
+    /// Run a native entry as a process, on the calling coroutine, with the startup
+    /// data in `state`. The coroutine runs inside the process's task, which is how
+    /// the process learns its identity.
     ///
     /// Returns the entry's exit status, or -1 if the process could not be set up:
     /// the coroutine is not on a registered task or the task is gone.
     ///
-    /// Every resource the process owns is held by the arguments or by this call's
-    /// own state. `xila_process_exit` releases the startup grants before
-    /// ending the process. A worker that exits the process cancels main as
-    /// described in #731.
-    /// The caller must keep no other owned object live above this call.
+    /// Every resource the process owns is held by `state`, which belongs to the
+    /// host side of the task, not to this coroutine's stack: the call keeps only
+    /// pointers to it. Returning from the entry, a failed setup and
+    /// `xila_process_exit` each drop the state's resources once, before the
+    /// process ends. A worker that exits the process cancels main as described in
+    /// #731.
     ///
     /// # Safety
-    /// Same contract as [`crate::run_main`].
+    /// Same contract as [`crate::run_main`], and `state` and `heap` stay at their
+    /// addresses and live until native execution has permanently ended. The caller
+    /// must keep no other owned object live above this call.
     pub unsafe fn run(
         self,
+        state: NonNull<HostState>,
         entry: unsafe extern "C" fn(*const crate::XilaStartup) -> i32,
-        heap: &mut Heap,
-        arguments: Vec<String>,
-        standard_input: Option<File>,
-        standard_output: Option<File>,
-        standard_error: Option<File>,
+        heap: NonNull<Heap>,
     ) -> i32 {
         let Self {
             host,
@@ -126,29 +128,20 @@ impl ProcessLaunch {
             .await
             .map_err(task_status);
         }));
+        let resources = unsafe { &raw mut (*state.as_ptr()).resources };
         let Ok((task, program_name)) = identity else {
+            // SAFETY: nothing has started that could use the resources.
+            unsafe { Resources::release(resources) };
             return START_FAILURE;
         };
-        let home = home.map(|grant| {
-            Directory::granted(host.virtual_file_system(), task, grant.path, grant.rights)
-        });
-        let mut pointers = Vec::with_capacity(arguments.len());
-        for argument in &arguments {
-            pointers.push(XilaString {
-                data: argument.as_ptr().cast(),
-                length: argument.len(),
+        // SAFETY: the caller guarantees the state is live; nothing else uses it yet.
+        unsafe {
+            (*resources).program_name = program_name;
+            (*resources).home = home.map(|grant| {
+                Directory::granted(host.virtual_file_system(), task, grant.path, grant.rights)
             });
+            enter(state, entry, heap, Some((host, task)))
         }
-        let resources = Resources {
-            _owned: arguments,
-            program_name,
-            arguments: pointers,
-            standard_input,
-            standard_output,
-            standard_error,
-            home,
-        };
-        unsafe { enter(entry, heap, Some((host, task)), resources) }
     }
 }
 
@@ -282,9 +275,9 @@ pub unsafe extern "C" fn xila_process_exit(process: *const Process, status: i32)
     if let Err(error) = current {
         return error;
     }
-    // SAFETY: the pointer is the live startup state on main's stack. The
-    // driver will never poll another coroutine, even if cleanup suspends.
-    unsafe { *process.resources = Resources::default() };
+    // SAFETY: the pointer is the live host state, which the coroutine's frames do
+    // not hold. The driver will never poll another coroutine, even if cleanup suspends.
+    unsafe { Resources::release(process.resources) };
     crate::exit_coroutine(status)
 }
 
