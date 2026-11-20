@@ -86,6 +86,12 @@ pub unsafe fn start(
     result
 }
 
+/// Return the host's startup data during entry.
+pub fn startup() -> Option<&'static XilaStartup> {
+    // SAFETY: start installs validated startup data for the duration of entry.
+    unsafe { STARTUP.load(Ordering::Acquire).as_ref() }
+}
+
 /// Return the installed API table during entry.
 pub fn api() -> Option<&'static XilaApi> {
     // SAFETY: start installs validated startup data for the duration of entry.

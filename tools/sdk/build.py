@@ -351,11 +351,12 @@ def compile_sdk(target, install, work):
 
     crt0 = compile_one(SDK_SOURCE / "sdk/crt0.c", "crt0")
     stubs = compile_one(SDK_SOURCE / "sdk/stubs.c", "stubs")
+    graphics = compile_one(SDK_SOURCE / "sdk/graphics.c", "graphics")
     posix = [compile_one(SDK_SOURCE / f"sdk/posix/{name}.c", name) for name in POSIX_SOURCES]
     ar = find_tool("llvm-ar")
     libraries = work / "lib"
     libraries.mkdir(exist_ok=True)
-    for archive, members in (("libxila.a", [stubs]), ("libxila_posix.a", posix)):
+    for archive, members in (("libxila.a", [stubs, graphics]), ("libxila_posix.a", posix)):
         # A new file each time, renamed over the old one: updating in place would keep the
         # members of sources that no longer exist.
         staging = libraries / f"{archive}.{os.getpid()}"
@@ -387,6 +388,7 @@ def assemble(target, pin, install, crt0, libraries, work):
     shutil.copytree(install / "include", root / "include", dirs_exist_ok=True)
     shutil.copytree(SDK_SOURCE / "sdk/posix/include", root / "include", dirs_exist_ok=True)
     shutil.copy(SDK_SOURCE / "include/xila/application.h", root / "include/xila/")
+    shutil.copy(SDK_SOURCE / "include/xila/graphics.h", root / "include/xila/")
     shutil.copy(SDK_SOURCE / "sdk/stubs.h", root / "include/xila/")
     shutil.copy(crt0, root / "lib/crt0.o")
     for archive in ("libxila.a", "libxila_posix.a"):
@@ -614,7 +616,7 @@ def verify(args):
         if links_builder != needs_environ:
             sys.exit(f"error: unexpected environ builder linkage in {name}.elf")
         print(f"{name}.elf: environ builder {'present' if links_builder else 'absent'}")
-    for name in ("threads", "ssp"):
+    for name in ("threads", "ssp", "graphics"):
         verify_c_program(target, sdk, name, SDK_SOURCE / "sdk/test" / name)
     run([find_tool("llvm-size"), image])
     print("\nBytes by origin (map):")

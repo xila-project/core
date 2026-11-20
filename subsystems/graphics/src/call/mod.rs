@@ -57,11 +57,54 @@ pub struct Call {
 
 include!(concat!(env!("OUT_DIR"), "/call_table.rs"));
 
-/// Run one call for the process that owns `state`.
+/// Run one call for the process that owns `state`, blocking the thread while
+/// another holder has the graphics lock. A caller on a cooperative executor
+/// takes the lock itself and uses [`execute_locked`].
 ///
 /// The result address is validated before anything runs, so a call never has
 /// effects it cannot report.
 pub fn execute(state: &mut State, transport: &mut dyn Transport, call: &Call) -> Result<()> {
+    let (function, manager) = begin(state, transport, call)?;
+    manager
+        .with_lvgl_sync(|lv| {
+            Ok(state
+                .initialize(lv)
+                .and_then(|()| run(state, transport, call, function)))
+        })
+        .map_err(|_| Error::NativeFailure)?
+}
+
+/// [`execute`] for a caller that already holds the manager's graphics lock,
+/// taken with [`Manager::lock`]. Waiting for that lock can suspend the caller
+/// instead of blocking its thread.
+///
+/// # Safety
+///
+/// The caller holds the lock of `state`'s manager for the whole call and
+/// uses no LVGL session in it.
+pub unsafe fn execute_locked(
+    state: &mut State,
+    transport: &mut dyn Transport,
+    call: &Call,
+) -> Result<()> {
+    let (function, manager) = begin(state, transport, call)?;
+    // SAFETY: the caller holds the lock.
+    unsafe {
+        manager.with_lvgl_locked(|lv| {
+            Ok(state
+                .initialize(lv)
+                .and_then(|()| run(state, transport, call, function)))
+        })
+    }
+    .map_err(|_| Error::NativeFailure)?
+}
+
+/// Check the call and find the manager it runs on.
+fn begin(
+    state: &State,
+    transport: &mut dyn Transport,
+    call: &Call,
+) -> Result<(Function, &'static crate::Manager)> {
     let (function, argument_count, result_kind) =
         lookup(call.function).ok_or(Error::Unsupported)?;
     if argument_count != call.count {
@@ -73,11 +116,5 @@ pub fn execute(state: &mut State, transport: &mut dyn Transport, call: &Call) ->
         ResultKind::Word => transport.validate(call.result, transport.word_size())?,
         ResultKind::U32 | ResultKind::I32 => transport.validate(call.result, size_of::<u32>())?,
     }
-    manager
-        .with_lvgl_sync(|lv| {
-            Ok(state
-                .initialize(lv)
-                .and_then(|()| run(state, transport, call, function)))
-        })
-        .map_err(|_| Error::NativeFailure)?
+    Ok((function, manager))
 }

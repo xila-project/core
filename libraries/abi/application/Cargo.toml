@@ -11,9 +11,11 @@ name = "abi_application"
 [features]
 default = []
 network = ["dep:network", "dep:smoltcp", "dep:embassy-futures"]
+graphics = ["dep:graphics"]
 
 [dependencies]
 network = { workspace = true, optional = true }
+graphics = { workspace = true, optional = true }
 smoltcp = { workspace = true, optional = true }
 embassy-futures = { workspace = true, optional = true }
 virtual_file_system.workspace = true

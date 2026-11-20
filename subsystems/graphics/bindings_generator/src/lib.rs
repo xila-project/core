@@ -7,6 +7,7 @@ pub mod context;
 pub mod enumeration;
 pub mod executor;
 pub mod function;
+pub mod guest;
 pub mod guest_constants;
 pub mod naming;
 pub mod registry;

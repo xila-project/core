@@ -19,6 +19,8 @@ extern crate alloc;
 
 mod directory;
 mod file;
+#[cfg(feature = "graphics")]
+mod graphics;
 mod iterator;
 mod metadata;
 #[cfg(feature = "network")]
@@ -43,6 +45,8 @@ pub use threads::*;
 
 pub use directory::*;
 pub use file::*;
+#[cfg(feature = "graphics")]
+pub use graphics::xila_graphics_call;
 pub use iterator::*;
 pub use metadata::*;
 pub use poll::*;
@@ -240,6 +244,15 @@ mod tests {
                 committed.display()
             );
         }
+    }
+
+    #[cfg(not(feature = "graphics"))]
+    #[test]
+    fn disabled_graphics_keeps_its_slot() {
+        assert_eq!(
+            unsafe { (XILA_API.graphics_call)(ptr::null(), 0, ptr::null(), 0, ptr::null_mut()) },
+            Status::Unsupported
+        );
     }
 
     #[cfg(not(feature = "network"))]

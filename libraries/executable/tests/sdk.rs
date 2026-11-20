@@ -155,15 +155,14 @@ async fn install(
         .unwrap();
 }
 
-/// Run the program at `path` with `arguments`; stdout and stderr go to their own files.
-/// Returns the exit status, stdout and stderr.
-async fn launch(
+/// Start the program at `path` with `arguments`; stdout and stderr go to their own files.
+async fn start(
     context: &'static ExecutableContext,
     parent: TaskIdentifier,
     path: &str,
     label: &str,
     arguments: &[&str],
-) -> (isize, Vec<u8>, Vec<u8>) {
+) -> task::JoinHandle<isize> {
     let vfs = context.virtual_file_system;
     let create = Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None);
     let (stdout, stderr) = (format!("/{label}.out"), format!("/{label}.err"));
@@ -179,7 +178,7 @@ async fn launch(
         path: PathOwned::new("/".into()).unwrap(),
         rights: XILA_RIGHT_READ | XILA_RIGHT_WRITE,
     });
-    let handle = execute_with(
+    execute_with(
         context,
         path,
         arguments
@@ -191,17 +190,37 @@ async fn launch(
         launch,
     )
     .await
-    .unwrap();
+    .unwrap()
+}
+
+/// Run the program at `path` with `arguments` to its end. Returns the exit status, stdout and
+/// stderr.
+async fn launch(
+    context: &'static ExecutableContext,
+    parent: TaskIdentifier,
+    path: &str,
+    label: &str,
+    arguments: &[&str],
+) -> (isize, Vec<u8>, Vec<u8>) {
+    let vfs = context.virtual_file_system;
+    let handle = start(context, parent, path, label, arguments).await;
     let status = handle.join().await;
     assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
     (
         status,
-        read_all(vfs, parent, &stdout).await,
-        read_all(vfs, parent, &stderr).await,
+        read_all(vfs, parent, &format!("/{label}.out")).await,
+        read_all(vfs, parent, &format!("/{label}.err")).await,
     )
 }
 
 async fn setup() -> (&'static ExecutableContext, TaskIdentifier) {
+    setup_with(|_| ()).await
+}
+
+/// A context with the SDK's loader and a filesystem, which `configure` may extend.
+async fn setup_with(
+    configure: impl FnOnce(&mut ExecutableContext),
+) -> (&'static ExecutableContext, TaskIdentifier) {
     let time = Box::leak(Box::new(
         time::Manager::new(&testing_support::TimeDevice).unwrap(),
     ));
@@ -216,6 +235,7 @@ async fn setup() -> (&'static ExecutableContext, TaskIdentifier) {
     ));
     let mut context = ExecutableContext::new(tasks, users, vfs, time);
     context.formats = const { &[LOADER.registration()] };
+    configure(&mut context);
     let context = Box::leak(Box::new(context));
 
     (context, parent)
@@ -460,5 +480,157 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
         assert_eq!(status, 134, "{size}");
         assert_eq!(stdout, b"", "{size}");
         assert_eq!(stderr, b"*** stack smashing detected ***\n", "{size}");
+    }
+}
+
+/// A display the graphics manager draws on and nobody looks at.
+#[cfg(feature = "graphics")]
+mod screen {
+    use core::task::{Context, Poll};
+    use file_system::{
+        ControlCommand, ControlCommandIdentifier, DirectBaseOperations, DirectCharacterDevice,
+        MountOperations, Size,
+    };
+    use graphics::{GET_RESOLUTION, Point, SET_DRAWING_AREA, WAS_RESIZED};
+    use shared::AnyByLayout;
+
+    pub struct Screen;
+
+    impl MountOperations for Screen {}
+    impl DirectCharacterDevice for Screen {}
+    impl DirectBaseOperations for Screen {
+        fn read(
+            &self,
+            _: &mut Context<'_>,
+            _: &mut [u8],
+            _: Size,
+        ) -> Poll<file_system::Result<usize>> {
+            Poll::Ready(Err(file_system::IoErrorKind::Unsupported))
+        }
+
+        fn write(
+            &self,
+            _: &mut Context<'_>,
+            bytes: &[u8],
+            _: Size,
+        ) -> Poll<file_system::Result<usize>> {
+            Poll::Ready(Ok(bytes.len()))
+        }
+
+        fn control(
+            &self,
+            _: &mut Context<'_>,
+            command: ControlCommandIdentifier,
+            _: &AnyByLayout,
+            output: &mut AnyByLayout,
+        ) -> Poll<file_system::Result<()>> {
+            Poll::Ready(match command {
+                GET_RESOLUTION::IDENTIFIER => GET_RESOLUTION::cast_output(output)
+                    .map(|resolution| *resolution = Point::new(320, 240)),
+                WAS_RESIZED::IDENTIFIER => {
+                    WAS_RESIZED::cast_output(output).map(|resized| *resized = false)
+                }
+                SET_DRAWING_AREA::IDENTIFIER => Ok(()),
+                _ => Err(file_system::IoErrorKind::Unsupported),
+            })
+        }
+    }
+}
+
+/// A C program builds a window and a few objects through the SDK's graphics bindings, reads
+/// properties back, polls the window's events until the test clicks its button and ends
+/// with all of them alive: by returning, and by calling `exit`. Either way the host deletes
+/// the objects, and a second process after it starts clean.
+#[cfg(feature = "graphics")]
+#[task::test]
+async fn graphics_calls_reach_the_executor_and_a_process_leaves_no_objects() {
+    use graphics::{Manager, call::State, lvgl};
+
+    let time = Box::leak(Box::new(
+        time::Manager::new(&testing_support::TimeDevice).unwrap(),
+    ));
+    let manager: &'static Manager = Box::leak(Box::new(
+        graphics::initialize_with_input_devices(time, &screen::Screen, &[], 1024, false).await,
+    ));
+    let (context, parent) = setup_with(|context| context.graphics_manager = Some(manager)).await;
+    let vfs = context.virtual_file_system;
+    vfs.create_directory(parent, &"/devices").await.unwrap();
+    vfs.create_directory(parent, &"/devices/random")
+        .await
+        .unwrap();
+    vfs.mount_character_device(parent, "/devices/random/source", FixtureEntropy)
+        .await
+        .unwrap();
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../abi/application/sdk/test/graphics");
+    install(
+        vfs,
+        parent,
+        "/graphics",
+        &build_sdk_program(&source, "graphics", "integer"),
+    )
+    .await;
+
+    let screen = manager.get_current_screen().unwrap();
+    let children = || {
+        manager
+            .lock_function_sync(|| Ok(unsafe { lvgl::lv_obj_get_child_count(screen) }))
+            .unwrap()
+    };
+    let before = children();
+    for (mode, status) in [("return", 0), ("exit", 7)] {
+        let label = format!("graphics-{mode}");
+        let handle = start(context, parent, "/graphics", &label, &[mode]).await;
+
+        // The program creates /graphics-ready once its objects exist, then waits for a click.
+        let mut waited = 0;
+        while vfs.get_statistics(&"/graphics-ready").await.is_err() {
+            assert!(
+                waited < 5000 && !handle.is_finished(),
+                "{mode}: the program did not become ready: {}",
+                String::from_utf8_lossy(&read_all(vfs, parent, &format!("/{label}.err")).await)
+            );
+            task::sleep(core::time::Duration::from_millis(1)).await;
+            waited += 1;
+        }
+        assert_eq!(manager.get_window_count().await.unwrap(), 1);
+        assert_eq!(State::registered_state_count(manager), 1);
+        assert_eq!(children(), before + 1);
+        // Another task holds the graphics lock across an await. The program's next poll
+        // waits for it by suspending: were it to block the executor's thread instead, this
+        // task could never resume to release the lock.
+        {
+            let _lock = manager.lock().await;
+            task::sleep(core::time::Duration::from_millis(20)).await;
+        }
+        // The window's first child is the program's button.
+        let window = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
+        manager
+            .lock_function(|| {
+                // SAFETY: the graphics lock is held and the window is alive.
+                unsafe {
+                    let button = lvgl::lv_obj_get_child(window, 0);
+                    lvgl::lv_obj_send_event(
+                        button,
+                        lvgl::lv_event_code_t_LV_EVENT_CLICKED,
+                        core::ptr::null_mut(),
+                    );
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(handle.join().await, status, "{mode}");
+        assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            read_all(vfs, parent, &format!("/{label}.out")).await,
+            b"graphics: ok\n",
+            "{mode}: {}",
+            String::from_utf8_lossy(&read_all(vfs, parent, &format!("/{label}.err")).await)
+        );
+        // The process ended with its objects alive: the host deleted them.
+        assert_eq!(manager.get_window_count().await.unwrap(), 0, "{mode}");
+        assert_eq!(State::registered_state_count(manager), 0, "{mode}");
+        assert_eq!(children(), before, "{mode}");
     }
 }

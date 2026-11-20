@@ -890,6 +890,61 @@ fn unregister_side(side: Option<Box<UnsafeCell<Side>>>) {
     drop(side);
 }
 
+impl State {
+    /// Delete every object this process still owns, inside a session.
+    fn delete_objects(&mut self, lv: &mut safe::Lvgl) {
+        let handles = core::mem::take(&mut self.side_mut().handles);
+        for raw in handles {
+            let Some(handle) = safe::Handle::<safe::Obj>::from_raw(raw) else {
+                continue;
+            };
+            // The host owns the guest's windows: safe structural calls
+            // refuse them (Core registers them as host objects), so a
+            // window goes through its owner.
+            let window = handle
+                .get(lv)
+                .ok()
+                // SAFETY: the session lock is held and the object is live.
+                .and_then(|object| unsafe { Window::from_raw(object.as_ptr()) });
+            if let Some(window) = window {
+                // SAFETY: this VM created the window (`WindowCreate`) and
+                // took it from its `OwnedWindow`; nothing else owns or
+                // deletes it.
+                unsafe { OwnedWindow::from_raw(window) }.delete(lv);
+                continue;
+            }
+            if let Ok(object) = handle.get_mut(lv) {
+                let _ = object.delete();
+            }
+        }
+        // Private window roots ensure structural deletion cannot leave a
+        // retained resource attached to an untracked shared object.
+        unregister_side(self.side.take());
+    }
+
+    /// Delete the process's objects now, for a caller that already holds the
+    /// manager's graphics lock (taken with [`Manager::lock`], so a cooperative
+    /// caller waits for it without blocking its thread). Afterwards the state
+    /// owns nothing and dropping it is free. It is safe to call twice.
+    ///
+    /// # Safety
+    ///
+    /// The caller holds the lock of this state's manager for the whole call.
+    pub unsafe fn release_locked(&mut self) {
+        let Some(manager) = self.manager else { return };
+        if self.side.is_none() {
+            return;
+        }
+        // SAFETY: the caller holds the lock.
+        let _ = unsafe {
+            manager.with_lvgl_locked(|lv| {
+                self.delete_objects(lv);
+                Ok(())
+            })
+        };
+    }
+}
+
 impl Drop for State {
     fn drop(&mut self) {
         let Some(manager) = self.manager else {
@@ -899,33 +954,7 @@ impl Drop for State {
             return;
         }
         let _ = manager.with_lvgl_sync(|lv| {
-            let handles = core::mem::take(&mut self.side_mut().handles);
-            for raw in handles {
-                let Some(handle) = safe::Handle::<safe::Obj>::from_raw(raw) else {
-                    continue;
-                };
-                // The host owns the guest's windows: safe structural calls
-                // refuse them (Core registers them as host objects), so a
-                // window goes through its owner.
-                let window = handle
-                    .get(lv)
-                    .ok()
-                    // SAFETY: the session lock is held and the object is live.
-                    .and_then(|object| unsafe { Window::from_raw(object.as_ptr()) });
-                if let Some(window) = window {
-                    // SAFETY: this VM created the window (`WindowCreate`) and
-                    // took it from its `OwnedWindow`; nothing else owns or
-                    // deletes it.
-                    unsafe { OwnedWindow::from_raw(window) }.delete(lv);
-                    continue;
-                }
-                if let Ok(object) = handle.get_mut(lv) {
-                    let _ = object.delete();
-                }
-            }
-            // Private window roots ensure structural deletion cannot leave a
-            // retained resource attached to an untracked shared object.
-            unregister_side(self.side.take());
+            self.delete_objects(lv);
             Ok(())
         });
         if let Some(side) = self.side.take() {

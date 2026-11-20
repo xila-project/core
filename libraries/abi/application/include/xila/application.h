@@ -421,7 +421,8 @@ typedef struct XilaPollEntry {
 
 /**
  * Native application entry points, in slot order. The header precedes slot zero.
- * Networking slots return Unsupported when the runtime omits networking.
+ * Networking slots return Unsupported when the runtime omits networking, and so does
+ * the graphics slot when it omits graphics.
  */
 typedef struct XilaApi {
   /**
@@ -710,6 +711,16 @@ typedef struct XilaApi {
                             uint32_t flags,
                             struct XilaFile **reader,
                             struct XilaFile **writer);
+  /**
+   * Run one graphics call by its ID from `xila/graphics.h`. `arguments` holds
+   * `argument_count` words (at most seven; null at zero) and `result` receives the
+   * call's word or 32-bit result. The SDK's generated functions pack the words.
+   */
+  XilaStatus (*graphics_call)(const struct XilaProcess *process,
+                              uint32_t function,
+                              const size_t *arguments,
+                              size_t argument_count,
+                              void *result);
 } XilaApi;
 
 /**

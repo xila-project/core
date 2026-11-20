@@ -9,5 +9,8 @@ pub use bindings::*;
 #[cfg(feature = "runtime")]
 pub mod runtime;
 
+#[cfg(feature = "runtime")]
+pub mod graphics;
+
 #[cfg(all(xila_static_pie, not(test)))]
 include!(concat!(env!("OUT_DIR"), "/link.rs"));

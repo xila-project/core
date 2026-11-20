@@ -35,7 +35,7 @@ testing_support = { workspace = true }
 default = []
 building = []
 native-dev = ["dep:abi_application", "dep:native_loader", "dep:stackful"]
-graphics = ["dep:graphics"]
+graphics = ["dep:graphics", "abi_application?/graphics"]
 network = ["dep:network"]
 
 [lib]
@@ -51,3 +51,5 @@ strict = true
 libc = "0.2"
 little_fs.workspace = true
 portable-atomic.workspace = true
+# The graphics test renders in XRGB8888, as the graphics crate's own tests do.
+graphics = { workspace = true, features = ["rendering_xrgb8888"] }

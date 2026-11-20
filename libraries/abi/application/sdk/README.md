@@ -28,17 +28,19 @@ xila-sdk-0.1-<target>/
   sdk.json                  target, ABI, picolibc pin and options, compiler
   COPYING.picolibc          picolibc's licence (BSD); LICENSE-xila.md is Core's (Apache-2.0)
   include/                  picolibc headers, xila/application.h, xila/stubs.h,
-                            xila/posix.h, sys/random.h, sys/socket.h, pthread.h
+                            xila/graphics.h, xila/posix.h, sys/random.h, sys/socket.h,
+                            pthread.h
     posix/stdlib.h          wrapper for the SDK's getenv declaration
   lib/
     crt0.o                  _xila_start: checks the startup, installs the API table
-    libxila.a               indirect-call stubs for every XilaApi slot
+    libxila.a               indirect-call stubs for every XilaApi slot, and the graphics
+                            functions of xila/graphics.h
     libxila_posix.a         the POSIX layer; also defines xila_main, which calls main
     libc.a, libm.a          picolibc (libm.a is empty: the math library is inside libc.a)
     xila-static-pie.ld      the loader's linker script
   rust/xila-sys/             standalone Rust crate
     Cargo.toml, Cargo.lock
-    src/                    raw bindings and optional entry runtime
+    src/                    raw bindings, optional entry runtime and graphics module
     build.rs                supplies the guest linker arguments with the link feature
     xila-static-pie.ld      copy of the loader's linker script used by build.rs
   cmake/xila-toolchain.cmake
@@ -178,6 +180,74 @@ all three ELFs with `tools/sdk/check_elf.py`, and runs the Linux image through
 process heap by growing a `Vec` and resizing a 64-byte-aligned block, writes to
 its borrowed stdout and returns status 73. A second launch checks the panic
 diagnostic and exit status.
+
+## Graphics
+
+Native programs draw with the same API as Wasm applications. `xila/graphics.h`
+declares one function per supported call, with the name, arguments and result of
+the Wasm guest API (`xila_graphics_label_create`, `xila_graphics_label_set_text`,
+`xila_graphics_window_pop_pointer_event`, ...), and `libxila.a` defines them.
+`xila_sys::graphics` is the Rust counterpart with the guest API's function names,
+types and `Result`; a Rust application written against the guest API builds
+natively with little change. Both are generated from the declaration that
+generates the Wasm guest bindings and Core's executor, so the three cannot
+disagree and no call is written by hand. `xila_graphics_object_create(parent, &object)`
+in C and `object_create(parent)` in Rust both produce the new object, which is a
+32-bit handle held in a pointer-sized value, never an address.
+
+```c
+#include <xila/graphics.h>
+
+XilaGraphicsObject *window, *label;
+if (xila_graphics_window_create(&window) != 0 ||
+    xila_graphics_label_create(window, &label) != 0)
+    return 1;
+xila_graphics_label_set_text(label, "Hello");
+```
+
+Every function returns 0, or the non-zero `XilaStatus` the host reported:
+`XILA_STATUS_INVALID_ARGUMENT` for a wrong handle, argument or value,
+`XILA_STATUS_OUT_OF_MEMORY` when a string, buffer or per-process table is over
+its limit, `XILA_STATUS_UNAVAILABLE` when the system has no display, and
+`XILA_STATUS_UNSUPPORTED` when the firmware was built without graphics. A
+result that is a pointer-sized word (a handle, or the target of an event) is
+written as a whole `size_t`; the others are 32 bits. Strings are NUL-terminated
+and capped by the host: a longer one, or an unterminated one, is refused after
+the host has read at most that many bytes.
+
+Events come from the window's queue: `xila_graphics_window_pop_event` and
+`xila_graphics_window_pop_pointer_event` report an event code
+(`XILA_GRAPHICS_EVENT_CODE_CLICKED`, ...) and the handle of its target, or code 0
+for no event. Poll them from your main loop and sleep (`xila_time_sleep`) when the
+queue is empty, so the other tasks run.
+
+How it works, and why raw `lv_*` functions are not exposed:
+
+* One `XilaApi` slot, `graphics_call(process, id, words, count, result)`, carries
+  every call. The generated functions pack their arguments into words, so adding a
+  call to Core adds no slot.
+* Core's graphics executor runs the call under the graphics lock and keeps a
+  per-process table of the objects the process created. A handle names one of them;
+  an object that is not the process's is refused. When the process ends (`main`
+  returns, `exit` or `xila_process_exit`), the host deletes every object it still
+  owns, windows included, so nothing needs cleaning up by hand. The table lives in the
+  process's host-owned state, not on its stack, so the host-side cleanup of a task
+  cancelled while suspended (#731) finds it there too.
+* Raw LVGL functions would bypass both: they would not take the lock, and the objects
+  they create would belong to nobody, so an exited or cancelled process would leak them
+  and could corrupt the display by deleting an object another process owns. An `lv_*`
+  compatibility layer can be built on top of this API later; it cannot be built
+  beneath it.
+* The graphics lock is awaited by suspending the process, like a file read, so a
+  program that draws never blocks the other tasks. The first graphics call of a
+  process allocates its table; a process that never draws pays one pointer.
+* Native code is trusted, so pointers are read as they are; only strings and buffers
+  are bounded by the executor's limits.
+
+Core's `sdk/test/graphics` program builds a window with a button, a label, a checkbox
+and a slider, reads properties back, packs a color, checks the refused cases and polls
+for a click; the Linux loader test clicks it and checks the host deleted everything,
+whether the program returned or called `exit`.
 
 ## How it maps onto the native ABI
 

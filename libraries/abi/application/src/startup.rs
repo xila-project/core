@@ -47,6 +47,9 @@ pub(crate) struct Resources {
     pub(crate) standard_output: Option<File>,
     pub(crate) standard_error: Option<File>,
     pub(crate) home: Option<Directory>,
+    /// The process's graphics objects, allocated by its first graphics call.
+    #[cfg(feature = "graphics")]
+    pub(crate) graphics: Option<alloc::boxed::Box<graphics::call::State>>,
 }
 
 /// Everything the host keeps for one native run: the startup block the entry
@@ -102,6 +105,8 @@ impl HostState {
             standard_output,
             standard_error,
             home: None,
+            #[cfg(feature = "graphics")]
+            graphics: None,
         })
     }
 
@@ -153,6 +158,18 @@ impl Resources {
     /// The pointer addresses live resources and no reference to them is in use.
     #[inline(never)]
     pub(crate) unsafe fn release(resources: *mut Self) {
+        // The process's graphics objects go first, under the graphics lock, which
+        // the process waits for by suspending. The state stays in the resources, so
+        // a coroutine cancelled in that wait leaves it for the loader to drop.
+        #[cfg(feature = "graphics")]
+        {
+            // SAFETY: the caller guarantees the pointer is valid.
+            let state = unsafe { (*resources).graphics.as_mut() }.map(|state| &raw mut **state);
+            if let Some(state) = state {
+                // SAFETY: the state is live and no reference to it is in use.
+                unsafe { crate::graphics::release(state) };
+            }
+        }
         // SAFETY: the caller guarantees the pointer is valid. `take` writes the empty
         // set before anything is dropped, so a destructor that suspends (a `File` closes
         // through the VFS) and is then cancelled leaves an empty state behind, never a
@@ -189,6 +206,8 @@ pub unsafe fn run_main(
         standard_output,
         standard_error,
         home,
+        #[cfg(feature = "graphics")]
+        graphics: None,
     });
     unsafe { enter(NonNull::from(&mut state), entry, NonNull::from(heap), None) }
 }
