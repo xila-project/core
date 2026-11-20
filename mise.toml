@@ -152,6 +152,8 @@ rustup toolchain install {{ vars.nightly_version }} --profile minimal --componen
 uv run --no-project python tools/sdk/build.py rust-example ${XILA_SDK_TARGET:+--target="$XILA_SDK_TARGET"}
 case "${XILA_SDK_TARGET:-x86_64-unknown-linux-gnu}" in
   x86_64-unknown-linux-gnu)
+    rustup run {{ vars.nightly_version }} cargo test --locked \
+      --manifest-path libraries/abi/application/sdk/rust/xila-sys/Cargo.toml --features runtime
     XILA_RUST_HELLO="$PWD/target/sdk/rust-hello/x86_64-unknown-linux-gnu/release/xila-rust-hello" \
       cargo test --locked -p xila-executable --features native-dev --test sdk -- runs_sdk_rust_hello --ignored --exact
     ;;

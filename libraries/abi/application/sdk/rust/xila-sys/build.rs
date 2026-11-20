@@ -7,18 +7,23 @@ fn main() {
     println!("cargo::rerun-if-changed=build.rs");
     println!("cargo::rerun-if-changed={SCRIPT}");
 
-    if env::var_os("CARGO_FEATURE_RUNTIME").is_none() {
+    if env::var_os("CARGO_FEATURE_LINK").is_none() {
         return;
     }
-    let alignment = match env::var("TARGET").unwrap().as_str() {
+    let target = env::var("TARGET").unwrap();
+    let alignment = match target.as_str() {
         "x86_64-unknown-linux-gnu" => 4096, // The host separates permissions with mprotect.
         "thumbv7em-none-eabihf" | "riscv32imac-unknown-none-elf" => 16,
-        _ => return,
+        _ => {
+            println!(
+                "cargo::warning=xila-sys: target {target} has no Xila static PIE link configuration"
+            );
+            return;
+        }
     };
 
-    // Raw link arguments in rlib metadata require nightly. Stable builds can
-    // still use and check the runtime API. Native guest builds use nightly
-    // to rebuild the PIC sysroot.
+    // Raw link arguments in rlib metadata require nightly, as does rebuilding
+    // the guest's PIC sysroot. Stable builds can still check all features.
     let version = Command::new(env::var_os("RUSTC").unwrap())
         .arg("--version")
         .output()
@@ -28,12 +33,15 @@ fn main() {
         .unwrap()
         .contains("-nightly")
     {
+        println!(
+            "cargo::warning=xila-sys: static PIE link arguments require the nightly compiler pinned in Core's mise.toml"
+        );
         return;
     }
 
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
-    fs::write(out.join(SCRIPT), include_str!("xila-static-pie.ld")).unwrap();
-    println!("cargo::rustc-link-search=native={}", out.display());
+    let script = out.join(SCRIPT);
+    fs::write(&script, include_str!("xila-static-pie.ld")).unwrap();
     println!("cargo::rustc-cfg=xila_static_pie");
 
     // Cargo's rustc-link-arg instruction only affects this package's targets.
@@ -49,7 +57,7 @@ fn main() {
         "--gc-sections",
         "--build-id=none",
         &format!("--defsym=XILA_DATA_ALIGN={alignment}"),
-        &format!("-T{SCRIPT}"),
+        &format!("-T{}", script.display()),
     ] {
         use std::fmt::Write;
         writeln!(attributes, "#[link(name = {arg:?}, kind = \"link-arg\")]").unwrap();

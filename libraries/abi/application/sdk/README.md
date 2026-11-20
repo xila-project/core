@@ -35,7 +35,11 @@ xila-sdk-0.1-<target>/
     libxila_posix.a         the POSIX layer; also defines xila_main, which calls main
     libc.a, libm.a          picolibc (libm.a is empty: the math library is inside libc.a)
     xila-static-pie.ld      the loader's linker script
-  rust/xila-sys/             standalone Rust bindings and optional entry runtime
+  rust/xila-sys/             standalone Rust crate
+    Cargo.toml, Cargo.lock
+    src/                    raw bindings and optional entry runtime
+    build.rs                supplies the guest linker arguments with the link feature
+    xila-static-pie.ld      copy of the loader's linker script used by build.rs
   cmake/xila-toolchain.cmake
   share/xila/example/hello  the example below
 ```
@@ -82,11 +86,12 @@ the ABI table (`libraries/executable/tests/sdk.rs`).
 
 ## Rust
 
-Add `xila-sys` to your application's `Cargo.toml`:
+Add `xila-sys` to your application's `Cargo.toml` and replace `<core-commit>`
+with the full commit SHA for the Core revision you build against.
 
 ```toml
 [dependencies]
-xila-sys = { git = "https://github.com/xila-project/core.git", features = ["runtime"] }
+xila-sys = { git = "https://github.com/xila-project/core.git", rev = "<core-commit>", features = ["link"] }
 
 [profile.dev]
 panic = "abort"
@@ -104,8 +109,8 @@ especially for the borrowed startup streams. `Status` preserves every 32-bit
 value, including status codes introduced by later hosts. Use `Mutex::ZERO` and
 `Condition::ZERO` for initial synchronization storage.
 
-Enable the `runtime` feature for `xila_sys::entry!(main)`. It emits
-`_xila_start` and the ELF ABI note, checks both sizes and the table
+The `link` feature enables `runtime`, which provides `xila_sys::entry!(main)`.
+The entry macro emits `_xila_start` and the ELF ABI note, checks both sizes and the table
 version, then calls your `unsafe fn main(*const xila_sys::XilaStartup) -> i32`.
 The result is the process exit status. During entry, `xila_sys::runtime::api()`
 returns `Some(&XilaApi)`, and it returns `None` outside entry. Define a
@@ -131,8 +136,9 @@ binary with an explicit target so the PIC flags also apply to the rebuilt
 sysroot while build scripts still use the host configuration.
 
 ```sh
-rustup toolchain install nightly-2026-10-12 --profile minimal --component rust-src
-cargo +nightly-2026-10-12 build --release --target thumbv7em-none-eabihf
+XILA_NIGHTLY='<nightly_version from the pinned Core revision>'
+rustup toolchain install "$XILA_NIGHTLY" --profile minimal --component rust-src
+cargo +"$XILA_NIGHTLY" build --release --target thumbv7em-none-eabihf
 ```
 
 The supported targets are `x86_64-unknown-linux-gnu`, `thumbv7em-none-eabihf`
@@ -142,12 +148,16 @@ You can omit `alloc` if your application never uses it. A future dedicated
 Xila target with `std` would start as tier 3 and would still need a source
 build of its sysroot.
 
-On the guest nightly, `runtime` supplies the linker script and all Xila
+On the guest nightly, `link` supplies the linker script and all Xila
 link arguments, including the target's data alignment. It uses rustc's
 nightly support for forwarding link arguments from a library to its
 consumer. Direct GNU-style linking uses the `rust-lld` bundled with Rustup,
 so the application needs no system LLVM install, custom linker script,
 C startup object, or libc.
+
+Enable only `runtime` when building host tests or doctests that use the runtime
+API. Cargo unifies dependency features within a build, so keep host tests and
+guest builds that enable `link` in separate Cargo invocations.
 
 From a Core checkout on Linux x86-64 with Rustup and `llvm-size`:
 

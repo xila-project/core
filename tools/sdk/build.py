@@ -610,6 +610,8 @@ def verify(args):
 
 def rust_example(args):
     """Build an independent PIC sysroot for each selected Rust guest and verify its image."""
+    from check_elf import Elf, PF_W, PT_LOAD
+
     nightly = tomllib.loads((ROOT / "mise.toml").read_text())["vars"]["nightly_version"]
     example = SDK_SOURCE / "sdk/rust/hello"
     output = OUTPUT / "rust-hello"
@@ -622,6 +624,11 @@ def rust_example(args):
              "--target", target, "--target-dir", output], cwd=example, env=env)
         image = output / target / "release/xila-rust-hello"
         verify_image(image, target)
+        alignment = TARGETS[target]["data_alignment"]
+        writable_loads = [segment for segment in Elf(image.read_bytes()).segments()
+                          if segment["type"] == PT_LOAD and segment["flags"] & PF_W]
+        if not writable_loads or any(segment["vaddr"] % alignment for segment in writable_loads):
+            sys.exit(f"{image}: expected writable PT_LOAD segments aligned to {alignment} bytes")
         run([find_tool("llvm-size"), image])
         print(f"ELF file: {image.stat().st_size} bytes")
 

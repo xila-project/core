@@ -8,7 +8,7 @@ publish = false
 [workspace]
 
 [dependencies]
-xila-sys = { path = "../xila-sys", features = ["runtime"] }
+xila-sys = { path = "../xila-sys", features = ["link"] }
 
 [profile.dev]
 panic = "abort"
