@@ -64,7 +64,7 @@ OutOfMemory.
 - `xila_heap_allocate`, `xila_heap_reallocate`, `xila_heap_free`: process-owned allocation.
 - `xila_process_id`, `xila_process_parent_id`, `xila_process_exit`: identity and termination.
 - `xila_process_spawn`, `xila_process_wait`, `xila_process_child_close`: children.
-- `xila_env_get`, `xila_env_set`, `xila_env_remove`: the process's environment.
+- `xila_env_get`, `xila_env_set`, `xila_env_remove`, `xila_env_entry`: the process's environment.
 
 The host constructs capabilities with `Directory::new` and wraps existing streams
 with `File::new`. `into_raw` transfers ownership and unsafe `from_raw` reclaims it
@@ -285,8 +285,16 @@ value without a terminator. A missing variable returns NotFound and leaves the o
 alone. A buffer that is too small returns BufferTooSmall, stores the required
 length and leaves the buffer unchanged; a null buffer is allowed at capacity zero.
 `xila_env_set` replaces any value, and a null value is valid at length zero.
-`xila_env_remove` of a missing variable succeeds. Names are non-empty UTF-8 without
-`=` or NUL and values are UTF-8 without NUL, otherwise InvalidArgument. Entries are not
+`xila_env_remove` of a missing variable succeeds.
+`xila_env_entry(process, index, buffer, capacity, &entry_length)` copies one
+`NAME=VALUE` entry without a terminator. Start at index zero and stop at
+NotFound, which leaves both outputs untouched. Short buffers follow the
+`xila_env_get` convention. Indices can change when the environment is mutated,
+so callers must coordinate writes for a consistent pass. This call occupies
+slot 51 and shifts the following slots in the development ABI 0.1.
+
+Names are non-empty UTF-8 without `=` or NUL and values are UTF-8 without NUL,
+otherwise InvalidArgument. Entries are not
 bounded: the memory comes from the system allocator, which follows its usual
 failure policy, and applications are trusted not to flood it.
 

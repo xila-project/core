@@ -562,6 +562,19 @@ XilaStatus xila_env_remove(XilaProcess const * process, char const * name, size_
     return xila_sdk_api->env_remove(process, name, name_length);
 }
 
+static XilaStatus unavailable_env_entry(XilaProcess const * process, size_t index, char * buffer, size_t capacity, size_t * entry_length) {
+    (void)process;
+    (void)index;
+    (void)buffer;
+    (void)capacity;
+    (void)entry_length;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_env_entry(XilaProcess const * process, size_t index, char * buffer, size_t capacity, size_t * entry_length) {
+    return xila_sdk_api->env_entry(process, index, buffer, capacity, entry_length);
+}
+
 static XilaStatus unavailable_thread_spawn(XilaProcess const * process, size_t stack_size, XilaThreadEntry entry, void * argument, size_t * thread) {
     (void)process;
     (void)stack_size;
@@ -901,6 +914,7 @@ const XilaApi xila_sdk_fallback_api = {
     .env_get = unavailable_env_get,
     .env_set = unavailable_env_set,
     .env_remove = unavailable_env_remove,
+    .env_entry = unavailable_env_entry,
     .thread_spawn = unavailable_thread_spawn,
     .thread_join = unavailable_thread_join,
     .thread_detach = unavailable_thread_detach,

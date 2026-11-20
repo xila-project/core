@@ -223,6 +223,15 @@ pub struct XilaApi {
         name_length: usize,
     ) -> Status,
 
+    /// Read a counted NAME=VALUE entry by index; NotFound marks the end.
+    pub env_entry: unsafe extern "C" fn(
+        process: *const Process,
+        index: usize,
+        buffer: *mut c_char,
+        capacity: usize,
+        entry_length: *mut usize,
+    ) -> Status,
+
     /// Spawn a worker of the current process; stack_size zero chooses the default.
     pub thread_spawn: unsafe extern "C" fn(
         process: *const Process,
@@ -372,6 +381,7 @@ pub static XILA_API: XilaApi = XilaApi {
     env_get: xila_env_get,
     env_set: xila_env_set,
     env_remove: xila_env_remove,
+    env_entry: xila_env_entry,
     thread_spawn: xila_thread_spawn,
     thread_join: xila_thread_join,
     thread_detach: xila_thread_detach,

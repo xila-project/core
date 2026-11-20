@@ -126,6 +126,18 @@ impl Manager {
             .ok_or(Error::InvalidEnvironmentVariable)
     }
 
+    /// Get one environment entry by its current index, sharing its string.
+    pub async fn get_environment_variable_at(
+        &self,
+        task_identifier: TaskIdentifier,
+        index: usize,
+    ) -> Result<Option<EnvironmentVariable>> {
+        Ok(Self::get_task(&*self.0.read().await, task_identifier)?
+            .environment_variables
+            .get(index)
+            .cloned())
+    }
+
     pub async fn get_environment_variables(
         &self,
         task_identifier: TaskIdentifier,

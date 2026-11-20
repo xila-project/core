@@ -703,6 +703,46 @@ mod tests {
                 ) == Status::BufferTooSmall
             );
             check!(length == 5 && &buffer == b"value###");
+            // Enumeration uses byte counts and does not modify a short buffer.
+            check!(
+                (api.env_entry)(process, 0, ptr::null_mut(), 0, &mut length)
+                    == Status::BufferTooSmall
+            );
+            check!(length == 7);
+            check!(
+                (api.env_entry)(process, 0, buffer.as_mut_ptr().cast(), 6, &mut length)
+                    == Status::BufferTooSmall
+            );
+            check!(length == 7 && &buffer == b"value###");
+            check!(
+                (api.env_entry)(process, 0, buffer.as_mut_ptr().cast(), 7, &mut length)
+                    == Status::Ok
+            );
+            check!(length == 7 && &buffer == b"K=value#");
+
+            check!((api.env_set)(process, c"AB".as_ptr(), 2, c"".as_ptr(), 0) == Status::Ok);
+            check!(
+                (api.env_entry)(process, 1, buffer.as_mut_ptr().cast(), 8, &mut length)
+                    == Status::Ok
+            );
+            check!(length == 3 && &buffer[..3] == b"AB=");
+            check!(
+                (api.env_entry)(process, 2, ptr::null_mut(), 0, &mut length) == Status::NotFound
+            );
+            check!(length == 3 && &buffer[..3] == b"AB=");
+            check!(
+                (api.env_entry)(process, 0, ptr::null_mut(), 1, &mut length)
+                    == Status::InvalidArgument
+            );
+            check!(
+                (api.env_entry)(process, 0, ptr::null_mut(), 0, ptr::null_mut())
+                    == Status::InvalidArgument
+            );
+            check!(
+                (api.env_entry)(ptr::null(), 0, ptr::null_mut(), 0, &mut length)
+                    == Status::InvalidArgument
+            );
+            check!((api.env_remove)(process, c"AB".as_ptr(), 2) == Status::Ok);
             // Invalid names and values.
             for name in [&b""[..], b"A=B", b"A\0B", b"\xff"] {
                 check!(
@@ -739,6 +779,9 @@ mod tests {
             check!(length == 0);
             check!((api.env_remove)(process, c"K".as_ptr(), 1) == Status::Ok);
             check!((api.env_remove)(process, c"K".as_ptr(), 1) == Status::Ok);
+            check!(
+                (api.env_entry)(process, 0, ptr::null_mut(), 0, &mut length) == Status::NotFound
+            );
             // Wait needs a child this process spawned.
             check!(
                 (api.process_wait)(process, ptr::null_mut(), 0, ptr::null_mut())

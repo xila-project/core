@@ -61,6 +61,7 @@ XilaStatus xila_process_child_close(XilaChild * child);
 XilaStatus xila_env_get(XilaProcess const * process, char const * name, size_t name_length, char * buffer, size_t capacity, size_t * value_length);
 XilaStatus xila_env_set(XilaProcess const * process, char const * name, size_t name_length, char const * value, size_t value_length);
 XilaStatus xila_env_remove(XilaProcess const * process, char const * name, size_t name_length);
+XilaStatus xila_env_entry(XilaProcess const * process, size_t index, char * buffer, size_t capacity, size_t * entry_length);
 XilaStatus xila_thread_spawn(XilaProcess const * process, size_t stack_size, XilaThreadEntry entry, void * argument, size_t * thread);
 XilaStatus xila_thread_join(size_t thread, void * * result);
 XilaStatus xila_thread_detach(size_t thread);
