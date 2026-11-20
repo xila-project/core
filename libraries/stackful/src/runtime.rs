@@ -192,6 +192,7 @@ impl Future for Coroutine {
 }
 impl Drop for Coroutine {
     fn drop(&mut self) {
+        self.control.native_context.set(core::ptr::null());
         if self.control.started.get() && self.control.result.get().is_none() {
             self.control.result.set(Some(Err(Cancelled)));
             if let Some(w) = self.control.waker.borrow_mut().take() {
@@ -314,6 +315,7 @@ pub fn tls_set(slot: usize, value: usize) -> Result<(), TlsError> {
 /// `c` must be the control block of the running coroutine. Nothing may resume it.
 unsafe fn finish(c: *const Control, status: i32) -> ! {
     unsafe {
+        (*c).native_context.set(core::ptr::null());
         (*c).result.set(Some(Ok(status)));
         let waker = (*c).waker.borrow_mut().take();
         if let Some(w) = waker {

@@ -89,8 +89,9 @@ impl ProcessLaunch {
     /// the coroutine is not on a registered task or the task is gone.
     ///
     /// Every resource the process owns is held by the arguments or by this call's
-    /// own state, which main's `xila_process_exit` releases before abandoning its
-    /// stack. A worker that exits the process cancels main as described in #731.
+    /// own state. `xila_process_exit` releases the startup grants before
+    /// ending the process. A worker that exits the process cancels main as
+    /// described in #731.
     /// The caller must keep no other owned object live above this call.
     ///
     /// # Safety
@@ -254,11 +255,9 @@ pub unsafe extern "C" fn xila_process_parent_id(process: *const Process, id: *mu
     result.map_or_else(|error| error, |()| Status::Ok)
 }
 
-/// End the process and all its workers at once. The calling coroutine does
-/// not unwind. Main closes startup streams and releases its startup grants
-/// before leaving. A worker exits without resuming main or its peers, which
-/// follow stackful's cancellation policy (#731), including leaked stack
-/// resources. The loader still releases the process heap and image.
+/// Stop every peer, release the startup grants, and exit without unwinding.
+/// Stopped peers follow stackful's cancellation policy (#731), including
+/// leaked stack resources. The loader releases the process heap and image.
 ///
 /// Both main and worker entries run without host-owned guards in callback
 /// frames, so abandoning the calling stack does not skip their cleanup.
@@ -272,7 +271,7 @@ pub unsafe extern "C" fn xila_process_exit(process: *const Process, status: i32)
     if !is_in_coroutine() {
         return Status::Unsupported;
     }
-    if let Err(error) = crate::threads::exit_process(ptr::from_ref(process), status) {
+    if let Err(error) = crate::threads::prepare_exit(ptr::from_ref(process)) {
         return error;
     }
     let mut current = Err(Status::Unavailable);
@@ -282,8 +281,8 @@ pub unsafe extern "C" fn xila_process_exit(process: *const Process, status: i32)
     if let Err(error) = current {
         return error;
     }
-    // SAFETY: the pointer is the live startup state of this very coroutine. Closing the
-    // streams may suspend, which is fine before the stack is abandoned.
+    // SAFETY: the pointer is the live startup state on main's stack. The
+    // driver will never poll another coroutine, even if cleanup suspends.
     unsafe { *process.resources = Resources::default() };
     crate::exit_coroutine(status)
 }

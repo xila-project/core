@@ -15,15 +15,15 @@ pub use sync::*;
 
 const MAIN_THREAD: usize = 1;
 
-struct Local {
-    group: *const Group,
+struct Local<'group> {
+    group: &'group Group,
     id: usize,
     libc: UnsafeCell<ThreadLibc>,
     values: [Cell<(usize, *mut c_void)>; XILA_THREAD_KEYS_MAX],
 }
 
-impl Local {
-    const fn new(group: &Group, id: usize) -> Self {
+impl<'group> Local<'group> {
+    const fn new(group: &'group Group, id: usize) -> Self {
         Self {
             group,
             id,
@@ -53,8 +53,7 @@ struct Group {
     keys: [Cell<usize>; XILA_THREAD_KEYS_MAX],
     next_key: Cell<usize>,
     repoll: Cell<bool>,
-    stopping: Cell<bool>,
-    exit: Cell<Option<i32>>,
+    shutdown_thread: Cell<usize>,
 }
 
 impl Group {
@@ -66,8 +65,7 @@ impl Group {
             keys: [const { Cell::new(0) }; XILA_THREAD_KEYS_MAX],
             next_key: Cell::new(XILA_THREAD_KEYS_MAX),
             repoll: Cell::new(false),
-            stopping: Cell::new(false),
-            exit: Cell::new(None),
+            shutdown_thread: Cell::new(0),
         }
     }
 
@@ -91,30 +89,30 @@ impl Group {
     /// Only one executor poll drives the group. Use its real waker for each
     /// child future, including Embassy timers which require an Embassy waker.
     /// A wake polls the group again. No future wakes just because it is pending.
-    fn poll_workers(&self, waker: &Waker) {
+    fn poll_workers(&self, waker: &Waker) -> Poll<i32> {
         let count = self.workers.borrow().len();
         for index in 0..count {
             // Release the borrow before resuming arbitrary C (which can spawn).
+            let shutdown_thread = self.shutdown_thread.get();
             let Some(mut coroutine) = self.workers.borrow_mut()[index]
                 .as_mut()
+                .filter(|worker| shutdown_thread == 0 || shutdown_thread == worker.id)
                 .and_then(|worker| worker.coroutine.take())
             else {
                 continue;
             };
-            let finished = coroutine
-                .resume(&mut core::task::Context::from_waker(waker))
-                .is_ready();
-            if self.stopping.get() {
-                return;
-            }
+            let result = coroutine.resume(&mut core::task::Context::from_waker(waker));
             let mut workers = self.workers.borrow_mut();
             let slot = &mut workers[index];
             if let Some(worker) = slot {
-                if !finished {
+                if result.is_pending() {
                     worker.coroutine = Some(coroutine);
                     continue;
                 }
                 let id = worker.id;
+                if self.shutdown_thread.get() == id {
+                    return result;
+                }
                 if worker.detached {
                     *slot = None;
                 }
@@ -133,6 +131,7 @@ impl Group {
                 self.notify();
             }
         }
+        Poll::Pending
     }
 
     fn key(&self, key: usize) -> Result<&Cell<usize>, Status> {
@@ -144,12 +143,14 @@ impl Group {
     }
 }
 
-fn current() -> Result<(&'static Group, &'static Local), Status> {
-    // Only drive_process and its worker entry wrapper install this context.
-    // Both keep their Local and its group live for the entire C execution.
-    let local = unsafe { stackful::native_context().cast::<Local>().as_ref() }
+fn current() -> Result<(&'static Group, &'static Local<'static>), Status> {
+    // The pinned driver owns the Group for the lifetime of every runnable
+    // coroutine. The driver installs main's Local around resume, and a worker
+    // installs its own Local until it returns or exits. The erased lifetime
+    // lets ABI calls suspend, but references must never escape this group.
+    let local = unsafe { stackful::native_context().cast::<Local<'static>>().as_ref() }
         .ok_or(Status::Unsupported)?;
-    Ok((unsafe { &*local.group }, local))
+    Ok((local.group, local))
 }
 
 pub(crate) fn bind_process(process: *const Process) {
@@ -159,22 +160,52 @@ pub(crate) fn bind_process(process: *const Process) {
 }
 
 pub(crate) fn stop_workers() {
-    if let Ok((group, _)) = current() {
-        group.stopping.set(true);
+    if let Ok((group, local)) = current() {
+        group.shutdown_thread.set(local.id);
     }
 }
 
-pub(crate) fn exit_process(process: *const Process, status: i32) -> Result<(), Status> {
+/// Begin terminal process cleanup. Only the calling thread may run after
+/// this call, even if cleanup suspends. Spawning new workers is disabled.
+/// # Safety
+/// The caller must complete process exit without waiting for stopped peers.
+/// Stopped coroutines and their pending operations are never resumed.
+pub unsafe extern "C" fn xila_thread_stop_others(process: *const Process) -> Status {
+    status((|| {
+        let (group, local) = current()?;
+        if process.is_null() || group.process.get() != process {
+            return Err(Status::InvalidArgument);
+        }
+        group.shutdown_thread.set(local.id);
+        Ok(())
+    })())
+}
+
+/// Finish the calling worker with a pointer-sized result. Main must use
+/// process exit or return. The worker's native frames are abandoned.
+/// # Safety
+/// The caller must release resources that would otherwise be leaked when its
+/// frames are abandoned. The result is opaque and must survive worker exit.
+pub unsafe extern "C" fn xila_thread_exit(result: *mut c_void) -> Status {
+    status((|| {
+        let (group, local) = current()?;
+        if local.id == MAIN_THREAD || group.shutdown_thread.get() != 0 {
+            return Err(Status::InvalidState);
+        }
+        group.with_worker(local.id, |slot| {
+            slot.as_mut().ok_or(Status::NoSuchTask)?.result = Some(result);
+            Ok(())
+        })?;
+        crate::exit_coroutine(0);
+    })())
+}
+
+pub(crate) fn prepare_exit(process: *const Process) -> Result<(), Status> {
     if let Ok((group, local)) = current() {
         if group.process.get() != process {
             return Err(Status::InvalidArgument);
         }
-        group.stopping.set(true);
-        if local.id != MAIN_THREAD {
-            group.exit.set(Some(status));
-            // This worker has no host-owned values live below its C entry.
-            crate::exit_coroutine(status);
-        }
+        group.shutdown_thread.set(local.id);
     }
     Ok(())
 }
@@ -186,22 +217,25 @@ pub async fn drive_process(mut main: Coroutine) -> i32 {
     let group = Group::new();
     let local = Local::new(&group, MAIN_THREAD);
     poll_fn(|cx| {
-        // Both locals are borrowed by this pinned future and stay at fixed
-        // addresses until every coroutine has permanently stopped.
-        unsafe { main.set_native_context(ptr::from_ref(&local).cast()) };
         group.repoll.set(false);
 
-        if let Poll::Ready(status) = main.resume(cx) {
-            return Poll::Ready(status);
+        match group.shutdown_thread.get() {
+            0 | MAIN_THREAD => {
+                // Both locals are borrowed by this pinned future.
+                unsafe { main.set_native_context(ptr::from_ref(&local).cast()) };
+                let result = main.resume(cx);
+                unsafe { main.set_native_context(ptr::null()) };
+                if result.is_ready() {
+                    return result;
+                }
+            }
+            _ => {}
         }
-        if !group.stopping.get() {
-            group.poll_workers(cx.waker());
-        }
-        if group.stopping.get() {
-            group.workers.borrow_mut().clear();
-        }
-        if let Some(status) = group.exit.get() {
-            return Poll::Ready(status);
+        if group.shutdown_thread.get() != MAIN_THREAD {
+            let result = group.poll_workers(cx.waker());
+            if result.is_ready() {
+                return result;
+            }
         }
         if group.repoll.get() {
             cx.waker().wake_by_ref();
@@ -233,7 +267,7 @@ pub unsafe extern "C" fn xila_thread_spawn(
         if process.is_null() || group.process.get() != process || thread.is_null() {
             return Err(Status::InvalidArgument);
         }
-        if group.stopping.get() {
+        if group.shutdown_thread.get() != 0 {
             return Err(Status::InvalidState);
         }
         let stack_size = match stack_size {
@@ -260,6 +294,7 @@ pub unsafe extern "C" fn xila_thread_spawn(
                 let local = Local::new(group, id);
                 stackful::set_native_context(ptr::from_ref(&local).cast());
                 let result = entry(argument);
+                stackful::set_native_context(ptr::null());
                 if let Some(worker) = &mut group.workers.borrow_mut()[index] {
                     worker.result = Some(result);
                 }
@@ -518,5 +553,162 @@ mod tests {
         let mut cx = Context::from_waker(Waker::noop());
         assert_eq!(driver.as_mut().poll(&mut cx), Poll::Pending);
         assert_eq!(driver.as_mut().poll(&mut cx), Poll::Ready(17));
+    }
+
+    // Keep the probes bounded so a missed wake is a test failure.
+    fn run_probe(main: impl FnOnce() -> i32 + 'static) -> i32 {
+        let main = unsafe { Coroutine::new(Stack::new(64 * 1024), main) };
+        let mut driver = pin!(drive_process(main));
+        let mut cx = Context::from_waker(Waker::noop());
+        for _ in 0..200 {
+            if let Poll::Ready(status) = driver.as_mut().poll(&mut cx) {
+                return status;
+            }
+        }
+        panic!("process did not finish");
+    }
+
+    struct BroadcastProbe {
+        mutex: Mutex,
+        condition: Condition,
+        woken: usize,
+    }
+
+    unsafe extern "C" fn probe_waiter(argument: *mut c_void) -> *mut c_void {
+        let probe = argument.cast::<BroadcastProbe>();
+        unsafe {
+            let mutex = &raw mut (*probe).mutex;
+            let condition = &raw mut (*probe).condition;
+            assert_eq!(xila_mutex_lock(mutex, 0), Status::Ok);
+            assert_eq!(
+                xila_condition_wait(condition, mutex, 0, ptr::null()),
+                Status::Ok
+            );
+            (*probe).woken += 1;
+            assert_eq!(xila_mutex_unlock(mutex), Status::Ok);
+        }
+        ptr::null_mut()
+    }
+
+    #[test]
+    fn probe_destroy_after_broadcast() {
+        for reinit in [false, true] {
+            let result = run_probe(move || unsafe {
+                let process = ptr::dangling::<Process>();
+                bind_process(process);
+                let mut probe = BroadcastProbe {
+                    mutex: core::mem::zeroed(),
+                    condition: core::mem::zeroed(),
+                    woken: 0,
+                };
+                let probe = &raw mut probe;
+                let mutex = &raw mut (*probe).mutex;
+                let condition = &raw mut (*probe).condition;
+                let mut ids = [0; 3];
+                for id in &mut ids {
+                    assert_eq!(
+                        xila_thread_spawn(process, 0, Some(probe_waiter), probe.cast(), id),
+                        Status::Ok
+                    );
+                }
+                assert_eq!(xila_thread_yield(), Status::Ok);
+                assert_eq!(xila_mutex_lock(mutex, 0), Status::Ok);
+                assert_eq!(xila_condition_notify(condition, true), Status::Ok);
+                assert_eq!(xila_mutex_unlock(mutex), Status::Ok);
+                assert_eq!(xila_condition_destroy(condition), Status::Ok);
+                assert_eq!((*probe).woken, 0);
+                if reinit {
+                    assert_eq!(xila_condition_init(condition), Status::Ok);
+                }
+                for id in ids {
+                    assert_eq!(xila_thread_join(id, ptr::null_mut()), Status::Ok);
+                }
+                (*probe).woken as i32
+            });
+            assert_eq!(result, 3);
+        }
+    }
+
+    struct StarvationProbe {
+        mutex: Mutex,
+        iterations: usize,
+    }
+
+    unsafe extern "C" fn hog(argument: *mut c_void) -> *mut c_void {
+        let probe = argument.cast::<StarvationProbe>();
+        unsafe {
+            let mutex = &raw mut (*probe).mutex;
+            for _ in 0..50 {
+                assert_eq!(xila_mutex_lock(mutex, 0), Status::Ok);
+                // Suspend while holding the mutex, as stdio can during a write.
+                assert_eq!(xila_thread_yield(), Status::Ok);
+                (*probe).iterations += 1;
+                assert_eq!(xila_mutex_unlock(mutex), Status::Ok);
+            }
+        }
+        ptr::null_mut()
+    }
+
+    #[test]
+    fn probe_mutex_starvation() {
+        let seen = run_probe(|| unsafe {
+            let process = ptr::dangling::<Process>();
+            bind_process(process);
+            let mut probe = StarvationProbe {
+                mutex: core::mem::zeroed(),
+                iterations: 0,
+            };
+            let probe = &raw mut probe;
+            let mutex = &raw mut (*probe).mutex;
+            let mut id = 0;
+            assert_eq!(
+                xila_thread_spawn(process, 0, Some(hog), probe.cast(), &mut id),
+                Status::Ok
+            );
+            assert_eq!(xila_thread_yield(), Status::Ok);
+            assert_eq!(xila_mutex_lock(mutex, 0), Status::Ok);
+            let seen = (*probe).iterations;
+            assert_eq!(xila_mutex_unlock(mutex), Status::Ok);
+            assert_eq!(xila_thread_join(id, ptr::null_mut()), Status::Ok);
+            seen as i32
+        });
+        assert!(
+            (1..=2).contains(&seen),
+            "main acquired after {seen} iterations"
+        );
+    }
+
+    unsafe extern "C" fn stop_from_worker(argument: *mut c_void) -> *mut c_void {
+        assert_eq!(
+            unsafe { xila_thread_stop_others(argument.cast()) },
+            Status::Ok
+        );
+        // The sole cleanup thread must resume even if its flush suspends.
+        assert_eq!(xila_thread_yield(), Status::Ok);
+        crate::exit_coroutine(37);
+    }
+
+    unsafe extern "C" fn stopped_worker(_: *mut c_void) -> *mut c_void {
+        panic!("stopped worker resumed");
+    }
+
+    #[test]
+    fn only_shutdown_caller_can_resume() {
+        let result = run_probe(|| unsafe {
+            let process = ptr::dangling_mut::<Process>();
+            bind_process(process);
+            let mut id = 0;
+            assert_eq!(
+                xila_thread_spawn(process, 0, Some(stop_from_worker), process.cast(), &mut id),
+                Status::Ok
+            );
+            assert_eq!(
+                xila_thread_spawn(process, 0, Some(stopped_worker), ptr::null_mut(), &mut id),
+                Status::Ok
+            );
+            assert_eq!(xila_thread_yield(), Status::Ok);
+            panic!("main resumed after a worker started shutdown");
+        });
+        assert_eq!(result, 37);
     }
 }

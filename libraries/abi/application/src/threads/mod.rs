@@ -93,7 +93,7 @@ mod unsupported {
 
     pub(crate) fn bind_process(_: *const Process) {}
     pub(crate) fn stop_workers() {}
-    pub(crate) fn exit_process(_: *const Process, _: i32) -> Result<(), Status> {
+    pub(crate) fn prepare_exit(_: *const Process) -> Result<(), Status> {
         Ok(())
     }
 }

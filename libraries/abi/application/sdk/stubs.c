@@ -745,6 +745,24 @@ XilaStatus xila_thread_has_workers(bool * live) {
     return xila_sdk_api->thread_has_workers(live);
 }
 
+static XilaStatus unavailable_thread_stop_others(XilaProcess const * process) {
+    (void)process;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_thread_stop_others(XilaProcess const * process) {
+    return xila_sdk_api->thread_stop_others(process);
+}
+
+static XilaStatus unavailable_thread_exit(void * result) {
+    (void)result;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_thread_exit(void * result) {
+    return xila_sdk_api->thread_exit(result);
+}
+
 const XilaApi xila_sdk_fallback_api = {
     .version = (XILA_ABI_VERSION_MAJOR << 16) | XILA_ABI_VERSION_MINOR,
     .size = sizeof(XilaApi),
@@ -818,4 +836,6 @@ const XilaApi xila_sdk_fallback_api = {
     .condition_wait = unavailable_condition_wait,
     .condition_notify = unavailable_condition_notify,
     .thread_has_workers = unavailable_thread_has_workers,
+    .thread_stop_others = unavailable_thread_stop_others,
+    .thread_exit = unavailable_thread_exit,
 };

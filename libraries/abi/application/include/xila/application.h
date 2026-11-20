@@ -600,6 +600,14 @@ typedef struct XilaApi {
    * Report whether any worker is live, including the caller if it is a worker.
    */
   XilaStatus (*thread_has_workers)(bool *live);
+  /**
+   * Begin terminal cleanup. The process driver will only resume the caller.
+   */
+  XilaStatus (*thread_stop_others)(const struct XilaProcess *process);
+  /**
+   * End a worker with a join result. This returns only on failure.
+   */
+  XilaStatus (*thread_exit)(void *result);
 } XilaApi;
 
 /**

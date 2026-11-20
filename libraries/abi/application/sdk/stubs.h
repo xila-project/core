@@ -80,6 +80,8 @@ XilaStatus xila_condition_destroy(XilaCondition * condition);
 XilaStatus xila_condition_wait(XilaCondition * condition, XilaMutex * mutex, uint32_t clock, int64_t const * deadline);
 XilaStatus xila_condition_notify(XilaCondition * condition, bool all);
 XilaStatus xila_thread_has_workers(bool * live);
+XilaStatus xila_thread_stop_others(XilaProcess const * process);
+XilaStatus xila_thread_exit(void * result);
 
 #ifdef __cplusplus
 }

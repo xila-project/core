@@ -137,17 +137,19 @@ usual independent lifetimes.
 The coroutine that calls `xila_process_exit` leaves through `stackful::exit`.
 Its native frames are abandoned without unwinding or running destructors. The
 main coroutine releases the granted startup streams, strings and home directory
-on return or when it calls exit. A worker that exits the process abandons main
-while it is suspended, so main's startup resources can leak. This uses the same
-policy as executor teardown. Unstarted workers and workers that return normally
-release their stacks. Suspended peers leak their stacks and anything held by
+on return. An explicit process exit from any thread stops its peers and releases
+the same startup resources. Unstarted workers and workers that finish release
+their stacks. Suspended peers leak their stacks and anything held by
 abandoned frames, such as a temporary VFS handle, under
 [Core #731](https://github.com/xila-project/core/issues/731). The process heap and
 mapped image belong to the loader's task future and are reclaimed after all C
 execution has ended.
 
-The host invokes native entry points with no owned guards in callback frames.
-This also applies to worker entry points, so direct exit can abandon them.
+The host invokes native entry points with no owned guards in their callback
+frames. The SDK first calls `xila_thread_stop_others(process)` for terminal
+cleanup. The driver thereafter polls only that caller, including if a cleanup
+operation suspends. The caller must complete process exit without waiting for
+a peer. New worker creation returns InvalidState.
 A process on a target without stack switching must return from its entry.
 Passing another process's capability fails with InvalidArgument.
 
@@ -245,8 +247,9 @@ can join and reap the result. Self-joins return Deadlock, join by another thread
 returns NoChild and a missing worker returns NoSuchTask. Any thread in the process
 can detach a worker that is still joinable. Detaching discards its result and
 reaps it once it finishes. A returning worker's unjoined children are detached
-automatically. Completion frees the stack immediately, even if the result has not
-yet been joined.
+automatically. Completion frees the stack immediately, even while a join result
+is pending. `xila_thread_exit(result)` lets a worker finish with a join result by
+abandoning its own frames. SDK workers run their TLS destructors before calling it.
 
 The process can create up to eight TLS keys. Each key holds a pointer-sized value
 for each coroutine, initially null. Deleting a key invalidates it and leaves
@@ -265,14 +268,15 @@ driver, including on targets without native stack switching, return Unsupported.
 Zero initialization gives a plain mutex or an empty condition variable. Use
 `xila_mutex_init` with `XILA_MUTEX_RECURSIVE` to select recursive locking.
 Only the owner can unlock. A plain self-lock returns Deadlock, and a contended
-`XILA_MUTEX_TRY` returns WouldBlock. Destroy while locked or waiting returns
-ResourceBusy. Objects must stay live throughout their operations, including
-while passed to a condition wait.
+`XILA_MUTEX_TRY` returns WouldBlock. Final unlock transfers ownership directly
+to the oldest queued locker. Destroy while locked or waiting returns ResourceBusy.
+The mutex must stay live throughout a condition wait, including reacquisition.
 
 A condition wait enqueues the caller before it releases the mutex, without
 a suspension in between. It accepts a mutex held exactly once and reacquires
-it before returning. Notify wakes one or all waiters. Callers should recheck
-their predicate under the mutex. A non-null deadline is absolute signed
+it before returning. Signal removes and wakes the oldest waiter. Broadcast removes
+and wakes all waiters, so the condition can be destroyed immediately afterward.
+Callers should recheck their predicate under the mutex. A non-null deadline is absolute signed
 nanoseconds on the selected ABI clock. The host samples that clock once and
 uses the executor timer for the remaining duration. Realtime requires a
 synchronized clock and later UTC adjustments do not change an armed wait.
@@ -280,9 +284,9 @@ Timeout returns TimedOut after reacquiring the mutex.
 
 Join and synchronization waits suspend through `suspend_on`. Queue nodes are
 stored on waiting stacks. No wait allocates or wakes itself while pending.
-Cancellation stops the entire process under #731, so no surviving coroutine
-uses the queue nodes on abandoned stacks. There is no per-thread cancellation
-or robust-lock recovery when a worker returns while holding a lock.
+A worker must release its locks before ending. Individual worker cancellation and
+robust-lock recovery are outside this ABI. Terminal cleanup stops peers permanently
+under #731, so the cleanup caller must avoid waiting on locks they own.
 
 ## Header and compatibility
 

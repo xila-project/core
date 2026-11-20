@@ -88,7 +88,7 @@ pub unsafe fn run_main(
 /// abandoned by that call without running a destructor. That is sound only because
 /// the host never calls back into C with host state (a lock, guard or borrow) on the
 /// stack: whenever C runs, the only host frames below it are this one and the
-/// coroutine's own, and main empties `resources` on its own explicit exit.
+/// coroutine's own. Explicit process exit empties `resources` after stopping peers.
 /// Worker callbacks are separate coroutine entries and carry no host-owned guards.
 ///
 /// # Safety

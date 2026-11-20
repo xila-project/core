@@ -260,6 +260,10 @@ pub struct XilaApi {
     pub condition_notify: unsafe extern "C" fn(condition: *mut Condition, all: bool) -> Status,
     /// Report whether any worker is live, including the caller if it is a worker.
     pub thread_has_workers: unsafe extern "C" fn(live: *mut bool) -> Status,
+    /// Begin terminal cleanup. The process driver will only resume the caller.
+    pub thread_stop_others: unsafe extern "C" fn(process: *const Process) -> Status,
+    /// End a worker with a join result. This returns only on failure.
+    pub thread_exit: unsafe extern "C" fn(result: *mut c_void) -> Status,
 }
 
 include!(concat!(env!("OUT_DIR"), "/api_layout.rs"));
@@ -341,4 +345,6 @@ pub static XILA_API: XilaApi = XilaApi {
     condition_wait: xila_condition_wait,
     condition_notify: xila_condition_notify,
     thread_has_workers: xila_thread_has_workers,
+    thread_stop_others: xila_thread_stop_others,
+    thread_exit: xila_thread_exit,
 };

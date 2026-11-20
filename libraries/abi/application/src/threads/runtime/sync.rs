@@ -18,6 +18,7 @@ use embassy_time::Timer;
 /// to these nodes.
 struct Waiter {
     next: *mut Waiter,
+    owner: usize,
     notified: bool,
 }
 
@@ -26,11 +27,13 @@ struct Waiter {
 /// into the caller's synchronization object across the suspension.
 unsafe fn wait(
     queue: *mut *mut c_void,
+    owner: usize,
     mut timer: Option<Timer>,
     release: impl FnOnce(),
 ) -> Result<(), Status> {
     let mut waiter = Waiter {
         next: ptr::null_mut(),
+        owner,
         notified: false,
     };
     let node = ptr::from_mut(&mut waiter);
@@ -58,29 +61,28 @@ unsafe fn wait(
         }
     })));
 
-    // Unlink before the node's stack frame can disappear. A signalled waiter
-    // remains in the queue until this point, so destruction still reports busy.
-    let mut link = queue.cast::<*mut Waiter>();
-    unsafe {
-        while *link != node {
-            link = &raw mut (**link).next;
+    // Notification removes the node from the queue. Only a timeout still
+    // owns a queued node and may access the condition variable.
+    if result.is_err() {
+        let mut link = queue.cast::<*mut Waiter>();
+        unsafe {
+            while *link != node {
+                link = &raw mut (**link).next;
+            }
+            link.write((*node).next);
         }
-        link.write((*node).next);
     }
     result
 }
 
-unsafe fn notify(group: &Group, mut waiter: *mut Waiter, all: bool) {
-    while let Some(waiter_ref) = unsafe { waiter.as_mut() } {
-        if !waiter_ref.notified {
-            waiter_ref.notified = true;
-            group.notify();
-            if !all {
-                break;
-            }
-        }
-        waiter = waiter_ref.next;
+fn pop_waiter(queue: &mut *mut c_void) -> Option<*mut Waiter> {
+    let waiter = queue.cast::<Waiter>();
+    if waiter.is_null() {
+        return None;
     }
+    // Queued nodes belong to suspended calls in the current process.
+    *queue = unsafe { (*waiter).next.cast() };
+    Some(waiter)
 }
 
 /// Initialize an uninitialized or destroyed mutex.
@@ -113,31 +115,37 @@ pub unsafe extern "C" fn xila_mutex_destroy(mutex: *mut Mutex) -> Status {
 }
 
 unsafe fn lock(mutex: *mut Mutex, owner: usize, try_only: bool) -> Result<(), Status> {
-    loop {
-        let state = unsafe { mutex.as_mut() }.ok_or(Status::InvalidArgument)?;
-        match state.owner {
-            0 => {
-                state.owner = owner;
-                state.depth = 1;
-                return Ok(());
-            }
-            id if id == owner && state.recursive => {
-                state.depth = state.depth.checked_add(1).ok_or(Status::Overflow)?;
-                return Ok(());
-            }
-            _ if try_only => return Err(Status::WouldBlock),
-            id if id == owner => return Err(Status::Deadlock),
-            _ => {}
+    let state = unsafe { mutex.as_mut() }.ok_or(Status::InvalidArgument)?;
+    match state.owner {
+        0 => {
+            state.owner = owner;
+            state.depth = 1;
+            Ok(())
         }
-        unsafe { wait(&raw mut (*mutex).waiters, None, || {})? };
+        id if id == owner && state.recursive => {
+            state.depth = state.depth.checked_add(1).ok_or(Status::Overflow)?;
+            Ok(())
+        }
+        _ if try_only => Err(Status::WouldBlock),
+        id if id == owner => Err(Status::Deadlock),
+        // Unlock gives this waiter ownership before waking it.
+        _ => unsafe { wait(&raw mut (*mutex).waiters, owner, None, || {}) },
     }
 }
 
-unsafe fn unlock(group: &Group, mutex: &mut Mutex) {
+fn unlock(group: &Group, mutex: &mut Mutex) {
     mutex.depth -= 1;
     if mutex.depth == 0 {
-        mutex.owner = 0;
-        unsafe { notify(group, mutex.waiters.cast(), false) };
+        if let Some(waiter) = pop_waiter(&mut mutex.waiters) {
+            unsafe {
+                mutex.owner = (*waiter).owner;
+                mutex.depth = 1;
+                (*waiter).notified = true;
+            }
+            group.notify();
+        } else {
+            mutex.owner = 0;
+        }
     }
 }
 
@@ -164,7 +172,7 @@ pub unsafe extern "C" fn xila_mutex_unlock(mutex: *mut Mutex) -> Status {
         if mutex.owner != local.id {
             return Err(Status::OperationNotPermitted);
         }
-        unsafe { unlock(group, mutex) };
+        unlock(group, mutex);
         Ok(())
     })())
 }
@@ -222,7 +230,9 @@ fn deadline_timer(clock: u32, deadline: i64) -> Result<Timer, Status> {
 /// Wait for notification or an absolute clock deadline, reacquiring the mutex
 /// before returning. The caller must own the mutex with depth exactly one.
 /// # Safety
-/// Both objects must remain live at fixed addresses until the call returns.
+/// The mutex must remain live at a fixed address until the call returns.
+/// The condition must remain live at a fixed address until this waiter is
+/// notified or times out.
 /// A non-null deadline must be aligned and readable.
 pub unsafe extern "C" fn xila_condition_wait(
     condition: *mut Condition,
@@ -247,7 +257,7 @@ pub unsafe extern "C" fn xila_condition_wait(
             .transpose()?;
         // No suspension point between registration and unlock.
         let waited = unsafe {
-            wait(&raw mut (*condition).waiters, timer, || {
+            wait(&raw mut (*condition).waiters, local.id, timer, || {
                 unlock(group, &mut *mutex)
             })
         };
@@ -262,8 +272,14 @@ pub unsafe extern "C" fn xila_condition_wait(
 pub unsafe extern "C" fn xila_condition_notify(condition: *mut Condition, all: bool) -> Status {
     status((|| {
         let (group, _) = current()?;
-        let condition = unsafe { condition.as_ref() }.ok_or(Status::InvalidArgument)?;
-        unsafe { notify(group, condition.waiters.cast(), all) };
+        let condition = unsafe { condition.as_mut() }.ok_or(Status::InvalidArgument)?;
+        while let Some(waiter) = pop_waiter(&mut condition.waiters) {
+            unsafe { (*waiter).notified = true };
+            group.notify();
+            if !all {
+                break;
+            }
+        }
         Ok(())
     })())
 }
