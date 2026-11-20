@@ -71,6 +71,16 @@
  */
 #define XILA_WAIT_NO_HANG 1
 
+#define XILA_THREAD_STACK_MIN 2048
+
+#define XILA_THREAD_STACK_MAX (64 * 1024)
+
+#define XILA_THREAD_KEYS_MAX 8
+
+#define XILA_MUTEX_RECURSIVE 1
+
+#define XILA_MUTEX_TRY 1
+
 /**
  * Monotonic clock identifier for `xila_time_resolution`.
  */
@@ -330,6 +340,41 @@ typedef struct XilaSpawn {
 } XilaSpawn;
 
 /**
+ * A native worker entry. Null is rejected.
+ */
+typedef void *(*XilaThreadEntry)(void*);
+
+/**
+ * SDK-reserved coroutine-local libc state. Other applications should use TLS keys.
+ */
+typedef struct XilaThreadLibc {
+  int32_t error;
+  char *strtok_next;
+  uint64_t random_state;
+} XilaThreadLibc;
+
+/**
+ * Process-local mutex. Zero initialize for a plain mutex, or use mutex_init.
+ * Keep its address fixed from first use through destruction. The fields are private
+ * to the host; copying a used mutex or sharing it across processes is invalid.
+ */
+typedef struct XilaMutex {
+  size_t owner;
+  uint32_t depth;
+  bool recursive;
+  void *waiters;
+} XilaMutex;
+
+/**
+ * Process-local condition variable. Zero initialize or use condition_init.
+ * Keep its address fixed from first use through destruction. The fields are private
+ * to the host; copying a used condition or sharing it across processes is invalid.
+ */
+typedef struct XilaCondition {
+  void *waiters;
+} XilaCondition;
+
+/**
  * Native application entry points, in slot order. The header precedes slot zero.
  * Networking slots return Unsupported when the runtime omits networking.
  */
@@ -510,6 +555,51 @@ typedef struct XilaApi {
    * Remove an environment variable of this process. A missing one succeeds.
    */
   XilaStatus (*env_remove)(const struct XilaProcess *process, const char *name, size_t name_length);
+  /**
+   * Spawn a worker of the current process; stack_size zero chooses the default.
+   */
+  XilaStatus (*thread_spawn)(const struct XilaProcess *process,
+                             size_t stack_size,
+                             XilaThreadEntry entry,
+                             void *argument,
+                             size_t *thread);
+  /**
+   * Collect the worker result. Only the thread that created it may join.
+   */
+  XilaStatus (*thread_join)(size_t thread, void **result);
+  XilaStatus (*thread_detach)(size_t thread);
+  XilaStatus (*thread_yield)(void);
+  XilaStatus (*thread_current)(size_t *thread);
+  XilaStatus (*thread_key_create)(size_t *key);
+  XilaStatus (*thread_key_delete)(size_t key);
+  XilaStatus (*thread_tls_get)(size_t key, void **value);
+  XilaStatus (*thread_tls_set)(size_t key, void *value);
+  /**
+   * Address of the SDK-reserved libc state, valid until the current thread ends.
+   */
+  XilaStatus (*thread_libc)(struct XilaThreadLibc **location);
+  XilaStatus (*mutex_init)(struct XilaMutex *mutex, uint32_t flags);
+  XilaStatus (*mutex_destroy)(struct XilaMutex *mutex);
+  /**
+   * A contended XILA_MUTEX_TRY returns WouldBlock.
+   */
+  XilaStatus (*mutex_lock)(struct XilaMutex *mutex, uint32_t flags);
+  XilaStatus (*mutex_unlock)(struct XilaMutex *mutex);
+  XilaStatus (*condition_init)(struct XilaCondition *condition);
+  XilaStatus (*condition_destroy)(struct XilaCondition *condition);
+  /**
+   * Unlock and sleep atomically, then reacquire before returning. A null deadline
+   * means infinite; otherwise use absolute nanoseconds on the selected ABI clock.
+   */
+  XilaStatus (*condition_wait)(struct XilaCondition *condition,
+                               struct XilaMutex *mutex,
+                               uint32_t clock,
+                               const int64_t *deadline);
+  XilaStatus (*condition_notify)(struct XilaCondition *condition, bool all);
+  /**
+   * Report whether any worker is live, including the caller if it is a worker.
+   */
+  XilaStatus (*thread_has_workers)(bool *live);
 } XilaApi;
 
 /**

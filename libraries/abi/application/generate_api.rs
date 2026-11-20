@@ -58,6 +58,7 @@ pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig) {
     let mut network_slots: BTreeSet<_> = NETWORK_SLOTS.iter().copied().collect();
     let mut slots = String::from("# Zero-based slot\tC symbol\n");
     let mut disabled_network = String::new();
+    let mut disabled_threads = String::new();
     let mut layout = String::from(
         "const _: () = {\n\
          let mut offset = 8;\n\
@@ -140,7 +141,17 @@ pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig) {
         )
         .unwrap();
 
-        if network_slots.remove(name.as_str()) {
+        let disabled = if network_slots.remove(name.as_str()) {
+            Some(&mut disabled_network)
+        } else if ["thread_", "mutex_", "condition_"]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+        {
+            Some(&mut disabled_threads)
+        } else {
+            None
+        };
+        if let Some(disabled) = disabled {
             let mut parameters = Vec::new();
             for input in &signature.inputs {
                 let ty = &input.ty;
@@ -149,8 +160,8 @@ pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig) {
             }
             let parameters = parameters.join(", ");
             writeln!(
-                disabled_network,
-                "unsafe extern \"C\" fn xila_{name}({parameters}) -> Status {{ Status::Unsupported }}"
+                disabled,
+                "pub unsafe extern \"C\" fn xila_{name}({parameters}) -> Status {{ Status::Unsupported }}"
             ).unwrap();
         }
     }
@@ -171,6 +182,7 @@ pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig) {
         ("stubs.c", stubs),
         ("slots.tsv", slots),
         ("disabled_network.rs", disabled_network),
+        ("disabled_threads.rs", disabled_threads),
         ("api_layout.rs", layout),
     ] {
         fs::write(out.join(name), contents).unwrap();
@@ -193,6 +205,7 @@ fn c_type(ty: &Type, export: &cbindgen::ExportConfig) -> String {
                 return name.clone();
             }
             match name.as_str() {
+                "bool" => "bool",
                 "c_char" => "char",
                 "c_void" => "void",
                 "usize" => "size_t",

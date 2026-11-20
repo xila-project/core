@@ -3,7 +3,7 @@ extern crate alloc;
 use alloc::{alloc::alloc, boxed::Box, string::String, vec::Vec};
 use core::{alloc::Layout, cell::UnsafeCell, ptr::NonNull};
 
-use abi_application::{File, Heap, ProcessLaunch, XilaStartup, run_main};
+use abi_application::{File, Heap, ProcessLaunch, XilaStartup, drive_process, run_main};
 
 use crate::{Error, LoadedImage};
 
@@ -104,13 +104,21 @@ impl LoadedImage {
             heap: UnsafeCell::new(Heap::new()),
         })?;
         let heap = process.heap();
+        let managed = startup.process.is_some();
         Ok(unsafe {
-            stackful::spawn_with_result(
+            stackful::spawn_with_driver(
                 manager,
                 parent,
                 name,
                 stack,
                 move || run(entry, heap, startup),
+                move |coroutine| async move {
+                    if managed {
+                        drive_process(coroutine).await
+                    } else {
+                        stackful::drive(coroutine).await
+                    }
+                },
                 move |status| {
                     let result = map(status);
                     drop(process);

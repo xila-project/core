@@ -222,6 +222,44 @@ pub struct XilaApi {
         name: *const c_char,
         name_length: usize,
     ) -> Status,
+
+    /// Spawn a worker of the current process; stack_size zero chooses the default.
+    pub thread_spawn: unsafe extern "C" fn(
+        process: *const Process,
+        stack_size: usize,
+        entry: ThreadEntry,
+        argument: *mut c_void,
+        thread: *mut usize,
+    ) -> Status,
+    /// Collect the worker result. Only the thread that created it may join.
+    pub thread_join: unsafe extern "C" fn(thread: usize, result: *mut *mut c_void) -> Status,
+    pub thread_detach: unsafe extern "C" fn(thread: usize) -> Status,
+    pub thread_yield: unsafe extern "C" fn() -> Status,
+    pub thread_current: unsafe extern "C" fn(thread: *mut usize) -> Status,
+    pub thread_key_create: unsafe extern "C" fn(key: *mut usize) -> Status,
+    pub thread_key_delete: unsafe extern "C" fn(key: usize) -> Status,
+    pub thread_tls_get: unsafe extern "C" fn(key: usize, value: *mut *mut c_void) -> Status,
+    pub thread_tls_set: unsafe extern "C" fn(key: usize, value: *mut c_void) -> Status,
+    /// Address of the SDK-reserved libc state, valid until the current thread ends.
+    pub thread_libc: unsafe extern "C" fn(location: *mut *mut ThreadLibc) -> Status,
+    pub mutex_init: unsafe extern "C" fn(mutex: *mut Mutex, flags: u32) -> Status,
+    pub mutex_destroy: unsafe extern "C" fn(mutex: *mut Mutex) -> Status,
+    /// A contended XILA_MUTEX_TRY returns WouldBlock.
+    pub mutex_lock: unsafe extern "C" fn(mutex: *mut Mutex, flags: u32) -> Status,
+    pub mutex_unlock: unsafe extern "C" fn(mutex: *mut Mutex) -> Status,
+    pub condition_init: unsafe extern "C" fn(condition: *mut Condition) -> Status,
+    pub condition_destroy: unsafe extern "C" fn(condition: *mut Condition) -> Status,
+    /// Unlock and sleep atomically, then reacquire before returning. A null deadline
+    /// means infinite; otherwise use absolute nanoseconds on the selected ABI clock.
+    pub condition_wait: unsafe extern "C" fn(
+        condition: *mut Condition,
+        mutex: *mut Mutex,
+        clock: u32,
+        deadline: *const i64,
+    ) -> Status,
+    pub condition_notify: unsafe extern "C" fn(condition: *mut Condition, all: bool) -> Status,
+    /// Report whether any worker is live, including the caller if it is a worker.
+    pub thread_has_workers: unsafe extern "C" fn(live: *mut bool) -> Status,
 }
 
 include!(concat!(env!("OUT_DIR"), "/api_layout.rs"));
@@ -284,4 +322,23 @@ pub static XILA_API: XilaApi = XilaApi {
     env_get: xila_env_get,
     env_set: xila_env_set,
     env_remove: xila_env_remove,
+    thread_spawn: xila_thread_spawn,
+    thread_join: xila_thread_join,
+    thread_detach: xila_thread_detach,
+    thread_yield: xila_thread_yield,
+    thread_current: xila_thread_current,
+    thread_key_create: xila_thread_key_create,
+    thread_key_delete: xila_thread_key_delete,
+    thread_tls_get: xila_thread_tls_get,
+    thread_tls_set: xila_thread_tls_set,
+    thread_libc: xila_thread_libc,
+    mutex_init: xila_mutex_init,
+    mutex_destroy: xila_mutex_destroy,
+    mutex_lock: xila_mutex_lock,
+    mutex_unlock: xila_mutex_unlock,
+    condition_init: xila_condition_init,
+    condition_destroy: xila_condition_destroy,
+    condition_wait: xila_condition_wait,
+    condition_notify: xila_condition_notify,
+    thread_has_workers: xila_thread_has_workers,
 };

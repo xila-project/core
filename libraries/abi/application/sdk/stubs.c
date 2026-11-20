@@ -562,6 +562,189 @@ XilaStatus xila_env_remove(XilaProcess const * process, char const * name, size_
     return xila_sdk_api->env_remove(process, name, name_length);
 }
 
+static XilaStatus unavailable_thread_spawn(XilaProcess const * process, size_t stack_size, XilaThreadEntry entry, void * argument, size_t * thread) {
+    (void)process;
+    (void)stack_size;
+    (void)entry;
+    (void)argument;
+    (void)thread;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_thread_spawn(XilaProcess const * process, size_t stack_size, XilaThreadEntry entry, void * argument, size_t * thread) {
+    return xila_sdk_api->thread_spawn(process, stack_size, entry, argument, thread);
+}
+
+static XilaStatus unavailable_thread_join(size_t thread, void * * result) {
+    (void)thread;
+    (void)result;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_thread_join(size_t thread, void * * result) {
+    return xila_sdk_api->thread_join(thread, result);
+}
+
+static XilaStatus unavailable_thread_detach(size_t thread) {
+    (void)thread;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_thread_detach(size_t thread) {
+    return xila_sdk_api->thread_detach(thread);
+}
+
+static XilaStatus unavailable_thread_yield(void) {
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_thread_yield(void) {
+    return xila_sdk_api->thread_yield();
+}
+
+static XilaStatus unavailable_thread_current(size_t * thread) {
+    (void)thread;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_thread_current(size_t * thread) {
+    return xila_sdk_api->thread_current(thread);
+}
+
+static XilaStatus unavailable_thread_key_create(size_t * key) {
+    (void)key;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_thread_key_create(size_t * key) {
+    return xila_sdk_api->thread_key_create(key);
+}
+
+static XilaStatus unavailable_thread_key_delete(size_t key) {
+    (void)key;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_thread_key_delete(size_t key) {
+    return xila_sdk_api->thread_key_delete(key);
+}
+
+static XilaStatus unavailable_thread_tls_get(size_t key, void * * value) {
+    (void)key;
+    (void)value;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_thread_tls_get(size_t key, void * * value) {
+    return xila_sdk_api->thread_tls_get(key, value);
+}
+
+static XilaStatus unavailable_thread_tls_set(size_t key, void * value) {
+    (void)key;
+    (void)value;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_thread_tls_set(size_t key, void * value) {
+    return xila_sdk_api->thread_tls_set(key, value);
+}
+
+static XilaStatus unavailable_thread_libc(XilaThreadLibc * * location) {
+    (void)location;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_thread_libc(XilaThreadLibc * * location) {
+    return xila_sdk_api->thread_libc(location);
+}
+
+static XilaStatus unavailable_mutex_init(XilaMutex * mutex, uint32_t flags) {
+    (void)mutex;
+    (void)flags;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_mutex_init(XilaMutex * mutex, uint32_t flags) {
+    return xila_sdk_api->mutex_init(mutex, flags);
+}
+
+static XilaStatus unavailable_mutex_destroy(XilaMutex * mutex) {
+    (void)mutex;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_mutex_destroy(XilaMutex * mutex) {
+    return xila_sdk_api->mutex_destroy(mutex);
+}
+
+static XilaStatus unavailable_mutex_lock(XilaMutex * mutex, uint32_t flags) {
+    (void)mutex;
+    (void)flags;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_mutex_lock(XilaMutex * mutex, uint32_t flags) {
+    return xila_sdk_api->mutex_lock(mutex, flags);
+}
+
+static XilaStatus unavailable_mutex_unlock(XilaMutex * mutex) {
+    (void)mutex;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_mutex_unlock(XilaMutex * mutex) {
+    return xila_sdk_api->mutex_unlock(mutex);
+}
+
+static XilaStatus unavailable_condition_init(XilaCondition * condition) {
+    (void)condition;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_condition_init(XilaCondition * condition) {
+    return xila_sdk_api->condition_init(condition);
+}
+
+static XilaStatus unavailable_condition_destroy(XilaCondition * condition) {
+    (void)condition;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_condition_destroy(XilaCondition * condition) {
+    return xila_sdk_api->condition_destroy(condition);
+}
+
+static XilaStatus unavailable_condition_wait(XilaCondition * condition, XilaMutex * mutex, uint32_t clock, int64_t const * deadline) {
+    (void)condition;
+    (void)mutex;
+    (void)clock;
+    (void)deadline;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_condition_wait(XilaCondition * condition, XilaMutex * mutex, uint32_t clock, int64_t const * deadline) {
+    return xila_sdk_api->condition_wait(condition, mutex, clock, deadline);
+}
+
+static XilaStatus unavailable_condition_notify(XilaCondition * condition, bool all) {
+    (void)condition;
+    (void)all;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_condition_notify(XilaCondition * condition, bool all) {
+    return xila_sdk_api->condition_notify(condition, all);
+}
+
+static XilaStatus unavailable_thread_has_workers(bool * live) {
+    (void)live;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_thread_has_workers(bool * live) {
+    return xila_sdk_api->thread_has_workers(live);
+}
+
 const XilaApi xila_sdk_fallback_api = {
     .version = (XILA_ABI_VERSION_MAJOR << 16) | XILA_ABI_VERSION_MINOR,
     .size = sizeof(XilaApi),
@@ -616,4 +799,23 @@ const XilaApi xila_sdk_fallback_api = {
     .env_get = unavailable_env_get,
     .env_set = unavailable_env_set,
     .env_remove = unavailable_env_remove,
+    .thread_spawn = unavailable_thread_spawn,
+    .thread_join = unavailable_thread_join,
+    .thread_detach = unavailable_thread_detach,
+    .thread_yield = unavailable_thread_yield,
+    .thread_current = unavailable_thread_current,
+    .thread_key_create = unavailable_thread_key_create,
+    .thread_key_delete = unavailable_thread_key_delete,
+    .thread_tls_get = unavailable_thread_tls_get,
+    .thread_tls_set = unavailable_thread_tls_set,
+    .thread_libc = unavailable_thread_libc,
+    .mutex_init = unavailable_mutex_init,
+    .mutex_destroy = unavailable_mutex_destroy,
+    .mutex_lock = unavailable_mutex_lock,
+    .mutex_unlock = unavailable_mutex_unlock,
+    .condition_init = unavailable_condition_init,
+    .condition_destroy = unavailable_condition_destroy,
+    .condition_wait = unavailable_condition_wait,
+    .condition_notify = unavailable_condition_notify,
+    .thread_has_workers = unavailable_thread_has_workers,
 };

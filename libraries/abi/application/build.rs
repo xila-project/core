@@ -33,6 +33,10 @@ fn main() {
         ("Process", "XilaProcess"),
         ("Child", "XilaChild"),
         ("Spawn", "XilaSpawn"),
+        ("ThreadEntry", "XilaThreadEntry"),
+        ("ThreadLibc", "XilaThreadLibc"),
+        ("Mutex", "XilaMutex"),
+        ("Condition", "XilaCondition"),
     ] {
         config.export.rename.insert(rust.into(), c.into());
     }

@@ -37,6 +37,7 @@ struct Control {
     result: Cell<Option<Result<i32, Cancelled>>>,
     waker: RefCell<Option<Waker>>,
     tls: [Cell<usize>; TLS_SLOTS],
+    native_context: Cell<*const ()>,
 }
 impl Drop for Control {
     fn drop(&mut self) {
@@ -127,9 +128,17 @@ impl Coroutine {
                 result: Cell::new(None),
                 waker: RefCell::new(None),
                 tls: [const { Cell::new(0) }; TLS_SLOTS],
+                native_context: Cell::new(core::ptr::null()),
             }),
         }
     }
+    /// Install the native ABI's private context for this coroutine.
+    /// # Safety
+    /// A non-null value must identify a live native ABI context for each poll.
+    pub unsafe fn set_native_context(&mut self, value: *const ()) {
+        self.control.native_context.set(value);
+    }
+
     /// Create the sole join observer. Multiple observers are rejected to bound waker storage.
     pub fn join_handle(&self) -> JoinHandle {
         // Rc count also includes an earlier observer, if any.
@@ -249,6 +258,21 @@ pub fn suspend_on<F: Future>(future: F) -> F::Output {
     output.expect("coroutine resumed before future completed")
 }
 
+/// Pointer privately installed by the native ABI; null on other coroutines.
+pub fn native_context() -> *const () {
+    unsafe { current().as_ref() }.map_or(core::ptr::null(), |control| control.native_context.get())
+}
+
+/// Install the native ABI's private context on the running coroutine.
+/// # Safety
+/// Must be in a coroutine. A non-null value must remain a live native ABI
+/// context while execution can access it.
+pub unsafe fn set_native_context(value: *const ()) {
+    if let Some(control) = unsafe { current().as_ref() } {
+        control.native_context.set(value);
+    }
+}
+
 /// Read a coroutine-local storage slot for the currently running coroutine.
 /// Slots start at `0`. No heap allocation occurs.
 /// Returns [`TlsError::InvalidSlot`] if `slot >= TLS_SLOTS`, or
@@ -363,12 +387,35 @@ where
     Map: FnOnce(i32) -> T + 'static,
     T: 'static,
 {
+    unsafe { spawn_with_driver(manager, parent, name, stack, entry, drive, map).await }
+}
+
+/// Like [`spawn_with_result`], with a local future that drives the entry coroutine.
+/// # Safety
+/// Same contract as [`spawn`]. The driver must keep all native execution on the task's
+/// executor and stop it before releasing the resources borrowed by the entry.
+pub async unsafe fn spawn_with_driver<F, Driver, Run, Map, T>(
+    manager: &'static task::Manager,
+    parent: task::TaskIdentifier,
+    name: &str,
+    stack: Stack,
+    entry: F,
+    driver: Run,
+    map: Map,
+) -> task::Result<(task::JoinHandle<T>, task::TaskIdentifier)>
+where
+    F: FnOnce() -> i32 + 'static,
+    Driver: Future<Output = i32> + 'static,
+    Run: FnOnce(Coroutine) -> Driver + 'static,
+    Map: FnOnce(i32) -> T + 'static,
+    T: 'static,
+{
     let caller = manager.get_current_task_identifier().await;
     let spawner = manager.get_spawner(caller).await?;
     let coroutine = unsafe { Coroutine::new(stack, entry) };
     manager
         .spawn(parent, name, Some(spawner), move |_| async move {
-            map(drive(coroutine).await)
+            map(driver(coroutine).await)
         })
         .await
 }
