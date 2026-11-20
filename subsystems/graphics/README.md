@@ -150,7 +150,7 @@ and `free-observer`, without `heap`.
 ### Updating consumers
 
 Consumers with a direct sys dependency must use `package = "lvgl-rust-sys"`
-with the same git source and branch as Core's `lvgl_rust_sys` dependency.
+with the same git source and revision as Core's `lvgl_rust_sys` dependency.
 The old package `lvgl_rust_sys` cannot coexist with the new one: both link
 LVGL. Keep the dependency key to preserve `use lvgl_rust_sys` statements.
 Their own `lv_conf.h` must enable `LV_USE_OBJ_ID=1`, `LV_OBJ_ID_AUTO_ASSIGN=1`, and
