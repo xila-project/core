@@ -387,6 +387,11 @@ async fn native_process_spawns_waits_and_exits_through_the_host() {
 /// path drops the same state, and is checked by inspection only.
 #[test]
 fn dropped_spawn_future_releases_the_startup_arguments() {
+    // The other tests assert exact `MAPPINGS` counts; hold the same lock as
+    // `#[task::test]` so this test's mapping never overlaps them.
+    let _test_lock = task::test_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let manager: &'static task::Manager = Box::leak(Box::new(task::Manager::new()));
     let bytes = build_fixture("xila-unstarted.elf", "");
     let before = testing_support::MemoryManager::thread_allocations();
