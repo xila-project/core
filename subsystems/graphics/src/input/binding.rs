@@ -63,6 +63,8 @@ pub unsafe extern "C" fn binding_callback_function(
 pub(super) struct UserData {
     pub(super) device: Option<&'static dyn DirectCharacterDevice>,
     pub(super) injected: Option<Arc<InputQueue>>,
+    /// Counts callbacks in a single LVGL timer-mode read.
+    /// LVGL ignores `continue_reading` in `LV_INDEV_MODE_EVENT`.
     pub(super) events_read: Cell<u16>,
     pub(super) kind: InputKind,
 }

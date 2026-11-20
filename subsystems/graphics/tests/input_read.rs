@@ -122,16 +122,19 @@ fn pointer_press_and_release_in_one_read_register_a_click() {
 }
 
 #[test]
-fn a_driver_with_more_events_resumes_on_the_next_read() {
-    BACKLOG.0.lock().unwrap().resize(514, InputData::default());
-
+fn a_short_drain_leaves_the_next_read_its_full_budget() {
     let _lvgl = LVGL.lock().unwrap_or_else(|error| error.into_inner());
-    let (after_first, after_second) = unsafe {
+    let (after_short, after_first, after_second) = unsafe {
         lvgl::lv_init();
         let display = lvgl::lv_display_create(128, 128);
         let input = Input::new(&BACKLOG, InputKind::Pointer).unwrap();
         let indev = lvgl::lv_indev_get_next(ptr::null_mut());
 
+        BACKLOG.0.lock().unwrap().resize(3, InputData::default());
+        lvgl::lv_indev_read(indev);
+        let after_short = BACKLOG.0.lock().unwrap().len();
+
+        BACKLOG.0.lock().unwrap().resize(514, InputData::default());
         lvgl::lv_indev_read(indev);
         let after_first = BACKLOG.0.lock().unwrap().len();
         lvgl::lv_indev_read(indev);
@@ -140,7 +143,7 @@ fn a_driver_with_more_events_resumes_on_the_next_read() {
         drop(input);
         lvgl::lv_display_delete(display);
         lvgl::lv_deinit();
-        (after_first, after_second)
+        (after_short, after_first, after_second)
     };
-    assert_eq!((after_first, after_second), (2, 0));
+    assert_eq!((after_short, after_first, after_second), (0, 2, 0));
 }

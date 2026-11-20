@@ -592,6 +592,8 @@ impl Manager {
 
                 // Through the session: requests recorded by the safe layer
                 // (dropped `Owned` values, `delete_later`) run right after.
+                // One timer handler can drain up to 512 events per input device.
+                // A large paste can hold `global_lock` for tens of milliseconds on ESP32.
                 let time_until_next = guard.session()?.timer_handler();
 
                 if call_count >= 30 {
