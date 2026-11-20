@@ -244,12 +244,7 @@ async fn execute_inner(
                 // The task was registered a moment ago, so replacement cannot fail.
                 let _ = context
                     .task_manager
-                    .replace_environment_variables(
-                        task,
-                        environment
-                            .iter()
-                            .map(|(name, value)| (name.as_str(), value.as_str())),
-                    )
+                    .replace_environment_variables(task, environment)
                     .await;
             }
 

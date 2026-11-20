@@ -141,6 +141,15 @@ The process heap and the loaded image belong to the task's owner, not the corout
 stack, and are released when the task ends, so the rule in the heap section holds. A
 Rust native application that exits abandons its live destructors the same way.
 
+Abandoning the stack is sound only because the host never calls back into C with
+host state on the stack. Every host frame between the entry and the exit call has
+returned before C runs again, so the frames that are abandoned are C's alone and own
+nothing the host must release: no lock, guard or borrowed capability. No ABI call
+takes a C callback today. A future call that did would have to keep its host state
+out of the callback's frames, or `xila_process_exit` from the callback would leak it.
+Native code is trusted, so the invariant is documented here and on `enter` instead of
+being checked at run time.
+
 Only a process on its own coroutine can exit. Elsewhere (a built-in application, or a
 target without stack switching) the call returns Unsupported and the entry must
 return. Passing another process's capability returns InvalidArgument without effect.
@@ -173,7 +182,12 @@ child's own task. The call suspends the caller while the host reads the file, th
 writes the owned `XilaChild` handle. Failures use the usual statuses: NotFound,
 PermissionDenied, ExecFormat for a file that is no image the host can run, OutOfMemory,
 and ResourceBusy when the task table is full. Native children run on the same
-single executor, so a child progresses only while its parent is suspended.
+single executor, so a child progresses only while its parent is suspended. The
+capability must be the calling task's own, as for exit: another process's capability
+returns InvalidArgument without effect. A child that fails before its entry runs
+(its task or environment could not be set up) exits with status -1, which a program
+can also return itself, so a parent that must tell the two apart needs the child to
+report success some other way.
 
 `XilaChild` is the capability to wait for one child, and the only way to do it. Only
 the process that spawned the child may wait: another process holding the pointer gets

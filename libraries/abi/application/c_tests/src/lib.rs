@@ -66,7 +66,6 @@ mod tests {
                 let entry = unsafe { process_test_entry(name.as_ptr().cast(), name.len()) }
                     .ok_or(Status::NotFound)?;
                 let SpawnRequest {
-                    parent,
                     arguments,
                     environment,
                     standard_input,
@@ -80,6 +79,8 @@ mod tests {
                     environment,
                     home,
                 };
+                // The spawn future runs on the spawner's task, which is the child's parent.
+                let parent = self.tasks.get_current_task_identifier().await;
                 let heap: &'static mut Heap = Box::leak(Box::new(Heap::new()));
                 let stream = |file: virtual_file_system::File<'static>| {
                     Some(File::new(file.into_synchronous_file()))
@@ -789,7 +790,7 @@ mod tests {
         };
         let launch = ProcessLaunch {
             host,
-            environment: Some(vec![("SHARED".into(), "parent".into())]),
+            environment: Some(vec![task::EnvironmentVariable::new("SHARED", "parent")]),
             home: Some(HomeGrant {
                 path: PathOwned::new("/".into()).unwrap(),
                 rights: 3,

@@ -84,6 +84,13 @@ pub unsafe fn run_main(
 /// Build the startup data over `resources`, call the entry and drop the resources
 /// when it returns.
 ///
+/// This frame, and every frame between it and a call to `xila_process_exit`, is
+/// abandoned by that call without running a destructor. That is sound only because
+/// the host never calls back into C with host state (a lock, guard or borrow) on the
+/// stack: whenever C runs, the only host frames below it are this one and the
+/// coroutine's own, and `resources` is emptied by exit before they are abandoned. No
+/// ABI call takes a C callback today; one that did would break the invariant.
+///
 /// # Safety
 /// Same as [`run_main`].
 pub(crate) unsafe fn enter(

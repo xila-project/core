@@ -5,7 +5,7 @@ extern crate std;
 
 use super::*;
 use crate::test;
-use alloc::{collections::BTreeMap, format, vec::Vec};
+use alloc::{collections::BTreeMap, format, vec, vec::Vec};
 use core::time::Duration;
 use users::{GroupIdentifier, UserIdentifier};
 
@@ -197,7 +197,14 @@ async fn test_environment_replacement() {
             );
             // An explicit list replaces it. Later entries win and the parent is unaffected.
             manager
-                .replace_environment_variables(child, [("A", "1"), ("B", "2"), ("A", "3")])
+                .replace_environment_variables(
+                    child,
+                    vec![
+                        EnvironmentVariable::new("A", "1"),
+                        EnvironmentVariable::new("B", "2"),
+                        EnvironmentVariable::new("A", "3"),
+                    ],
+                )
                 .await
                 .unwrap();
             assert!(
@@ -223,7 +230,7 @@ async fn test_environment_replacement() {
                 2
             );
             manager
-                .replace_environment_variables::<&str, &str>(child, [])
+                .replace_environment_variables(child, Vec::new())
                 .await
                 .unwrap();
             assert!(
@@ -235,9 +242,9 @@ async fn test_environment_replacement() {
             );
             assert!(
                 manager
-                    .replace_environment_variables::<&str, &str>(
+                    .replace_environment_variables(
                         TaskIdentifier::new(TaskIdentifier::MAXIMUM),
-                        []
+                        Vec::new()
                     )
                     .await
                     .is_err()

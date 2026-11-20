@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::pin::Pin;
 use file_system::PathOwned;
-use task::{JoinHandle, SpawnerIdentifier, TaskIdentifier};
+use task::{EnvironmentVariable, JoinHandle, SpawnerIdentifier, TaskIdentifier};
 use virtual_file_system::File;
 
 use crate::{Error, Result, Standard};
@@ -28,20 +28,24 @@ pub struct Home {
 }
 
 /// Optional parameters of a launch beyond the program's arguments and streams.
-/// A handler applies the ones its format supports; unsupported ones are ignored.
+///
+/// A handler applies the home capability only if its format supports one. It must
+/// apply `environment` in every case and fail the launch if it cannot: an explicit
+/// environment is a confinement request, so ignoring it would hand the program the
+/// caller's whole environment (fail closed).
 #[derive(Default)]
 #[non_exhaustive]
 pub struct Launch {
     /// The program's whole environment, replacing the copy its task makes of the
-    /// parent's. Name and value pairs; a later pair overrides an earlier one.
-    pub environment: Option<Vec<(String, String)>>,
+    /// parent's. A later variable overrides an earlier one of the same name.
+    pub environment: Option<Vec<EnvironmentVariable>>,
     /// Home directory capability for programs that take one (native executables).
     pub home: Option<Home>,
 }
 
 impl Launch {
     /// Give the program this whole environment instead of a copy of its parent's.
-    pub fn with_environment(mut self, environment: Vec<(String, String)>) -> Self {
+    pub fn with_environment(mut self, environment: Vec<EnvironmentVariable>) -> Self {
         self.environment = Some(environment);
         self
     }

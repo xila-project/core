@@ -10,6 +10,10 @@ typedef int32_t (*Entry)(const XilaStartup *);
 
 /* Handle of a running child, shared with a sibling that must not be able to wait on it. */
 static XilaChild *volatile shared_child;
+/* The parent's process capability, which a sibling must not be able to use either. */
+static const XilaProcess *volatile shared_process;
+
+static XilaSpawn spawn_of(const XilaStartup *startup);
 
 static int check_env(const XilaStartup *startup, const char *name, const char *expected) {
     const XilaApi *api = startup->api;
@@ -93,14 +97,21 @@ static int32_t child_slow(const XilaStartup *startup) {
     return 5;
 }
 
-/* Only the parent may wait for a child: this sibling cannot. */
+/* Only the parent may wait for a child: this sibling cannot. Its capability is not the
+ * running task's, so it cannot spawn through it either. */
 static int32_t child_steal(const XilaStartup *startup) {
     const XilaApi *api = startup->api;
     int32_t status = 123;
-    CHECK(shared_child != NULL);
+    CHECK(shared_child != NULL && shared_process != NULL);
     CHECK(api->process_wait(startup->process, shared_child, XILA_WAIT_NO_HANG, &status) ==
           XILA_STATUS_NO_CHILD);
     CHECK(status == 123);
+    XilaSpawn spawn = spawn_of(startup);
+    XilaChild *stolen = NULL;
+    CHECK(startup->home != NULL);
+    CHECK(api->process_spawn(shared_process, startup->home, "exit", 4, &spawn, &stolen) ==
+          XILA_STATUS_INVALID_ARGUMENT);
+    CHECK(stolen == NULL);
     return 0;
 }
 
@@ -274,8 +285,12 @@ int32_t process_parent_main(const XilaStartup *startup) {
     CHECK(status == 123);
     CHECK(api->process_wait(me, child, 4, &status) == XILA_STATUS_INVALID_ARGUMENT);
     shared_child = child;
-    CHECK(run_child(startup, "steal", &slow_spawn) == 0);
+    shared_process = me;
+    XilaSpawn steal_spawn = spawn_of(startup);
+    steal_spawn.home = startup->home; /* The sibling needs a directory to name the program. */
+    CHECK(run_child(startup, "steal", &steal_spawn) == 0);
     shared_child = NULL;
+    shared_process = NULL;
     CHECK(api->process_wait(me, child, 0, &status) == XILA_STATUS_OK && status == 5);
     CHECK(api->process_child_close(child) == XILA_STATUS_OK);
     /* A child closed while running is detached. */

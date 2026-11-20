@@ -704,7 +704,10 @@ mod tests {
             let heap = Box::into_raw(Box::new(Heap::new()));
             let launch = ProcessLaunch {
                 host,
-                environment: Some(vec![("A".into(), "1".into()), ("B".into(), "2".into())]),
+                environment: Some(vec![
+                    task::EnvironmentVariable::new("A", "1"),
+                    task::EnvironmentVariable::new("B", "2"),
+                ]),
                 home: None,
             };
             // SAFETY: the bounded entries fit the stack and never unwind, and the closure

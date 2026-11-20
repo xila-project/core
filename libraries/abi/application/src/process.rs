@@ -16,13 +16,18 @@ use core::{
     ptr, slice, str,
 };
 use file_system::PathOwned;
-use task::{JoinHandle, TaskIdentifier};
+use task::{EnvironmentVariable, JoinHandle, TaskIdentifier};
 use virtual_file_system::{File as VfsFile, VirtualFileSystem};
 
 /// `xila_process_wait` flag: return `WouldBlock` instead of waiting for a running child.
 pub const XILA_WAIT_NO_HANG: u32 = 1;
 
 /// The exit status of a child that could not start its entry.
+///
+/// An exit status is any `int32_t`, so no value is outside the range a program can
+/// return: this one is indistinguishable from a program that calls `exit(-1)`. A
+/// parent that needs to tell them apart must have the child report success some
+/// other way, such as a line on its standard output.
 const START_FAILURE: i32 = -1;
 
 /// A directory capability granted to a child as its home.
@@ -36,13 +41,12 @@ pub struct HomeGrant {
 /// parent's, owned by the request.
 #[non_exhaustive]
 pub struct SpawnRequest {
-    /// The spawning process's task. The host starts the child as its child.
-    pub parent: TaskIdentifier,
     /// Absolute, canonical VFS path of the executable, inside the caller's directory capability.
     pub path: PathOwned,
     pub arguments: Vec<String>,
-    /// The child's whole environment, or `None` to give it a copy of the parent's.
-    pub environment: Option<Vec<(String, String)>>,
+    /// The child's whole environment, already validated, or `None` to give it a copy
+    /// of the parent's. A later variable overrides an earlier one of the same name.
+    pub environment: Option<Vec<EnvironmentVariable>>,
     pub standard_input: VfsFile<'static>,
     pub standard_output: VfsFile<'static>,
     pub standard_error: VfsFile<'static>,
@@ -67,7 +71,7 @@ pub trait ProcessHost: Sync {
 pub struct ProcessLaunch {
     pub host: &'static dyn ProcessHost,
     /// Replaces the environment the task copied from its parent.
-    pub environment: Option<Vec<(String, String)>>,
+    pub environment: Option<Vec<EnvironmentVariable>>,
     /// Becomes the child's home directory capability, bound to the child's task.
     pub home: Option<HomeGrant>,
 }
@@ -108,12 +112,7 @@ impl ProcessLaunch {
                 let task = manager.try_get_current_task_identifier().await?;
                 if let Some(environment) = environment {
                     manager
-                        .replace_environment_variables(
-                            task,
-                            environment
-                                .iter()
-                                .map(|(name, value)| (name.as_str(), value.as_str())),
-                        )
+                        .replace_environment_variables(task, environment)
                         .await?;
                 }
                 Ok::<_, task::Error>(task)
@@ -127,13 +126,13 @@ impl ProcessLaunch {
         let home = home.map(|grant| {
             Directory::granted(host.virtual_file_system(), task, grant.path, grant.rights)
         });
-        let pointers = arguments
-            .iter()
-            .map(|argument| XilaString {
+        let mut pointers = Vec::with_capacity(arguments.len());
+        for argument in &arguments {
+            pointers.push(XilaString {
                 data: argument.as_ptr().cast(),
                 length: argument.len(),
-            })
-            .collect();
+            });
+        }
         let resources = Resources {
             _owned: arguments,
             arguments: pointers,
@@ -193,6 +192,20 @@ pub(crate) fn identifier(task: TaskIdentifier) -> u32 {
     task.into_inner() as u32
 }
 
+/// Check that the capability is the running task's, which is how a process cannot act
+/// through another process's capability.
+async fn is_current(process: &Process) -> Result<(), Status> {
+    match process
+        .host
+        .task_manager()
+        .try_get_current_task_identifier()
+        .await
+    {
+        Ok(task) if task == process.task => Ok(()),
+        _ => Err(Status::InvalidArgument),
+    }
+}
+
 fn this<'a>(process: *const Process) -> Result<&'a Process, Status> {
     // SAFETY: the caller guarantees a non-null pointer is a live capability.
     unsafe { process.as_ref() }.ok_or(Status::InvalidArgument)
@@ -246,6 +259,13 @@ pub unsafe extern "C" fn xila_process_parent_id(process: *const Process, id: *mu
 /// when the entry returns without closing them; the process heap, if granted, is
 /// released with the process. The caller must not hold a lock or other resource a
 /// destructor would release.
+///
+/// Abandoning the stack is sound only because the host never calls back into C with
+/// host state on the stack. Every host frame between the entry and this call has
+/// returned before C runs again, so the abandoned frames are C's alone and own nothing
+/// the host must release. No ABI call takes a C callback today. A call that did would
+/// have to keep its host guards out of the callback's frames, or `xila_process_exit`
+/// from the callback would leak them.
 /// # Safety
 /// Process must be the running process's capability.
 pub unsafe extern "C" fn xila_process_exit(process: *const Process, status: i32) -> Status {
@@ -256,17 +276,12 @@ pub unsafe extern "C" fn xila_process_exit(process: *const Process, status: i32)
     if !is_in_coroutine() {
         return Status::Unsupported;
     }
-    let mut current = None;
+    let mut current = Err(Status::Unavailable);
     suspend_dynamic(pin!(async {
-        current = process
-            .host
-            .task_manager()
-            .try_get_current_task_identifier()
-            .await
-            .ok();
+        current = is_current(process).await;
     }));
-    if current != Some(process.task) {
-        return Status::InvalidArgument;
+    if let Err(error) = current {
+        return error;
     }
     // SAFETY: the pointer is the live startup state of this very coroutine. Closing the
     // streams may suspend, which is fine before the stack is abandoned.
@@ -397,42 +412,58 @@ pub unsafe extern "C" fn xila_env_remove(
     result.map_or_else(|error| error, |()| Status::Ok)
 }
 
-/// Borrow a counted array of strings.
-unsafe fn strings<'a>(array: *const XilaString, count: usize) -> Result<Vec<&'a str>, Status> {
+/// Borrow a counted array of strings as a slice, which is empty at count zero.
+unsafe fn entries<'a>(array: *const XilaString, count: usize) -> Result<&'a [XilaString], Status> {
     if count == 0 {
-        return Ok(Vec::new());
+        return Ok(&[]);
     }
     if array.is_null() || count > isize::MAX as usize / size_of::<XilaString>() {
         return Err(Status::InvalidArgument);
     }
-    unsafe { slice::from_raw_parts(array, count) }
-        .iter()
-        .map(|entry| {
-            if entry.length == 0 {
-                return Ok("");
-            }
-            if entry.data.is_null() || entry.length > isize::MAX as usize {
-                return Err(Status::InvalidArgument);
-            }
-            str::from_utf8(unsafe { slice::from_raw_parts(entry.data.cast(), entry.length) })
-                .map_err(|_| Status::InvalidArgument)
-        })
-        .collect()
+    Ok(unsafe { slice::from_raw_parts(array, count) })
 }
 
-/// Read the `NAME=VALUE` entries of an explicit environment.
-fn environment_entries(entries: Vec<&str>) -> Result<Vec<(String, String)>, Status> {
-    entries
-        .into_iter()
-        .map(|entry| match entry.split_once('=') {
+/// Borrow one string as UTF-8 text.
+unsafe fn text<'a>(entry: &XilaString) -> Result<&'a str, Status> {
+    if entry.length == 0 {
+        return Ok("");
+    }
+    if entry.data.is_null() || entry.length > isize::MAX as usize {
+        return Err(Status::InvalidArgument);
+    }
+    str::from_utf8(unsafe { slice::from_raw_parts(entry.data.cast(), entry.length) })
+        .map_err(|_| Status::InvalidArgument)
+}
+
+/// Copy the argument strings of a spawn.
+unsafe fn arguments(array: *const XilaString, count: usize) -> Result<Vec<String>, Status> {
+    let entries = unsafe { entries(array, count)? };
+    let mut arguments = Vec::with_capacity(entries.len());
+    for entry in entries {
+        arguments.push(String::from(unsafe { text(entry)? }));
+    }
+    Ok(arguments)
+}
+
+/// Validate the `NAME=VALUE` entries of an explicit environment once, so the host
+/// receives them as the task manager stores them.
+unsafe fn environment(
+    array: *const XilaString,
+    count: usize,
+) -> Result<Vec<EnvironmentVariable>, Status> {
+    let entries = unsafe { entries(array, count)? };
+    let mut variables = Vec::with_capacity(entries.len());
+    for entry in entries {
+        match unsafe { text(entry)? }.split_once('=') {
             Some((name, value))
                 if !name.is_empty() && !name.contains('\0') && !value.contains('\0') =>
             {
-                Ok((String::from(name), String::from(value)))
+                variables.push(EnvironmentVariable::new(name, value));
             }
-            _ => Err(Status::InvalidArgument),
-        })
-        .collect()
+            _ => return Err(Status::InvalidArgument),
+        }
+    }
+    Ok(variables)
 }
 
 /// Start an executable as a child of this process and return its handle.
@@ -445,7 +476,8 @@ fn environment_entries(entries: Vec<&str>) -> Result<Vec<(String, String)>, Stat
 /// suspends the caller while the host reads the executable. Failures map to the
 /// usual statuses: `NotFound`, `PermissionDenied`, `ExecFormat` for an image the host
 /// cannot run, `OutOfMemory` and `ResourceBusy` when the task table is full. The
-/// handle is written only on success.
+/// process must be the running process's capability, otherwise the call returns
+/// `InvalidArgument`. The handle is written only on success.
 /// # Safety
 /// Process and directory must be live capabilities, the path readable for its length, the
 /// request and everything it points to valid for the call, and the output writable.
@@ -481,23 +513,18 @@ pub unsafe extern "C" fn xila_process_spawn(
             unsafe { path_input(path, path_length)? },
             true,
         )?;
-        let arguments = unsafe { strings(spawn.arguments, spawn.argument_count)? }
-            .into_iter()
-            .map(String::from)
-            .collect();
+        let arguments = unsafe { arguments(spawn.arguments, spawn.argument_count)? };
         let environment = if spawn.environment.is_null() {
             None
         } else {
-            Some(environment_entries(unsafe {
-                strings(spawn.environment, spawn.environment_count)?
-            })?)
+            Some(unsafe { environment(spawn.environment, spawn.environment_count)? })
         };
         let home = unsafe { spawn.home.as_ref() }.map(|home| HomeGrant {
             path: home.path.clone(),
             rights: home.rights,
         });
         // SAFETY: the caller guarantees the three streams are live files.
-        let [input, output, error] = unsafe {
+        let streams = unsafe {
             [
                 &*spawn.standard_input,
                 &*spawn.standard_output,
@@ -506,14 +533,30 @@ pub unsafe extern "C" fn xila_process_spawn(
         };
         let host = process.host;
         let parent = process.task;
+        // Allocated before the child starts, so a started child is never left unowned.
+        let mut owned = Box::new(Child {
+            owner: parent,
+            handle: None,
+        });
         let mut started = Err(Status::Unavailable);
         suspend_dynamic(pin!(async {
             started = async {
-                let standard_input = input.inner.duplicate().await?;
-                let standard_output = output.inner.duplicate().await?;
-                let standard_error = error.inner.duplicate().await?;
+                is_current(process).await?;
+                // One duplication site for the three streams. A failure drops, and so
+                // closes, the duplicates already made.
+                let mut duplicates = [None, None, None];
+                for (duplicate, stream) in duplicates.iter_mut().zip(streams) {
+                    *duplicate = Some(stream.inner.duplicate().await?);
+                }
+                let [
+                    Some(standard_input),
+                    Some(standard_output),
+                    Some(standard_error),
+                ] = duplicates
+                else {
+                    return Err(Status::InvalidState);
+                };
                 host.spawn(SpawnRequest {
-                    parent,
                     path,
                     arguments,
                     environment,
@@ -526,10 +569,8 @@ pub unsafe extern "C" fn xila_process_spawn(
             }
             .await;
         }));
-        Ok(Box::new(Child {
-            owner: parent,
-            handle: Some(started?),
-        }))
+        owned.handle = Some(started?);
+        Ok(owned)
     })();
     match result {
         Ok(value) => {
