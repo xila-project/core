@@ -3,8 +3,8 @@
 //! The output is one `Function` enum with its ID, argument count and result
 //! kind lookups, and one `run` function: a single `match` on the call that
 //! either expands a scalar adapter inline, calls a named handler, or falls
-//! through to the executor's handwritten match. Nothing is stored at runtime
-//! beyond that code.
+//! through to the executor's handwritten match. Besides that code, only the
+//! ID and metadata tables (three bytes a call) are stored at runtime.
 //!
 //! The generated code is included by `xila-graphics` and refers to its
 //! `handlers` module, `Kind` enum, `State`, `Transport`, `Call` and
@@ -13,7 +13,9 @@
 use crate::{
     GeneratorError,
     enumeration::get_variant_identifier,
-    registry::{AdapterPolicy, AutoObjectScalar, GraphicsRegistry, ObjectOperation},
+    registry::{
+        AdapterPolicy, AutoObjectScalar, GraphicsRegistry, KindTable, ObjectOperation, StyleValue,
+    },
 };
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -76,12 +78,12 @@ pub fn generate(registry: &GraphicsRegistry<'_>) -> Result<TokenStream, Generato
         arms.push(match policy {
             AdapterPolicy::AutoObjectScalar(AutoObjectScalar::SetI32) => quote! {
                 Function::#variant => handlers::object_set_i32(
-                    state, call, None, |o, v| unsafe { crate::lvgl::#native(o, v) },
+                    state, memory, call, None, |o, v| unsafe { crate::lvgl::#native(o, v) },
                 )
             },
             AdapterPolicy::AutoObjectScalar(AutoObjectScalar::SetPairI32) => quote! {
                 Function::#variant => handlers::object_set_i32_pair(
-                    state, call, |o, x, y| unsafe { crate::lvgl::#native(o, x, y) },
+                    state, memory, call, |o, x, y| unsafe { crate::lvgl::#native(o, x, y) },
                 )
             },
             AdapterPolicy::AutoObjectScalar(AutoObjectScalar::GetI32) => quote! {
@@ -146,6 +148,82 @@ pub fn generate(registry: &GraphicsRegistry<'_>) -> Result<TokenStream, Generato
                             state, memory, call, #kind, |o| unsafe { crate::lvgl::#native(o) },
                         )
                     },
+                    ObjectOperation::SetEnum { max } => {
+                        let max = format_ident!("{max}");
+                        quote! {
+                            Function::#variant => handlers::object_set_u32(
+                                state, call, #kind, 0..=crate::lvgl::#max,
+                                |o, v| unsafe { crate::lvgl::#native(o, v) },
+                            )
+                        }
+                    }
+                    ObjectOperation::SetU32Limit { max } => quote! {
+                        Function::#variant => handlers::object_set_u32_limit(
+                            state, call, #kind, #max,
+                            |o, v| unsafe { crate::lvgl::#native(o, v) },
+                        )
+                    },
+                    ObjectOperation::SetText { limit } => {
+                        let limit = format_ident!("{limit}");
+                        quote! {
+                            Function::#variant => handlers::object_set_text(
+                                state, memory, call, #kind, marshal::#limit,
+                                |o, t| unsafe { crate::lvgl::#native(o, t) },
+                            )
+                        }
+                    }
+                    ObjectOperation::SetRange => quote! {
+                        Function::#variant => handlers::object_set_range(
+                            state, memory, call, #kind,
+                            |o, min, max| unsafe { crate::lvgl::#native(o, min, max) },
+                        )
+                    },
+                    ObjectOperation::SetStyle(value) => {
+                        let convert = match value {
+                            StyleValue::Color => quote!(handlers::style_color),
+                            StyleValue::Font => quote!(handlers::style_font),
+                            StyleValue::I32 { min, max } => quote! {
+                                |v, bits| handlers::i32_between(v, bits, #min, #max)
+                            },
+                            StyleValue::Enum { max } => {
+                                let max = format_ident!("{max}");
+                                quote! { |v, _| handlers::u32_at_most(v, crate::lvgl::#max) }
+                            }
+                        };
+                        quote! {
+                            Function::#variant => handlers::object_set_style(
+                                state, memory, call, #kind, #convert,
+                                |o, v, selector| unsafe { crate::lvgl::#native(o, v, selector) },
+                            )
+                        }
+                    }
+                    ObjectOperation::GetI32ByKind(table) => {
+                        let arms = kind_arms(table, true, |native| quote!(#native(o)));
+                        quote! {
+                            Function::#variant => handlers::object_get_i32_by_kind(
+                                state, memory, call,
+                                |o, kind| match kind { #arms _ => None },
+                            )
+                        }
+                    }
+                    ObjectOperation::SetEnumByKind { max, table } => {
+                        let arms = kind_arms(table, false, |native| quote!(#native(o, v as _)));
+                        quote! {
+                            Function::#variant => handlers::object_set_enum_by_kind(
+                                state, call, #max,
+                                |o, kind, v| match kind { #arms _ => None },
+                            )
+                        }
+                    }
+                    ObjectOperation::SetRangeByKind(table) => {
+                        let arms = kind_arms(table, false, |native| quote!(#native(o, min, max)));
+                        quote! {
+                            Function::#variant => handlers::object_set_range_by_kind(
+                                state, memory, call,
+                                |o, kind, min, max| match kind { #arms _ => None },
+                            )
+                        }
+                    }
                 }
             }
             AdapterPolicy::Create(kind) => {
@@ -214,4 +292,23 @@ pub fn generate(registry: &GraphicsRegistry<'_>) -> Result<TokenStream, Generato
             }
         }
     })
+}
+
+/// One arm per kind in the table: the kind's LVGL function, which `call`
+/// builds from its name, returning its value or nothing.
+fn kind_arms(
+    table: KindTable,
+    returns: bool,
+    call: impl Fn(proc_macro2::Ident) -> TokenStream,
+) -> TokenStream {
+    let arms = table.iter().map(|(kind, native)| {
+        let kind = format_ident!("{kind}");
+        let call = call(format_ident!("{native}"));
+        if returns {
+            quote!(Kind::#kind => Some(unsafe { crate::lvgl::#call }),)
+        } else {
+            quote!(Kind::#kind => { unsafe { crate::lvgl::#call }; Some(()) })
+        }
+    });
+    quote!(#(#arms)*)
 }

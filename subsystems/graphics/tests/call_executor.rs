@@ -6,7 +6,7 @@
 testing_support::instantiate_global_allocator!();
 
 use core::{
-    ffi::{CStr, c_char},
+    ffi::CStr,
     task::{Context, Poll},
 };
 use file_system::{
@@ -72,12 +72,25 @@ impl Transport for HostMemory {
         Ok(unsafe { core::slice::from_raw_parts_mut(address as *mut u8, length) })
     }
     fn c_string(&self, address: Word, limit: usize) -> Result<&CStr, Error> {
-        // SAFETY: the test passes NUL-terminated strings.
-        let string = unsafe { CStr::from_ptr(address as *const c_char) };
-        if string.to_bytes_with_nul().len() > limit {
-            return Err(Error::ResourceLimit);
+        if address == 0 {
+            return Err(Error::InvalidMemory);
         }
-        Ok(string)
+        // A bounded scan, as `strnlen` does: never read past the limit.
+        let start = address as *const u8;
+        for length in 0..limit {
+            // SAFETY: the test passes NUL-terminated strings, and the scan
+            // stops at the first NUL.
+            if unsafe { *start.add(length) } == 0 {
+                // SAFETY: the bytes up to and including this NUL hold no other NUL.
+                return Ok(unsafe {
+                    CStr::from_bytes_with_nul_unchecked(core::slice::from_raw_parts(
+                        start,
+                        length + 1,
+                    ))
+                });
+            }
+        }
+        Err(Error::ResourceLimit)
     }
 }
 
@@ -144,6 +157,7 @@ fn executor_runs_calls_for_independent_processes() {
     dispatch_rejects_malformed_calls(manager);
     handles_belong_to_one_process(manager);
     generated_adapters_and_kinds(manager);
+    every_declared_call_reaches_a_handler(manager);
     pointer_arguments_follow_the_transport(manager);
     events_come_from_the_process_window(manager);
     a_process_that_exits_leaves_nothing(manager);
@@ -170,6 +184,33 @@ fn call_table_keeps_catalog_ids() {
     assert_eq!(graphics::call::MAX_ARGUMENTS, 7);
     // The contract's close request lives beside LVGL's own events.
     assert_eq!(EVENT_CLOSE_REQUESTED, EventCode::Last as u32 + 3);
+}
+
+/// A call declared without an arm in the handwritten match would answer
+/// `Unsupported` at runtime. Every declared ID runs here with zeroed words:
+/// a bad handle or value is fine, `Unsupported` is not.
+fn every_declared_call_reaches_a_handler(manager: &'static Manager) {
+    let mut bytes = [0; 64];
+    let mut memory = LinearMemory::new(&mut bytes, 32);
+    let mut state = State::new(Some(manager));
+    let mut declared = 0;
+    for id in 0..=u16::MAX {
+        let Some(function) = Function::from_id(i32::from(id)) else {
+            continue;
+        };
+        declared += 1;
+        // The argument count is the first one the call table accepts.
+        let result = (0..=graphics::call::MAX_ARGUMENTS)
+            .map(|count| call(&mut state, &mut memory, function, &[0; 7][..count], RESULT))
+            .find(|result| *result != Err(Error::InvalidArgumentsCount))
+            .expect("every call has an argument count");
+        assert_ne!(
+            result,
+            Err(Error::Unsupported),
+            "{function:?} has no handler"
+        );
+    }
+    assert!(declared > 100, "only {declared} calls are declared");
 }
 
 fn dispatch_rejects_malformed_calls(manager: &'static Manager) {
@@ -425,6 +466,74 @@ fn generated_adapters_and_kinds(manager: &'static Manager) {
             &[label, 0, 9],
             RESULT
         ),
+        Err(Error::InvalidHandle)
+    );
+    // Each word width accepts only its own form of a negative i32: a 64-bit
+    // caller's zero-extended 0xffff_ffff is not -1.
+    assert_eq!(
+        call(
+            &mut state,
+            &mut wide_memory,
+            Function::ObjectSetPos,
+            &[object, 0xffff_ffff, 0],
+            RESULT
+        ),
+        Err(Error::InvalidValue)
+    );
+    assert_eq!(
+        call(
+            &mut state,
+            &mut memory,
+            Function::ObjectSetPos,
+            &[object, (-1isize) as Word, 0],
+            RESULT
+        ),
+        Err(Error::InvalidValue)
+    );
+    // Generated validation: the object first, then the value, then the kind.
+    let mut check = |function: Function, arguments: &[Word]| {
+        call(&mut state, &mut memory, function, arguments, RESULT)
+    };
+    assert_eq!(check(Function::RangeSetMode, &[bar, 2]), Ok(()));
+    assert_eq!(
+        check(Function::RangeSetMode, &[bar, 3]),
+        Err(Error::InvalidValue)
+    );
+    assert_eq!(
+        check(Function::RangeSetMode, &[label, 3]),
+        Err(Error::InvalidValue)
+    );
+    assert_eq!(
+        check(Function::RangeSetMode, &[label, 1]),
+        Err(Error::InvalidHandle)
+    );
+    assert_eq!(
+        check(Function::ObjectSetRadius, &[object, 1025, 0]),
+        Err(Error::InvalidValue)
+    );
+    assert_eq!(check(Function::ObjectSetRadius, &[object, 8, 0]), Ok(()));
+    assert_eq!(
+        check(Function::ObjectSetRadius, &[object, 8, 0x7_0000]),
+        Err(Error::InvalidValue)
+    );
+    assert_eq!(
+        check(Function::ObjectSetTextColor, &[object, 0x100_0000, 0]),
+        Err(Error::InvalidValue)
+    );
+    assert_eq!(
+        check(Function::ObjectSetFont, &[object, 6, 0]),
+        Err(Error::InvalidValue)
+    );
+    assert_eq!(
+        check(Function::ObjectSetTextAlign, &[object, 4, 0]),
+        Err(Error::InvalidValue)
+    );
+    assert_eq!(
+        check(Function::ChartSetType, &[label, 0]),
+        Err(Error::InvalidHandle)
+    );
+    assert_eq!(
+        check(Function::TextareaSetMaxLength, &[label, 1]),
         Err(Error::InvalidHandle)
     );
     call(&mut state, &mut memory, Function::GridFr, &[3], RESULT).unwrap();

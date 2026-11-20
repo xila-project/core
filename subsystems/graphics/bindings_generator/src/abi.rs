@@ -5,7 +5,9 @@
 //! guest bindings select the same calls, so both sides share one declaration.
 //! Call IDs come from the catalog; the list never assigns them.
 
-use crate::registry::{AdapterRule, AutoObjectScalar, GraphicsRegistry, ObjectOperation};
+use crate::registry::{
+    AdapterRule, AutoObjectScalar, GraphicsRegistry, KindTable, ObjectOperation, StyleValue,
+};
 use crate::{CallCatalog, GeneratorError};
 
 /// Catalog name, argument types, result kind, and the native return type.
@@ -190,11 +192,15 @@ const CREATE: &[(&str, &str)] = &[
     ("list_create", "List"),
 ];
 
-use ObjectOperation::{Call, GetBool, GetI32, GetU32, SetBool, SetMask, SetU8, SetU32};
+use ObjectOperation::{
+    Call, GetBool, GetI32, GetI32ByKind, GetU32, SetBool, SetEnum, SetEnumByKind, SetMask,
+    SetRange, SetRangeByKind, SetStyle, SetText, SetU8, SetU32, SetU32Limit,
+};
+use StyleValue::{Color, Font};
 
-/// Calls on one object with scalar arguments: the object kind they require
-/// (`None` for any) and what they do with their words. Validation beyond the
-/// range, such as a bit mask, stays in the handwritten match.
+/// Calls on one object: the object kind they require (`None` for any) and
+/// what they do with their words, validated as the operation says. Calls whose
+/// validation is specific to them stay in the handwritten match.
 const OBJECT: &[(&str, Option<&str>, ObjectOperation)] = &[
     ("object_update_layout", None, Call),
     ("object_set_flex_grow", None, SetU8),
@@ -263,6 +269,99 @@ const OBJECT: &[(&str, Option<&str>, ObjectOperation)] = &[
         Some("ButtonMatrix"),
         GetU32,
     ),
+    (
+        "chart_set_type",
+        Some("Chart"),
+        SetEnum {
+            max: "lv_chart_type_t_LV_CHART_TYPE_SCATTER",
+        },
+    ),
+    (
+        "label_set_text",
+        Some("Label"),
+        SetText {
+            limit: "MAX_STRING_BYTES",
+        },
+    ),
+    (
+        "checkbox_set_text",
+        Some("Checkbox"),
+        SetText {
+            limit: "MAX_STRING_BYTES",
+        },
+    ),
+    (
+        "textarea_set_text",
+        Some("Textarea"),
+        SetText {
+            limit: "MAX_TEXTAREA_BYTES",
+        },
+    ),
+    (
+        "textarea_set_max_length",
+        Some("Textarea"),
+        SetU32Limit { max: 4096 },
+    ),
+    ("spinbox_set_range", Some("Spinbox"), SetRange),
+    ("object_set_text_color", None, SetStyle(Color)),
+    (
+        "object_set_radius",
+        None,
+        SetStyle(StyleValue::I32 { min: 0, max: 1024 }),
+    ),
+    (
+        "object_set_text_align",
+        None,
+        SetStyle(StyleValue::Enum {
+            max: "lv_text_align_t_LV_TEXT_ALIGN_RIGHT",
+        }),
+    ),
+    ("object_set_font", None, SetStyle(Font)),
+    ("range_get_value", None, GetI32ByKind(RANGE_VALUE)),
+    ("range_get_start_value", None, GetI32ByKind(RANGE_START)),
+    (
+        "range_set_mode",
+        None,
+        SetEnumByKind {
+            max: 2,
+            table: RANGE_MODE,
+        },
+    ),
+    (
+        "range_set_orientation",
+        None,
+        SetEnumByKind {
+            max: 2,
+            table: RANGE_ORIENTATION,
+        },
+    ),
+    ("range_set_range", None, SetRangeByKind(RANGE_RANGE)),
+];
+
+// The widgets behind the `range_*` helpers, each with its LVGL function.
+const RANGE_VALUE: KindTable = &[
+    ("Arc", "lv_arc_get_value"),
+    ("Bar", "lv_bar_get_value"),
+    ("Slider", "lv_slider_get_value"),
+];
+const RANGE_START: KindTable = &[
+    ("Bar", "lv_bar_get_start_value"),
+    ("Slider", "lv_slider_get_left_value"),
+];
+const RANGE_MODE: KindTable = &[
+    ("Arc", "lv_arc_set_mode"),
+    ("Bar", "lv_bar_set_mode"),
+    ("Slider", "lv_slider_set_mode"),
+];
+const RANGE_ORIENTATION: KindTable = &[
+    ("Bar", "lv_bar_set_orientation"),
+    ("Slider", "lv_slider_set_orientation"),
+    ("Switch", "lv_switch_set_orientation"),
+];
+const RANGE_RANGE: KindTable = &[
+    ("Arc", "lv_arc_set_range"),
+    ("Bar", "lv_bar_set_range"),
+    ("Slider", "lv_slider_set_range"),
 ];
 
 /// Xila helpers that wrap a differently named LVGL function.
@@ -276,6 +375,10 @@ const RENAMED: &[(&str, &str)] = &[
         "lv_dropdown_get_selected_highlight",
     ),
     ("dropdown_is_open_state", "lv_dropdown_is_open"),
+    ("object_set_text_color", "lv_obj_set_style_text_color"),
+    ("object_set_radius", "lv_obj_set_style_radius"),
+    ("object_set_text_align", "lv_obj_set_style_text_align"),
+    ("object_set_font", "lv_obj_set_style_text_font"),
 ];
 
 /// Per-call adapters. A call without a rule is dispatched by the executor's

@@ -142,10 +142,6 @@ pub fn read_utf8_c_string(memory: &dyn Transport, address: Word) -> Result<&str>
         .map_err(|_| Error::InvalidValue)
 }
 
-pub fn read_textarea_string(memory: &dyn Transport, address: Word) -> Result<&CStr> {
-    memory.c_string(address, MAX_TEXTAREA_BYTES)
-}
-
 /// Reads newline-separated widget options. LVGL's dynamic setters copy this
 /// string, so the returned borrow is only valid for the current call.
 pub fn read_widget_options(memory: &dyn Transport, address: Word) -> Result<&CStr> {
@@ -385,11 +381,14 @@ mod tests {
         bytes[4097] = 0;
         let base = bytes.as_ptr() as usize;
         let mut memory = LinearMemory::new(&mut bytes, 32);
-        let borrowed = read_textarea_string(&memory, 1).unwrap();
+        let borrowed = memory.c_string(1, MAX_TEXTAREA_BYTES).unwrap();
         assert_eq!(borrowed.to_bytes().len(), 4096);
         assert_eq!(borrowed.as_ptr() as usize, base + 1);
         write(&mut memory, 4097, b'a');
-        assert_eq!(read_textarea_string(&memory, 1), Err(Error::ResourceLimit));
+        assert_eq!(
+            memory.c_string(1, MAX_TEXTAREA_BYTES),
+            Err(Error::ResourceLimit)
+        );
     }
 
     #[test]

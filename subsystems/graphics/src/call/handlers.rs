@@ -8,8 +8,8 @@ use super::{
     Call, Function, Word,
     error::{Error, Result},
     marshal::{
-        ButtonMap, MAX_STRING_BYTES, MAX_WIDGET_OPTIONS_BYTES, read_c_string, read_textarea_string,
-        read_utf8_c_string, read_widget_options,
+        ButtonMap, MAX_STRING_BYTES, MAX_WIDGET_OPTIONS_BYTES, read_c_string, read_utf8_c_string,
+        read_widget_options,
     },
     state::{Kind, State},
     transport::Transport,
@@ -25,12 +25,18 @@ fn checked_u32(value: Word) -> Result<u32> {
     u32::try_from(value).map_err(|_| Error::InvalidValue)
 }
 
-/// A signed 32-bit argument. A 32-bit caller passes it zero-extended in its
-/// word and a 64-bit caller sign-extended; both are the same `i32`. On a
-/// 32-bit host every word is one.
-pub(super) fn signed_word(value: Word) -> Result<i32> {
+/// A signed 32-bit argument in a caller's word of `word_bits`. A 32-bit caller
+/// passes it zero-extended and a 64-bit caller sign-extended, and only that
+/// form is valid for each: a 64-bit word of `0x0000_0000_FFFF_FFFF` is not
+/// `-1`. On a 32-bit host both forms are the same word.
+pub(super) fn signed_word(value: Word, word_bits: u32) -> Result<i32> {
     let narrowed = value as u32 as i32;
-    if value == narrowed as isize as Word || value == narrowed as u32 as Word {
+    let extended = if word_bits == 32 {
+        narrowed as u32 as Word
+    } else {
+        narrowed as isize as Word
+    };
+    if extended == value {
         Ok(narrowed)
     } else {
         Err(Error::InvalidValue)
@@ -98,9 +104,8 @@ pub(super) fn dispatch_calendar_set_highlights(
     // Packed records: year (u16), month (u8), day (u8).
     let records = memory.bytes(pointer, byte_count)?;
     let mut dates = Vec::with_capacity(count);
-    for record in records.chunks_exact(4) {
-        let year = u16::from_le_bytes([record[0], record[1]]);
-        let (month, day) = (record[2], record[3]);
+    for &[year_low, year_high, month, day] in records.as_chunks::<4>().0 {
+        let year = u16::from_le_bytes([year_low, year_high]);
         if !valid_calendar_date(u32::from(year), u32::from(month), u32::from(day)) {
             return Err(Error::InvalidValue);
         }
@@ -211,10 +216,10 @@ pub(super) fn dispatch_line_set_points(
     // Packed records: x (i32), y (i32).
     let records = memory.bytes(pointer, byte_count)?;
     let mut points = Vec::with_capacity(count);
-    for record in records.chunks_exact(8) {
+    for &[x0, x1, x2, x3, y0, y1, y2, y3] in records.as_chunks::<8>().0 {
         points.push(lvgl::lv_point_precise_t {
-            x: i32::from_le_bytes([record[0], record[1], record[2], record[3]]),
-            y: i32::from_le_bytes([record[4], record[5], record[6], record[7]]),
+            x: i32::from_le_bytes([x0, x1, x2, x3]),
+            y: i32::from_le_bytes([y0, y1, y2, y3]),
         });
     }
     let line = state.object(handle, Some(Kind::Line))?;
@@ -556,24 +561,183 @@ pub(super) fn object_set_mask(
 
 pub(super) fn object_set_i32(
     state: &mut State,
+    memory: &dyn Transport,
     call: &Call,
     kind: Option<Kind>,
     native: fn(Object, i32),
 ) -> Result<()> {
     let object = state.object(call.arguments[0], kind)?;
-    native(object, signed_word(call.arguments[1])?);
+    native(object, signed_word(call.arguments[1], memory.word_bits())?);
     Ok(())
 }
 
 pub(super) fn object_set_i32_pair(
     state: &mut State,
+    memory: &dyn Transport,
     call: &Call,
     native: fn(Object, i32, i32),
 ) -> Result<()> {
     let object = state.object(call.arguments[0], None)?;
-    let first = signed_word(call.arguments[1])?;
-    native(object, first, signed_word(call.arguments[2])?);
+    let bits = memory.word_bits();
+    let first = signed_word(call.arguments[1], bits)?;
+    native(object, first, signed_word(call.arguments[2], bits)?);
     Ok(())
+}
+
+/// A `u32` above `max` is a resource limit rather than an invalid value.
+pub(super) fn object_set_u32_limit(
+    state: &mut State,
+    call: &Call,
+    kind: Option<Kind>,
+    max: u32,
+    native: fn(Object, u32),
+) -> Result<()> {
+    let object = state.object(call.arguments[0], kind)?;
+    let value = checked_u32(call.arguments[1])?;
+    if value > max {
+        return Err(Error::ResourceLimit);
+    }
+    native(object, value);
+    Ok(())
+}
+
+/// A string of at most `limit` bytes, NUL included. LVGL copies it, so it
+/// never retains the caller's memory.
+pub(super) fn object_set_text(
+    state: &mut State,
+    memory: &dyn Transport,
+    call: &Call,
+    kind: Option<Kind>,
+    limit: usize,
+    native: fn(Object, *const core::ffi::c_char),
+) -> Result<()> {
+    let object = state.object(call.arguments[0], kind)?;
+    native(object, memory.c_string(call.arguments[1], limit)?.as_ptr());
+    Ok(())
+}
+
+/// A pair of signed words with `minimum < maximum`, both within the range
+/// limit.
+fn range_words(call: &Call, memory: &dyn Transport) -> Result<(i32, i32)> {
+    let bits = memory.word_bits();
+    let minimum = signed_word(call.arguments[1], bits)?;
+    let maximum = signed_word(call.arguments[2], bits)?;
+    if minimum >= maximum || minimum < -MAX_RANGE_VALUE || maximum > MAX_RANGE_VALUE {
+        return Err(Error::InvalidValue);
+    }
+    Ok((minimum, maximum))
+}
+
+pub(super) fn object_set_range(
+    state: &mut State,
+    memory: &dyn Transport,
+    call: &Call,
+    kind: Option<Kind>,
+    native: fn(Object, i32, i32),
+) -> Result<()> {
+    let object = state.object(call.arguments[0], kind)?;
+    let (minimum, maximum) = range_words(call, memory)?;
+    native(object, minimum, maximum);
+    Ok(())
+}
+
+// A value word of a style call, converted to the native property value. The
+// word's width tells a zero-extended signed word from a sign-extended one.
+
+pub(super) fn style_color(value: Word, _: u32) -> Result<lvgl::lv_color_t> {
+    let rgb = checked_u32(value)?;
+    if rgb > 0x00ff_ffff {
+        return Err(Error::InvalidValue);
+    }
+    Ok(unsafe { lvgl::lv_color_hex(rgb) })
+}
+
+pub(super) fn style_font(value: Word, _: u32) -> Result<&'static lvgl::lv_font_t> {
+    Ok(match value {
+        0 => crate::fonts::get_font_small(),
+        1 => crate::fonts::get_font_medium(),
+        2 => crate::fonts::get_font_large(),
+        3 => crate::fonts::get_font_extra_large(),
+        4 => crate::fonts::get_font_monospace_small(),
+        5 => crate::fonts::get_font_monospace_medium(),
+        _ => return Err(Error::InvalidValue),
+    })
+}
+
+pub(super) fn i32_between(value: Word, word_bits: u32, min: i32, max: i32) -> Result<i32> {
+    let value = signed_word(value, word_bits)?;
+    if (min..=max).contains(&value) {
+        Ok(value)
+    } else {
+        Err(Error::InvalidValue)
+    }
+}
+
+pub(super) fn u32_at_most(value: Word, max: u32) -> Result<u32> {
+    let value = checked_u32(value)?;
+    if value > max {
+        return Err(Error::InvalidValue);
+    }
+    Ok(value)
+}
+
+/// `(object, value, selector)`: the value converted for the property, and a
+/// style selector made of known parts and states.
+pub(super) fn object_set_style<V>(
+    state: &mut State,
+    memory: &dyn Transport,
+    call: &Call,
+    kind: Option<Kind>,
+    convert: fn(Word, u32) -> Result<V>,
+    native: fn(Object, V, u32),
+) -> Result<()> {
+    let object = state.object(call.arguments[0], kind)?;
+    let value = convert(call.arguments[1], memory.word_bits())?;
+    let selector = checked_u32(call.arguments[2])?;
+    super::marshal::validate_style_selector(selector)?;
+    native(object, value, selector);
+    Ok(())
+}
+
+// Helpers that run one of several native calls by the object's kind. The
+// closure returns `None` for a kind the call does not accept.
+
+pub(super) fn object_get_i32_by_kind(
+    state: &mut State,
+    memory: &mut dyn Transport,
+    call: &Call,
+    native: fn(Object, Kind) -> Option<i32>,
+) -> Result<()> {
+    let (object, kind) = state.object_with_kind(call.arguments[0])?;
+    let value = native(object, kind).ok_or(Error::InvalidHandle)?;
+    memory.put::<i32>(call.result, value);
+    Ok(())
+}
+
+/// A word of at most `max`, then the native call of the object's kind.
+pub(super) fn object_set_enum_by_kind(
+    state: &mut State,
+    call: &Call,
+    max: u32,
+    native: fn(Object, Kind, u32) -> Option<()>,
+) -> Result<()> {
+    let (object, kind) = state.object_with_kind(call.arguments[0])?;
+    let value = call.arguments[1];
+    if value > max as Word {
+        return Err(Error::InvalidValue);
+    }
+    native(object, kind, value as u32).ok_or(Error::InvalidHandle)
+}
+
+pub(super) fn object_set_range_by_kind(
+    state: &mut State,
+    memory: &dyn Transport,
+    call: &Call,
+    native: fn(Object, Kind, i32, i32) -> Option<()>,
+) -> Result<()> {
+    let (object, kind) = state.object_with_kind(call.arguments[0])?;
+    let (minimum, maximum) = range_words(call, memory)?;
+    native(object, kind, minimum, maximum).ok_or(Error::InvalidHandle)
 }
 
 pub(super) fn object_get_u32(
@@ -642,6 +806,7 @@ pub(super) fn manual(
     function: Function,
 ) -> Result<()> {
     let [a, b, c, ..] = call.arguments;
+    let bits = memory.word_bits();
     match function {
         Function::FilePickerCreate => {
             state.ensure_capacity()?;
@@ -726,8 +891,8 @@ pub(super) fn manual(
             if b > lvgl::lv_align_t_LV_ALIGN_OUT_RIGHT_BOTTOM as Word {
                 return Err(Error::InvalidValue);
             }
-            let x = signed_word(c)?;
-            let y = signed_word(call.arguments[3])?;
+            let x = signed_word(c, bits)?;
+            let y = signed_word(call.arguments[3], bits)?;
             unsafe { lvgl::lv_obj_align(object, b as _, x, y) };
         }
         Function::ObjectSetBackground => {
@@ -745,21 +910,10 @@ pub(super) fn manual(
                 lvgl::lv_obj_set_style_bg_opa(object, opacity, selector);
             }
         }
-        Function::ObjectSetTextColor => {
-            let object = state.object(a, None)?;
-            let rgb = u32::try_from(b).map_err(|_| Error::InvalidValue)?;
-            let selector = u32::try_from(c).map_err(|_| Error::InvalidValue)?;
-            super::marshal::validate_style_selector(selector)?;
-            if rgb > 0x00ff_ffff {
-                return Err(Error::InvalidValue);
-            }
-            let color = unsafe { lvgl::lv_color_hex(rgb) };
-            unsafe { lvgl::lv_obj_set_style_text_color(object, color, selector) };
-        }
         Function::ObjectSetBorder => {
             let object = state.object(a, None)?;
             let rgb = u32::try_from(b).map_err(|_| Error::InvalidValue)?;
-            let width = signed_word(c)?;
+            let width = signed_word(c, bits)?;
             let side = u32::try_from(call.arguments[3]).map_err(|_| Error::InvalidValue)?;
             let selector = u32::try_from(call.arguments[4]).map_err(|_| Error::InvalidValue)?;
             super::marshal::validate_style_selector(selector)?;
@@ -772,41 +926,6 @@ pub(super) fn manual(
                 lvgl::lv_obj_set_style_border_width(object, width, selector);
                 lvgl::lv_obj_set_style_border_side(object, side, selector);
             }
-        }
-        Function::ObjectSetRadius => {
-            let object = state.object(a, None)?;
-            let radius = signed_word(b)?;
-            let selector = u32::try_from(c).map_err(|_| Error::InvalidValue)?;
-            super::marshal::validate_style_selector(selector)?;
-            if !(0..=1024).contains(&radius) {
-                return Err(Error::InvalidValue);
-            }
-            unsafe { lvgl::lv_obj_set_style_radius(object, radius, selector) };
-        }
-        Function::ObjectSetTextAlign => {
-            let object = state.object(a, None)?;
-            let align = u32::try_from(b).map_err(|_| Error::InvalidValue)?;
-            let selector = u32::try_from(c).map_err(|_| Error::InvalidValue)?;
-            super::marshal::validate_style_selector(selector)?;
-            if align > lvgl::lv_text_align_t_LV_TEXT_ALIGN_RIGHT {
-                return Err(Error::InvalidValue);
-            }
-            unsafe { lvgl::lv_obj_set_style_text_align(object, align, selector) };
-        }
-        Function::ObjectSetFont => {
-            let object = state.object(a, None)?;
-            let font = match b {
-                0 => crate::fonts::get_font_small(),
-                1 => crate::fonts::get_font_medium(),
-                2 => crate::fonts::get_font_large(),
-                3 => crate::fonts::get_font_extra_large(),
-                4 => crate::fonts::get_font_monospace_small(),
-                5 => crate::fonts::get_font_monospace_medium(),
-                _ => return Err(Error::InvalidValue),
-            };
-            let selector = u32::try_from(c).map_err(|_| Error::InvalidValue)?;
-            super::marshal::validate_style_selector(selector)?;
-            unsafe { lvgl::lv_obj_set_style_text_font(object, font, selector) };
         }
         Function::ObjectSetSurface => {
             let object = state.object(a, None)?;
@@ -821,10 +940,10 @@ pub(super) fn manual(
         }
         Function::ObjectSetMinMaxSize => {
             let object = state.object(a, None)?;
-            let min_width = signed_word(b)?;
-            let max_width = signed_word(c)?;
-            let min_height = signed_word(call.arguments[3])?;
-            let max_height = signed_word(call.arguments[4])?;
+            let min_width = signed_word(b, bits)?;
+            let max_width = signed_word(c, bits)?;
+            let min_height = signed_word(call.arguments[3], bits)?;
+            let max_height = signed_word(call.arguments[4], bits)?;
             let selector = u32::try_from(call.arguments[5]).map_err(|_| Error::InvalidValue)?;
             super::marshal::validate_style_selector(selector)?;
             if !(0..=16_384).contains(&min_width)
@@ -852,19 +971,11 @@ pub(super) fn manual(
             }
             unsafe { lvgl::lv_calendar_set_month_shown(calendar, year, month) };
         }
-        Function::ChartSetType => {
-            let chart = state.object(a, Some(Kind::Chart))?;
-            let chart_type = u32::try_from(b).map_err(|_| Error::InvalidValue)?;
-            if chart_type > lvgl::lv_chart_type_t_LV_CHART_TYPE_SCATTER {
-                return Err(Error::InvalidValue);
-            }
-            unsafe { lvgl::lv_chart_set_type(chart, chart_type) };
-        }
         Function::ChartSetAxisRange => {
             let chart = state.object(a, Some(Kind::Chart))?;
             let axis = u32::try_from(b).map_err(|_| Error::InvalidValue)?;
-            let minimum = signed_word(c)?;
-            let maximum = signed_word(call.arguments[3])?;
+            let minimum = signed_word(c, bits)?;
+            let maximum = signed_word(call.arguments[3], bits)?;
             if !matches!(axis, 0 | 1 | 2 | 4)
                 || minimum >= maximum
                 || minimum < -MAX_RANGE_VALUE
@@ -874,18 +985,9 @@ pub(super) fn manual(
             }
             unsafe { lvgl::lv_chart_set_axis_range(chart, axis, minimum, maximum) };
         }
-        Function::SpinboxSetRange => {
-            let spinbox = state.object(a, Some(Kind::Spinbox))?;
-            let minimum = signed_word(b)?;
-            let maximum = signed_word(c)?;
-            if minimum >= maximum || minimum < -MAX_RANGE_VALUE || maximum > MAX_RANGE_VALUE {
-                return Err(Error::InvalidValue);
-            }
-            unsafe { lvgl::lv_spinbox_set_range(spinbox, minimum, maximum) };
-        }
         Function::SpinboxSetValue => {
             let spinbox = state.object(a, Some(Kind::Spinbox))?;
-            let value = signed_word(b)?;
+            let value = signed_word(b, bits)?;
             let minimum = unsafe { lvgl::lv_spinbox_get_min_value(spinbox) };
             let maximum = unsafe { lvgl::lv_spinbox_get_max_value(spinbox) };
             if !(minimum..=maximum).contains(&value) {
@@ -902,23 +1004,9 @@ pub(super) fn manual(
             }
             unsafe { lvgl::lv_spinbox_set_digit_format(spinbox, digits, separator) };
         }
-        Function::RangeSetRange => {
-            let (object, kind) = state.object_with_kind(a)?;
-            let minimum = signed_word(b)?;
-            let maximum = signed_word(c)?;
-            if minimum >= maximum || minimum < -MAX_RANGE_VALUE || maximum > MAX_RANGE_VALUE {
-                return Err(Error::InvalidValue);
-            }
-            match kind {
-                Kind::Arc => unsafe { lvgl::lv_arc_set_range(object, minimum, maximum) },
-                Kind::Bar => unsafe { lvgl::lv_bar_set_range(object, minimum, maximum) },
-                Kind::Slider => unsafe { lvgl::lv_slider_set_range(object, minimum, maximum) },
-                _ => return Err(Error::InvalidHandle),
-            }
-        }
         Function::RangeSetValue => {
             let (object, kind) = state.object_with_kind(a)?;
-            let value = signed_word(b)?;
+            let value = signed_word(b, bits)?;
             if !(-MAX_RANGE_VALUE..=MAX_RANGE_VALUE).contains(&value) || c > 1 {
                 return Err(Error::InvalidValue);
             }
@@ -950,49 +1038,6 @@ pub(super) fn manual(
                     }
                     unsafe { lvgl::lv_slider_set_value(object, value, c != 0) };
                 }
-                _ => return Err(Error::InvalidHandle),
-            }
-        }
-        Function::RangeGetValue => {
-            let (object, kind) = state.object_with_kind(a)?;
-            let value = match kind {
-                Kind::Arc => unsafe { lvgl::lv_arc_get_value(object) },
-                Kind::Bar => unsafe { lvgl::lv_bar_get_value(object) },
-                Kind::Slider => unsafe { lvgl::lv_slider_get_value(object) },
-                _ => return Err(Error::InvalidHandle),
-            };
-            memory.put::<i32>(call.result, value);
-        }
-        Function::RangeGetStartValue => {
-            let (object, kind) = state.object_with_kind(a)?;
-            let value = match kind {
-                Kind::Bar => unsafe { lvgl::lv_bar_get_start_value(object) },
-                Kind::Slider => unsafe { lvgl::lv_slider_get_left_value(object) },
-                _ => return Err(Error::InvalidHandle),
-            };
-            memory.put::<i32>(call.result, value);
-        }
-        Function::RangeSetMode => {
-            let (object, kind) = state.object_with_kind(a)?;
-            if b > 2 {
-                return Err(Error::InvalidValue);
-            }
-            match kind {
-                Kind::Arc => unsafe { lvgl::lv_arc_set_mode(object, b as _) },
-                Kind::Bar => unsafe { lvgl::lv_bar_set_mode(object, b as _) },
-                Kind::Slider => unsafe { lvgl::lv_slider_set_mode(object, b as _) },
-                _ => return Err(Error::InvalidHandle),
-            }
-        }
-        Function::RangeSetOrientation => {
-            let (object, kind) = state.object_with_kind(a)?;
-            if b > 2 {
-                return Err(Error::InvalidValue);
-            }
-            match kind {
-                Kind::Bar => unsafe { lvgl::lv_bar_set_orientation(object, b as _) },
-                Kind::Slider => unsafe { lvgl::lv_slider_set_orientation(object, b as _) },
-                Kind::Switch => unsafe { lvgl::lv_switch_set_orientation(object, b as _) },
                 _ => return Err(Error::InvalidHandle),
             }
         }
@@ -1238,14 +1283,6 @@ pub(super) fn manual(
                 lvgl::lv_obj_invalidate(object);
             }
         }
-        Function::TextareaSetMaxLength => {
-            let object = state.object(a, Some(Kind::Textarea))?;
-            let length = u32::try_from(b).map_err(|_| Error::InvalidValue)?;
-            if length > 4096 {
-                return Err(Error::ResourceLimit);
-            }
-            unsafe { lvgl::lv_textarea_set_max_length(object, length) };
-        }
         Function::TextareaGetText | Function::TextareaGetTextLength => {
             let object = state.object(a, Some(Kind::Textarea))?;
             let text = unsafe { core::ffi::CStr::from_ptr(lvgl::lv_textarea_get_text(object)) };
@@ -1273,31 +1310,6 @@ pub(super) fn manual(
         }
         Function::Percentage => {
             memory.put::<i32>(call.result, unsafe { lvgl::lv_pct(a as i32) });
-        }
-        Function::LabelSetText | Function::CheckboxSetText | Function::TextareaSetText => {
-            let kind = if function == Function::LabelSetText {
-                Kind::Label
-            } else if function == Function::CheckboxSetText {
-                Kind::Checkbox
-            } else {
-                Kind::Textarea
-            };
-            let pointer = state.object(a, Some(kind))?;
-            let text = if function == Function::TextareaSetText {
-                read_textarea_string(memory, b)?
-            } else {
-                read_c_string(memory, b)?
-            };
-            // Both setters copy synchronously; neither retains guest bytes.
-            unsafe {
-                if function == Function::LabelSetText {
-                    lvgl::lv_label_set_text(pointer, text.as_ptr());
-                } else if function == Function::CheckboxSetText {
-                    lvgl::lv_checkbox_set_text(pointer, text.as_ptr());
-                } else {
-                    lvgl::lv_textarea_set_text(pointer, text.as_ptr());
-                }
-            }
         }
         Function::ButtonmatrixSetMap => {
             state.object(a, Some(Kind::ButtonMatrix))?;

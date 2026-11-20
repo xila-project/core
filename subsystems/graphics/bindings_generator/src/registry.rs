@@ -36,6 +36,41 @@ pub enum ObjectOperation {
     GetBool,
     /// `(object) -> i32`.
     GetI32,
+    /// `(object, u32)`, at most the LVGL enumeration constant `max`.
+    SetEnum { max: &'static str },
+    /// `(object, u32)`, above `max` is a resource limit, not an invalid value.
+    SetU32Limit { max: u32 },
+    /// `(object, text)`: a string of at most the marshal constant `limit`
+    /// bytes, NUL included, which LVGL copies.
+    SetText { limit: &'static str },
+    /// `(object, min, max)`: signed words with `min < max`, both within the
+    /// range limit.
+    SetRange,
+    /// `(object, value, selector)`: a local style property.
+    SetStyle(StyleValue),
+    /// `(object) -> i32`, by the object's kind: the kind and LVGL function
+    /// pairs. Any other kind is an invalid handle.
+    GetI32ByKind(KindTable),
+    /// `(object, u32)`, at most `max`, then by the object's kind.
+    SetEnumByKind { max: u32, table: KindTable },
+    /// `(object, min, max)` as [`ObjectOperation::SetRange`], then by kind.
+    SetRangeByKind(KindTable),
+}
+
+/// The kinds a by-kind operation accepts, each with its LVGL function.
+pub type KindTable = &'static [(&'static str, &'static str)];
+
+/// How a style call's value word becomes the property's native value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StyleValue {
+    /// A 24-bit RGB word, made into an LVGL color.
+    Color,
+    /// A signed word within `min..=max`.
+    I32 { min: i32, max: i32 },
+    /// An unsigned word of at most the LVGL enumeration constant `max`.
+    Enum { max: &'static str },
+    /// The index of one of Xila's fonts.
+    Font,
 }
 
 impl ObjectOperation {
@@ -43,8 +78,16 @@ impl ObjectOperation {
     fn shape(self) -> (usize, bool) {
         match self {
             Self::Call => (0, false),
-            Self::SetBool | Self::SetU8 | Self::SetU32 { .. } | Self::SetMask { .. } => (1, false),
-            Self::GetU32 | Self::GetBool | Self::GetI32 => (0, true),
+            Self::SetBool
+            | Self::SetU8
+            | Self::SetU32 { .. }
+            | Self::SetMask { .. }
+            | Self::SetEnum { .. }
+            | Self::SetU32Limit { .. }
+            | Self::SetText { .. }
+            | Self::SetEnumByKind { .. } => (1, false),
+            Self::SetRange | Self::SetRangeByKind(_) | Self::SetStyle(_) => (2, false),
+            Self::GetU32 | Self::GetBool | Self::GetI32 | Self::GetI32ByKind(_) => (0, true),
         }
     }
 }
@@ -161,7 +204,19 @@ impl<'a> GraphicsRegistry<'a> {
                     .find(|call| call.name == rule.name)
                     .expect("validated supported name");
                 let (extra, returns) = operation.shape();
-                if !call.generic_safe()
+                // A string is the one pointer argument a generated call takes:
+                // LVGL copies it, and the declaration pins its exact type.
+                let scalar = match operation {
+                    ObjectOperation::SetText { .. } => call
+                        .validate_signature(&["*mut lv_obj_t", "*const core::ffi::c_char"], None)
+                        .is_ok(),
+                    // An enumeration argument is a scalar whatever its alias.
+                    ObjectOperation::SetEnum { .. } | ObjectOperation::SetEnumByKind { .. } => {
+                        call.signature.variadic.is_none()
+                    }
+                    _ => call.generic_safe(),
+                };
+                if !scalar
                     || call.argument_count != 1 + extra
                     || matches!(call.signature.output, ReturnType::Type(..)) != returns
                 {
