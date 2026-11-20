@@ -1,6 +1,9 @@
 #![no_std]
 #![no_main]
 
+extern crate alloc;
+
+use alloc::vec::Vec;
 use core::{
     alloc::{GlobalAlloc, Layout},
     panic::PanicInfo,
@@ -19,22 +22,40 @@ fn panic(_: &PanicInfo<'_>) -> ! {
 
 /// Called by the entry shim with validated, host-owned startup data.
 unsafe fn main(startup: *const XilaStartup) -> i32 {
-    let api = unsafe { &*runtime::api() };
+    let Some(api) = runtime::api() else {
+        return 1;
+    };
     let mut now = 0;
     if unsafe { (api.time_monotonic)(&mut now) } != Status::Ok {
         return 1;
     }
 
-    // Exercise the optional process allocator, including a layout more aligned
-    // than the host's heap. This example needs neither the alloc crate nor libc.
-    let layout = Layout::from_size_align(32, 32).unwrap();
+    // Grow a Vec past its initial capacity and check that reallocation kept its data.
+    let mut bytes = Vec::with_capacity(4);
+    bytes.extend_from_slice(b"Xila");
+    bytes.reserve_exact(bytes.capacity());
+    if bytes.capacity() <= 4 || bytes.as_slice() != b"Xila" {
+        return 2;
+    }
+    drop(bytes);
+
+    // Exercise the allocator's over-aligned allocation and reallocation paths.
+    let layout = Layout::from_size_align(32, 64).unwrap();
     let memory = unsafe { HEAP.alloc(layout) };
     if memory.is_null() {
         return 2;
     }
-    let aligned = memory.addr().is_multiple_of(layout.align());
-    unsafe { HEAP.dealloc(memory, layout) };
-    if !aligned {
+    let aligned = memory.addr().is_multiple_of(64);
+    unsafe { memory.write(42) };
+    let resized = unsafe { HEAP.realloc(memory, layout, 128) };
+    if resized.is_null() {
+        unsafe { HEAP.dealloc(memory, layout) };
+        return 2;
+    }
+    let aligned = aligned && resized.addr().is_multiple_of(64);
+    let preserved = unsafe { resized.read() } == 42;
+    unsafe { HEAP.dealloc(resized, Layout::from_size_align(128, 64).unwrap()) };
+    if !aligned || !preserved {
         return 2;
     }
 

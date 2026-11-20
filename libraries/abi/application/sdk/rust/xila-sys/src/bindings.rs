@@ -567,12 +567,27 @@ pub struct Mutex {
     pub(crate) recursive: bool,
     pub(crate) waiters: *mut c_void,
 }
+impl Mutex {
+    /// Initial storage, before any host operation.
+    pub const ZERO: Self = Self {
+        owner: 0,
+        depth: 0,
+        recursive: false,
+        waiters: core::ptr::null_mut(),
+    };
+}
 /// Process-local condition variable. Zero initialize or use condition_init.
 /// Keep its address fixed from first use through destruction. The fields are private
 /// to the host; copying a used condition or sharing it across processes is invalid.
 #[repr(C)]
 pub struct Condition {
     pub(crate) waiters: *mut c_void,
+}
+impl Condition {
+    /// Initial storage, before any host operation.
+    pub const ZERO: Self = Self {
+        waiters: core::ptr::null_mut(),
+    };
 }
 /// Monotonic clock identifier for `xila_time_resolution`.
 pub const XILA_CLOCK_MONOTONIC: u32 = 0;
@@ -607,82 +622,84 @@ pub struct Heap {
 pub const XILA_ABI_VERSION_MAJOR: u32 = 0;
 pub const XILA_ABI_VERSION_MINOR: u32 = 1;
 /// Native status values mirror the unified error kinds one-to-one. Zero is success.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
-pub enum Status {
-    Ok = 0,
-    InvalidArgument = 0x0101,
-    InvalidData = 0x0102,
-    PermissionDenied = 0x0103,
-    OperationNotPermitted = 0x0104,
-    InputOutput = 0x0105,
-    OutOfMemory = 0x0106,
-    WouldBlock = 0x0107,
-    ResourceBusy = 0x0108,
-    Interrupted = 0x0109,
-    TimedOut = 0x010a,
-    Unsupported = 0x010b,
-    Overflow = 0x010c,
-    WriteZero = 0x010d,
-    NoBuffers = 0x010e,
-    NotFound = 0x010f,
-    AlreadyExists = 0x0110,
-    InvalidFlags = 0x0111,
-    InvalidState = 0x0112,
-    NotImplemented = 0x0113,
-    ExecFormat = 0x0114,
-    NoChild = 0x0115,
-    ArgumentListTooLong = 0x0116,
-    Deadlock = 0x0117,
-    BadDescriptor = 0x0201,
-    InvalidPath = 0x0202,
-    MissingPathComponent = 0x0203,
-    MissingFinalEntry = 0x0204,
-    NameTooLong = 0x0205,
-    SymlinkLoop = 0x0206,
-    NotADirectory = 0x0207,
-    IsADirectory = 0x0208,
-    DirectoryNotEmpty = 0x0209,
-    NoSpace = 0x020a,
-    FileTooLarge = 0x020b,
-    ProcessFileLimit = 0x020c,
-    SystemFileLimit = 0x020d,
-    CrossDevice = 0x020e,
-    PathEscapesRoot = 0x020f,
-    CorruptData = 0x0210,
-    MissingAttribute = 0x0211,
-    StaleHandle = 0x0212,
-    ReadOnlyFileSystem = 0x0213,
-    InvalidSeek = 0x0214,
-    Unavailable = 0x0301,
-    NoSuchTask = 0x0302,
-    InappropriateIoControl = 0x0303,
-    ConnectionRefused = 0x0401,
-    ConnectionReset = 0x0402,
-    ConnectionAborted = 0x0403,
-    NotConnected = 0x0404,
-    AlreadyConnected = 0x0405,
-    AddressInUse = 0x0406,
-    AddressNotAvailable = 0x0407,
-    DestinationRequired = 0x0408,
-    HostUnreachable = 0x0409,
-    NetworkUnreachable = 0x040a,
-    NetworkDown = 0x040b,
-    BrokenPipe = 0x040c,
-    MessageTooLarge = 0x040d,
-    DatagramTruncated = 0x040e,
-    SocketOperationUnsupported = 0x040f,
-    ProtocolUnsupported = 0x0410,
-    AddressFamilyUnsupported = 0x0411,
-    InProgress = 0x0412,
-    AlreadyInProgress = 0x0413,
-    ProtocolError = 0x0414,
-    NotASocket = 0x0415,
-    InvalidDnsName = 0x0501,
-    UnsupportedDnsQuery = 0x0502,
-    NameNotResolved = 0x0503,
-    ResolverTemporaryFailure = 0x0504,
-    ResolverFailure = 0x0505,
-    End = 0x0701,
-    BufferTooSmall = 0x0702,
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Status(pub u32);
+#[allow(non_upper_case_globals)]
+impl Status {
+    pub const Ok: Self = Self(0);
+    pub const InvalidArgument: Self = Self(0x0101);
+    pub const InvalidData: Self = Self(0x0102);
+    pub const PermissionDenied: Self = Self(0x0103);
+    pub const OperationNotPermitted: Self = Self(0x0104);
+    pub const InputOutput: Self = Self(0x0105);
+    pub const OutOfMemory: Self = Self(0x0106);
+    pub const WouldBlock: Self = Self(0x0107);
+    pub const ResourceBusy: Self = Self(0x0108);
+    pub const Interrupted: Self = Self(0x0109);
+    pub const TimedOut: Self = Self(0x010a);
+    pub const Unsupported: Self = Self(0x010b);
+    pub const Overflow: Self = Self(0x010c);
+    pub const WriteZero: Self = Self(0x010d);
+    pub const NoBuffers: Self = Self(0x010e);
+    pub const NotFound: Self = Self(0x010f);
+    pub const AlreadyExists: Self = Self(0x0110);
+    pub const InvalidFlags: Self = Self(0x0111);
+    pub const InvalidState: Self = Self(0x0112);
+    pub const NotImplemented: Self = Self(0x0113);
+    pub const ExecFormat: Self = Self(0x0114);
+    pub const NoChild: Self = Self(0x0115);
+    pub const ArgumentListTooLong: Self = Self(0x0116);
+    pub const Deadlock: Self = Self(0x0117);
+    pub const BadDescriptor: Self = Self(0x0201);
+    pub const InvalidPath: Self = Self(0x0202);
+    pub const MissingPathComponent: Self = Self(0x0203);
+    pub const MissingFinalEntry: Self = Self(0x0204);
+    pub const NameTooLong: Self = Self(0x0205);
+    pub const SymlinkLoop: Self = Self(0x0206);
+    pub const NotADirectory: Self = Self(0x0207);
+    pub const IsADirectory: Self = Self(0x0208);
+    pub const DirectoryNotEmpty: Self = Self(0x0209);
+    pub const NoSpace: Self = Self(0x020a);
+    pub const FileTooLarge: Self = Self(0x020b);
+    pub const ProcessFileLimit: Self = Self(0x020c);
+    pub const SystemFileLimit: Self = Self(0x020d);
+    pub const CrossDevice: Self = Self(0x020e);
+    pub const PathEscapesRoot: Self = Self(0x020f);
+    pub const CorruptData: Self = Self(0x0210);
+    pub const MissingAttribute: Self = Self(0x0211);
+    pub const StaleHandle: Self = Self(0x0212);
+    pub const ReadOnlyFileSystem: Self = Self(0x0213);
+    pub const InvalidSeek: Self = Self(0x0214);
+    pub const Unavailable: Self = Self(0x0301);
+    pub const NoSuchTask: Self = Self(0x0302);
+    pub const InappropriateIoControl: Self = Self(0x0303);
+    pub const ConnectionRefused: Self = Self(0x0401);
+    pub const ConnectionReset: Self = Self(0x0402);
+    pub const ConnectionAborted: Self = Self(0x0403);
+    pub const NotConnected: Self = Self(0x0404);
+    pub const AlreadyConnected: Self = Self(0x0405);
+    pub const AddressInUse: Self = Self(0x0406);
+    pub const AddressNotAvailable: Self = Self(0x0407);
+    pub const DestinationRequired: Self = Self(0x0408);
+    pub const HostUnreachable: Self = Self(0x0409);
+    pub const NetworkUnreachable: Self = Self(0x040a);
+    pub const NetworkDown: Self = Self(0x040b);
+    pub const BrokenPipe: Self = Self(0x040c);
+    pub const MessageTooLarge: Self = Self(0x040d);
+    pub const DatagramTruncated: Self = Self(0x040e);
+    pub const SocketOperationUnsupported: Self = Self(0x040f);
+    pub const ProtocolUnsupported: Self = Self(0x0410);
+    pub const AddressFamilyUnsupported: Self = Self(0x0411);
+    pub const InProgress: Self = Self(0x0412);
+    pub const AlreadyInProgress: Self = Self(0x0413);
+    pub const ProtocolError: Self = Self(0x0414);
+    pub const NotASocket: Self = Self(0x0415);
+    pub const InvalidDnsName: Self = Self(0x0501);
+    pub const UnsupportedDnsQuery: Self = Self(0x0502);
+    pub const NameNotResolved: Self = Self(0x0503);
+    pub const ResolverTemporaryFailure: Self = Self(0x0504);
+    pub const ResolverFailure: Self = Self(0x0505);
+    pub const End: Self = Self(0x0701);
+    pub const BufferTooSmall: Self = Self(0x0702);
 }

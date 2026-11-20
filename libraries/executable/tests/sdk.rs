@@ -230,16 +230,29 @@ async fn runs_sdk_rust_hello() {
     install(vfs, parent, "/rust-hello", &bytes).await;
     let create = Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None);
 
-    for (arguments, status, expected) in [
-        (vec![], 73, b"Hello from Rust on Xila!\n".as_slice()),
-        (vec!["panic".into()], 134, b"".as_slice()),
+    for (arguments, status, stdout, stderr) in [
+        (
+            vec![],
+            73,
+            b"Hello from Rust on Xila!\n".as_slice(),
+            b"".as_slice(),
+        ),
+        (
+            vec!["panic".into()],
+            134,
+            b"".as_slice(),
+            b"panicked\n".as_slice(),
+        ),
     ] {
         let output_path = format!("/rust-{status}.out");
+        let error_path = format!("/rust-{status}.err");
         let input = File::open(vfs, parent, "/input", create).await.unwrap();
         let output = File::open(vfs, parent, output_path.as_str(), create)
             .await
             .unwrap();
-        let error = File::open(vfs, parent, "/error", create).await.unwrap();
+        let error = File::open(vfs, parent, error_path.as_str(), create)
+            .await
+            .unwrap();
         let handle = execute(
             context,
             "/rust-hello",
@@ -250,7 +263,8 @@ async fn runs_sdk_rust_hello() {
         .await
         .unwrap();
         assert_eq!(handle.join().await, status);
-        assert_eq!(read_all(vfs, parent, &output_path).await, expected);
+        assert_eq!(read_all(vfs, parent, &output_path).await, stdout);
+        assert_eq!(read_all(vfs, parent, &error_path).await, stderr);
         assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
     }
 }

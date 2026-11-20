@@ -27,6 +27,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 ROOT = Path(__file__).resolve().parents[2]
 SDK_SOURCE = ROOT / "libraries/abi/application"
+RUST_CRATE = SDK_SOURCE / "sdk/rust/xila-sys"
+RUST_MANIFESTS = ("Cargo.toml", "Cargo.lock")
 LOADER = ROOT / "libraries/native_loader"
 OUTPUT = ROOT / "target/sdk"
 
@@ -359,9 +361,9 @@ def assemble(target, pin, install, crt0, libraries, work):
         shutil.copy(example, root / "share/xila/example/hello" / example.name)
     shutil.copy(SDK_SOURCE / "sdk/README.md", root / "README.md")
     rust = root / "rust/xila-sys"
-    (rust / "src").mkdir(parents=True, exist_ok=True)
-    for source in ("Cargo.toml", "Cargo.lock", "src/lib.rs", "src/bindings.rs", "src/runtime.rs"):
-        shutil.copy(SDK_SOURCE / "sdk/rust/xila-sys" / source, rust / source)
+    shutil.copytree(RUST_CRATE / "src", rust / "src", dirs_exist_ok=True)
+    for manifest in RUST_MANIFESTS:
+        shutil.copy(RUST_CRATE / manifest, rust / manifest)
 
     config = TARGETS[target]
     template = (SDK_SOURCE / "sdk/cmake/xila-toolchain.cmake.in").read_text()
@@ -504,11 +506,48 @@ def verify_stack_protector(target, sdk):
     print(f"{image}: stack protector program linked, ELF checks passed")
 
 
+def verify_rust_crate(sdk):
+    """Compare the archive's rust/ tree against the SDK crate in the checkout."""
+    prefix = f"{sdk.name}/rust"
+    crate = f"{prefix}/xila-sys"
+    expected = {prefix: None, crate: None}
+    paths = [RUST_CRATE / name for name in RUST_MANIFESTS]
+    paths.extend([RUST_CRATE / "src", *(RUST_CRATE / "src").rglob("*")])
+    for path in paths:
+        name = f"{crate}/{path.relative_to(RUST_CRATE).as_posix()}"
+        expected[name] = None if path.is_dir() else path.read_bytes()
+
+    archive = OUTPUT / f"{sdk.name}.tar.zst"
+    differences = []
+    with subprocess.Popen(["zstd", "-dc", archive], stdout=subprocess.PIPE) as decompressor:
+        with tarfile.open(fileobj=decompressor.stdout, mode="r|") as tar:
+            for member in tar:
+                if member.name != prefix and not member.name.startswith(f"{prefix}/"):
+                    continue
+                if member.name not in expected:
+                    differences.append(f"unexpected {member.name}")
+                    continue
+                contents = expected.pop(member.name)
+                matches = (member.isdir() if contents is None else
+                           member.isfile() and tar.extractfile(member).read() == contents)
+                if not matches:
+                    differences.append(f"differs: {member.name}")
+        # The decompressor may still have tar padding buffered in its output.
+        decompressor.stdout.read()
+        if decompressor.wait() != 0:
+            sys.exit(f"error: could not decompress {archive}")
+    differences.extend(f"missing {name}" for name in sorted(expected))
+    if differences:
+        sys.exit(f"error: Rust SDK crate in {archive} differs from the checkout:\n"
+                 + "\n".join(differences))
+    print(f"{archive}: rust/ matches the SDK source crate")
+
+
 def verify(args):
-    """Build the hello example with the SDK's CMake toolchain, assert the ELF contract and
-    report the image footprint."""
+    """Verify the archive's Rust crate and the C examples' ELF contract, and report sizes."""
     target = args.target
     sdk = sdk_directory(target)
+    verify_rust_crate(sdk)
     build = OUTPUT / target / "example-hello"
     run(["cmake", "-S", sdk / "share/xila/example/hello", "-B", build,
          f"-DCMAKE_TOOLCHAIN_FILE={sdk / 'cmake/xila-toolchain.cmake'}",
@@ -553,7 +592,7 @@ def rust_example(_args):
         ]
         env = dict(os.environ, CARGO_ENCODED_RUSTFLAGS="\x1f".join(flags))
         run(["rustup", "run", nightly, "cargo", "build", "--locked", "--release",
-             "--target", target, "--target-dir", output, "-Z", "build-std=core,compiler_builtins",
+             "--target", target, "--target-dir", output, "-Z", "build-std=core,alloc,compiler_builtins",
              "-Z", "build-std-features=compiler-builtins-mem"], cwd=example, env=env)
         image = output / target / "release/xila-rust-hello"
         problems = check_target(image.read_bytes(), target)

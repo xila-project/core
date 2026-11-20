@@ -75,14 +75,17 @@ Add a path dependency on `rust/xila-sys` from the SDK archive (or
 dependencies and works with Rust 1.97. It exposes the same startup record,
 opaque capabilities, ABI constants and table as the C header. Calls through the
 table are unsafe. Follow the ABI's buffer, lifetime and ownership rules,
-especially for the borrowed startup streams.
+especially for the borrowed startup streams. `Status` preserves every 32-bit
+value, including status codes introduced by later hosts. Use `Mutex::ZERO` and
+`Condition::ZERO` for initial synchronization storage.
 
 Enable the `runtime` feature for `xila_sys::entry!(main)`. It emits
 `_xila_start` and the ELF ABI note, checks both sizes and the table
 version, then calls your `unsafe fn main(*const xila_sys::XilaStartup) -> i32`.
 The result is the process exit status. During entry, `xila_sys::runtime::api()`
-returns the installed table pointer. Define a `#[panic_handler]` and call
-`xila_sys::runtime::panic_abort()` to exit with status 134. If you use
+returns `Some(&XilaApi)`, and it returns `None` outside entry. Define a
+`#[panic_handler]` and call `xila_sys::runtime::panic_abort()` to report
+`panicked` on standard error and exit with status 134. If you use
 `alloc`, you can install `xila_sys::runtime::ProcessAllocator` as your
 `#[global_allocator]`. The host reclaims the guest heap on exit.
 
@@ -95,8 +98,9 @@ mise run sdk:rust-example
 This builds `sdk/rust/hello` for Linux x86-64 and Cortex-M4F, checks both
 ELFs with `tools/sdk/check_elf.py`, and runs the Linux image through
 `executable::execute`. The program reads the monotonic clock, exercises the
-process heap, writes to its borrowed stdout and returns status 73. A second
-launch requests a panic to exercise process termination.
+process heap by growing a `Vec` and resizing a 64-byte-aligned block, writes to
+its borrowed stdout and returns status 73. A second launch checks the panic
+diagnostic and exit status.
 
 For a standalone build, use the nightly pinned in Core's `mise.toml` with
 `rust-src` and `-Z build-std=core,compiler_builtins` (add `alloc` if used).

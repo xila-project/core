@@ -59,8 +59,9 @@ macro_rules! entry {
 /// # Safety
 /// The loader calls this once per image. Non-null startup and table pointers
 /// must be aligned and readable through their size fields and cover the bytes
-/// they advertise. On success the host keeps them and all granted capabilities
-/// live until the process ends. The application must obey the native ABI,
+/// they advertise. A table that passes validation must be immutable and valid
+/// for the lifetime of the image. The host keeps startup and all granted
+/// capabilities live until the process ends. The application must obey the native ABI,
 /// including keeping calls on the process's cooperative executor.
 #[doc(hidden)]
 pub unsafe fn start(
@@ -85,27 +86,35 @@ pub unsafe fn start(
     result
 }
 
-/// Return the installed API pointer, or null outside the entry call.
-/// Dereferencing it requires the startup lifetime and the ABI's safety rules.
-pub fn api() -> *const XilaApi {
-    let startup = STARTUP.load(Ordering::Acquire);
-    if startup.is_null() {
-        return ptr::null();
-    }
-    // The host keeps startup live for as long as this image can run guest code.
-    unsafe { (*startup).api }
+/// Return the installed API table during entry.
+pub fn api() -> Option<&'static XilaApi> {
+    // SAFETY: start installs validated startup data for the duration of entry.
+    // The host's immutable table remains valid for the lifetime of the image.
+    let startup = unsafe { STARTUP.load(Ordering::Acquire).as_ref() }?;
+    unsafe { startup.api.as_ref() }
 }
 
 /// Terminate the native process with status 134. Call from the application's
 /// `#[panic_handler]` with `panic = "abort"`. The host reclaims the process
 /// heap and image. Rust destructors do not run.
 pub fn panic_abort() -> ! {
-    let startup = STARTUP.load(Ordering::Acquire);
-    if !startup.is_null() {
+    if let Some(startup) = unsafe { STARTUP.load(Ordering::Acquire).as_ref() }
+        && let Some(api) = unsafe { startup.api.as_ref() }
+    {
         // The host grants this capability for native processes; built-in entries
         // may run without it. A successful process_exit never returns.
         unsafe {
-            let _ = ((*(*startup).api).process_exit)((*startup).process, 134);
+            let message = b"panicked\n";
+            if !startup.standard_error.is_null() {
+                let mut written = 0;
+                let _ = (api.file_write)(
+                    startup.standard_error,
+                    message.as_ptr().cast(),
+                    message.len(),
+                    &mut written,
+                );
+            }
+            let _ = (api.process_exit)(startup.process, 134);
         }
     }
 
@@ -144,7 +153,8 @@ pub fn panic_abort() -> ! {
 /// Optional `#[global_allocator]` for native applications using `alloc`.
 /// Allocation is available during the entry call when the host grants a heap.
 /// Over-aligned blocks store the original heap pointer immediately before
-/// the aligned address. Reallocation uses `GlobalAlloc`'s allocate/copy/free.
+/// the aligned address. Reallocation uses the host heap directly when the
+/// requested alignment is within the heap's guarantee.
 pub struct ProcessAllocator;
 
 // SAFETY: the runtime installs a process heap for the duration of guest
@@ -159,11 +169,7 @@ unsafe impl GlobalAlloc for ProcessAllocator {
 
         let over_aligned = layout.align() > XILA_HEAP_ALIGNMENT;
         let size = if over_aligned {
-            let Some(size) = layout
-                .size()
-                .checked_add(layout.align() - 1)
-                .and_then(|size| size.checked_add(size_of::<*mut c_void>()))
-            else {
+            let Some(size) = layout.size().checked_add(layout.align()) else {
                 return ptr::null_mut();
             };
             size
@@ -181,8 +187,10 @@ unsafe impl GlobalAlloc for ProcessAllocator {
         if !over_aligned {
             return bytes;
         }
-        // SAFETY: the allocation has room for the pointer header, any padding,
-        // and the requested bytes. The aligned address also aligns the header.
+        // SAFETY: the heap base and requested alignment are multiples of
+        // XILA_HEAP_ALIGNMENT, which is at least a pointer wide. The next aligned
+        // address strictly after the base is therefore at least a pointer and
+        // at most layout.align() bytes away, leaving room for both header and data.
         unsafe {
             let after_header = bytes.add(size_of::<*mut c_void>());
             let aligned = after_header.add(after_header.align_offset(layout.align()));
@@ -192,9 +200,11 @@ unsafe impl GlobalAlloc for ProcessAllocator {
     }
 
     unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-        // SAFETY: a live allocation can only have been obtained during this
-        // process's entry call and must be released within that same lifetime.
         let startup = STARTUP.load(Ordering::Acquire);
+        if startup.is_null() {
+            // The host reclaims any remaining blocks when the process exits.
+            return;
+        }
         unsafe {
             let base = if layout.align() > XILA_HEAP_ALIGNMENT {
                 pointer.cast::<*mut c_void>().sub(1).read()
@@ -203,5 +213,38 @@ unsafe impl GlobalAlloc for ProcessAllocator {
             };
             let _ = ((*(*startup).api).heap_free)((*startup).heap, base);
         }
+    }
+
+    unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        if layout.align() > XILA_HEAP_ALIGNMENT {
+            // SAFETY: GlobalAlloc::realloc requires new_size to fit this alignment.
+            let new_layout = unsafe { Layout::from_size_align_unchecked(new_size, layout.align()) };
+            let resized = unsafe { self.alloc(new_layout) };
+            if !resized.is_null() {
+                unsafe {
+                    ptr::copy_nonoverlapping(pointer, resized, layout.size().min(new_size));
+                    self.dealloc(pointer, layout);
+                }
+            }
+            return resized;
+        }
+
+        let startup = STARTUP.load(Ordering::Acquire);
+        if startup.is_null() {
+            return ptr::null_mut();
+        }
+        let mut resized = ptr::null_mut();
+        let result = unsafe {
+            ((*(*startup).api).heap_reallocate)(
+                (*startup).heap,
+                pointer.cast(),
+                new_size,
+                &mut resized,
+            )
+        };
+        if result != Status::Ok {
+            return ptr::null_mut();
+        }
+        resized.cast()
     }
 }

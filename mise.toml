@@ -133,7 +133,7 @@ tools.uv = "{{ vars.uv_version }}"
 run = "uv run --no-project --with meson=={{ vars.meson_version }} --with ninja=={{ vars.ninja_version }} python tools/sdk/build.py build --target \"${XILA_SDK_TARGET:-x86_64-unknown-linux-gnu}\""
 
 [tasks."sdk:verify"]
-description = "After sdk:build, build the SDK hello example with its CMake toolchain, check the ELF contract and report sizes"
+description = "Verify the packaged Rust crate, build the C examples, check the ELF contract and report sizes"
 tools.uv = "{{ vars.uv_version }}"
 run = "uv run --no-project --with meson=={{ vars.meson_version }} --with ninja=={{ vars.ninja_version }} python tools/sdk/build.py verify --target \"${XILA_SDK_TARGET:-x86_64-unknown-linux-gnu}\""
 
