@@ -69,8 +69,8 @@ COMMON_FLAGS = [
     "-D_GNU_SOURCE", "-Wall", "-Wextra", "-Werror",
 ]
 
-POSIX_SOURCES = ["errno", "exit_flush", "fd", "file", "heap", "onexit", "path", "startup", "status", "stderr", "stdin", "stdout", "time",
-                 "unsupported"]
+POSIX_SOURCES = ["errno", "exit_flush", "fd", "file", "heap", "onexit", "path", "stack_protector", "startup", "status", "stderr", "stdin", "stdout",
+                 "time", "unsupported"]
 
 
 def pins():
@@ -200,36 +200,46 @@ def build_picolibc(source, target, work):
     return install
 
 
-# picolibc archive members the SDK removes from libc.a, by member name substring: (substring,
-# reason). Each holds a constructor section the loader rejects, so an image that used any
-# symbol of the member could not be loaded; a program that needs one then fails at link time,
-# by name, instead.
-#   bufio_exit_flush: registers the exit-time stdio flush with atexit() from a constructor,
-#     and its flush unlinks every stream from the list as it goes, so a program that called
-#     fflush(NULL) lost its later writes at exit. The POSIX layer defines _bufio_exit_flush
-#     and __stdio_file_list itself (posix/exit_flush.c), with a flush that only walks the list.
-#   exitprocs: picolibc's atexit table, run from a .fini_array_onexit entry that only a C
-#     runtime which walks the fini array would call. The POSIX layer provides _on_exit and
-#     runs the handlers from exit() itself (posix/onexit.c).
-#   libc_ssp_stack_protector: seeds __stack_chk_guard from a constructor. Applications are
-#     built with -fno-stack-protector.
-#   interrupt.c: the x86_64 interrupt descriptor table setup (__idt), a constructor that is
-#     only reachable from bare-metal x86 start-up code the SDK does not use.
-DROPPED_MEMBERS = ("bufio_exit_flush", "exitprocs", "libc_ssp_stack_protector", "interrupt.c")
+# picolibc archive members the SDK removes from libc.a, by exact member name: (member,
+# targets, reason); targets is None for every target. Each holds a constructor section the
+# loader rejects, so an image that used any symbol of the member could not be loaded; a
+# program that needs one then fails at link time, by name, instead.
+#   libc_stdio_bufio_exit_flush.c.o: registers the exit-time stdio flush with atexit() from
+#     a constructor, and its flush unlinks every stream from the list as it goes, so a
+#     program that called fflush(NULL) lost its later writes at exit. The POSIX layer
+#     defines _bufio_exit_flush and __stdio_file_list itself (posix/exit_flush.c), with a
+#     flush that only walks the list.
+#   libc_stdlib_exitprocs.c.o: picolibc's atexit table, run from a .fini_array_onexit entry
+#     that only a C runtime which walks the fini array would call. The POSIX layer provides
+#     _on_exit and runs the handlers from exit() itself (posix/onexit.c).
+#   libc_ssp_stack_protector.c.o: seeds __stack_chk_guard from a constructor. The POSIX
+#     layer defines __stack_chk_guard and __stack_chk_fail (posix/stack_protector.c) and
+#     seeds the guard from xila_posix_initialize.
+#   interrupt.c.o (x86_64 only): the interrupt descriptor table setup (__idt), a constructor
+#     that is only reachable from bare-metal x86 start-up code the SDK does not use. Arm's
+#     member of the same name (the vector table and default handlers) has no constructor
+#     and stays.
+DROPPED_MEMBERS = (
+    ("libc_stdio_bufio_exit_flush.c.o", None),
+    ("libc_stdlib_exitprocs.c.o", None),
+    ("libc_ssp_stack_protector.c.o", None),
+    ("interrupt.c.o", ("x86_64-unknown-linux-gnu",)),
+)
 
 
-def drop_members(install):
+def drop_members(install, target):
     """Remove DROPPED_MEMBERS from the installed libc.a (llvm-ar d), when present: a member
-    can be absent on a target (interrupt.c is x86 only) or already removed by an earlier run
-    on the same installed copy. The constructor scan fails the build if anything else with a
-    constructor remains, and the link fails if a second __stdio_file_list appears."""
+    can be absent on a target or already removed by an earlier run on the same installed
+    copy. The constructor scan fails the build if anything else with a constructor remains,
+    and the link fails if a second __stdio_file_list appears."""
     ar = find_tool("llvm-ar")
     archive = install / "lib/libc.a"
     members = subprocess.run([ar, "t", archive], capture_output=True, text=True, check=True)
-    found = [m for m in members.stdout.split() if any(name in m for name in DROPPED_MEMBERS)]
+    names = [name for name, targets in DROPPED_MEMBERS if targets is None or target in targets]
+    found = [m for m in dict.fromkeys(members.stdout.split()) if m in names]
     if found:
-        run([ar, "d", archive, *dict.fromkeys(found)])
-    if not any("bufio_exit_flush" in m for m in found):
+        run([ar, "d", archive, *found])
+    if "libc_stdio_bufio_exit_flush.c.o" not in found:
         nm = subprocess.run([find_tool("llvm-nm"), "--defined-only", archive],
                             capture_output=True, text=True, check=True).stdout
         if "_bufio_exit_register" in nm:
@@ -414,7 +424,7 @@ def build(args):
     work = OUTPUT / target
     work.mkdir(parents=True, exist_ok=True)
     install = build_picolibc(source, target, work)
-    drop_members(install)
+    drop_members(install, target)
     crt0, libraries = compile_sdk(target, install, work)
     name, root = assemble(target, pin, install, crt0, libraries, work)
     scan_constructors([root / "lib/crt0.o", *sorted((root / "lib").glob("*.a"))])
@@ -459,6 +469,25 @@ def sdk_directory(target):
     return found[-1]
 
 
+def verify_stack_protector(target, sdk):
+    """Link a program built with -fstack-protector-strong (SDK_SOURCE/sdk/test/ssp) and
+    check the image: the SDK must define __stack_chk_guard and __stack_chk_fail."""
+    from check_elf import check
+
+    build = OUTPUT / target / "example-ssp"
+    run(["cmake", "-S", SDK_SOURCE / "sdk/test/ssp", "-B", build,
+         f"-DCMAKE_TOOLCHAIN_FILE={sdk / 'cmake/xila-toolchain.cmake'}",
+         "-DCMAKE_BUILD_TYPE=MinSizeRel"])
+    run(["cmake", "--build", build])
+    image = build / "ssp.elf"
+    problems = check(image.read_bytes(), TARGETS[target]["machine"])
+    for problem in problems:
+        print(f"{image}: {problem}", file=sys.stderr)
+    if problems:
+        sys.exit(1)
+    print(f"{image}: stack protector program linked, ELF checks passed")
+
+
 def verify(args):
     """Build the hello example with the SDK's CMake toolchain, assert the ELF contract and
     report the image footprint."""
@@ -478,6 +507,7 @@ def verify(args):
     if problems:
         sys.exit(1)
     print(f"{image}: ELF checks passed")
+    verify_stack_protector(target, sdk)
     run([find_tool("llvm-size"), image])
     print("\nBytes by origin (map):")
     sizes = map_sizes((build / "hello.map").read_text())

@@ -78,17 +78,18 @@ static int root(void) {
     CHECK("create b", made >= 0 && close(made) == 0);
     DIR *directory = opendir("/probe-dir");
     CHECK("opendir", directory != NULL);
-    unsigned long first[2] = {0, 0};
+    unsigned long long first[2] = {0, 0};
     int count = 0;
     for (struct dirent *entry; (entry = readdir(directory)) != NULL; ++count) {
         CHECK("d_ino", entry->d_ino != 0 && count < 2);
-        first[count] = (unsigned long)entry->d_ino;
+        first[count] = (unsigned long long)entry->d_ino;
     }
     CHECK("two entries", count == 2 && first[0] != first[1]);
+    CHECK("64-bit inodes", ((first[0] | first[1]) >> 32) != 0);
     rewinddir(directory);
     for (int index = 0; index < 2; ++index) {
         struct dirent *entry = readdir(directory);
-        CHECK("again", entry != NULL && (unsigned long)entry->d_ino == first[index]);
+        CHECK("again", entry != NULL && (unsigned long long)entry->d_ino == first[index]);
     }
     CHECK("closedir", closedir(directory) == 0);
 

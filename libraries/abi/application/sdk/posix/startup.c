@@ -22,6 +22,9 @@ extern int main(int argc, char **argv);
    does not link the table. */
 extern void xila_run_exit_handlers(int status) __attribute__((weak));
 
+/* The stack protector guard (stack_protector.c); weak for the same reason. */
+extern void xila_stack_guard_seed(void) __attribute__((weak));
+
 static jmp_buf *exit_target;
 static int exit_status;
 
@@ -52,9 +55,13 @@ static char **build_arguments(const XilaStartup *startup, int *argc) {
 }
 
 /* The host does not pass the program name yet: argv[0] is the empty string. */
-int xila_posix_initialize(const XilaStartup *startup, int *argc, char ***argv) {
+__attribute__((no_stack_protector)) int xila_posix_initialize(const XilaStartup *startup, int *argc,
+                                                             char ***argv) {
     if (xila_fd_initialize(startup) != 0)
         return -1;
+    /* Before any function built with the stack protector runs. */
+    if (xila_stack_guard_seed != NULL)
+        xila_stack_guard_seed();
     *argv = build_arguments(startup, argc);
     return *argv != NULL ? 0 : -1;
 }

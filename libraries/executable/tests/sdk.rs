@@ -114,6 +114,15 @@ fn build_probe() -> Vec<u8> {
     )
 }
 
+/// The stack protector test program: built with -fstack-protector-strong.
+fn build_ssp() -> Vec<u8> {
+    build_sdk_program(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../abi/application/sdk/test/ssp"),
+        "ssp",
+        "integer",
+    )
+}
+
 async fn read_all(vfs: &'static VirtualFileSystem, parent: TaskIdentifier, path: &str) -> Vec<u8> {
     let mut file = File::open(vfs, parent, path, AccessFlags::Read.into())
         .await
@@ -283,4 +292,18 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
     let (status, stdout, stderr) = launch(context, parent, "/probe", "root", &["root"]).await;
     assert_eq!(status, 0, "{}", String::from_utf8_lossy(&stderr));
     assert_eq!(stdout, b"probe: ok\n");
+
+    // A program built with -fstack-protector-strong links against the SDK, and the guard
+    // is seeded from the entropy device before main runs.
+    install(vfs, parent, "/ssp", &build_ssp()).await;
+    let (status, stdout, stderr) = launch(context, parent, "/ssp", "ssp-ok", &["ok"]).await;
+    assert_eq!(status, 0, "{}", String::from_utf8_lossy(&stderr));
+    assert_eq!(stdout, b"ssp: ok\n");
+
+    // Overwriting the canary ends the process with status 134 and a message on stderr; the
+    // host still gets its descriptors and mappings back (launch checks the mappings).
+    let (status, stdout, stderr) = launch(context, parent, "/ssp", "ssp-smash", &["smash"]).await;
+    assert_eq!(status, 134);
+    assert_eq!(stdout, b"");
+    assert_eq!(stderr, b"*** stack smashing detected ***\n");
 }

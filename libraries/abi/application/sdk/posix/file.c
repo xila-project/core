@@ -406,18 +406,21 @@ int chdir(const char *path) {
    hash of the directory's absolute path that seeds d_ino. */
 struct xila_dir {
     XilaDirectoryIterator *iterator;
-    uint32_t seed;
+    uint64_t seed;
     struct dirent entry;
 };
 
 /* The directory iterator reports a name and a kind, not an inode, and a statistics call
    per entry would need the directory's path kept for the life of the stream. d_ino is
-   therefore a stable nonzero identifier derived from the absolute path (FNV-1a): the
+   therefore a stable nonzero identifier derived from the absolute path (64-bit FNV-1a): the
    same entry of the same directory always has the same value, which is what readdir
    callers need (zero marks a deleted entry on some systems), but it is not st_ino. */
-static uint32_t fnv(uint32_t hash, const char *text, size_t length) {
+#define FNV_OFFSET_BASIS 14695981039346656037ULL
+#define FNV_PRIME 1099511628211ULL
+
+static uint64_t fnv(uint64_t hash, const char *text, size_t length) {
     for (size_t index = 0; index < length; ++index)
-        hash = (hash ^ (unsigned char)text[index]) * 16777619u;
+        hash = (hash ^ (unsigned char)text[index]) * FNV_PRIME;
     return hash;
 }
 
@@ -448,7 +451,7 @@ DIR *opendir(const char *path) {
     struct xila_dir *stream = xila_heap_alloc(sizeof(*stream));
     if (stream == NULL)
         return NULL;
-    stream->seed = fnv(2166136261u, buffer, strlen(buffer));
+    stream->seed = fnv(FNV_OFFSET_BASIS, buffer, strlen(buffer));
     stream->seed = fnv(stream->seed, "/", 1);
     XilaStatus status = xila_directory_iterator_open(resolved.directory, resolved.relative,
                                                      resolved.length, &stream->iterator);
@@ -478,7 +481,7 @@ struct dirent *readdir(DIR *directory) {
     }
     stream->entry.d_name[length] = '\0';
     stream->entry.d_type = dirent_type(kind);
-    uint32_t inode = fnv(stream->seed, stream->entry.d_name, length);
+    uint64_t inode = fnv(stream->seed, stream->entry.d_name, length);
     stream->entry.d_ino = (ino_t)(inode != 0 ? inode : 1);
     return &stream->entry;
 }
