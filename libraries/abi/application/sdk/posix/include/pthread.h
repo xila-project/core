@@ -15,6 +15,11 @@ typedef size_t pthread_key_t;
 typedef XilaMutex pthread_mutex_t;
 
 typedef struct {
+    pthread_mutex_t mutex;
+    bool done;
+} pthread_once_t;
+
+typedef struct {
     size_t stack_size;
     int detach_state;
 } pthread_attr_t;
@@ -39,7 +44,8 @@ typedef struct {
 #define PTHREAD_MUTEX_RECURSIVE 1
 #define PTHREAD_MUTEX_ERRORCHECK 2
 #define PTHREAD_MUTEX_INITIALIZER {0, 0, false, NULL}
-#define PTHREAD_COND_INITIALIZER {{NULL}, XILA_CLOCK_REALTIME}
+#define PTHREAD_COND_INITIALIZER {{NULL}, XILA_CLOCK_MONOTONIC}
+#define PTHREAD_ONCE_INIT {PTHREAD_MUTEX_INITIALIZER, false}
 #define PTHREAD_DESTRUCTOR_ITERATIONS 4
 #ifndef PTHREAD_STACK_MIN
 #define PTHREAD_STACK_MIN XILA_THREAD_STACK_MIN
@@ -53,6 +59,9 @@ int pthread_attr_setdetachstate(pthread_attr_t *attributes, int state);
 int pthread_attr_getdetachstate(const pthread_attr_t *attributes, int *state);
 int pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*entry)(void *),
                    void *argument);
+/* Supported from worker entries. On main, use return or exit instead. */
+void pthread_exit(void *result) __attribute__((__noreturn__));
+int pthread_once(pthread_once_t *once, void (*initialize)(void));
 int pthread_join(pthread_t thread, void **result);
 int pthread_detach(pthread_t thread);
 pthread_t pthread_self(void);

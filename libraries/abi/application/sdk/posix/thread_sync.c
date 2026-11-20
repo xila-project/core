@@ -49,7 +49,7 @@ int pthread_mutex_unlock(pthread_mutex_t *mutex) {
 }
 
 int pthread_condattr_init(pthread_condattr_t *attributes) {
-    attributes->clock = XILA_CLOCK_REALTIME;
+    attributes->clock = XILA_CLOCK_MONOTONIC;
     return 0;
 }
 
@@ -71,7 +71,7 @@ int pthread_condattr_getclock(const pthread_condattr_t *attributes, clockid_t *c
 }
 
 int pthread_cond_init(pthread_cond_t *condition, const pthread_condattr_t *attributes) {
-    condition->clock = attributes == NULL ? XILA_CLOCK_REALTIME : attributes->clock;
+    condition->clock = attributes == NULL ? XILA_CLOCK_MONOTONIC : attributes->clock;
     return xila_errno_from_status(xila_condition_init(&condition->condition));
 }
 
@@ -103,4 +103,19 @@ int pthread_cond_signal(pthread_cond_t *condition) {
 
 int pthread_cond_broadcast(pthread_cond_t *condition) {
     return xila_errno_from_status(xila_condition_notify(&condition->condition, true));
+}
+
+int pthread_once(pthread_once_t *once, void (*initialize)(void)) {
+    XilaStatus status = xila_mutex_lock(&once->mutex, 0);
+    /* An entry run without a process driver has no concurrent callers. */
+    if (status != XILA_STATUS_OK && status != XILA_STATUS_UNSUPPORTED &&
+        status != XILA_STATUS_UNAVAILABLE)
+        return xila_errno_from_status(status);
+    if (!once->done) {
+        initialize();
+        once->done = true;
+    }
+    if (status == XILA_STATUS_OK)
+        return pthread_mutex_unlock(&once->mutex);
+    return 0;
 }

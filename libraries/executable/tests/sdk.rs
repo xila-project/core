@@ -302,10 +302,43 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
         "failed check at threads.c:{status}, stderr={stderr:?}"
     );
     assert_eq!(stdout, b"threads: ok\n");
-    for (mode, expected) in [("main-return", 29), ("worker-exit", 31)] {
-        let (status, _, stderr) = launch(context, parent, "/threads", mode, &[mode]).await;
+    let (status, stdout, stderr) = launch(
+        context,
+        parent,
+        "/threads",
+        "print-contention",
+        &["print-contention"],
+    )
+    .await;
+    assert_eq!(status, 0, "printing threads: {stderr:?}");
+    assert_eq!(stdout, b"worker\nmain\n".repeat(4));
+    vfs.create_named_pipe(&"/thread-pipe", 8, parent)
+        .await
+        .unwrap();
+    let mut reader = File::open(vfs, parent, "/thread-pipe", AccessFlags::Read.into())
+        .await
+        .unwrap();
+    for (mode, expected, output) in [
+        ("main-return", 29, "partial line"),
+        ("locked-stdout", 29, ""),
+        ("worker-exit", 31, ""),
+        ("worker-exit-flush", 32, "partial line"),
+    ] {
+        let (status, stdout, stderr) = launch(context, parent, "/threads", mode, &[mode]).await;
         assert_eq!(status, expected, "threads {mode}, stderr={stderr:?}");
+        let mut buf = [0];
+        // A synchronous read returns WouldBlock if the leaked writer still holds the pipe open.
+        let reader = reader.as_synchronous_file_mut();
+        assert_eq!(reader.read(&mut buf), Ok(1), "threads {mode}");
+        assert_eq!(&buf, b"x");
+        assert_eq!(reader.read(&mut buf), Ok(0), "threads {mode}: expected EOF");
+        assert_eq!(stdout, output.as_bytes(), "threads {mode}");
     }
+    reader.close(vfs).await.unwrap();
+    assert_eq!(
+        read_all(vfs, parent, "/thread-buffered.txt").await,
+        b"buffered file"
+    );
 
     // A program built with -fstack-protector-strong links against the SDK, and the guard
     // is seeded from the entropy device before main runs.

@@ -72,7 +72,7 @@ COMMON_FLAGS = [
 ]
 
 POSIX_SOURCES = ["errno", "exit_flush", "fd", "file", "heap", "onexit", "path", "stack_protector", "startup", "status", "stderr", "stdin", "stdout",
-                 "time", "unsupported", "thread", "thread_keys", "thread_sync", "libc_lock"]
+                 "time", "unsupported", "thread", "thread_keys", "thread_sync", "libc_lock", "strtok", "random"]
 
 
 def pins():
@@ -346,13 +346,6 @@ def assemble(target, pin, install, crt0, libraries, work):
     (root / "share/xila/example/hello").mkdir(parents=True, exist_ok=True)
 
     shutil.copytree(install / "include", root / "include", dirs_exist_ok=True)
-    # Expose sched_yield without advertising the full _POSIX_THREADS option.
-    sched = root / "include/sched.h"
-    declaration_guard = "#if defined(_POSIX_THREADS) || defined(_POSIX_PRIORITY_SCHEDULING)"
-    header = sched.read_text()
-    if header.count(declaration_guard) != 1:
-        sys.exit("error: update the sched_yield declaration for this picolibc release")
-    sched.write_text(header.replace(declaration_guard, "#if 1 /* Xila provides sched_yield */"))
     shutil.copytree(SDK_SOURCE / "sdk/posix/include", root / "include", dirs_exist_ok=True)
     shutil.copy(SDK_SOURCE / "include/xila/application.h", root / "include/xila/")
     shutil.copy(SDK_SOURCE / "sdk/stubs.h", root / "include/xila/")

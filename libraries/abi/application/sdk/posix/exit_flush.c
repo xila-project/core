@@ -10,9 +10,11 @@
  * edited: fclose() unlinks a stream, a flush does not.
  *
  * fflush(NULL) calls _bufio_exit_flush and then flushes stdout and stderr itself, and
- * the layer's exit() calls fflush(NULL). _exit() calls neither. */
+ * the layer's single-threaded exit path calls fflush(NULL). */
 #include <stdio.h>
 #include <stdio-bufio.h>
+
+#include "internal.h"
 
 #ifndef __STDIO_EXIT_FLUSH
 #error "picolibc must be built with stdio-exit-flush"
@@ -26,4 +28,45 @@ void _bufio_exit_flush(void) {
         (void)fflush(file);
         file = next;
     }
+}
+
+/* Match picolibc's weak references so images using neither stream still
+ * omit their FILE objects and buffers. */
+extern FILE *const stdout __attribute__((weak));
+extern FILE *const stderr __attribute__((weak));
+
+static void keep_stream_descriptor(FILE *file) {
+    if (file->flags & __SBUF)
+        xila_fd_keep_for_exit_flush((int)(intptr_t)((struct __file_bufio *)file)->ptr);
+}
+
+static void flush_available(FILE *file) {
+    if (file->lock == NULL) {
+        /* No thread owns this stream. Avoid lazy lock initialization during
+           shutdown, which would need the global libc lock. */
+        if (file->flush != NULL)
+            (void)file->flush(file);
+    } else if (ftrylockfile(file) == 0) {
+        (void)fflush(file);
+        funlockfile(file);
+    }
+}
+
+void xila_stdio_exit_with_stopped_threads(void) {
+    for (FILE *file = __stdio_file_list; file != NULL; file = ((struct __file_bufio *)file)->next)
+        keep_stream_descriptor(file);
+    if (&stdout)
+        keep_stream_descriptor(stdout);
+    if (&stderr)
+        keep_stream_descriptor(stderr);
+
+    /* Close raw descriptors first, so pipe readers can see EOF. Keep the
+       descriptors backing FILE buffers open until their final writes. */
+    xila_fd_close_before_exit_flush();
+    for (FILE *file = __stdio_file_list; file != NULL; file = ((struct __file_bufio *)file)->next)
+        flush_available(file);
+    if (&stdout)
+        flush_available(stdout);
+    if (&stderr)
+        flush_available(stderr);
 }

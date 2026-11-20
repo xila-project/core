@@ -1,5 +1,6 @@
 #include <pthread.h>
 #include <sched.h>
+#include <stdlib.h>
 
 #include "internal.h"
 
@@ -81,6 +82,13 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*
     if (attributes != NULL && attributes->detach_state == PTHREAD_CREATE_DETACHED)
         return pthread_detach(*thread);
     return 0;
+}
+
+void pthread_exit(void *result) {
+    if (xila_run_key_destructors != NULL)
+        xila_run_key_destructors();
+    (void)xila_thread_exit(result);
+    abort();
 }
 
 int pthread_join(pthread_t thread, void **result) {

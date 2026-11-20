@@ -76,11 +76,13 @@ struct xila_fd *xila_fd_get(int fd) {
     return &xila_process.fds[fd];
 }
 
-/* Release everything the application left open. Borrowed streams stay with the host. */
-void xila_fd_close_all(void) {
+/* Forget borrowed streams without releasing them. */
+static void close_descriptors(uint8_t skip) {
     for (size_t fd = 0; fd < xila_process.fd_count; ++fd) {
         struct xila_fd *entry = &xila_process.fds[fd];
-        if (entry->object != NULL && !(entry->flags & XILA_FD_BORROWED)) {
+        if (entry->object == NULL || (entry->flags & skip))
+            continue;
+        if (!(entry->flags & XILA_FD_BORROWED)) {
             if (entry->kind == XILA_FD_FILE)
                 (void)xila_file_close(entry->object);
             else
@@ -88,6 +90,17 @@ void xila_fd_close_all(void) {
         }
         entry->object = NULL;
     }
+}
+
+void xila_fd_keep_for_exit_flush(int fd) {
+    if (fd >= 0 && (size_t)fd < xila_process.fd_count)
+        xila_process.fds[fd].flags |= XILA_FD_EXIT_FLUSH;
+}
+
+void xila_fd_close_before_exit_flush(void) { close_descriptors(XILA_FD_EXIT_FLUSH); }
+
+void xila_fd_close_all(void) {
+    close_descriptors(0);
     xila_heap_release(xila_process.fds);
     xila_process.fds = NULL;
     xila_process.fd_count = 0;
