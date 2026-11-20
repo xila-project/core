@@ -133,8 +133,23 @@ description = "Install the native SDK build packages (LLVM linker and tools, CMa
 run = "mise -E ci,sdk bootstrap packages apply --manager apt --update --yes"
 
 [tasks."ci:packages-sdk-arm"]
-description = "Install the native SDK build packages and the Arm GNU toolchain (libgcc for Cortex-M)"
-run = "mise -E ci,sdk,sdk-arm bootstrap packages apply --manager apt --update --yes"
+description = "Install the native SDK build packages and the Arm GNU toolchain (libgcc for Cortex-M). On GitHub Actions runners only, first writes /etc/apt/apt.conf.d/90xila-no-install-recommends so that apt skips the recommended newlib packages (489 MB); anywhere else it installs gcc-arm-none-eabi with its recommends and changes no apt configuration"
+depends = ["ci:packages-sdk"]
+run = """
+set -eu
+# mise runs a plain `apt-get install -y` and cannot skip recommended packages: gcc-arm-none-eabi
+# recommends libnewlib-arm-none-eabi, which recommends libstdc++-arm-none-eabi-newlib; together 489 MB (550 MB instead of 61 MB).
+# The SDK needs neither (it links picolibc and only takes libgcc.a). The only way to skip them
+# through mise is a system-wide apt setting, which persists after the install, so it is written
+# on a throwaway runner only and never on a developer machine.
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+  mise -E apt-no-recommends bootstrap files apply --yes
+else
+  echo "Not on a GitHub Actions runner: leaving the apt configuration untouched, so apt installs the recommended newlib packages."
+fi
+# No --update: the ci:packages-sdk dependency just refreshed the package lists.
+mise -E ci,sdk-arm bootstrap packages apply --manager apt --yes
+"""
 
 [tasks."ci:packages-sdk-riscv"]
 description = "Install the SDK tools and the RISC-V ILP32 compiler runtime"
