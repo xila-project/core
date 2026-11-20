@@ -2,6 +2,7 @@ use alloc::boxed::Box;
 use file_system::DirectCharacterDevice;
 use synchronization::Arc;
 
+use core::cell::Cell;
 use core::ffi::c_void;
 
 use crate::{Result, lvgl};
@@ -47,6 +48,7 @@ impl Input {
         let user_data = Box::new(UserData {
             device,
             injected,
+            events_read: Cell::new(0),
             kind,
         });
 
