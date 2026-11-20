@@ -18,6 +18,15 @@ enum InjectedEvent {
     Key { key: [u8; 4], state: State },
 }
 
+impl InjectedEvent {
+    fn kind(&self) -> InputKind {
+        match self {
+            Self::Pointer { .. } => InputKind::Pointer,
+            Self::Key { .. } => InputKind::Keypad,
+        }
+    }
+}
+
 pub(crate) struct InputQueue {
     events: Mutex<CriticalSectionRawMutex, RefCell<VecDeque<InjectedEvent>>>,
     pointer: Mutex<CriticalSectionRawMutex, Cell<(Point, State)>>,
@@ -186,21 +195,19 @@ impl InputQueue {
     pub(crate) fn pop_for(&self, kind: InputKind) -> Option<lvgl::lv_indev_data_t> {
         self.events.lock(|events| {
             let mut events = events.borrow_mut();
-            let matches = matches!(
-                (kind, events.front()),
-                (InputKind::Pointer, Some(InjectedEvent::Pointer { .. }))
-                    | (InputKind::Keypad, Some(InjectedEvent::Key { .. }))
-            );
-            if !matches {
+            if events.front()?.kind() != kind {
                 return None;
             }
-            match events.pop_front()? {
+            let event = events.pop_front()?;
+            let continue_reading = events.front().is_some_and(|next| next.kind() == kind);
+            match event {
                 InjectedEvent::Pointer { point, state } => {
-                    Some(InputData::new(point, state, Key::Character(0), false).into())
+                    Some(InputData::new(point, state, Key::Character(0), continue_reading).into())
                 }
                 InjectedEvent::Key { key, state } => Some(lvgl::lv_indev_data_t {
                     key: u32::from_ne_bytes(key),
                     state: state.into(),
+                    continue_reading,
                     ..Default::default()
                 }),
             }
@@ -293,20 +300,28 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
-    #[test]
-    fn unicode_key_events_insert_into_lvgl_textarea() {
+    fn in_lvgl_test_process(name: &str) -> bool {
         // LVGL owns process-global state; isolate it from other parallel unit tests.
         extern crate std;
-        if std::env::var_os("XILA_INPUT_LVGL_TEST_CHILD").is_none() {
-            let status = std::process::Command::new(std::env::current_exe().unwrap())
-                .args([
-                    "--exact",
-                    "input::injection::tests::unicode_key_events_insert_into_lvgl_textarea",
-                ])
-                .env("XILA_INPUT_LVGL_TEST_CHILD", "1")
-                .status()
-                .unwrap();
-            assert!(status.success());
+        if std::env::var_os("XILA_INPUT_LVGL_TEST_CHILD").is_some() {
+            return true;
+        }
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg(alloc::format!("input::injection::tests::{name}"))
+            .env("XILA_INPUT_LVGL_TEST_CHILD", "1")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        false
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn injected_text_chunk_is_delivered_in_one_poll() {
+        use crate::Input;
+
+        if !in_lvgl_test_process("injected_text_chunk_is_delivered_in_one_poll") {
             return;
         }
         unsafe {
@@ -316,20 +331,64 @@ mod tests {
             let screen = lvgl::lv_display_get_screen_active(display);
             let textarea = lvgl::lv_textarea_create(screen);
             assert!(!textarea.is_null());
+            let group = lvgl::lv_group_create();
+            lvgl::lv_group_add_obj(group, textarea);
+            lvgl::lv_group_set_default(group);
+
             let queue = InputQueue::new().unwrap();
-            assert_eq!(queue.text_chunk("Aé中"), Ok("Aé中".len()));
-            for _ in 0..3 {
-                let mut press = queue.pop_for(InputKind::Keypad).unwrap();
-                let release = queue.pop_for(InputKind::Keypad).unwrap();
-                assert_eq!(press.key, release.key);
-                lvgl::lv_obj_send_event(
-                    textarea,
-                    lvgl::lv_event_code_t_LV_EVENT_KEY,
-                    (&mut press.key as *mut u32).cast(),
-                );
-            }
+            let input = Input::new_virtual(queue.clone(), InputKind::Keypad).unwrap();
+            let text = "hello world é中";
+            assert_eq!(queue.text_chunk(text), Ok(text.len()));
+            lvgl::lv_indev_read(lvgl::lv_indev_get_next(core::ptr::null_mut()));
             let value = core::ffi::CStr::from_ptr(lvgl::lv_textarea_get_text(textarea));
-            assert_eq!(value.to_str().unwrap(), "Aé中");
+            assert_eq!(value.to_str().unwrap(), text);
+            assert!(queue.pop_for(InputKind::Keypad).is_none());
+
+            drop(input);
+            lvgl::lv_group_delete(group);
+            lvgl::lv_display_delete(display);
+            lvgl::lv_deinit();
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn injected_pointer_click_registers_in_one_poll() {
+        use crate::Input;
+        use core::ptr;
+
+        unsafe extern "C" fn count_click(event: *mut lvgl::lv_event_t) {
+            let count = unsafe { &*lvgl::lv_event_get_user_data(event).cast::<Cell<u32>>() };
+            count.set(count.get() + 1);
+        }
+
+        if !in_lvgl_test_process("injected_pointer_click_registers_in_one_poll") {
+            return;
+        }
+        let clicks = Cell::new(0_u32);
+        unsafe {
+            lvgl::lv_init();
+            let display = lvgl::lv_display_create(128, 128);
+            let screen = lvgl::lv_display_get_screen_active(display);
+            let button = lvgl::lv_button_create(screen);
+            lvgl::lv_obj_set_pos(button, 10, 10);
+            lvgl::lv_obj_set_size(button, 40, 40);
+            lvgl::lv_obj_add_event_cb(
+                button,
+                Some(count_click),
+                lvgl::lv_event_code_t_LV_EVENT_CLICKED,
+                ptr::from_ref(&clicks).cast_mut().cast(),
+            );
+            lvgl::lv_obj_update_layout(screen);
+
+            let queue = InputQueue::new().unwrap();
+            let input = Input::new_virtual(queue.clone(), InputKind::Pointer).unwrap();
+            queue.pointer_click(Point::new(20, 20)).unwrap();
+            lvgl::lv_indev_read(lvgl::lv_indev_get_next(ptr::null_mut()));
+            assert_eq!(clicks.get(), 1);
+            assert!(queue.pop_for(InputKind::Pointer).is_none());
+
+            drop(input);
             lvgl::lv_display_delete(display);
             lvgl::lv_deinit();
         }
@@ -362,13 +421,22 @@ mod tests {
         let queue = InputQueue::new().unwrap();
         queue.key(Key::Enter, State::Pressed).unwrap();
         queue.key(Key::Enter, State::Released).unwrap();
+        queue.pointer_move(Point::default()).unwrap();
+        queue.key(Key::Enter, State::Pressed).unwrap();
 
         let press = queue.pop_for(InputKind::Keypad).unwrap();
         let release = queue.pop_for(InputKind::Keypad).unwrap();
         assert_eq!(press.key, u32::from(Key::Enter));
         assert_eq!(press.state, State::Pressed.into());
+        assert!(press.continue_reading);
         assert_eq!(release.key, u32::from(Key::Enter));
         assert_eq!(release.state, State::Released.into());
+        assert!(!release.continue_reading);
+        assert!(queue.pop_for(InputKind::Keypad).is_none());
+        let pointer = queue.pop_for(InputKind::Pointer).unwrap();
+        assert!(!pointer.continue_reading);
+        let press = queue.pop_for(InputKind::Keypad).unwrap();
+        assert!(!press.continue_reading);
     }
 
     #[test]

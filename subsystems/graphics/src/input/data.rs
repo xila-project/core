@@ -7,6 +7,7 @@ use super::{Key, State};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
 pub struct InputData {
+    /// Set after consuming an event only if another queued event is ready to read.
     pub r#continue: bool,
     pub point: Point,
     pub state: State,
@@ -117,6 +118,7 @@ impl From<InputData> for lvgl::lv_indev_data_t {
 
         input_device_data.state = (*state).into();
         input_device_data.key = value.key.into();
+        input_device_data.continue_reading = value.get_continue();
 
         input_device_data
     }
