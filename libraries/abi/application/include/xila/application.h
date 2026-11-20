@@ -38,6 +38,14 @@
 
 #define XILA_SEEK_END 2
 
+#define XILA_CONTROL_BYTES_AVAILABLE 1
+
+#define XILA_CONTROL_GET_FILE_FLAGS 2
+
+#define XILA_CONTROL_SET_FILE_FLAGS 3
+
+#define XILA_PIPE_CAPACITY 512
+
 #define XILA_STATISTICS_NO_FOLLOW 1
 
 #define XILA_KIND_FILE 1
@@ -65,6 +73,28 @@
 #define XILA_ADDRESS_IPV6 6
 
 #define XILA_SHUTDOWN_WRITE 1
+
+#define XILA_POLL_IGNORE 0
+
+#define XILA_POLL_FILE 1
+
+#define XILA_POLL_DIRECTORY 2
+
+#define XILA_POLL_TCP 3
+
+#define XILA_POLL_TCP_LISTENER 4
+
+#define XILA_POLL_UDP 5
+
+#define XILA_POLL_IN 1
+
+#define XILA_POLL_OUT 2
+
+#define XILA_POLL_ERR 4
+
+#define XILA_POLL_HUP 8
+
+#define XILA_POLL_NVAL 16
 
 /**
  * `xila_process_wait` flag: return `WouldBlock` instead of waiting for a running child.
@@ -375,6 +405,21 @@ typedef struct XilaCondition {
 } XilaCondition;
 
 /**
+ * One poll entry. Only IN and OUT are requested. ERR, HUP and NVAL are
+ * reported regardless of the request. IGNORE entries always return zero.
+ * A null file/directory/socket or unknown kind reports NVAL.
+ */
+typedef struct XilaPollEntry {
+  /**
+   * Opaque object of the type named by kind.
+   */
+  const void *handle;
+  uint32_t kind;
+  uint16_t events;
+  uint16_t revents;
+} XilaPollEntry;
+
+/**
  * Native application entry points, in slot order. The header precedes slot zero.
  * Networking slots return Unsupported when the runtime omits networking.
  */
@@ -608,6 +653,55 @@ typedef struct XilaApi {
    * End a worker with a join result. This returns only on failure.
    */
   XilaStatus (*thread_exit)(void *result);
+  /**
+   * Wait for readiness across file, pipe, directory and socket handles.
+   * timeout_ms is relative; negative means infinite, zero probes once.
+   */
+  XilaStatus (*poll_wait)(struct XilaPollEntry *entries,
+                          size_t count,
+                          int32_t timeout_ms,
+                          size_t *ready_count);
+  /**
+   * Transfer from an explicit offset without changing the shared cursor.
+   */
+  XilaStatus (*file_read_at)(struct XilaFile *file,
+                             void *buffer,
+                             size_t size,
+                             uint64_t offset,
+                             size_t *count);
+  /**
+   * Transfer to an explicit offset without changing the shared cursor.
+   */
+  XilaStatus (*file_write_at)(struct XilaFile *file,
+                              const void *buffer,
+                              size_t size,
+                              uint64_t offset,
+                              size_t *count);
+  /**
+   * Return an owned file that shares the original cursor and status flags.
+   */
+  XilaStatus (*file_duplicate)(const struct XilaFile *file, struct XilaFile **output);
+  /**
+   * Query queued pipe bytes or get/set file flags using a uint32_t buffer.
+   */
+  XilaStatus (*file_control)(struct XilaFile *file,
+                             uint32_t command,
+                             const void *input,
+                             size_t input_size,
+                             void *output,
+                             size_t output_size);
+  /**
+   * Report whether an open file is an interactive terminal.
+   */
+  XilaStatus (*file_is_terminal)(struct XilaFile *file, bool *terminal);
+  /**
+   * Create the read and write handles of an unnamed pipe.
+   * The only supported flag is XILA_OPEN_NON_BLOCKING.
+   */
+  XilaStatus (*pipe_create)(const struct XilaProcess *process,
+                            uint32_t flags,
+                            struct XilaFile **reader,
+                            struct XilaFile **writer);
 } XilaApi;
 
 /**

@@ -1,7 +1,7 @@
 //! Borrowed operation state: dropping the future detaches device registrations.
 use crate::{Result, SynchronousFile};
 use core::future::poll_fn;
-use file_system::{ControlCommand, Operation};
+use file_system::{ControlCommand, Operation, Size};
 use shared::AnyByLayout;
 
 struct Guard<'operation, 'vfs> {
@@ -14,12 +14,16 @@ impl Drop for Guard<'_, '_> {
     }
 }
 
-pub(crate) async fn read(file: &mut SynchronousFile<'_>, buffer: &mut [u8]) -> Result<usize> {
+pub(crate) async fn read(
+    file: &mut SynchronousFile<'_>,
+    buffer: &mut [u8],
+    offset: Option<Size>,
+) -> Result<usize> {
     let guard = Guard {
         file,
         operation: Operation::Read,
     };
-    poll_fn(|cx| guard.file.poll_read(cx, buffer)).await
+    poll_fn(|cx| guard.file.poll_read(cx, buffer, offset)).await
 }
 
 pub(crate) async fn read_until(
@@ -34,12 +38,16 @@ pub(crate) async fn read_until(
     poll_fn(|cx| guard.file.poll_read_until(cx, buffer, delimiter)).await
 }
 
-pub(crate) async fn write(file: &mut SynchronousFile<'_>, buffer: &[u8]) -> Result<usize> {
+pub(crate) async fn write(
+    file: &mut SynchronousFile<'_>,
+    buffer: &[u8],
+    offset: Option<Size>,
+) -> Result<usize> {
     let guard = Guard {
         file,
         operation: Operation::Write,
     };
-    poll_fn(|cx| guard.file.poll_write(cx, buffer)).await
+    poll_fn(|cx| guard.file.poll_write(cx, buffer, offset)).await
 }
 
 pub(crate) async fn flush(file: &mut SynchronousFile<'_>) -> Result<()> {

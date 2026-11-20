@@ -82,6 +82,13 @@ XilaStatus xila_condition_notify(XilaCondition * condition, bool all);
 XilaStatus xila_thread_has_workers(bool * live);
 XilaStatus xila_thread_stop_others(XilaProcess const * process);
 XilaStatus xila_thread_exit(void * result);
+XilaStatus xila_poll_wait(XilaPollEntry * entries, size_t count, int32_t timeout_ms, size_t * ready_count);
+XilaStatus xila_file_read_at(XilaFile * file, void * buffer, size_t size, uint64_t offset, size_t * count);
+XilaStatus xila_file_write_at(XilaFile * file, void const * buffer, size_t size, uint64_t offset, size_t * count);
+XilaStatus xila_file_duplicate(XilaFile const * file, XilaFile * * output);
+XilaStatus xila_file_control(XilaFile * file, uint32_t command, void const * input, size_t input_size, void * output, size_t output_size);
+XilaStatus xila_file_is_terminal(XilaFile * file, bool * terminal);
+XilaStatus xila_pipe_create(XilaProcess const * process, uint32_t flags, XilaFile * * reader, XilaFile * * writer);
 
 #ifdef __cplusplus
 }

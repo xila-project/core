@@ -107,7 +107,7 @@ static XilaStatus receive_udp(const XilaApi *api, XilaUdp *socket, char *buffer,
 }
 
 int application_c_network(const XilaApi *api, const XilaNetwork *network, const XilaNetwork *denied,
-                          const XilaNetwork *listen_only) {
+                          const XilaNetwork *listen_only, bool cooperative) {
     XilaNetworkAddress address = {XILA_ADDRESS_IPV4, {127, 0, 0, 1}, 52001, 0, 0};
     XilaNetworkAddress endpoint = {0};
     XilaTcp *client = NULL, *server = NULL;
@@ -128,18 +128,37 @@ int application_c_network(const XilaApi *api, const XilaNetwork *network, const 
     address.scope_id = 0;
     if (api->tcp_listen(network, &address, &listener) != XILA_STATUS_OK) return 16;
     if (api->tcp_connect(network, &address, 2000, &client) != XILA_STATUS_OK) return 17;
+    XilaPollEntry pending = {listener, XILA_POLL_TCP_LISTENER, XILA_POLL_IN, 0};
+    size_t ready = 0;
+    if (cooperative && (api->poll_wait(&pending, 1, 2000, &ready) != XILA_STATUS_OK ||
+                        ready != 1 || pending.revents != XILA_POLL_IN)) return 49;
     if (api->tcp_accept(listener, &server) != XILA_STATUS_OK) return 18;
     if (api->tcp_local_address(server, &endpoint) != XILA_STATUS_OK || memcmp(&address, &endpoint, sizeof address)) return 19;
     if (api->tcp_peer_address(client, &endpoint) != XILA_STATUS_OK || memcmp(&address, &endpoint, sizeof address)) return 20;
     if (api->tcp_send(client, "ping", 4, &count) != XILA_STATUS_OK || count != 4) return 21;
+    pending = (XilaPollEntry){server, XILA_POLL_TCP, XILA_POLL_IN, 0};
+    if (cooperative && (api->poll_wait(&pending, 1, 2000, &ready) != XILA_STATUS_OK ||
+                        ready != 1 || pending.revents != XILA_POLL_IN)) return 50;
     if (api->tcp_receive(server, buffer, sizeof buffer, &count) != XILA_STATUS_OK || count != 4 || memcmp(buffer, "ping", 4)) return 22;
     if (api->tcp_send(server, buffer, count, &count) != XILA_STATUS_OK || count != 4) return 23;
     if (api->tcp_receive(client, buffer, sizeof buffer, &count) != XILA_STATUS_OK || count != 4 || memcmp(buffer, "ping", 4)) return 24;
     if (api->tcp_send(client, NULL, 0, &count) != XILA_STATUS_OK || count) return 25;
     if (api->tcp_shutdown(client, 99) != XILA_STATUS_INVALID_ARGUMENT) return 26;
     if (api->tcp_shutdown(client, XILA_SHUTDOWN_WRITE) != XILA_STATUS_OK) return 27;
+    if (cooperative && (api->poll_wait(&pending, 1, 2000, &ready) != XILA_STATUS_OK ||
+                        ready != 1 || pending.revents != XILA_POLL_HUP)) return 51;
     if (api->tcp_receive(server, buffer, sizeof buffer, &count) != XILA_STATUS_OK || count) return 28;
-    if (api->tcp_close(client) || api->tcp_close(server) || api->tcp_listener_close(listener)) return 29;
+    if (api->tcp_close(client) || api->tcp_close(server)) return 29;
+    if (cooperative) {
+        if (api->tcp_connect(network, &address, 2000, &client) != XILA_STATUS_OK ||
+            api->tcp_accept(listener, &server) != XILA_STATUS_OK) return 53;
+        if (api->tcp_close(client) != XILA_STATUS_OK) return 54;
+        pending = (XilaPollEntry){server, XILA_POLL_TCP, 0, 0};
+        if (api->poll_wait(&pending, 1, 2000, &ready) != XILA_STATUS_OK ||
+            ready != 1 || pending.revents != (XILA_POLL_ERR | XILA_POLL_HUP)) return 55;
+        if (api->tcp_close(server) != XILA_STATUS_OK) return 56;
+    }
+    if (api->tcp_listener_close(listener) != XILA_STATUS_OK) return 57;
     address.port = 52002;
     if (api->udp_bind(listen_only, &address, &receiver) != XILA_STATUS_OK) return 30;
     count = 99;
@@ -149,6 +168,9 @@ int application_c_network(const XilaApi *api, const XilaNetwork *network, const 
     if (api->udp_bind(network, &address, &sender) != XILA_STATUS_OK) return 33;
     address.port = 52002;
     if (api->udp_send_to(sender, "udp", 3, &address, &count) != XILA_STATUS_OK || count != 3) return 34;
+    pending = (XilaPollEntry){receiver, XILA_POLL_UDP, XILA_POLL_IN | XILA_POLL_OUT, 0};
+    if (cooperative && (api->poll_wait(&pending, 1, 2000, &ready) != XILA_STATUS_OK ||
+                        ready != 1 || pending.revents != XILA_POLL_IN)) return 52;
     if (receive_udp(api, receiver, buffer, sizeof buffer, &endpoint, &count) != XILA_STATUS_OK || count != 3 || memcmp(buffer, "udp", 3) || endpoint.port != 52003) return 35;
     /* A LISTEN-only socket may receive, but needs CONNECT to send. */
     if (api->udp_close(receiver) || api->udp_close(sender)) return 36;

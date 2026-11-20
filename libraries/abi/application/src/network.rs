@@ -696,6 +696,89 @@ pub unsafe extern "C" fn xila_network_resolve(
     }
 }
 
+pub(crate) fn tcp_readiness(
+    connection: &TcpSocket,
+    cx: &mut core::task::Context<'_>,
+    listener: bool,
+    events: u16,
+) -> u16 {
+    use crate::{XILA_POLL_ERR, XILA_POLL_HUP, XILA_POLL_IN, XILA_POLL_OUT};
+    use core::task::Poll;
+    use smoltcp::socket::tcp::State;
+
+    let result = connection.poll_with(cx, |socket, _| {
+        let state = socket.state();
+        let mut ready = 0;
+        if listener {
+            if matches!(state, State::Established | State::CloseWait) {
+                ready |= events & XILA_POLL_IN;
+            } else if state == State::Closed {
+                ready |= XILA_POLL_ERR;
+            }
+        } else {
+            if socket.can_recv() {
+                ready |= events & XILA_POLL_IN;
+            }
+            if socket.can_send() {
+                ready |= events & XILA_POLL_OUT;
+            }
+            if matches!(
+                state,
+                State::CloseWait
+                    | State::Closing
+                    | State::LastAck
+                    | State::TimeWait
+                    | State::Closed
+            ) {
+                ready |= XILA_POLL_HUP;
+            }
+        }
+        Poll::Ready((ready, state))
+    });
+    match result {
+        Poll::Ready((ready, State::Closed)) if !listener => {
+            // A fully closed socket can represent either a FIN or a reset.
+            // Peeking zero bytes asks smoltcp which one without consuming data.
+            match connection.poll_with_mutable(cx, |socket, _| {
+                let reset = matches!(
+                    socket.peek(0),
+                    Err(smoltcp::socket::tcp::RecvError::InvalidState)
+                );
+                Poll::Ready(reset)
+            }) {
+                Poll::Ready(true) => ready | XILA_POLL_ERR,
+                Poll::Ready(false) => ready,
+                Poll::Pending => 0,
+            }
+        }
+        Poll::Ready((ready, _)) => ready,
+        Poll::Pending => 0,
+    }
+}
+
+pub(crate) fn udp_readiness(socket: &Udp, cx: &mut core::task::Context<'_>, events: u16) -> u16 {
+    use crate::{XILA_POLL_ERR, XILA_POLL_IN, XILA_POLL_OUT};
+    use core::task::Poll;
+
+    let result = socket.inner.poll_with(cx, |inner, _| {
+        if !inner.is_open() {
+            return Poll::Ready(XILA_POLL_ERR);
+        }
+        let mut ready = 0;
+        if inner.can_recv() {
+            ready |= events & XILA_POLL_IN;
+        }
+        if inner.can_send() && u32::from(socket.rights) & XILA_NETWORK_CONNECT != 0 {
+            ready |= events & XILA_POLL_OUT;
+        }
+        Poll::Ready(ready)
+    });
+    match result {
+        Poll::Ready(ready) => ready,
+        Poll::Pending => 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;

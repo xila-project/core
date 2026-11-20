@@ -29,17 +29,20 @@ where
 
     pub async fn run(&mut self) -> ! {
         loop {
-            let next_poll_in = self
+            let (next_poll_in, changed) = self
                 .stack
                 .with_mutable_no_wake(|stack_inner| {
                     if stack_inner.enabled {
                         stack_inner.poll(&mut self.device)
                     } else {
                         stack_inner.reap_retired_sockets();
-                        None
+                        (None, false)
                     }
                 })
                 .await;
+            if changed {
+                file_system::notify_readiness();
+            }
 
             let sleep_duration = match next_poll_in {
                 Some(d) if d.is_zero() => {

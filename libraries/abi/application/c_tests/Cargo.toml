@@ -15,12 +15,13 @@ cc = "1"
 [dev-dependencies]
 testing.workspace = true
 task = { workspace = true, features = ["test_harness"] }
-file_system.workspace = true
+file_system = { workspace = true, features = ["test_harness"] }
 virtual_file_system.workspace = true
 little_fs.workspace = true
 time.workspace = true
 users.workspace = true
 portable-atomic.workspace = true
+shared.workspace = true
 
 [target.'cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))'.dev-dependencies]
 stackful = { workspace = true }

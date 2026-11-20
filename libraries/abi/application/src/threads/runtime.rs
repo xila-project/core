@@ -383,15 +383,7 @@ pub extern "C" fn xila_thread_yield() -> Status {
     if let Err(error) = current() {
         return error;
     }
-    let mut yielded = false;
-    suspend_dynamic(pin!(poll_fn(|cx| {
-        if core::mem::replace(&mut yielded, true) {
-            Poll::Ready(())
-        } else {
-            cx.waker().wake_by_ref();
-            Poll::Pending
-        }
-    })));
+    crate::yield_once();
     Status::Ok
 }
 

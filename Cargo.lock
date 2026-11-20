@@ -1971,6 +1971,7 @@ dependencies = [
  "xila-file-system",
  "xila-little-fs",
  "xila-network",
+ "xila-shared",
  "xila-stackful",
  "xila-task",
  "xila-testing",

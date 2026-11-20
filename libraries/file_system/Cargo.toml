@@ -20,6 +20,7 @@ task = { workspace = true, features = ["test_harness"] }
 drivers_core = { workspace = true }
 
 [features]
+test_harness = []
 std = []
 default = []
 

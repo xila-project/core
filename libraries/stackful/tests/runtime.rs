@@ -135,6 +135,34 @@ fn cancellation_and_unstarted_drop() {
 }
 
 #[test]
+fn cancellation_drops_an_opted_in_future_once() {
+    struct DropCount(Rc<Cell<usize>>);
+
+    impl Drop for DropCount {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+
+    let drops = Rc::new(Cell::new(0));
+    let resource = DropCount(drops.clone());
+    let mut driver = coroutine(move || {
+        stackful::suspend_on_cancellable(async move {
+            core::future::pending::<()>().await;
+            drop(resource);
+        });
+        0
+    });
+    assert_eq!(
+        driver.resume(&mut Context::from_waker(Waker::noop())),
+        Poll::Pending
+    );
+    assert_eq!(drops.get(), 0);
+    drop(driver);
+    assert_eq!(drops.get(), 1);
+}
+
+#[test]
 fn footprint_and_switch_timing() {
     const N: usize = 100_000;
     let c = coroutine(|| {

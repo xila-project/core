@@ -264,6 +264,52 @@ pub struct XilaApi {
     pub thread_stop_others: unsafe extern "C" fn(process: *const Process) -> Status,
     /// End a worker with a join result. This returns only on failure.
     pub thread_exit: unsafe extern "C" fn(result: *mut c_void) -> Status,
+
+    /// Wait for readiness across file, pipe, directory and socket handles.
+    /// timeout_ms is relative; negative means infinite, zero probes once.
+    pub poll_wait: unsafe extern "C" fn(
+        entries: *mut PollEntry,
+        count: usize,
+        timeout_ms: i32,
+        ready_count: *mut usize,
+    ) -> Status,
+    /// Transfer from an explicit offset without changing the shared cursor.
+    pub file_read_at: unsafe extern "C" fn(
+        file: *mut File,
+        buffer: *mut c_void,
+        size: usize,
+        offset: u64,
+        count: *mut usize,
+    ) -> Status,
+    /// Transfer to an explicit offset without changing the shared cursor.
+    pub file_write_at: unsafe extern "C" fn(
+        file: *mut File,
+        buffer: *const c_void,
+        size: usize,
+        offset: u64,
+        count: *mut usize,
+    ) -> Status,
+    /// Return an owned file that shares the original cursor and status flags.
+    pub file_duplicate: unsafe extern "C" fn(file: *const File, output: *mut *mut File) -> Status,
+    /// Query queued pipe bytes or get/set file flags using a uint32_t buffer.
+    pub file_control: unsafe extern "C" fn(
+        file: *mut File,
+        command: u32,
+        input: *const c_void,
+        input_size: usize,
+        output: *mut c_void,
+        output_size: usize,
+    ) -> Status,
+    /// Report whether an open file is an interactive terminal.
+    pub file_is_terminal: unsafe extern "C" fn(file: *mut File, terminal: *mut bool) -> Status,
+    /// Create the read and write handles of an unnamed pipe.
+    /// The only supported flag is XILA_OPEN_NON_BLOCKING.
+    pub pipe_create: unsafe extern "C" fn(
+        process: *const Process,
+        flags: u32,
+        reader: *mut *mut File,
+        writer: *mut *mut File,
+    ) -> Status,
 }
 
 include!(concat!(env!("OUT_DIR"), "/api_layout.rs"));
@@ -347,4 +393,11 @@ pub static XILA_API: XilaApi = XilaApi {
     thread_has_workers: xila_thread_has_workers,
     thread_stop_others: xila_thread_stop_others,
     thread_exit: xila_thread_exit,
+    poll_wait: xila_poll_wait,
+    file_read_at: xila_file_read_at,
+    file_write_at: xila_file_write_at,
+    file_duplicate: xila_file_duplicate,
+    file_control: xila_file_control,
+    file_is_terminal: xila_file_is_terminal,
+    pipe_create: xila_pipe_create,
 };

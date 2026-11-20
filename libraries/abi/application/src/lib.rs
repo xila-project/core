@@ -24,6 +24,7 @@ mod metadata;
 #[cfg(feature = "network")]
 mod network;
 mod network_types;
+mod poll;
 mod process;
 mod startup;
 #[cfg(feature = "network")]
@@ -39,6 +40,7 @@ pub use directory::*;
 pub use file::*;
 pub use iterator::*;
 pub use metadata::*;
+pub use poll::*;
 pub use process::*;
 pub use random::*;
 pub use startup::*;
@@ -80,7 +82,7 @@ pub use heap::*;
         target_os = "none"
     )
 ))]
-use stackful::{is_in_coroutine, suspend_on};
+use stackful::{is_in_coroutine, suspend_on, suspend_on_cancellable};
 
 /// End the running coroutine with an exit status. Callers have checked
 /// `is_in_coroutine`.
@@ -136,6 +138,23 @@ use task::block_on as suspend_on;
         target_os = "none"
     )
 )))]
+use task::block_on as suspend_on_cancellable;
+
+#[cfg(not(any(
+    all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_os = "linux"
+    ),
+    all(
+        any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "arm",
+            target_arch = "riscv32"
+        ),
+        target_os = "none"
+    )
+)))]
 const fn is_in_coroutine() -> bool {
     false
 }
@@ -165,6 +184,23 @@ fn exit_coroutine(_: i32) -> ! {
 #[inline(never)]
 fn suspend_dynamic(future: core::pin::Pin<&mut dyn core::future::Future<Output = ()>>) {
     suspend_on(future)
+}
+
+/// Give every other ready task on the executor one turn, then resume.
+///
+/// Shared by `xila_thread_yield` and fallback-only polls. It reuses the non-generic
+/// [`suspend_dynamic`] so a yield adds no new copy of the suspension machinery.
+#[inline(never)]
+fn yield_once() {
+    let mut yielded = false;
+    suspend_dynamic(core::pin::pin!(core::future::poll_fn(|cx| {
+        if core::mem::replace(&mut yielded, true) {
+            core::task::Poll::Ready(())
+        } else {
+            cx.waker().wake_by_ref();
+            core::task::Poll::Pending
+        }
+    })));
 }
 
 #[cfg(test)]

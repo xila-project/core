@@ -763,6 +763,90 @@ XilaStatus xila_thread_exit(void * result) {
     return xila_sdk_api->thread_exit(result);
 }
 
+static XilaStatus unavailable_poll_wait(XilaPollEntry * entries, size_t count, int32_t timeout_ms, size_t * ready_count) {
+    (void)entries;
+    (void)count;
+    (void)timeout_ms;
+    (void)ready_count;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_poll_wait(XilaPollEntry * entries, size_t count, int32_t timeout_ms, size_t * ready_count) {
+    return xila_sdk_api->poll_wait(entries, count, timeout_ms, ready_count);
+}
+
+static XilaStatus unavailable_file_read_at(XilaFile * file, void * buffer, size_t size, uint64_t offset, size_t * count) {
+    (void)file;
+    (void)buffer;
+    (void)size;
+    (void)offset;
+    (void)count;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_file_read_at(XilaFile * file, void * buffer, size_t size, uint64_t offset, size_t * count) {
+    return xila_sdk_api->file_read_at(file, buffer, size, offset, count);
+}
+
+static XilaStatus unavailable_file_write_at(XilaFile * file, void const * buffer, size_t size, uint64_t offset, size_t * count) {
+    (void)file;
+    (void)buffer;
+    (void)size;
+    (void)offset;
+    (void)count;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_file_write_at(XilaFile * file, void const * buffer, size_t size, uint64_t offset, size_t * count) {
+    return xila_sdk_api->file_write_at(file, buffer, size, offset, count);
+}
+
+static XilaStatus unavailable_file_duplicate(XilaFile const * file, XilaFile * * output) {
+    (void)file;
+    (void)output;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_file_duplicate(XilaFile const * file, XilaFile * * output) {
+    return xila_sdk_api->file_duplicate(file, output);
+}
+
+static XilaStatus unavailable_file_control(XilaFile * file, uint32_t command, void const * input, size_t input_size, void * output, size_t output_size) {
+    (void)file;
+    (void)command;
+    (void)input;
+    (void)input_size;
+    (void)output;
+    (void)output_size;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_file_control(XilaFile * file, uint32_t command, void const * input, size_t input_size, void * output, size_t output_size) {
+    return xila_sdk_api->file_control(file, command, input, input_size, output, output_size);
+}
+
+static XilaStatus unavailable_file_is_terminal(XilaFile * file, bool * terminal) {
+    (void)file;
+    (void)terminal;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_file_is_terminal(XilaFile * file, bool * terminal) {
+    return xila_sdk_api->file_is_terminal(file, terminal);
+}
+
+static XilaStatus unavailable_pipe_create(XilaProcess const * process, uint32_t flags, XilaFile * * reader, XilaFile * * writer) {
+    (void)process;
+    (void)flags;
+    (void)reader;
+    (void)writer;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_pipe_create(XilaProcess const * process, uint32_t flags, XilaFile * * reader, XilaFile * * writer) {
+    return xila_sdk_api->pipe_create(process, flags, reader, writer);
+}
+
 const XilaApi xila_sdk_fallback_api = {
     .version = (XILA_ABI_VERSION_MAJOR << 16) | XILA_ABI_VERSION_MINOR,
     .size = sizeof(XilaApi),
@@ -838,4 +922,11 @@ const XilaApi xila_sdk_fallback_api = {
     .thread_has_workers = unavailable_thread_has_workers,
     .thread_stop_others = unavailable_thread_stop_others,
     .thread_exit = unavailable_thread_exit,
+    .poll_wait = unavailable_poll_wait,
+    .file_read_at = unavailable_file_read_at,
+    .file_write_at = unavailable_file_write_at,
+    .file_duplicate = unavailable_file_duplicate,
+    .file_control = unavailable_file_control,
+    .file_is_terminal = unavailable_file_is_terminal,
+    .pipe_create = unavailable_pipe_create,
 };

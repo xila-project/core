@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 
 #include "internal.h"
@@ -42,13 +43,13 @@ static uint32_t open_flags(int flags) {
 }
 
 /* A directory descriptor is read-only: callers have rejected every write access mode. */
-static int open_directory(const struct xila_path *path) {
+static int open_directory(const struct xila_path *path, uint8_t flags) {
     XilaDirectory *directory = NULL;
     XilaStatus status = xila_directory_open(path->directory, path->relative, path->length,
                                             XILA_RIGHT_READ, &directory);
     if (status != XILA_STATUS_OK)
         return xila_fail(status);
-    int fd = xila_fd_allocate(directory, XILA_FD_DIRECTORY, 0);
+    int fd = xila_fd_allocate(directory, XILA_FD_DIRECTORY, flags);
     if (fd < 0)
         (void)xila_directory_close(directory);
     return fd;
@@ -59,9 +60,10 @@ int openat(int dirfd, const char *path, int flags, ...) {
     struct xila_path resolved;
     if (xila_path_resolve(dirfd, path, buffer, &resolved) != 0)
         return -1;
+    uint8_t descriptor_flags = (flags & O_CLOEXEC) ? XILA_FD_CLOEXEC : 0;
     int read_only = (flags & O_ACCMODE) == O_RDONLY && !(flags & (O_CREAT | O_TRUNC));
     if (flags & O_DIRECTORY)
-        return (flags & O_ACCMODE) == O_RDONLY ? open_directory(&resolved)
+        return (flags & O_ACCMODE) == O_RDONLY ? open_directory(&resolved, descriptor_flags)
                                                : xila_fail_errno(EISDIR);
 
     XilaFile *file = NULL;
@@ -71,12 +73,12 @@ int openat(int dirfd, const char *path, int flags, ...) {
        which a file open rejects as an invalid argument. */
     if (read_only && (status == XILA_STATUS_IS_A_DIRECTORY ||
                       (status == XILA_STATUS_INVALID_ARGUMENT && resolved.length == 0)))
-        return open_directory(&resolved);
+        return open_directory(&resolved, descriptor_flags);
     if (status == XILA_STATUS_INVALID_ARGUMENT && resolved.length == 0)
         return xila_fail_errno(EISDIR); /* the root opened for writing */
     if (status != XILA_STATUS_OK)
         return xila_fail(status);
-    int fd = xila_fd_allocate(file, XILA_FD_FILE, 0);
+    int fd = xila_fd_allocate(file, XILA_FD_FILE, descriptor_flags);
     if (fd < 0)
         (void)xila_file_close(file);
     return fd;
@@ -95,21 +97,6 @@ int open(const char *path, int flags, ...) {
 }
 
 int creat(const char *path, mode_t mode) { return open(path, O_WRONLY | O_CREAT | O_TRUNC, mode); }
-
-int close(int fd) {
-    struct xila_fd *entry = xila_fd_get(fd);
-    if (entry == NULL)
-        return -1;
-    void *object = entry->object;
-    uint8_t kind = entry->kind;
-    uint8_t flags = entry->flags;
-    entry->object = NULL; /* the descriptor is gone even when the ABI reports an error */
-    if (flags & XILA_FD_BORROWED)
-        return 0;
-    XilaStatus status =
-        kind == XILA_FD_FILE ? xila_file_close(object) : xila_directory_close(object);
-    return status == XILA_STATUS_OK ? 0 : xila_fail(status);
-}
 
 /* ---- data transfer ------------------------------------------------------------- */
 
@@ -173,36 +160,26 @@ off_t lseek(int fd, off_t offset, int whence) {
     return (off_t)position;
 }
 
-/* The ABI has no positional I/O yet: emulate it by seeking and restoring the cursor.
-   The pair is not atomic against other users of the same descriptor. */
-static ssize_t positional(int fd, void *buffer, const void *source, size_t size, off_t offset) {
+ssize_t pread(int fd, void *buffer, size_t size, off_t offset) {
     XilaFile *file = file_of(fd);
     if (file == NULL)
         return -1;
     if (offset < 0 || size > SSIZE_MAX)
         return xila_fail_errno(EINVAL);
-    uint64_t saved = 0, ignored = 0;
-    XilaStatus status = xila_file_seek(file, 0, XILA_SEEK_CURRENT, &saved);
-    if (status != XILA_STATUS_OK)
-        return xila_fail(status); /* the cursor is unknown and nothing moved: leave it */
-    status = xila_file_seek(file, offset, XILA_SEEK_START, &ignored);
     size_t count = 0;
-    if (status == XILA_STATUS_OK)
-        status = buffer != NULL ? xila_file_read(file, buffer, size, &count)
-                                : xila_file_write(file, source, size, &count);
-    /* The cursor may have moved, even when the transfer failed: put it back. */
-    XilaStatus restore = xila_file_seek(file, (int64_t)saved, XILA_SEEK_START, &ignored);
-    if (status == XILA_STATUS_OK)
-        status = restore;
+    XilaStatus status = xila_file_read_at(file, buffer, size, (uint64_t)offset, &count);
     return status == XILA_STATUS_OK ? (ssize_t)count : xila_fail(status);
 }
 
-ssize_t pread(int fd, void *buffer, size_t size, off_t offset) {
-    return positional(fd, buffer, NULL, size, offset);
-}
-
 ssize_t pwrite(int fd, const void *buffer, size_t size, off_t offset) {
-    return positional(fd, NULL, buffer, size, offset);
+    XilaFile *file = file_of(fd);
+    if (file == NULL)
+        return -1;
+    if (offset < 0 || size > SSIZE_MAX)
+        return xila_fail_errno(EINVAL);
+    size_t count = 0;
+    XilaStatus status = xila_file_write_at(file, buffer, size, (uint64_t)offset, &count);
+    return status == XILA_STATUS_OK ? (ssize_t)count : xila_fail(status);
 }
 
 int fsync(int fd) {
@@ -225,11 +202,44 @@ int ftruncate(int fd, off_t length) {
     return status == XILA_STATUS_OK ? 0 : xila_fail(status);
 }
 
-/* The ABI has no terminal query yet. */
 int isatty(int fd) {
-    if (xila_fd_get(fd) == NULL)
+    struct xila_fd *entry = xila_fd_get(fd);
+    if (entry == NULL)
         return 0;
-    errno = ENOTTY;
+    bool terminal = false;
+    if (entry->kind == XILA_FD_FILE) {
+        XilaStatus status = xila_file_is_terminal(entry->object, &terminal);
+        if (status != XILA_STATUS_OK) {
+            xila_fail(status);
+            return 0;
+        }
+    }
+    if (!terminal)
+        errno = ENOTTY;
+    return terminal;
+}
+
+int ioctl(int fd, unsigned long request, void *argument) {
+    struct xila_fd *entry = xila_fd_get(fd);
+    if (entry == NULL)
+        return -1;
+    if (request != FIONREAD || entry->kind != XILA_FD_FILE)
+        return xila_fail_errno(ENOTTY);
+
+    int *output = argument;
+    if (output == NULL)
+        return xila_fail_errno(EFAULT);
+
+    uint32_t bytes;
+    XilaStatus status = xila_file_control(entry->object, XILA_CONTROL_BYTES_AVAILABLE,
+                                          NULL, 0, &bytes, sizeof(bytes));
+    if (status == XILA_STATUS_UNSUPPORTED)
+        return xila_fail_errno(ENOTTY);
+    if (status != XILA_STATUS_OK)
+        return xila_fail(status);
+    if (bytes > INT_MAX)
+        return xila_fail_errno(EOVERFLOW);
+    *output = (int)bytes;
     return 0;
 }
 

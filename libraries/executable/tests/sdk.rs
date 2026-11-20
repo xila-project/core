@@ -293,6 +293,11 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
     assert_eq!(status, 0, "{}", String::from_utf8_lossy(&stderr));
     assert_eq!(stdout, b"probe: ok\n");
 
+    let (status, stdout, stderr) =
+        launch(context, parent, "/probe", "descriptors", &["descriptors"]).await;
+    assert_eq!(status, 0, "SDK descriptor probe failed: {stderr:?}");
+    assert_eq!(stdout, b"descriptors: ok\n");
+
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../abi/application/sdk/test/threads");
     let threads = build_sdk_program(&source, "threads", "integer");
     install(vfs, parent, "/threads", &threads).await;
