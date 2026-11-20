@@ -10,8 +10,8 @@
 //!
 //! Every struct starts with a `version` field equal to [`ABI_VERSION`] and its
 //! reserved fields must be zero; otherwise the command fails with
-//! `InvalidParameter`. Field values outside their documented range are
-//! `InvalidParameter`. A controller refusal to take the line (unsupported
+//! `InvalidArgument`. Field values outside their documented range are
+//! `InvalidArgument`. A controller refusal to take the line (unsupported
 //! option, line already in use) is reported as `InputOutput`.
 
 use file_system::{ControlCommand, define_command};

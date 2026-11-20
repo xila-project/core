@@ -1,5 +1,5 @@
 use super::VirtualFileSystem;
-use crate::{Error, ItemStatic, Result, SynchronousFile, poll, suspend_on};
+use crate::{IoErrorKind, ItemStatic, Result, SynchronousFile, poll, suspend_on};
 use alloc::{vec, vec::Vec};
 use embedded_io_async::ErrorType;
 use exported_file_system::{AccessFlags, ControlCommand, CreateFlags, Permissions};
@@ -26,7 +26,7 @@ impl<'a> File<'a> {
 }
 
 impl ErrorType for File<'_> {
-    type Error = Error;
+    type Error = IoErrorKind;
 }
 
 impl embedded_io_async::Write for File<'_> {
@@ -148,23 +148,21 @@ impl<'a> File<'a> {
         )
         .await
         {
-            Err(Error::FileSystem(file_system::Error::NotFound) | Error::InvalidInode)
-                if require_character_device =>
-            {
-                return Err(Error::UnavailableDriver);
+            Err(IoErrorKind::NotFound | IoErrorKind::StaleHandle) if require_character_device => {
+                return Err(IoErrorKind::DeviceUnavailable);
             }
             opened => opened?,
         };
 
         let result = async {
             if require_character_device && !matches!(file.0.item, ItemStatic::CharacterDevice(_)) {
-                return Err(Error::UnavailableDriver);
+                return Err(IoErrorKind::DeviceUnavailable);
             }
             let mut offset = 0;
             while offset < buffer.len() {
                 let count = file.read(&mut buffer[offset..]).await?;
                 if count == 0 {
-                    return Err(Error::FileSystem(file_system::Error::InputOutput));
+                    return Err(IoErrorKind::InputOutput);
                 }
                 offset += count;
             }
@@ -235,7 +233,7 @@ impl<'a> File<'a> {
             while offset < buffer.len() {
                 let count = file.write(&buffer[offset..]).await?;
                 if count == 0 {
-                    return Err(Error::FailedToWrite);
+                    return Err(IoErrorKind::WriteZero);
                 }
                 offset += count;
             }
@@ -252,14 +250,14 @@ impl<'a> File<'a> {
             let mut offset = 0;
             while offset < part.len() {
                 match self.write(&part[offset..]).await {
-                    Ok(0) => return Err(Error::FailedToWrite),
+                    Ok(0) => return Err(IoErrorKind::WriteZero),
                     Ok(count) => {
                         offset += count;
                         written += count;
                     }
-                    Err(
-                        Error::FileSystem(file_system::Error::RessourceBusy) | Error::RessourceBusy,
-                    ) if self.nonblocking() && written > 0 => return Ok(written),
+                    Err(IoErrorKind::WouldBlock) if self.nonblocking() && written > 0 => {
+                        return Ok(written);
+                    }
                     Err(error) => return Err(error),
                 }
             }
@@ -282,7 +280,7 @@ impl<'a> File<'a> {
 
             w.write(&buffer[..bytes_read])
                 .await
-                .map_err(|_| Error::FailedToWrite)?;
+                .map_err(|_| IoErrorKind::WriteZero)?;
         }
 
         Ok(())
@@ -304,7 +302,7 @@ impl<'a> File<'a> {
 
     pub async fn read_to_end(&mut self, buffer: &mut Vec<u8>, chunk_size: usize) -> Result<usize> {
         if chunk_size == 0 {
-            return Err(Error::FileSystem(file_system::Error::InvalidParameter));
+            return Err(IoErrorKind::InvalidArgument);
         }
         let mut chunk = vec![0; chunk_size];
         let mut total = 0;
@@ -315,9 +313,9 @@ impl<'a> File<'a> {
                     buffer.extend_from_slice(&chunk[..count]);
                     total += count;
                 }
-                Err(
-                    Error::FileSystem(file_system::Error::RessourceBusy) | Error::RessourceBusy,
-                ) if self.nonblocking() && total > 0 => return Ok(total),
+                Err(IoErrorKind::WouldBlock) if self.nonblocking() && total > 0 => {
+                    return Ok(total);
+                }
                 Err(error) => return Err(error),
             }
         }

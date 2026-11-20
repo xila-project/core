@@ -12,12 +12,12 @@ use drivers_peripherals::i2c::{
     FrequencyOutput, GET_FREQUENCY, SELECT_ADDRESS, SET_FREQUENCY, SelectAddressInput,
     SetFrequencyInput, WRITE_READ, WriteReadInput, WriteReadOutput, mount_i2c_device,
 };
-use file_system::{AccessFlags, Error as FileSystemError, Flags, MemoryDevice};
+use file_system::{AccessFlags, Flags, IoErrorKind, MemoryDevice};
 use peripherals::i2c::{
     BusConfig, Capabilities, I2cController, I2cSlave, MockI2cBus, MockI2cController,
 };
 use task::TaskIdentifier;
-use virtual_file_system::{Error, File, VirtualFileSystem};
+use virtual_file_system::{File, VirtualFileSystem};
 
 const CAPABILITIES: Capabilities = Capabilities {
     ten_bit: false,
@@ -209,14 +209,11 @@ async fn absent_address_is_nacked_and_reported() {
     file.control(SELECT_ADDRESS, &select(0, 0x20))
         .await
         .unwrap();
-    assert_eq!(
-        file.write(&[0]).await.err(),
-        Some(Error::FileSystem(FileSystemError::NotFound))
-    );
+    assert_eq!(file.write(&[0]).await.err(), Some(IoErrorKind::NotFound));
     let mut buffer = [0u8; 1];
     assert_eq!(
         file.read(&mut buffer).await.err(),
-        Some(Error::FileSystem(FileSystemError::NotFound))
+        Some(IoErrorKind::NotFound)
     );
 
     file.close(vfs).await.unwrap();
@@ -230,7 +227,7 @@ async fn node_is_exclusive_while_open() {
 
     assert_eq!(
         open(vfs, task, "/devices/i2c/bus3").await.err(),
-        Some(Error::FileSystem(FileSystemError::RessourceBusy))
+        Some(IoErrorKind::ResourceBusy)
     );
 
     file.close(vfs).await.unwrap();
@@ -275,7 +272,7 @@ async fn frequency_and_argument_validation() {
         )
         .await
         .err(),
-        Some(Error::FileSystem(FileSystemError::UnsupportedOperation))
+        Some(IoErrorKind::Unsupported)
     );
     assert_eq!(
         file.control(
@@ -288,23 +285,23 @@ async fn frequency_and_argument_validation() {
         )
         .await
         .err(),
-        Some(Error::FileSystem(FileSystemError::InvalidParameter))
+        Some(IoErrorKind::InvalidArgument)
     );
 
     // Ten-bit addressing is unsupported by this controller.
     assert_eq!(
         file.control(SELECT_ADDRESS, &select(1, 0x123)).await.err(),
-        Some(Error::FileSystem(FileSystemError::UnsupportedOperation))
+        Some(IoErrorKind::Unsupported)
     );
     // Seven-bit addresses above 0x7F are invalid.
     assert_eq!(
         file.control(SELECT_ADDRESS, &select(0, 0x80)).await.err(),
-        Some(Error::FileSystem(FileSystemError::InvalidParameter))
+        Some(IoErrorKind::InvalidArgument)
     );
     // Transfers must move at least one byte.
     assert_eq!(
         file.control(WRITE_READ, &transfer(&[], 0)).await.err(),
-        Some(Error::FileSystem(FileSystemError::InvalidParameter))
+        Some(IoErrorKind::InvalidArgument)
     );
     file.close(vfs).await.unwrap();
 }
@@ -317,7 +314,7 @@ async fn plain_io_before_address_selection_fails() {
 
     assert_eq!(
         file.write(&[0]).await.err(),
-        Some(Error::FileSystem(FileSystemError::NotInitialized))
+        Some(IoErrorKind::DeviceUnavailable)
     );
 
     file.close(vfs).await.unwrap();

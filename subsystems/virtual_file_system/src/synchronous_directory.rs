@@ -5,7 +5,7 @@ use exported_file_system::{
 use file_system::{Context, DirectoryOperations, Entry, Flags, Path, Size};
 use task::TaskIdentifier;
 
-use crate::{Error, ItemStatic, Result, VirtualFileSystem, blocking_operation, suspend_on};
+use crate::{IoErrorKind, ItemStatic, Result, VirtualFileSystem, blocking_operation, suspend_on};
 
 pub struct SynchronousDirectory<'a> {
     virtual_file_system: &'a VirtualFileSystem,
@@ -59,10 +59,7 @@ impl<'a> SynchronousDirectory<'a> {
 
     pub fn read(&mut self) -> Result<Option<Entry>> {
         let entry = self.blocking_operation(|directory| {
-            Ok(DirectoryOperations::read(
-                directory.directory,
-                &mut directory.context,
-            )?)
+            DirectoryOperations::read(directory.directory, &mut directory.context)
         })?;
 
         Ok(entry)
@@ -78,26 +75,19 @@ impl<'a> SynchronousDirectory<'a> {
                 &mut attributes,
             )?;
 
-            Statistics::from_attributes(&attributes).ok_or(Error::MissingAttribute)
+            Statistics::from_attributes(&attributes).ok_or(IoErrorKind::InputOutput)
         })
     }
 
     pub fn get_position(&mut self) -> Result<Size> {
         self.blocking_operation(|directory| {
-            Ok(DirectoryOperations::get_position(
-                directory.directory,
-                &mut directory.context,
-            )?)
+            DirectoryOperations::get_position(directory.directory, &mut directory.context)
         })
     }
 
     pub fn set_position(&mut self, position: Size) -> Result<()> {
         self.blocking_operation(|directory| {
-            Ok(DirectoryOperations::set_position(
-                directory.directory,
-                &mut directory.context,
-                position,
-            )?)
+            DirectoryOperations::set_position(directory.directory, &mut directory.context, position)
         })?;
 
         Ok(())
@@ -105,10 +95,7 @@ impl<'a> SynchronousDirectory<'a> {
 
     pub fn rewind(&mut self) -> Result<()> {
         self.blocking_operation(|directory| {
-            Ok(DirectoryOperations::rewind(
-                directory.directory,
-                &mut directory.context,
-            )?)
+            DirectoryOperations::rewind(directory.directory, &mut directory.context)
         })
     }
 

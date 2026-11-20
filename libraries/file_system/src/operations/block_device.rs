@@ -1,6 +1,6 @@
 use crate::{
-    BaseOperations, ControlCommand, DirectBaseOperations, Error, MountOperations, Position, Result,
-    Size, define_command,
+    BaseOperations, ControlCommand, DirectBaseOperations, IoErrorKind, MountOperations, Position,
+    Result, Size, define_command,
 };
 use shared::AnyByLayout;
 
@@ -46,7 +46,7 @@ pub trait DirectBlockDevice: DirectBaseOperations + MountOperations {
     ///
     /// The range reads back unspecified data afterwards, and any write to it then
     /// succeeds. Devices that can rewrite in place need not implement `ERASE`:
-    /// callers treat [`Error::UnsupportedOperation`] as "nothing to do".
+    /// callers treat [`IoErrorKind::Unsupported`] as "nothing to do".
     fn erase(&self, position: Size, size: Size) -> Result<()> {
         self.control_sync(
             ERASE::IDENTIFIER,
@@ -60,13 +60,13 @@ pub fn set_position(current_position: Size, position: &Position, size: Size) -> 
     let new_position = match position {
         Position::Start(position) => (*position)
             .try_into()
-            .map_err(|_| Error::InvalidParameter)?,
+            .map_err(|_| IoErrorKind::InvalidArgument)?,
         Position::Current(offset) => (current_position as i64).wrapping_add(*offset),
         Position::End(offset) => (size as i64).saturating_add(*offset),
     };
 
     if new_position < 0 || (new_position as u64) > size {
-        return Err(Error::InvalidParameter);
+        return Err(IoErrorKind::InvalidArgument);
     }
 
     Ok(new_position as Size)
@@ -516,7 +516,7 @@ pub mod tests {
         fn test_position_start_exceeds_size() {
             let result = set_position(100, &Position::Start(1001), 1000);
             assert!(result.is_err());
-            assert_eq!(result.unwrap_err(), Error::InvalidParameter);
+            assert_eq!(result.unwrap_err(), IoErrorKind::InvalidArgument);
         }
 
         #[test]
@@ -541,7 +541,7 @@ pub mod tests {
         fn test_position_current_exceeds_size() {
             let result = set_position(100, &Position::Current(901), 1000);
             assert!(result.is_err());
-            assert_eq!(result.unwrap_err(), Error::InvalidParameter);
+            assert_eq!(result.unwrap_err(), IoErrorKind::InvalidArgument);
         }
 
         #[test]
@@ -567,14 +567,14 @@ pub mod tests {
         fn test_position_end_positive_offset() {
             let result = set_position(100, &Position::End(10), 1000);
             assert!(result.is_err());
-            assert_eq!(result.unwrap_err(), Error::InvalidParameter);
+            assert_eq!(result.unwrap_err(), IoErrorKind::InvalidArgument);
         }
 
         #[test]
         fn test_position_end_negative_exceeds_zero() {
             let result = set_position(100, &Position::End(-1001), 1000);
             assert!(result.is_err());
-            assert_eq!(result.unwrap_err(), Error::InvalidParameter);
+            assert_eq!(result.unwrap_err(), IoErrorKind::InvalidArgument);
         }
 
         #[test]

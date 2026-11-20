@@ -1,4 +1,6 @@
-use crate::{AccessTimePolicy, Error, Result, VirtualFileSystem, pipe::Pipe, poll};
+use crate::{
+    AccessTimePolicy, IoErrorKind, Result, ResultExt, VirtualFileSystem, pipe::Pipe, poll,
+};
 use alloc::{borrow::ToOwned, collections::btree_map::BTreeMap, string::String, vec::Vec};
 use exported_file_system::{
     AccessFlags, AttributeFlags, Attributes, BlockDevice, CharacterDevice, Context,
@@ -76,32 +78,32 @@ impl VirtualFileSystem {
         const MAX_TARGET_LENGTH: usize = 4096;
         let mut attributes = Attributes::new().set_mask(AttributeFlags::Size);
         Self::get_attributes(file_system, path, &mut attributes).await?;
-        let size = *attributes.get_size().ok_or(Error::MissingAttribute)? as usize;
+        let size = *attributes.get_size().ok_or(IoErrorKind::InputOutput)? as usize;
         if size == 0 || size > MAX_TARGET_LENGTH {
-            return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
+            return Err(IoErrorKind::CorruptData);
         }
 
         buffer.resize(size, 0);
-        match poll(|| Ok(file_system.read_symlink(path, buffer.as_mut_slice())?)).await {
+        match poll(|| file_system.read_symlink(path, buffer.as_mut_slice())).await {
             Ok(read) => {
                 if read != size {
-                    return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
+                    return Err(IoErrorKind::CorruptData);
                 }
                 return Ok(read);
             }
-            Err(Error::FileSystem(file_system::Error::UnsupportedOperation)) => {}
+            Err(IoErrorKind::Unsupported) => {}
             Err(error) => return Err(error),
         }
 
         let mut context = Context::new_empty();
-        poll(|| Ok(file_system.lookup_file(&mut context, path, Flags::from(AccessFlags::Read))?))
+        poll(|| file_system.lookup_file(&mut context, path, Flags::from(AccessFlags::Read)))
             .await?;
         let read = file_system.read_sync(&mut context, buffer.as_mut_slice(), 0);
         let close = exported_file_system::BaseOperations::close(file_system, &mut context);
         let read = read?;
         close?;
         if read != size {
-            return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
+            return Err(IoErrorKind::CorruptData);
         }
         Ok(read)
     }
@@ -120,7 +122,7 @@ impl VirtualFileSystem {
         let require_directory = path.as_str().len() > 1 && path.as_str().ends_with('/');
         let resolved = if require_directory {
             let normalized = PathOwned::try_from(path.as_str().trim_end_matches('/'))
-                .map_err(|_| Error::InvalidPath)?;
+                .map_err(|_| IoErrorKind::InvalidPath)?;
             let resolved = self
                 .resolve_path_inner(
                     file_systems,
@@ -133,7 +135,7 @@ impl VirtualFileSystem {
                 )
                 .await?;
             ResolvedPath::Owned(
-                PathOwned::try_from(resolved.as_str()).map_err(|_| Error::InvalidPath)?,
+                PathOwned::try_from(resolved.as_str()).map_err(|_| IoErrorKind::InvalidPath)?,
             )
         } else {
             self.resolve_path_inner(
@@ -155,13 +157,13 @@ impl VirtualFileSystem {
                 .await
             {
                 Ok(()) => {}
-                Err(Error::FileSystem(file_system::Error::NotFound)) if allow_missing_final => {
+                Err(IoErrorKind::NotFound) if allow_missing_final => {
                     return Ok(resolved);
                 }
                 Err(error) => return Err(error),
             }
             if attributes.get_kind() != Some(&Kind::Directory) {
-                return Err(Error::NotADirectory);
+                return Err(IoErrorKind::NotADirectory);
             }
         }
         Ok(resolved)
@@ -193,7 +195,7 @@ impl VirtualFileSystem {
                 .await;
         };
         if path.is_absolute() {
-            return Err(Error::PathEscapesRoot);
+            return Err(IoErrorKind::PathEscapesRoot);
         }
         let root = self
             .resolve_path(file_systems, root, true, false, user, task)
@@ -202,13 +204,13 @@ impl VirtualFileSystem {
         let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
         Self::get_attributes(fs.file_system, relative, &mut attributes).await?;
         if attributes.get_kind() != Some(&Kind::Directory) {
-            return Err(Error::NotADirectory);
+            return Err(IoErrorKind::NotADirectory);
         }
         let mut joined = String::with_capacity(root.get_length() + 1 + path.get_length());
         joined.push_str(root.as_str().trim_end_matches('/'));
         joined.push('/');
         joined.push_str(path.as_str());
-        let joined = PathOwned::new(joined).ok_or(Error::InvalidPath)?;
+        let joined = PathOwned::new(joined).ok_or(IoErrorKind::InvalidPath)?;
         let require_directory = path.as_str().ends_with('/');
         let resolved = self
             .resolve_path_inner(
@@ -225,10 +227,10 @@ impl VirtualFileSystem {
             let (fs, relative, _) = Self::get_file_system_from_path(file_systems, &resolved)?;
             let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
             match Self::get_attributes(fs.file_system, relative, &mut attributes).await {
-                Err(Error::FileSystem(file_system::Error::NotFound)) if allow_missing_final => {}
+                Err(IoErrorKind::NotFound) if allow_missing_final => {}
                 Err(error) => return Err(error),
                 Ok(()) if attributes.get_kind() != Some(&Kind::Directory) => {
-                    return Err(Error::NotADirectory);
+                    return Err(IoErrorKind::NotADirectory);
                 }
                 Ok(()) => {}
             }
@@ -252,7 +254,7 @@ impl VirtualFileSystem {
     ) -> Result<ResolvedPath<'a>> {
         const MAX_PATH_LENGTH: usize = 4096;
         if !path.is_valid() || !path.is_absolute() || path.get_length() > MAX_PATH_LENGTH {
-            return Err(Error::InvalidPath);
+            return Err(IoErrorKind::InvalidPath);
         }
 
         // Fast path: walk borrowed prefixes first. This avoids allocating a
@@ -291,14 +293,12 @@ impl VirtualFileSystem {
                 .await
             {
                 Ok(()) => {}
-                Err(Error::FileSystem(file_system::Error::NotFound))
-                    if !has_remaining && allow_missing_final =>
-                {
+                Err(IoErrorKind::NotFound) if !has_remaining && allow_missing_final => {
                     return Ok(ResolvedPath::Borrowed(path));
                 }
                 Err(error) => return Err(error),
             }
-            let kind = *attributes.get_kind().ok_or(Error::MissingAttribute)?;
+            let kind = *attributes.get_kind().ok_or(IoErrorKind::InputOutput)?;
             if kind == Kind::SymbolicLink && (has_remaining || follow_final) {
                 let length = Self::read_link_payload(
                     file_system.file_system,
@@ -307,13 +307,13 @@ impl VirtualFileSystem {
                 )
                 .await?;
                 let target = core::str::from_utf8(&target_buffer[..length])
-                    .map_err(|_| Error::FileSystem(file_system::Error::InvalidSymbolicLink))?;
+                    .map_err(|_| IoErrorKind::CorruptData)?;
                 if !Path::new(target).is_valid() || target.is_empty() {
-                    return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
+                    return Err(IoErrorKind::CorruptData);
                 }
 
                 if root.is_some() && target.starts_with('/') {
-                    return Err(Error::PathEscapesRoot);
+                    return Err(IoErrorKind::PathEscapesRoot);
                 }
                 let mut pending = String::with_capacity(target.len() + text.len() - component_end);
                 pending.push_str(target);
@@ -321,7 +321,8 @@ impl VirtualFileSystem {
                 let resolved = if target.starts_with('/') {
                     PathOwned::root()
                 } else {
-                    PathOwned::try_from(&text[..parent_end]).map_err(|_| Error::InvalidPath)?
+                    PathOwned::try_from(&text[..parent_end])
+                        .map_err(|_| IoErrorKind::InvalidPath)?
                 };
                 return self
                     .resolve_pending(
@@ -341,7 +342,7 @@ impl VirtualFileSystem {
                     .await;
             }
             if has_remaining && kind != Kind::Directory {
-                return Err(Error::NotADirectory);
+                return Err(IoErrorKind::NotADirectory);
             }
             parent_end = component_end;
             component_start = component_end + 1;
@@ -423,7 +424,7 @@ impl VirtualFileSystem {
 
             if component == ".." {
                 if root.is_some_and(|root| resolved.as_str() == root.as_str()) {
-                    return Err(Error::PathEscapesRoot);
+                    return Err(IoErrorKind::PathEscapesRoot);
                 }
                 if let Some(parent) = resolved.go_parent() {
                     resolved = parent.to_owned();
@@ -435,7 +436,7 @@ impl VirtualFileSystem {
             let candidate = resolved
                 .to_owned()
                 .join(Path::from_str(component))
-                .ok_or(Error::InvalidPath)?;
+                .ok_or(IoErrorKind::InvalidPath)?;
             let (file_system, relative_path, _) =
                 Self::get_file_system_from_path(file_systems, &candidate)?;
             let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
@@ -443,19 +444,17 @@ impl VirtualFileSystem {
                 .await
             {
                 Ok(()) => {}
-                Err(Error::FileSystem(file_system::Error::NotFound))
-                    if !has_remaining && allow_missing_final =>
-                {
+                Err(IoErrorKind::NotFound) if !has_remaining && allow_missing_final => {
                     return Ok(ResolvedPath::Owned(candidate));
                 }
                 Err(error) => return Err(error),
             }
-            let kind = *attributes.get_kind().ok_or(Error::MissingAttribute)?;
+            let kind = *attributes.get_kind().ok_or(IoErrorKind::InputOutput)?;
 
             if kind == Kind::SymbolicLink && (has_remaining || follow_final) {
                 links_followed += 1;
                 if links_followed > MAX_SYMLINKS {
-                    return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
+                    return Err(IoErrorKind::SymlinkLoop);
                 }
                 let target_length = Self::read_link_payload(
                     file_system.file_system,
@@ -464,16 +463,16 @@ impl VirtualFileSystem {
                 )
                 .await?;
                 let target = core::str::from_utf8(&target_buffer[..target_length])
-                    .map_err(|_| Error::FileSystem(file_system::Error::InvalidSymbolicLink))?;
+                    .map_err(|_| IoErrorKind::CorruptData)?;
                 if target.is_empty()
                     || target_length > MAX_PATH_LENGTH
                     || !Path::new(target).is_valid()
                 {
-                    return Err(Error::FileSystem(file_system::Error::InvalidSymbolicLink));
+                    return Err(IoErrorKind::CorruptData);
                 }
 
                 if root.is_some() && target.starts_with('/') {
-                    return Err(Error::PathEscapesRoot);
+                    return Err(IoErrorKind::PathEscapesRoot);
                 }
                 if target.starts_with('/') {
                     resolved = PathOwned::root();
@@ -485,13 +484,13 @@ impl VirtualFileSystem {
                 }
                 pending.insert_str(0, target);
                 if resolved.get_length().saturating_add(pending.len()) > MAX_PATH_LENGTH {
-                    return Err(Error::FileSystem(file_system::Error::NameTooLong));
+                    return Err(IoErrorKind::NameTooLong);
                 }
                 continue;
             }
 
             if has_remaining && kind != Kind::Directory {
-                return Err(Error::NotADirectory);
+                return Err(IoErrorKind::NotADirectory);
             }
             resolved = candidate;
             pending.drain(..consumed);
@@ -538,7 +537,7 @@ impl VirtualFileSystem {
             .intersects(AttributeFlags::User | AttributeFlags::Group)
             || current_user != owner
         {
-            return Err(Error::PermissionDenied);
+            return Err(IoErrorKind::PermissionDenied);
         }
         Ok(())
     }
@@ -614,7 +613,7 @@ impl VirtualFileSystem {
                     path
                 );
 
-                Error::InvalidPath
+                IoErrorKind::InvalidPath
             })?;
 
         Ok((internal_file_system, relative_path, i))
@@ -630,7 +629,7 @@ impl VirtualFileSystem {
 
         let relative_path = path
             .strip_prefix_absolute(&internal_file_system.mount_point)
-            .ok_or(Error::InvalidPath)?;
+            .ok_or(IoErrorKind::InvalidPath)?;
 
         Ok((internal_file_system, relative_path, i))
     }
@@ -639,8 +638,10 @@ impl VirtualFileSystem {
     pub(super) fn get_time(&self) -> Result<Time> {
         Ok(self
             .time_manager
-            .realtime_now()?
-            .try_into_duration()?
+            .realtime_now()
+            .map_io_error()?
+            .try_into_duration()
+            .map_io_error()?
             .into())
     }
 
@@ -650,9 +651,13 @@ impl VirtualFileSystem {
     ) -> Result<(Time, UserIdentifier, GroupIdentifier)> {
         let time = self.get_time()?;
 
-        let user = self.task_manager.get_user(task).await?;
+        let user = self.task_manager.get_user(task).await.map_io_error()?;
 
-        let group = self.users_manager.get_user_primary_group(user).await?;
+        let group = self
+            .users_manager
+            .get_user_primary_group(user)
+            .await
+            .map_io_error()?;
 
         Ok((time, user, group))
     }
@@ -723,14 +728,7 @@ impl VirtualFileSystem {
         if attributes_equal(&current, attributes) {
             return Ok(());
         }
-        poll(|| {
-            Ok(FileSystemOperations::set_attributes(
-                file_system,
-                path,
-                attributes,
-            )?)
-        })
-        .await
+        poll(|| FileSystemOperations::set_attributes(file_system, path, attributes)).await
     }
 
     pub(super) async fn get_attributes(
@@ -738,14 +736,7 @@ impl VirtualFileSystem {
         path: &Path,
         attributes: &mut Attributes,
     ) -> Result<()> {
-        poll(|| {
-            Ok(FileSystemOperations::get_attributes(
-                file_system,
-                path,
-                attributes,
-            )?)
-        })
-        .await
+        poll(|| FileSystemOperations::get_attributes(file_system, path, attributes)).await
     }
 
     pub(super) async fn check_permissions(
@@ -759,18 +750,18 @@ impl VirtualFileSystem {
         if asked_permissions.contains(Permission::Write)
             && self.writes_frozen.load(portable_atomic::Ordering::Acquire)
         {
-            return Err(Error::RessourceBusy);
+            return Err(IoErrorKind::ResourceBusy);
         }
         let mut attributes = Attributes::default()
             .set_mask(AttributeFlags::User | AttributeFlags::Group | AttributeFlags::Permissions);
 
         Self::get_attributes(file_system, path, &mut attributes).await?;
 
-        let owner_user = *attributes.get_user().ok_or(Error::MissingAttribute)?;
-        let owner_group = *attributes.get_group().ok_or(Error::MissingAttribute)?;
+        let owner_user = *attributes.get_user().ok_or(IoErrorKind::InputOutput)?;
+        let owner_group = *attributes.get_group().ok_or(IoErrorKind::InputOutput)?;
         let owner_permissions = *attributes
             .get_permissions()
-            .ok_or(Error::MissingAttribute)?;
+            .ok_or(IoErrorKind::InputOutput)?;
 
         if !Self::has_permissions(
             self.users_manager,
@@ -790,7 +781,7 @@ impl VirtualFileSystem {
                 owner_group,
                 owner_permissions,
             );
-            return Err(Error::PermissionDenied);
+            return Err(IoErrorKind::PermissionDenied);
         }
 
         Ok(())
@@ -813,10 +804,10 @@ impl VirtualFileSystem {
 
         let parent_owner = *parent_attributes
             .get_user()
-            .ok_or(Error::MissingAttribute)?;
+            .ok_or(IoErrorKind::InputOutput)?;
         let parent_permissions = *parent_attributes
             .get_permissions()
-            .ok_or(Error::MissingAttribute)?;
+            .ok_or(IoErrorKind::InputOutput)?;
 
         if !parent_permissions.get_special().get_sticky() || parent_owner == current_user {
             return Ok(());
@@ -824,10 +815,12 @@ impl VirtualFileSystem {
 
         let mut entry_attributes = Attributes::default().set_mask(AttributeFlags::User);
         Self::get_attributes(file_system, entry_path, &mut entry_attributes).await?;
-        let entry_owner = *entry_attributes.get_user().ok_or(Error::MissingAttribute)?;
+        let entry_owner = *entry_attributes
+            .get_user()
+            .ok_or(IoErrorKind::InputOutput)?;
 
         if entry_owner != current_user {
-            return Err(Error::PermissionDenied);
+            return Err(IoErrorKind::PermissionDenied);
         }
 
         Ok(())
@@ -843,7 +836,7 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
     ) -> Result<()> {
         if !path.is_root() {
-            let parent_path = path.go_parent().ok_or(Error::InvalidPath)?;
+            let parent_path = path.go_parent().ok_or(IoErrorKind::InvalidPath)?;
 
             let (parent_file_system, relative_path, _) =
                 Self::get_file_system_from_path(file_systems, parent_path)?; // Get the file system identifier and the relative path

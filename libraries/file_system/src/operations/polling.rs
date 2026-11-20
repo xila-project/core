@@ -13,7 +13,9 @@ pub enum Operation {
     reason = "host-only unit test counts operation cancellations"
 )]
 mod tests {
-    use crate::{BaseOperations, Context, DirectBaseOperations, Error, Operation, Result, Size};
+    use crate::{
+        BaseOperations, Context, DirectBaseOperations, IoErrorKind, Operation, Result, Size,
+    };
     use core::{
         sync::atomic::{AtomicUsize, Ordering},
         task::{Context as TaskContext, Poll, Waker},
@@ -24,7 +26,7 @@ mod tests {
             Poll::Pending
         }
         fn write(&self, _: &mut TaskContext<'_>, _: &[u8], _: Size) -> Poll<Result<usize>> {
-            Poll::Ready(Err(Error::InputOutput))
+            Poll::Ready(Err(IoErrorKind::InputOutput))
         }
         fn cancel_operation(&self, _: Operation) {
             self.0.fetch_add(1, Ordering::Relaxed);
@@ -39,7 +41,7 @@ mod tests {
         assert!(base.read(&mut context, &mut cx, &mut [0], 0).is_pending());
         assert_eq!(
             base.write(&mut context, &mut cx, b"x", 0),
-            Poll::Ready(Err(Error::InputOutput))
+            Poll::Ready(Err(IoErrorKind::InputOutput))
         );
         base.cancel_operation(&mut context, Operation::Read);
         assert_eq!(device.0.load(Ordering::Relaxed), 1);
@@ -96,7 +98,7 @@ impl<const N: usize> WaitQueue<N> {
             let index = match waiter.slot {
                 Some(index) => {
                     if index >= N || !slots[index].reserved {
-                        return Err(crate::Error::InvalidContext);
+                        return Err(crate::IoErrorKind::InvalidState);
                     }
                     index
                 }
@@ -104,7 +106,7 @@ impl<const N: usize> WaitQueue<N> {
                     let index = slots
                         .iter()
                         .position(|s| !s.reserved)
-                        .ok_or(crate::Error::TooManyOpenFiles)?;
+                        .ok_or(crate::IoErrorKind::SystemFileLimit)?;
                     slots[index].reserved = true;
                     waiter.slot = Some(index);
                     index
@@ -149,7 +151,7 @@ impl<const N: usize> WaitQueue<N> {
 )]
 mod wait_tests {
     extern crate std;
-    use crate::{Error, WaitQueue, Waiter};
+    use crate::{IoErrorKind, WaitQueue, Waiter};
     use core::{
         sync::atomic::{AtomicUsize, Ordering},
         task::Waker,
@@ -174,7 +176,7 @@ mod wait_tests {
         queue.register(&mut second, &waker).unwrap();
         assert_eq!(
             queue.register(&mut third, &waker),
-            Err(Error::TooManyOpenFiles)
+            Err(IoErrorKind::SystemFileLimit)
         );
         queue.wake_all();
         assert_eq!(count.0.load(Ordering::Relaxed), 2);

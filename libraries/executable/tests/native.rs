@@ -63,7 +63,7 @@ impl BaseOperations for PendingDevice {
         _: &[u8],
         _: Size,
     ) -> Poll<file_system::Result<usize>> {
-        Poll::Ready(Err(file_system::Error::UnsupportedOperation))
+        Poll::Ready(Err(file_system::IoErrorKind::Unsupported))
     }
 
     fn clone_context(&self, _: &DeviceContext) -> file_system::Result<DeviceContext> {

@@ -2,7 +2,7 @@
 
 use core::time::Duration;
 use file_system::{
-    DirectBaseOperations, DirectCharacterDevice, Error, MountOperations, Result, Size,
+    DirectBaseOperations, DirectCharacterDevice, IoErrorKind, MountOperations, Result, Size,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -17,12 +17,12 @@ impl DirectBaseOperations for TimeDevice {
     ) -> core::task::Poll<Result<usize>> {
         file_system::ready(|| {
             if buffer.len() < size_of::<Duration>() {
-                return Err(Error::InvalidParameter);
+                return Err(IoErrorKind::InvalidArgument);
             }
 
             let duration = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .map_err(|_| Error::InternalError)?;
+                .map_err(|_| IoErrorKind::InputOutput)?;
 
             let duration: Duration = Duration::new(duration.as_secs(), duration.subsec_nanos());
 
@@ -45,7 +45,7 @@ impl DirectBaseOperations for TimeDevice {
         _: &[u8],
         _: Size,
     ) -> core::task::Poll<Result<usize>> {
-        file_system::ready(|| Err(Error::UnsupportedOperation))
+        file_system::ready(|| Err(IoErrorKind::Unsupported))
     }
 }
 
@@ -81,7 +81,7 @@ impl DirectBaseOperations for RandomDevice {
         _: Size,
     ) -> core::task::Poll<file_system::Result<usize>> {
         file_system::ready(|| {
-            getrandom::fill(buffer).map_err(|_| file_system::Error::Other)?;
+            getrandom::fill(buffer).map_err(|_| file_system::IoErrorKind::InputOutput)?;
 
             Ok(buffer.len())
         })
@@ -93,7 +93,7 @@ impl DirectBaseOperations for RandomDevice {
         _: &[u8],
         _: Size,
     ) -> core::task::Poll<file_system::Result<usize>> {
-        file_system::ready(|| Err(file_system::Error::UnsupportedOperation))
+        file_system::ready(|| Err(file_system::IoErrorKind::Unsupported))
     }
 
     fn set_position(
@@ -101,7 +101,7 @@ impl DirectBaseOperations for RandomDevice {
         _: Size,
         _position: &file_system::Position,
     ) -> file_system::Result<file_system::Size> {
-        Err(file_system::Error::UnsupportedOperation)
+        Err(file_system::IoErrorKind::Unsupported)
     }
 }
 
@@ -128,8 +128,8 @@ impl DirectBaseOperations for ConsoleDevice {
         file_system::ready(|| match self {
             Self::Input => std::io::stdin()
                 .read(buffer)
-                .map_err(|_| Error::InputOutput),
-            _ => Err(Error::UnsupportedOperation),
+                .map_err(|_| IoErrorKind::InputOutput),
+            _ => Err(IoErrorKind::Unsupported),
         })
     }
 
@@ -141,13 +141,13 @@ impl DirectBaseOperations for ConsoleDevice {
     ) -> core::task::Poll<file_system::Result<usize>> {
         use std::io::Write;
         file_system::ready(|| match self {
-            Self::Input => Err(Error::UnsupportedOperation),
+            Self::Input => Err(IoErrorKind::Unsupported),
             Self::Output => std::io::stdout()
                 .write(buffer)
-                .map_err(|_| Error::InputOutput),
+                .map_err(|_| IoErrorKind::InputOutput),
             Self::Error => std::io::stderr()
                 .write(buffer)
-                .map_err(|_| Error::InputOutput),
+                .map_err(|_| IoErrorKind::InputOutput),
         })
     }
 
@@ -158,8 +158,12 @@ impl DirectBaseOperations for ConsoleDevice {
         use std::io::Write;
         file_system::ready(|| match self {
             Self::Input => Ok(()),
-            Self::Output => std::io::stdout().flush().map_err(|_| Error::InputOutput),
-            Self::Error => std::io::stderr().flush().map_err(|_| Error::InputOutput),
+            Self::Output => std::io::stdout()
+                .flush()
+                .map_err(|_| IoErrorKind::InputOutput),
+            Self::Error => std::io::stderr()
+                .flush()
+                .map_err(|_| IoErrorKind::InputOutput),
         })
     }
 }

@@ -5,8 +5,8 @@
 use crate::{Error as FirmwareError, FirmwareBackend, Update};
 use alloc::boxed::Box;
 use file_system::{
-    BaseOperations, CharacterDevice, Context, ControlCommand, ControlCommandIdentifier, Error,
-    MountOperations, Position, Result, Size, define_command,
+    BaseOperations, CharacterDevice, Context, ControlCommand, ControlCommandIdentifier,
+    IoErrorKind, MountOperations, Position, Result, Size, define_command,
 };
 use shared::AnyByLayout;
 use synchronization::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
@@ -63,7 +63,7 @@ pub fn header() -> [u8; 8] {
 }
 pub fn begin_request(size: u64, metadata: &[u8]) -> Result<[u8; BEGIN_SIZE]> {
     if metadata.len() > MAX_METADATA {
-        return Err(Error::InvalidParameter);
+        return Err(IoErrorKind::InvalidArgument);
     }
     let mut bytes = [0; BEGIN_SIZE];
     bytes[..8].copy_from_slice(&header());
@@ -76,18 +76,18 @@ fn validate(bytes: &[u8]) -> Result<()> {
     if bytes == header() {
         Ok(())
     } else {
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     }
 }
 /// Stable mapping into existing Xila file-system errors.
-fn error(error: FirmwareError) -> Error {
+fn error(error: FirmwareError) -> IoErrorKind {
     match error {
-        FirmwareError::Unsupported => Error::UnsupportedOperation,
-        FirmwareError::Storage | FirmwareError::Recovery => Error::InputOutput,
+        FirmwareError::Unsupported => IoErrorKind::Unsupported,
+        FirmwareError::Storage | FirmwareError::Recovery => IoErrorKind::InputOutput,
         FirmwareError::Authentication | FirmwareError::Target | FirmwareError::SecurityVersion => {
-            Error::PermissionDenied
+            IoErrorKind::PermissionDenied
         }
-        _ => Error::InvalidParameter,
+        _ => IoErrorKind::InvalidArgument,
     }
 }
 struct Inner<B: FirmwareBackend> {
@@ -110,7 +110,7 @@ impl<B: FirmwareBackend> FirmwareDevice<B> {
     fn opening(context: &Context) -> Result<()> {
         context
             .get_private_data_of_type::<Opening>()
-            .ok_or(Error::InvalidIdentifier)
+            .ok_or(IoErrorKind::BadDescriptor)
             .map(|_| ())
     }
 }
@@ -120,9 +120,9 @@ where
     B::Verified: Send,
 {
     fn open(&self, context: &mut Context) -> Result<()> {
-        let mut inner = self.inner.try_lock().map_err(|_| Error::RessourceBusy)?;
+        let mut inner = self.inner.try_lock().map_err(|_| IoErrorKind::WouldBlock)?;
         if inner.opened {
-            return Err(Error::RessourceBusy);
+            return Err(IoErrorKind::ResourceBusy);
         }
         context.set_private_data(Box::new(Opening));
         inner.opened = true;
@@ -130,7 +130,7 @@ where
     }
     fn close(&self, context: &mut Context) -> Result<()> {
         Self::opening(context)?;
-        let mut inner = self.inner.try_lock().map_err(|_| Error::RessourceBusy)?;
+        let mut inner = self.inner.try_lock().map_err(|_| IoErrorKind::WouldBlock)?;
         // Keep exclusivity after abort failure; reopening an uncertain backend
         // requires reconstruction/recovery by the platform owner.
         inner.update.abort().map_err(error)?;
@@ -145,7 +145,7 @@ where
         _: &mut [u8],
         _: Size,
     ) -> core::task::Poll<Result<usize>> {
-        file_system::ready(|| Err(Error::UnsupportedOperation))
+        file_system::ready(|| Err(IoErrorKind::Unsupported))
     }
     fn write(
         &self,
@@ -158,7 +158,7 @@ where
             Self::opening(context)?;
             self.inner
                 .try_lock()
-                .map_err(|_| Error::RessourceBusy)?
+                .map_err(|_| IoErrorKind::WouldBlock)?
                 .update
                 .write(bytes)
                 .map_err(error)
@@ -174,7 +174,7 @@ where
     ) -> core::task::Poll<Result<()>> {
         file_system::ready(|| {
             Self::opening(context)?;
-            let mut inner = self.inner.try_lock().map_err(|_| Error::RessourceBusy)?;
+            let mut inner = self.inner.try_lock().map_err(|_| IoErrorKind::WouldBlock)?;
             let update = &mut inner.update;
             let expected = match command {
                 GET_CAPABILITIES::IDENTIFIER => (8, 32),
@@ -184,10 +184,10 @@ where
                 | ACTIVATE::IDENTIFIER
                 | ABORT::IDENTIFIER
                 | CONFIRM::IDENTIFIER => (8, 0),
-                _ => return Err(Error::UnsupportedOperation),
+                _ => return Err(IoErrorKind::Unsupported),
             };
             if input.get_size() != expected.0 || output.get_size() != expected.1 {
-                return Err(Error::InvalidParameter);
+                return Err(IoErrorKind::InvalidArgument);
             }
             match command {
                 GET_CAPABILITIES::IDENTIFIER => {
@@ -218,7 +218,7 @@ where
                         || i[18..24] != [0; 6]
                         || i[24 + n..].iter().any(|b| *b != 0)
                     {
-                        return Err(Error::InvalidParameter);
+                        return Err(IoErrorKind::InvalidArgument);
                     }
                     update
                         .begin(
@@ -241,15 +241,15 @@ where
                     }
                     .map_err(error)
                 }
-                _ => Err(Error::UnsupportedOperation),
+                _ => Err(IoErrorKind::Unsupported),
             }
         })
     }
     fn set_position(&self, _: &mut Context, _: Size, _: &Position) -> Result<Size> {
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     }
     fn clone_context(&self, _: &Context) -> Result<Context> {
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     }
 }
 impl<B: FirmwareBackend> MountOperations for FirmwareDevice<B> {}

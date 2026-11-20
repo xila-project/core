@@ -27,6 +27,7 @@ embassy-time.workspace = true
 stackful = { workspace = true }
 
 [build-dependencies]
+io_error.workspace = true
 cbindgen.workspace = true
 syn = { workspace = true, features = ["full"] }
 quote.workspace = true

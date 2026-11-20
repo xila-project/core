@@ -1,0 +1,18 @@
+[package]
+name = "xila-io-error"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "io_error"
+
+[dependencies]
+embedded-i18n.workspace = true
+embedded-io.workspace = true
+
+[package.metadata.i18n]
+load-path = "locales"
+default-locale = "en"
+fallback = ["en"]
+strict = true

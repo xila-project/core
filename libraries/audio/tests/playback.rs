@@ -2,7 +2,7 @@ use audio::{
     Configuration, GET_CONFIGURATION, GET_VOLUME, GET_WRITABLE, PlaybackBuffer, SET_CONFIGURATION,
     SET_VOLUME, START, STOP, SampleFormat,
 };
-use file_system::{ControlCommand, DirectBaseOperations, Error};
+use file_system::{ControlCommand, DirectBaseOperations, IoErrorKind};
 use shared::AnyByLayout;
 use std::{
     alloc::{GlobalAlloc, Layout, System},
@@ -69,12 +69,15 @@ fn configuration_and_frame_boundaries() {
         Configuration::new(48_000, 0, SampleFormat::I16),
         Configuration::new(48_000, 9, SampleFormat::I16),
     ] {
-        assert_eq!(configuration.validate(), Err(Error::InvalidParameter));
+        assert_eq!(configuration.validate(), Err(IoErrorKind::InvalidArgument));
     }
     let configuration = Configuration::new(48_000, 2, SampleFormat::I16);
     assert_eq!(configuration.frame_size(), Ok(4));
     assert_eq!(size_of::<Configuration>(), 8);
-    assert_eq!(SampleFormat::try_from(255), Err(Error::InvalidParameter));
+    assert_eq!(
+        SampleFormat::try_from(255),
+        Err(IoErrorKind::InvalidArgument)
+    );
     assert!(PlaybackBuffer::<6>::new().split(configuration).is_err());
     assert!(PlaybackBuffer::<2>::new().split(configuration).is_err());
 
@@ -82,7 +85,7 @@ fn configuration_and_frame_boundaries() {
     let (device, _renderer) = buffer.split(configuration).unwrap();
     assert_eq!(
         device.write_sync(&[1, 2, 3], 0),
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     );
     assert_eq!(device.write_sync(&[0; 12], 0), Ok(8));
     assert_eq!(device.write_sync(&[0; 4], 0), Ok(0));
@@ -100,7 +103,7 @@ fn starts_paused_and_retains_audio_across_stop() {
     let mut output = [42i16; 2];
     assert_eq!(renderer.render_i16(&mut output), 0);
     assert_eq!(output, [0, 0]);
-    assert_eq!(device.flush_sync(), Err(Error::RessourceBusy));
+    assert_eq!(device.flush_sync(), Err(IoErrorKind::WouldBlock));
     start(&device);
     control::<STOP>(&device, &(), &mut ()).unwrap();
     assert_eq!(renderer.render_i16(&mut output), 0);
@@ -147,11 +150,11 @@ fn volume_is_applied_when_rendering_and_configuration_is_fixed() {
             &Configuration::new(44_100, 1, SampleFormat::I16),
             &mut (),
         ),
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     );
     assert_eq!(
         control::<SET_VOLUME>(&device, &101, &mut ()),
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     );
     device.write_sync(&1000i16.to_le_bytes(), 0).unwrap();
     control::<SET_VOLUME>(&device, &50, &mut ()).unwrap();
@@ -193,11 +196,11 @@ fn backend_failure_is_reported_instead_of_stalling() {
     start(&device);
     device.write_sync(&[0; 2], 0).unwrap();
     renderer.failure_reporter().fail();
-    assert_eq!(device.flush_sync(), Err(Error::InputOutput));
-    assert_eq!(device.write_sync(&[0; 2], 0), Err(Error::InputOutput));
+    assert_eq!(device.flush_sync(), Err(IoErrorKind::InputOutput));
+    assert_eq!(device.write_sync(&[0; 2], 0), Err(IoErrorKind::InputOutput));
     assert_eq!(
         control::<START>(&device, &(), &mut ()),
-        Err(Error::InputOutput)
+        Err(IoErrorKind::InputOutput)
     );
     let mut output = [42.0; 2];
     assert_eq!(renderer.render_f32(&mut output), 0);
@@ -308,7 +311,7 @@ fn commands_have_unique_audio_identifiers_and_renderer_drop_fails_device() {
         .split(Configuration::new(48_000, 1, SampleFormat::I16))
         .unwrap();
     drop(renderer);
-    assert_eq!(device.write_sync(&[0; 2], 0), Err(Error::InputOutput));
+    assert_eq!(device.write_sync(&[0; 2], 0), Err(IoErrorKind::InputOutput));
 }
 
 #[test]
@@ -324,7 +327,7 @@ fn rejects_oversized_misaligned_and_unexpected_command_payloads() {
             AnyByLayout::from(&[configuration; 2]),
             AnyByLayout::NONE,
         ),
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     );
     let mut oversized = [0u8; 2];
     assert_eq!(
@@ -333,7 +336,7 @@ fn rejects_oversized_misaligned_and_unexpected_command_payloads() {
             AnyByLayout::from(&()),
             AnyByLayout::from_mutable(&mut oversized),
         ),
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     );
     #[repr(align(4))]
     struct Aligned([u8; 16]);
@@ -345,7 +348,7 @@ fn rejects_oversized_misaligned_and_unexpected_command_payloads() {
             AnyByLayout::from(&()),
             AnyByLayout::from_mutable(misaligned),
         ),
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     );
     assert_eq!(
         device.control_sync(
@@ -353,7 +356,7 @@ fn rejects_oversized_misaligned_and_unexpected_command_payloads() {
             AnyByLayout::from(&0u8),
             AnyByLayout::NONE
         ),
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     );
     assert_eq!(
         device.control_sync(
@@ -361,6 +364,6 @@ fn rejects_oversized_misaligned_and_unexpected_command_payloads() {
             AnyByLayout::from(&()),
             AnyByLayout::NONE,
         ),
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     );
 }

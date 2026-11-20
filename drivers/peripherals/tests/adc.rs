@@ -12,10 +12,10 @@ use drivers_peripherals::adc::{
     ABI_VERSION, GET_INFO, InfoAbi, MillivoltsAbi, READ_MILLIVOLTS, SELECT_CHANNEL,
     SelectChannelAbi, VersionAbi, mount_adc,
 };
-use file_system::{AccessFlags, Error as FileSystemError, Flags, MemoryDevice};
+use file_system::{AccessFlags, Flags, IoErrorKind, MemoryDevice};
 use peripherals::adc::AdcMock;
 use task::TaskIdentifier;
-use virtual_file_system::{Error, File, VirtualFileSystem};
+use virtual_file_system::{File, VirtualFileSystem};
 
 async fn initialize() -> (TaskIdentifier, &'static VirtualFileSystem) {
     let time_manager = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
@@ -70,10 +70,6 @@ fn select(channel: u8) -> SelectChannelAbi {
     }
 }
 
-fn fs_error(error: FileSystemError) -> Option<Error> {
-    Some(Error::FileSystem(error))
-}
-
 #[task::test]
 async fn plain_read_returns_selected_channel_as_little_endian_u16() {
     let (task, vfs) = initialize().await;
@@ -96,14 +92,11 @@ async fn plain_read_returns_selected_channel_as_little_endian_u16() {
     // A plain read needs room for one sample.
     assert_eq!(
         file.read(&mut buffer[..1]).await.err(),
-        fs_error(FileSystemError::InvalidParameter)
+        Some(IoErrorKind::InvalidArgument)
     );
 
     // Plain writes are not supported on an ADC.
-    assert_eq!(
-        file.write(b"x").await.err(),
-        fs_error(FileSystemError::UnsupportedOperation)
-    );
+    assert_eq!(file.write(b"x").await.err(), Some(IoErrorKind::Unsupported));
 
     file.close(vfs).await.unwrap();
 }
@@ -167,7 +160,7 @@ async fn converter_without_reference_reports_it_and_refuses_millivolts() {
 
     assert_eq!(
         file.control(READ_MILLIVOLTS, &version()).await.err(),
-        fs_error(FileSystemError::UnsupportedOperation)
+        Some(IoErrorKind::Unsupported)
     );
 
     file.close(vfs).await.unwrap();
@@ -184,7 +177,7 @@ async fn invalid_channel_and_bad_abi_are_rejected_and_keep_selection() {
 
     assert_eq!(
         file.control(SELECT_CHANNEL, &select(2)).await.err(),
-        fs_error(FileSystemError::InvalidParameter)
+        Some(IoErrorKind::InvalidArgument)
     );
     let mut buffer = [0u8; 2];
     file.read(&mut buffer).await.unwrap();
@@ -196,7 +189,7 @@ async fn invalid_channel_and_bad_abi_are_rejected_and_keep_selection() {
     };
     assert_eq!(
         file.control(SELECT_CHANNEL, &wrong_version).await.err(),
-        fs_error(FileSystemError::InvalidParameter)
+        Some(IoErrorKind::InvalidArgument)
     );
     let dirty_reserved = SelectChannelAbi {
         reserved: 1,
@@ -204,7 +197,7 @@ async fn invalid_channel_and_bad_abi_are_rejected_and_keep_selection() {
     };
     assert_eq!(
         file.control(SELECT_CHANNEL, &dirty_reserved).await.err(),
-        fs_error(FileSystemError::InvalidParameter)
+        Some(IoErrorKind::InvalidArgument)
     );
     assert_eq!(
         file.control(
@@ -216,7 +209,7 @@ async fn invalid_channel_and_bad_abi_are_rejected_and_keep_selection() {
         )
         .await
         .err(),
-        fs_error(FileSystemError::InvalidParameter)
+        Some(IoErrorKind::InvalidArgument)
     );
 
     file.close(vfs).await.unwrap();
@@ -232,7 +225,7 @@ async fn second_open_of_the_same_node_is_busy() {
     let first = open(vfs, task, "/devices/adc/adc4").await.unwrap();
     assert_eq!(
         open(vfs, task, "/devices/adc/adc4").await.err(),
-        fs_error(FileSystemError::RessourceBusy)
+        Some(IoErrorKind::ResourceBusy)
     );
 
     first.close(vfs).await.unwrap();

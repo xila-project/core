@@ -9,7 +9,7 @@ mod model;
 async fn privileged_worker_cannot_browse_or_select_for_unprivileged_caller() {
     use file_system::{AccessFlags, CreateFlags, Flags, MemoryDevice, Permissions};
     use model::{Browser, Model};
-    use virtual_file_system::{Error, File, VirtualFileSystem};
+    use virtual_file_system::{File, IoErrorKind, VirtualFileSystem};
     let manager = task::test_manager();
     let caller = manager.get_current_task_identifier().await;
     let users = Box::leak(Box::new(users::Manager::new()));
@@ -147,12 +147,12 @@ async fn privileged_worker_cannot_browse_or_select_for_unprivileged_caller() {
                 model.navigate(vfs, "/", 0).unwrap();
                 assert_eq!(
                     model.navigate(vfs, "/private", 0),
-                    Err(Error::PermissionDenied)
+                    Err(IoErrorKind::PermissionDenied)
                 );
                 assert_eq!(model.directory, "/");
                 assert_eq!(
                     model.confirm(vfs, "/private/file"),
-                    Err(Error::PermissionDenied)
+                    Err(IoErrorKind::PermissionDenied)
                 );
                 assert_eq!(model.status, FilePickerStatus::Pending);
                 assert!(model.selected.is_none());
@@ -163,7 +163,7 @@ async fn privileged_worker_cannot_browse_or_select_for_unprivileged_caller() {
                 );
                 assert_eq!(
                     model.confirm(vfs, "/restricted"),
-                    Err(Error::PermissionDenied)
+                    Err(IoErrorKind::PermissionDenied)
                 );
                 for path in ["/target/file/.", "/target/file/"] {
                     let mut invalid = Model::new(caller, FilePickerMode::OpenFile);
@@ -179,50 +179,53 @@ async fn privileged_worker_cannot_browse_or_select_for_unprivileged_caller() {
                 let mut directory = Model::new(caller, FilePickerMode::Directory);
                 assert_eq!(
                     directory.confirm(vfs, "/private"),
-                    Err(Error::PermissionDenied)
+                    Err(IoErrorKind::PermissionDenied)
                 );
                 let mut save = Model::new(caller, FilePickerMode::SaveFile);
                 assert_eq!(
                     save.confirm(vfs, "/restricted"),
-                    Err(Error::PermissionDenied)
+                    Err(IoErrorKind::PermissionDenied)
                 );
                 assert_eq!(
                     save.confirm(vfs, "/private/new"),
-                    Err(Error::PermissionDenied)
+                    Err(IoErrorKind::PermissionDenied)
                 );
                 assert!(matches!(
                     vfs.kind(worker, "/private/new"),
-                    Err(Error::FileSystem(file_system::Error::NotFound))
+                    Err(file_system::IoErrorKind::NotFound)
                 ));
                 let mut save = Model::new(caller, FilePickerMode::SaveFile);
-                assert_eq!(save.confirm(vfs, "/new"), Err(Error::PermissionDenied));
+                assert_eq!(
+                    save.confirm(vfs, "/new"),
+                    Err(IoErrorKind::PermissionDenied)
+                );
                 assert_eq!(save.status, FilePickerStatus::Pending);
                 assert!(save.selected.is_none());
                 assert!(matches!(
                     vfs.kind(worker, "/new"),
-                    Err(Error::FileSystem(file_system::Error::NotFound))
+                    Err(file_system::IoErrorKind::NotFound)
                 ));
                 save.confirm(vfs, "/writable/new").unwrap();
                 assert_eq!(save.selected.as_deref(), Some("/writable/new"));
                 assert!(matches!(
                     vfs.kind(worker, "/writable/new"),
-                    Err(Error::FileSystem(file_system::Error::NotFound))
+                    Err(file_system::IoErrorKind::NotFound)
                 ));
                 let mut linked_save = Model::new(caller, FilePickerMode::SaveFile);
                 linked_save.confirm(vfs, "/dangling").unwrap();
                 assert_eq!(linked_save.selected.as_deref(), Some("/dangling"));
                 assert!(matches!(
                     vfs.kind(worker, "/writable/new-link-target"),
-                    Err(Error::FileSystem(file_system::Error::NotFound))
+                    Err(file_system::IoErrorKind::NotFound)
                 ));
                 let mut denied_save = Model::new(caller, FilePickerMode::SaveFile);
                 assert_eq!(
                     denied_save.confirm(vfs, "/denied-link"),
-                    Err(Error::PermissionDenied)
+                    Err(IoErrorKind::PermissionDenied)
                 );
                 assert!(matches!(
                     vfs.kind(worker, "/private/new-link-target"),
-                    Err(Error::FileSystem(file_system::Error::NotFound))
+                    Err(file_system::IoErrorKind::NotFound)
                 ));
                 let mut save = Model::new(caller, FilePickerMode::SaveFile);
                 save.confirm(vfs, "/retained").unwrap();

@@ -16,7 +16,7 @@ pub trait AttributeOperations {
     /// Change the fields selected by `attributes.get_mask()`.
     ///
     /// An empty mask succeeds without changing any fields. If any requested
-    /// field is unsupported, return [`crate::Error::UnsupportedOperation`]
+    /// field is unsupported, return [`crate::IoErrorKind::Unsupported`]
     /// before changing a supported field. A later backend I/O or permission
     /// failure does not guarantee rollback of earlier changes.
     fn set_attributes(&self, context: &mut crate::Context, attributes: &Attributes) -> Result<()>;

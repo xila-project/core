@@ -17,14 +17,14 @@ use drivers_peripherals::spi::{
     SPI_SET_CONFIGURATION, SPI_TRANSACTION, SPI_TRANSFER, SpiConfigurationAbi, SpiSegmentAbi,
     SpiTransactionInputAbi, SpiTransferInputAbi, mount_spi_device,
 };
-use file_system::{AccessFlags, Error as FileSystemError, Flags, MemoryDevice, Position};
+use file_system::{AccessFlags, Flags, IoErrorKind, MemoryDevice, Position};
 use peripherals::spi::{
     BusCapabilities, DeviceConfig, Mode, SimulatedSpiDevice, SpiController, SpiError, SpiMock,
     SpiMockReservation,
 };
 use synchronization::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use task::TaskIdentifier;
-use virtual_file_system::{Error, File, VirtualFileSystem};
+use virtual_file_system::{File, VirtualFileSystem};
 
 /// Simulated device: every byte it receives is answered with `byte + selects`,
 /// where `selects` counts chip-select assertions so far. Responses therefore
@@ -172,7 +172,7 @@ async fn spi_node_is_exclusive_and_plain_io_reads_zeros_on_mosi() {
     // A second opening while the first is held is refused.
     assert_eq!(
         open(vfs, task, "/devices/spi/spi0.0").await.err(),
-        Some(Error::FileSystem(FileSystemError::RessourceBusy))
+        Some(IoErrorKind::ResourceBusy)
     );
 
     // Write: one chip-select cycle, responses are discarded.
@@ -232,7 +232,7 @@ async fn configuration_is_read_and_validated_through_the_contract() {
         file.control(SPI_SET_CONFIGURATION, &unsupported_mode)
             .await
             .err(),
-        Some(Error::FileSystem(FileSystemError::UnsupportedOperation))
+        Some(IoErrorKind::Unsupported)
     );
     let unsupported_frequency = SpiConfigurationAbi {
         frequency_hz: 20_000_000,
@@ -242,7 +242,7 @@ async fn configuration_is_read_and_validated_through_the_contract() {
         file.control(SPI_SET_CONFIGURATION, &unsupported_frequency)
             .await
             .err(),
-        Some(Error::FileSystem(FileSystemError::UnsupportedOperation))
+        Some(IoErrorKind::Unsupported)
     );
     let lsb_first = SpiConfigurationAbi {
         bit_order: 1,
@@ -250,7 +250,7 @@ async fn configuration_is_read_and_validated_through_the_contract() {
     };
     assert_eq!(
         file.control(SPI_SET_CONFIGURATION, &lsb_first).await.err(),
-        Some(Error::FileSystem(FileSystemError::UnsupportedOperation))
+        Some(IoErrorKind::Unsupported)
     );
 
     // Malformed values are rejected before the contract sees them.
@@ -260,7 +260,7 @@ async fn configuration_is_read_and_validated_through_the_contract() {
     };
     assert_eq!(
         file.control(SPI_SET_CONFIGURATION, &bad_mode).await.err(),
-        Some(Error::FileSystem(FileSystemError::InvalidParameter))
+        Some(IoErrorKind::InvalidArgument)
     );
     let bad_version = SpiConfigurationAbi {
         version: SPI_ABI_VERSION + 1,
@@ -270,7 +270,7 @@ async fn configuration_is_read_and_validated_through_the_contract() {
         file.control(SPI_SET_CONFIGURATION, &bad_version)
             .await
             .err(),
-        Some(Error::FileSystem(FileSystemError::InvalidParameter))
+        Some(IoErrorKind::InvalidArgument)
     );
 
     let after = file.control(SPI_GET_CONFIGURATION, &()).await.unwrap();
@@ -307,7 +307,7 @@ async fn full_duplex_transfer_returns_the_simulated_response() {
     };
     assert_eq!(
         file.control(SPI_TRANSFER, &too_long).await.err(),
-        Some(Error::FileSystem(FileSystemError::InvalidParameter))
+        Some(IoErrorKind::InvalidArgument)
     );
 
     file.close(vfs).await.unwrap();
@@ -352,7 +352,7 @@ async fn transaction_rejects_out_of_bounds_input() {
         .await
         .unwrap();
     let mut file = open(vfs, task, "/devices/spi/spi0.0").await.unwrap();
-    let invalid = Some(Error::FileSystem(FileSystemError::InvalidParameter));
+    let invalid = Some(IoErrorKind::InvalidArgument);
 
     let one = [segment(SPI_SEGMENT_WRITE, 0, 1)];
 
@@ -411,10 +411,7 @@ async fn invalid_chip_select_surfaces_as_not_found() {
         .unwrap();
     let mut file = open(vfs, task, "/devices/spi/spi0.1").await.unwrap();
 
-    assert_eq!(
-        file.write(&[1]).await.err(),
-        Some(Error::FileSystem(FileSystemError::NotFound))
-    );
+    assert_eq!(file.write(&[1]).await.err(), Some(IoErrorKind::NotFound));
 
     file.close(vfs).await.unwrap();
 }
@@ -430,10 +427,7 @@ async fn bus_held_by_another_master_surfaces_as_busy() {
     let mut file = open(vfs, task, "/devices/spi/spi0.0").await.unwrap();
 
     bus.external_master.store(true, Ordering::Release);
-    assert_eq!(
-        file.write(&[1]).await.err(),
-        Some(Error::FileSystem(FileSystemError::RessourceBusy))
-    );
+    assert_eq!(file.write(&[1]).await.err(), Some(IoErrorKind::WouldBlock));
     bus.external_master.store(false, Ordering::Release);
 
     assert_eq!(file.write(&[1]).await.unwrap(), 1);

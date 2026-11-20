@@ -10,9 +10,9 @@
 //!
 //! Every struct starts with a `version` field equal to [`ABI_VERSION`] and its
 //! reserved fields must be zero; otherwise the command fails with
-//! `InvalidParameter`. A channel outside `0..channels` is `InvalidParameter`,
+//! `InvalidArgument`. A channel outside `0..channels` is `InvalidArgument`,
 //! and `READ_MILLIVOLTS` on a converter without a reference voltage is
-//! `UnsupportedOperation`.
+//! `Unsupported`.
 
 use file_system::{ControlCommand, define_command};
 

@@ -1,5 +1,6 @@
 use crate::{
-    DnsQueryKind, Error, IpAddress, IpCidr, Ipv4, Ipv6, MacAddress, Port, Result, Route, WakeSignal,
+    DnsQueryKind, IoErrorKind, IpAddress, IpCidr, Ipv4, Ipv6, MacAddress, Port, ResolveError,
+    ResolveResult, Result, Route, WakeSignal,
 };
 use alloc::{boxed::Box, string::String, vec, vec::Vec};
 use core::{
@@ -219,9 +220,11 @@ impl StackInner {
     pub fn add_route(&mut self, route: Route) -> Result<()> {
         let mut result = Ok(());
 
-        self.interface
-            .routes_mut()
-            .update(|v| result = v.push(route.into_smoltcp()).map_err(|_| Error::NoFreeSlot));
+        self.interface.routes_mut().update(|v| {
+            result = v
+                .push(route.into_smoltcp())
+                .map_err(|_| IoErrorKind::NoBuffers)
+        });
 
         result
     }
@@ -248,7 +251,7 @@ impl StackInner {
 
     pub fn add_dns_server(&mut self, server: IpAddress) -> Result<()> {
         if self.dns_servers.len() >= DNS_MAX_SERVER_COUNT {
-            return Err(Error::NoFreeSlot);
+            return Err(IoErrorKind::NoBuffers);
         }
 
         self.dns_servers.push(server.into_smoltcp());
@@ -304,7 +307,7 @@ impl StackInner {
 
     pub fn add_ip_address(&mut self, cidr: IpCidr) -> Result<()> {
         if self.get_ip_addresses_count() >= IFACE_MAX_ADDR_COUNT {
-            return Err(Error::NoFreeSlot);
+            return Err(IoErrorKind::NoBuffers);
         }
 
         let mut result = Ok(());
@@ -312,7 +315,7 @@ impl StackInner {
         self.interface.update_ip_addrs(|addrs| {
             result = addrs
                 .push(cidr.into_smoltcp())
-                .map_err(|_| Error::NoFreeSlot);
+                .map_err(|_| IoErrorKind::NoBuffers);
         });
 
         result
@@ -449,7 +452,11 @@ impl StackInner {
         }
     }
 
-    pub fn start_dns_query(&mut self, name: &str, kind: DnsQueryKind) -> Result<dns::QueryHandle> {
+    pub fn start_dns_query(
+        &mut self,
+        name: &str,
+        kind: DnsQueryKind,
+    ) -> ResolveResult<dns::QueryHandle> {
         let query_type = if kind.contains(DnsQueryKind::A) {
             DnsQueryType::A
         } else if kind.contains(DnsQueryKind::Aaaa) {
@@ -461,14 +468,15 @@ impl StackInner {
         } else if kind.contains(DnsQueryKind::Soa) {
             DnsQueryType::Soa
         } else {
-            return Err(Error::UnsupportedProtocol);
+            return Err(ResolveError::UnsupportedQuery);
         };
 
         let socket_handle = self.get_dns_socket_handle();
         let query_handle = self
             .sockets
             .get_mut::<dns::Socket>(socket_handle)
-            .start_query(self.interface.context(), name, query_type)?;
+            .start_query(self.interface.context(), name, query_type)
+            .map_err(crate::error::dns_start_error)?;
 
         Ok(query_handle)
     }
@@ -477,7 +485,7 @@ impl StackInner {
         &mut self,
         query_handle: dns::QueryHandle,
         waker: Option<&Waker>,
-    ) -> Poll<Result<Vec<IpAddress>>> {
+    ) -> Poll<ResolveResult<Vec<IpAddress>>> {
         let socket_handle = self.get_dns_socket_handle();
         let socket = self.sockets.get_mut::<dns::Socket>(socket_handle);
 
@@ -488,7 +496,7 @@ impl StackInner {
                 }
                 Poll::Pending
             }
-            Err(e) => Poll::Ready(Err::<_, Error>(e.into())),
+            Err(e) => Poll::Ready(Err(crate::error::dns_result_error(e))),
             Ok(query_result) => Poll::Ready(Ok(query_result
                 .iter()
                 .map(IpAddress::from_smoltcp)
@@ -509,7 +517,7 @@ fn controller_link_state(controller: &dyn DirectCharacterDevice, fallback: bool)
         AnyByLayout::from_mutable(&mut up),
     ) {
         Ok(()) => up,
-        Err(file_system::Error::UnsupportedOperation) => fallback,
+        Err(file_system::IoErrorKind::Unsupported) => fallback,
         Err(_) => false,
     }
 }
@@ -529,7 +537,7 @@ mod link_tests {
             _: &mut [u8],
             _: file_system::Size,
         ) -> Poll<file_system::Result<usize>> {
-            Poll::Ready(Err(file_system::Error::UnsupportedOperation))
+            Poll::Ready(Err(file_system::IoErrorKind::Unsupported))
         }
         fn write(
             &self,
@@ -537,7 +545,7 @@ mod link_tests {
             _: &[u8],
             _: file_system::Size,
         ) -> Poll<file_system::Result<usize>> {
-            Poll::Ready(Err(file_system::Error::UnsupportedOperation))
+            Poll::Ready(Err(file_system::IoErrorKind::Unsupported))
         }
         fn control(
             &self,
@@ -552,7 +560,7 @@ mod link_tests {
                     Ok(())
                 }
                 Some(Err(error)) => Err(error),
-                None => Err(file_system::Error::UnsupportedOperation),
+                None => Err(file_system::IoErrorKind::Unsupported),
             })
         }
     }
@@ -585,11 +593,11 @@ mod link_tests {
         assert!(controller_link_state(&Controller(None), true));
         assert!(!controller_link_state(&Controller(None), false));
         assert!(!controller_link_state(
-            &Controller(Some(Err(file_system::Error::RessourceBusy))),
+            &Controller(Some(Err(file_system::IoErrorKind::ResourceBusy))),
             true
         ));
         assert!(!controller_link_state(
-            &Controller(Some(Err(file_system::Error::InputOutput))),
+            &Controller(Some(Err(file_system::IoErrorKind::InputOutput))),
             true
         ));
     }

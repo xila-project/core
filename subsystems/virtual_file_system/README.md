@@ -19,12 +19,12 @@ that need another task's context should open a handle for that task.
 
 Path and descriptor mutations share the owner/root authorization policy.
 Changing path ownership is root-only. Descriptor ownership changes currently
-return `UnsupportedOperation` for root and are denied for non-root callers;
+return `Unsupported` for root and are denied for non-root callers;
 use the path API for supported ownership changes. Read/write access alone never
 grants permission to change a foreign file's metadata.
 
 Synchronous descriptor mutations attempt the existing namespace and task locks
-once, returning `RessourceBusy` on contention. They do not block an executor
+once, returning `WouldBlock` on contention. They do not block an executor
 waiting for those locks. Path metadata mutations use the namespace write guard
 to serialize authorization and mutation with rename and descriptor mutations.
 Lock order is namespace, then a short task credential lookup, then backend
@@ -40,13 +40,13 @@ LittleFS cache size, released before returning.
 
 LittleFS descriptor metadata mutations have explicit limitations:
 
-- Read-only opens return `UnsupportedOperation` rather than reporting a change
+- Read-only opens return `Unsupported` rather than reporting a change
   that disappears on close.
 - A native `DUSTY` open has stale file data after another independent open's
-  commit. Its metadata mutation returns `RessourceBusy`; reopen the file.
+  commit. Its metadata mutation returns `ResourceBusy`; reopen the file.
 - An `ERRED` open returns `InputOutput`. Metadata cache changes are published to
   other opens only after a successful commit.
-- Renaming an open source file returns `RessourceBusy`; close it and retry.
+- Renaming an open source file returns `ResourceBusy`; close it and retry.
   Native LittleFS otherwise detaches those source handles during rename.
 
 Independent writer/append consistency and failing close/Drop semantics remain

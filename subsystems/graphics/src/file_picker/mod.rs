@@ -492,7 +492,7 @@ unsafe extern "C" fn callback(event: *mut lvgl::lv_event_t) {
             || ((target == state.path || target == state.keyboard)
                 && code == lvgl::lv_event_code_t_LV_EVENT_READY)
         {
-            path.map_err(|_| virtual_file_system::Error::InvalidPath)
+            path.map_err(|_| virtual_file_system::IoErrorKind::InvalidPath)
                 .and_then(|path| state.model.activate(state.vfs, &path))
                 .map(|did_navigate| {
                     navigated = did_navigate;
@@ -544,7 +544,7 @@ unsafe extern "C" fn callback(event: *mut lvgl::lv_event_t) {
                 match path {
                     Ok(path) => (path, 0),
                     Err(_) => {
-                        picker.show_result(Err(virtual_file_system::Error::InvalidPath));
+                        picker.show_result(Err(virtual_file_system::IoErrorKind::InvalidPath));
                         return;
                     }
                 }

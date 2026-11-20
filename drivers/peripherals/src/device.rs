@@ -5,8 +5,8 @@ use portable_atomic::{AtomicBool, Ordering};
 
 use alloc::boxed::Box;
 use file_system::{
-    BaseOperations, CharacterDevice, Context, ControlCommandIdentifier, Error, MountOperations,
-    Result, Size, ready,
+    BaseOperations, CharacterDevice, Context, ControlCommandIdentifier, IoErrorKind,
+    MountOperations, Result, Size, ready,
 };
 use shared::AnyByLayout;
 use synchronization::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
@@ -15,7 +15,7 @@ use synchronization::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex
 ///
 /// Every method is a single synchronous attempt. It must return promptly
 /// without waiting for hardware, because it runs on the executor. A peripheral
-/// that would have to wait returns `Error::RessourceBusy` (for example when a
+/// that would have to wait returns `IoErrorKind::WouldBlock` (for example when a
 /// UART reports `WouldBlock`), and the caller decides whether to retry. Callers
 /// do not retain buffers past the call.
 ///
@@ -40,7 +40,7 @@ pub trait PeripheralHandle: Send {
         _input: &AnyByLayout,
         _output: &mut AnyByLayout,
     ) -> Result<()> {
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     }
 }
 
@@ -51,10 +51,10 @@ struct Opening;
 /// Character device exposing a [`PeripheralHandle`] through the VFS polling contract.
 ///
 /// Opening is exclusive: while one opening is held, another `open` returns
-/// `Error::RessourceBusy`. The exclusivity is released by `close` on the
+/// `IoErrorKind::ResourceBusy`. The exclusivity is released by `close` on the
 /// opening's own context. A context created by `clone_context` does not own
 /// the device. Read, write, flush and control never return `Pending`; they run
-/// once through `ready` and return `RessourceBusy` if the handle is in use.
+/// once through `ready` and return `WouldBlock` if the handle is in use.
 /// Reads and writes ignore the absolute position because the device is a stream.
 pub struct PeripheralDevice<H> {
     opened: AtomicBool,
@@ -71,7 +71,10 @@ impl<H: PeripheralHandle> PeripheralDevice<H> {
 
     /// Runs `operation` on the handle once, without waiting for the lock.
     fn with_handle<R>(&self, operation: impl FnOnce(&mut H) -> Result<R>) -> Result<R> {
-        let mut handle = self.handle.try_lock().map_err(|_| Error::RessourceBusy)?;
+        let mut handle = self
+            .handle
+            .try_lock()
+            .map_err(|_| IoErrorKind::WouldBlock)?;
         operation(&mut handle)
     }
 }
@@ -80,7 +83,7 @@ impl<H: PeripheralHandle> BaseOperations for PeripheralDevice<H> {
     fn open(&self, context: &mut Context) -> Result<()> {
         self.opened
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .map_err(|_| Error::RessourceBusy)?;
+            .map_err(|_| IoErrorKind::ResourceBusy)?;
         context.set_private_data(Box::new(Opening));
         Ok(())
     }
@@ -167,14 +170,14 @@ mod tests {
         device.open(&mut owner).unwrap();
         assert_eq!(
             device.open(&mut Context::new_empty()),
-            Err(Error::RessourceBusy)
+            Err(IoErrorKind::ResourceBusy)
         );
 
         // Closing a context that does not own the opening keeps the device held.
         device.close(&mut clone).unwrap();
         assert_eq!(
             device.open(&mut Context::new_empty()),
-            Err(Error::RessourceBusy)
+            Err(IoErrorKind::ResourceBusy)
         );
 
         device.close(&mut owner).unwrap();

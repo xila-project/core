@@ -38,12 +38,15 @@ impl NativeFormat {
         }
     }
 
-    /// Grant every launched program a directory capability at an absolute path with
-    /// the given `XILA_RIGHT_*` bits. It becomes `XilaStartup.home`, which the SDK's
-    /// POSIX layer resolves absolute and relative paths against. Without it, programs
-    /// receive no filesystem authority beyond their standard streams. Opening the
-    /// capability must complete without suspending, like any other native ABI call
-    /// made before the program starts.
+    /// Fallback home for launches that carry none: grant the program a directory
+    /// capability at an absolute path with the given `XILA_RIGHT_*` bits. It becomes
+    /// `XilaStartup.home`, which the SDK's POSIX layer resolves absolute and relative
+    /// paths against. Without it, programs receive no filesystem authority beyond their
+    /// standard streams. Opening the capability must complete without suspending, like
+    /// any other native ABI call made before the program starts.
+    ///
+    /// Temporary: the per-launch home of the process and environment ABI (core#759)
+    /// replaces this, and the method goes away with it.
     pub const fn with_home(mut self, path: &'static str, rights: u32) -> Self {
         self.home = Some((path, rights));
         self
@@ -108,7 +111,15 @@ impl FormatHandler for NativeFormat {
                         path,
                         rights,
                     )
-                    .map_err(|_| Error::FileSystem(virtual_file_system::Error::InvalidPath))?,
+                    .map_err(|status| {
+                        // Keep the cause (not found, permission denied, ...): a status
+                        // with no I/O kind cannot come from opening a directory.
+                        Error::FileSystem(
+                            status
+                                .io_kind()
+                                .unwrap_or(virtual_file_system::IoErrorKind::InputOutput),
+                        )
+                    })?,
                 ),
                 None => None,
             };

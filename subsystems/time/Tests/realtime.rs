@@ -116,7 +116,7 @@ impl RealtimeSource for Source {
 struct Failed;
 impl RealtimeSource for Failed {
     fn read(&self) -> time::Result<RealtimeSample> {
-        Err(Error::DeviceError(file_system::Error::InternalError))
+        Err(Error::DeviceError(file_system::IoErrorKind::InputOutput))
     }
 }
 #[test]

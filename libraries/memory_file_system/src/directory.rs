@@ -1,5 +1,5 @@
 use alloc::string::String;
-use file_system::{Attributes, Entry, Error, Kind, Result, Size};
+use file_system::{Attributes, Entry, IoErrorKind, Kind, Result, Size};
 
 use crate::file_system::State;
 use crate::node::ROOT_NODE_INDEX;
@@ -28,7 +28,7 @@ impl Directory {
     fn verify_open<'a>(&self, state: &'a State) -> Result<&'a crate::node::Node> {
         let node = state.get_node_with_generation(self.node_index, self.generation)?;
         if !node.is_directory() {
-            return Err(Error::NotDirectory);
+            return Err(IoErrorKind::NotADirectory);
         }
         Ok(node)
     }
@@ -36,7 +36,7 @@ impl Directory {
     fn verify_open_mutable<'a>(&self, state: &'a mut State) -> Result<&'a mut crate::node::Node> {
         let node = state.get_node_with_generation_mutable(self.node_index, self.generation)?;
         if !node.is_directory() {
-            return Err(Error::NotDirectory);
+            return Err(IoErrorKind::NotADirectory);
         }
         Ok(node)
     }

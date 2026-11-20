@@ -215,5 +215,5 @@ pub async fn load_file(
 #[derive(Debug)]
 pub enum LoadError {
     Host(std::io::Error),
-    VirtualFileSystem(virtual_file_system::Error),
+    VirtualFileSystem(virtual_file_system::IoErrorKind),
 }

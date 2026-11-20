@@ -2,7 +2,7 @@ use core::{ffi::CStr, mem::MaybeUninit};
 
 use crate::{attributes::InternalAttributes, error::convert_result, littlefs};
 use alloc::{borrow::ToOwned, boxed::Box, ffi::CString, string::ToString};
-use file_system::{Attributes, Entry, Error, Kind, Path, PathOwned, Result, Size, Time};
+use file_system::{Attributes, Entry, IoErrorKind, Kind, Path, PathOwned, Result, Size, Time};
 
 pub struct Directory {
     directory: littlefs::lfs_dir_t,
@@ -68,7 +68,7 @@ impl Directory {
         if attributes.get_mask().is_empty() {
             Ok(())
         } else {
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         }
     }
 
@@ -141,7 +141,7 @@ impl Directory {
                 stored_attributes.modification,
                 true,
             ),
-            Err(Error::NoAttribute) => (0, Time::new(0), false),
+            Err(IoErrorKind::MissingAttribute) => (0, Time::new(0), false),
             Err(error) => return Err(error),
         };
 
@@ -166,7 +166,7 @@ impl Directory {
                 } else {
                     directory.as_str()
                 };
-                CString::new(target).map_err(|_| Error::InvalidParameter)
+                CString::new(target).map_err(|_| IoErrorKind::InvalidArgument)
             }
             ".." => {
                 let mut components = alloc::vec::Vec::new();
@@ -181,21 +181,21 @@ impl Directory {
                 }
                 components.pop();
                 if components.is_empty() {
-                    CString::new("/").map_err(|_| Error::InvalidParameter)
+                    CString::new("/").map_err(|_| IoErrorKind::InvalidArgument)
                 } else {
                     let mut parent = alloc::string::String::new();
                     for component in components {
                         parent.push('/');
                         parent.push_str(component);
                     }
-                    CString::new(parent).map_err(|_| Error::InvalidParameter)
+                    CString::new(parent).map_err(|_| IoErrorKind::InvalidArgument)
                 }
             }
             _ => {
                 let entry_path = directory
                     .join(Path::from_str(name))
-                    .ok_or(Error::InvalidPath)?;
-                CString::new(entry_path.as_str()).map_err(|_| Error::InvalidParameter)
+                    .ok_or(IoErrorKind::InvalidPath)?;
+                CString::new(entry_path.as_str()).map_err(|_| IoErrorKind::InvalidArgument)
             }
         }
     }

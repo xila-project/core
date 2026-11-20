@@ -1,7 +1,7 @@
 use crate::{GET_KIND, InterfaceKind};
 use file_system::{
-    ControlCommand, ControlCommandIdentifier, DirectBaseOperations, DirectCharacterDevice, Error,
-    MountOperations,
+    ControlCommand, ControlCommandIdentifier, DirectBaseOperations, DirectCharacterDevice,
+    IoErrorKind, MountOperations,
 };
 use shared::AnyByLayout;
 pub use smoltcp::phy::Loopback;
@@ -16,7 +16,7 @@ impl DirectBaseOperations for LoopbackControllerDevice {
         _: &mut [u8],
         _: file_system::Size,
     ) -> core::task::Poll<file_system::Result<usize>> {
-        file_system::ready(|| Err(Error::UnsupportedOperation))
+        file_system::ready(|| Err(IoErrorKind::Unsupported))
     }
 
     fn write(
@@ -25,7 +25,7 @@ impl DirectBaseOperations for LoopbackControllerDevice {
         _: &[u8],
         _: file_system::Size,
     ) -> core::task::Poll<file_system::Result<usize>> {
-        file_system::ready(|| Err(Error::UnsupportedOperation))
+        file_system::ready(|| Err(IoErrorKind::Unsupported))
     }
 
     fn control(
@@ -41,7 +41,7 @@ impl DirectBaseOperations for LoopbackControllerDevice {
                 *kind = InterfaceKind::Ethernet;
                 Ok(())
             }
-            _ => Err(Error::UnsupportedOperation),
+            _ => Err(IoErrorKind::Unsupported),
         })
     }
 }
