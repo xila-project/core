@@ -62,8 +62,8 @@ if(NOT XILA_BUILTINS_LIBRARY AND XILA_BUILTINS_COMMAND)
     RESULT_VARIABLE XILA_BUILTINS_RESULT)
   if(NOT XILA_BUILTINS_RESULT EQUAL 0 OR NOT EXISTS "${XILA_BUILTINS_FOUND}")
     message(FATAL_ERROR
-      "No compiler runtime found for @XILA_SDK_TARGET@. Install the Arm GNU toolchain "
-      "(gcc-arm-none-eabi) or pass -DXILA_BUILTINS_LIBRARY=<libgcc.a or libclang_rt.builtins.a>.")
+      "No compiler runtime found for @XILA_SDK_TARGET@. Install the target toolchain "
+      "(${XILA_BUILTINS_COMMAND}) or pass -DXILA_BUILTINS_LIBRARY=<runtime archive>.")
   endif()
   set(XILA_BUILTINS_LIBRARY "${XILA_BUILTINS_FOUND}" CACHE FILEPATH "Compiler runtime archive" FORCE)
 endif()
@@ -90,4 +90,4 @@ endif()
 # rule, not in CMAKE_EXE_LINKER_FLAGS, so that a user's own flags cannot replace them;
 # CMAKE_EXE_LINKER_FLAGS and target link options therefore take ld.lld flags (no -Wl,).
 set(CMAKE_C_LINK_EXECUTABLE
-  "${XILA_LLD} -pie --no-dynamic-linker -Bsymbolic -z max-page-size=16 --gc-sections --build-id=none --defsym=XILA_DATA_ALIGN=${XILA_DATA_ALIGNMENT} ${XILA_PRINTF_ALIASES} -T ${XILA_SDK_ROOT}/lib/xila-static-pie.ld <CMAKE_C_LINK_FLAGS> <LINK_FLAGS> ${XILA_SDK_ROOT}/lib/crt0.o <OBJECTS> -o <TARGET> -L${XILA_SDK_ROOT}/lib --start-group <LINK_LIBRARIES> -lxila_posix -lxila -lc ${XILA_BUILTINS_LIBRARY} --end-group")
+  "${XILA_LLD} -pie --no-dynamic-linker -Bsymbolic -z max-page-size=16 --gc-sections --build-id=none @XILA_LINK_FLAGS@ --defsym=XILA_DATA_ALIGN=${XILA_DATA_ALIGNMENT} ${XILA_PRINTF_ALIASES} -T ${XILA_SDK_ROOT}/lib/xila-static-pie.ld <CMAKE_C_LINK_FLAGS> <LINK_FLAGS> ${XILA_SDK_ROOT}/lib/crt0.o <OBJECTS> -o <TARGET> -L${XILA_SDK_ROOT}/lib --start-group <LINK_LIBRARIES> -lxila_posix -lxila -lc ${XILA_BUILTINS_LIBRARY} --end-group")

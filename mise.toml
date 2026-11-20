@@ -143,15 +143,19 @@ tools.uv = "{{ vars.uv_version }}"
 run = "uv run --no-project python -m unittest discover -s tools/sdk -v"
 
 [tasks."sdk:rust-example"]
-description = "Build and verify standalone Rust native ELFs, then run the Linux image through execute"
+description = "Build and verify Rust native ELFs (all targets or XILA_SDK_TARGET), running the Linux image through execute"
 tools.uv = "{{ vars.uv_version }}"
 tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal" }
 run = """
 set -eu
 rustup toolchain install {{ vars.nightly_version }} --profile minimal --component rust-src
-uv run --no-project python tools/sdk/build.py rust-example
-XILA_RUST_HELLO="$PWD/target/sdk/rust-hello/x86_64-unknown-linux-gnu/release/xila-rust-hello" \
-  cargo test --locked -p xila-executable --features native-dev --test sdk -- runs_sdk_rust_hello --ignored --exact
+uv run --no-project python tools/sdk/build.py rust-example ${XILA_SDK_TARGET:+--target="$XILA_SDK_TARGET"}
+case "${XILA_SDK_TARGET:-x86_64-unknown-linux-gnu}" in
+  x86_64-unknown-linux-gnu)
+    XILA_RUST_HELLO="$PWD/target/sdk/rust-hello/x86_64-unknown-linux-gnu/release/xila-rust-hello" \
+      cargo test --locked -p xila-executable --features native-dev --test sdk -- runs_sdk_rust_hello --ignored --exact
+    ;;
+esac
 """
 
 [tasks."test:native-loader"]

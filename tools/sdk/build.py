@@ -34,8 +34,7 @@ OUTPUT = ROOT / "target/sdk"
 
 HOST_TARGET = "x86_64-unknown-linux-gnu"
 
-# Per-target compiler configuration. Adding riscv32imac or Xtensa is a new entry (plus the
-# loader-side checks in check_elf.py): the rest of the pipeline is target-independent.
+# Per-target compiler and linker configuration for the loader's static PIE contract.
 TARGETS = {
     "x86_64-unknown-linux-gnu": {
         "triple": "x86_64-unknown-none-elf",
@@ -62,6 +61,20 @@ TARGETS = {
         # soft double helpers from the Arm GNU toolchain until the SDK builds its own.
         "builtins": ["arm-none-eabi-gcc", "-mthumb", "-mcpu=cortex-m4", "-mfpu=fpv4-sp-d16",
                      "-mfloat-abi=hard", "-print-libgcc-file-name"],
+    },
+    "riscv32imac-unknown-none-elf": {
+        "triple": "riscv32-unknown-none-elf",
+        "flags": ["-march=rv32imac", "-mabi=ilp32", "-mno-relax"],
+        "link_flags": ["--no-relax"],
+        "meson_cpu_family": "riscv32",
+        "meson_cpu": "rv32imac",
+        "processor": "riscv32",
+        "machine": "riscv32",
+        "data_alignment": 16,
+        "float_abi": "soft",
+        # Bare-metal GCC supplies the RV32 ILP32 multilib without needing newlib.
+        "builtins": ["riscv64-unknown-elf-gcc", "-march=rv32imac", "-mabi=ilp32",
+                     "-print-libgcc-file-name"],
     },
 }
 
@@ -372,6 +385,7 @@ def assemble(target, pin, install, crt0, libraries, work):
         "@XILA_CLANG_TRIPLE@": config["triple"],
         "@XILA_CMAKE_PROCESSOR@": config["processor"],
         "@XILA_ARCH_FLAGS@": ";".join(config["flags"]),
+        "@XILA_LINK_FLAGS@": " ".join(config.get("link_flags", [])),
         "@XILA_DATA_ALIGNMENT@": str(config["data_alignment"]),
         "@XILA_BUILTINS_COMMAND@": ";".join(config["builtins"] or []),
     }
@@ -489,21 +503,24 @@ def check_target(data, target):
     return check(data, config["machine"], float_abi=config["float_abi"])
 
 
-def verify_stack_protector(target, sdk):
-    """Link a program built with -fstack-protector-strong (SDK_SOURCE/sdk/test/ssp) and
-    check the image: the SDK must define __stack_chk_guard and __stack_chk_fail."""
-    build = OUTPUT / target / "example-ssp"
-    run(["cmake", "-S", SDK_SOURCE / "sdk/test/ssp", "-B", build,
-         f"-DCMAKE_TOOLCHAIN_FILE={sdk / 'cmake/xila-toolchain.cmake'}",
-         "-DCMAKE_BUILD_TYPE=MinSizeRel"])
-    run(["cmake", "--build", build])
-    image = build / "ssp.elf"
+def verify_image(image, target):
     problems = check_target(image.read_bytes(), target)
     for problem in problems:
         print(f"{image}: {problem}", file=sys.stderr)
     if problems:
         sys.exit(1)
-    print(f"{image}: stack protector program linked, ELF checks passed")
+    print(f"{image}: ELF checks passed")
+
+
+def verify_c_program(target, sdk, name, source, *options):
+    build = OUTPUT / target / f"example-{name}"
+    run(["cmake", "-S", source, "-B", build,
+         f"-DCMAKE_TOOLCHAIN_FILE={sdk / 'cmake/xila-toolchain.cmake'}",
+         "-DCMAKE_BUILD_TYPE=MinSizeRel", *options])
+    run(["cmake", "--build", build])
+    image = build / f"{name}.elf"
+    verify_image(image, target)
+    return image
 
 
 def verify_rust_crate(sdk):
@@ -548,22 +565,15 @@ def verify(args):
     target = args.target
     sdk = sdk_directory(target)
     verify_rust_crate(sdk)
-    build = OUTPUT / target / "example-hello"
-    run(["cmake", "-S", sdk / "share/xila/example/hello", "-B", build,
-         f"-DCMAKE_TOOLCHAIN_FILE={sdk / 'cmake/xila-toolchain.cmake'}",
-         "-DCMAKE_BUILD_TYPE=MinSizeRel", f"-DCMAKE_EXE_LINKER_FLAGS=-Map={build / 'hello.map'}"])
-    run(["cmake", "--build", build])
-    image = build / "hello.elf"
-    problems = check_target(image.read_bytes(), target)
-    for problem in problems:
-        print(f"{image}: {problem}", file=sys.stderr)
-    if problems:
-        sys.exit(1)
-    print(f"{image}: ELF checks passed")
-    verify_stack_protector(target, sdk)
+    map_file = OUTPUT / target / "example-hello/hello.map"
+    image = verify_c_program(target, sdk, "hello", sdk / "share/xila/example/hello",
+                             f"-DCMAKE_EXE_LINKER_FLAGS=-Map={map_file}")
+    # The probe includes the pipe and poll tests.
+    for name in ("probe", "threads", "ssp"):
+        verify_c_program(target, sdk, name, SDK_SOURCE / "sdk/test" / name)
     run([find_tool("llvm-size"), image])
     print("\nBytes by origin (map):")
-    sizes = map_sizes((build / "hello.map").read_text())
+    sizes = map_sizes(map_file.read_text())
     print(f"{'origin':<18}{'.text':>8}{'.rodata':>9}{'.data+.got':>12}{'.bss':>7}")
     for origin, sections in sorted(sizes.items()):
         data = sections.get(".data", 0) + sections.get(".got", 0)
@@ -572,17 +582,18 @@ def verify(args):
     run([find_tool("llvm-size"), "-t", "libxila_posix.a", "libxila.a", "crt0.o"], cwd=sdk / "lib")
 
 
-def rust_example(_args):
-    """Build an independent PIC sysroot for the Rust guest and verify both images."""
+def rust_example(args):
+    """Build an independent PIC sysroot for each selected Rust guest and verify its image."""
     nightly = tomllib.loads((ROOT / "mise.toml").read_text())["vars"]["nightly_version"]
     example = SDK_SOURCE / "sdk/rust/hello"
     output = OUTPUT / "rust-hello"
-    for target in (HOST_TARGET, "thumbv7em-none-eabihf"):
+    for target in (args.target,) if args.target else TARGETS:
         linker = [
             "-pie", "--no-dynamic-linker", "-Bsymbolic", "-z", "max-page-size=16",
             "--gc-sections", "--build-id=none",
             f"--defsym=XILA_DATA_ALIGN={TARGETS[target]['data_alignment']}",
             f"-T{LOADER / 'xila-static-pie.ld'}",
+            *TARGETS[target].get("link_flags", []),
         ]
         flags = [
             "-C", "relocation-model=pic",
@@ -595,12 +606,7 @@ def rust_example(_args):
              "--target", target, "--target-dir", output, "-Z", "build-std=core,alloc,compiler_builtins",
              "-Z", "build-std-features=compiler-builtins-mem"], cwd=example, env=env)
         image = output / target / "release/xila-rust-hello"
-        problems = check_target(image.read_bytes(), target)
-        for problem in problems:
-            print(f"{image}: {problem}", file=sys.stderr)
-        if problems:
-            sys.exit(1)
-        print(f"{image}: ELF checks passed")
+        verify_image(image, target)
         run([find_tool("llvm-size"), image])
         print(f"ELF file: {image.stat().st_size} bytes")
 
@@ -619,6 +625,7 @@ def main():
     verify_parser.add_argument("--target", default=HOST_TARGET, choices=sorted(TARGETS))
     verify_parser.set_defaults(function=verify)
     rust_parser = commands.add_parser("rust-example", help="build and check the Rust static PIE example")
+    rust_parser.add_argument("--target", choices=sorted(TARGETS), help="build only this target")
     rust_parser.set_defaults(function=rust_example)
     args = parser.parse_args()
     args.function(args)
