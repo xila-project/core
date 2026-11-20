@@ -3,9 +3,13 @@
  *
  *   ok     protected functions return normally; the guard was seeded from getentropy
  *   smash  overwrite the canary: the process ends with status 134 and a message
+ *   large  overwrite `argv[2]` bytes (default 256) past the buffer, over main's saved
+ *          return address and xila_main's frame with its jmp_buf: the process still ends
+ *          with status 134 and the message, without returning through those frames
  */
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 extern uintptr_t __stack_chk_guard;
@@ -37,6 +41,11 @@ int main(int argc, char **argv) {
     if (strcmp(mode, "smash") == 0) {
         fill(16 + 64);
         puts("ssp: smash returned");
+        return 3;
+    }
+    if (strcmp(mode, "large") == 0) {
+        fill(argc > 2 ? (size_t)atoi(argv[2]) : 256);
+        puts("ssp: large smash returned");
         return 3;
     }
     fprintf(stderr, "ssp: unknown scenario \"%s\"\n", mode);

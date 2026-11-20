@@ -34,6 +34,7 @@ static int grow(size_t wanted) {
 
 int xila_fd_initialize(const XilaStartup *startup) {
     xila_process.startup = startup;
+    xila_process.process = startup->process;
     if (startup->heap == NULL)
         return -1;
     if (grow(XILA_FD_INITIAL) != 0)

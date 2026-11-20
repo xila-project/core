@@ -1,5 +1,7 @@
 /* Stack protector runtime: the guard value and the failure handler that objects compiled
  * with -fstack-protector, -fstack-protector-strong or -fstack-protector-all reference.
+ * The handler ends the process through xila_process_exit, never through the longjmp that
+ * exit() uses (see __stack_chk_fail).
  *
  * picolibc's own member seeds the guard from a constructor, which the loader rejects, so
  * the SDK removes it from libc.a (DROPPED_MEMBERS in tools/sdk/build.py). This file takes
@@ -26,11 +28,25 @@ NO_PROTECTOR void xila_stack_guard_seed(void) {
     __stack_chk_guard = value & ~(uintptr_t)0xff;
 }
 
+/* Leaves without returning through, or jumping back into, any frame of the program: the
+   frames of a smashed stack hold attacker-controlled return addresses and a jmp_buf that
+   _exit()'s longjmp would trust lives in xila_main's frame on that very stack.
+   Like abort(), nothing is flushed (stream buffers may be corrupt) and no handler runs.
+   Only the process capability, which the host keeps off the stack, ends the process. */
 NO_PROTECTOR __attribute__((noreturn)) void __stack_chk_fail(void) {
     static const char message[] = "*** stack smashing detected ***\n";
-    /* The frame that detected the corruption is trusted no further than this call: write
-       straight to the host's standard error and leave with the status SIGABRT would give
-       a POSIX shell (128 + 6). */
+    /* Straight to the host's standard error, through the descriptor table on the heap. */
     (void)write(2, message, sizeof message - 1);
+    /* Copied to static storage at startup: the startup block sits on the coroutine's
+       stack, which the overflow may have reached. */
+    const XilaProcess *process = xila_process.process;
+    if (process != NULL) {
+        xila_posix_shutdown();
+        /* Status 128 + SIGABRT, what a POSIX shell reports for abort(). Does not return
+           when it can end the process: the coroutine is abandoned, not unwound. */
+        (void)xila_process_exit(process, 134);
+    }
+    /* No process capability (the host does not offer exit): the status travels through
+       the jump in _exit(), which is as far as the layer can trust the stack. */
     _exit(134);
 }

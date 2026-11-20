@@ -119,7 +119,12 @@ the ABI table (`libraries/executable/tests/sdk.rs`).
   `__stack_chk_guard` and `__stack_chk_fail`. The guard is seeded from `getentropy` by
   `xila_posix_initialize` (its lowest byte is NUL; if the host has no entropy a fixed
   value stays), before any protected function runs. On corruption the process writes
-  `*** stack smashing detected ***` to descriptor 2 and ends with status 134. An image
+  `*** stack smashing detected ***` to descriptor 2 and ends with status 134 through
+  `xila_process_exit`, like `abort`: no handler runs and no stream is flushed (the
+  buffers may be corrupt), the descriptors are closed, and the coroutine is abandoned
+  without returning through any of its frames. It does not use `_exit`'s `longjmp`,
+  whose `jmp_buf` lives on the stack that was just smashed; only a host that grants no
+  process capability falls back to `_exit(134)`. An image
   that does not use the protector does not link the file. picolibc's own member seeds the
   guard from a constructor, so it is removed from `libc.a`.
 * **Directories.** Reading a directory stream gives `d_ino` a stable nonzero 64-bit

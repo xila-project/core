@@ -28,6 +28,9 @@ struct xila_fd {
 /* Process state. Small and zero-initialized: the descriptor table lives on the process heap. */
 struct xila_process {
     const XilaStartup *startup;
+    /* startup->process, copied to static storage at startup so the stack smash handler
+       does not read it back from a stack that may have been overwritten. */
+    const XilaProcess *process;
     struct xila_fd *fds;
     uint16_t fd_count;
     char *cwd; /* NULL means "/" */

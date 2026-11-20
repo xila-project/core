@@ -3,7 +3,8 @@
  * crt0's _xila_start installs the API table and calls xila_main, which lives here so
  * that an image links the POSIX layer only when it uses it. exit() and _exit() leave
  * from any depth by jumping back to this frame: a Xila application ends by returning
- * from its entry point, never by killing the coroutine.
+ * from its entry point. The one exception is a detected stack smash, which must not
+ * trust this frame or the stack above it (stack_protector.c).
  *
  * exit() runs the registered handlers and flushes every open stream before it calls
  * _exit(); _exit() flushes nothing, as POSIX requires, and only the descriptors the
@@ -68,7 +69,7 @@ __attribute__((no_stack_protector)) int xila_posix_initialize(const XilaStartup 
 
 /* What is left after the program stopped, whichever way it did: the descriptors it left
    open and the process state. Stream buffers are not touched here (see exit()). */
-void xila_posix_shutdown(void) {
+__attribute__((no_stack_protector)) void xila_posix_shutdown(void) {
     xila_fd_close_all();
     xila_heap_release(xila_process.cwd);
     xila_process.cwd = NULL;
@@ -89,6 +90,7 @@ int32_t xila_main(const XilaStartup *startup) {
     int status = exit_status;
     xila_posix_shutdown();
     xila_process.startup = NULL;
+    xila_process.process = NULL;
     return status;
 }
 

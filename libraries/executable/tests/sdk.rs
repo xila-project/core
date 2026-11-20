@@ -306,4 +306,17 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
     assert_eq!(status, 134);
     assert_eq!(stdout, b"");
     assert_eq!(stderr, b"*** stack smashing detected ***\n");
+
+    // A larger overflow also destroys the frames above main: the saved return addresses
+    // and xila_main's jmp_buf, which _exit() would jump through (it crashes the host when
+    // the handler uses it). The handler must leave through the process capability. The
+    // sizes stay within the program's own frames, the first ~400 bytes above the buffer;
+    // beyond them lie the host's startup block and capability on the same coroutine stack.
+    for size in ["224", "320"] {
+        let (status, stdout, stderr) =
+            launch(context, parent, "/ssp", "ssp-large", &["large", size]).await;
+        assert_eq!(status, 134, "{size}");
+        assert_eq!(stdout, b"", "{size}");
+        assert_eq!(stderr, b"*** stack smashing detected ***\n", "{size}");
+    }
 }
