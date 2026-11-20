@@ -10,6 +10,8 @@ quote = { workspace = true }
 syn = { workspace = true, features = ["full", "visit", "extra-traits"] }
 
 [dev-dependencies]
+# Tests derive the catalog from the host bindings. The library takes the
+# bindings source as an argument, so no build script runs LVGL's bindgen for it.
 lvgl_rust_sys = { workspace = true }
 
 [lib]

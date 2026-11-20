@@ -119,13 +119,31 @@ it must hold that lock throughout and must not overlap another session.
 Raw calls that delete or move objects must never overlap safe views.
 Do not call raw `lv_init`, `lv_deinit`, or change object IDs.
 
+### Call executor
+
+`graphics::call` is the one service behind every way a program reaches the UI. A caller names a call by its catalog ID (`call::Function`; IDs come from `bindings_generator`'s `CallCatalog`, extensions from `0xf000`) and passes up to seven words. `call::execute(&mut State, &mut dyn Transport, &Call)` checks the call, takes the graphics lock for that one call, runs it on LVGL and writes the result back.
+
+| Piece | Owner |
+| --- | --- |
+| Graphics lock | the executor: one call holds it, nothing is held between calls |
+| Object handles | `call::State`, one per process |
+| Event queue | the window's queue; `window_pop_event` and `window_pop_pointer_event` translate to the Xila event contract (`call::EventCode`) |
+| Extension calls | the executor (IDs from `0xf000`) |
+| Argument memory | the caller's `call::Transport` |
+
+**Transport.** Only pointer, string and buffer words differ between callers. A `Transport` borrows bytes at an address, mutably or not, and a NUL-terminated string. Wasm guests pass offsets into their linear memory: `LinearMemory` translates and bounds-checks them, with a 32-bit or 64-bit word as the guest has. Native code passes host pointers, since native code is trusted. Values behind an address are little-endian. A call word is a `usize`, so a call costs no double-word arithmetic on a 32-bit target (a 64-bit guest only runs on a 64-bit host).
+
+**State.** Each process owns a `State`: the sorted array of its live handles (the ID LVGL keeps in each object's own `id` field) and a sorted side table for what LVGL borrows from the host (button maps, grid descriptors, canvas buffers). A handle from another process, or of a deleted object, fails as `InvalidHandle`. Dropping the `State` deletes everything the process still owns, under the lock; the free observer releases side data when LVGL deletes an object by itself, such as the children of a deleted parent.
+
+**The call table is generated.** `build.rs` runs `graphics_bindgen::executor` over the catalog and the ABI declaration in `graphics_bindgen::abi`, the same declaration that generates the guest bindings. The catalog is parsed from the bindings `lvgl_rust_sys` already generated for the build target (its `BINDINGS` build metadata), so building graphics runs no second LVGL bindgen pass and builds no host copy of LVGL. The output is the `Function` enum, a packed table of IDs, argument counts and result kinds, and one `match` on the call. Constructors and scalar setters and getters expand into calls of a few shared helpers; custom adapters call a named handler; everything else falls through to the handwritten match in `call/handlers.rs`. To add a call, declare it in `abi.rs` and write a handler only if no generated shape fits.
+
 ### Wasm host integration
 
-Each VM keeps its own table of handles and gives the guest indices into it,
-never raw handles, like file descriptors (see lvgl-rust's
-`host-several-clients` guide). Resolve every guest index through the table of
-the VM that sent it; an index from another VM, or of a deleted object, fails
-as `Dead`. Insert only objects the VM created beneath its own private root;
+Applications' Wasm host is a thin transport over the executor: it hands the guest's linear memory over as a `LinearMemory` and keeps one `call::State` per VM. Native executables will reach the same executor through a transport of host pointers. What follows is what the executor relies on from `lvgl-rust`.
+
+Each process keeps its own table of handles and gives the caller the IDs, never raw pointers, like file descriptors (see lvgl-rust's
+`host-several-clients` guide). Resolve every ID through the table of the process that sent it; an ID from another process, or of a deleted object, fails
+as `Dead`. Insert only objects the process created beneath its own private root;
 shared windows and display layers stay host-owned and out of the table.
 
 Install the single `Lvgl::set_free_observer(Some(callback))` (`free-observer`

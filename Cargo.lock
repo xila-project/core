@@ -2170,6 +2170,7 @@ dependencies = [
  "xila-drivers-core",
  "xila-file-system",
  "xila-graphics",
+ "xila-graphics-bindgen",
  "xila-little-fs",
  "xila-log",
  "xila-memory",

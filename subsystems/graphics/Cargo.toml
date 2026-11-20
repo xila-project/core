@@ -39,6 +39,7 @@ users = { workspace = true }
 
 
 [build-dependencies]
+graphics_bindgen = { workspace = true }
 toml = "1"
 cc = "1"
 embedded-i18n = { workspace = true, features = ["std"] }

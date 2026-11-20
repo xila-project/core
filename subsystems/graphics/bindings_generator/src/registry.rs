@@ -15,6 +15,83 @@ pub enum AutoObjectScalar {
     GetI32,
 }
 
+/// What a generated object call does with its argument words. The object is
+/// always the first word, resolved (and checked against the rule's kind)
+/// before anything else is read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ObjectOperation {
+    /// `(object)`.
+    Call,
+    /// `(object, bool)`; a word above 1 is invalid.
+    SetBool,
+    /// `(object, u8)`.
+    SetU8,
+    /// `(object, u32)`, the word within `min..=max`.
+    SetU32 { min: u32, max: u32 },
+    /// `(object, u32)`, a word made of the bits in `mask` only.
+    SetMask { mask: u32 },
+    /// `(object) -> u32`.
+    GetU32,
+    /// `(object) -> bool`, widened to a `u32` result.
+    GetBool,
+    /// `(object) -> i32`.
+    GetI32,
+    /// `(object, u32)`, at most the LVGL enumeration constant `max`.
+    SetEnum { max: &'static str },
+    /// `(object, u32)`, above `max` is a resource limit, not an invalid value.
+    SetU32Limit { max: u32 },
+    /// `(object, text)`: a string of at most the marshal constant `limit`
+    /// bytes, NUL included, which LVGL copies.
+    SetText { limit: &'static str },
+    /// `(object, min, max)`: signed words with `min < max`, both within the
+    /// range limit.
+    SetRange,
+    /// `(object, value, selector)`: a local style property.
+    SetStyle(StyleValue),
+    /// `(object) -> i32`, by the object's kind: the kind and LVGL function
+    /// pairs. Any other kind is an invalid handle.
+    GetI32ByKind(KindTable),
+    /// `(object, u32)`, at most `max`, then by the object's kind.
+    SetEnumByKind { max: u32, table: KindTable },
+    /// `(object, min, max)` as [`ObjectOperation::SetRange`], then by kind.
+    SetRangeByKind(KindTable),
+}
+
+/// The kinds a by-kind operation accepts, each with its LVGL function.
+pub type KindTable = &'static [(&'static str, &'static str)];
+
+/// How a style call's value word becomes the property's native value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StyleValue {
+    /// A 24-bit RGB word, made into an LVGL color.
+    Color,
+    /// A signed word within `min..=max`.
+    I32 { min: i32, max: i32 },
+    /// An unsigned word of at most the LVGL enumeration constant `max`.
+    Enum { max: &'static str },
+    /// The index of one of Xila's fonts.
+    Font,
+}
+
+impl ObjectOperation {
+    /// Arguments after the object, and whether the call returns a value.
+    fn shape(self) -> (usize, bool) {
+        match self {
+            Self::Call => (0, false),
+            Self::SetBool
+            | Self::SetU8
+            | Self::SetU32 { .. }
+            | Self::SetMask { .. }
+            | Self::SetEnum { .. }
+            | Self::SetU32Limit { .. }
+            | Self::SetText { .. }
+            | Self::SetEnumByKind { .. } => (1, false),
+            Self::SetRange | Self::SetRangeByKind(_) | Self::SetStyle(_) => (2, false),
+            Self::GetU32 | Self::GetBool | Self::GetI32 | Self::GetI32ByKind(_) => (0, true),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdapterPolicy {
     /// Existing handwritten dispatch arm; used until it is migrated.
@@ -23,6 +100,17 @@ pub enum AdapterPolicy {
     AutoObjectScalar(AutoObjectScalar),
     /// Generated dispatch arm calls this named handwritten adapter.
     Custom(&'static str),
+    /// Generated call on one object of an optional kind (`None`: any object).
+    /// The native function is called through a shared helper per operation.
+    Object {
+        kind: Option<&'static str>,
+        operation: ObjectOperation,
+        /// The LVGL function, when it is not the call's own name with `lv_`.
+        native: Option<&'static str>,
+    },
+    /// Generated constructor: the native `(parent) -> object` function plus the
+    /// kind the new object is registered under.
+    Create(&'static str),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -36,6 +124,29 @@ impl AdapterRule {
         Self {
             name,
             policy: AdapterPolicy::AutoObjectScalar(adapter),
+        }
+    }
+
+    pub const fn object(
+        name: &'static str,
+        kind: Option<&'static str>,
+        operation: ObjectOperation,
+        native: Option<&'static str>,
+    ) -> Self {
+        Self {
+            name,
+            policy: AdapterPolicy::Object {
+                kind,
+                operation,
+                native,
+            },
+        }
+    }
+
+    pub const fn create(name: &'static str, kind: &'static str) -> Self {
+        Self {
+            name,
+            policy: AdapterPolicy::Create(kind),
         }
     }
 
@@ -86,6 +197,41 @@ impl<'a> GraphicsRegistry<'a> {
                     .find(|call| call.name == rule.name)
                     .expect("validated supported name");
                 validate_auto_object_scalar(call, adapter)?;
+            }
+            if let AdapterPolicy::Object { operation, .. } = rule.policy {
+                let call = calls
+                    .iter()
+                    .find(|call| call.name == rule.name)
+                    .expect("validated supported name");
+                let (extra, returns) = operation.shape();
+                // A string is the one pointer argument a generated call takes:
+                // LVGL copies it, and the declaration pins its exact type.
+                let scalar = match operation {
+                    ObjectOperation::SetText { .. } => call
+                        .validate_signature(&["*mut lv_obj_t", "*const core::ffi::c_char"], None)
+                        .is_ok(),
+                    // An enumeration argument is a scalar whatever its alias.
+                    ObjectOperation::SetEnum { .. } | ObjectOperation::SetEnumByKind { .. } => {
+                        call.signature.variadic.is_none()
+                    }
+                    _ => call.generic_safe(),
+                };
+                if !scalar
+                    || call.argument_count != 1 + extra
+                    || matches!(call.signature.output, ReturnType::Type(..)) != returns
+                {
+                    return Err(GeneratorError::new(format!(
+                        "object adapter for {} does not match its signature",
+                        rule.name
+                    )));
+                }
+            }
+            if let AdapterPolicy::Create(_) = rule.policy {
+                let call = calls
+                    .iter()
+                    .find(|call| call.name == rule.name)
+                    .expect("validated supported name");
+                call.validate_signature(&["*mut lv_obj_t"], Some("*mut lv_obj_t"))?;
             }
             if let AdapterPolicy::Custom(handler) = rule.policy
                 && handler.trim().is_empty()
@@ -151,6 +297,12 @@ impl<'a> GraphicsRegistry<'a> {
                 ),
                 Some(AdapterPolicy::Custom(handler)) => {
                     (true, "custom", handler, "null", "handwritten")
+                }
+                Some(AdapterPolicy::Object { .. }) => {
+                    (true, "object", "null", "null", "scalar_no_retention")
+                }
+                Some(AdapterPolicy::Create(_)) => {
+                    (true, "create", "null", "null", "host_object_creation")
                 }
                 None => (
                     false,

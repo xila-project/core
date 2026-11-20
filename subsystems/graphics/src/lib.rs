@@ -45,6 +45,7 @@ pub use window::*;
 pub mod stubs;
 pub use logo::*;
 pub mod appearance;
+pub mod call;
 pub mod fonts;
 pub mod theme;
 
