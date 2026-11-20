@@ -293,6 +293,20 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
     assert_eq!(status, 0, "{}", String::from_utf8_lossy(&stderr));
     assert_eq!(stdout, b"probe: ok\n");
 
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../abi/application/sdk/test/threads");
+    let threads = build_sdk_program(&source, "threads", "integer");
+    install(vfs, parent, "/threads", &threads).await;
+    let (status, stdout, stderr) = launch(context, parent, "/threads", "threads", &[]).await;
+    assert_eq!(
+        status, 0,
+        "failed check at threads.c:{status}, stderr={stderr:?}"
+    );
+    assert_eq!(stdout, b"threads: ok\n");
+    for (mode, expected) in [("main-return", 29), ("worker-exit", 31)] {
+        let (status, _, stderr) = launch(context, parent, "/threads", mode, &[mode]).await;
+        assert_eq!(status, expected, "threads {mode}, stderr={stderr:?}");
+    }
+
     // A program built with -fstack-protector-strong links against the SDK, and the guard
     // is seeded from the entropy device before main runs.
     install(vfs, parent, "/ssp", &build_ssp()).await;

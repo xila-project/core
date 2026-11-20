@@ -1,18 +1,33 @@
-/* picolibc is built with -Derrno-function=__xila_errno_location and without TLS.
- *
- * errno belongs to the running coroutine. Applications run on a single coroutine today,
- * so the state is process-wide. Once the ABI exposes coroutine-local storage (core#718)
- * only xila_libc_state() changes: it will return the state kept in a stackful TLS slot.
- * strtok, rand and the other libc statics stay process-wide until then, because
- * picolibc keeps them in ordinary statics when thread-local storage is off. */
+/* The loader has no ELF TLS. Use the state in the running coroutine, with a
+ * fallback for entries run without a process driver. */
+#include <stdlib.h>
+#include <string.h>
+
 #include "internal.h"
 
-struct xila_libc_state {
-    int error;
-};
+static XilaThreadLibc fallback = {.random_state = 1};
 
-static struct xila_libc_state state;
+static XilaThreadLibc *libc_state(void) {
+    XilaThreadLibc *state = &fallback;
+    (void)xila_thread_libc(&state);
+    return state;
+}
 
-static struct xila_libc_state *xila_libc_state(void) { return &state; }
+int *__xila_errno_location(void) { return &libc_state()->error; }
 
-int *__xila_errno_location(void) { return &xila_libc_state()->error; }
+char *strtok(char *restrict string, const char *restrict delimiters) {
+    return strtok_r(string, delimiters, &libc_state()->strtok_next);
+}
+
+/* Preserve the pinned picolibc sequence, including the shared rand/random
+   seed. rand_r already keeps its state in caller-provided storage. */
+long random(void) {
+    XilaThreadLibc *state = libc_state();
+    state->random_state = state->random_state * UINT64_C(6364136223846793005) + 1;
+    return (long)((state->random_state >> 32) & UINT32_C(0x7fffffff));
+}
+
+void srandom(unsigned int seed) { libc_state()->random_state = seed; }
+
+int rand(void) { return (int)(random() & RAND_MAX); }
+void srand(unsigned int seed) { srandom(seed); }

@@ -72,7 +72,7 @@ COMMON_FLAGS = [
 ]
 
 POSIX_SOURCES = ["errno", "exit_flush", "fd", "file", "heap", "onexit", "path", "stack_protector", "startup", "status", "stderr", "stdin", "stdout",
-                 "time", "unsupported"]
+                 "time", "unsupported", "thread", "thread_keys", "thread_sync", "libc_lock"]
 
 
 def pins():
@@ -176,7 +176,8 @@ PICOLIBC_OPTIONS = {
     "picocrt-lib": "false",
     "enable-malloc": "false",
     "posix-console": "false",
-    "single-thread": "true",
+    "single-thread": "false",
+    "stdio-locking": "true",
     "stdio-exit-flush": "true",
     "tests": "false",
     "c_std": "c11",
@@ -204,8 +205,7 @@ def build_picolibc(source, target, work):
 
 # picolibc archive members the SDK removes from libc.a, by exact member name: (member,
 # targets, reason); targets is None for every target. Each holds a constructor section the
-# loader rejects, so an image that used any symbol of the member could not be loaded; a
-# program that needs one then fails at link time, by name, instead.
+# loader rejects or fallback implementations the SDK replaces.
 #   libc_stdio_bufio_exit_flush.c.o: registers the exit-time stdio flush with atexit() from
 #     a constructor, and its flush unlinks every stream from the list as it goes, so a
 #     program that called fflush(NULL) lost its later writes at exit. The POSIX layer
@@ -221,7 +221,10 @@ def build_picolibc(source, target, work):
 #     that is only reachable from bare-metal x86 start-up code the SDK does not use. Arm's
 #     member of the same name (the vector table and default handlers) has no constructor
 #     and stays.
+# The POSIX layer provides the retarget locks and the nonblocking ftrylockfile.
 DROPPED_MEMBERS = (
+    ("libc_misc_lock.c.o", None),
+    ("libc_stdio_ftrylockfile.c.o", None),
     ("libc_stdio_bufio_exit_flush.c.o", None),
     ("libc_stdlib_exitprocs.c.o", None),
     ("libc_ssp_stack_protector.c.o", None),
@@ -296,6 +299,7 @@ def compile_sdk(target, install, work):
         f"-isystem{resource_dir(target)}/include",
         f"-isystem{SDK_SOURCE / 'sdk/posix/include'}",
         f"-I{SDK_SOURCE / 'include/xila'}",
+        f"-I{SDK_SOURCE / 'include'}",
         f"-I{SDK_SOURCE / 'sdk'}",
         f"-I{SDK_SOURCE / 'sdk/posix'}",
     ]
@@ -342,6 +346,13 @@ def assemble(target, pin, install, crt0, libraries, work):
     (root / "share/xila/example/hello").mkdir(parents=True, exist_ok=True)
 
     shutil.copytree(install / "include", root / "include", dirs_exist_ok=True)
+    # Expose sched_yield without advertising the full _POSIX_THREADS option.
+    sched = root / "include/sched.h"
+    declaration_guard = "#if defined(_POSIX_THREADS) || defined(_POSIX_PRIORITY_SCHEDULING)"
+    header = sched.read_text()
+    if header.count(declaration_guard) != 1:
+        sys.exit("error: update the sched_yield declaration for this picolibc release")
+    sched.write_text(header.replace(declaration_guard, "#if 1 /* Xila provides sched_yield */"))
     shutil.copytree(SDK_SOURCE / "sdk/posix/include", root / "include", dirs_exist_ok=True)
     shutil.copy(SDK_SOURCE / "include/xila/application.h", root / "include/xila/")
     shutil.copy(SDK_SOURCE / "sdk/stubs.h", root / "include/xila/")

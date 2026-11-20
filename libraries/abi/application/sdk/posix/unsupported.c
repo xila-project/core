@@ -2,12 +2,10 @@
  * portable code can probe for them at run time. Each group names the work that
  * provides it:
  *   processes and environment (posix_spawn, waitpid, kill): core#717
- *   threads and synchronization (pthread_*):                  core#718
  *   readiness, pipes and descriptor duplication (poll, pipe): core#719
  *   sockets and name resolution: needs the startup network capability, core#717 */
 #include <sys/types.h>
 #include <poll.h>
-#include <pthread.h>
 #include <spawn.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
@@ -55,25 +53,6 @@ pid_t waitpid(pid_t pid, int *status, int options) {
     return xila_fail_errno(ENOSYS);
 }
 pid_t fork(void) { return xila_fail_errno(ENOSYS); } /* never provided: no MMU */
-
-/* ---- core#718 ---- */
-int pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*entry)(void *),
-                   void *argument) {
-    (void)thread;
-    (void)attributes;
-    (void)entry;
-    (void)argument;
-    return ENOSYS;
-}
-int pthread_join(pthread_t thread, void **result) {
-    (void)thread;
-    (void)result;
-    return ENOSYS;
-}
-int pthread_detach(pthread_t thread) {
-    (void)thread;
-    return ENOSYS;
-}
 
 /* ---- sockets: core#717 grants the network capability ---- */
 #define UNSUPPORTED_SOCKET_CALL return xila_fail_errno(ENOSYS)

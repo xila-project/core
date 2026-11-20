@@ -93,15 +93,24 @@ the ABI table (`libraries/executable/tests/sdk.rs`).
   `stderr` is unbuffered, so each write reaches the host when it is made. `printf` and `scanf` are integer-only by default;
   configure with `-DXILA_PRINTF_FORMAT=double` (or `float`, `long-long`, `minimal`)
   to link picolibc's other variants. Floating point costs several KB of flash.
-* **errno and libc state.** picolibc is built with `-Dthread-local-storage=false
-  -Derrno-function=__xila_errno_location`. There is one coroutine per application
-  today, so `errno` is process-wide; `__xila_errno_location` is the only function to
-  change when the ABI exposes coroutine-local storage (core#718). `strtok`, `rand`
-  and the other libc statics stay process-wide until then.
-* **Exit.** `exit` runs the `atexit`, `on_exit` and `__cxa_atexit` handlers in reverse
-  order, then `fflush(NULL)`, which flushes every `FILE` picolibc tracked
-  (`stdio-exit-flush`) and `stdout` and `stderr`, then calls `_exit`. `_exit` jumps back
-  to `xila_main`, which closes the descriptors and returns the status. picolibc's own
+* **Coroutine-local libc state.** The SDK keeps `errno`, `strtok` and the
+  `rand`/`random` seed in the calling coroutine. Other picolibc state that
+  depends on ELF TLS, including `rand48`, `gmtime` and `localtime` result
+  buffers and the implicit multibyte conversion state, remains process-wide.
+  Use the reentrant variants or caller-supplied state when these calls span
+  yields. Picolibc is built with `single-thread=false` and `stdio-locking=true`.
+  Its global and per-stream locks are ABI mutexes. ELF TLS remains disabled.
+  Applications serialize descriptor operations that share an underlying handle,
+  changes to the working directory, and `fflush(NULL)` against open and close
+  of streams.
+* **Exit.** With no live workers, `exit` runs the `atexit`, `on_exit` and
+  `__cxa_atexit` handlers in reverse order, then `fflush(NULL)`, then `_exit`.
+  `_exit` jumps back to `xila_main`, which closes descriptors and returns.
+  With live workers, both calls use `xila_process_exit` to terminate the process
+  immediately. They skip C cleanup because a worker can hold a lock needed by
+  the flush or descriptor sweep. Join workers before exit when the application
+  needs those handlers or flushes. See the ABI README for resource lifetimes.
+  Picolibc's own
   exit-time machinery is replaced because it cannot run here: its handler table runs from
   a `.fini_array` entry and its stdio flush registers itself from a constructor, and
   that flush also forgot each stream it flushed, so a program that called `fflush(NULL)`
@@ -148,12 +157,20 @@ descriptor), `lseek`, `fsync`, `fdatasync`, `ftruncate`, `fstat`, `stat`, `lstat
 signals), `time`, `gettimeofday`, `getentropy`, `getrandom`, the `malloc` family, C
 `stdio`, `exit`, `_exit` and `abort`. Mode bits passed to `open` and `mkdir` are ignored.
 
+The SDK provides `pthread_create`, `pthread_join`, `pthread_detach`, `pthread_self`,
+`pthread_equal`, stack and detach attributes, TLS keys with up to four destructor
+passes on normal worker return, plain and recursive mutexes, condition variables
+including timed waits, and `sched_yield`. Threads use the process's single
+executor, and only the creator can join a worker. Blocking calls let peers run.
+The default condition clock is `CLOCK_REALTIME`; choose `CLOCK_MONOTONIC` with
+`pthread_condattr_setclock` when UTC is unavailable. There is no `pthread_cancel`
+or `pthread_exit` in this subset. Return from the entry function to end a worker.
+
 Return `ENOSYS`, until the ABI slots they need exist:
 
 | Calls | Waiting for |
 |---|---|
 | `posix_spawn`, `waitpid`, environment, user and process ids | core#717 (process and environment capabilities) |
-| `pthread_create`, `pthread_join`, `pthread_detach` (no mutexes or condition variables are declared) | core#718 (threads, coroutine TLS, synchronization) |
 | `poll`, `pipe`, `dup`, `dup2` | core#719 (readiness, pipes, descriptor operations) |
 | `socket`, `connect`, `bind`, `listen`, `accept`, `send*`, `recv*`, `shutdown` | the network capability in the startup structure (core#717); DNS (`getaddrinfo`) is not declared |
 
