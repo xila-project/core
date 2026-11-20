@@ -59,6 +59,10 @@ pub(crate) struct Resources {
 /// once a run has begun: the allocation that holds it stays where it is until the
 /// run has ended for good. Building it, and moving it into that allocation, are
 /// free to move it, because nothing points into it yet.
+///
+/// It owns the arguments and streams until a run starts. A loader that stops the state
+/// from being dropped with its allocation, to leave it alone after a cancellation, must
+/// still drop it when the run never starts: nothing else holds those streams.
 pub struct HostState {
     startup: XilaStartup,
     process: Option<Process>,

@@ -378,3 +378,42 @@ async fn native_process_spawns_waits_and_exits_through_the_host() {
         "host"
     );
 }
+
+/// A program that never starts must still release its arguments and startup streams
+/// (#775): the host state sits in a `ManuallyDrop` the moment it is built, so only the
+/// allocation's owner can drop it when the coroutine entry never ran. Here the spawn
+/// future is dropped before its first poll, as when a caller gives up or a spawn is
+/// refused. Exhausting the allocator at the allocation itself cannot be injected: that
+/// path drops the same state, and is checked by inspection only.
+#[test]
+fn dropped_spawn_future_releases_the_startup_arguments() {
+    let manager: &'static task::Manager = Box::leak(Box::new(task::Manager::new()));
+    let bytes = build_fixture("xila-unstarted.elf", "");
+    let before = testing_support::MemoryManager::thread_allocations();
+    let image = LoadedImage::load(&bytes, &Mmap, 32 * 1024).expect("load");
+    let stack = stackful::Stack::new(16 * 1024);
+    let arguments = vec![
+        String::from_utf8(vec![b'a'; 4000]).unwrap(),
+        String::from("second"),
+    ];
+    let spawned = unsafe {
+        image.spawn(
+            manager,
+            task::Manager::ROOT_TASK_IDENTIFIER,
+            "unstarted",
+            stack,
+            native_loader::Startup {
+                arguments,
+                ..Default::default()
+            },
+            |status| status,
+        )
+    }
+    .expect("the process state allocates");
+    // Never polled: the task never starts, and the future owns everything.
+    drop(spawned);
+    let net = testing_support::MemoryManager::thread_allocations()
+        .since(before)
+        .net_bytes();
+    assert_eq!(net, 0, "dropping an unpolled spawn leaked {net} bytes");
+}
