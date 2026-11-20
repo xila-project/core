@@ -80,12 +80,19 @@ int openat(int dirfd, const char *path, int flags, ...) {
     return fd;
 }
 
-int open(const char *path, int flags, ...) { return openat(AT_FDCWD, path, flags); }
-
-int creat(const char *path, mode_t mode) {
-    (void)mode;
-    return open(path, O_WRONLY | O_CREAT | O_TRUNC);
+/* The mode of a created file is accepted and ignored: Core's open has no mode argument. */
+int open(const char *path, int flags, ...) {
+    mode_t mode = 0;
+    if (flags & O_CREAT) {
+        va_list arguments;
+        va_start(arguments, flags);
+        mode = (mode_t)va_arg(arguments, int);
+        va_end(arguments);
+    }
+    return openat(AT_FDCWD, path, flags, mode);
 }
+
+int creat(const char *path, mode_t mode) { return open(path, O_WRONLY | O_CREAT | O_TRUNC, mode); }
 
 int close(int fd) {
     struct xila_fd *entry = xila_fd_get(fd);
