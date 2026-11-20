@@ -13,7 +13,7 @@
 //! | `0x03` | `SLEEP`            | Write     | `()`  | `()`   | Enter a low-power state it resumes from. |
 //!
 //! The exit status is meaningful only to hosted targets (process exit code).
-//! An unsupported action fails with `UnsupportedOperation`; a successful
+//! An unsupported action fails with `Unsupported`; a successful
 //! action may never return. Payloads are plain bytes.
 
 use file_system::{ControlCommand, define_command};

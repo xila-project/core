@@ -3,7 +3,7 @@ use alloc::{string::String, vec::Vec};
 use file_system::{AccessFlags, Entry, Kind, Path};
 use task::TaskIdentifier;
 use virtual_file_system::{
-    Error, Result, SynchronousDirectory, SynchronousFile, VirtualFileSystem,
+    IoErrorKind, Result, SynchronousDirectory, SynchronousFile, VirtualFileSystem,
 };
 
 pub const PAGE_SIZE: usize = 16;
@@ -11,7 +11,7 @@ pub const MAX_PATH: usize = 1023;
 
 pub fn normalize(path: &str) -> Result<String> {
     if !path.starts_with('/') || path.len() > MAX_PATH || path.as_bytes().contains(&0) {
-        return Err(Error::InvalidPath);
+        return Err(IoErrorKind::InvalidPath);
     }
     // VFS resolves dot components, symlinks, and trailing-slash directory
     // requirements. Rewriting them here can silently select a different file.
@@ -113,7 +113,7 @@ impl Model {
     }
     pub fn navigate(&mut self, browser: &impl Browser, path: &str, offset: usize) -> Result<()> {
         if self.status != FilePickerStatus::Pending {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         let path = normalize(path)?;
         let page = browser.page(self.caller, &path, offset)?;
@@ -140,7 +140,7 @@ impl Model {
 
     pub fn confirm(&mut self, browser: &impl Browser, path: &str) -> Result<()> {
         if self.status != FilePickerStatus::Pending {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         let path = normalize(path)?;
         match (self.mode, browser.kind(self.caller, &path)) {
@@ -150,15 +150,15 @@ impl Model {
             (FilePickerMode::OpenFile | FilePickerMode::SaveFile, Ok(Kind::File)) => {
                 browser.file_access(self.caller, &path, self.mode == FilePickerMode::SaveFile)?;
             }
-            (FilePickerMode::SaveFile, Err(Error::FileSystem(file_system::Error::NotFound))) => {
+            (FilePickerMode::SaveFile, Err(file_system::IoErrorKind::NotFound)) => {
                 if browser.kind(self.caller, parent(&path))? != Kind::Directory {
-                    return Err(Error::NotADirectory);
+                    return Err(IoErrorKind::NotADirectory);
                 }
                 browser.create_access(self.caller, &path)?;
             }
             (_, Err(error)) => return Err(error),
-            (FilePickerMode::Directory, _) => return Err(Error::NotADirectory),
-            _ => return Err(Error::NotAFile),
+            (FilePickerMode::Directory, _) => return Err(IoErrorKind::NotADirectory),
+            _ => return Err(IoErrorKind::IsADirectory),
         }
         self.selected = Some(path);
         self.status = FilePickerStatus::Selected;
@@ -212,14 +212,14 @@ mod behavior_tests {
             match path {
                 "/" => Ok(Kind::Directory),
                 "/file" => Ok(Kind::File),
-                "/missing" => Err(Error::FileSystem(file_system::Error::NotFound)),
-                _ => Err(Error::PermissionDenied),
+                "/missing" => Err(file_system::IoErrorKind::NotFound),
+                _ => Err(IoErrorKind::PermissionDenied),
             }
         }
         fn page(&self, task: TaskIdentifier, path: &str, offset: usize) -> Result<Page> {
             self.calls.borrow_mut().push(task);
             if path != "/" {
-                return Err(Error::PermissionDenied);
+                return Err(IoErrorKind::PermissionDenied);
             }
             let mut entries = Vec::new();
             for i in offset..core::cmp::min(offset + PAGE_SIZE, 33) {
@@ -254,7 +254,7 @@ mod behavior_tests {
         assert!(!model.page.more);
         assert_eq!(
             model.navigate(&backend, "/private", 0),
-            Err(Error::PermissionDenied)
+            Err(IoErrorKind::PermissionDenied)
         );
         assert_eq!(model.directory, "/");
         assert_eq!(model.offset, 32);

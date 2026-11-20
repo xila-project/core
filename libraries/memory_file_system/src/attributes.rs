@@ -1,4 +1,6 @@
-use file_system::{AttributeFlags, Attributes, Error, Inode, Kind, Permissions, Result, Time};
+use file_system::{
+    AttributeFlags, Attributes, Inode, IoErrorKind, Kind, Permissions, Result, Time,
+};
 use users::{GroupIdentifier, UserIdentifier};
 
 /// All attribute fields stored in RAM per node.
@@ -14,7 +16,7 @@ pub(crate) fn validate_attribute_mask(mask: AttributeFlags) -> Result<()> {
     if mask.difference(SUPPORTED_ATTRIBUTE_FLAGS).is_empty() {
         Ok(())
     } else {
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     }
 }
 
@@ -100,10 +102,10 @@ impl NodeAttributes {
 
         if let Some(kind) = attributes.get_kind() {
             if self.kind == Kind::Directory && *kind != Kind::Directory {
-                return Err(Error::IsDirectory);
+                return Err(IoErrorKind::IsADirectory);
             }
             if self.kind != Kind::Directory && *kind == Kind::Directory {
-                return Err(Error::InvalidParameter);
+                return Err(IoErrorKind::InvalidArgument);
             }
         }
 

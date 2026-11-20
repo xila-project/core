@@ -1,7 +1,7 @@
 use drivers_neural_network::{
     Backend, COMPUTE, NeuralNetworkDevice, QuantizationEntry, TensorInfo,
 };
-use file_system::{BaseOperations, Context, ControlCommand, Error, Result};
+use file_system::{BaseOperations, Context, ControlCommand, IoErrorKind, Result};
 
 struct Model(u32);
 struct Execution {
@@ -29,7 +29,7 @@ impl Backend for Model {
     }
     fn input_info(&self, index: usize) -> Result<TensorInfo> {
         if index != 0 {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         Ok(TensorInfo {
             data_type: 3,
@@ -44,10 +44,10 @@ impl Backend for Model {
         self.input_info(index)
     }
     fn input_quantization(&self, _: usize, _: usize) -> Result<QuantizationEntry> {
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     }
     fn output_quantization(&self, _: usize, _: usize) -> Result<QuantizationEntry> {
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     }
     fn input<'a>(&self, e: &'a mut Execution, index: usize) -> Result<&'a mut [u8]> {
         self.input_info(index)?;
@@ -62,7 +62,7 @@ impl Backend for Model {
             *v = v.wrapping_add(1);
         }
         if self.0 == 99 {
-            return Err(Error::InputOutput);
+            return Err(IoErrorKind::InputOutput);
         }
         Ok(())
     }
@@ -86,10 +86,13 @@ fn portable_adapter_owns_sessions_and_consumes_inputs() {
     device.open(&mut second).unwrap();
     assert_eq!(
         other.write_sync(&mut first, &[0], 0),
-        Err(Error::InvalidContext)
+        Err(IoErrorKind::BadDescriptor)
     );
     assert_eq!(device.write_sync(&mut first, &[1, 2], 0), Ok(2));
-    assert_eq!(compute(&device, &mut first), Err(Error::InvalidParameter));
+    assert_eq!(
+        compute(&device, &mut first),
+        Err(IoErrorKind::InvalidArgument)
+    );
     assert_eq!(device.write_sync(&mut first, &[3, 4], 2), Ok(2));
     compute(&device, &mut first).unwrap();
     let mut result = [0; 4];
@@ -97,12 +100,15 @@ fn portable_adapter_owns_sessions_and_consumes_inputs() {
     assert_eq!(result, [2, 3, 4, 5]);
     assert_eq!(
         device.read_sync(&mut second, &mut result, 0),
-        Err(Error::NotInitialized)
+        Err(IoErrorKind::DeviceUnavailable)
     );
-    assert_eq!(compute(&device, &mut first), Err(Error::InvalidParameter));
+    assert_eq!(
+        compute(&device, &mut first),
+        Err(IoErrorKind::InvalidArgument)
+    );
     assert_eq!(
         device.read_sync(&mut first, &mut result, 0),
-        Err(Error::NotInitialized)
+        Err(IoErrorKind::DeviceUnavailable)
     );
     device.close(&mut first).unwrap();
     device.close(&mut second).unwrap();
@@ -114,11 +120,14 @@ fn failed_backend_execution_invalidates_results_and_consumes_input() {
     let mut state = Context::new_empty();
     device.open(&mut state).unwrap();
     device.write_sync(&mut state, &[1, 2, 3, 4], 0).unwrap();
-    assert_eq!(compute(&device, &mut state), Err(Error::InputOutput));
+    assert_eq!(compute(&device, &mut state), Err(IoErrorKind::InputOutput));
     assert_eq!(
         device.read_sync(&mut state, &mut [0; 4], 0),
-        Err(Error::NotInitialized)
+        Err(IoErrorKind::DeviceUnavailable)
     );
-    assert_eq!(compute(&device, &mut state), Err(Error::InvalidParameter));
+    assert_eq!(
+        compute(&device, &mut state),
+        Err(IoErrorKind::InvalidArgument)
+    );
     device.close(&mut state).unwrap();
 }

@@ -31,9 +31,9 @@ impl State {
     }
     fn attempt(&self) -> Result<()> {
         match self.mode.load(Ordering::SeqCst) {
-            0 => Err(file_system::Error::RessourceBusy),
+            0 => Err(file_system::IoErrorKind::WouldBlock),
             1 => Ok(()),
-            _ => Err(file_system::Error::InputOutput),
+            _ => Err(file_system::IoErrorKind::InputOutput),
         }
     }
     fn poll(&self, cx: &mut TaskContext<'_>) -> Poll<Result<()>> {
@@ -182,9 +182,7 @@ async fn flush_and_control_preserve_private_state_and_cleanup_on_all_exits() {
     state.signal(2); // Model a terminal device error/removal notification.
     assert_eq!(
         file.flush().await,
-        Err(virtual_file_system::Error::FileSystem(
-            file_system::Error::InputOutput
-        ))
+        Err(file_system::IoErrorKind::InputOutput)
     );
     assert_eq!(
         state.cleanup[Operation::Flush as usize].load(Ordering::SeqCst),
@@ -195,9 +193,7 @@ async fn flush_and_control_preserve_private_state_and_cleanup_on_all_exits() {
 #[task::test]
 async fn nonblocking_flush_and_control_cancel_pending_without_retry() {
     let (state, mut file) = device(StateFlags::NonBlocking).await;
-    let busy = Err(virtual_file_system::Error::FileSystem(
-        file_system::Error::RessourceBusy,
-    ));
+    let busy = Err(file_system::IoErrorKind::WouldBlock);
     assert_eq!(file.flush().await, busy);
     assert_eq!(file.control(WAIT_COMMAND, &5).await, busy.map(|_| 0));
     assert!(state.waker.lock().unwrap().is_none());
@@ -219,9 +215,7 @@ async fn an_explicit_busy_error_is_ready_and_never_retried() {
     let mut read = pin!(file.read(&mut byte));
     assert_eq!(
         read.as_mut().poll(&mut cx),
-        Poll::Ready(Err(virtual_file_system::Error::FileSystem(
-            file_system::Error::RessourceBusy
-        )))
+        Poll::Ready(Err(file_system::IoErrorKind::WouldBlock))
     );
     assert_eq!(
         state.cleanup[Operation::Read as usize].load(Ordering::SeqCst),

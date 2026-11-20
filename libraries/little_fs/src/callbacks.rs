@@ -74,7 +74,7 @@ pub unsafe extern "C" fn erase_callback(
     match context.device.erase(position, block_size as u64) {
         Ok(()) => return 0,
         // Rewritable storage has no erase: clear the block instead.
-        Err(file_system::Error::UnsupportedOperation) => (),
+        Err(file_system::IoErrorKind::Unsupported) => (),
         Err(_) => return littlefs::lfs_error_LFS_ERR_IO,
     }
 
@@ -195,7 +195,7 @@ mod tests {
                     self.erases.fetch_add(1, Ordering::SeqCst);
                     Ok(())
                 }
-                _ => Err(file_system::Error::UnsupportedOperation),
+                _ => Err(file_system::IoErrorKind::Unsupported),
             })
         }
     }

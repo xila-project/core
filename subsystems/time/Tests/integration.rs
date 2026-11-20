@@ -39,7 +39,9 @@ struct WallClock {
 impl time::RealtimeSource for WallClock {
     fn read(&self) -> time::Result<time::RealtimeSample> {
         if self.failed.load(Ordering::Relaxed) {
-            return Err(time::Error::DeviceError(file_system::Error::InternalError));
+            return Err(time::Error::DeviceError(
+                file_system::IoErrorKind::InputOutput,
+            ));
         }
         Ok(time::RealtimeSample {
             timestamp: Duration::from_secs(self.seconds.load(Ordering::Relaxed)).into(),

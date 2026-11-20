@@ -4,7 +4,7 @@
 //! bytes. Volume is `0..=100` percent, applied when rendering. [`STOP`] pauses
 //! on the next callback and retains queued PCM.
 
-use file_system::{ControlCommand, Error, Result, define_command};
+use file_system::{ControlCommand, IoErrorKind, Result, define_command};
 
 use crate::kind;
 
@@ -33,7 +33,7 @@ impl SampleFormat {
 }
 
 impl TryFrom<u8> for SampleFormat {
-    type Error = Error;
+    type Error = IoErrorKind;
 
     fn try_from(value: u8) -> Result<Self> {
         match value {
@@ -42,7 +42,7 @@ impl TryFrom<u8> for SampleFormat {
             2 => Ok(Self::I24),
             3 => Ok(Self::I32),
             4 => Ok(Self::F32),
-            _ => Err(Error::InvalidParameter),
+            _ => Err(IoErrorKind::InvalidArgument),
         }
     }
 }
@@ -76,7 +76,7 @@ impl Configuration {
 
     pub fn validate(&self) -> Result<()> {
         if self.sample_rate == 0 || !(1..=8).contains(&self.channels) || self.reserved != [0; 2] {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         self.sample_format()?;
         Ok(())

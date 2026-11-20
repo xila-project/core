@@ -1842,6 +1842,7 @@ dependencies = [
  "smoltcp",
  "syn 3.0.10",
  "xila-file-system",
+ "xila-io-error",
  "xila-network",
  "xila-stackful",
  "xila-synchronization",
@@ -2013,10 +2014,10 @@ name = "xila-file-system"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.13.2",
- "embedded-i18n",
  "embedded-io-async",
  "mbrman",
  "xila-drivers-core",
+ "xila-io-error",
  "xila-shared",
  "xila-synchronization",
  "xila-task",
@@ -2077,6 +2078,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.10",
+]
+
+[[package]]
+name = "xila-io-error"
+version = "0.1.0"
+dependencies = [
+ "embedded-i18n",
+ "embedded-io",
 ]
 
 [[package]]
@@ -2158,7 +2167,6 @@ dependencies = [
  "bitflags 2.13.2",
  "embassy-futures",
  "embassy-time",
- "embedded-i18n",
  "embedded-io-async",
  "heapless",
  "smoltcp",
@@ -2316,7 +2324,6 @@ dependencies = [
 name = "xila-virtual-file-system"
 version = "0.1.0"
 dependencies = [
- "embedded-i18n",
  "embedded-io-async",
  "portable-atomic",
  "xila-drivers-core",

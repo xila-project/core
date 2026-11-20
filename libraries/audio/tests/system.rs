@@ -1,5 +1,5 @@
 use audio::{AudioSystem, Configuration, SampleFormat};
-use file_system::Error;
+use file_system::IoErrorKind;
 use std::{
     alloc::{GlobalAlloc, Layout, System as NativeAllocator},
     cell::Cell,
@@ -45,7 +45,10 @@ fn stream_slots_are_bounded_and_reused_without_old_pcm() {
     let system = core::pin::pin!(System::new().unwrap());
     let first = system.open_stream().unwrap();
     let second = system.open_stream().unwrap();
-    assert!(matches!(system.open_stream(), Err(Error::RessourceBusy)));
+    assert!(matches!(
+        system.open_stream(),
+        Err(IoErrorKind::ResourceBusy)
+    ));
     assert_eq!(first.configuration(), configuration());
     assert_eq!(first.write(&[0; 8]), Ok(8));
     drop(first);
@@ -58,7 +61,7 @@ fn stream_slots_are_bounded_and_reused_without_old_pcm() {
 fn writes_are_partial_whole_frames_and_reject_incomplete_frames() {
     let system = core::pin::pin!(System::new().unwrap());
     let stream = system.open_stream().unwrap();
-    assert_eq!(stream.write(&[1; 7]), Err(Error::InvalidParameter));
+    assert_eq!(stream.write(&[1; 7]), Err(IoErrorKind::InvalidArgument));
     assert_eq!(stream.writable(), 32);
     assert_eq!(stream.write(&[1; 24]), Ok(24));
     assert_eq!(stream.write(&[2; 24]), Ok(8));
@@ -82,7 +85,7 @@ fn outputs_are_bounded_and_reused_with_empty_consumers() {
     let second = system.as_ref().open_output().unwrap();
     assert!(matches!(
         system.as_ref().open_output(),
-        Err(Error::RessourceBusy)
+        Err(IoErrorKind::ResourceBusy)
     ));
     assert_eq!(first.configuration(), configuration());
     assert_eq!(first.with_consumer(|consumer| consumer.available()), 0);
@@ -136,9 +139,12 @@ fn stream_and_master_gain_are_combined_and_reset_on_reuse() {
     assert_eq!(first.volume(), Ok(100));
     first.set_volume(50).unwrap();
     assert_eq!(first.volume(), Ok(50));
-    assert_eq!(first.set_volume(101), Err(Error::InvalidParameter));
+    assert_eq!(first.set_volume(101), Err(IoErrorKind::InvalidArgument));
     system.set_master_volume(50).unwrap();
-    assert_eq!(system.set_master_volume(101), Err(Error::InvalidParameter));
+    assert_eq!(
+        system.set_master_volume(101),
+        Err(IoErrorKind::InvalidArgument)
+    );
     first.write(&pcm(&[1.0; 4])).unwrap();
     second.write(&pcm(&[0.5; 4])).unwrap();
     first.start().unwrap();
@@ -157,7 +163,7 @@ fn stopped_and_empty_streams_are_silent_and_stop_retains_pcm() {
     let stream = system.open_stream().unwrap();
     let mut output = system.as_ref().open_output().unwrap();
     stream.write(&pcm(&[0.25, -0.25])).unwrap();
-    assert_eq!(stream.flush(), Err(Error::RessourceBusy));
+    assert_eq!(stream.flush(), Err(IoErrorKind::WouldBlock));
     let mut bytes = [99; 16];
     system.as_ref().mix_next_block().unwrap();
     output.with_consumer(|consumer| consumer.read(&mut bytes));
@@ -266,7 +272,10 @@ fn static_output_can_transfer_its_consumer_to_an_owning_platform_adapter() {
     let system = core::pin::Pin::as_ref(system);
     let mut consumer = system.open_output().unwrap().into_consumer();
     let other = system.open_output().unwrap();
-    assert!(matches!(system.open_output(), Err(Error::RessourceBusy)));
+    assert!(matches!(
+        system.open_output(),
+        Err(IoErrorKind::ResourceBusy)
+    ));
     system.mix_next_block().unwrap();
     let mut bytes = [99; 16];
     assert_eq!(consumer.read(&mut bytes), 16);
@@ -286,10 +295,16 @@ fn static_output_reservation_releases_only_after_consumer_drop_and_lease_drop() 
                 .into_consumer_with_reservation()
         };
         let second = system.open_output().unwrap();
-        assert!(matches!(system.open_output(), Err(Error::RessourceBusy)));
+        assert!(matches!(
+            system.open_output(),
+            Err(IoErrorKind::ResourceBusy)
+        ));
         (reservation, second)
     };
-    assert!(matches!(system.open_output(), Err(Error::RessourceBusy)));
+    assert!(matches!(
+        system.open_output(),
+        Err(IoErrorKind::ResourceBusy)
+    ));
     drop(reservation);
     let third = system.open_output().unwrap();
     drop((second, third));
@@ -324,7 +339,7 @@ fn forgotten_output_keeps_its_pinned_slot_reserved() {
     let _remaining = system.as_ref().open_output().unwrap();
     assert!(matches!(
         system.as_ref().open_output(),
-        Err(Error::RessourceBusy)
+        Err(IoErrorKind::ResourceBusy)
     ));
     for _ in 0..10 {
         system.as_ref().mix_next_block().unwrap();

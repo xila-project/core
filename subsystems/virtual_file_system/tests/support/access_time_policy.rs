@@ -2,7 +2,7 @@ use super::*;
 use file_system::{DirectBaseOperations, DirectBlockDevice, MountOperations, Permissions, Size};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use users::{GroupIdentifier, UserIdentifier};
-use virtual_file_system::{AccessTimePolicy, Directory, Error, MountOptions};
+use virtual_file_system::{AccessTimePolicy, Directory, IoErrorKind, MountOptions};
 
 struct CountingDevice {
     inner: &'static MemoryDevice<512>,
@@ -473,7 +473,7 @@ async fn identical_metadata_writes_are_skipped_without_changing_errors() {
     // Permission checks and handle ownership error behaviour remain unchanged.
     assert_eq!(
         file.set_owner(Some(UserIdentifier::ROOT), None).await,
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     );
     file.close(virtual_file_system).await.unwrap();
 
@@ -492,6 +492,6 @@ async fn identical_metadata_writes_are_skipped_without_changing_errors() {
         virtual_file_system
             .set_permissions(task, "/file", Permissions::ALL_FULL)
             .await,
-        Err(Error::PermissionDenied)
+        Err(IoErrorKind::PermissionDenied)
     );
 }

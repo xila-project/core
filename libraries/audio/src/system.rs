@@ -5,7 +5,7 @@ use core::{
     ops::{Deref, DerefMut},
     pin::Pin,
 };
-use file_system::{Error, Result};
+use file_system::{IoErrorKind, Result};
 use nanoaudio::{Consumer, Mixer, Producer, RingBuffer, Volume};
 use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -33,7 +33,7 @@ impl<T> TryMutex<T> {
     fn lock(&self) -> Result<Guard<'_, T>> {
         self.locked
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .map_err(|_| Error::RessourceBusy)?;
+            .map_err(|_| IoErrorKind::WouldBlock)?;
         Ok(Guard(self))
     }
 }
@@ -93,7 +93,7 @@ unsafe impl<const N: usize> Sync for OutputSlot<N> {}
 /// for local storage or `alloc::boxed::Box::pin` for an owned platform service.
 ///
 /// All storage is inline. Writes, controls, registration and mixing return
-/// [`Error::RessourceBusy`] immediately on contention; no operation waits or spins.
+/// [`IoErrorKind::WouldBlock`] immediately on contention; no operation waits or spins.
 /// Output consumption never takes the core lock.
 ///
 /// ```compile_fail
@@ -125,16 +125,18 @@ impl<const S: usize, const B: usize, const F: usize, const O: usize, const Q: us
     AudioSystem<S, B, F, O, Q>
 {
     /// Creates empty, paused 48 kHz stereo F32 streams without allocation.
-    /// Invalid const capacities return `InvalidParameter`.
+    /// Invalid const capacities return `InvalidArgument`.
     pub fn new() -> Result<Self> {
-        let block_bytes = F.checked_mul(FRAME_BYTES).ok_or(Error::InvalidParameter)?;
+        let block_bytes = F
+            .checked_mul(FRAME_BYTES)
+            .ok_or(IoErrorKind::InvalidArgument)?;
         if B == 0
             || !B.is_multiple_of(FRAME_BYTES)
             || F == 0
             || Q < block_bytes
             || !Q.is_multiple_of(FRAME_BYTES)
         {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         Ok(Self {
             _pinned: PhantomPinned,
@@ -155,7 +157,7 @@ impl<const S: usize, const B: usize, const F: usize, const O: usize, const Q: us
     /// Sets the master gain, from 0 to 100 percent.
     pub fn set_master_volume(&self, volume: u8) -> Result<()> {
         if volume > 100 {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         self.streams
             .lock()?
@@ -208,7 +210,7 @@ impl<const S: usize, const B: usize, const F: usize, const O: usize, const Q: us
                         &stream.bytes[stream.read..stream.read + frame_size],
                         format,
                     )
-                    .map_err(|_| Error::InvalidParameter)?;
+                    .map_err(|_| IoErrorKind::InvalidArgument)?;
                 stream.read = (stream.read + frame_size) % B;
                 stream.length -= frame_size;
             }
@@ -232,7 +234,7 @@ impl<const S: usize, const B: usize, const F: usize, const O: usize, const Q: us
             .outputs
             .iter()
             .position(|slot| !slot.occupied.load(Ordering::Acquire))
-            .ok_or(Error::RessourceBusy)?;
+            .ok_or(IoErrorKind::ResourceBusy)?;
         // SAFETY: the core lock serializes registration and producer use. An
         // unoccupied slot has no live consumer; handle drop destroys it before
         // releasing the slot. Pinning prevents moves even if a handle is forgotten.
@@ -264,12 +266,12 @@ impl<const S: usize, const B: usize, const F: usize, const O: usize, const Q: us
             .occupied
             .iter()
             .position(|slot| !slot.load(Ordering::Acquire))
-            .ok_or(Error::RessourceBusy)?;
+            .ok_or(IoErrorKind::ResourceBusy)?;
         streams.streams[index] = Stream::new();
         streams
             .mixer
             .set_volume(index, Volume::UNITY)
-            .map_err(|_| Error::InvalidParameter)?;
+            .map_err(|_| IoErrorKind::InvalidArgument)?;
         self.occupied[index].store(true, Ordering::Release);
         Ok(StreamHandle {
             system: self,
@@ -308,19 +310,19 @@ impl<const S: usize, const B: usize, const F: usize, const O: usize, const Q: us
         if self.system.streams.lock()?.streams[self.index].length == 0 {
             Ok(())
         } else {
-            Err(Error::RessourceBusy)
+            Err(IoErrorKind::WouldBlock)
         }
     }
     pub fn set_volume(&self, volume: u8) -> Result<()> {
         if volume > 100 {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         self.system
             .streams
             .lock()?
             .mixer
             .set_volume(self.index, Volume::from_percent(volume))
-            .map_err(|_| Error::InvalidParameter)
+            .map_err(|_| IoErrorKind::InvalidArgument)
     }
     pub fn volume(&self) -> Result<u8> {
         Ok(self
@@ -329,7 +331,7 @@ impl<const S: usize, const B: usize, const F: usize, const O: usize, const Q: us
             .lock()?
             .mixer
             .volume(self.index)
-            .map_err(|_| Error::InvalidParameter)?
+            .map_err(|_| IoErrorKind::InvalidArgument)?
             .percent() as u8)
     }
     /// Returns frame-aligned writable bytes, or zero while the core is busy.
@@ -345,7 +347,7 @@ impl<const S: usize, const B: usize, const F: usize, const O: usize, const Q: us
     pub fn write(&self, bytes: &[u8]) -> Result<usize> {
         let frame_size = FRAME_BYTES;
         if !bytes.len().is_multiple_of(frame_size) {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         let mut streams = self.system.streams.lock()?;
         let stream = &mut streams.streams[self.index];

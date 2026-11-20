@@ -77,8 +77,8 @@ test("all Xila locale files are nested and round-trip without changing messages"
     findCatalogs(path.join(ROOT, directory)),
   );
   assert.ok(
-    catalogs.length >= 88,
-    "expected at least 11 Core namespaces with 8 locales each",
+    catalogs.length >= 81,
+    "expected at least 9 Core namespaces with 9 locales each",
   );
   const unconverted = new Set();
   for (const file of catalogs) {

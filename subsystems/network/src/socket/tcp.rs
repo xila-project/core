@@ -4,7 +4,7 @@ use core::{
 };
 
 use crate::{
-    Duration, Error, IpAddress, IpEndpoint, IpListenEndpoint, Port, Result, SocketContext,
+    Duration, IoErrorKind, IpAddress, IpEndpoint, IpListenEndpoint, Port, Result, SocketContext,
 };
 use embassy_futures::block_on;
 use smoltcp::socket::tcp;
@@ -64,8 +64,8 @@ impl TcpSocket {
             .with_mutable(|s| -> Result<bool> {
                 if s.state() == tcp::State::Closed {
                     s.listen(endpoint).map_err(|e| match e {
-                        tcp::ListenError::InvalidState => Error::InvalidState,
-                        tcp::ListenError::Unaddressable => Error::InvalidPort,
+                        tcp::ListenError::InvalidState => IoErrorKind::InvalidState,
+                        tcp::ListenError::Unaddressable => IoErrorKind::InvalidArgument,
                     })?;
                     Ok(true)
                 } else {
@@ -108,8 +108,8 @@ impl TcpSocket {
 
                 match socket.connect(stack.interface.context(), endpoint, local_port) {
                     Ok(()) => Ok(()),
-                    Err(tcp::ConnectError::InvalidState) => Err(Error::InvalidState),
-                    Err(tcp::ConnectError::Unaddressable) => Err(Error::NoRoute),
+                    Err(tcp::ConnectError::InvalidState) => Err(IoErrorKind::InvalidState),
+                    Err(tcp::ConnectError::Unaddressable) => Err(IoErrorKind::HostUnreachable),
                 }
             })
             .await?;
@@ -119,7 +119,7 @@ impl TcpSocket {
         poll_fn(|cx| {
             self.poll_with_mutable(cx, |socket, cx| match socket.state() {
                 tcp::State::Closed | tcp::State::TimeWait => {
-                    Poll::Ready(Err(Error::ConnectionReset))
+                    Poll::Ready(Err(IoErrorKind::ConnectionReset))
                 }
                 tcp::State::Listen => unreachable!(),
                 tcp::State::SynSent | tcp::State::SynReceived => {
@@ -147,9 +147,9 @@ impl TcpSocket {
                 Err(tcp::RecvError::Finished) => Poll::Ready(Ok(0)),
                 Err(tcp::RecvError::InvalidState) => {
                     Poll::Ready(Err(if self.context.was_connected && !self.context.closed {
-                        Error::ConnectionReset
+                        IoErrorKind::ConnectionReset
                     } else {
-                        Error::NotConnected
+                        IoErrorKind::NotConnected
                     }))
                 }
             })
@@ -180,11 +180,11 @@ impl TcpSocket {
                                 | tcp::State::TimeWait
                         );
                     Poll::Ready(Err(if send_closed {
-                        Error::BrokenPipe
+                        IoErrorKind::BrokenPipe
                     } else if self.context.was_connected {
-                        Error::ConnectionReset
+                        IoErrorKind::ConnectionReset
                     } else {
-                        Error::NotConnected
+                        IoErrorKind::NotConnected
                     }))
                 }
             })
@@ -333,8 +333,11 @@ mod tests {
         let manager = initialize().await;
         let mut socket = manager.new_tcp_socket(128, 128, None).await.unwrap();
 
-        assert_eq!(socket.write(b"data").await, Err(Error::NotConnected));
-        assert_eq!(socket.read(&mut [0; 1]).await, Err(Error::NotConnected));
+        assert_eq!(socket.write(b"data").await, Err(IoErrorKind::NotConnected));
+        assert_eq!(
+            socket.read(&mut [0; 1]).await,
+            Err(IoErrorKind::NotConnected)
+        );
         socket.close_forced().await;
     }
 
@@ -351,7 +354,7 @@ mod tests {
         assert_eq!(block_on(client.write(&[])), Ok(0));
 
         client.close().await;
-        assert_eq!(client.write(b"data").await, Err(Error::BrokenPipe));
+        assert_eq!(client.write(b"data").await, Err(IoErrorKind::BrokenPipe));
         assert_eq!(client.write(&[]).await, Ok(0));
         listener.close_forced().await;
     }
@@ -376,7 +379,10 @@ mod tests {
         client.close_forced().await;
         assert_eq!(
             (read_result, write_result),
-            (Err(Error::ConnectionReset), Err(Error::ConnectionReset))
+            (
+                Err(IoErrorKind::ConnectionReset),
+                Err(IoErrorKind::ConnectionReset)
+            )
         );
     }
 

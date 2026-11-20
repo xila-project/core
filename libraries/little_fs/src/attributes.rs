@@ -1,6 +1,8 @@
 use core::{fmt::Debug, mem::MaybeUninit};
 
-use file_system::{AttributeFlags, Attributes, Error, Inode, Kind, Permissions, Result, Time};
+use file_system::{
+    AttributeFlags, Attributes, Inode, IoErrorKind, Kind, Permissions, Result, Time,
+};
 use users::{GroupIdentifier, UserIdentifier};
 
 #[derive(Clone)]
@@ -46,7 +48,7 @@ impl InternalAttributes {
         if mask.difference(Self::PERSISTED_ATTRIBUTE_FLAGS).is_empty() {
             Ok(())
         } else {
-            Err(Error::UnsupportedOperation)
+            Err(IoErrorKind::Unsupported)
         }
     }
 

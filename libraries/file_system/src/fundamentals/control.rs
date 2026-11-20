@@ -1,7 +1,7 @@
 use bitflags::bitflags;
 use shared::AnyByLayout;
 
-use crate::{Error, Result};
+use crate::{IoErrorKind, Result};
 
 bitflags! {
     /// Direction of control commands.
@@ -24,11 +24,11 @@ pub trait ControlCommand: Clone + Copy {
     const IDENTIFIER: ControlCommandIdentifier;
 
     fn cast_input(input: &AnyByLayout) -> Result<&Self::Input> {
-        input.cast().ok_or(Error::InvalidParameter)
+        input.cast().ok_or(IoErrorKind::InvalidArgument)
     }
 
     fn cast_output(output: &mut AnyByLayout) -> Result<&mut Self::Output> {
-        output.cast_mutable().ok_or(Error::InvalidParameter)
+        output.cast_mutable().ok_or(IoErrorKind::InvalidArgument)
     }
 
     fn cast<'i, 'o>(

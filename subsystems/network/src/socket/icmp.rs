@@ -1,4 +1,4 @@
-use crate::{Duration, Error, IpAddress, Port, Result, SocketContext};
+use crate::{Duration, IoErrorKind, IpAddress, Port, Result, SocketContext};
 use alloc::vec;
 use core::{
     future::poll_fn,
@@ -82,7 +82,7 @@ impl IcmpSocket {
         self.poll_with_mutable(context, |socket, context| {
             let send_capacity_too_small = socket.payload_send_capacity() < buffer.len();
             if send_capacity_too_small {
-                return Poll::Ready(Err(Error::PacketTooLarge));
+                return Poll::Ready(Err(IoErrorKind::MessageTooLarge));
             }
 
             let remote_endpoint = remote_endpoint.into_smoltcp();
@@ -93,12 +93,12 @@ impl IcmpSocket {
                     socket.register_send_waker(context.waker());
                     Poll::Pending
                 }
-                Err(icmp::SendError::Unaddressable) => {
-                    if socket.is_open() {
-                        Poll::Ready(Err(Error::NoRoute))
-                    } else {
-                        Poll::Ready(Err(Error::SocketNotBound))
-                    }
+                Err(error @ icmp::SendError::Unaddressable) => {
+                    Poll::Ready(Err(crate::error::icmp_send_error(
+                        error,
+                        socket.is_open(),
+                        !remote_endpoint.is_unspecified(),
+                    )))
                 }
             }
         })
@@ -114,7 +114,7 @@ impl IcmpSocket {
                 let remote_endpoint = IpAddress::from_smoltcp(&remote_endpoint);
                 Poll::Ready(Ok((size, remote_endpoint)))
             }
-            Err(icmp::RecvError::Truncated) => Poll::Ready(Err(Error::Truncated)),
+            Err(icmp::RecvError::Truncated) => Poll::Ready(Err(IoErrorKind::DatagramTruncated)),
             Err(icmp::RecvError::Exhausted) => {
                 socket.register_recv_waker(context.waker());
 
@@ -128,7 +128,8 @@ impl IcmpSocket {
         let endpoint = endpoint.into_smoltcp();
 
         self.with_mutable(|socket: &mut icmp::Socket| socket.bind(endpoint))
-            .await?;
+            .await
+            .map_err(crate::error::icmp_bind_error)?;
         Ok(())
     }
 
@@ -162,7 +163,7 @@ impl IcmpSocket {
 
         match select(receive, sleep).await {
             Either::First(result) => result,
-            Either::Second(_) => Err(Error::TimedOut),
+            Either::Second(_) => Err(IoErrorKind::TimedOut),
         }
     }
 
@@ -218,9 +219,8 @@ impl IcmpSocket {
 
                 let icmp_payload = socket
                     .send(icmp_repr.buffer_len(), remote_endpoint)
-                    .map_err(|e| match e {
-                        icmp::SendError::BufferFull => Error::ResourceBusy,
-                        icmp::SendError::Unaddressable => Error::NoRoute,
+                    .map_err(|e| {
+                        crate::error::icmp_send_error(e, true, !remote_endpoint.is_unspecified())
                     })?;
 
                 let mut icmp_packet = Icmpv4Packet::new_unchecked(icmp_payload);
@@ -235,9 +235,8 @@ impl IcmpSocket {
 
                 let icmp_payload = socket
                     .send(icmp_repr.buffer_len(), remote_endpoint)
-                    .map_err(|e| match e {
-                        icmp::SendError::BufferFull => Error::ResourceBusy,
-                        icmp::SendError::Unaddressable => Error::NoRoute,
+                    .map_err(|e| {
+                        crate::error::icmp_send_error(e, true, !remote_endpoint.is_unspecified())
                     })?;
 
                 let src_addr = src_addr_v6.unwrap();
@@ -386,7 +385,7 @@ fn remaining_timeout(
 ) -> Result<core::time::Duration> {
     let remaining = timeout.saturating_sub(now.saturating_sub(start));
     if remaining.is_zero() {
-        Err(Error::TimedOut)
+        Err(IoErrorKind::TimedOut)
     } else {
         Ok(remaining)
     }
@@ -407,11 +406,11 @@ mod timeout_tests {
         );
         assert_eq!(
             remaining_timeout(start, StdDuration::from_secs(40), timeout),
-            Err(Error::TimedOut)
+            Err(IoErrorKind::TimedOut)
         );
         assert_eq!(
             remaining_timeout(start, StdDuration::from_secs(41), timeout),
-            Err(Error::TimedOut)
+            Err(IoErrorKind::TimedOut)
         );
     }
 }

@@ -10,8 +10,8 @@
 //!
 //! Every struct starts with a `version` field equal to [`ABI_VERSION`] and
 //! carries zeroed `reserved` fields. A wrong version, a non-zero reserved field
-//! or an out-of-range value is `InvalidParameter`. A frequency the controller
-//! cannot express, or a fixed-period controller, is `UnsupportedOperation`.
+//! or an out-of-range value is `InvalidArgument`. A frequency the controller
+//! cannot express, or a fixed-period controller, is `Unsupported`.
 
 use file_system::{ControlCommand, define_command};
 

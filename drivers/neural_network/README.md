@@ -50,14 +50,14 @@ Model retention and shared ownership are backend responsibilities.
 
 1. Open the loader node (e.g. `/devices/nn/cpu`). The handle starts in the staging state.
 2. Write the raw model FlatBuffer bytes sequentially starting from position 0. Writes must be
-   contiguous; gaps return `InvalidParameter`. Writes exceeding `maximum_model_size()` are
+   contiguous; gaps return `InvalidArgument`. Writes exceeding `maximum_model_size()` are
    rejected with `FileTooLarge`.
 3. Issue the `LOAD` control command with a `LoadRequest` payload (`version = 1`, `encoding = 0`
    for TensorFlow Lite).
 4. Upon successful loading, the handle transitions to ready state and thereafter functions
    identically to a `NeuralNetworkDevice` handle (steps 1–5 of the inference protocol).
-5. Issuing inference commands before `LOAD` returns `InvalidContext`. Issuing a second `LOAD`
-   on a ready handle returns `InvalidContext`.
+5. Issuing inference commands before `LOAD` returns `InvalidState`. Issuing a second `LOAD`
+   on a ready handle returns `InvalidState`.
 6. Closing the file descriptor deallocates both the model storage and the execution arena.
 
 Commands return `TensorInfo`, `QuantizationRequest` and `QuantizationEntry` as appropriate.

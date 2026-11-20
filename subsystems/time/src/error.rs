@@ -8,7 +8,7 @@ pub enum Error {
     InvalidResolution,
     NotInitialized,
     AlreadyInitialized,
-    DeviceError(file_system::Error),
+    DeviceError(file_system::IoErrorKind),
 }
 
 impl Display for Error {
@@ -27,3 +27,16 @@ impl Display for Error {
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
+
+impl file_system::IntoIoErrorKind for Error {
+    fn into_io_error_kind(self) -> file_system::IoErrorKind {
+        use file_system::IoErrorKind;
+        match self {
+            Error::Unsynchronized | Error::NotInitialized => IoErrorKind::DeviceUnavailable,
+            Error::Overflow => IoErrorKind::Overflow,
+            Error::InvalidResolution => IoErrorKind::InvalidArgument,
+            Error::AlreadyInitialized => IoErrorKind::InvalidState,
+            Error::DeviceError(kind) => kind,
+        }
+    }
+}

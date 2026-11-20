@@ -7,7 +7,7 @@ use drivers_peripherals::{
         RELEASE, VersionAbi,
     },
 };
-use file_system::{ControlCommand, Error};
+use file_system::{ControlCommand, IoErrorKind};
 use peripherals::gpio::{GpioMock, LineCapabilities, LineId, PinState};
 use shared::AnyByLayout;
 
@@ -114,7 +114,7 @@ fn writing_an_input_is_unsupported() {
     let controller = controller(CAPABILITIES);
     let mut handle = configured(controller, 0, INPUT);
 
-    assert_eq!(write(&mut handle, 1), Err(Error::UnsupportedOperation));
+    assert_eq!(write(&mut handle, 1), Err(IoErrorKind::Unsupported));
 }
 
 #[test]
@@ -122,8 +122,8 @@ fn unconfigured_line_reports_not_initialized() {
     let controller = controller(CAPABILITIES);
     let mut handle = GpioHandle::new(controller, LineId::new(0));
 
-    assert_eq!(read(&mut handle), Err(Error::NotInitialized));
-    assert_eq!(write(&mut handle, 1), Err(Error::NotInitialized));
+    assert_eq!(read(&mut handle), Err(IoErrorKind::DeviceUnavailable));
+    assert_eq!(write(&mut handle, 1), Err(IoErrorKind::DeviceUnavailable));
 }
 
 #[test]
@@ -140,7 +140,7 @@ fn invalid_fields_are_rejected() {
     for request in invalid {
         assert_eq!(
             configure(&mut handle, request),
-            Err(Error::InvalidParameter)
+            Err(IoErrorKind::InvalidArgument)
         );
     }
 
@@ -150,7 +150,7 @@ fn invalid_fields_are_rejected() {
     };
     assert_eq!(
         configure(&mut handle, wrong_version),
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     );
 
     let reserved_set = ConfigureAbi {
@@ -159,7 +159,7 @@ fn invalid_fields_are_rejected() {
     };
     assert_eq!(
         configure(&mut handle, reserved_set),
-        Err(Error::InvalidParameter)
+        Err(IoErrorKind::InvalidArgument)
     );
 }
 
@@ -169,7 +169,7 @@ fn reconfiguring_releases_the_previous_line() {
     let mut handle = configured(controller, 0, OUTPUT_LOW);
 
     configure(&mut handle, configuration(0, 0, 0, 0)).unwrap();
-    assert_eq!(write(&mut handle, 1), Err(Error::UnsupportedOperation));
+    assert_eq!(write(&mut handle, 1), Err(IoErrorKind::Unsupported));
 }
 
 #[test]
@@ -180,7 +180,7 @@ fn release_frees_the_line_for_another_handle() {
 
     assert_eq!(
         configure(&mut second, configuration(0, 0, 0, 0)),
-        Err(Error::InputOutput)
+        Err(IoErrorKind::InputOutput)
     );
 
     release(&mut first).unwrap();
@@ -197,7 +197,7 @@ fn unsupported_pull_is_reported_as_input_output_error() {
 
     assert_eq!(
         configure(&mut handle, configuration(0, 1, 0, 0)),
-        Err(Error::InputOutput)
+        Err(IoErrorKind::InputOutput)
     );
 }
 
@@ -250,6 +250,6 @@ fn unknown_command_is_unsupported() {
             AnyByLayout::from(&input),
             AnyByLayout::from_mutable(&mut output),
         ),
-        Err(Error::UnsupportedOperation)
+        Err(IoErrorKind::Unsupported)
     );
 }

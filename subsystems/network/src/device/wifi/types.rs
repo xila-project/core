@@ -1,7 +1,7 @@
 //! Fixed-layout Wi-Fi control payloads. Byte-backed state values deliberately
 //! accept every bit pattern: validate at the driver boundary before use.
 use core::fmt;
-use file_system::{Error, Result};
+use file_system::{IoErrorKind, Result};
 
 macro_rules! byte_value {
     ($name:ident { $($constant:ident = $value:expr),* $(,)? }) => {
@@ -26,7 +26,7 @@ pub struct WifiSsid {
 impl WifiSsid {
     pub fn new(bytes: &[u8]) -> Result<Self> {
         if bytes.is_empty() || bytes.len() > 32 {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         let mut ssid = Self::default();
         ssid.bytes[..bytes.len()].copy_from_slice(bytes);
@@ -35,7 +35,7 @@ impl WifiSsid {
     }
     pub fn as_bytes(&self) -> Result<&[u8]> {
         if !(1..=32).contains(&self.length) {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         Ok(&self.bytes[..self.length as usize])
     }
@@ -64,7 +64,7 @@ impl fmt::Debug for WifiPassword {
 impl WifiPassword {
     pub fn new(bytes: &[u8]) -> Result<Self> {
         if bytes.len() > 64 {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         let mut result = Self::default();
         result.bytes[..bytes.len()].copy_from_slice(bytes);
@@ -74,7 +74,7 @@ impl WifiPassword {
     pub fn as_bytes(&self) -> Result<&[u8]> {
         self.bytes
             .get(..self.length as usize)
-            .ok_or(Error::InvalidParameter)
+            .ok_or(IoErrorKind::InvalidArgument)
     }
     pub fn clear(&mut self) {
         // Volatile stores prevent dead-store elimination of this owned buffer.
@@ -118,7 +118,7 @@ impl WifiClientConfiguration {
     pub fn validate(&self) -> Result<()> {
         self.ssid.as_bytes()?;
         if self.use_bssid > 1 || self.channel > 196 {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         let secret = self.credential.as_bytes()?;
         let valid = match self.authentication {
@@ -132,12 +132,12 @@ impl WifiClientConfiguration {
                     && core::str::from_utf8(secret).is_ok()
                     && !secret.contains(&0)
             }
-            _ => return Err(Error::UnsupportedOperation),
+            _ => return Err(IoErrorKind::Unsupported),
         };
         if valid {
             Ok(())
         } else {
-            Err(Error::InvalidParameter)
+            Err(IoErrorKind::InvalidArgument)
         }
     }
 }
@@ -191,7 +191,7 @@ impl Default for WifiScanConfiguration {
 impl WifiScanConfiguration {
     pub fn validate(&self) -> Result<()> {
         if self.channel > 196 || self.passive > 1 || self.result_limit == 0 {
-            Err(Error::InvalidParameter)
+            Err(IoErrorKind::InvalidArgument)
         } else {
             Ok(())
         }

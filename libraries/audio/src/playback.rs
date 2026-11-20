@@ -1,7 +1,7 @@
 use core::cell::RefCell;
 use file_system::{
-    ControlCommand, ControlCommandIdentifier, DirectBaseOperations, DirectCharacterDevice, Error,
-    MountOperations, Result, Size,
+    ControlCommand, ControlCommandIdentifier, DirectBaseOperations, DirectCharacterDevice,
+    IoErrorKind, MountOperations, Result, Size,
 };
 use nanoaudio::{Consumer, Producer, RingBuffer, Sample, Stream, Volume};
 use portable_atomic::{AtomicBool, AtomicU8, Ordering};
@@ -16,7 +16,7 @@ use crate::{
 fn validate_payload<T>(payload: &AnyByLayout) -> Result<()> {
     let pointer = core::ptr::from_ref(payload).cast::<u8>() as usize;
     if payload.get_size() != size_of::<T>() || !pointer.is_multiple_of(align_of::<T>()) {
-        return Err(Error::InvalidParameter);
+        return Err(IoErrorKind::InvalidArgument);
     }
     Ok(())
 }
@@ -43,7 +43,7 @@ impl State {
 
     fn check(&self) -> Result<()> {
         if self.failed.load(Ordering::Acquire) {
-            Err(Error::InputOutput)
+            Err(IoErrorKind::InputOutput)
         } else {
             Ok(())
         }
@@ -81,7 +81,7 @@ impl<const N: usize> PlaybackBuffer<N> {
     ) -> Result<(OutputDevice<'_, N>, Renderer<'_, N>)> {
         let frame_size = configuration.frame_size()?;
         if N > u32::MAX as usize || !N.is_multiple_of(frame_size) {
-            return Err(Error::InvalidParameter);
+            return Err(IoErrorKind::InvalidArgument);
         }
         self.state = State::new();
         let (producer, consumer) = self.ring.split();
@@ -118,7 +118,7 @@ impl<const N: usize> DirectBaseOperations for OutputDevice<'_, N> {
         _: &mut [u8],
         _: Size,
     ) -> core::task::Poll<Result<usize>> {
-        file_system::ready(|| Err(Error::UnsupportedOperation))
+        file_system::ready(|| Err(IoErrorKind::Unsupported))
     }
 
     /// Enqueues whole frames, returning zero immediately when full. No alignment
@@ -132,7 +132,7 @@ impl<const N: usize> DirectBaseOperations for OutputDevice<'_, N> {
         file_system::ready(|| {
             self.state.check()?;
             if !buffer.len().is_multiple_of(self.frame_size) {
-                return Err(Error::InvalidParameter);
+                return Err(IoErrorKind::InvalidArgument);
             }
             Ok(self.producer.lock(|producer| {
                 let mut producer = producer.borrow_mut();
@@ -150,7 +150,7 @@ impl<const N: usize> DirectBaseOperations for OutputDevice<'_, N> {
             if self.producer.lock(|producer| producer.borrow().free()) == N {
                 Ok(())
             } else {
-                Err(Error::RessourceBusy)
+                Err(IoErrorKind::WouldBlock)
             }
         })
     }
@@ -170,7 +170,7 @@ impl<const N: usize> DirectBaseOperations for OutputDevice<'_, N> {
                     let configuration = SET_CONFIGURATION::cast_input(input)?;
                     configuration.validate()?;
                     if *configuration != self.configuration {
-                        return Err(Error::UnsupportedOperation);
+                        return Err(IoErrorKind::Unsupported);
                     }
                 }
                 GET_CONFIGURATION::IDENTIFIER => {
@@ -187,7 +187,7 @@ impl<const N: usize> DirectBaseOperations for OutputDevice<'_, N> {
                     validate_command::<SET_VOLUME>(input, output)?;
                     let volume = *SET_VOLUME::cast_input(input)?;
                     if volume > 100 {
-                        return Err(Error::InvalidParameter);
+                        return Err(IoErrorKind::InvalidArgument);
                     }
                     self.state.volume.store(volume, Ordering::Release);
                 }
@@ -203,7 +203,7 @@ impl<const N: usize> DirectBaseOperations for OutputDevice<'_, N> {
                     validate_command::<STOP>(input, output)?;
                     self.state.started.store(false, Ordering::Release);
                 }
-                _ => return Err(Error::UnsupportedOperation),
+                _ => return Err(IoErrorKind::Unsupported),
             }
             Ok(())
         })

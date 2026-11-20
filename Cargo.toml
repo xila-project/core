@@ -37,6 +37,7 @@ users = { package = "xila-users", path = "subsystems/users" }
 memory = { package = "xila-memory", path = "subsystems/memory" }
 executable = { package = "xila-executable", path = "libraries/executable" }
 file_system = { package = "xila-file-system", path = "libraries/file_system" }
+io_error = { package = "xila-io-error", path = "libraries/io_error" }
 authentication = { package = "xila-authentication", path = "libraries/authentication" }
 log = { package = "xila-log", path = "subsystems/log" }
 shared = { package = "xila-shared", path = "libraries/shared" }
@@ -109,6 +110,7 @@ members = [
   "libraries/neural_network",
   "drivers/neural_network",
   "libraries/file_system",
+  "libraries/io_error",
   "subsystems/graphics",
   "subsystems/task",
   "subsystems/users",

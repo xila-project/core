@@ -7,21 +7,21 @@ pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOper
     /// support native links or a durable Xila link representation may keep the
     /// default implementation.
     fn create_symlink(&self, _target: &Path, _link: &Path) -> Result<()> {
-        Err(crate::Error::UnsupportedOperation)
+        Err(crate::IoErrorKind::Unsupported)
     }
 
     /// Create `new` as an additional directory entry for the existing,
     /// non-directory object at `existing`, sharing its data. Backends without
     /// hard links (including LittleFS) keep the default implementation, which
-    /// reports [`crate::Error::UnsupportedOperation`].
+    /// reports [`crate::IoErrorKind::Unsupported`].
     fn link(&self, _existing: &Path, _new: &Path) -> Result<()> {
-        Err(crate::Error::UnsupportedOperation)
+        Err(crate::IoErrorKind::Unsupported)
     }
 
     /// Copy the stored target of a symbolic link into a caller-owned buffer.
     /// This operation must inspect the final directory entry without following it.
     fn read_symlink(&self, _link: &Path, _buffer: &mut [u8]) -> Result<usize> {
-        Err(crate::Error::UnsupportedOperation)
+        Err(crate::IoErrorKind::Unsupported)
     }
 
     /// Return the fields this backend can accept through `set_attributes`.
@@ -64,14 +64,14 @@ pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOper
     /// # Returns
     ///
     /// * `Ok(())` - File or directory successfully removed
-    /// * `Err(Error)` - Error during removal
+    /// * `Err(IoErrorKind)` - Error during removal
     ///
     /// # Errors
     ///
-    /// * [`crate::Error::NotFound`] - File or directory doesn't exist
-    /// * [`crate::Error::PermissionDenied`] - Insufficient permissions
-    /// * [`crate::Error::DirectoryNotEmpty`] - Directory contains files
-    /// * [`crate::Error::RessourceBusy`] - File is currently in use
+    /// * [`crate::IoErrorKind::NotFound`] - File or directory doesn't exist
+    /// * [`crate::IoErrorKind::PermissionDenied`] - Insufficient permissions
+    /// * [`crate::IoErrorKind::DirectoryNotEmpty`] - Directory contains files
+    /// * [`crate::IoErrorKind::ResourceBusy`] - File is currently in use
     fn remove(&self, path: &Path) -> Result<()>;
 
     /// Rename or move a file or directory.
@@ -88,13 +88,13 @@ pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOper
     /// # Returns
     ///
     /// * `Ok(())` - File or directory successfully renamed/moved
-    /// * `Err(Error)` - Error during rename operation
+    /// * `Err(IoErrorKind)` - Error during rename operation
     ///
     /// # Errors
     ///
-    /// * [`crate::Error::NotFound`] - Source file doesn't exist
-    /// * [`crate::Error::AlreadyExists`] - Destination already exists
-    /// * [`crate::Error::PermissionDenied`] - Insufficient permissions
+    /// * [`crate::IoErrorKind::NotFound`] - Source file doesn't exist
+    /// * [`crate::IoErrorKind::AlreadyExists`] - Destination already exists
+    /// * [`crate::IoErrorKind::PermissionDenied`] - Insufficient permissions
     fn rename(&self, source: &Path, destination: &Path) -> Result<()>;
 
     // - Directory
@@ -113,7 +113,7 @@ pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOper
     /// Change the fields selected by `attributes.get_mask()` for a path.
     ///
     /// An empty mask is a successful no-op. If any requested field is
-    /// unsupported, the operation must return [`crate::Error::UnsupportedOperation`]
+    /// unsupported, the operation must return [`crate::IoErrorKind::Unsupported`]
     /// before changing any supported field. A later backend I/O or permission
     /// failure may occur after an earlier supported field was changed; this
     /// operation does not promise rollback for such failures.
@@ -215,8 +215,8 @@ pub mod tests {
 
     use super::*;
     use crate::{
-        AccessFlags, AttributeFlags, Attributes, BaseOperations, Context, Error, Kind, Permissions,
-        Size, Time,
+        AccessFlags, AttributeFlags, Attributes, BaseOperations, Context, IoErrorKind, Kind,
+        Permissions, Size, Time,
     };
     use users::{GroupIdentifier, UserIdentifier};
 
@@ -287,7 +287,7 @@ pub mod tests {
 
         let result = fs.create_file(test_file);
         assert!(
-            matches!(result, Err(Error::AlreadyExists)),
+            matches!(result, Err(IoErrorKind::AlreadyExists)),
             "Creating duplicate file should return AlreadyExists error"
         );
 
@@ -337,7 +337,7 @@ pub mod tests {
         // Try to remove parent with child (should fail)
         let result = fs.remove(parent_dir);
         assert!(
-            matches!(result, Err(Error::DirectoryNotEmpty)),
+            matches!(result, Err(IoErrorKind::DirectoryNotEmpty)),
             "Removing non-empty directory should fail with DirectoryNotEmpty"
         );
 
@@ -388,7 +388,7 @@ pub mod tests {
 
         // Test renaming non-existent file
         let result = fs.rename(source, destination);
-        assert_eq!(result, Err(Error::NotFound),);
+        assert_eq!(result, Err(IoErrorKind::NotFound),);
 
         // Create both files
         fs.create_file(source).unwrap();
@@ -398,7 +398,7 @@ pub mod tests {
         //let _ = fs.rename(source, destination);
         //assert_eq!(
         //    result,
-        //    Err(Error::AlreadyExists),
+        //    Err(IoErrorKind::AlreadyExists),
         //);
 
         // Cleanup
@@ -525,7 +525,7 @@ pub mod tests {
                 .set_mask(AttributeFlags::all());
             assert!(matches!(
                 FileSystemOperations::set_attributes(fs, test_file, &changed),
-                Err(Error::UnsupportedOperation)
+                Err(IoErrorKind::Unsupported)
             ));
 
             let mut after_rejection = Attributes::new().set_mask(readable);
@@ -1025,7 +1025,7 @@ pub mod tests {
         // Flush should succeed or be unsupported
         let result = BaseOperations::flush_sync(fs, &mut context);
         assert!(
-            result.is_ok() || matches!(result, Err(Error::UnsupportedOperation)),
+            result.is_ok() || matches!(result, Err(IoErrorKind::Unsupported)),
             "Flush should succeed or be unsupported"
         );
 
@@ -1183,7 +1183,7 @@ pub mod tests {
             // Set position back to start
             let set_result = DirectoryOperations::set_position(fs, &mut context, 0);
             assert!(
-                set_result.is_ok() || matches!(set_result, Err(Error::UnsupportedOperation)),
+                set_result.is_ok() || matches!(set_result, Err(IoErrorKind::Unsupported)),
                 "Should set position or be unsupported"
             );
         }
@@ -1191,7 +1191,7 @@ pub mod tests {
         // Test rewind
         let rewind_result = fs.rewind(&mut context);
         assert!(
-            rewind_result.is_ok() || matches!(rewind_result, Err(Error::UnsupportedOperation)),
+            rewind_result.is_ok() || matches!(rewind_result, Err(IoErrorKind::Unsupported)),
             "Should rewind or be unsupported"
         );
 
@@ -1265,7 +1265,7 @@ pub mod tests {
         let result = DirectoryOperations::read(fs, &mut context);
         // Either returns None immediately or returns . and .. entries
         assert!(
-            result.is_ok() || matches!(result, Err(Error::NotFound)),
+            result.is_ok() || matches!(result, Err(IoErrorKind::NotFound)),
             "Reading empty directory should succeed or return not found"
         );
 
@@ -1343,7 +1343,7 @@ pub mod tests {
         // Close file
         let close_result = BaseOperations::close(fs, &mut context);
         assert!(
-            close_result.is_ok() || matches!(close_result, Err(Error::UnsupportedOperation)),
+            close_result.is_ok() || matches!(close_result, Err(IoErrorKind::Unsupported)),
             "Should close file or be unsupported"
         );
 

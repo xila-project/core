@@ -31,11 +31,11 @@ Commands use the `b'A'` prefix:
 | 7 | `STOP` | `()` | `()` |
 
 Command payloads must have exactly the declared size and alignment; malformed
-payloads return `InvalidParameter` before reading or writing their contents.
+payloads return `InvalidArgument` before reading or writing their contents.
 
 - The configuration is fixed when splitting the storage/opening a backend.
   Setting it to the same value succeeds; a different valid value returns
-  `UnsupportedOperation`. Open a new stream to change its configuration.
+  `Unsupported`. Open a new stream to change its configuration.
 - New devices are paused, at 100% volume. You may prefill them before START.
   STOP pauses consumption and retains the queue; it takes effect on the next
   callback. An already executing callback can finish.
@@ -46,7 +46,7 @@ payloads return `InvalidParameter` before reading or writing their contents.
   critical section; the renderer never takes that lock.
 - Underruns and paused callbacks produce silence. Volume applies to queued
   samples when they are consumed, without changing the input bytes.
-- `flush()` is a **nonblocking drain poll**: `RessourceBusy` while queued and
+- `flush()` is a **nonblocking drain poll**: `WouldBlock` while queued and
   `Ok(())` when consumed by the callback. This does not guarantee that the last
   sample has left the host/device latency buffer. A paused queue needs START
   before it can drain.
@@ -98,7 +98,7 @@ system.as_ref().mix_next_block()?;
 output.with_consumer(|consumer| { /* platform adapter reads PCM here */ });
 ```
 
-Opening beyond either limit returns `RessourceBusy`; dropping a handle releases
+Opening beyond either limit returns `ResourceBusy`; dropping a handle releases
 its slot. Reopened streams start empty and paused at 100 percent volume. Start,
 stop, volume and drain polling follow the playback semantics above. Stream and
 master gain use `nanoaudio::Mixer`; stopped or empty sources contribute silence.
@@ -108,7 +108,7 @@ PCM, and increments its own `dropped_blocks()` counter. Other sinks and applicat
 queues continue. The next block can be admitted after its consumer drains space.
 
 Writes, controls and mixing use an atomic try-lock: contention returns
-`RessourceBusy` immediately; `writable()` conservatively returns zero while busy.
+`WouldBlock` immediately; `writable()` conservatively returns zero while busy.
 The scheduler should retry a skipped mix at its next opportunity. Output consumers
 never take this lock. `with_consumer` keeps the consumer inside its reservation;
 `OutputHandle<'static>::into_consumer` supports adapters that take ownership of a
@@ -155,7 +155,7 @@ the VFS node `/devices/audio/playback`. Construct it with a pinned static
 reserves one independent stream in that open's `Context`; writes and the
 existing generic `b'A'` controls apply only to that stream. A close releases the
 reservation, and reopening gets an empty paused stream at default volume.
-Cloning an open context returns `UnsupportedOperation`, so stream handles are
+Cloning an open context returns `Unsupported`, so stream handles are
 never aliased. Reads are unsupported, and `flush()` polls until the mixer has
 consumed queued PCM. Applications use ordinary file writes and descriptor
 controls; the device does not add app-specific APIs or WASI imports.

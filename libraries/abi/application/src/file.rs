@@ -112,15 +112,6 @@ pub unsafe extern "C" fn xila_file_open(
     }
 }
 
-// VFS reports a cancelled one-shot I/O probe as resource busy.
-fn io_status(error: virtual_file_system::Error) -> Status {
-    match error {
-        virtual_file_system::Error::FileSystem(file_system::Error::RessourceBusy)
-        | virtual_file_system::Error::RessourceBusy => Status::WouldBlock,
-        error => error.into(),
-    }
-}
-
 /// Read directly into the caller's buffer; zero size permits a null buffer.
 /// # Safety
 /// File must be live and exclusively accessed. Buffer must be writable for size
@@ -154,7 +145,7 @@ pub unsafe extern "C" fn xila_file_read(
             unsafe { count.write(value) };
             Status::Ok
         }
-        Err(error) => io_status(error),
+        Err(error) => error.into(),
     }
 }
 /// Write directly from the caller's buffer; zero size permits a null buffer.
@@ -190,7 +181,7 @@ pub unsafe extern "C" fn xila_file_write(
             unsafe { count.write(value) };
             Status::Ok
         }
-        Err(error) => io_status(error),
+        Err(error) => error.into(),
     }
 }
 /// Seek using XILA_SEEK_START, CURRENT or END. Position output is optional.
@@ -239,7 +230,7 @@ pub unsafe extern "C" fn xila_file_flush(file: *mut File) -> Status {
     } else {
         file.as_synchronous_file_mut().flush()
     };
-    result.map_or_else(io_status, |()| Status::Ok)
+    result.map_or_else(Status::from, |()| Status::Ok)
 }
 /// Close and free the object even if closing fails. Null succeeds.
 /// # Safety

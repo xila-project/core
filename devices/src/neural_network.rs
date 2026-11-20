@@ -22,15 +22,15 @@
 //!   A platform mounts a loader node (e.g. `/devices/nn/cpu`).
 //!   1. Open the loader node. The descriptor starts in the *Staging* state.
 //!   2. Write the model binary bytes sequentially from offset 0 using `write()`.
-//!      Writes beyond the loader's maximum model size are rejected with [`file_system::Error::FileTooLarge`].
-//!      Non-contiguous writes are rejected with [`file_system::Error::InvalidParameter`].
+//!      Writes beyond the loader's maximum model size are rejected with [`file_system::IoErrorKind::FileTooLarge`].
+//!      Non-contiguous writes are rejected with [`file_system::IoErrorKind::InvalidArgument`].
 //!   3. Send the [`LOAD`] command with a [`LoadRequest`] payload (e.g. TensorFlow Lite format).
 //!      Upon successful preparation, the descriptor transitions to the *Ready* state.
 //!   4. From this point forward, the descriptor behaves identically to a fixed-model device:
 //!      input/output inspection, tensor staging via `write()`, [`COMPUTE`], and output retrieval
 //!      via `read()`.
-//!   5. Attempting inference commands before [`LOAD`] returns [`file_system::Error::InvalidContext`].
-//!      A second [`LOAD`] on a ready descriptor returns [`file_system::Error::InvalidContext`].
+//!   5. Attempting inference commands before [`LOAD`] returns [`file_system::IoErrorKind::InvalidState`].
+//!      A second [`LOAD`] on a ready descriptor returns [`file_system::IoErrorKind::InvalidState`].
 //!   6. Closing the descriptor frees both the dynamically allocated model and its execution state.
 
 use file_system::{ControlCommand, define_command};
