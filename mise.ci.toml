@@ -82,6 +82,19 @@ env = { MBX_CARGO_SHIM_MODE = "1" }
 "apt:gcc-arm-none-eabi" = { env = "sdk-arm" }
 "apt:gcc-riscv64-unknown-elf" = { env = "sdk-riscv" }
 
+# mise installs apt packages with a plain `apt-get install -y` and cannot skip recommended
+# packages. gcc-arm-none-eabi recommends libnewlib-arm-none-eabi, which recommends
+# libstdc++-arm-none-eabi-newlib (439 MB). The SDK needs neither: it links picolibc and takes
+# only libgcc.a from the compiler package. Applied by ci:packages-sdk-arm after the other
+# SDK packages, so that the rest of the SDK toolchain installs exactly as before.
+[bootstrap.files."/etc/apt/apt.conf.d/90xila-no-install-recommends"]
+mode = "0644"
+owner = "root"
+group = "root"
+content = """
+APT::Install-Recommends "false";
+"""
+
 [tasks."ci:packages-linker"]
 description = "Install CI linker packages only when a build task needs them"
 run = "mise -E ci bootstrap packages apply --manager apt --update --yes"
@@ -133,8 +146,13 @@ description = "Install the native SDK build packages (LLVM linker and tools, CMa
 run = "mise -E ci,sdk bootstrap packages apply --manager apt --update --yes"
 
 [tasks."ci:packages-sdk-arm"]
-description = "Install the native SDK build packages and the Arm GNU toolchain (libgcc for Cortex-M)"
-run = "mise -E ci,sdk,sdk-arm bootstrap packages apply --manager apt --update --yes"
+description = "Install the native SDK build packages and the Arm GNU toolchain (libgcc for Cortex-M) without its recommended newlib"
+depends = ["ci:packages-sdk"]
+run = """
+set -eu
+mise -E ci bootstrap files apply --yes
+mise -E ci,sdk-arm bootstrap packages apply --manager apt --yes
+"""
 
 [tasks."ci:packages-sdk-riscv"]
 description = "Install the SDK tools and the RISC-V ILP32 compiler runtime"

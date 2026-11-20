@@ -447,6 +447,13 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertEqual(packages["apt:gcc-arm-none-eabi"]["env"], "sdk-arm")
         self.assertEqual(packages["apt:gcc-riscv64-unknown-elf"]["env"], "sdk-riscv")
         self.assertIn("packages: ci:packages-sdk-riscv", sdk)
+        # The SDK links picolibc and only takes libgcc.a from the Arm compiler package. mise cannot
+        # skip recommended packages, which would add 487 MB of newlib to every Arm SDK job.
+        arm = ci_config()["tasks"]["ci:packages-sdk-arm"]
+        self.assertIn("ci:packages-sdk", arm["depends"])
+        self.assertLess(arm["run"].index("bootstrap files apply"), arm["run"].index("bootstrap packages apply"))
+        apt_config = ci_config()["bootstrap"]["files"]["/etc/apt/apt.conf.d/90xila-no-install-recommends"]
+        self.assertEqual(apt_config["content"].strip(), 'APT::Install-Recommends "false";')
         # The host job builds the example for the Linux loader test.
         self.assertIn("ci:packages-sdk", ci_config()["tasks"]["ci:host-tests"]["depends"])
         self.assertIn("sdk:build", configured_tasks("ci")["test:native-loader"]["depends"])

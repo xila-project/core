@@ -426,4 +426,5 @@ machine's `RELATIVE` dynamic relocations, and (on RISC-V) defines no
 Xtensa the link will use `-pie --no-dynamic-linker`, never `-static-pie`. The
 build needs `clang`, `lld`, `llvm-ar`, `cmake`, `zstd` and, for Cortex-M and RISC-V,
 the Arm GNU toolchain or `gcc-riscv64-unknown-elf`; CI installs them through mise
-bootstrap packages.
+bootstrap packages. The SDK only takes `libgcc.a` from the Arm package, so CI installs
+`gcc-arm-none-eabi` without its recommended newlib (about 490 MB).
