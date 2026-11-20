@@ -9,14 +9,17 @@ and uploads it as a workflow artifact:
 
 | Target | Class | Float ABI | Compiler runtime |
 |---|---|---|---|
-| `x86_64-unknown-linux-gnu` | the host Platforms runs on Linux | none | clang's own |
+| `x86_64-unknown-linux-gnu` | the host Platforms runs on Linux | none | none needed |
 | `thumbv7em-none-eabihf` | Cortex-M4F | hard | Arm GNU toolchain's `libgcc.a` |
 | `riscv32imac-unknown-none-elf` | ESP32-C6 class RV32IMAC | soft (`ilp32`) | bare-metal RISC-V GCC's `libgcc.a` |
 
 Xtensa (`xtensa-esp32s3`) is an addition to the build tables, not a redesign.
-The RISC-V images are built with `-mno-relax` and linked with `--no-relax`: the
-loader applies no `R_RISCV_RELAX` fix-ups. They cannot run on the Linux host
-loader, so CI validates them structurally with `check_elf.py`, like Cortex-M.
+The RISC-V images do no gp relaxation: the link defines no `__global_pointer$`
+(and never passes `--relax-gp`), and `check_elf.py` rejects an image that defines
+it, because the image's gp is not the firmware's. Call relaxation (pc-relative
+`jal`) stays on: it is valid in a position-independent executable. They cannot
+run on the Linux host loader, so CI validates them structurally with
+`check_elf.py`, like Cortex-M.
 
 ## Layout
 
@@ -289,7 +292,8 @@ configures it with meson and ninja through `uv run`, compiles the SDK sources an
 packs a deterministic archive. `tools/sdk/check_elf.py` asserts that an image is
 `ET_DYN`, has no `PT_INTERP` or `PT_TLS`, carries the `XILA` ABI note, has no
 `DT_NEEDED`, `DT_INIT`, `DT_FINI` or non-empty init/fini arrays, uses only the
-machine's `RELATIVE` dynamic relocations, and contains no `R_RISCV_RELAX`. On
+machine's `RELATIVE` dynamic relocations, and (on RISC-V) defines no
+`__global_pointer$`. On
 Xtensa the link will use `-pie --no-dynamic-linker`, never `-static-pie`. The
 build needs `clang`, `lld`, `llvm-ar`, `cmake`, `zstd` and, for Cortex-M and RISC-V,
 the Arm GNU toolchain or `gcc-riscv64-unknown-elf`; CI installs them through mise

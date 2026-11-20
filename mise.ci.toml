@@ -551,7 +551,7 @@ description = "Build the native SDK archive for XILA_SDK_TARGET"
 run = "mise run sdk:build"
 
 [tasks."ci:sdk-verify"]
-description = "Check the SDK hello example's ELF contract and report its size for XILA_SDK_TARGET"
+description = "Check the SDK examples' (hello, probe, threads, ssp) ELF contract and report the hello size for XILA_SDK_TARGET"
 run = "mise run sdk:verify"
 
 [tasks."ci:sdk-test"]

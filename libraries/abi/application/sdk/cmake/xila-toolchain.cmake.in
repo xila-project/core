@@ -90,4 +90,4 @@ endif()
 # rule, not in CMAKE_EXE_LINKER_FLAGS, so that a user's own flags cannot replace them;
 # CMAKE_EXE_LINKER_FLAGS and target link options therefore take ld.lld flags (no -Wl,).
 set(CMAKE_C_LINK_EXECUTABLE
-  "${XILA_LLD} -pie --no-dynamic-linker -Bsymbolic -z max-page-size=16 --gc-sections --build-id=none @XILA_LINK_FLAGS@ --defsym=XILA_DATA_ALIGN=${XILA_DATA_ALIGNMENT} ${XILA_PRINTF_ALIASES} -T ${XILA_SDK_ROOT}/lib/xila-static-pie.ld <CMAKE_C_LINK_FLAGS> <LINK_FLAGS> ${XILA_SDK_ROOT}/lib/crt0.o <OBJECTS> -o <TARGET> -L${XILA_SDK_ROOT}/lib --start-group <LINK_LIBRARIES> -lxila_posix -lxila -lc ${XILA_BUILTINS_LIBRARY} --end-group")
+  "${XILA_LLD} -pie --no-dynamic-linker -Bsymbolic -z max-page-size=16 --gc-sections --build-id=none --defsym=XILA_DATA_ALIGN=${XILA_DATA_ALIGNMENT} ${XILA_PRINTF_ALIASES} -T ${XILA_SDK_ROOT}/lib/xila-static-pie.ld <CMAKE_C_LINK_FLAGS> <LINK_FLAGS> ${XILA_SDK_ROOT}/lib/crt0.o <OBJECTS> -o <TARGET> -L${XILA_SDK_ROOT}/lib --start-group <LINK_LIBRARIES> -lxila_posix -lxila -lc ${XILA_BUILTINS_LIBRARY} --end-group")

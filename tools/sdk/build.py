@@ -64,8 +64,12 @@ TARGETS = {
     },
     "riscv32imac-unknown-none-elf": {
         "triple": "riscv32-unknown-none-elf",
-        "flags": ["-march=rv32imac", "-mabi=ilp32", "-mno-relax"],
-        "link_flags": ["--no-relax"],
+        # Call relaxation (pc-relative jal/c.jal) stays on: it is valid in a PIE and leaves
+        # the R_RISCV_RELATIVE count of hello unchanged. Only gp relaxation would tie an
+        # image to the firmware's global pointer; lld does it only with --relax-gp and a
+        # __global_pointer$ symbol, neither of which the SDK has (check_elf.py rejects the
+        # symbol).
+        "flags": ["-march=rv32imac", "-mabi=ilp32"],
         "meson_cpu_family": "riscv32",
         "meson_cpu": "rv32imac",
         "processor": "riscv32",
@@ -172,9 +176,12 @@ skip_sanity_check = true
 needs_exe_wrapper = true
 """
     # Rewriting an identical file would make meson regenerate (and uv's throwaway
-    # environment, which build.ninja remembers, is gone by the next run).
-    if not path.exists() or path.read_text() != text:
+    # environment, which build.ninja remembers, is gone by the next run). Report a change to
+    # an existing file: meson keeps the old compiler flags across --reconfigure.
+    changed = path.exists() and path.read_text() != text
+    if not path.exists() or changed:
         path.write_text(text)
+    return changed
 
 
 # picolibc configuration. TLS is off and errno is a function so the loader never sees PT_TLS
@@ -205,11 +212,17 @@ def build_picolibc(source, target, work):
     build = work / "picolibc-build"
     install = work / "picolibc"
     cross = work / "picolibc.cross"
-    write_cross_file(target, cross)
+    cross_changed = write_cross_file(target, cross)
     options = [f"-D{key}={value}" for key, value in PICOLIBC_OPTIONS.items()]
     if not (build / "build.ninja").exists():
         run(["meson", "setup", build, source, "--cross-file", cross, f"--prefix={install}",
              *options])
+    elif cross_changed:
+        # --reconfigure keeps the compiler and flags of the original cross file, so a changed
+        # cross file (a new -march or -m flag) would silently not apply. --wipe empties the
+        # build directory and configures it again from the cross file as it is now.
+        run(["meson", "setup", "--wipe", build, source, "--cross-file", cross,
+             f"--prefix={install}", *options])
     else:
         # build.ninja remembers the meson that configured it, which may be gone.
         run(["meson", "setup", "--reconfigure", build, source, *options])
@@ -385,7 +398,6 @@ def assemble(target, pin, install, crt0, libraries, work):
         "@XILA_CLANG_TRIPLE@": config["triple"],
         "@XILA_CMAKE_PROCESSOR@": config["processor"],
         "@XILA_ARCH_FLAGS@": ";".join(config["flags"]),
-        "@XILA_LINK_FLAGS@": " ".join(config.get("link_flags", [])),
         "@XILA_DATA_ALIGNMENT@": str(config["data_alignment"]),
         "@XILA_BUILTINS_COMMAND@": ";".join(config["builtins"] or []),
     }
@@ -462,18 +474,30 @@ def build(args):
 
 def map_sizes(text):
     """Bytes per origin and output section from an lld map: {origin: {section: size}}.
-    Origins are the application object, crt0, and each SDK archive."""
+    Origins are the application object, crt0, and each SDK archive.
+
+    The map has fixed columns (VMA LMA Size Align Out In Symbol): an output section starts in
+    the "Out" column, an input section in "In", a symbol after that. Labels such as RISC-V's
+    `.Lpcrel_hiN` also start with a dot, so the column decides, never the name."""
     sizes = {}
+    output_column = None
     output_section = None
+    rows = []
     for line in text.splitlines():
-        match = re.match(r"\s+[0-9a-f]+\s+[0-9a-f]+\s+([0-9a-f]+)\s+\d+\s+(\S.*)$", line)
-        if not match:
+        if output_column is None and re.search(r"\bOut\s+In\s+Symbol\b", line):
+            output_column = line.index("Out")
+        match = re.match(r"(\s+[0-9a-f]+\s+[0-9a-f]+\s+([0-9a-f]+)\s+\d+\s+)(\S.*)$", line)
+        if match:
+            rows.append((len(match.group(1)), int(match.group(2), 16), match.group(3)))
+    if output_column is None and rows:
+        # No header (an excerpt): the output sections are the leftmost text.
+        output_column = min(column for column, _size, _rest in rows)
+    for column, size, rest in rows:
+        if column <= output_column:
+            output_section = rest.split()[0]
             continue
-        size, rest = int(match.group(1), 16), match.group(2)
         member = re.match(r"(.+?):\((\.\S+)\)$", rest)
         if member is None:
-            if rest.startswith("."):
-                output_section = rest.split()[0]
             continue
         path = member.group(1)
         archive = re.match(r".*?([^/]+\.a)\(", path)
@@ -514,7 +538,9 @@ def verify_image(image, target):
 
 def verify_c_program(target, sdk, name, source, *options):
     build = OUTPUT / target / f"example-{name}"
-    run(["cmake", "-S", source, "-B", build,
+    # --fresh (CMake 3.24): the cache keeps the first configure's flags, so an SDK rebuilt
+    # with different target flags would otherwise leave the example on the old ones.
+    run(["cmake", "--fresh", "-S", source, "-B", build,
          f"-DCMAKE_TOOLCHAIN_FILE={sdk / 'cmake/xila-toolchain.cmake'}",
          "-DCMAKE_BUILD_TYPE=MinSizeRel", *options])
     run(["cmake", "--build", build])
@@ -593,7 +619,6 @@ def rust_example(args):
             "--gc-sections", "--build-id=none",
             f"--defsym=XILA_DATA_ALIGN={TARGETS[target]['data_alignment']}",
             f"-T{LOADER / 'xila-static-pie.ld'}",
-            *TARGETS[target].get("link_flags", []),
         ]
         flags = [
             "-C", "relocation-model=pic",
