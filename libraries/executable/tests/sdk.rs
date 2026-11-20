@@ -289,6 +289,12 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
         .await
         .unwrap();
 
+    context
+        .task_manager
+        .set_environment_variable(parent, "SDK_GREETING", "hello from the environment")
+        .await
+        .unwrap();
+
     // Integer-only printf (the default) and the double variant, each a separate build.
     for format in ["integer", "double"] {
         let program_path = format!("/program-{format}");
@@ -299,6 +305,10 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
         let text = String::from_utf8(stdout).unwrap();
         println!("{text}");
         assert!(text.contains("hello from Xila, 1 argument(s)\n"), "{text}");
+        assert!(
+            text.contains("greeting: hello from the environment\n"),
+            "{text}"
+        );
         assert!(text.contains("entropy: a5a5a5a5\n"), "{text}");
         assert!(text.ends_with("hello: ok\n"), "{text}");
 
@@ -312,6 +322,15 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
     }
 
     install(vfs, parent, "/probe", &build_probe()).await;
+    context
+        .task_manager
+        .set_environment_variable(parent, "SDK_PROBE", "inherited")
+        .await
+        .unwrap();
+    let (status, stdout, stderr) =
+        launch(context, parent, "/probe", "environment", &["environment"]).await;
+    assert_eq!(status, 0, "{}", String::from_utf8_lossy(&stderr));
+    assert_eq!(stdout, b"environment: ok\n");
 
     // _exit flushes nothing: the buffered writes are lost, the file the program created
     // stays empty, the unbuffered stderr write got through.

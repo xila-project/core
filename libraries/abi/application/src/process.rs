@@ -121,12 +121,12 @@ impl ProcessLaunch {
                         .replace_environment_variables(task, environment)
                         .await?;
                 }
-                Ok::<_, task::Error>(task)
+                Ok::<_, task::Error>((task, manager.get_name(task).await?))
             }
             .await
             .map_err(task_status);
         }));
-        let Ok(task) = identity else {
+        let Ok((task, program_name)) = identity else {
             return START_FAILURE;
         };
         let home = home.map(|grant| {
@@ -141,6 +141,7 @@ impl ProcessLaunch {
         }
         let resources = Resources {
             _owned: arguments,
+            program_name,
             arguments: pointers,
             standard_input,
             standard_output,

@@ -5,6 +5,7 @@
  *
  *   underscore-exit  buffered writes, then _exit: nothing buffered may reach a file
  *   flush-then-exit  fflush(NULL), more writes, an atexit handler, then exit: all of it
+ *   environment      POSIX access and raw ABI interoperation
  *   root             open of the root and "." , readdir inodes, errno values
  */
 #include <dirent.h>
@@ -21,7 +22,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
-#include <xila/application.h>
+#include <xila/stubs.h>
 
 #define CHECK(step, condition)                                                           \
     do {                                                                                 \
@@ -351,6 +352,81 @@ static int descriptors(void) {
     return 0;
 }
 
+/* Capture the raw capability only for the interoperation tests. */
+static const XilaProcess *process;
+int32_t __real_xila_main(const XilaStartup *startup);
+
+int32_t __wrap_xila_main(const XilaStartup *startup) {
+    process = startup->process;
+    return __real_xila_main(startup);
+}
+
+static void *environment_worker(void *expected) {
+    if (getenv("SDK_PROBE") == expected && unsetenv("") == -1 && errno == EINVAL)
+        return expected;
+    return NULL;
+}
+
+static int environment(const char *program) {
+    const char *name = "SDK_PROBE";
+    char *initial = getenv(name);
+    CHECK("inherited environment", initial != NULL && strcmp(initial, "inherited") == 0);
+    CHECK("program name", strcmp(program, "probe") == 0);
+    errno = EDOM;
+    CHECK("missing value preserves errno", getenv("SDK_MISSING") == NULL && errno == EDOM);
+    pthread_t worker;
+    void *worker_value = NULL;
+    CHECK("start environment reader", pthread_create(&worker, NULL, environment_worker, initial) == 0);
+    CHECK("worker sees the same value and has its own errno",
+          pthread_join(worker, &worker_value) == 0 && worker_value == initial && errno == EDOM);
+    CHECK("existing value without overwrite", setenv(name, "ignored", 0) == 0 &&
+          getenv(name) == initial);
+
+    CHECK("set empty value", setenv("SDK_EMPTY", "", 0) == 0);
+    const char *empty = getenv("SDK_EMPTY");
+    CHECK("get empty value", empty != NULL && *empty == '\0');
+    CHECK("empty value counts as present", setenv("SDK_EMPTY", "ignored", 0) == 0 &&
+          getenv("SDK_EMPTY") == empty);
+    CHECK("unrelated set and get preserve the pointer", strcmp(initial, "inherited") == 0);
+
+    CHECK("overwrite", setenv(name, "new", 1) == 0);
+    const char *current = getenv(name);
+    CHECK("read overwritten value", current != NULL && strcmp(current, "new") == 0);
+    char raw[3];
+    size_t length;
+    CHECK("POSIX change visible to ABI",
+          xila_env_get(process, name, strlen(name), raw, sizeof(raw), &length) == XILA_STATUS_OK &&
+          length == sizeof(raw) && memcmp(raw, "new", sizeof(raw)) == 0);
+
+    char large[513];
+    memset(large, 'x', sizeof(large) - 1);
+    large[sizeof(large) - 1] = '\0';
+    CHECK("set long value through ABI",
+          xila_env_set(process, name, strlen(name), large, strlen(large)) == XILA_STATUS_OK);
+    const char *long_value = getenv(name);
+    CHECK("get long value with terminator", long_value != NULL && strcmp(long_value, large) == 0);
+    CHECK("raw update preserves the earlier pointer", strcmp(current, "new") == 0);
+    CHECK("repeated long lookup", getenv(name) == long_value);
+    CHECK("raw removal is visible",
+          xila_env_remove(process, name, strlen(name)) == XILA_STATUS_OK && getenv(name) == NULL);
+    CHECK("raw removal preserves the earlier pointer", strcmp(long_value, large) == 0);
+    CHECK("unset absent name", unsetenv(name) == 0);
+
+    CHECK("set after removal", setenv(name, "again", 0) == 0);
+    CHECK("unset present name", unsetenv(name) == 0 && getenv(name) == NULL);
+    CHECK("ABI sees unset",
+          xila_env_get(process, name, strlen(name), raw, sizeof(raw), &length) == XILA_STATUS_NOT_FOUND);
+    char assignment[] = "SDK_EMPTY=put";
+    CHECK("putenv updates through setenv", putenv(assignment) == 0);
+    const char *put = getenv("SDK_EMPTY");
+    CHECK("get putenv value", put != NULL && strcmp(put, "put") == 0);
+    CHECK("invalid set name", setenv("A=B", "bad", 0) == -1 && errno == EINVAL);
+    CHECK("invalid unset name", unsetenv("") == -1 && errno == EINVAL);
+
+    puts("environment: ok");
+    return 0;
+}
+
 int main(int argc, char **argv) {
     const char *mode = argc > 1 ? argv[1] : "";
     if (strcmp(mode, "underscore-exit") == 0)
@@ -359,6 +435,8 @@ int main(int argc, char **argv) {
         return flush_then_exit();
     if (strcmp(mode, "root") == 0)
         return root();
+    if (strcmp(mode, "environment") == 0)
+        return environment(argv[0]);
     if (strcmp(mode, "descriptors") == 0)
         return descriptors();
     fprintf(stderr, "probe: unknown scenario \"%s\"\n", mode);

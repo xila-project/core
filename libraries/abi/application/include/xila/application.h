@@ -724,6 +724,10 @@ typedef struct XilaStartup {
   struct XilaFile *standard_error;
   struct XilaDirectory *home;
   const struct XilaProcess *process;
+  /**
+   * Executable's launch name. Empty for a linked entry without a process.
+   */
+  struct XilaString program_name;
 } XilaStartup;
 
 #endif  /* XILA_APPLICATION_H */

@@ -27,7 +27,8 @@ static int exit_status;
 /* One argv block on the process heap: pointer array, then the NUL-terminated copies. */
 static char **build_arguments(const XilaStartup *startup, int *argc) {
     size_t count = startup->argument_count;
-    size_t bytes = (count + 2) * sizeof(char *) + 1; /* argv[0] is "" */
+    XilaString name = startup->program_name;
+    size_t bytes = (count + 2) * sizeof(char *) + name.length + 1;
     for (size_t index = 0; index < count; ++index) {
         if (startup->arguments[index].length > SIZE_MAX / 2 - bytes - 1)
             return NULL;
@@ -38,6 +39,9 @@ static char **build_arguments(const XilaStartup *startup, int *argc) {
         return NULL;
     char *text = (char *)(argv + count + 2);
     argv[0] = text;
+    if (name.length != 0)
+        memcpy(text, name.data, name.length);
+    text += name.length;
     *text++ = '\0';
     for (size_t index = 0; index < count; ++index) {
         argv[index + 1] = text;
@@ -50,7 +54,6 @@ static char **build_arguments(const XilaStartup *startup, int *argc) {
     return argv;
 }
 
-/* The host does not pass the program name yet: argv[0] is the empty string. */
 __attribute__((no_stack_protector)) int xila_posix_initialize(const XilaStartup *startup, int *argc,
                                                              char ***argv) {
     if (xila_fd_initialize(startup) != 0)

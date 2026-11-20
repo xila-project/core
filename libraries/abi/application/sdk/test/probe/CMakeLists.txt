@@ -4,3 +4,5 @@ cmake_minimum_required(VERSION 3.20)
 project(xila_probe C)
 
 add_executable(probe probe.c)
+# Only the probe needs the raw startup capability to test ABI/POSIX interoperation.
+target_link_options(probe PRIVATE --wrap=xila_main)

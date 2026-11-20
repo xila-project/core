@@ -542,6 +542,8 @@ pub struct XilaStartup {
     pub standard_error: *mut File,
     pub home: *mut Directory,
     pub process: *const Process,
+    /// Executable's launch name. Empty for a linked entry without a process.
+    pub program_name: XilaString,
 }
 /// A native worker entry. Null is rejected.
 pub type ThreadEntry = Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>;

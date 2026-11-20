@@ -30,6 +30,8 @@ pub struct XilaStartup {
     pub standard_error: *mut File,
     pub home: *mut Directory,
     pub process: *const Process,
+    /// Executable's launch name. Empty for a linked entry without a process.
+    pub program_name: XilaString,
 }
 
 /// What the entry call borrows and the process owner releases when it ends. Kept in
@@ -39,6 +41,7 @@ pub(crate) struct Resources {
     /// Strings that `arguments` points into.
     pub(crate) _owned: Vec<String>,
     pub(crate) arguments: Vec<XilaString>,
+    pub(crate) program_name: String,
     pub(crate) standard_input: Option<File>,
     pub(crate) standard_output: Option<File>,
     pub(crate) standard_error: Option<File>,
@@ -66,6 +69,7 @@ pub unsafe fn run_main(
 ) -> i32 {
     let resources = Resources {
         _owned: Vec::new(),
+        program_name: String::new(),
         arguments: arguments
             .iter()
             .map(|argument| XilaString {
@@ -136,6 +140,10 @@ pub(crate) unsafe fn enter(
             .as_mut()
             .map_or(ptr::null_mut(), ptr::from_mut),
         process: process.as_ref().map_or(ptr::null(), ptr::from_ref),
+        program_name: XilaString {
+            data: resources.program_name.as_ptr().cast(),
+            length: resources.program_name.len(),
+        },
     };
     if !startup.process.is_null() {
         crate::threads::bind_process(startup.process);

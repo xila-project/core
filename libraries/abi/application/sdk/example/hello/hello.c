@@ -1,7 +1,7 @@
 /* Hello world for Xila native applications, built against the SDK with CMake.
  *
  * It exercises the C library and the POSIX layer on top of the native ABI: stdio,
- * files and directories, the clocks and entropy. On success it returns 0 and prints
+ * files and directories, the environment, clocks and entropy. On success it returns 0 and prints
  * "hello: ok"; on failure it names the step and returns a non-zero code. */
 #include <dirent.h>
 #include <errno.h>
@@ -26,6 +26,10 @@
 
 int main(int argc, char **argv) {
     printf("hello from Xila, %d argument(s)\n", argc - 1);
+
+    const char *greeting = getenv("SDK_GREETING");
+    if (greeting != NULL)
+        printf("greeting: %s\n", greeting);
 
     /* Standard C: formatted output without float support, and the heap. */
     char *text = malloc(32);

@@ -90,7 +90,7 @@ COMMON_FLAGS = [
     "-D_GNU_SOURCE", "-Wall", "-Wextra", "-Werror",
 ]
 
-POSIX_SOURCES = ["errno", "exit_flush", "fd", "file", "heap", "onexit", "path", "stack_protector", "startup", "status", "stderr", "stdin", "stdout",
+POSIX_SOURCES = ["environment", "errno", "exit_flush", "fd", "file", "heap", "onexit", "path", "stack_protector", "startup", "status", "stderr", "stdin", "stdout",
                  "time", "poll", "unsupported", "thread", "thread_keys", "thread_sync", "libc_lock", "strtok", "random"]
 
 
@@ -250,11 +250,19 @@ def build_picolibc(source, target, work):
 #     member of the same name (the vector table and default handlers) has no constructor
 #     and stays.
 # The POSIX layer provides the retarget locks and the nonblocking ftrylockfile.
+# It also provides getenv, setenv and unsetenv over the ABI. Remove picolibc's
+# private environment and its empty environ, which cannot represent the ABI's state.
+# Picolibc's putenv copies the assignment and calls setenv.
 DROPPED_MEMBERS = (
     ("libc_misc_lock.c.o", None),
     ("libc_stdio_ftrylockfile.c.o", None),
     ("libc_stdio_bufio_exit_flush.c.o", None),
     ("libc_stdlib_exitprocs.c.o", None),
+    ("libc_stdlib__findenv.c.o", None),
+    ("libc_stdlib_environ.c.o", None),
+    ("libc_stdlib_getenv.c.o", None),
+    ("libc_stdlib_setenv.c.o", None),
+    ("libc_stdlib_unsetenv.c.o", None),
     ("libc_ssp_stack_protector.c.o", None),
     ("interrupt.c.o", ("x86_64-unknown-linux-gnu",)),
 )

@@ -443,7 +443,8 @@ writes to the borrowed output stream. Read the ABI version from
 fields, and check `api->version` and `api->size` against the required slots.
 The API pointer is always present. Optional capability pointers may be null.
 Arguments are UTF-8 `XilaString` pairs without NUL terminators. The argument
-array is null at count zero. `XilaStartup.process` is the process capability, null
+array is null at count zero. `XilaStartup.program_name` carries the executable's
+launch name separately and is empty for a linked entry. `XilaStartup.process` is the process capability, null
 for an application that is not a process.
 
 The host lends the startup data, strings and initial capabilities for the call.

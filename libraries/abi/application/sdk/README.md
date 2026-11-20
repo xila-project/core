@@ -66,7 +66,9 @@ rejects an image with `DT_INIT`, a non-empty `DT_INIT_ARRAY` or `PT_TLS`.
 
 Copy `hello.elf` to a filesystem the platform's native format reads (Core's
 `NativeFormat`, the `native-dev` feature) and execute it. `main(int argc, char **argv)`
-receives the arguments; `argv[0]` is empty until the host passes the program name.
+receives the arguments. For a native executable, `argv[0]` is its launch name
+(the executable's basename when launched through `executable::execute`). A linked
+entry with no process capability gets an empty `argv[0]`.
 Returning from `main` uses `exit` and performs the cleanup described below.
 Both `exit` and `_exit` close the descriptors the program left open. `_exit`
 discards buffered output and skips exit handlers.
@@ -76,9 +78,9 @@ discards buffered output and skips exit handlers.
 `share/xila/example/hello/hello.c` exercises `printf`/`snprintf`, `malloc`, files
 (`open`, `read`, `write`, `lseek`, `pread`, `fstat`, `rename`, `unlink`), directories
 (`mkdir`, `chdir`, `getcwd`, `opendir`, `readdir`), `fopen`/`fgets`/`fprintf`,
-clocks, `nanosleep` and `getentropy`. Core's test builds it with this toolchain file
-and runs it through the VFS, the executable dispatch table, the native loader and
-the ABI table (`libraries/executable/tests/sdk.rs`).
+clocks, `nanosleep`, `getentropy` and `getenv`. Core's test builds it with this
+toolchain file and runs it through the VFS, the executable dispatch table, the
+native loader and the ABI table (`libraries/executable/tests/sdk.rs`).
 
 ## Rust
 
@@ -141,6 +143,24 @@ Rust entry shim provides the ABI note and needs no C startup object or libc.
 * **Heap.** `malloc`, `calloc`, `realloc` and friends are the process heap
   (`xila_heap_*`); picolibc's own allocator is not built. Alignments above
   `XILA_HEAP_ALIGNMENT` fail.
+* **Environment.** `getenv`, `setenv` and `unsetenv` use the process capability
+  and see inherited or explicitly supplied launch values. Names and values
+  follow the ABI's UTF-8 rules. `getenv` returns NULL for a missing name
+  without changing `errno`. `setenv` honors its overwrite flag and `unsetenv`
+  succeeds for an absent name. Without a process capability, `getenv` returns
+  NULL and mutations fail with `ENOSYS`. Picolibc's `putenv` copies the assignment
+  and calls `setenv`.
+
+  Each lookup checks the ABI, so a new lookup sees raw ABI changes. The SDK
+  allocates a NUL-terminated copy only for each distinct value it returns for a
+  name. Those pointers remain valid until a successful POSIX change of that name
+  or process exit. A long lookup may temporarily allocate another buffer to
+  compare with a cached value. The process-wide libc lock serializes the C
+  environment functions across coroutines. Coordinate direct ABI mutations
+  with POSIX calls if they must act as one operation, and coordinate use of
+  returned pointers with POSIX mutations of the same name.
+
+  The ABI has no enumeration call, so the SDK does not provide `environ`.
 * **stdio.** `stdin`, `stdout` and `stderr` are descriptors 0-2 through picolibc's
   buffered POSIX streams, each in its own object, so a program that never reads
   `stdin` carries neither its `FILE` nor its buffer. `stdout` is line buffered (128
@@ -259,11 +279,11 @@ Workers can return a result or call `pthread_exit`, both of which run their TLS
 destructors. Main ends the process by returning or calling `exit`. Calling
 `pthread_exit` from main aborts. Worker cancellation is outside this subset.
 
-Return `ENOSYS`, until the ABI slots they need exist:
+The following stubs report `ENOSYS`:
 
-| Calls | Waiting for |
+| Calls | Pending support |
 |---|---|
-| `posix_spawn`, `waitpid`, environment, user and process ids | core#717 (process and environment capabilities) |
+| `posix_spawn`, `waitpid` | POSIX wrappers for the process ABI (core#762) |
 | `socket`, `connect`, `bind`, `listen`, `accept`, `send*`, `recv*`, `shutdown` | the network capability in the startup structure (core#717); DNS (`getaddrinfo`) is not declared |
 
 Never provided: `fork`, asynchronous signals, general `mmap`.
