@@ -419,10 +419,12 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
     // the handler uses it). The handler must leave through the process capability, whose
     // state (startup block, capability, standard streams) is host-owned and off the
     // coroutine stack (#766): sizes from 224 bytes to well past the 416 where it used to
-    // crash the host still end with status 134. The largest stays about 500 bytes short of
-    // the top of the coroutine stack, which an overflow of around 2.2 KiB reaches; past it
-    // the program writes outside any memory the host gave it.
-    for size in ["224", "320", "416", "512", "1024", "1536"] {
+    // crash the host still end with status 134. How far an overflow can go before it
+    // leaves the coroutine stack depends on the build profile: in release 1024 bytes
+    // already write into the next heap chunk (glibc then aborts the test with
+    // "free(): invalid next size"), while debug holds up to 2 KiB. The largest size is
+    // one both profiles hold; past it the program writes outside any memory the host gave it.
+    for size in ["224", "320", "416", "512", "768"] {
         let (status, stdout, stderr) =
             launch(context, parent, "/ssp", "ssp-large", &["large", size]).await;
         assert_eq!(status, 134, "{size}");
