@@ -17,4 +17,5 @@ panic = "abort"
 panic = "abort"
 opt-level = "s"
 codegen-units = 1
+lto = true
 strip = "symbols"

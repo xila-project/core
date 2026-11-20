@@ -286,6 +286,15 @@ async fn executes_c_elf_from_vfs_with_host_services() {
         Err(LoaderError::IncompatibleAbi(_))
     ));
     assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
+
+    // lld omits the empty relocation section in this fixture. Its dynamic
+    // metadata must stay outside the ABI note segment.
+    let bytes = build_fixture(
+        "xila-no-relocations.elf",
+        "-fuse-ld=lld -DXILA_FIXTURE_NO_RELOCATIONS",
+    );
+    drop(LoadedImage::load(&bytes, &Mmap, 32 * 1024).unwrap());
+    assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
 }
 
 /// A native program spawns copies of itself through `xila_process_spawn`, which goes

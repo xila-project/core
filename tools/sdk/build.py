@@ -610,7 +610,7 @@ def verify(args):
 
 def rust_example(args):
     """Build an independent PIC sysroot for each selected Rust guest and verify its image."""
-    from check_elf import Elf, PF_W, PT_LOAD
+    from check_elf import Elf, PF_W, PT_LOAD, SHT_REL, SHT_RELA
 
     nightly = tomllib.loads((ROOT / "mise.toml").read_text())["vars"]["nightly_version"]
     example = SDK_SOURCE / "sdk/rust/hello"
@@ -624,8 +624,13 @@ def rust_example(args):
              "--target", target, "--target-dir", output], cwd=example, env=env)
         image = output / target / "release/xila-rust-hello"
         verify_image(image, target)
+        elf = Elf(image.read_bytes())
+        # The fat-LTO hello exercises linking and loading without .rel.dyn/.rela.dyn.
+        if any(section["size"] and section["type"] in (SHT_REL, SHT_RELA)
+               for section in elf.sections()):
+            sys.exit(f"{image}: the zero-relocation regression fixture has relocations")
         alignment = TARGETS[target]["data_alignment"]
-        writable_loads = [segment for segment in Elf(image.read_bytes()).segments()
+        writable_loads = [segment for segment in elf.segments()
                           if segment["type"] == PT_LOAD and segment["flags"] & PF_W]
         if not writable_loads or any(segment["vaddr"] % alignment for segment in writable_loads):
             sys.exit(f"{image}: expected writable PT_LOAD segments aligned to {alignment} bytes")
