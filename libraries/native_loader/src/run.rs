@@ -3,7 +3,7 @@ extern crate alloc;
 use alloc::{alloc::alloc, boxed::Box, string::String, vec::Vec};
 use core::{alloc::Layout, cell::UnsafeCell, ptr::NonNull};
 
-use abi_application::{File, Heap, ProcessLaunch, XilaStartup, drive_process, run_main};
+use abi_application::{File, Heap, HostState, ProcessLaunch, XilaStartup, drive_process};
 
 use crate::{Error, LoadedImage};
 
@@ -20,10 +20,12 @@ pub struct Startup {
     pub process: Option<ProcessLaunch>,
 }
 
-/// The image and process heap of one running program, in a single allocation.
-/// The task future owns it through [`Owned`], not the coroutine stack, so
-/// cancelling a suspended coroutine (which leaks its stack) still releases both
-/// once the task future is dropped.
+/// The image, process heap and host state of one running program, in a single
+/// allocation. The host state holds the startup block, the process capability and
+/// the resources they point into, so the coroutine's own frames hold none of it.
+/// The task future owns the allocation through [`Owned`], not the coroutine stack,
+/// so cancelling a suspended coroutine (which leaks its stack) still releases all
+/// of it once the task future is dropped.
 ///
 /// Freeing the image and the heap while the cancelled coroutine's own pending
 /// future is leaked is sound because no driver keeps a pointer into a program
@@ -32,6 +34,7 @@ pub struct Startup {
 struct Process {
     _image: LoadedImage,
     heap: UnsafeCell<Heap>,
+    state: UnsafeCell<HostState>,
 }
 
 /// The owner of a leaked [`Process`] allocation, freeing it on drop.
@@ -54,6 +57,12 @@ impl Owned {
     fn heap(&self) -> NonNull<Heap> {
         // SAFETY: the pointer refers to an initialized `Process`.
         unsafe { NonNull::new_unchecked((*self.0.as_ptr()).heap.get()) }
+    }
+
+    /// The host state of the process. It stays at this address until `self` is dropped.
+    fn state(&self) -> NonNull<HostState> {
+        // SAFETY: the pointer refers to an initialized `Process`.
+        unsafe { NonNull::new_unchecked((*self.0.as_ptr()).state.get()) }
     }
 }
 
@@ -99,19 +108,33 @@ impl LoadedImage {
         Error,
     > {
         let entry = self.entry_address();
+        let Startup {
+            arguments,
+            standard_input,
+            standard_output,
+            standard_error,
+            process: launch,
+        } = startup;
         let process = Owned::new(Process {
             _image: self,
             heap: UnsafeCell::new(Heap::new()),
+            state: UnsafeCell::new(HostState::new(
+                arguments,
+                standard_input,
+                standard_output,
+                standard_error,
+            )),
         })?;
         let heap = process.heap();
-        let managed = startup.process.is_some();
+        let state = process.state();
+        let managed = launch.is_some();
         Ok(unsafe {
             stackful::spawn_with_driver(
                 manager,
                 parent,
                 name,
                 stack,
-                move || run(entry, heap, startup),
+                move || run(entry, heap, state, launch),
                 move |coroutine| async move {
                     if managed {
                         drive_process(coroutine).await
@@ -129,40 +152,21 @@ impl LoadedImage {
     }
 }
 
-/// Everything owned moves into the callee, so a process that exits early abandons
-/// this frame without leaking: see `xila_process_exit`.
-unsafe fn run(entry: NonNull<u8>, mut heap: NonNull<Heap>, startup: Startup) -> i32 {
+/// The coroutine entry. It holds only pointers into the process allocation and the
+/// launch request, which the callee consumes before C runs: the arguments, the
+/// streams and the startup block stay in the host state, off this stack, so a
+/// process that exits early abandons this frame without leaking: see
+/// `xila_process_exit`.
+unsafe fn run(
+    entry: NonNull<u8>,
+    heap: NonNull<Heap>,
+    state: NonNull<HostState>,
+    launch: Option<ProcessLaunch>,
+) -> i32 {
     let entry: unsafe extern "C" fn(*const XilaStartup) -> i32 =
         unsafe { core::mem::transmute(entry.as_ptr()) };
-    let Startup {
-        arguments,
-        standard_input,
-        standard_output,
-        standard_error,
-        process,
-    } = startup;
-    if let Some(process) = process {
-        return unsafe {
-            process.run(
-                entry,
-                heap.as_mut(),
-                arguments,
-                standard_input,
-                standard_output,
-                standard_error,
-            )
-        };
-    }
-    let args: Vec<&str> = arguments.iter().map(String::as_str).collect();
-    unsafe {
-        run_main(
-            entry,
-            heap.as_mut(),
-            &args,
-            standard_input,
-            standard_output,
-            standard_error,
-            None,
-        )
+    match launch {
+        Some(launch) => unsafe { launch.run(state, entry, heap) },
+        None => unsafe { HostState::run_linked(state, entry, heap) },
     }
 }

@@ -1,7 +1,23 @@
 #[cfg(test)]
 mod tests {
     use abi_application::*;
-    use core::ptr;
+    use core::ptr::{self, NonNull};
+
+    /// The heap and host state of a test run. They are leaked, like the other
+    /// fixtures here, so the coroutine entry holds only pointers to them.
+    fn run_state(
+        arguments: Vec<String>,
+        input: Option<File>,
+        output: Option<File>,
+        error: Option<File>,
+    ) -> (NonNull<HostState>, NonNull<Heap>) {
+        (
+            NonNull::from(Box::leak(Box::new(HostState::new(
+                arguments, input, output, error,
+            )))),
+            NonNull::from(Box::leak(Box::new(Heap::new()))),
+        )
+    }
     testing::instantiate_global_allocator!();
 
     #[unsafe(no_mangle)]
@@ -83,7 +99,6 @@ mod tests {
                 };
                 // The spawn future runs on the spawner's task, which is the child's parent.
                 let parent = self.tasks.get_current_task_identifier().await;
-                let heap: &'static mut Heap = Box::leak(Box::new(Heap::new()));
                 let stream = |file: virtual_file_system::File<'static>| {
                     Some(File::new(file.into_synchronous_file()))
                 };
@@ -92,6 +107,7 @@ mod tests {
                     stream(standard_output),
                     stream(standard_error),
                 );
+                let (state, heap) = run_state(arguments, input, output, error);
                 // SAFETY: the bounded C children fit the stack and never unwind; the closure
                 // moves every owned value into `run`, as the exit contract requires.
                 let (handle, _) = unsafe {
@@ -100,7 +116,7 @@ mod tests {
                         parent,
                         &name,
                         stackful::Stack::new(64 * 1024),
-                        move || launch.run(entry, heap, arguments, input, output, error),
+                        move || launch.run(state, entry, heap),
                         |status| status as isize,
                     )
                     .await
@@ -981,11 +997,12 @@ mod tests {
             environment: None,
             home: None,
         };
+        let (state, heap) = run_state(Vec::new(), None, None, None);
         // The bounded probe fits the stack and leaves the pipe endpoints owned
         // by the test so their close notifications cannot clear the hub first.
         let coroutine = unsafe {
             stackful::Coroutine::new(stackful::Stack::new(64 * 1024), move || {
-                launch.run(run, &mut Heap::new(), Vec::new(), None, None, None)
+                launch.run(state, run, heap)
             })
         };
         assert_eq!(readiness_waiter_count(), 0);
@@ -1142,8 +1159,8 @@ mod tests {
                 rights: 3,
             }),
         };
-        let heap: &'static mut Heap = Box::leak(Box::new(Heap::new()));
         let (input, output, error) = (open(), open(), open());
+        let (state, heap) = run_state(Vec::new(), Some(input), Some(output), Some(error));
         // SAFETY: the bounded C parent fits the stack and never unwinds.
         let (parent, _) = unsafe {
             stackful::spawn_with_result(
@@ -1151,16 +1168,7 @@ mod tests {
                 task,
                 "process parent",
                 stackful::Stack::new(128 * 1024),
-                move || {
-                    launch.run(
-                        process_parent_main,
-                        heap,
-                        Vec::new(),
-                        Some(input),
-                        Some(output),
-                        Some(error),
-                    )
-                },
+                move || launch.run(state, process_parent_main, heap),
                 |status| status as isize,
             )
             .await
@@ -1174,13 +1182,14 @@ mod tests {
             environment: None,
             home: None,
         };
+        let (state, heap) = run_state(Vec::new(), None, None, None);
         let (thread_test, _) = unsafe {
             stackful::spawn_with_driver(
                 tasks,
                 task,
                 "thread test",
                 stackful::Stack::new(64 * 1024),
-                move || launch.run(threads_main, &mut Heap::new(), Vec::new(), None, None, None),
+                move || launch.run(state, threads_main, heap),
                 drive_process,
                 core::convert::identity,
             )

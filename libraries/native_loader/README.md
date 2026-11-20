@@ -71,11 +71,17 @@ program that a native process spawned, its explicit environment and home
 directory. Set `Startup.process` to make a program a process; without it the
 program is started like a linked one, with no process capability. A spawned
 program's environment replaces the copy its task made of its parent's before
-the entry runs. The task future, not
-the coroutine stack, owns the image and the process `XilaHeap` granted through
-`startup->heap`. Both are released when the program returns or when the task is
-dropped. A cancelled coroutine's stack, arguments and startup streams stay
-leaked, as stackful documents. See
+the entry runs. The task future, not the coroutine stack, owns one allocation
+that holds the image, the process `XilaHeap` granted through `startup->heap` and
+the host state: the `XilaStartup` block, the process capability and the
+arguments and startup streams they point into. The coroutine entry receives
+only a pointer to it, so a program that overruns its own frames cannot damage the
+state `xila_process_exit` and the SDK's heap and standard error access depend
+on, and the host can reach the streams whatever the coroutine was doing. The
+allocation is released when the program returns or when the task is dropped. A
+cancelled coroutine's stack stays leaked, as stackful documents, and its
+streams are closed only when that allocation is dropped; closing them
+earlier and releasing the pipes a cancelled process holds is
 [Core #731](https://github.com/xila-project/core/issues/731).
 
 The platform implements `ExecutableMemory`, including cache synchronization

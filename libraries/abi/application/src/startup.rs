@@ -1,7 +1,7 @@
 //! Startup capabilities borrowed by a linked native C application.
 use crate::{Directory, File, Heap, Process, ProcessHost, XILA_API, XilaApi};
 use alloc::{string::String, vec::Vec};
-use core::{ffi::c_char, ptr};
+use core::{ffi::c_char, ptr, ptr::NonNull};
 use task::TaskIdentifier;
 
 /// UTF-8 bytes, not NUL-terminated. A null data pointer is valid only at length zero.
@@ -45,12 +45,114 @@ pub(crate) struct Resources {
     pub(crate) home: Option<Directory>,
 }
 
-/// Invoke a linked C entry, then close its granted streams. The process owner
-/// provides the heap and drops it after all native execution ends. Keep the heap
-/// owner outside any coroutine stack that can be abandoned.
+/// Everything the host keeps for one native run: the startup block the entry
+/// borrows, the process capability and the resources both point into.
 ///
-/// The entry gets no process capability; a loader that starts native processes
-/// uses [`crate::ProcessLaunch::run`].
+/// It belongs to the host side of the task, not to the program's coroutine: the
+/// loader allocates it once, next to the heap and the image, and the coroutine
+/// entry receives only a pointer to it. A program that writes past its own frames
+/// therefore cannot damage the state `xila_process_exit`, the SDK's heap access and
+/// the standard error stream behind `write(2)` depend on, and a host that stops
+/// resuming a coroutine can still reach what the coroutine owned.
+///
+/// The startup block and the capability point into the state, so it must not move
+/// once a run has begun: the allocation that holds it stays where it is until the
+/// run has ended for good. Building it, and moving it into that allocation, are
+/// free to move it, because nothing points into it yet.
+pub struct HostState {
+    startup: XilaStartup,
+    process: Option<Process>,
+    pub(crate) resources: Resources,
+}
+
+/// The startup array over `arguments`, which must outlive it. One instance serves
+/// both callers.
+fn argument_pointers(arguments: &mut dyn ExactSizeIterator<Item = &str>) -> Vec<XilaString> {
+    let mut pointers = Vec::with_capacity(arguments.len());
+    for argument in arguments {
+        pointers.push(XilaString {
+            data: argument.as_ptr().cast(),
+            length: argument.len(),
+        });
+    }
+    pointers
+}
+
+impl HostState {
+    /// The arguments and the standard streams of a program that has not started.
+    pub fn new(
+        arguments: Vec<String>,
+        standard_input: Option<File>,
+        standard_output: Option<File>,
+        standard_error: Option<File>,
+    ) -> Self {
+        Self::from_resources(Resources {
+            arguments: argument_pointers(&mut arguments.iter().map(String::as_str)),
+            _owned: arguments,
+            standard_input,
+            standard_output,
+            standard_error,
+            home: None,
+        })
+    }
+
+    fn from_resources(resources: Resources) -> Self {
+        Self {
+            // Filled in by `enter`, which knows the heap and the capability.
+            startup: XilaStartup {
+                size: 0,
+                api: ptr::null(),
+                heap: ptr::null_mut(),
+                arguments: ptr::null(),
+                argument_count: 0,
+                standard_input: ptr::null_mut(),
+                standard_output: ptr::null_mut(),
+                standard_error: ptr::null_mut(),
+                home: ptr::null_mut(),
+                process: ptr::null(),
+            },
+            process: None,
+            resources,
+        }
+    }
+
+    /// Run a linked entry that gets no process capability and cannot exit early,
+    /// then drop the resources. The state belongs to the caller, as for
+    /// [`crate::ProcessLaunch::run`].
+    ///
+    /// # Safety
+    /// Same as [`run_main`], and `state` and `heap` stay at their addresses and live
+    /// until native execution has permanently ended.
+    pub unsafe fn run_linked(
+        state: NonNull<Self>,
+        entry: unsafe extern "C" fn(*const XilaStartup) -> i32,
+        heap: NonNull<Heap>,
+    ) -> i32 {
+        unsafe { enter(state, entry, heap, None) }
+    }
+}
+
+impl Resources {
+    /// Drop what the process owns, once. Dropping an empty set does nothing, so a
+    /// return from the entry and `xila_process_exit` can both call it.
+    ///
+    /// # Safety
+    /// The pointer addresses live resources and no reference to them is in use.
+    #[inline(never)]
+    pub(crate) unsafe fn release(resources: *mut Self) {
+        // SAFETY: the caller guarantees the pointer is valid; the old value is
+        // dropped in place, after the new empty one is written.
+        unsafe { *resources = Self::default() };
+    }
+}
+
+/// Invoke a linked C entry on the calling stack, then close its granted streams.
+/// The process owner provides the heap and drops it after all native execution
+/// ends.
+///
+/// The entry gets no process capability and cannot exit early; the host state sits
+/// in this frame. A loader that starts native processes keeps the state off the
+/// stack: see [`HostState`] and [`crate::ProcessLaunch::run`].
 /// # Safety
 /// Entry must obey the startup lifetime and ownership rules, serialize object
 /// access, and never unwind. The heap must remain live until native execution
@@ -64,85 +166,88 @@ pub unsafe fn run_main(
     standard_error: Option<File>,
     home: Option<Directory>,
 ) -> i32 {
-    let resources = Resources {
+    let mut state = HostState::from_resources(Resources {
         _owned: Vec::new(),
-        arguments: arguments
-            .iter()
-            .map(|argument| XilaString {
-                data: argument.as_ptr().cast(),
-                length: argument.len(),
-            })
-            .collect(),
+        arguments: argument_pointers(&mut arguments.iter().copied()),
         standard_input,
         standard_output,
         standard_error,
         home,
-    };
-    unsafe { enter(entry, heap, None, resources) }
+    });
+    unsafe { enter(NonNull::from(&mut state), entry, NonNull::from(heap), None) }
 }
 
-/// Build the startup data over `resources`, call the entry and drop the resources
-/// when it returns.
+/// Build the startup data in `state`, call the entry and release the resources
+/// when it returns. Nothing the entry or `xila_process_exit` reaches is stored in
+/// this frame: they find the state through pointers into `state`.
 ///
-/// This frame, and every frame between it and a call to `xila_process_exit`, is
-/// abandoned by that call without running a destructor. That is sound only because
-/// the host never calls back into C with host state (a lock, guard or borrow) on the
+/// Whichever way the run ends, the resources are dropped exactly once: here when the
+/// entry returns, or by `xila_process_exit`, which empties them and abandons this
+/// frame and every frame between it and the exit. That is sound only because the
+/// host never calls back into C with host state (a lock, guard or borrow) on the
 /// stack: whenever C runs, the only host frames below it are this one and the
-/// coroutine's own. Explicit process exit empties `resources` after stopping peers.
-/// Worker callbacks are separate coroutine entries and carry no host-owned guards.
+/// coroutine's own. Worker callbacks are separate coroutine entries and carry no
+/// host-owned guards.
 ///
 /// # Safety
-/// Same as [`run_main`].
+/// Same as [`run_main`], and `state` and `heap` stay at their addresses and live
+/// until native execution has permanently ended.
 pub(crate) unsafe fn enter(
+    state: NonNull<HostState>,
     entry: unsafe extern "C" fn(*const XilaStartup) -> i32,
-    heap: &mut Heap,
+    heap: NonNull<Heap>,
     process: Option<(&'static dyn ProcessHost, TaskIdentifier)>,
-    mut resources: Resources,
 ) -> i32 {
-    // Every access below goes through this pointer, so `xila_process_exit` can empty
-    // the resources while the entry runs.
-    let resources_pointer: *mut Resources = &mut resources;
-    let process = process.map(|(host, task)| Process {
-        host,
-        task,
-        resources: resources_pointer,
-    });
-    // SAFETY: the pointer addresses the live local above.
-    let resources = unsafe { &mut *resources_pointer };
-    let startup = XilaStartup {
-        size: core::mem::size_of::<XilaStartup>() as u32,
-        api: &XILA_API,
-        heap,
-        arguments: if resources.arguments.is_empty() {
-            ptr::null()
-        } else {
-            resources.arguments.as_ptr()
-        },
-        argument_count: resources.arguments.len(),
-        standard_input: resources
-            .standard_input
-            .as_mut()
-            .map_or(ptr::null_mut(), ptr::from_mut),
-        standard_output: resources
-            .standard_output
-            .as_mut()
-            .map_or(ptr::null_mut(), ptr::from_mut),
-        standard_error: resources
-            .standard_error
-            .as_mut()
-            .map_or(ptr::null_mut(), ptr::from_mut),
-        home: resources
-            .home
-            .as_mut()
-            .map_or(ptr::null_mut(), ptr::from_mut),
-        process: process.as_ref().map_or(ptr::null(), ptr::from_ref),
+    let state = state.as_ptr();
+    // Every access goes through pointers into `state`, so `xila_process_exit` can
+    // empty the resources while the entry runs.
+    let resources: *mut Resources = unsafe { &raw mut (*state).resources };
+    let startup = unsafe {
+        (*state).process = process.map(|(host, task)| Process {
+            host,
+            task,
+            resources,
+        });
+        let resources = &mut *resources;
+        (*state).startup = XilaStartup {
+            size: core::mem::size_of::<XilaStartup>() as u32,
+            api: &XILA_API,
+            heap: heap.as_ptr(),
+            arguments: if resources.arguments.is_empty() {
+                ptr::null()
+            } else {
+                resources.arguments.as_ptr()
+            },
+            argument_count: resources.arguments.len(),
+            standard_input: resources
+                .standard_input
+                .as_mut()
+                .map_or(ptr::null_mut(), ptr::from_mut),
+            standard_output: resources
+                .standard_output
+                .as_mut()
+                .map_or(ptr::null_mut(), ptr::from_mut),
+            standard_error: resources
+                .standard_error
+                .as_mut()
+                .map_or(ptr::null_mut(), ptr::from_mut),
+            home: resources
+                .home
+                .as_mut()
+                .map_or(ptr::null_mut(), ptr::from_mut),
+            process: (*state).process.as_ref().map_or(ptr::null(), ptr::from_ref),
+        };
+        &raw const (*state).startup
     };
-    if !startup.process.is_null() {
-        crate::threads::bind_process(startup.process);
+    let process = unsafe { (*startup).process };
+    let managed = !process.is_null();
+    if managed {
+        crate::threads::bind_process(process);
     }
-    let status = unsafe { entry(&startup) };
-    if !startup.process.is_null() {
+    let status = unsafe { entry(startup) };
+    if managed {
         crate::threads::stop_workers();
     }
+    unsafe { Resources::release(resources) };
     status
 }

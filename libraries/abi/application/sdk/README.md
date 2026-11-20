@@ -188,7 +188,9 @@ Rust entry shim provides the ABI note and needs no C startup object or libc.
   buffers may be corrupt), the descriptors are closed, and the coroutine is abandoned
   without returning through any of its frames. It does not use `_exit`'s `longjmp`,
   whose `jmp_buf` lives on the stack that was just smashed; only a host that grants no
-  process capability falls back to `_exit(134)`. An image
+  process capability falls back to `_exit(134)`. The host keeps the capability, the startup
+  block and the stream behind descriptor 2 off the coroutine stack, so an overflow that stays
+  inside that stack does not reach them, however far it goes. An image
   that does not use the protector does not link the file. picolibc's own member seeds the
   guard from a constructor, so it is removed from `libc.a`.
 * **Directories.** Reading a directory stream gives `d_ino` a stable nonzero 64-bit
