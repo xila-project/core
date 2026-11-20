@@ -176,6 +176,7 @@ run = """
 set -euo pipefail
 mise run ci:wasm-clippy
 mise run ci:wasm-audio-check
+mise run test:browser-task
 """
 
 [tasks."ci:wasm".tools]
@@ -327,6 +328,11 @@ extends = "ci:rust-browser-lint"
 description = "Lint WASM guest targets"
 depends = ["ci:packages-linker"]
 run = "mise run clippy:guest"
+
+[tasks."test:browser-task"]
+extends = "ci:rust-browser"
+tools."github:wasm-bindgen/wasm-bindgen" = "{{ vars.wasm_bindgen_version }}"
+depends = ["ci:packages-linker"]
 
 [tasks."ci:wasm-audio-check"]
 extends = "ci:rust-browser"
