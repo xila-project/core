@@ -49,26 +49,62 @@ impl Stack {
         unsafe { memory.as_ptr().write_bytes(PAINT, layout.size()) };
         Some(Self { memory, layout })
     }
-    pub(crate) fn top(&mut self) -> usize {
+    pub(crate) fn top(&self) -> usize {
         self.memory.as_ptr() as usize + self.layout.size()
-    }
-    pub(crate) fn usable_limit(&self) -> usize {
-        self.memory.as_ptr() as usize + GUARD
     }
     pub fn usable_size(&self) -> usize {
         self.layout.size() - GUARD
     }
     pub fn guard_intact(&self) -> bool {
-        (0..GUARD).all(|i| unsafe { self.memory.as_ptr().add(i).read_volatile() == PAINT })
+        // SAFETY: this Stack still owns the allocation containing the guard.
+        unsafe { guard_intact_at(self.memory) }
     }
-    pub(crate) fn check_guard(&self) {
-        // C ABI ensures fatal termination instead of unwinding over a damaged stack.
-        extern "C" fn overflow() -> ! {
-            panic!("stackful stack guard corrupted");
-        }
-        if !self.guard_intact() {
-            overflow();
-        }
+    /// The painted guard at the lower end, for checks while a coroutine owns the stack.
+    pub(crate) fn guard(&self) -> NonNull<u8> {
+        self.memory
+    }
+}
+
+/// The corosensei view of a [`Stack`]. A private type, so only `Coroutine::new` can
+/// hand a painted stack, which has no protected guard, to corosensei.
+#[repr(transparent)]
+pub(crate) struct Backing(pub(crate) Stack);
+
+// SAFETY: the allocation is 16-byte aligned, stable for the lifetime of the value and
+// at least 2 KiB. It has no guard page, which is acceptable here: Xila's targets have
+// no MMU, so none is possible. The painted guard detects an overflow at the next switch,
+// and the caller of the unsafe `Coroutine::new` sizes the stack to cover native code,
+// its callees and interrupt frames (on Xtensa, `xtensa-lx-rt` pushes 256 bytes per
+// interrupt level on the coroutine stack).
+unsafe impl corosensei::stack::Stack for Backing {
+    fn base(&self) -> corosensei::stack::StackPointer {
+        // SAFETY: both addresses lie in a live allocation, so they are not zero. The
+        // unchecked constructor avoids a panic site on every target.
+        unsafe { corosensei::stack::StackPointer::new_unchecked(self.0.top()) }
+    }
+    fn limit(&self) -> corosensei::stack::StackPointer {
+        // SAFETY: as in `base`.
+        unsafe { corosensei::stack::StackPointer::new_unchecked(self.0.guard().as_ptr() as usize) }
+    }
+}
+
+/// # Safety
+/// The allocation holding the guard must be alive.
+unsafe fn guard_intact_at(guard: NonNull<u8>) -> bool {
+    (0..GUARD).all(|i| unsafe { guard.as_ptr().add(i).read_volatile() == PAINT })
+}
+
+/// Terminate the program if the painted guard was damaged.
+///
+/// # Safety
+/// The allocation holding the guard must be alive.
+pub(crate) unsafe fn check_guard_at(guard: NonNull<u8>) {
+    // C ABI ensures fatal termination instead of unwinding over a damaged stack.
+    extern "C" fn overflow() -> ! {
+        panic!("stackful stack guard corrupted");
+    }
+    if !unsafe { guard_intact_at(guard) } {
+        overflow();
     }
 }
 impl Drop for Stack {

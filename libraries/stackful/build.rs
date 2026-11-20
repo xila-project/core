@@ -1,20 +1,21 @@
 use std::env;
+
+/// Emits `stackful_fp_control` when the target has floating-point control state
+/// that must stay local to each coroutine (see `src/fp.rs`).
 fn main() {
-    println!("cargo:rustc-check-cfg=cfg(stackful_float)");
-    println!("cargo:rustc-check-cfg=cfg(stackful_fpv5)");
+    println!("cargo:rustc-check-cfg=cfg(stackful_fp_control)");
     println!("cargo:rerun-if-env-changed=CARGO_ENCODED_RUSTFLAGS");
     let target = env::var("TARGET").unwrap();
     let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
     let features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
-    // Rust does not expose unstable floating-point target features in cfg on
-    // these architectures. Include built-in target defaults and explicit flags.
     let flags = env::var("CARGO_ENCODED_RUSTFLAGS").unwrap_or_default();
-    let mut float = env::var_os("CARGO_FEATURE_FPU").is_some()
-        || target.contains("eabihf")
+    // Rust does not expose the unstable floating-point target features of Arm
+    // and RISC-V in cfg. Use the built-in target defaults and explicit flags.
+    let mut float = target.contains("eabihf")
         || target.starts_with("riscv32imaf")
         || features
             .split(',')
-            .any(|f| f == "f" || f.starts_with("vfp"));
+            .any(|f| f == "f" || f == "fp" || f.starts_with("vfp"));
     for flag in flags.split(['\x1f', ',', '=']) {
         if flag == "+f"
             || flag.starts_with("+vfp")
@@ -27,29 +28,9 @@ fn main() {
             float = false;
         }
     }
-    // The RISC-V float frame saves single-precision registers. With the D
-    // extension they are 64 bits wide and `fsw` would drop their upper halves.
-    let double = features.split(',').any(|f| f == "d")
-        || flags.split(['\x1f', ',', '=']).any(|f| f == "+d")
-        || target.starts_with("riscv32imafd")
-        || target.starts_with("riscv32gc");
-    if arch == "riscv32" && double {
-        panic!(
-            "stackful: RISC-V double-precision (D extension) float registers are not supported yet"
-        );
-    }
-    if arch == "arm"
-        && !(target.starts_with("thumbv6m-")
-            || target.starts_with("thumbv7em-")
-            || target.starts_with("thumbv8m.main-"))
+    if matches!(arch.as_str(), "x86_64" | "aarch64")
+        || (float && matches!(arch.as_str(), "arm" | "riscv32" | "xtensa"))
     {
-        panic!("stackful: only Cortex-M thumbv6m, thumbv7em and thumbv8m.main are supported");
-    }
-    if float {
-        println!("cargo:rustc-cfg=stackful_float");
-        // Cortex-M33 class cores have an FPv5 unit; Cortex-M4F has FPv4.
-        if target.starts_with("thumbv8m.main-") {
-            println!("cargo:rustc-cfg=stackful_fpv5");
-        }
+        println!("cargo:rustc-cfg=stackful_fp_control");
     }
 }

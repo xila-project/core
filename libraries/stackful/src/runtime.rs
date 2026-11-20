@@ -1,7 +1,8 @@
-#[path = "arch.rs"]
-mod arch;
+#[path = "fp.rs"]
+mod fp;
 #[path = "stack.rs"]
 mod stack;
+use stack::{Backing, check_guard_at};
 pub use stack::{DEFAULT_MIN_STACK_SIZE, MIN_STACK_SIZE, Stack};
 
 use alloc::rc::Rc;
@@ -9,8 +10,17 @@ use core::{
     cell::{Cell, RefCell, UnsafeCell},
     future::Future,
     pin::Pin,
+    ptr::NonNull,
     task::{Context, Poll, Waker},
 };
+
+type Native = corosensei::Coroutine<(), (), (), Backing>;
+type Yielder = corosensei::Yielder<(), ()>;
+
+/// Bytes corosensei reserves at the top of the stack, beyond the entry, on every target.
+const INITIAL_FRAME: usize = 128;
+/// Usable bytes that must remain for the entry's own frames.
+const MIN_ENTRY_STACK: usize = 1024;
 
 /// Number of coroutine-local storage slots stored inline in each coroutine control block.
 pub const TLS_SLOTS: usize = 4;
@@ -31,12 +41,12 @@ struct Pending {
     cancel: bool,
 }
 struct Control {
-    stack: Stack,
-    coroutine_sp: UnsafeCell<usize>,
-    caller_sp: UnsafeCell<usize>,
-    entry: Cell<*mut u8>,
-    run: unsafe fn(*mut u8) -> i32,
-    destroy: unsafe fn(*mut u8),
+    /// Owns the stack and the entry. Only the driver touches it, around each switch.
+    native: UnsafeCell<Native>,
+    /// The stack's painted guard, which `native` owns.
+    guard: NonNull<u8>,
+    /// Set when the entry starts; stays valid, on the coroutine stack, until it ends.
+    yielder: Cell<*const Yielder>,
     pending: Cell<Option<Pending>>,
     started: Cell<bool>,
     result: Cell<Option<Result<i32, Cancelled>>>,
@@ -44,15 +54,6 @@ struct Control {
     tls: [Cell<usize>; TLS_SLOTS],
     native_context: Cell<*const ()>,
 }
-impl Drop for Control {
-    fn drop(&mut self) {
-        if !self.started.get() {
-            // SAFETY: the unstarted entry is still initialized on our owned stack.
-            unsafe { (self.destroy)(self.entry.get()) };
-        }
-    }
-}
-
 #[cfg(target_os = "linux")]
 std::thread_local! { static CURRENT: Cell<*const Control> = const { Cell::new(core::ptr::null()) }; }
 #[cfg(target_os = "linux")]
@@ -102,32 +103,28 @@ impl Coroutine {
     /// application ABI and the synchronous VFS files and directories. That core would
     /// see the live coroutine as its own and switch onto its stack. A per-core current
     /// pointer (xila-project/core#682) lifts this restriction.
-    pub unsafe fn new<F: FnOnce() -> i32 + 'static>(mut stack: Stack, entry: F) -> Self {
-        unsafe fn run<F: FnOnce() -> i32>(p: *mut u8) -> i32 {
-            unsafe { p.cast::<F>().read()() }
-        }
-        unsafe fn destroy<F>(p: *mut u8) {
-            unsafe { p.cast::<F>().drop_in_place() };
-        }
-        let top = stack.top();
-        let entry_address = (top
-            .checked_sub(core::mem::size_of::<F>())
-            .expect("entry too large"))
-            & !(core::mem::align_of::<F>() - 1);
+    pub unsafe fn new<F: FnOnce() -> i32 + 'static>(stack: Stack, entry: F) -> Self {
+        // The entry and corosensei's initial frame sit at the top of the stack.
         assert!(
-            entry_address >= stack.usable_limit() + 1024,
+            stack.usable_size()
+                >= size_of::<F>() + align_of::<F>() + INITIAL_FRAME + MIN_ENTRY_STACK,
             "entry leaves too little stack"
         );
-        let sp = unsafe { arch::initialize(entry_address & !15, trampoline as *const () as usize) };
-        unsafe { (entry_address as *mut F).write(entry) };
+        let guard = stack.guard();
+        let native = Native::with_stack(Backing(stack), move |yielder, ()| {
+            // SAFETY: the driver set the current coroutine before entering.
+            let control = unsafe { &*current() };
+            control.yielder.set(yielder);
+            fp::Environment::INITIAL.write();
+            let status = entry();
+            // SAFETY: this is the running coroutine's control block.
+            unsafe { finish(control, status) }
+        });
         Self {
             control: Rc::new(Control {
-                stack,
-                coroutine_sp: UnsafeCell::new(sp),
-                caller_sp: UnsafeCell::new(0),
-                entry: Cell::new(entry_address as *mut u8),
-                run: run::<F>,
-                destroy: destroy::<F>,
+                native: UnsafeCell::new(native),
+                guard,
+                yielder: Cell::new(core::ptr::null()),
                 pending: Cell::new(None),
                 started: Cell::new(false),
                 result: Cell::new(None),
@@ -174,18 +171,25 @@ impl Coroutine {
                 }
                 self.control.pending.set(None);
             }
-            self.control.stack.check_guard();
+            self.control.check_guard();
             let previous = current();
             set_current(c);
             self.control.started.set(true);
+            let environment = fp::Environment::read();
+            // SAFETY: the driver has exclusive access to `native`: the coroutine side
+            // reaches only the other fields of the control block, through `current`.
             unsafe {
-                arch::switch(
-                    self.control.caller_sp.get(),
-                    self.control.coroutine_sp.get(),
-                )
-            };
+                let native = &mut *self.control.native.get();
+                native.resume(());
+                if matches!(self.control.result.get(), Some(Ok(_))) {
+                    // `finish` left the coroutine suspended for good, abandoning
+                    // its frames as `exit` documents. Nothing on them is dropped.
+                    native.force_reset();
+                }
+            }
+            environment.write();
             set_current(previous);
-            self.control.stack.check_guard();
+            self.control.check_guard();
         }
     }
 }
@@ -246,6 +250,8 @@ pub fn is_in_coroutine() -> bool {
 /// Await from native code. Outside a coroutine this preserves task::block_on behavior.
 /// No heap allocation occurs here. The future and output stay on the native stack.
 /// Do not call this from a future's poll method: poll methods must return Pending.
+/// Do not call it while holding a critical section: the interrupt mask is not
+/// switched with the stack, so the executor would run with interrupts masked.
 pub fn suspend_on<F: Future>(future: F) -> F::Output {
     suspend(future, false)
 }
@@ -292,10 +298,12 @@ unsafe fn suspend_pending(control: *const Control, pending: Pending) {
     // SAFETY: the caller is on this control's coroutine stack and the pending
     // future remains pinned until completion or cancellation of that stack.
     unsafe {
-        (*control).stack.check_guard();
+        (*control).check_guard();
         (*control).pending.set(Some(pending));
-        arch::switch((*control).coroutine_sp.get(), (*control).caller_sp.get());
-        (*control).stack.check_guard();
+        let environment = fp::Environment::read();
+        (*(*control).yielder.get()).suspend(());
+        environment.write();
+        (*control).check_guard();
     }
 }
 
@@ -349,6 +357,13 @@ pub fn tls_set(slot: usize, value: usize) -> Result<(), TlsError> {
     Ok(())
 }
 
+impl Control {
+    fn check_guard(&self) {
+        // SAFETY: `native` owns the stack containing the guard for our lifetime.
+        unsafe { check_guard_at(self.guard) };
+    }
+}
+
 /// Publish `status`, wake the join observer and leave the coroutine for good.
 ///
 /// # Safety
@@ -361,8 +376,9 @@ unsafe fn finish(c: *const Control, status: i32) -> ! {
         if let Some(w) = waker {
             w.wake();
         }
-        (*c).stack.check_guard();
-        arch::switch((*c).coroutine_sp.get(), (*c).caller_sp.get());
+        (*c).check_guard();
+        // The driver discards the abandoned coroutine with `force_reset`.
+        (*(*c).yielder.get()).suspend(());
     }
     panic!("completed coroutine resumed");
 }
@@ -385,15 +401,6 @@ pub unsafe fn exit(status: i32) -> ! {
     let c = current();
     assert!(!c.is_null(), "exit outside a coroutine");
     unsafe { finish(c, status) }
-}
-
-// C ABI makes escaping panics abort on hosts even when the application uses unwind.
-extern "C" fn trampoline() -> ! {
-    let c = current();
-    unsafe {
-        let result = ((*c).run)((*c).entry.get());
-        finish(c, result)
-    }
 }
 
 /// Spawn on the calling task's executor, preserving stack/thread affinity.
