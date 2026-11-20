@@ -75,7 +75,7 @@ pub fn execute(state: &mut State, transport: &mut dyn Transport, call: &Call) ->
 }
 
 /// [`execute`] for a caller that already holds the manager's graphics lock,
-/// taken with [`Manager::lock`]. Waiting for that lock can suspend the caller
+/// taken with [`Manager::lock`](crate::Manager::lock). Waiting for that lock can suspend the caller
 /// instead of blocking its thread.
 ///
 /// # Safety
