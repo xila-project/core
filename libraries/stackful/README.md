@@ -39,6 +39,15 @@ coupling it to an OS thread. Calling either function outside a coroutine returns
 `Err(TlsError::NotInCoroutine)`; out-of-range indices return
 `Err(TlsError::InvalidSlot)`.
 
+`exit(status)` ends the running coroutine at once, as if its entry had returned
+`status`: the driver and the join observer see the status, and the stack and
+control block are released as for a normal return. It abandons the frames between
+the call and the entry without running destructors, like a `longjmp` that never
+lands, so it is unsafe: any owned resource live in those frames (an allocation, an open
+file, a lock guard), including the entry closure's captures, is leaked. Release
+such resources first, or keep them outside the coroutine stack. The native ABI's
+`xila_process_exit` does the first. Calling it outside a coroutine panics.
+
 A single `JoinHandle` observes completion and implements a future returning
 `Result<i32, Cancelled>`; it can be awaited or passed to `suspend_on`. A second
 live observer is rejected because the control block stores one waker.

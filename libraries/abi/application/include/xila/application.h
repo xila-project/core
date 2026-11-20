@@ -67,6 +67,11 @@
 #define XILA_SHUTDOWN_WRITE 1
 
 /**
+ * `xila_process_wait` flag: return `WouldBlock` instead of waiting for a running child.
+ */
+#define XILA_WAIT_NO_HANG 1
+
+/**
  * Monotonic clock identifier for `xila_time_resolution`.
  */
 #define XILA_CLOCK_MONOTONIC 0
@@ -183,6 +188,14 @@ typedef uint32_t XilaStatus;
 #endif // __cplusplus
 
 /**
+ * A spawned child, owned by the process that spawned it. It holds the child's
+ * exit status until the owner waits for it, so a child that finished and was not
+ * waited for costs one signal slot and no task. `xila_process_child_close`
+ * releases it, waited for or not.
+ */
+typedef struct XilaChild XilaChild;
+
+/**
  * Opaque path capability. Native callers must serialize access and preserve ownership.
  */
 typedef struct XilaDirectory XilaDirectory;
@@ -220,6 +233,13 @@ typedef struct XilaHeap XilaHeap;
  * Host-granted network authority. Future host/port restrictions belong here.
  */
 typedef struct XilaNetwork XilaNetwork;
+
+/**
+ * Opaque capability of the running process: its identity, environment, children and
+ * exit. The host grants it through `XilaStartup.process`; the pointer is borrowed for
+ * the entry call and a process must not pass it to another process.
+ */
+typedef struct XilaProcess XilaProcess;
 
 /**
  * Owned TCP connection. Its creation grants bidirectional I/O authority.
@@ -274,6 +294,40 @@ typedef struct XilaNetworkAddress {
   uint16_t reserved;
   uint32_t scope_id;
 } XilaNetworkAddress;
+
+/**
+ * Arguments of `xila_process_spawn`. Set `size` to `sizeof(XilaSpawn)`. All
+ * pointers are borrowed for the call.
+ */
+typedef struct XilaSpawn {
+  uint32_t size;
+  /**
+   * Reserved, must be zero.
+   */
+  uint32_t flags;
+  /**
+   * Arguments of the child, with no implicit program name. A null array has count zero.
+   */
+  const struct XilaString *arguments;
+  size_t argument_count;
+  /**
+   * The child's whole environment as `NAME=VALUE` strings, a later entry overriding an
+   * earlier one. A null array gives the child a copy of the parent's environment
+   * and requires count zero. An array with count zero gives it an empty one.
+   */
+  const struct XilaString *environment;
+  size_t environment_count;
+  /**
+   * Streams the child gets as duplicates of these. All three are required.
+   */
+  const struct XilaFile *standard_input;
+  const struct XilaFile *standard_output;
+  const struct XilaFile *standard_error;
+  /**
+   * Optional home directory capability the child gets a copy of.
+   */
+  const struct XilaDirectory *home;
+} XilaSpawn;
 
 /**
  * Native application entry points, in slot order. The header precedes slot zero.
@@ -400,12 +454,70 @@ typedef struct XilaApi {
    * buffer contents are unspecified after a failure.
    */
   XilaStatus (*random_fill)(void *buffer, size_t size);
+  /**
+   * Read the process's identifier.
+   */
+  XilaStatus (*process_id)(const struct XilaProcess *process, uint32_t *id);
+  /**
+   * Read the identifier of the process that spawned this one, or zero (the root
+   * task) once that process has exited.
+   */
+  XilaStatus (*process_parent_id)(const struct XilaProcess *process, uint32_t *id);
+  /**
+   * End the process with an exit status. Does not return on success; outside a
+   * native process coroutine it returns Unsupported.
+   */
+  XilaStatus (*process_exit)(const struct XilaProcess *process, int32_t status);
+  /**
+   * Start an executable below a directory capability as a child process.
+   */
+  XilaStatus (*process_spawn)(const struct XilaProcess *process,
+                              const struct XilaDirectory *directory,
+                              const char *path,
+                              size_t path_length,
+                              const struct XilaSpawn *spawn,
+                              struct XilaChild **child);
+  /**
+   * Collect a child's exit status. Only the spawning process may wait; flags:
+   * XILA_WAIT_NO_HANG.
+   */
+  XilaStatus (*process_wait)(const struct XilaProcess *process,
+                             struct XilaChild *child,
+                             uint32_t flags,
+                             int32_t *status);
+  /**
+   * Release a child handle. Null succeeds.
+   */
+  XilaStatus (*process_child_close)(struct XilaChild *child);
+  /**
+   * Read an environment variable; BufferTooSmall stores the required length.
+   */
+  XilaStatus (*env_get)(const struct XilaProcess *process,
+                        const char *name,
+                        size_t name_length,
+                        char *buffer,
+                        size_t capacity,
+                        size_t *value_length);
+  /**
+   * Set an environment variable of this process.
+   */
+  XilaStatus (*env_set)(const struct XilaProcess *process,
+                        const char *name,
+                        size_t name_length,
+                        const char *value,
+                        size_t value_length);
+  /**
+   * Remove an environment variable of this process. A missing one succeeds.
+   */
+  XilaStatus (*env_remove)(const struct XilaProcess *process, const char *name, size_t name_length);
 } XilaApi;
 
 /**
  * Host-owned startup data, valid only for the duration of the entry call.
- * The API is always present. Capability pointers may be null when not granted.
- * A null argument array has argument_count zero.
+ * The API is always present. Capability pointers may be null when not granted;
+ * the process capability is null for an application that is not a process, such
+ * as a built-in one linked into the firmware, whose process calls fail with
+ * InvalidArgument. A null argument array has argument_count zero.
  * Applications must not close, retain or transfer these objects; closing them is
  * undefined behavior. Objects opened by the application must still be closed.
  */
@@ -419,6 +531,7 @@ typedef struct XilaStartup {
   struct XilaFile *standard_output;
   struct XilaFile *standard_error;
   struct XilaDirectory *home;
+  const struct XilaProcess *process;
 } XilaStartup;
 
 #endif  /* XILA_APPLICATION_H */

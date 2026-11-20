@@ -18,22 +18,20 @@ use std::{
 
 use common::{FixtureEntropy, MAPPINGS, Mmap};
 use core::sync::atomic::Ordering;
-use executable::{ExecutableContext, NativeFormat, Standard, execute};
-use file_system::{AccessFlags, CreateFlags, Flags, Permissions};
+use executable::{ExecutableContext, Home, Launch, NativeFormat, Standard, execute_with};
+use file_system::{AccessFlags, CreateFlags, Flags, PathOwned, Permissions};
 use task::TaskIdentifier;
 use virtual_file_system::{File, VirtualFileSystem};
 
 testing_support::instantiate_global_allocator!();
 
-const XILA_RIGHT_READ: u32 = 1;
-const XILA_RIGHT_WRITE: u32 = 2;
+const XILA_RIGHT_READ: u8 = 1;
+const XILA_RIGHT_WRITE: u8 = 2;
 
 // SAFETY: the test runs the SDK example it just compiled, on the test's single executor,
 // with a stack sized for the debug build of the ABI call chain.
-static LOADER: NativeFormat = unsafe {
-    NativeFormat::new(&Mmap, 64 * 1024, 256 * 1024, 256 * 1024)
-        .with_home("/", XILA_RIGHT_READ | XILA_RIGHT_WRITE)
-};
+static LOADER: NativeFormat =
+    unsafe { NativeFormat::new(&Mmap, 64 * 1024, 256 * 1024, 256 * 1024) };
 
 fn run(command: &mut Command) {
     let status = command.status().unwrap();
@@ -167,7 +165,12 @@ async fn launch(
     let error = File::open(vfs, parent, stderr.as_str(), create)
         .await
         .unwrap();
-    let handle = execute(
+    // Every launch carries its own home: the root of the filesystem, read and write.
+    let launch = Launch::default().with_home(Home {
+        path: PathOwned::new("/".into()).unwrap(),
+        rights: XILA_RIGHT_READ | XILA_RIGHT_WRITE,
+    });
+    let handle = execute_with(
         context,
         path,
         arguments
@@ -176,6 +179,7 @@ async fn launch(
             .collect(),
         Standard::new(context, input, output, error),
         None,
+        launch,
     )
     .await
     .unwrap();

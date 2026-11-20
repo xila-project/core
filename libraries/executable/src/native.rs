@@ -1,8 +1,71 @@
+use abi_application::{HomeGrant, ProcessHost, ProcessLaunch, SpawnFuture, SpawnRequest, Status};
 use alloc::{boxed::Box, vec::Vec};
+use file_system::IntoIoErrorKind;
 use native_loader::{ExecutableMemory, LoadedImage, Startup};
 use stackful::{MIN_STACK_SIZE, Stack};
+use virtual_file_system::VirtualFileSystem;
 
-use crate::{Error, ExecutableFormat, FormatHandler, FormatLaunch, FormatRequest, Result};
+use crate::{
+    Error, ExecutableContext, ExecutableFormat, FormatHandler, FormatLaunch, FormatRequest, Home,
+    Launch, Result, Standard, execute_with,
+};
+
+/// The status a failed spawn reports to the native caller.
+fn status(error: Error) -> Status {
+    match error {
+        Error::FileSystem(kind) => kind.into(),
+        Error::Task(error) => error.into_io_error_kind().into(),
+        Error::PermissionDenied => Status::PermissionDenied,
+        // The file is not an image this firmware can run.
+        Error::FailedToGetMainFunction => Status::ExecFormat,
+        Error::InvalidStackSize => Status::InvalidState,
+        Error::NativeFileTooLarge => Status::OutOfMemory,
+        Error::Native(
+            native_loader::Error::AllocationFailed | native_loader::Error::ImageTooLarge,
+        ) => Status::OutOfMemory,
+        Error::Native(native_loader::Error::FinalizationFailed) => Status::InputOutput,
+        Error::Native(_) => Status::ExecFormat,
+    }
+}
+
+/// A native process spawns children through the executable context it was launched
+/// from: the same permission checks, formats and task tree as any other launch.
+impl ProcessHost for ExecutableContext {
+    fn task_manager(&self) -> &'static task::Manager {
+        self.task_manager
+    }
+
+    fn virtual_file_system(&self) -> &'static VirtualFileSystem {
+        self.virtual_file_system
+    }
+
+    fn spawn(&'static self, request: SpawnRequest) -> SpawnFuture {
+        Box::pin(async move {
+            let SpawnRequest {
+                path,
+                arguments,
+                environment,
+                standard_input,
+                standard_output,
+                standard_error,
+                home,
+                ..
+            } = request;
+            let standard = Standard::new(self, standard_input, standard_output, standard_error);
+            let launch = Launch {
+                environment,
+                home: home.map(|grant| Home {
+                    path: grant.path,
+                    rights: grant.rights,
+                }),
+            };
+            // The child's coroutine must stay on the spawner's executor.
+            execute_with(self, &path, arguments, standard, None, launch)
+                .await
+                .map_err(status)
+        })
+    }
+}
 
 /// Developer-only handler for raw ELF files on a trusted filesystem.
 pub struct NativeFormat {
@@ -10,7 +73,6 @@ pub struct NativeFormat {
     stack_size: usize,
     file_limit: usize,
     image_limit: usize,
-    home: Option<(&'static str, u32)>,
 }
 
 impl NativeFormat {
@@ -34,22 +96,7 @@ impl NativeFormat {
             stack_size,
             file_limit,
             image_limit,
-            home: None,
         }
-    }
-
-    /// Fallback home for launches that carry none: grant the program a directory
-    /// capability at an absolute path with the given `XILA_RIGHT_*` bits. It becomes
-    /// `XilaStartup.home`, which the SDK's POSIX layer resolves absolute and relative
-    /// paths against. Without it, programs receive no filesystem authority beyond their
-    /// standard streams. Opening the capability must complete without suspending, like
-    /// any other native ABI call made before the program starts.
-    ///
-    /// Temporary: the per-launch home of the process and environment ABI (core#759)
-    /// replaces this, and the method goes away with it.
-    pub const fn with_home(mut self, path: &'static str, rights: u32) -> Self {
-        self.home = Some((path, rights));
-        self
     }
 
     pub const fn registration(&'static self) -> ExecutableFormat {
@@ -103,36 +150,24 @@ impl FormatHandler for NativeFormat {
             let stack = Stack::try_with_min_size(self.stack_size, MIN_STACK_SIZE)
                 .ok_or(Error::Native(native_loader::Error::AllocationFailed))?;
             let image = self.load(&mut request).await?;
-            let home = match self.home {
-                Some((path, rights)) => Some(
-                    abi_application::Directory::new(
-                        context.virtual_file_system,
-                        request.parent,
-                        path,
-                        rights,
-                    )
-                    .map_err(|status| {
-                        // Keep the cause (not found, permission denied, ...): a status
-                        // with no I/O kind cannot come from opening a directory.
-                        Error::FileSystem(
-                            status
-                                .io_kind()
-                                .unwrap_or(virtual_file_system::IoErrorKind::InputOutput),
-                        )
-                    })?,
-                ),
-                None => None,
-            };
             let (input, output, error) = request.standard.split();
             let wrap = |file: virtual_file_system::File<'static>| {
                 Some(abi_application::File::new(file.into_synchronous_file()))
             };
+            let launch = request.launch;
             let startup = Startup {
                 arguments: request.arguments,
                 standard_input: wrap(input),
                 standard_output: wrap(output),
                 standard_error: wrap(error),
-                home,
+                process: Some(ProcessLaunch {
+                    host: context,
+                    environment: launch.environment,
+                    home: launch.home.map(|home| HomeGrant {
+                        path: home.path,
+                        rights: home.rights,
+                    }),
+                }),
             };
             let spawned = unsafe {
                 image.spawn(

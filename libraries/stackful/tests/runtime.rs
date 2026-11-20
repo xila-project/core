@@ -372,3 +372,63 @@ fn two_kib_stack_runs_simple_call_chain() {
     // outer(5) -> middle(10) -> leaf(13): buf[0]=13, buf[63]=76 -> acc=89 -> resumed=90 -> leaf=179 -> middle=189 -> outer=188
     assert_eq!(embassy_futures::block_on(c), 188);
 }
+
+#[test]
+fn exit_leaves_from_a_nested_frame_without_running_destructors() {
+    let reached_after = Rc::new(Cell::new(false));
+    // The entry's capture is moved into its frame, so exit abandons it: its
+    // destructor never runs and the count below stays raised. This is the leak
+    // the safety contract of `exit` describes.
+    let captured = Rc::new(());
+    let (after, held) = (reached_after.clone(), captured.clone());
+    let mut c = pin!(coroutine(move || {
+        fn nested(depth: i32) -> i32 {
+            if depth == 0 {
+                // SAFETY: the frames above own no resource that matters here.
+                unsafe { stackful::exit(7) }
+            }
+            nested(depth - 1) + 1
+        }
+        let _held = held;
+        let result = nested(3);
+        after.set(true);
+        result
+    }));
+    let join = c.join_handle();
+    let mut join = pin!(join);
+    let wake = Arc::new(Wake(AtomicUsize::new(0)));
+    let waker = Waker::from(wake.clone());
+    let mut cx = Context::from_waker(&waker);
+    assert_eq!(join.as_mut().poll(&mut cx), Poll::Pending);
+    assert_eq!(c.as_mut().poll(&mut cx), Poll::Ready(7));
+    assert!(!reached_after.get());
+    assert_eq!(Rc::strong_count(&captured), 2);
+    // The join observer saw the status and was woken once.
+    assert_eq!(wake.0.load(Ordering::Relaxed), 1);
+    assert_eq!(join.as_mut().poll(&mut cx), Poll::Ready(Ok(7)));
+    // Polling a finished coroutine again repeats its status.
+    assert_eq!(c.as_mut().poll(&mut cx), Poll::Ready(7));
+}
+
+#[test]
+fn exit_after_a_suspension_and_outside_a_coroutine() {
+    let signal = Rc::new(Signal::<NoopRawMutex, i32>::new());
+    let s = signal.clone();
+    let mut c = pin!(coroutine(move || {
+        let value = suspend_on(s.wait());
+        // SAFETY: nothing owning a resource is live below the entry.
+        unsafe { stackful::exit(value + 1) }
+    }));
+    let wake = Arc::new(Wake(AtomicUsize::new(0)));
+    let waker = Waker::from(wake.clone());
+    let mut cx = Context::from_waker(&waker);
+    assert_eq!(c.as_mut().poll(&mut cx), Poll::Pending);
+    signal.signal(41);
+    assert_eq!(c.as_mut().poll(&mut cx), Poll::Ready(42));
+
+    let outside = std::panic::catch_unwind(|| {
+        // SAFETY: the call panics before it abandons any frame.
+        unsafe { stackful::exit(0) }
+    });
+    assert!(outside.is_err());
+}

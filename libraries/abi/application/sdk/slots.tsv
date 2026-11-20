@@ -41,3 +41,12 @@
 39	xila_time_resolution
 40	xila_time_sleep
 41	xila_random_fill
+42	xila_process_id
+43	xila_process_parent_id
+44	xila_process_exit
+45	xila_process_spawn
+46	xila_process_wait
+47	xila_process_child_close
+48	xila_env_get
+49	xila_env_set
+50	xila_env_remove

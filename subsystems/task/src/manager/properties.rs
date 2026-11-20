@@ -4,6 +4,12 @@ use super::*;
 use alloc::{string::String, vec::Vec};
 use users::{GroupIdentifier, UserIdentifier};
 
+/// Remove the variables called `name`. One non-generic copy serves set, remove and
+/// replace.
+fn remove_named(variables: &mut Vec<EnvironmentVariable>, name: &str) {
+    variables.retain(|variable| variable.get_name() != name);
+}
+
 impl Manager {
     pub async fn set_user(
         &self,
@@ -37,11 +43,8 @@ impl Manager {
         let mut inner = self.0.write().await;
         let metadata = Self::get_task_mutable(&mut inner, task_identifier)?;
 
-        // We remove any existing environment variable with the same name
-        metadata
-            .environment_variables
-            .retain(|variable| variable.get_name() != name);
-        // Add the new environment variable
+        // A variable of the same name is replaced.
+        remove_named(&mut metadata.environment_variables, name);
         metadata.environment_variables.push(environment_variable);
 
         Ok(())
@@ -63,14 +66,38 @@ impl Manager {
         Ok(())
     }
 
+    /// Replace the whole environment of a task with `variables`, as one atomic
+    /// update. A later entry overrides an earlier one of the same name. A spawned
+    /// task starts with a copy of its parent's environment; this gives it an
+    /// explicit one instead.
+    pub async fn replace_environment_variables(
+        &self,
+        task_identifier: TaskIdentifier,
+        variables: Vec<EnvironmentVariable>,
+    ) -> Result<()> {
+        // Deduplicate before taking the lock, so the lock covers no allocation
+        // beyond the replaced list's release.
+        let mut replacement: Vec<EnvironmentVariable> = Vec::with_capacity(variables.len());
+        for variable in variables {
+            remove_named(&mut replacement, variable.get_name());
+            replacement.push(variable);
+        }
+        let mut inner = self.0.write().await;
+        Self::get_task_mutable(&mut inner, task_identifier)?.environment_variables = replacement;
+
+        Ok(())
+    }
+
     pub async fn remove_environment_variable(
         &self,
         task_identifier: TaskIdentifier,
         name: &str,
     ) -> Result<()> {
-        Self::get_task_mutable(&mut *self.0.write().await, task_identifier)?
-            .environment_variables
-            .retain(|variable| variable.get_name() != name);
+        remove_named(
+            &mut Self::get_task_mutable(&mut *self.0.write().await, task_identifier)?
+                .environment_variables,
+            name,
+        );
 
         Ok(())
     }
