@@ -18,9 +18,10 @@ use crate::{
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-/// Generate the call table source for the executor from LVGL's own bindings.
-pub fn source() -> Result<String, GeneratorError> {
-    let catalog = crate::abi::catalog()?;
+/// Generate the call table source for the executor from LVGL's own bindings
+/// (the Rust source `lvgl_rust_sys` generated for the build target).
+pub fn source(bindings: &str) -> Result<String, GeneratorError> {
+    let catalog = crate::abi::catalog(bindings)?;
     let registry = crate::abi::registry(&catalog)?;
     Ok(generate(&registry)?.to_string())
 }

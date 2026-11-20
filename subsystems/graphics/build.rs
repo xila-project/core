@@ -30,6 +30,7 @@ fn main() {
         "DEP_LVGL_RUST_SYS_DEFINES",
         "DEP_LVGL_RUST_SYS_CFLAGS",
         "DEP_LVGL_RUST_SYS_TARGET",
+        "DEP_LVGL_RUST_SYS_BINDINGS",
     ] {
         println!("cargo:rerun-if-env-changed={variable}");
     }
@@ -232,10 +233,16 @@ XILA_SELECTED_SYSTEM_HEAP
 }
 
 /// The executor's call table, generated from the same catalog and ABI
-/// declaration the guest bindings use.
+/// declaration the guest bindings use. The catalog comes from the bindings
+/// `lvgl_rust_sys` already generated for this target, so no second bindgen
+/// pass (and no host LVGL build) runs for it.
 fn emit_call_table() {
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo OUT_DIR")).join("call_table.rs");
-    let source = graphics_bindgen::executor::source()
+    let bindings = required_metadata("DEP_LVGL_RUST_SYS_BINDINGS");
+    println!("cargo:rerun-if-changed={bindings}");
+    let bindings = fs::read_to_string(&bindings)
+        .unwrap_or_else(|error| panic!("Could not read the LVGL bindings {bindings}: {error}"));
+    let source = graphics_bindgen::executor::source(&bindings)
         .unwrap_or_else(|error| panic!("Could not generate the graphics call table: {error}"));
     fs::write(&out, source)
         .unwrap_or_else(|error| panic!("Could not write {}: {error}", out.display()));

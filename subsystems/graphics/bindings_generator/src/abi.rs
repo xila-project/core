@@ -351,8 +351,11 @@ pub fn declaration(name: &str) -> Option<&'static Declaration> {
 }
 
 /// The catalog of every call LVGL's bindings export, with stable IDs.
-pub fn catalog() -> Result<CallCatalog, GeneratorError> {
-    CallCatalog::parse(lvgl_rust_sys::_bindgen_raw_src())
+///
+/// `bindings` is the Rust source `lvgl_rust_sys` generates for the build
+/// target (its `BINDINGS` build metadata, or `_bindgen_raw_src()`).
+pub fn catalog(bindings: &str) -> Result<CallCatalog, GeneratorError> {
+    CallCatalog::parse(bindings)
 }
 
 /// Select every supported call from the catalog and check each declaration

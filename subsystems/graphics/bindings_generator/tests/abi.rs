@@ -24,7 +24,7 @@ fn declarations_are_unique_and_fit_the_call_frame() {
 
 #[test]
 fn every_declaration_matches_the_discovered_c_signature_and_keeps_its_catalog_id() {
-    let catalog = abi::catalog().unwrap();
+    let catalog = abi::catalog(lvgl_rust_sys::_bindgen_raw_src()).unwrap();
     let registry = abi::registry(&catalog).unwrap();
     assert_eq!(registry.calls().len(), SUPPORTED.len() + EXTRA.len());
     // Extension IDs are append-only and stay clear of the legacy range.
@@ -43,7 +43,7 @@ fn every_declaration_matches_the_discovered_c_signature_and_keeps_its_catalog_id
 
 #[test]
 fn constructors_are_generated_and_the_rest_name_a_handler_or_the_manual_match() {
-    let catalog = abi::catalog().unwrap();
+    let catalog = abi::catalog(lvgl_rust_sys::_bindgen_raw_src()).unwrap();
     let registry = abi::registry(&catalog).unwrap();
     assert_eq!(
         registry.adapter_for("bar_create"),
@@ -61,7 +61,7 @@ fn constructors_are_generated_and_the_rest_name_a_handler_or_the_manual_match() 
 
 #[test]
 fn generated_executor_is_valid_rust_with_one_arm_per_adapter() {
-    let source = executor::source().unwrap();
+    let source = executor::source(lvgl_rust_sys::_bindgen_raw_src()).unwrap();
     let file = syn::parse_file(&source).expect("the call table must be valid Rust");
     assert!(file.items.len() >= 3);
     // One enum variant per declared call.
