@@ -146,21 +146,35 @@ Rust entry shim provides the ABI note and needs no C startup object or libc.
 * **Environment.** `getenv`, `setenv` and `unsetenv` use the process capability
   and see inherited or explicitly supplied launch values. Names and values
   follow the ABI's UTF-8 rules. `getenv` returns NULL for a missing name
-  without changing `errno`. `setenv` honors its overwrite flag and `unsetenv`
-  succeeds for an absent name. Without a process capability, `getenv` returns
-  NULL and mutations fail with `ENOSYS`. Picolibc's `putenv` copies the assignment
-  and calls `setenv`.
+  without changing `errno`, and returns NULL with `errno = ENOMEM` if allocation
+  fails. `setenv` honors its overwrite flag and `unsetenv` succeeds for an
+  absent name. Mutations reject a NULL or invalid name with `EINVAL`.
+  Without a process capability, `getenv` returns NULL and valid mutations fail
+  with `ENOSYS`. Picolibc's `putenv` copies the assignment and calls `setenv`.
 
-  Each lookup checks the ABI, so a new lookup sees raw ABI changes. The SDK
-  allocates a NUL-terminated copy only for each distinct value it returns for a
-  name. Those pointers remain valid until a successful POSIX change of that name
-  or process exit. A long lookup may temporarily allocate another buffer to
-  compare with a cached value. The process-wide libc lock serializes the C
-  environment functions across coroutines. Coordinate direct ABI mutations
-  with POSIX calls if they must act as one operation, and coordinate use of
-  returned pointers with POSIX mutations of the same name.
+  Each lookup checks the ABI, so it sees direct ABI updates. The SDK keeps one
+  NUL-terminated cached value per name. A lookup of that name that observes a
+  changed or removed value can invalidate the earlier pointer, as can a POSIX
+  mutation of the same name or process exit. Lookups and mutations of other
+  names preserve the pointer. A long lookup may briefly allocate a buffer to
+  compare with the cached value. The libc lock serializes the POSIX calls
+  across coroutines. Coordinate same-name pointer use with those calls.
 
-  The ABI has no enumeration call, so the SDK does not provide `environ`.
+  `environ` (declared in `<xila/posix.h>`) points to a NULL-terminated array of
+  `NAME=VALUE` strings. It reflects the launch environment and subsequent
+  changes made by `setenv`, `unsetenv` and `putenv`. It starts empty if the program
+  has no process capability. Treat the array and strings
+  as read-only and coordinate iteration with POSIX mutations. To observe
+  direct task or ABI changes, use `getenv` or enumerate through `xila_env_entry`.
+  Referencing `environ` pulls in the archive member that overrides the SDK's
+  hidden weak startup and mutation hooks. The startup hook builds the table
+  before `main`. Each mutation reserves any needed memory before updating the
+  host. Accessor-only programs retain the default hooks and use zero RAM for
+  this table.
+* **Process IDs.** `getpid` and `getppid` read the current and parent process IDs
+  from the native process capability. A process adopted by the root task has
+  parent ID zero. The SDK provides no user or group ID wrappers such as
+  `getuid`, `geteuid`, `getgid`, `getegid`, `getgroups`, `setuid` or `setgid`.
 * **stdio.** `stdin`, `stdout` and `stderr` are descriptors 0-2 through picolibc's
   buffered POSIX streams, each in its own object, so a program that never reads
   `stdin` carries neither its `FILE` nor its buffer. `stdout` is line buffered (128

@@ -105,11 +105,11 @@ fn build_sdk_example(format: &str) -> Vec<u8> {
     )
 }
 
-/// The probe is a test program of this repository, not part of the SDK's examples.
-fn build_probe() -> Vec<u8> {
+/// The POSIX probes are test programs of this repository, not part of the SDK's examples.
+fn build_posix_probe(name: &str) -> Vec<u8> {
     build_sdk_program(
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("../abi/application/sdk/test/probe"),
-        "probe",
+        name,
         "integer",
     )
 }
@@ -321,16 +321,26 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
         );
     }
 
-    install(vfs, parent, "/probe", &build_probe()).await;
+    install(vfs, parent, "/probe", &build_posix_probe("probe")).await;
     context
         .task_manager
         .set_environment_variable(parent, "SDK_PROBE", "inherited")
+        .await
+        .unwrap();
+    context
+        .task_manager
+        .set_environment_variable(parent, "SDK_OTHER", "a=b")
         .await
         .unwrap();
     let (status, stdout, stderr) =
         launch(context, parent, "/probe", "environment", &["environment"]).await;
     assert_eq!(status, 0, "{}", String::from_utf8_lossy(&stderr));
     assert_eq!(stdout, b"environment: ok\n");
+
+    install(vfs, parent, "/no-environ", &build_posix_probe("no-environ")).await;
+    let (status, stdout, stderr) = launch(context, parent, "/no-environ", "no-environ", &[]).await;
+    assert_eq!(status, 0);
+    assert!(stdout.is_empty() && stderr.is_empty());
 
     // _exit flushes nothing: the buffered writes are lost, the file the program created
     // stays empty, the unbuffered stderr write got through.

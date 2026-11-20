@@ -1,6 +1,5 @@
 /* The ABI owns the environment. Cache only strings returned by getenv, since
- * the ABI copies values into caller-owned storage and raw ABI updates can
- * happen between POSIX calls. */
+ * the ABI copies values into caller-owned storage. Keep one value per name. */
 #include <stdlib.h>
 #include <string.h>
 #include <sys/lock.h>
@@ -19,6 +18,21 @@ static const char *value_name(const struct env_value *entry) {
     return entry->value + entry->length + 1;
 }
 
+static struct env_value **find_value(const char *name) {
+    struct env_value **link = &values;
+    while (*link != NULL && strcmp(value_name(*link), name) != 0)
+        link = &(*link)->next;
+    return link;
+}
+
+static void release_value(struct env_value **link) {
+    struct env_value *entry = *link;
+    if (entry != NULL) {
+        *link = entry->next;
+        xila_heap_release(entry);
+    }
+}
+
 static struct env_value *allocate_value(size_t length, size_t name_length) {
     if (length > SIZE_MAX - sizeof(struct env_value) - name_length - 2) {
         errno = ENOMEM;
@@ -31,6 +45,8 @@ static char *get_value(const char *name) {
     char small[64];
     char *buffer = small;
     size_t capacity = sizeof(small);
+    struct env_value **link = find_value(name);
+    struct env_value *cached = *link;
     size_t name_length = strlen(name);
     size_t length;
     struct env_value *pending = NULL;
@@ -50,17 +66,16 @@ static char *get_value(const char *name) {
 
     if (status != XILA_STATUS_OK) {
         xila_heap_release(pending);
-        if (status != XILA_STATUS_NOT_FOUND)
+        if (status == XILA_STATUS_NOT_FOUND)
+            release_value(link);
+        else
             xila_fail(status);
         return NULL;
     }
 
-    for (struct env_value *entry = values; entry != NULL; entry = entry->next) {
-        if (entry->length == length && strcmp(value_name(entry), name) == 0 &&
-            memcmp(entry->value, buffer, length) == 0) {
-            xila_heap_release(pending);
-            return entry->value;
-        }
+    if (cached != NULL && cached->length == length && memcmp(cached->value, buffer, length) == 0) {
+        xila_heap_release(pending);
+        return cached->value;
     }
 
     if (pending == NULL) {
@@ -72,34 +87,34 @@ static char *get_value(const char *name) {
     pending->length = length;
     pending->value[length] = '\0';
     memcpy(pending->value + length + 1, name, name_length + 1);
-    pending->next = values;
-    values = pending;
+    release_value(link);
+    pending->next = *link;
+    *link = pending;
     return pending->value;
 }
 
-/* A successful POSIX mutation invalidates this name's snapshots. Defer freeing
- * them until the scan is finished: name itself can point into one of them. */
-static void forget_values(const char *name) {
-    struct env_value *removed = NULL;
-    struct env_value **link = &values;
-    while (*link != NULL) {
-        struct env_value *entry = *link;
-        if (strcmp(value_name(entry), name) == 0) {
-            *link = entry->next;
-            entry->next = removed;
-            removed = entry;
-        } else {
-            link = &entry->next;
-        }
-    }
-    while (removed != NULL) {
-        struct env_value *entry = removed;
-        removed = entry->next;
-        xila_heap_release(entry);
-    }
+int xila_posix_env_commit(const char *name, size_t name_length, const char *value) {
+    XilaStatus status =
+        value != NULL ? xila_env_set(xila_process.process, name, name_length, value, strlen(value))
+                      : xila_env_remove(xila_process.process, name, name_length);
+    if (status != XILA_STATUS_OK)
+        return xila_fail(status);
+    release_value(find_value(name));
+    return 0;
+}
+
+/* The optional environ member overrides this hook when linked. Direct calls
+ * to the hidden default use no GOT slot in an accessor-only image. */
+__attribute__((weak, visibility("hidden"), noinline)) int
+xila_environ_change(const char *name, size_t name_length, const char *value) {
+    return xila_posix_env_commit(name, name_length, value);
 }
 
 char *getenv(const char *name) {
+    if (name == NULL) {
+        xila_fail_errno(EINVAL);
+        return NULL;
+    }
     if (xila_process.process == NULL)
         return NULL;
     __LIBC_LOCK();
@@ -109,6 +124,8 @@ char *getenv(const char *name) {
 }
 
 int setenv(const char *name, const char *value, int overwrite) {
+    if (value == NULL || name == NULL || *name == '\0' || strchr(name, '=') != NULL)
+        return xila_fail_errno(EINVAL);
     if (xila_process.process == NULL)
         return xila_fail_errno(ENOSYS);
 
@@ -127,21 +144,19 @@ int setenv(const char *name, const char *value, int overwrite) {
                        : xila_fail(status);
         }
     }
-    XilaStatus status = xila_env_set(xila_process.process, name, name_length, value, strlen(value));
-    if (status == XILA_STATUS_OK)
-        forget_values(name);
+    int result = xila_environ_change(name, name_length, value);
     __LIBC_UNLOCK();
-    return status == XILA_STATUS_OK ? 0 : xila_fail(status);
+    return result;
 }
 
 int unsetenv(const char *name) {
+    if (name == NULL || *name == '\0' || strchr(name, '=') != NULL)
+        return xila_fail_errno(EINVAL);
     if (xila_process.process == NULL)
         return xila_fail_errno(ENOSYS);
 
     __LIBC_LOCK();
-    XilaStatus status = xila_env_remove(xila_process.process, name, strlen(name));
-    if (status == XILA_STATUS_OK)
-        forget_values(name);
+    int result = xila_environ_change(name, strlen(name), NULL);
     __LIBC_UNLOCK();
-    return status == XILA_STATUS_OK ? 0 : xila_fail(status);
+    return result;
 }

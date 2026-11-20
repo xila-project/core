@@ -90,7 +90,7 @@ COMMON_FLAGS = [
     "-D_GNU_SOURCE", "-Wall", "-Wextra", "-Werror",
 ]
 
-POSIX_SOURCES = ["environment", "errno", "exit_flush", "fd", "file", "heap", "onexit", "path", "stack_protector", "startup", "status", "stderr", "stdin", "stdout",
+POSIX_SOURCES = ["environ", "environment", "errno", "exit_flush", "fd", "file", "heap", "onexit", "path", "process", "stack_protector", "startup", "status", "stderr", "stdin", "stdout",
                  "time", "poll", "unsupported", "thread", "thread_keys", "thread_sync", "libc_lock", "strtok", "random"]
 
 
@@ -252,7 +252,8 @@ def build_picolibc(source, target, work):
 # The POSIX layer provides the retarget locks and the nonblocking ftrylockfile.
 # It also provides getenv, setenv and unsetenv over the ABI. Remove picolibc's
 # private environment and its empty environ, which cannot represent the ABI's state.
-# Picolibc's putenv copies the assignment and calls setenv.
+# Picolibc's putenv copies the assignment and calls the SDK's setenv.
+# Use the process capability instead of picolibc's fallback getpid.
 DROPPED_MEMBERS = (
     ("libc_misc_lock.c.o", None),
     ("libc_stdio_ftrylockfile.c.o", None),
@@ -263,6 +264,7 @@ DROPPED_MEMBERS = (
     ("libc_stdlib_getenv.c.o", None),
     ("libc_stdlib_setenv.c.o", None),
     ("libc_stdlib_unsetenv.c.o", None),
+    ("libos_fallback_getpid.c.o", None),
     ("libc_ssp_stack_protector.c.o", None),
     ("interrupt.c.o", ("x86_64-unknown-linux-gnu",)),
 )
@@ -551,7 +553,7 @@ def verify_c_program(target, sdk, name, source, *options):
     run(["cmake", "--fresh", "-S", source, "-B", build,
          f"-DCMAKE_TOOLCHAIN_FILE={sdk / 'cmake/xila-toolchain.cmake'}",
          "-DCMAKE_BUILD_TYPE=MinSizeRel", *options])
-    run(["cmake", "--build", build])
+    run(["cmake", "--build", build, "--target", name])
     image = build / f"{name}.elf"
     verify_image(image, target)
     return image
@@ -602,8 +604,16 @@ def verify(args):
     map_file = OUTPUT / target / "example-hello/hello.map"
     image = verify_c_program(target, sdk, "hello", sdk / "share/xila/example/hello",
                              f"-DCMAKE_EXE_LINKER_FLAGS=-Map={map_file}")
-    # The probe includes the pipe and poll tests.
-    for name in ("probe", "threads", "ssp"):
+    # The main probe references environ. The accessor-only probe still calls setenv.
+    probe_source = SDK_SOURCE / "sdk/test/probe"
+    for name, needs_environ in (("probe", True), ("no-environ", False)):
+        probe_map = OUTPUT / target / f"example-{name}" / f"{name}.map"
+        verify_c_program(target, sdk, name, probe_source, f"-DCMAKE_EXE_LINKER_FLAGS=-Map={probe_map}")
+        links_builder = "libxila_posix.a(environ.o)" in probe_map.read_text()
+        if links_builder != needs_environ:
+            sys.exit(f"error: unexpected environ builder linkage in {name}.elf")
+        print(f"{name}.elf: environ builder {'present' if links_builder else 'absent'}")
+    for name in ("threads", "ssp"):
         verify_c_program(target, sdk, name, SDK_SOURCE / "sdk/test" / name)
     run([find_tool("llvm-size"), image])
     print("\nBytes by origin (map):")

@@ -21,6 +21,12 @@ extern void xila_run_exit_handlers(int status) __attribute__((weak));
 /* The stack protector guard (stack_protector.c); weak for the same reason. */
 extern void xila_stack_guard_seed(void) __attribute__((weak));
 
+/* Only a strong reference to environ extracts the member with the builder.
+   The hidden default lets the linker resolve the call without a GOT slot. */
+__attribute__((weak, visibility("hidden"), noinline)) int xila_environ_initialize(void) {
+    return 0;
+}
+
 static jmp_buf *exit_target;
 static int exit_status;
 
@@ -62,7 +68,9 @@ __attribute__((no_stack_protector)) int xila_posix_initialize(const XilaStartup 
     if (xila_stack_guard_seed != NULL)
         xila_stack_guard_seed();
     *argv = build_arguments(startup, argc);
-    return *argv != NULL ? 0 : -1;
+    if (*argv == NULL)
+        return -1;
+    return xila_environ_initialize();
 }
 
 /* What is left after the program stopped, whichever way it did: the descriptors it left
