@@ -54,8 +54,9 @@ fn header(calls: &[guest::GuestCall], enumeration: &str, constants: &str) -> Str
         no_includes: true,
         export: cbindgen::ExportConfig {
             prefix: Some(guest::C_PREFIX.into()),
-            // Only the generated definitions refer to the call IDs.
-            include: vec!["FunctionCall".into()],
+            // Only the generated definitions refer to the call IDs, and the event
+            // constant is a literal, so nothing else refers to the event codes.
+            include: vec!["FunctionCall".into(), "EventCode".into()],
             ..Default::default()
         },
         enumeration: cbindgen::EnumConfig {

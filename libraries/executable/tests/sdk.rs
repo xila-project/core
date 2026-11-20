@@ -537,19 +537,42 @@ mod screen {
     }
 }
 
-/// A C program builds a window and a few objects through the SDK's graphics bindings, reads
-/// properties back, polls the window's events until the test clicks its button and ends
-/// with all of them alive: by returning, and by calling `exit`. Either way the host deletes
-/// the objects, and a second process after it starts clean.
+/// Fails the test binary, rather than hanging it, when a test runs past its deadline: a
+/// regression in how a process waits for the graphics lock stops the executor's only
+/// thread, so the test itself could never notice. Dropping the guard disarms it.
 #[cfg(feature = "graphics")]
-#[task::test]
-async fn graphics_calls_reach_the_executor_and_a_process_leaves_no_objects() {
-    use graphics::{Manager, call::State, lvgl};
+struct Watchdog {
+    _disarm: std::sync::mpsc::Sender<()>,
+}
 
+#[cfg(feature = "graphics")]
+impl Watchdog {
+    fn start(name: &'static str, seconds: u64) -> Self {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            if let Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
+                receiver.recv_timeout(core::time::Duration::from_secs(seconds))
+            {
+                eprintln!("{name}: still running after {seconds} s: the graphics lock hangs");
+                std::process::exit(1);
+            }
+        });
+        Self { _disarm: sender }
+    }
+}
+
+/// A graphics manager on a screen nobody looks at, and a context that has it. The manager
+/// is a process-wide singleton, so the graphics scenarios share one test and one setup.
+#[cfg(feature = "graphics")]
+async fn graphics_setup() -> (
+    &'static graphics::Manager,
+    &'static ExecutableContext,
+    TaskIdentifier,
+) {
     let time = Box::leak(Box::new(
         time::Manager::new(&testing_support::TimeDevice).unwrap(),
     ));
-    let manager: &'static Manager = Box::leak(Box::new(
+    let manager: &'static graphics::Manager = Box::leak(Box::new(
         graphics::initialize_with_input_devices(time, &screen::Screen, &[], 1024, false).await,
     ));
     let (context, parent) = setup_with(|context| context.graphics_manager = Some(manager)).await;
@@ -561,6 +584,22 @@ async fn graphics_calls_reach_the_executor_and_a_process_leaves_no_objects() {
     vfs.mount_character_device(parent, "/devices/random/source", FixtureEntropy)
         .await
         .unwrap();
+    (manager, context, parent)
+}
+
+/// A C program builds a window and a few objects through the SDK's graphics bindings, reads
+/// properties back, polls the window's events until the test clicks its button and ends
+/// with all of them alive: by returning, and by calling `exit`. Either way the host deletes
+/// the objects, and a second process after it starts clean. Then a worker's `exit` while the
+/// main thread waits for the graphics lock.
+#[cfg(feature = "graphics")]
+#[task::test]
+async fn graphics_calls_reach_the_executor_and_a_process_leaves_no_objects() {
+    use graphics::{call::State, lvgl};
+
+    let _watchdog = Watchdog::start("graphics_calls_reach_the_executor", 180);
+    let (manager, context, parent) = graphics_setup().await;
+    let vfs = context.virtual_file_system;
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../abi/application/sdk/test/graphics");
     install(
         vfs,
@@ -633,4 +672,62 @@ async fn graphics_calls_reach_the_executor_and_a_process_leaves_no_objects() {
         assert_eq!(State::registered_state_count(manager), 0, "{mode}");
         assert_eq!(children(), before, "{mode}");
     }
+
+    exit_from_a_worker_waits_for_the_graphics_lock(manager, context, parent).await;
+}
+
+/// A worker calls `exit(9)` while the main thread is suspended in a graphics call, and the
+/// test holds the graphics lock across both. The exit has to wait for the lock too, as the
+/// main thread's call does, and then delete the objects: no window and no registered state
+/// are left, and the process ends with status 9.
+#[cfg(feature = "graphics")]
+async fn exit_from_a_worker_waits_for_the_graphics_lock(
+    manager: &'static graphics::Manager,
+    context: &'static ExecutableContext,
+    parent: TaskIdentifier,
+) {
+    use graphics::call::State;
+
+    let vfs = context.virtual_file_system;
+    let source =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../abi/application/sdk/test/exit_suspended");
+    install(
+        vfs,
+        parent,
+        "/exit-suspended",
+        &build_sdk_program(&source, "exit_suspended", "integer"),
+    )
+    .await;
+
+    let handle = start(context, parent, "/exit-suspended", "exit-suspended", &[]).await;
+    let mut waited = 0;
+    while vfs.get_statistics(&"/exit-ready").await.is_err() {
+        assert!(
+            waited < 5000 && !handle.is_finished(),
+            "the program did not become ready: {}",
+            String::from_utf8_lossy(&read_all(vfs, parent, "/exit-suspended.err").await)
+        );
+        task::sleep(core::time::Duration::from_millis(1)).await;
+        waited += 1;
+    }
+    assert_eq!(manager.get_window_count().await.unwrap(), 1);
+    assert_eq!(State::registered_state_count(manager), 1);
+
+    {
+        let _lock = manager.lock().await;
+        // The main thread's next poll now waits for the lock, suspended.
+        task::sleep(core::time::Duration::from_millis(20)).await;
+        // The worker leaves: its exit waits for the same lock before it deletes anything.
+        vfs.create_directory(parent, &"/go").await.unwrap();
+        task::sleep(core::time::Duration::from_millis(100)).await;
+        assert!(
+            !handle.is_finished(),
+            "exit did not wait for the graphics lock"
+        );
+    }
+
+    assert_eq!(handle.join().await, 9);
+    assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
+    assert_eq!(manager.get_window_count().await.unwrap(), 0);
+    assert_eq!(State::registered_state_count(manager), 0);
 }

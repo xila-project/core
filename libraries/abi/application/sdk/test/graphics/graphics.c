@@ -31,6 +31,11 @@
 
 #define CALL(call) CHECK((call) == 0)
 
+/* The close request lives beside LVGL's own events; a macro the C compiler cannot evaluate
+ * would fail here. */
+_Static_assert(XilaGraphicsEVENT_CLOSE_REQUESTED == XILA_GRAPHICS_EVENT_CODE_LAST + 3,
+               "close request event code");
+
 /* Longer than any string the host accepts, and with no terminator. */
 static char unterminated[4096];
 
@@ -63,7 +68,7 @@ int main(int argc, char **argv) {
 
     /* The host reads strings with a bound: an unterminated one is refused, not scanned. */
     memset(unterminated, 'x', sizeof(unterminated));
-    CHECK(xila_graphics_label_set_text(label, unterminated) == XILA_STATUS_OUT_OF_MEMORY);
+    CHECK(xila_graphics_label_set_text(label, unterminated) == XILA_STATUS_INVALID_ARGUMENT);
     /* A handle that is not this process's object is refused, never dereferenced. */
     CHECK(xila_graphics_object_get_width((XilaGraphicsObject *)(uintptr_t)0x7fff, &width) != 0);
     /* A call without a process capability fails before it reaches graphics. */

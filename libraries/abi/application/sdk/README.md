@@ -206,10 +206,12 @@ xila_graphics_label_set_text(label, "Hello");
 ```
 
 Every function returns 0, or the non-zero `XilaStatus` the host reported:
-`XILA_STATUS_INVALID_ARGUMENT` for a wrong handle, argument or value,
-`XILA_STATUS_OUT_OF_MEMORY` when a string, buffer or per-process table is over
-its limit, `XILA_STATUS_UNAVAILABLE` when the system has no display, and
-`XILA_STATUS_UNSUPPORTED` when the firmware was built without graphics. A
+`XILA_STATUS_INVALID_ARGUMENT` for a wrong handle, argument or value (including a
+string with no terminator within the host's limit), `XILA_STATUS_OUT_OF_MEMORY` when a
+buffer or a per-call limit is exceeded, `XILA_STATUS_UNAVAILABLE` when the system has
+no display, and `XILA_STATUS_UNSUPPORTED` when the firmware was built without
+graphics. These are `XilaStatus` values: a Wasm guest receives the executor's codes 1
+to 8 instead, so an error-code check is not portable between the two. A
 result that is a pointer-sized word (a handle, or the target of an event) is
 written as a whole `size_t`; the others are 32 bits. Strings are NUL-terminated
 and capped by the host: a longer one, or an unterminated one, is refused after
@@ -231,8 +233,8 @@ How it works, and why raw `lv_*` functions are not exposed:
   an object that is not the process's is refused. When the process ends (`main`
   returns, `exit` or `xila_process_exit`), the host deletes every object it still
   owns, windows included, so nothing needs cleaning up by hand. The table lives in the
-  process's host-owned state, not on its stack, so the host-side cleanup of a task
-  cancelled while suspended (#731) finds it there too.
+  process's host-owned state, not on its stack, so that cleanup can later cover a
+  task cancelled while suspended; until #731 lands, its objects stay.
 * Raw LVGL functions would bypass both: they would not take the lock, and the objects
   they create would belong to nobody, so an exited or cancelled process would leak them
   and could corrupt the display by deleting an object another process owns. An `lv_*`

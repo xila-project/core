@@ -530,8 +530,8 @@ the native transport of the service the Wasm host also uses: the executor
 the event queue and the Xila extension calls; the transport only says how a pointer
 becomes memory. Here pointers are host pointers, read in place because native code is
 trusted. Strings are scanned with a bound (`strnlen` style), so the executor's limits cap
-how much memory an unterminated string makes the host read; they are the only
-checks. `function` is a call ID from the catalog, `words` the call's `count` (at most 7)
+how much memory an unterminated string makes the host read. Beyond those limits the only
+check is that a buffer's length can be a slice at all (at most `isize::MAX`, no wrap). `function` is a call ID from the catalog, `words` the call's `count` (at most 7)
 arguments, and `result` receives a pointer-sized word or a 32-bit value, depending on the
 call. The SDK generates a function for every call from the declaration that generates the
 executor, with the names of the Wasm guest API (`xila/graphics.h`, `xila_sys::graphics`);
