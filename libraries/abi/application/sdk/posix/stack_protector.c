@@ -32,13 +32,18 @@ NO_PROTECTOR void xila_stack_guard_seed(void) {
    frames of a smashed stack hold attacker-controlled return addresses and a jmp_buf that
    _exit()'s longjmp would trust lives in xila_main's frame on that very stack.
    Like abort(), nothing is flushed (stream buffers may be corrupt) and no handler runs.
-   Only the process capability, which the host keeps off the stack, ends the process. */
+   The process ends through the process capability, whose pointer is kept in static
+   storage. The capability itself, the startup block and the host's process resources
+   still live on the coroutine stack (#766), so a large enough overflow can still crash
+   the host before this handler finishes. */
 NO_PROTECTOR __attribute__((noreturn)) void __stack_chk_fail(void) {
     static const char message[] = "*** stack smashing detected ***\n";
     /* Straight to the host's standard error, through the descriptor table on the heap. */
     (void)write(2, message, sizeof message - 1);
-    /* Copied to static storage at startup: the startup block sits on the coroutine's
-       stack, which the overflow may have reached. */
+    /* The pointer is copied to static storage at startup so it is not read from the
+       startup block on the coroutine stack. What it points to is still on that stack
+       (#766), as are the startup block read by xila_posix_shutdown() and the stderr
+       stream behind write(2). */
     const XilaProcess *process = xila_process.process;
     if (process != NULL) {
         xila_posix_shutdown();
@@ -46,7 +51,8 @@ NO_PROTECTOR __attribute__((noreturn)) void __stack_chk_fail(void) {
            when it can end the process: the coroutine is abandoned, not unwound. */
         (void)xila_process_exit(process, 134);
     }
-    /* No process capability (the host does not offer exit): the status travels through
-       the jump in _exit(), which is as far as the layer can trust the stack. */
+    /* No process capability (the host does not offer exit), or xila_process_exit()
+       failed (a second shutdown does nothing): the status travels through the jump in
+       _exit(), which is as far as the layer can trust the stack. */
     _exit(134);
 }
