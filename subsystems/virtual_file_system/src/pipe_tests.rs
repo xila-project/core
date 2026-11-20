@@ -292,3 +292,33 @@ fn close_detaches_live_waiter_before_slot_is_reused() {
     assert_eq!(old.0.load(Ordering::SeqCst), 0);
     assert_eq!(new.0.load(Ordering::SeqCst), 1);
 }
+
+#[test]
+fn small_write_waits_until_the_entire_record_fits() {
+    let pipe = Pipe::new(512);
+    let mut reader = pipe.open_context(AccessFlags::Read).unwrap();
+    let mut writer = pipe.open_context(AccessFlags::Write).unwrap();
+    assert_eq!(pipe.write_sync(&mut writer, &[0; 400], 0), Ok(400));
+    assert_eq!(
+        pipe.write_sync(&mut writer, &[1; 200], 0),
+        Err(IoErrorKind::WouldBlock)
+    );
+    assert_eq!(pipe.bytes_available(), 400);
+    assert_eq!(
+        pipe.readiness(AccessFlags::Write, ReadyEvents::WRITE),
+        ReadyEvents::empty()
+    );
+
+    let (count, waker) = counter();
+    let mut cx = TaskContext::from_waker(&waker);
+    assert_eq!(
+        BaseOperations::write(&pipe, &mut writer, &mut cx, &[1; 200], 0),
+        Poll::Pending
+    );
+    assert_eq!(pipe.read_sync(&mut reader, &mut [0; 88], 0), Ok(88));
+    assert_eq!(count.0.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        BaseOperations::write(&pipe, &mut writer, &mut cx, &[1; 200], 0),
+        Poll::Ready(Ok(200))
+    );
+}

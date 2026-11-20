@@ -158,18 +158,48 @@ int dup2(int fd, int target) {
     return target;
 }
 
+static int get_file_flags(const struct xila_fd *entry) {
+    if (entry->kind == XILA_FD_DIRECTORY)
+        return O_RDONLY;
+    uint32_t flags = 0;
+    XilaStatus status = xila_file_control(entry->object, XILA_CONTROL_GET_FILE_FLAGS,
+                                          NULL, 0, &flags, sizeof(flags));
+    if (status != XILA_STATUS_OK)
+        return xila_fail(status);
+    int access = O_RDONLY;
+    if (flags & XILA_OPEN_WRITE)
+        access = (flags & XILA_OPEN_READ) ? O_RDWR : O_WRONLY;
+    return access | ((flags & XILA_OPEN_NON_BLOCKING) ? O_NONBLOCK : 0) |
+           ((flags & XILA_OPEN_APPEND) ? O_APPEND : 0);
+}
+
+static int set_file_flags(const struct xila_fd *entry, int flags) {
+    if (entry->kind == XILA_FD_DIRECTORY)
+        return xila_fail_errno(EINVAL);
+    uint32_t native = ((flags & O_NONBLOCK) ? XILA_OPEN_NON_BLOCKING : 0) |
+                      ((flags & O_APPEND) ? XILA_OPEN_APPEND : 0);
+    XilaStatus status = xila_file_control(entry->object, XILA_CONTROL_SET_FILE_FLAGS,
+                                          &native, sizeof(native), NULL, 0);
+    return status == XILA_STATUS_OK ? 0 : xila_fail(status);
+}
+
 int fcntl(int fd, int command, ...) {
     struct xila_fd *entry = xila_fd_get(fd);
     if (entry == NULL)
         return -1;
     if (command == F_GETFD)
         return (entry->flags & XILA_FD_CLOEXEC) ? FD_CLOEXEC : 0;
-    if (command != F_DUPFD && command != F_DUPFD_CLOEXEC && command != F_SETFD)
+    if (command == F_GETFL)
+        return get_file_flags(entry);
+    if (command != F_DUPFD && command != F_DUPFD_CLOEXEC && command != F_SETFD &&
+        command != F_SETFL)
         return xila_fail_errno(EINVAL);
     va_list arguments;
     va_start(arguments, command);
     int value = va_arg(arguments, int);
     va_end(arguments);
+    if (command == F_SETFL)
+        return set_file_flags(entry, value);
     if (command == F_SETFD) {
         entry->flags = (entry->flags & ~XILA_FD_CLOEXEC) |
                        ((value & FD_CLOEXEC) ? XILA_FD_CLOEXEC : 0);

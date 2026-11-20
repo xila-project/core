@@ -83,10 +83,13 @@ Zero timeout probes once. Positive timeouts are relative milliseconds on the
 executor clock, and negative timeouts wait indefinitely. A wait that would
 block outside a coroutine returns `WouldBlock`. An empty set may be used to
 sleep in a coroutine. Regular files and block devices report readiness for
-operations allowed by the opening, including at EOF. Directory capabilities
-report read readiness. A character driver supplies its own non-consuming
-readiness snapshot and notifies the shared hub when readiness changes. Drivers
-without this contract report `XILA_POLL_ERR`. With the `network` feature, TCP
+operations allowed by the opening, including at EOF. A write-only regular file
+reports `XILA_POLL_OUT` when requested. A request for `XILA_POLL_IN` alone on
+that opening reports no events. Directory capabilities report read readiness.
+By default, character devices report readiness for the requested directions
+allowed by the opening, and their I/O can still suspend cooperatively. A driver
+can opt in to precise readiness by supplying a non-consuming snapshot and
+notifying the shared hub when readiness changes. With the `network` feature, TCP
 connections, TCP listeners and UDP sockets are pollable. The network runner
 notifies the hub when socket state changes, without taking over the individual
 socket's read or write waker. Keep sockets live and serialize their other ABI
@@ -99,17 +102,30 @@ reader closing reports `XILA_POLL_ERR` to writers, and a nonempty write then
 returns `BrokenPipe`. A file readiness snapshot keeps a pipe's storage
 accessible without keeping its endpoints open. The wait registers one hub
 waker and stores one result per entry. The hub and snapshots are released on
-completion, timeout or coroutine cancellation.
+completion, timeout or coroutine cancellation. The hub currently wakes all
+pollers on a readiness notification, and each poller rescans its sources.
+Registering waiters per source is a follow-up.
 
 `xila_pipe_create` uses the supplied process capability to return an owned read
 and write handle for a 512-byte unnamed pipe. Pass `XILA_OPEN_NON_BLOCKING` for
-probe-only I/O. Transfers can be short. `xila_file_control` accepts only
-`XILA_CONTROL_BYTES_AVAILABLE` with zero input bytes and an aligned four-byte
-`uint32_t` output. Either pipe endpoint can report its queued byte count.
-`xila_file_is_terminal` queries the VFS terminal capability.
+probe-only I/O. Writes up to the SDK's 512-byte `PIPE_BUF` are atomic. If
+the whole write does not fit, a blocking writer waits and a nonblocking writer
+returns `WouldBlock` without queuing bytes. Larger writes and reads can be
+short. `XILA_POLL_OUT` on a pipe requires room for an atomic write.
+
+`xila_file_control` accepts an aligned native-endian `uint32_t` buffer.
+`XILA_CONTROL_BYTES_AVAILABLE` and `XILA_CONTROL_GET_FILE_FLAGS` take zero
+input bytes and return the pipe's queued byte count or the file's access mode
+and status flags. Either pipe endpoint can query the byte count.
+`XILA_CONTROL_SET_FILE_FLAGS` takes the new `XILA_OPEN_APPEND` and
+`XILA_OPEN_NON_BLOCKING` bits and zero output bytes.
+`xila_file_is_terminal` queries the VFS terminal capability and can suspend
+a coroutine if the device needs to wait.
 
 `xila_file_duplicate` returns an independently closable handle that shares
-the original VFS cursor. `xila_file_read_at` and `xila_file_write_at` perform
+the original VFS cursor and status flags. Duplicating an SDK directory
+descriptor creates another path capability. Directory streams opened from the
+capability have independent `readdir` positions. `xila_file_read_at` and `xila_file_write_at` perform
 I/O without moving that cursor. Positional writes use their explicit offset
 when the opening was created for append. Pipes and character streams return
 `InvalidSeek`.

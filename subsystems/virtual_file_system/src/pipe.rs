@@ -9,6 +9,9 @@ use file_system::{
 };
 use synchronization::blocking_mutex::{Mutex, raw::CriticalSectionRawMutex};
 
+/// Atomic write limit advertised by the native SDK's picolibc.
+pub const PIPE_BUF: usize = 512;
+
 /// Maximum simultaneous openings (including duplicates) of one pipe.
 /// Slots are reserved during open, never allocated on the I/O path.
 pub const MAX_PIPE_OPENINGS: usize = 16;
@@ -100,6 +103,10 @@ impl Pipe {
         Ok(opening)
     }
 
+    fn atomic_write_limit(&self) -> usize {
+        self.capacity.min(PIPE_BUF)
+    }
+
     pub(crate) fn readiness(&self, access: AccessFlags, interests: ReadyEvents) -> ReadyEvents {
         self.state.lock(|state| {
             let state = state.borrow();
@@ -117,7 +124,7 @@ impl Pipe {
                     ReadyEvents::WRITE,
                     interests.contains(ReadyEvents::WRITE)
                         && state.readers != 0
-                        && state.buffer.len() < self.capacity,
+                        && self.capacity - state.buffer.len() >= self.atomic_write_limit(),
                 );
             }
             events
@@ -212,10 +219,11 @@ impl Pipe {
             if state.readers == 0 {
                 return Err(IoErrorKind::BrokenPipe);
             }
-            let length = data.len().min(self.capacity - state.buffer.len());
-            if length == 0 {
+            let free = self.capacity - state.buffer.len();
+            if free == 0 || (data.len() <= self.atomic_write_limit() && data.len() > free) {
                 return Err(IoErrorKind::WouldBlock);
             }
+            let length = data.len().min(free);
             state.buffer.extend(&data[..length]);
             Ok(length)
         })

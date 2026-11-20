@@ -327,10 +327,10 @@ pub unsafe extern "C" fn xila_file_set_size(file: *mut File, size: u64) -> Statu
         .map_or_else(Status::from, |()| Status::Ok)
 }
 
-/// Duplicate this opening, including its shared cursor and access flags.
+/// Return an independently closable handle with the same cursor and status flags.
 /// # Safety
-/// File must be live and exclusively accessed. Output must be aligned,
-/// writable and disjoint from the file.
+/// File must be live. Serialize with close and operations that mutably borrow
+/// the file. Output must be aligned, writable and disjoint from the file.
 pub unsafe extern "C" fn xila_file_duplicate(file: *const File, output: *mut *mut File) -> Status {
     if file.is_null() || output.is_null() {
         return Status::InvalidArgument;
@@ -345,16 +345,21 @@ pub unsafe extern "C" fn xila_file_duplicate(file: *const File, output: *mut *mu
 }
 
 pub const XILA_CONTROL_BYTES_AVAILABLE: u32 = 1;
+pub const XILA_CONTROL_GET_FILE_FLAGS: u32 = 2;
+pub const XILA_CONTROL_SET_FILE_FLAGS: u32 = 3;
 
-/// The number of queued bytes in a pipe, on either end. No input and one
-/// native-endian uint32_t output. All other commands return Unsupported.
+/// A bounded command with one native-endian uint32_t input or output.
+/// BYTES_AVAILABLE returns the queued byte count on either pipe end.
+/// GET_FILE_FLAGS returns the access mode and status as XILA_OPEN_* bits.
+/// SET_FILE_FLAGS replaces the append and nonblocking bits.
 /// # Safety
-/// File must be live and exclusively accessed. Output must be aligned,
-/// writable for output_size bytes and disjoint from the file.
+/// File must be live and exclusively accessed. A used buffer must be aligned
+/// for a uint32_t and disjoint from the file. Input must be readable for
+/// input_size bytes and output writable for output_size bytes.
 pub unsafe extern "C" fn xila_file_control(
     file: *mut File,
     command: u32,
-    _input: *const c_void,
+    input: *const c_void,
     input_size: usize,
     output: *mut c_void,
     output_size: usize,
@@ -362,31 +367,59 @@ pub unsafe extern "C" fn xila_file_control(
     if file.is_null() {
         return Status::InvalidArgument;
     }
-    if command != XILA_CONTROL_BYTES_AVAILABLE {
-        return Status::Unsupported;
-    }
-    if input_size != 0
-        || output_size != size_of::<u32>()
-        || output.is_null()
-        || !output.cast::<u32>().is_aligned()
-    {
-        return Status::InvalidArgument;
-    }
-    match unsafe { &mut (*file).inner }
-        .as_synchronous_file_mut()
-        .pipe_bytes_available()
-    {
-        Ok(bytes) => {
-            // All pipes exposed through this ABI have bounded capacities.
-            unsafe {
-                output
-                    .cast::<u32>()
-                    .write(u32::try_from(bytes).unwrap_or(u32::MAX))
+    let file = unsafe { &mut (*file).inner }.as_synchronous_file_mut();
+    let result = match command {
+        XILA_CONTROL_BYTES_AVAILABLE | XILA_CONTROL_GET_FILE_FLAGS => {
+            let output = output.cast::<u32>();
+            if input_size != 0
+                || output_size != size_of::<u32>()
+                || output.is_null()
+                || !output.is_aligned()
+            {
+                return Status::InvalidArgument;
+            }
+            let value = if command == XILA_CONTROL_BYTES_AVAILABLE {
+                // All pipes exposed through this ABI have bounded capacities.
+                file.pipe_bytes_available()
+                    .map(|bytes| u32::try_from(bytes).unwrap_or(u32::MAX))
+            } else {
+                file_flags(file)
             };
-            Status::Ok
+            value.map(|value| unsafe { output.write(value) })
         }
-        Err(error) => error.into(),
-    }
+        XILA_CONTROL_SET_FILE_FLAGS => {
+            let input = input.cast::<u32>();
+            if input_size != size_of::<u32>()
+                || output_size != 0
+                || input.is_null()
+                || !input.is_aligned()
+            {
+                return Status::InvalidArgument;
+            }
+            let flags = unsafe { input.read() };
+            if flags & !(XILA_OPEN_APPEND | XILA_OPEN_NON_BLOCKING) != 0 {
+                return Status::InvalidArgument;
+            }
+            file.get_state().and_then(|mut state| {
+                state.set(StateFlags::Append, flags & XILA_OPEN_APPEND != 0);
+                state.set(StateFlags::NonBlocking, flags & XILA_OPEN_NON_BLOCKING != 0);
+                file.set_state(state)
+            })
+        }
+        _ => return Status::Unsupported,
+    };
+    result.map_or_else(Status::from, |()| Status::Ok)
+}
+
+fn file_flags(file: &SynchronousFile<'_>) -> file_system::Result<u32> {
+    let access = file.get_access()?;
+    let state = file.get_state()?;
+    Ok(
+        (u32::from(access.contains(AccessFlags::Read)) * XILA_OPEN_READ)
+            | (u32::from(access.contains(AccessFlags::Write)) * XILA_OPEN_WRITE)
+            | (u32::from(state.contains(StateFlags::Append)) * XILA_OPEN_APPEND)
+            | (u32::from(state.contains(StateFlags::NonBlocking)) * XILA_OPEN_NON_BLOCKING),
+    )
 }
 
 /// Report whether this file is an interactive terminal.
@@ -397,9 +430,13 @@ pub unsafe extern "C" fn xila_file_is_terminal(file: *mut File, terminal: *mut b
     if file.is_null() || terminal.is_null() {
         return Status::InvalidArgument;
     }
-    let result = unsafe { &mut (*file).inner }
-        .as_synchronous_file_mut()
-        .control(file_system::character_device::IS_A_TERMINAL, &());
+    let file = unsafe { &mut (*file).inner };
+    let command = file_system::character_device::IS_A_TERMINAL;
+    let result = if crate::is_in_coroutine() {
+        crate::suspend_on(file.control(command, &()))
+    } else {
+        file.as_synchronous_file_mut().control(command, &())
+    };
     let value = match result {
         Ok(value) => value,
         Err(file_system::IoErrorKind::Unsupported) => false,
@@ -410,6 +447,7 @@ pub unsafe extern "C" fn xila_file_is_terminal(file: *mut File, terminal: *mut b
 }
 
 pub const XILA_PIPE_CAPACITY: usize = 512;
+const _: () = assert!(XILA_PIPE_CAPACITY == virtual_file_system::PIPE_BUF);
 
 /// Create an unnamed pipe. Only XILA_OPEN_NON_BLOCKING is accepted in flags.
 /// # Safety

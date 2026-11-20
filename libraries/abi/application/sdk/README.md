@@ -157,14 +157,25 @@ signals), `time`, `gettimeofday`, `getentropy`, `getrandom`, the `malloc` family
 
 The descriptor table allocates the lowest free fd for `dup`, `open` and
 `pipe`. `dup2` replaces a specific fd. File duplicates share their VFS cursor,
-including across `read`, `write` and `lseek`. `fcntl` supports `F_DUPFD`,
-`F_DUPFD_CLOEXEC`, `F_GETFD` and `F_SETFD`. The close-on-exec bit is stored
-per descriptor for future process-spawn support. `pipe2` accepts `O_NONBLOCK`
-and `O_CLOEXEC`. Pipes hold 512 bytes and report partial transfers. Core's
-pipe opening limit also applies to pipe duplicates.
+including across `read`, `write` and `lseek`. Directory duplicates share
+the path capability's authority, and directory streams have independent
+`readdir` positions. `fcntl` supports `F_DUPFD`, `F_DUPFD_CLOEXEC`,
+`F_GETFD`, `F_SETFD`, `F_GETFL` and `F_SETFL`. The close-on-exec bit is
+per descriptor. `F_GETFL` reports the access mode and supported status flags.
+`F_SETFL` changes `O_NONBLOCK` and `O_APPEND` for file handles, including
+every duplicate of the same opening. Directory descriptors report `O_RDONLY`
+and reject `F_SETFL`.
+
+`pipe2` accepts `O_NONBLOCK` and `O_CLOEXEC`. Pipes hold 512 bytes.
+Writes of up to `PIPE_BUF` (512 bytes) are atomic. A nonblocking atomic write
+returns `EAGAIN` without queuing bytes if the whole write does not fit.
+Larger writes and reads can be short. Core's pipe opening limit also applies
+to pipe duplicates.
 
 `poll` supports read/write readiness, error, hangup and invalid descriptors.
-Negative descriptors are ignored. A poll wait snapshots its descriptors at
+Pipe output readiness requires space for an atomic write. A write-only
+regular file reports output readiness when requested. Negative descriptors
+are ignored. A poll wait snapshots its descriptors at
 entry. Applications should coordinate closing or replacing a descriptor with
 other threads that are waiting on it. `ioctl(fd, FIONREAD, &queued)` writes the
 number of bytes queued in a pipe to an `int`. Other ioctl requests fail with

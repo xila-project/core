@@ -1,8 +1,11 @@
 #include <fcntl.h>
+#include <limits.h>
 #include <poll.h>
 #include <unistd.h>
 
 #include "internal.h"
+
+_Static_assert(PIPE_BUF == XILA_PIPE_CAPACITY, "SDK and ABI atomic pipe write sizes must agree");
 
 int pipe2(int fds[2], int flags) {
     if (fds == NULL)

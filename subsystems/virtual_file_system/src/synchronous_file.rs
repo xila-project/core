@@ -27,11 +27,8 @@ impl Debug for SynchronousFile<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("SynchronousFile")
             .field("item", &self.item)
-            .field(
-                "position",
-                &self.cursor.update(|position| Ok((position, position))),
-            )
-            .field("flags", &self.flags)
+            .field("position", &self.cursor.position())
+            .field("flags", &self.flags.set_status(self.state()))
             .finish()
     }
 }
@@ -49,8 +46,8 @@ impl<'a> SynchronousFile<'a> {
             authority: None,
             virtual_file_system,
             item,
-            cursor: crate::cursor::Cursor::new(position),
-            flags,
+            cursor: crate::cursor::Cursor::new(position, flags.get_state()),
+            flags: flags.set_status(StateFlags::empty()),
             context,
         }
     }
@@ -145,7 +142,7 @@ impl<'a> SynchronousFile<'a> {
 
     fn append_position(&mut self) -> Option<Size> {
         // Some devices cannot report a size. Keep the cursor for those devices.
-        if self.flags.get_state().contains(StateFlags::Append) {
+        if self.state().contains(StateFlags::Append) {
             self.get_statistics().ok().map(|statistics| statistics.size)
         } else {
             None
@@ -484,17 +481,21 @@ impl<'a> SynchronousFile<'a> {
         Ok(self.flags.get_access())
     }
 
-    /// Set status flags supported by synchronous handles.
+    /// Set status flags on this open file description, including its duplicates.
     pub fn set_state(&mut self, state: StateFlags) -> Result<()> {
         if state.intersects(StateFlags::Synchronous | StateFlags::SynchronousDataOnly) {
             return Err(IoErrorKind::Unsupported);
         }
-        self.flags = self.flags.set_status(state);
+        self.cursor.set_state(state);
         Ok(())
     }
 
+    pub(crate) fn state(&self) -> StateFlags {
+        self.cursor.state()
+    }
+
     pub fn get_state(&self) -> Result<StateFlags> {
-        Ok(self.flags.get_state())
+        Ok(self.state())
     }
 
     pub fn close_internal(&mut self, virtual_file_system: &VirtualFileSystem) -> crate::Result<()> {

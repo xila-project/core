@@ -24,6 +24,7 @@ pub use file::*;
 pub use file_system::*;
 pub use hierarchy::*;
 pub use item::*;
+pub use pipe::PIPE_BUF;
 pub use readiness::*;
 pub use synchronous_directory::*;
 pub use synchronous_file::*;

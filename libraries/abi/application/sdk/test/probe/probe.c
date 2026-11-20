@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -122,6 +123,74 @@ static void *write_pipe(void *arg) {
     return arg;
 }
 
+struct drain_pipe {
+    int fd;
+    unsigned char data[XILA_PIPE_CAPACITY];
+};
+
+static void *drain_pipe(void *arg) {
+    struct drain_pipe *drain = arg;
+    if (read(drain->fd, drain->data, 112) != 112 || sched_yield() != 0 ||
+        read(drain->fd, drain->data + 112, sizeof(drain->data) - 112) !=
+            (ssize_t)(sizeof(drain->data) - 112))
+        return NULL;
+    return arg;
+}
+
+struct pipe_record {
+    int fd;
+    unsigned char bytes[300];
+};
+
+static void *write_record(void *arg) {
+    struct pipe_record *record = arg;
+    return write(record->fd, record->bytes, sizeof(record->bytes)) ==
+                   (ssize_t)sizeof(record->bytes)
+               ? arg : NULL;
+}
+
+static int atomic_pipe_writes(void) {
+    int fds[2];
+    CHECK("atomic pipe", pipe(fds) == 0);
+    int duplicate = dup(fds[1]);
+    CHECK("duplicate pipe writer", duplicate >= 0);
+    struct pipe_record first = {.fd = fds[1]}, second = {.fd = duplicate};
+    memset(first.bytes, 'a', sizeof(first.bytes));
+    memset(second.bytes, 'b', sizeof(second.bytes));
+    unsigned char filler[400] = {0};
+    CHECK("leave too little free space for a record",
+          write(fds[1], filler, sizeof(filler)) == (ssize_t)sizeof(filler));
+
+    pthread_t writers[2];
+    CHECK("start record writers", pthread_create(&writers[0], NULL, write_record, &first) == 0 &&
+          pthread_create(&writers[1], NULL, write_record, &second) == 0);
+    CHECK("allow both writers to block", sched_yield() == 0);
+    int queued = 0;
+    CHECK("both writers left the pipe intact", ioctl(fds[0], FIONREAD, &queued) == 0 &&
+          queued == (int)sizeof(filler));
+    CHECK("drain the filler", read(fds[0], filler, sizeof(filler)) == (ssize_t)sizeof(filler));
+
+    unsigned char records[sizeof(first.bytes) + sizeof(second.bytes)];
+    for (size_t offset = 0; offset < sizeof(records);) {
+        struct pollfd input = {fds[0], POLLIN, 0};
+        CHECK("wait for a record", poll(&input, 1, 1000) == 1 && input.revents == POLLIN);
+        ssize_t count = read(fds[0], records + offset, sizeof(records) - offset);
+        CHECK("read a record", count == (ssize_t)sizeof(first.bytes));
+        offset += (size_t)count;
+    }
+    void *result = NULL;
+    CHECK("both record writes completed in one call",
+          pthread_join(writers[0], &result) == 0 && result == &first &&
+          pthread_join(writers[1], &result) == 0 && result == &second);
+    CHECK("records did not interleave",
+          (memcmp(records, first.bytes, sizeof(first.bytes)) == 0 &&
+           memcmp(records + sizeof(first.bytes), second.bytes, sizeof(second.bytes)) == 0) ||
+          (memcmp(records, second.bytes, sizeof(second.bytes)) == 0 &&
+           memcmp(records + sizeof(second.bytes), first.bytes, sizeof(first.bytes)) == 0));
+    CHECK("close atomic pipe", close(fds[0]) == 0 && close(fds[1]) == 0 && close(duplicate) == 0);
+    return 0;
+}
+
 static int64_t monotonic_ns(void) {
     struct timespec now;
     if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
@@ -143,6 +212,14 @@ static int descriptors(void) {
     CHECK("dup2 invalid source preserves destination", dup2(255, high) == -1 &&
           errno == EBADF && fcntl(high, F_GETFD) == FD_CLOEXEC);
     CHECK("dup2 clears flag", dup2(fd, high) == high && fcntl(high, F_GETFD) == 0);
+    CHECK("file status flags exclude descriptor flags", fcntl(fd, F_GETFL) == O_RDWR);
+    CHECK("status flags shared by duplicates",
+          fcntl(copy, F_SETFL, O_RDONLY | O_NONBLOCK | O_APPEND) == 0 &&
+          fcntl(fd, F_GETFL) == (O_RDWR | O_NONBLOCK | O_APPEND) &&
+          fcntl(high, F_GETFL) == (O_RDWR | O_NONBLOCK | O_APPEND) &&
+          fcntl(fd, F_GETFD) == FD_CLOEXEC);
+    CHECK("clear shared status flags", fcntl(high, F_SETFL, 0) == 0 &&
+          fcntl(copy, F_GETFL) == O_RDWR);
 
     char data[8] = {0};
     CHECK("read updates shared offset", read(copy, data, 1) == 1 && data[0] == 'a' &&
@@ -162,6 +239,15 @@ static int descriptors(void) {
     CHECK("isatty invalid fd", isatty(fd) == 0 && errno == EBADF);
     CHECK("close copies", close(copy) == 0 && close(high) == 0);
 
+    int write_only = open("/positional.txt", O_WRONLY);
+    CHECK("open write-only file", write_only >= 0);
+    file = (struct pollfd){write_only, POLLIN | POLLOUT, 0};
+    CHECK("write-only file reports only output readiness",
+          poll(&file, 1, 0) == 1 && file.revents == POLLOUT);
+    file.events = POLLIN;
+    CHECK("write-only file has no input readiness", poll(&file, 1, 0) == 0 && file.revents == 0);
+    CHECK("close write-only file", close(write_only) == 0);
+
     int directory = open("/", O_RDONLY | O_DIRECTORY);
     int directory_copy = fcntl(directory, F_DUPFD, 17);
     CHECK("duplicate directory", directory == fd && directory_copy == 17 &&
@@ -173,6 +259,20 @@ static int descriptors(void) {
     int pipefd[2];
     CHECK("pipe2 flags", pipe2(pipefd, O_NONBLOCK | O_CLOEXEC) == 0 &&
           fcntl(pipefd[0], F_GETFD) == FD_CLOEXEC && fcntl(pipefd[1], F_GETFD) == FD_CLOEXEC);
+    CHECK("pipe status and access flags",
+          fcntl(pipefd[0], F_GETFL) == (O_RDONLY | O_NONBLOCK) &&
+          fcntl(pipefd[1], F_GETFL) == (O_WRONLY | O_NONBLOCK));
+    int reader_copy = dup(pipefd[0]);
+    CHECK("clear nonblocking on the duplicate",
+          reader_copy >= 0 && fcntl(reader_copy, F_SETFL, 0) == 0 &&
+          fcntl(pipefd[0], F_GETFL) == O_RDONLY &&
+          fcntl(pipefd[1], F_GETFL) == (O_WRONLY | O_NONBLOCK));
+    CHECK("set nonblocking on the original", fcntl(pipefd[0], F_SETFL, O_NONBLOCK) == 0 &&
+          fcntl(reader_copy, F_GETFL) == (O_RDONLY | O_NONBLOCK));
+    unsigned char byte;
+    CHECK("shared nonblocking affects reads", read(reader_copy, &byte, 1) == -1 && errno == EAGAIN);
+    CHECK("close duplicate reader", close(reader_copy) == 0);
+
     struct pollfd waiting[] = {{pipefd[0], POLLIN, 0}, {-1, POLLIN, 1}, {255, 0, 0}};
     errno = EDOM;
     CHECK("invalid and ignored entries", poll(waiting, 3, 0) == 1 && errno == EDOM &&
@@ -185,10 +285,16 @@ static int descriptors(void) {
     int available = 0;
     CHECK("FIONREAD", ioctl(pipefd[0], FIONREAD, &available) == 0 &&
           available == XILA_PIPE_CAPACITY);
+    CHECK("drain just 112 bytes", read(pipefd[0], big, 112) == 112);
+    CHECK("partial space is not writable", poll(&output, 1, 0) == 0 && output.revents == 0);
+    CHECK("200-byte write needs the whole record's space",
+          write(pipefd[1], big, 200) == -1 && errno == EAGAIN);
+    CHECK("failed atomic write queued nothing", ioctl(pipefd[0], FIONREAD, &available) == 0 &&
+          available == 400);
     CHECK("unsupported ioctl", ioctl(pipefd[0], TIOCLINUX, NULL) == -1 && errno == ENOTTY);
     CHECK("pipe lseek ESPIPE", lseek(pipefd[0], 0, SEEK_SET) == -1 && errno == ESPIPE);
     CHECK("pipe pread ESPIPE", pread(pipefd[0], big, 1, 0) == -1 && errno == ESPIPE);
-    CHECK("drain pipe", read(pipefd[0], big, sizeof(big)) == XILA_PIPE_CAPACITY);
+    CHECK("drain pipe", read(pipefd[0], big, sizeof(big)) == 400);
     CHECK("space makes pipe writable", poll(&output, 1, 0) == 1 && output.revents == POLLOUT);
     int64_t before = monotonic_ns();
     CHECK("empty pipe finite timeout", before >= 0 && poll(waiting, 1, 5) == 0 &&
@@ -221,6 +327,21 @@ static int descriptors(void) {
     CHECK("consume data after hangup", read(pipefd[0], data, sizeof(data)) == 2 &&
           memcmp(data, "ok", 2) == 0 && read(pipefd[0], data, sizeof(data)) == 0);
     CHECK("close reader", close(pipefd[0]) == 0);
+
+    CHECK("create pipe for blocking POLLOUT", pipe(pipefd) == 0);
+    CHECK("fill pipe for POLLOUT", write(pipefd[1], big, XILA_PIPE_CAPACITY) == XILA_PIPE_CAPACITY);
+    struct drain_pipe drain = {.fd = pipefd[0]};
+    pthread_t drainer;
+    CHECK("start draining peer", pthread_create(&drainer, NULL, drain_pipe, &drain) == 0);
+    output = (struct pollfd){pipefd[1], POLLOUT, 0};
+    CHECK("blocking POLLOUT wakes after the pipe drains",
+          poll(&output, 1, 1000) == 1 && output.revents == POLLOUT &&
+          ioctl(pipefd[0], FIONREAD, &available) == 0 && available == 0);
+    CHECK("join draining peer", pthread_join(drainer, &result) == 0 && result == &drain);
+    CHECK("close drained pipe", close(pipefd[0]) == 0 && close(pipefd[1]) == 0);
+    int records = atomic_pipe_writes();
+    if (records != 0)
+        return records;
 
     puts("descriptors: ok");
     return 0;

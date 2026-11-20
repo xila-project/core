@@ -289,10 +289,9 @@ pub struct XilaApi {
         offset: u64,
         count: *mut usize,
     ) -> Status,
-    /// Return an owned file that shares the original cursor.
+    /// Return an owned file that shares the original cursor and status flags.
     pub file_duplicate: unsafe extern "C" fn(file: *const File, output: *mut *mut File) -> Status,
-    /// Only XILA_CONTROL_BYTES_AVAILABLE is supported. It returns a uint32_t
-    /// on either end of a pipe, with an input size of zero.
+    /// Query queued pipe bytes or get/set file flags using a uint32_t buffer.
     pub file_control: unsafe extern "C" fn(
         file: *mut File,
         command: u32,

@@ -15,7 +15,7 @@ cc = "1"
 [dev-dependencies]
 testing.workspace = true
 task = { workspace = true, features = ["test_harness"] }
-file_system.workspace = true
+file_system = { workspace = true, features = ["test_harness"] }
 virtual_file_system.workspace = true
 little_fs.workspace = true
 time.workspace = true

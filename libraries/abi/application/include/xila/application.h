@@ -40,6 +40,10 @@
 
 #define XILA_CONTROL_BYTES_AVAILABLE 1
 
+#define XILA_CONTROL_GET_FILE_FLAGS 2
+
+#define XILA_CONTROL_SET_FILE_FLAGS 3
+
 #define XILA_PIPE_CAPACITY 512
 
 #define XILA_STATISTICS_NO_FOLLOW 1
@@ -674,12 +678,11 @@ typedef struct XilaApi {
                               uint64_t offset,
                               size_t *count);
   /**
-   * Return an owned file that shares the original cursor.
+   * Return an owned file that shares the original cursor and status flags.
    */
   XilaStatus (*file_duplicate)(const struct XilaFile *file, struct XilaFile **output);
   /**
-   * Only XILA_CONTROL_BYTES_AVAILABLE is supported. It returns a uint32_t
-   * on either end of a pipe, with an input size of zero.
+   * Query queued pipe bytes or get/set file flags using a uint32_t buffer.
    */
   XilaStatus (*file_control)(struct XilaFile *file,
                              uint32_t command,

@@ -131,17 +131,21 @@ impl Default for TerminalAttributes {
 }
 
 pub trait CharacterDevice: BaseOperations + MountOperations {
-    /// Snapshot device readiness without consuming data. Implementations must
-    /// call [`crate::notify_readiness`] after changes that can wake a poller.
-    fn readiness(&self, _interests: crate::ReadyEvents) -> crate::Result<crate::ReadyEvents> {
-        Err(crate::IoErrorKind::Unsupported)
+    /// Snapshot device readiness without consuming data. By default, report the
+    /// requested read/write directions, which the VFS masks by the opening's
+    /// access mode. I/O on such devices may still suspend.
+    ///
+    /// Drivers overriding this with a precise probe must call
+    /// [`crate::notify_readiness`] after changes that can wake a poller.
+    fn readiness(&self, interests: crate::ReadyEvents) -> crate::Result<crate::ReadyEvents> {
+        Ok(interests & (crate::ReadyEvents::READ | crate::ReadyEvents::WRITE))
     }
 }
 
 pub trait DirectCharacterDevice: DirectBaseOperations + MountOperations {
-    /// See [`CharacterDevice::readiness`].
-    fn readiness(&self, _interests: crate::ReadyEvents) -> crate::Result<crate::ReadyEvents> {
-        Err(crate::IoErrorKind::Unsupported)
+    /// See [`CharacterDevice::readiness`] for the default and notification contract.
+    fn readiness(&self, interests: crate::ReadyEvents) -> crate::Result<crate::ReadyEvents> {
+        Ok(interests & (crate::ReadyEvents::READ | crate::ReadyEvents::WRITE))
     }
 }
 

@@ -68,9 +68,19 @@ impl Drop for ReadinessWaiter {
 
 /// Notify after a source changes state. Drivers must release their state lock
 /// before calling this. Waiters always recheck their own sources after a wake.
-pub fn notify_readiness() {
+/// Returns the number of registrations woken.
+pub fn notify_readiness() -> usize {
     let waiters = WAITERS.lock(|slots| core::mem::take(&mut *slots.borrow_mut()));
+    let count = waiters.len();
     for (_, waker) in waiters {
         waker.wake();
     }
+    count
+}
+
+/// Number of registrations currently held by the hub.
+#[cfg(feature = "test_harness")]
+#[doc(hidden)]
+pub fn readiness_waiter_count() -> usize {
+    WAITERS.lock(|slots| slots.borrow().len())
 }

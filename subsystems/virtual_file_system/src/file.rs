@@ -51,7 +51,7 @@ impl core::fmt::Write for File<'_> {
 
 impl<'a> File<'a> {
     fn nonblocking(&self) -> bool {
-        self.0.flags.get_state().contains(StateFlags::NonBlocking)
+        self.0.state().contains(StateFlags::NonBlocking)
     }
 
     pub(crate) fn new(
