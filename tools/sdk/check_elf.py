@@ -253,9 +253,9 @@ def check(data, machine=None, abi=None, float_abi=None, compressed=True, embedde
 def _check(data, machine, abi, float_abi, compressed, embedded):
     elf = Elf(data)
     problems = []
-    wrong_machine = machine and elf.arch != machine and not (machine == "riscv32" and elf.arch == "riscv")
-    if wrong_machine:
-        problems.append(f"machine is {elf.arch}, expected {machine}")
+    actual_machine = f"riscv{64 if elf.is64 else 32}" if elf.arch == "riscv" else elf.arch
+    if machine and machine not in (elf.arch, actual_machine):
+        problems.append(f"machine is {actual_machine}, expected {machine}")
     else:
         # A float ABI that its architecture does not have is a usage error, not a
         # problem with the image.

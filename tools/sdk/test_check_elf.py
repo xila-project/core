@@ -184,9 +184,9 @@ class CheckElf(unittest.TestCase):
         self.assertEqual(check_elf.check(data, "x86_64"), [])
 
     def test_rejects_riscv_linker_relaxation(self):
-        good = image(machine=EM_RISCV, relocations=[(R_RISCV_RELATIVE, 0)])
+        good = image(machine=EM_RISCV, wide=False, relocations=[(R_RISCV_RELATIVE, 0)])
         self.assertEqual(check(good, "riscv32"), [])
-        bad = image(machine=EM_RISCV, relocations=[(check_elf.R_RISCV_RELAX, 0)])
+        bad = image(machine=EM_RISCV, wide=False, relocations=[(check_elf.R_RISCV_RELAX, 0)])
         self.assertTrue(any("R_RISCV_RELAX" in p for p in check(bad, "riscv32")))
 
     def test_rejects_the_wrong_machine(self):
@@ -260,6 +260,10 @@ class LoaderRules(unittest.TestCase):
     def test_the_arm_entry_selects_thumb(self):
         data = image(machine=EM_ARM, wide=False, flags=0x05000400, entry=0x80)
         self.problems(data, "Thumb", machine="arm")
+
+    def test_riscv32_rejects_elf64(self):
+        self.problems(image(machine=EM_RISCV), "machine is riscv64, expected riscv32",
+                      machine="riscv32", float_abi="soft")
 
     def test_riscv_flags_follow_the_loader(self):
         def riscv(flags, **target):
