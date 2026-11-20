@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """Assert that an SDK-built executable is something the Xila native loader accepts.
 
-    python tools/sdk/check_elf.py IMAGE.elf [--machine arm|x86_64|riscv32|aarch64]
+    python tools/sdk/check_elf.py IMAGE.elf [--machine arm|x86_64|riscv32|aarch64|xtensa]
+        [--float-abi soft|single|double|hard] [--no-compressed] [--embedded]
 
 The checks mirror the loader (libraries/native_loader) and the SDK contract:
 
-* ET_DYN with a PT_DYNAMIC segment, no PT_INTERP, no PT_TLS;
+* ET_DYN with a PT_DYNAMIC segment inside a PT_LOAD, no PT_INTERP, no PT_TLS;
+* the header, program header and PT_LOAD alignment rules of Elf::parse, an entry point in an
+  executable PT_LOAD (a Thumb entry on Arm), and the `e_flags` the loader accepts: Arm
+  EABI5 with the target's float ABI, RISC-V float ABI and RVC/RVE flags, zero on x86-64 and
+  AArch64 (Xtensa flags are not checked, as in the loader);
 * exactly one PT_NOTE record "XILA" type 1 with a four-byte ABI version the host loader
   accepts (every note of every PT_NOTE is read, as the loader does);
 * only the dynamic tags the loader consumes or ignores (libraries/native_loader/src/elf.rs):
   anything else, such as DT_RELR from -z pack-relative-relocs, fails the load; no DT_NEEDED,
   DT_INIT, DT_FINI or non-empty init/fini/preinit arrays (the loader runs no constructors);
+* DT_REL/DT_RELA tables that are complete, with the entry size the loader expects;
 * every dynamic relocation is the machine's RELATIVE type (no symbols);
 * no R_RISCV_RELAX in any relocation section, which would mean the link relaxed against
   the firmware's global pointer.
@@ -25,7 +31,11 @@ import sys
 from pathlib import Path
 
 ET_DYN = 3
-PT_DYNAMIC, PT_INTERP, PT_NOTE, PT_TLS = 2, 3, 4, 7
+PT_LOAD, PT_DYNAMIC, PT_INTERP, PT_NOTE, PT_TLS = 1, 2, 3, 4, 7
+PF_X = 1
+# The loader's limits (libraries/native_loader/src/elf.rs).
+MAX_ALIGNMENT = 64 * 1024
+MAX_PROGRAM_HEADERS = 16
 SHT_REL, SHT_RELA = 9, 4
 
 DT_NEEDED, DT_PLTRELSZ, DT_PLTGOT, DT_HASH = 1, 2, 3, 4
@@ -47,8 +57,14 @@ LOADER_IGNORED = (
 # Ignored only while zero: a nonzero value means constructors or destructors.
 LOADER_CONSTRUCTOR_VALUES = {DT_INIT, DT_FINI, DT_INIT_ARRAYSZ, DT_FINI_ARRAYSZ, DT_PREINIT_ARRAYSZ}
 
-EM = {3: "i386", 40: "arm", 62: "x86_64", 183: "aarch64", 243: "riscv"}
-RELATIVE = {"arm": 23, "x86_64": 8, "aarch64": 1027, "riscv": 3}
+EM = {3: "i386", 40: "arm", 62: "x86_64", 94: "xtensa", 183: "aarch64", 243: "riscv"}
+RELATIVE = {"arm": 23, "x86_64": 8, "aarch64": 1027, "riscv": 3, "xtensa": 5}
+
+# `e_flags` (arm_flags_supported and riscv_flags_supported in the loader).
+EF_ARM_BE8, EF_ARM_ABI_FLOAT_SOFT, EF_ARM_ABI_FLOAT_HARD = 0x0080_0000, 0x200, 0x400
+EF_RISCV_RVC, EF_RISCV_FLOAT_ABI, EF_RISCV_RVE = 0x1, 0x6, 0x8
+RISCV_FLOAT_ABI = {"soft": 0, "single": 2, "double": 4}
+FLOAT_ABIS = ("soft", "single", "double", "hard")
 R_RISCV_RELAX = 51
 XILA_NOTE_NAME = b"XILA\0"
 
@@ -81,11 +97,11 @@ class Elf:
             raise ElfError("only little-endian images are supported")
         e = "<"
         if self.is64:
-            (self.type, self.machine, _, self.entry, self.phoff, self.shoff, _flags, _eh,
+            (self.type, self.machine, self.version, self.entry, self.phoff, self.shoff, self.flags, self.ehsize,
              self.phentsize, self.phnum, self.shentsize, self.shnum,
              self.shstrndx) = struct.unpack_from(e + "HHIQQQIHHHHHH", data, 16)
         else:
-            (self.type, self.machine, _, self.entry, self.phoff, self.shoff, _flags, _eh,
+            (self.type, self.machine, self.version, self.entry, self.phoff, self.shoff, self.flags, self.ehsize,
              self.phentsize, self.phnum, self.shentsize, self.shnum,
              self.shstrndx) = struct.unpack_from(e + "HHIIIIIHHHHHH", data, 16)
         self.arch = EM.get(self.machine, f"machine-{self.machine}")
@@ -128,6 +144,8 @@ class Elf:
         entry = 16 if self.is64 else 8
         fmt = "<qQ" if self.is64 else "<iI"
         for offset in range(segment["offset"], segment["offset"] + segment["filesz"], entry):
+            if offset + entry > len(self.data):
+                raise ElfError("PT_DYNAMIC ends inside an entry")
             tag, value = struct.unpack_from(fmt, self.data, offset)
             if tag == 0:
                 return
@@ -157,15 +175,78 @@ class Elf:
         raise ElfError(f"address {address:#x} is outside every PT_LOAD segment")
 
 
-def check(data, machine=None, abi=None):
+def flags_problem(elf, float_abi, compressed, embedded):
+    """Why the loader would reject `e_flags`, or None. Mirrors Native::flags_supported.
+    `float_abi` is the target's ("hard" or "soft" on Arm, "soft", "single" or "double" on
+    RISC-V); None skips the float ABI comparison."""
+    flags = elf.flags
+    if elf.arch == "arm":
+        if flags >> 24 != 5:
+            return f"e_flags {flags:#x}: not EABI version 5"
+        if flags & EF_ARM_BE8:
+            return f"e_flags {flags:#x}: big-endian code (EF_ARM_BE8)"
+        float_flags = flags & (EF_ARM_ABI_FLOAT_SOFT | EF_ARM_ABI_FLOAT_HARD)
+        # An image that sets neither float ABI flag runs on both.
+        allowed = {0, EF_ARM_ABI_FLOAT_SOFT, EF_ARM_ABI_FLOAT_HARD}
+        if float_abi == "hard":
+            allowed = {0, EF_ARM_ABI_FLOAT_HARD}
+        elif float_abi == "soft":
+            allowed = {0, EF_ARM_ABI_FLOAT_SOFT}
+        if float_flags not in allowed:
+            wanted = f", expected the {float_abi}-float ABI" if float_abi else ""
+            return f"e_flags {flags:#x}: float ABI flags {float_flags:#x} are not supported{wanted}"
+    elif elf.arch == "riscv":
+        if flags & ~(EF_RISCV_RVC | EF_RISCV_FLOAT_ABI | EF_RISCV_RVE):
+            return f"e_flags {flags:#x}: unsupported RISC-V flag"
+        if flags & EF_RISCV_RVC and not compressed:
+            return f"e_flags {flags:#x}: compressed instructions on a target without them"
+        if float_abi is not None and flags & EF_RISCV_FLOAT_ABI != RISCV_FLOAT_ABI.get(float_abi):
+            return f"e_flags {flags:#x}: float ABI is not {float_abi}"
+        if bool(flags & EF_RISCV_RVE) != embedded:
+            return f"e_flags {flags:#x}: RVE does not match the target"
+    elif elf.arch in ("x86_64", "aarch64"):
+        if flags != 0:
+            return f"e_flags {flags:#x}: must be zero"
+    # Xtensa flags describe the core configuration, which the linker checks.
+    return None
+
+
+def instruction_alignment(elf):
+    if elf.arch == "aarch64":
+        return 4
+    if elf.arch == "arm":
+        return 4 if elf.entry & 1 == 0 else 2
+    return 2 if elf.arch == "riscv" else 1
+
+
+def check(data, machine=None, abi=None, float_abi=None, compressed=True, embedded=False):
     """Return a list of problems; empty means the image passes. `abi` is the host's
-    (major, minor), by default the one in this checkout."""
+    (major, minor), by default the one in this checkout. `float_abi`, `compressed` and
+    `embedded` describe the target for the `e_flags` check (see flags_problem). A truncated
+    image raises ElfError."""
+    try:
+        return _check(data, machine, abi, float_abi, compressed, embedded)
+    except struct.error as error:
+        raise ElfError(f"truncated ELF: {error}") from error
+
+
+def _check(data, machine, abi, float_abi, compressed, embedded):
     elf = Elf(data)
     problems = []
     if machine and elf.arch != machine and not (machine == "riscv32" and elf.arch == "riscv"):
         problems.append(f"machine is {elf.arch}, expected {machine}")
     if elf.type != ET_DYN:
         problems.append(f"e_type is {elf.type}, expected ET_DYN (static-PIE)")
+    if elf.version != 1:
+        problems.append(f"e_version is {elf.version}, expected 1")
+    problem = flags_problem(elf, float_abi, compressed, embedded)
+    if problem:
+        problems.append(problem)
+    phentsize = 56 if elf.is64 else 32
+    if elf.phentsize != phentsize:
+        problems.append(f"e_phentsize is {elf.phentsize}, expected {phentsize}")
+    if not 1 <= elf.phnum <= MAX_PROGRAM_HEADERS:
+        problems.append(f"{elf.phnum} program headers: the loader accepts 1 to {MAX_PROGRAM_HEADERS}")
     segments = list(elf.segments())
     kinds = [segment["type"] for segment in segments]
     if PT_INTERP in kinds:
@@ -175,6 +256,34 @@ def check(data, machine=None, abi=None):
     dynamic = [segment for segment in segments if segment["type"] == PT_DYNAMIC]
     if len(dynamic) != 1:
         problems.append("expected exactly one PT_DYNAMIC segment")
+
+    loads = [segment for segment in segments if segment["type"] == PT_LOAD]
+    for segment in loads:
+        align = segment["align"]
+        if align > 1 and (align & (align - 1) != 0 or align > MAX_ALIGNMENT
+                          or segment["offset"] % align != segment["vaddr"] % align):
+            problems.append(f"PT_LOAD alignment {align:#x} is not a power of two up to "
+                            f"{MAX_ALIGNMENT:#x} congruent with its file offset")
+        if segment["filesz"] > segment["memsz"] or segment["offset"] + segment["filesz"] > len(data):
+            problems.append("a PT_LOAD segment is larger in the file than in memory, or outside the file")
+
+    def load_for(address, size):
+        """The PT_LOAD whose file bytes hold [address, address + size), as Elf::file_range."""
+        for segment in loads:
+            if (segment["memsz"] != 0 and segment["vaddr"] <= address
+                    and address - segment["vaddr"] + size <= segment["filesz"]
+                    and segment["offset"] + address - segment["vaddr"] + size <= len(data)):
+                return segment
+        return None
+
+    code = elf.entry & ~1 if elf.arch == "arm" else elf.entry
+    ialign = instruction_alignment(elf)
+    if elf.arch == "arm" and elf.entry & 1 == 0:
+        problems.append("the entry point is not a Thumb address (bit 0 clear): "
+                        "the SDK's Arm targets run Thumb only")
+    holder = load_for(code, ialign)
+    if holder is None or not holder["flags"] & PF_X or code % ialign != 0:
+        problems.append("the entry point is not an aligned address inside an executable PT_LOAD segment")
 
     versions = []
     for note in (segment for segment in segments if segment["type"] == PT_NOTE):
@@ -199,8 +308,17 @@ def check(data, machine=None, abi=None):
 
     relocation = RELATIVE.get(elf.arch)
     if dynamic:
+        word = 8 if elf.is64 else 4
+        segment = dynamic[0]
+        holder = load_for(segment["vaddr"], segment["filesz"])
+        if (segment["filesz"] == 0 or segment["filesz"] > segment["memsz"]
+                or segment["filesz"] % (2 * word) != 0 or holder is None
+                or holder["offset"] + segment["vaddr"] - holder["vaddr"] != segment["offset"]):
+            problems.append("PT_DYNAMIC is empty, not a whole number of entries, or not backed by "
+                            "the same bytes of a PT_LOAD segment")
         seen = set()
-        for tag, value in elf.dynamic(dynamic[0]):
+        tables = {}
+        for tag, value in elf.dynamic(segment):
             if tag == DT_NEEDED:
                 problems.append("DT_NEEDED present: the image must be self-contained")
             elif tag in LOADER_CONSTRUCTOR_VALUES and value != 0:
@@ -215,9 +333,23 @@ def check(data, machine=None, abi=None):
                 if tag in seen:
                     problems.append(f"dynamic tag {tag} appears twice")
                 seen.add(tag)
+                tables[tag] = value
             elif tag not in LOADER_IGNORED:
                 hint = (" (-z pack-relative-relocs)" if tag in (DT_RELR, DT_RELRSZ, DT_RELRENT) else "")
                 problems.append(f"dynamic tag {tag:#x}{hint} is not supported by the loader")
+        # Table::bytes: address, size and entry size come together, and the entry size is the
+        # one the loader reads (REL: two words, RELA: three).
+        for name, parts, stride in (("DT_REL", (DT_REL, DT_RELSZ, DT_REL_ENTRY), 2 * word),
+                                    ("DT_RELA", (DT_RELA, DT_RELASZ, DT_RELA_ENTRY), 3 * word)):
+            present = [part in tables for part in parts]
+            if not any(present):
+                continue
+            address, size, entry_size = (tables.get(part) for part in parts)
+            if (not all(present) or entry_size != stride or size % stride != 0
+                    or (size != 0 and load_for(address, size) is None)):
+                problems.append(f"{name} table is incomplete, has an entry size other than "
+                                f"{stride}, a size that is not a whole number of entries, or lies "
+                                "outside every PT_LOAD segment")
 
     for section in elf.sections():
         if section["type"] not in (SHT_REL, SHT_RELA):
@@ -235,14 +367,21 @@ def check(data, machine=None, abi=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("image")
-    parser.add_argument("--machine", choices=["arm", "x86_64", "riscv32", "aarch64"])
+    parser.add_argument("--machine", choices=["arm", "x86_64", "riscv32", "aarch64", "xtensa"])
+    parser.add_argument("--float-abi", choices=FLOAT_ABIS,
+                        help="the target's float ABI, for the e_flags check (Arm: soft or hard; "
+                             "RISC-V: soft, single or double)")
+    parser.add_argument("--no-compressed", action="store_true",
+                        help="the RISC-V target has no C extension")
+    parser.add_argument("--embedded", action="store_true", help="the RISC-V target is RV32E")
     parser.add_argument("--abi", help="host ABI MAJOR.MINOR (default: from application.h)")
     args = parser.parse_args()
     abi = tuple(int(part) for part in args.abi.split(".")) if args.abi else None
     with open(args.image, "rb") as handle:
         data = handle.read()
     try:
-        problems = check(data, args.machine, abi)
+        problems = check(data, args.machine, abi, args.float_abi,
+                         not args.no_compressed, args.embedded)
     except ElfError as error:
         problems = [str(error)]
     for problem in problems:

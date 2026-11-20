@@ -73,9 +73,10 @@ the ABI table (`libraries/executable/tests/sdk.rs`).
   a length for every path. The layer keeps an `int` file-descriptor table and a
   current-directory string, normalizes paths lexically (`.` and `..` never reach Core;
   `..` does not look through symbolic links), and resolves absolute paths against the
-  *root capability*, which today is `XilaStartup.home`. The host grants it with
-  `NativeFormat::with_home(path, rights)` until the per-launch home of the process ABI
-  (core#759) replaces it. Without a home, path calls fail with `EACCES`.
+  *root capability*, which today is `XilaStartup.home`. The host grants it for each
+  launch (`executable::Launch::with_home`, or the home of a spawn request); a program
+  launched without one gets no filesystem authority and its path calls fail with
+  `EACCES`.
   When the ABI adds `root` and `cwd` handles (core#717) the layer prefers them.
 * **Descriptors.** Slots 0-2 are the startup streams; `close(0)` detaches without
   closing host-owned objects. The table is on the process heap: eight slots (8 bytes
@@ -106,13 +107,24 @@ the ABI table (`libraries/executable/tests/sdk.rs`).
   that flush also forgot each stream it flushed, so a program that called `fflush(NULL)`
   lost its later writes at exit. The build removes those archive members from `libc.a`
   (`DROPPED_MEMBERS` in `tools/sdk/build.py`) and the layer defines the replacements
-  (`posix/onexit.c`, `posix/exit_flush.c`). The build also scans every member of every
+  (`posix/onexit.c`, `posix/exit_flush.c`). Members are named exactly, per target:
+  Arm's `interrupt.c.o` (vector table, no constructor) stays, x86-64's (an interrupt
+  descriptor table set up by a constructor) goes. The build also scans every member of every
   SDK archive and fails on any `.init_array`, `.fini_array`, `.preinit_array`, `.ctors`
   or `.dtors` section, so no future picolibc update can hand an application a
   constructor.
-* **Directories.** Reading a directory stream gives `d_ino` a stable nonzero value
-  derived from the directory's path and the entry's name (the iterator reports no
-  inode; it is not `st_ino`). `open` of `/` or `.` read-only gives a directory
+* **Stack protector.** The toolchain file builds without it, to save flash and RAM;
+  objects compiled with `-fstack-protector`, `-fstack-protector-strong` or
+  `-fstack-protector-all` link against `posix/stack_protector.c`, which defines
+  `__stack_chk_guard` and `__stack_chk_fail`. The guard is seeded from `getentropy` by
+  `xila_posix_initialize` (its lowest byte is NUL; if the host has no entropy a fixed
+  value stays), before any protected function runs. On corruption the process writes
+  `*** stack smashing detected ***` to descriptor 2 and ends with status 134. An image
+  that does not use the protector does not link the file. picolibc's own member seeds the
+  guard from a constructor, so it is removed from `libc.a`.
+* **Directories.** Reading a directory stream gives `d_ino` a stable nonzero 64-bit
+  value (FNV-1a) derived from the directory's path and the entry's name (the iterator
+  reports no inode; it is not `st_ino`). `open` of `/` or `.` read-only gives a directory
   descriptor (`fstat`, `openat` base); with write access, or `O_DIRECTORY` with write
   access, it fails with `EISDIR`.
 * **Path escapes.** `openat` with a directory descriptor cannot leave that directory;

@@ -42,6 +42,7 @@ TARGETS = {
         "meson_cpu": "x86_64",
         "processor": "x86_64",
         "machine": "x86_64",
+        "float_abi": None,
         # The Linux host test maps segments with mprotect: data must start on a page.
         "data_alignment": 4096,
         "builtins": None,
@@ -54,6 +55,7 @@ TARGETS = {
         "processor": "arm",
         "machine": "arm",
         "data_alignment": 16,
+        "float_abi": "hard",
         # compiler-rt is not packaged for bare-metal Arm: take libgcc's 64-bit division and
         # soft double helpers from the Arm GNU toolchain until the SDK builds its own.
         "builtins": ["arm-none-eabi-gcc", "-mthumb", "-mcpu=cortex-m4", "-mfpu=fpv4-sp-d16",
@@ -469,18 +471,24 @@ def sdk_directory(target):
     return found[-1]
 
 
+def check_target(data, target):
+    """check_elf against the target's machine and float ABI."""
+    from check_elf import check
+
+    config = TARGETS[target]
+    return check(data, config["machine"], float_abi=config["float_abi"])
+
+
 def verify_stack_protector(target, sdk):
     """Link a program built with -fstack-protector-strong (SDK_SOURCE/sdk/test/ssp) and
     check the image: the SDK must define __stack_chk_guard and __stack_chk_fail."""
-    from check_elf import check
-
     build = OUTPUT / target / "example-ssp"
     run(["cmake", "-S", SDK_SOURCE / "sdk/test/ssp", "-B", build,
          f"-DCMAKE_TOOLCHAIN_FILE={sdk / 'cmake/xila-toolchain.cmake'}",
          "-DCMAKE_BUILD_TYPE=MinSizeRel"])
     run(["cmake", "--build", build])
     image = build / "ssp.elf"
-    problems = check(image.read_bytes(), TARGETS[target]["machine"])
+    problems = check_target(image.read_bytes(), target)
     for problem in problems:
         print(f"{image}: {problem}", file=sys.stderr)
     if problems:
@@ -491,8 +499,6 @@ def verify_stack_protector(target, sdk):
 def verify(args):
     """Build the hello example with the SDK's CMake toolchain, assert the ELF contract and
     report the image footprint."""
-    from check_elf import check
-
     target = args.target
     sdk = sdk_directory(target)
     build = OUTPUT / target / "example-hello"
@@ -501,7 +507,7 @@ def verify(args):
          "-DCMAKE_BUILD_TYPE=MinSizeRel", f"-DCMAKE_EXE_LINKER_FLAGS=-Map={build / 'hello.map'}"])
     run(["cmake", "--build", build])
     image = build / "hello.elf"
-    problems = check(image.read_bytes(), TARGETS[target]["machine"])
+    problems = check_target(image.read_bytes(), target)
     for problem in problems:
         print(f"{image}: {problem}", file=sys.stderr)
     if problems:
