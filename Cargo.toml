@@ -30,6 +30,7 @@ little_fs = { package = "xila-little-fs", path = "libraries/little_fs" }
 memory_file_system = { package = "xila-memory-file-system", path = "libraries/memory_file_system" }
 virtual_file_system = { package = "xila-virtual-file-system", path = "subsystems/virtual_file_system" }
 graphics = { package = "xila-graphics", path = "subsystems/graphics" }
+graphics_bindgen = { package = "xila-graphics-bindgen", path = "subsystems/graphics/bindings_generator" }
 time = { package = "xila-time", path = "subsystems/time" }
 task = { package = "xila-task", path = "subsystems/task" }
 lifecycle = { package = "xila-lifecycle", path = "subsystems/lifecycle" }

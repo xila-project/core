@@ -15,6 +15,40 @@ pub enum AutoObjectScalar {
     GetI32,
 }
 
+/// What a generated object call does with its argument words. The object is
+/// always the first word, resolved (and checked against the rule's kind)
+/// before anything else is read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ObjectOperation {
+    /// `(object)`.
+    Call,
+    /// `(object, bool)`; a word above 1 is invalid.
+    SetBool,
+    /// `(object, u8)`.
+    SetU8,
+    /// `(object, u32)`, the word within `min..=max`.
+    SetU32 { min: u32, max: u32 },
+    /// `(object, u32)`, a word made of the bits in `mask` only.
+    SetMask { mask: u32 },
+    /// `(object) -> u32`.
+    GetU32,
+    /// `(object) -> bool`, widened to a `u32` result.
+    GetBool,
+    /// `(object) -> i32`.
+    GetI32,
+}
+
+impl ObjectOperation {
+    /// Arguments after the object, and whether the call returns a value.
+    fn shape(self) -> (usize, bool) {
+        match self {
+            Self::Call => (0, false),
+            Self::SetBool | Self::SetU8 | Self::SetU32 { .. } | Self::SetMask { .. } => (1, false),
+            Self::GetU32 | Self::GetBool | Self::GetI32 => (0, true),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdapterPolicy {
     /// Existing handwritten dispatch arm; used until it is migrated.
@@ -23,6 +57,17 @@ pub enum AdapterPolicy {
     AutoObjectScalar(AutoObjectScalar),
     /// Generated dispatch arm calls this named handwritten adapter.
     Custom(&'static str),
+    /// Generated call on one object of an optional kind (`None`: any object).
+    /// The native function is called through a shared helper per operation.
+    Object {
+        kind: Option<&'static str>,
+        operation: ObjectOperation,
+        /// The LVGL function, when it is not the call's own name with `lv_`.
+        native: Option<&'static str>,
+    },
+    /// Generated constructor: the native `(parent) -> object` function plus the
+    /// kind the new object is registered under.
+    Create(&'static str),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -36,6 +81,29 @@ impl AdapterRule {
         Self {
             name,
             policy: AdapterPolicy::AutoObjectScalar(adapter),
+        }
+    }
+
+    pub const fn object(
+        name: &'static str,
+        kind: Option<&'static str>,
+        operation: ObjectOperation,
+        native: Option<&'static str>,
+    ) -> Self {
+        Self {
+            name,
+            policy: AdapterPolicy::Object {
+                kind,
+                operation,
+                native,
+            },
+        }
+    }
+
+    pub const fn create(name: &'static str, kind: &'static str) -> Self {
+        Self {
+            name,
+            policy: AdapterPolicy::Create(kind),
         }
     }
 
@@ -86,6 +154,29 @@ impl<'a> GraphicsRegistry<'a> {
                     .find(|call| call.name == rule.name)
                     .expect("validated supported name");
                 validate_auto_object_scalar(call, adapter)?;
+            }
+            if let AdapterPolicy::Object { operation, .. } = rule.policy {
+                let call = calls
+                    .iter()
+                    .find(|call| call.name == rule.name)
+                    .expect("validated supported name");
+                let (extra, returns) = operation.shape();
+                if !call.generic_safe()
+                    || call.argument_count != 1 + extra
+                    || matches!(call.signature.output, ReturnType::Type(..)) != returns
+                {
+                    return Err(GeneratorError::new(format!(
+                        "object adapter for {} does not match its signature",
+                        rule.name
+                    )));
+                }
+            }
+            if let AdapterPolicy::Create(_) = rule.policy {
+                let call = calls
+                    .iter()
+                    .find(|call| call.name == rule.name)
+                    .expect("validated supported name");
+                call.validate_signature(&["*mut lv_obj_t"], Some("*mut lv_obj_t"))?;
             }
             if let AdapterPolicy::Custom(handler) = rule.policy
                 && handler.trim().is_empty()
@@ -151,6 +242,12 @@ impl<'a> GraphicsRegistry<'a> {
                 ),
                 Some(AdapterPolicy::Custom(handler)) => {
                     (true, "custom", handler, "null", "handwritten")
+                }
+                Some(AdapterPolicy::Object { .. }) => {
+                    (true, "object", "null", "null", "scalar_no_retention")
+                }
+                Some(AdapterPolicy::Create(_)) => {
+                    (true, "create", "null", "null", "host_object_creation")
                 }
                 None => (
                     false,

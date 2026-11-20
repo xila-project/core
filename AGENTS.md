@@ -1,6 +1,6 @@
 # Project Overview
 
-Xila is an embedded operating system written in Rust for low-power microcontrollers, including ESP32, nRF, and STM32 targets. The root Cargo manifest is a virtual workspace; `core/` contains the public `xila` façade and is the default member. This workspace separates runtime-owned services into `subsystems/`, VFS device class contracts into `devices/`, reusable contracts and implementations into `libraries/`, and generic VFS device adapters into `drivers/`; the Wasm host and guest API live in Applications; code must account for constrained RAM, flash, and target capabilities.
+Xila is an embedded operating system written in Rust for low-power microcontrollers, including ESP32, nRF, and STM32 targets. The root Cargo manifest is a virtual workspace; `core/` contains the public `xila` façade and is the default member. This workspace separates runtime-owned services into `subsystems/`, VFS device class contracts into `devices/`, reusable contracts and implementations into `libraries/`, and generic VFS device adapters into `drivers/`; the graphics call executor (the service behind Wasm and native graphics calls) lives in `subsystems/graphics`, while the Wasm transport and guest API live in Applications; code must account for constrained RAM, flash, and target capabilities.
 
 # Build & Test Commands
 

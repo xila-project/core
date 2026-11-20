@@ -41,6 +41,7 @@ fn main() {
     }
 
     emit_lvgl_heap_cfg();
+    emit_call_table();
 
     let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir"));
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo OUT_DIR"));
@@ -228,4 +229,14 @@ XILA_SELECTED_SYSTEM_HEAP
     {
         println!("cargo:rustc-cfg=lvgl_system_heap");
     }
+}
+
+/// The executor's call table, generated from the same catalog and ABI
+/// declaration the guest bindings use.
+fn emit_call_table() {
+    let out = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo OUT_DIR")).join("call_table.rs");
+    let source = graphics_bindgen::executor::source()
+        .unwrap_or_else(|error| panic!("Could not generate the graphics call table: {error}"));
+    fs::write(&out, source)
+        .unwrap_or_else(|error| panic!("Could not write {}: {error}", out.display()));
 }

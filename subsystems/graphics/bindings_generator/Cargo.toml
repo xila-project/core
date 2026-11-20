@@ -8,8 +8,7 @@ rust-version.workspace = true
 proc-macro2 = { workspace = true }
 quote = { workspace = true }
 syn = { workspace = true, features = ["full", "visit", "extra-traits"] }
-
-[dev-dependencies]
+# Bindings only: the catalog is derived from them. This crate never links LVGL.
 lvgl_rust_sys = { workspace = true }
 
 [lib]
