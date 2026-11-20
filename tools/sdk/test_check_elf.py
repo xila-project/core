@@ -32,12 +32,12 @@ def note(name=b"XILA\0", kind=1, descriptor=VERSION):
 
 def image(machine=EM_X86_64, etype=3, extra_segments=(), dynamic=(), relocations=(), notes=None,
           second_notes=None, terminate=True, wide=True, flags=0, entry=None, load_flags=5,
-          load_align=8, load_count=1, dynamic_tail=0):
+          load_align=8, load_count=1, dynamic_tail=0, symbols=()):
     """A little-endian ELF (64-bit, or 32-bit with `wide=False`) with one PT_LOAD over the
     whole file, the given program headers and one relocation section. `second_notes` adds a
     second PT_NOTE segment; `terminate=False` omits DT_NULL; `dynamic_tail` appends that many
     stray bytes to PT_DYNAMIC. `entry` defaults to an address inside the PT_LOAD (with the
-    Thumb bit on Arm)."""
+    Thumb bit on Arm). `symbols` is a list of (name, defined) added as a symbol table."""
     word, ehsize, phsize = (8, 64, 56) if wide else (4, 52, 32)
     note_bytes = note() if notes is None else notes
     dynamic_bytes = b"".join(struct.pack("<qQ" if wide else "<iI", tag, value) for tag, value in dynamic)
@@ -64,8 +64,14 @@ def image(machine=EM_X86_64, etype=3, extra_segments=(), dynamic=(), relocations
         offsets.append(cursor)
         cursor += len(payload)
     rela_offset = cursor
-    section_offset = rela_offset + len(rela)
-    body = b"".join(payloads) + rela
+    strings, table = b"\0", b"\0" * (24 if wide else 16)
+    for name, defined in symbols:
+        index, strings = len(strings), strings + name + b"\0"
+        table += (struct.pack("<IBBHQQ", index, 0, 0, 1 if defined else 0, 0, 0) if wide
+                  else struct.pack("<IIIBBH", index, 0, 0, 0, 0, 1 if defined else 0))
+    symbol_offset = rela_offset + len(rela)
+    section_offset = symbol_offset + (len(table) + len(strings) if symbols else 0)
+    body = b"".join(payloads) + rela + (table + strings if symbols else b"")
     phdrs = b""
     for _ in range(load_count):
         if wide:
@@ -85,15 +91,26 @@ def image(machine=EM_X86_64, etype=3, extra_segments=(), dynamic=(), relocations
         sections = struct.pack("<IIQQQQIIQQ", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
         sections += struct.pack("<IIQQQQIIQQ", 0, check_elf.SHT_RELA, 0, 0, rela_offset, len(rela),
                                 0, 0, 8, 24)
+        if symbols:
+            sections += struct.pack("<IIQQQQIIQQ", 0, check_elf.SHT_SYMTAB, 0, 0, symbol_offset,
+                                    len(table), 3, 0, 8, 24)
+            sections += struct.pack("<IIQQQQIIQQ", 0, check_elf.SHT_STRTAB, 0, 0,
+                                    symbol_offset + len(table), len(strings), 0, 0, 1, 0)
     else:
         sections = struct.pack("<IIIIIIIIII", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
         sections += struct.pack("<IIIIIIIIII", 0, check_elf.SHT_RELA, 0, 0, rela_offset, len(rela),
                                 0, 0, 4, 12)
+        if symbols:
+            sections += struct.pack("<IIIIIIIIII", 0, check_elf.SHT_SYMTAB, 0, 0, symbol_offset,
+                                    len(table), 3, 0, 4, 16)
+            sections += struct.pack("<IIIIIIIIII", 0, check_elf.SHT_STRTAB, 0, 0,
+                                    symbol_offset + len(table), len(strings), 0, 0, 1, 0)
     if entry is None:
         entry = header_size | (1 if machine == EM_ARM else 0)
     header = b"\x7fELF" + bytes([2 if wide else 1, 1, 1, 0]) + bytes(8)
     header += struct.pack("<HHIQQQIHHHHHH" if wide else "<HHIIIIIHHHHHH", etype, machine, 1, entry,
-                          ehsize, section_offset, flags, ehsize, phsize, count, shentsize, 2, 0)
+                          ehsize, section_offset, flags, ehsize, phsize, count, shentsize,
+                          4 if symbols else 2, 0)
     return header + phdrs + body + sections
 
 
@@ -183,11 +200,24 @@ class CheckElf(unittest.TestCase):
         data = image(notes=note(descriptor=struct.pack("<I", (major << 16) | minor)))
         self.assertEqual(check_elf.check(data, "x86_64"), [])
 
-    def test_rejects_riscv_linker_relaxation(self):
-        good = image(machine=EM_RISCV, relocations=[(R_RISCV_RELATIVE, 0)])
+    def test_rejects_riscv_gp_relaxation(self):
+        # Without a gp symbol lld has nothing to relax against; with one the image may use
+        # a gp the firmware does not share. A local label or an undefined reference is fine.
+        good = image(machine=EM_RISCV, wide=False, relocations=[(R_RISCV_RELATIVE, 0)],
+                     symbols=[(b"main", True), (b"__global_pointer$", False)])
         self.assertEqual(check(good, "riscv32"), [])
-        bad = image(machine=EM_RISCV, relocations=[(check_elf.R_RISCV_RELAX, 0)])
-        self.assertTrue(any("R_RISCV_RELAX" in p for p in check(bad, "riscv32")))
+        bad = image(machine=EM_RISCV, wide=False, relocations=[(R_RISCV_RELATIVE, 0)],
+                    symbols=[(b"main", True), (b"__global_pointer$", True)])
+        self.assertTrue(any("__global_pointer$" in p for p in check(bad, "riscv32")))
+        # The symbol means nothing on other architectures, and a 64-bit table parses too.
+        wide = image(machine=EM_RISCV, relocations=[(R_RISCV_RELATIVE, 0)],
+                     symbols=[(b"__global_pointer$", True)])
+        self.assertTrue(any("__global_pointer$" in p for p in check(wide, "riscv64")))
+
+    def test_rejects_riscv_relax_relocations_as_non_relative(self):
+        # R_RISCV_RELAX (51) is an object-file marker: in an image it is not RELATIVE.
+        bad = image(machine=EM_RISCV, wide=False, relocations=[(51, 0)])
+        self.assertTrue(any("not RELATIVE" in p for p in check(bad, "riscv32")))
 
     def test_rejects_the_wrong_machine(self):
         self.assertTrue(any("expected arm" in p for p in check(image(), "arm")))
@@ -260,6 +290,10 @@ class LoaderRules(unittest.TestCase):
     def test_the_arm_entry_selects_thumb(self):
         data = image(machine=EM_ARM, wide=False, flags=0x05000400, entry=0x80)
         self.problems(data, "Thumb", machine="arm")
+
+    def test_riscv32_rejects_elf64(self):
+        self.problems(image(machine=EM_RISCV), "machine is riscv64, expected riscv32",
+                      machine="riscv32", float_abi="soft")
 
     def test_riscv_flags_follow_the_loader(self):
         def riscv(flags, **target):

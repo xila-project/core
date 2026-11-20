@@ -315,6 +315,8 @@ jobs:
             packages: ci:packages-sdk
           - target: thumbv7em-none-eabihf
             packages: ci:packages-sdk-arm
+          - target: riscv32imac-unknown-none-elf
+            packages: ci:packages-sdk-riscv
     env:
       MISE_ENV: ci
       XILA_SDK_TARGET: ${{ matrix.target }}

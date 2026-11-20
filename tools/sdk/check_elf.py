@@ -18,8 +18,10 @@ The checks mirror the loader (libraries/native_loader) and the SDK contract:
   DT_INIT, DT_FINI or non-empty init/fini/preinit arrays (the loader runs no constructors);
 * DT_REL/DT_RELA tables that are complete, with the entry size the loader expects;
 * every dynamic relocation is the machine's RELATIVE type (no symbols);
-* no R_RISCV_RELAX in any relocation section, which would mean the link relaxed against
-  the firmware's global pointer.
+* no gp relaxation on RISC-V: an image must not define `__global_pointer$`. lld relaxes
+  gp-relative accesses only with --relax-gp and that symbol, and the image's gp is not the
+  firmware's. Call relaxation (pc-relative jal/c.jal) is valid in a PIE and stays on. The
+  check reads the symbol tables, so a stripped image passes it vacuously.
 
 Only the standard library is used, so the check runs anywhere Python does.
 """
@@ -37,6 +39,9 @@ PF_X = 1
 MAX_ALIGNMENT = 64 * 1024
 MAX_PROGRAM_HEADERS = 16
 SHT_REL, SHT_RELA = 9, 4
+SHT_SYMTAB, SHT_DYNSYM, SHT_STRTAB = 2, 11, 3
+SHN_UNDEF = 0
+GLOBAL_POINTER = b"__global_pointer$"
 
 DT_NEEDED, DT_PLTRELSZ, DT_PLTGOT, DT_HASH = 1, 2, 3, 4
 DT_RELA, DT_RELASZ, DT_REL, DT_RELSZ = 7, 8, 17, 18
@@ -72,7 +77,6 @@ FLOAT_ABIS_BY_ARCH = {
     "riscv": ("soft", "single", "double"),
 }
 FLOAT_ABIS = ("soft", "softfp", "single", "double", "hard")
-R_RISCV_RELAX = 51
 XILA_NOTE_NAME = b"XILA\0"
 
 
@@ -136,12 +140,34 @@ class Elf:
         for index in range(self.shnum):
             base = self.shoff + index * self.shentsize
             if self.is64:
-                name, kind, _f, _a, offset, size, _l, _i, _al, entsize = struct.unpack_from(
+                name, kind, _f, _a, offset, size, link, _i, _al, entsize = struct.unpack_from(
                     "<IIQQQQIIQQ", self.data, base)
             else:
-                name, kind, _f, _a, offset, size, _l, _i, _al, entsize = struct.unpack_from(
+                name, kind, _f, _a, offset, size, link, _i, _al, entsize = struct.unpack_from(
                     "<IIIIIIIIII", self.data, base)
-            yield dict(name=name, type=kind, offset=offset, size=size, entsize=entsize)
+            yield dict(name=name, type=kind, offset=offset, size=size, link=link, entsize=entsize)
+
+    def defined_symbols(self):
+        """Names of the defined symbols in every SHT_SYMTAB and SHT_DYNSYM section."""
+        sections = list(self.sections())
+        size = 24 if self.is64 else 16
+        for section in sections:
+            if section["type"] not in (SHT_SYMTAB, SHT_DYNSYM):
+                continue
+            if section["link"] >= len(sections) or sections[section["link"]]["type"] != SHT_STRTAB:
+                raise ElfError("a symbol table has no string table")
+            strings = sections[section["link"]]
+            table = self.data[strings["offset"]: strings["offset"] + strings["size"]]
+            for offset in range(section["offset"], section["offset"] + section["size"] - size + 1, size):
+                if self.is64:
+                    name, _info, _other, shndx = struct.unpack_from("<IBBH", self.data, offset)
+                else:
+                    name, _value, _size, _info, _other, shndx = struct.unpack_from(
+                        "<IIIBBH", self.data, offset)
+                if shndx == SHN_UNDEF or name >= len(table):
+                    continue
+                end = table.find(b"\0", name)
+                yield table[name: end if end >= 0 else len(table)]
 
     def relocations(self, section):
         """(type, symbol) of each entry in a SHT_REL or SHT_RELA section."""
@@ -253,9 +279,9 @@ def check(data, machine=None, abi=None, float_abi=None, compressed=True, embedde
 def _check(data, machine, abi, float_abi, compressed, embedded):
     elf = Elf(data)
     problems = []
-    wrong_machine = machine and elf.arch != machine and not (machine == "riscv32" and elf.arch == "riscv")
-    if wrong_machine:
-        problems.append(f"machine is {elf.arch}, expected {machine}")
+    actual_machine = f"riscv{64 if elf.is64 else 32}" if elf.arch == "riscv" else elf.arch
+    if machine and machine not in (elf.arch, actual_machine):
+        problems.append(f"machine is {actual_machine}, expected {machine}")
     else:
         # A float ABI that its architecture does not have is a usage error, not a
         # problem with the image.
@@ -382,12 +408,13 @@ def _check(data, machine, abi, float_abi, compressed, embedded):
         if section["type"] not in (SHT_REL, SHT_RELA):
             continue
         for kind, symbol in elf.relocations(section):
-            if elf.arch == "riscv" and kind == R_RISCV_RELAX:
-                problems.append("R_RISCV_RELAX present: link with -mno-relax and --no-relax")
-            elif relocation is not None and kind != relocation:
+            if relocation is not None and kind != relocation:
                 problems.append(f"relocation type {kind} is not RELATIVE ({relocation})")
             elif symbol != 0:
                 problems.append("a relocation refers to a symbol: the image has external references")
+    if elf.arch == "riscv" and GLOBAL_POINTER in set(elf.defined_symbols()):
+        problems.append("__global_pointer$ is defined: lld would relax gp-relative accesses "
+                        "against a gp the firmware does not share (no gp relaxation)")
     return sorted(set(problems))
 
 

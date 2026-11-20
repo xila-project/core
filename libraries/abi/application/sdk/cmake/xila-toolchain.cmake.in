@@ -62,8 +62,8 @@ if(NOT XILA_BUILTINS_LIBRARY AND XILA_BUILTINS_COMMAND)
     RESULT_VARIABLE XILA_BUILTINS_RESULT)
   if(NOT XILA_BUILTINS_RESULT EQUAL 0 OR NOT EXISTS "${XILA_BUILTINS_FOUND}")
     message(FATAL_ERROR
-      "No compiler runtime found for @XILA_SDK_TARGET@. Install the Arm GNU toolchain "
-      "(gcc-arm-none-eabi) or pass -DXILA_BUILTINS_LIBRARY=<libgcc.a or libclang_rt.builtins.a>.")
+      "No compiler runtime found for @XILA_SDK_TARGET@. Install the target toolchain "
+      "(${XILA_BUILTINS_COMMAND}) or pass -DXILA_BUILTINS_LIBRARY=<runtime archive>.")
   endif()
   set(XILA_BUILTINS_LIBRARY "${XILA_BUILTINS_FOUND}" CACHE FILEPATH "Compiler runtime archive" FORCE)
 endif()

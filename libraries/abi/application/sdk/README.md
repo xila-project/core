@@ -7,9 +7,19 @@ and uploads it as a workflow artifact:
 
     xila-sdk-<abi>-<target>.tar.zst      for example xila-sdk-0.1-thumbv7em-none-eabihf.tar.zst
 
-Targets today: `x86_64-unknown-linux-gnu` (the host Platforms runs on Linux) and
-`thumbv7em-none-eabihf` (Cortex-M4F). RISC-V (`riscv32imac`) and Xtensa
-(`xtensa-esp32s3`) are additions to the build tables, not redesigns.
+| Target | Class | Float ABI | Compiler runtime |
+|---|---|---|---|
+| `x86_64-unknown-linux-gnu` | the host Platforms runs on Linux | none | none needed |
+| `thumbv7em-none-eabihf` | Cortex-M4F | hard | Arm GNU toolchain's `libgcc.a` |
+| `riscv32imac-unknown-none-elf` | ESP32-C6 class RV32IMAC | soft (`ilp32`) | bare-metal RISC-V GCC's `libgcc.a` |
+
+Xtensa (`xtensa-esp32s3`) is an addition to the build tables, not a redesign.
+The RISC-V images do no gp relaxation: the link defines no `__global_pointer$`
+(and never passes `--relax-gp`), and `check_elf.py` rejects an image that defines
+it, because the image's gp is not the firmware's. Call relaxation (pc-relative
+`jal`) stays on: it is valid in a position-independent executable. They cannot
+run on the Linux host loader, so CI validates them structurally with
+`check_elf.py`, like Cortex-M.
 
 ## Layout
 
@@ -32,9 +42,11 @@ xila-sdk-0.1-<target>/
 
 ## Building an application
 
-Needs `clang`, `lld` and CMake. On Cortex-M the 64-bit and soft-double helpers
-come from a compiler runtime: install the Arm GNU toolchain (`gcc-arm-none-eabi`)
-or pass `-DXILA_BUILTINS_LIBRARY=<libgcc.a>`.
+Needs `clang`, `lld` and CMake. On Cortex-M and RISC-V the 64-bit and soft-float
+helpers come from a compiler runtime: install the Arm GNU toolchain
+(`gcc-arm-none-eabi`) or the bare-metal RISC-V GCC (`gcc-riscv64-unknown-elf`,
+which provides the `rv32imac`/`ilp32` `libgcc.a`; it does not need newlib), or pass
+`-DXILA_BUILTINS_LIBRARY=<libgcc.a>`.
 
 ```sh
 tar --zstd -xf xila-sdk-0.1-thumbv7em-none-eabihf.tar.zst
@@ -95,8 +107,8 @@ From a Core checkout on Linux x86-64 with Rustup and LLVM (including LLD):
 mise run sdk:rust-example
 ```
 
-This builds `sdk/rust/hello` for Linux x86-64 and Cortex-M4F, checks both
-ELFs with `tools/sdk/check_elf.py`, and runs the Linux image through
+This builds `sdk/rust/hello` for Linux x86-64, Cortex-M4F and RV32IMAC, checks
+all three ELFs with `tools/sdk/check_elf.py`, and runs the Linux image through
 `executable::execute`. The program reads the monotonic clock, exercises the
 process heap by growing a `Vec` and resizing a 64-byte-aligned block, writes to
 its borrowed stdout and returns status 73. A second launch checks the panic
@@ -261,9 +273,9 @@ Never provided: `fork`, asynchronous signals, general `mmap`.
 picolibc is BSD-licensed; `COPYING.picolibc` (the licence of the exact release in
 `sdk.json`) ships in every archive and must stay with redistributed binaries
 that link `libc.a`. Core's own sources (crt0, stubs, the POSIX layer, the example)
-are Apache-2.0 (`LICENSE-xila.md`). On Cortex-M the link adds the Arm GNU
-toolchain's `libgcc.a` (GPL with the GCC Runtime Library Exception); the SDK does
-not redistribute it.
+are Apache-2.0 (`LICENSE-xila.md`). On Cortex-M and RISC-V the link adds the
+GNU toolchain's `libgcc.a` (GPL with the GCC Runtime Library Exception); the SDK
+does not redistribute it.
 
 ## Building the SDK
 
@@ -271,6 +283,7 @@ not redistribute it.
 mise run sdk:build      # target/sdk/xila-sdk-<abi>-<target>.tar.zst
 mise run sdk:verify     # build the example, assert the ELF contract, report sizes
 XILA_SDK_TARGET=thumbv7em-none-eabihf mise run sdk:build ::: sdk:verify
+XILA_SDK_TARGET=riscv32imac-unknown-none-elf mise run sdk:build ::: sdk:verify
 ```
 
 `tools/sdk/build.py` downloads the pinned picolibc release (`picolibc_version` and
@@ -279,7 +292,9 @@ configures it with meson and ninja through `uv run`, compiles the SDK sources an
 packs a deterministic archive. `tools/sdk/check_elf.py` asserts that an image is
 `ET_DYN`, has no `PT_INTERP` or `PT_TLS`, carries the `XILA` ABI note, has no
 `DT_NEEDED`, `DT_INIT`, `DT_FINI` or non-empty init/fini arrays, uses only the
-machine's `RELATIVE` dynamic relocations, and contains no `R_RISCV_RELAX`. On
+machine's `RELATIVE` dynamic relocations, and (on RISC-V) defines no
+`__global_pointer$`. On
 Xtensa the link will use `-pie --no-dynamic-linker`, never `-static-pie`. The
-build needs `clang`, `lld`, `llvm-ar`, `cmake`, `zstd` and, for Cortex-M, the Arm
-GNU toolchain; CI installs them through mise bootstrap packages.
+build needs `clang`, `lld`, `llvm-ar`, `cmake`, `zstd` and, for Cortex-M and RISC-V,
+the Arm GNU toolchain or `gcc-riscv64-unknown-elf`; CI installs them through mise
+bootstrap packages.

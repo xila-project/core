@@ -424,7 +424,7 @@ class WorkflowPolicy(unittest.TestCase):
 
     def test_sdk_job_builds_every_target_through_pinned_tasks_and_uploads_archives(self):
         sdk = job("ci.yml", "sdk")
-        for target in ["x86_64-unknown-linux-gnu", "thumbv7em-none-eabihf"]:
+        for target in ["x86_64-unknown-linux-gnu", "thumbv7em-none-eabihf", "riscv32imac-unknown-none-elf"]:
             self.assertIn(f"target: {target}", sdk)
         self.assertNotIn("apt-get", sdk)
         steps = re.findall(r"run: (?:mise run )?(\S+)", sdk)
@@ -445,6 +445,8 @@ class WorkflowPolicy(unittest.TestCase):
         for package in ["apt:lld", "apt:llvm", "apt:cmake", "apt:zstd"]:
             self.assertEqual(packages[package]["env"], "sdk")
         self.assertEqual(packages["apt:gcc-arm-none-eabi"]["env"], "sdk-arm")
+        self.assertEqual(packages["apt:gcc-riscv64-unknown-elf"]["env"], "sdk-riscv")
+        self.assertIn("packages: ci:packages-sdk-riscv", sdk)
         # The host job builds the example for the Linux loader test.
         self.assertIn("ci:packages-sdk", ci_config()["tasks"]["ci:host-tests"]["depends"])
         self.assertIn("sdk:build", configured_tasks("ci")["test:native-loader"]["depends"])

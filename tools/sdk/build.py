@@ -34,8 +34,7 @@ OUTPUT = ROOT / "target/sdk"
 
 HOST_TARGET = "x86_64-unknown-linux-gnu"
 
-# Per-target compiler configuration. Adding riscv32imac or Xtensa is a new entry (plus the
-# loader-side checks in check_elf.py): the rest of the pipeline is target-independent.
+# Per-target compiler and linker configuration for the loader's static PIE contract.
 TARGETS = {
     "x86_64-unknown-linux-gnu": {
         "triple": "x86_64-unknown-none-elf",
@@ -62,6 +61,24 @@ TARGETS = {
         # soft double helpers from the Arm GNU toolchain until the SDK builds its own.
         "builtins": ["arm-none-eabi-gcc", "-mthumb", "-mcpu=cortex-m4", "-mfpu=fpv4-sp-d16",
                      "-mfloat-abi=hard", "-print-libgcc-file-name"],
+    },
+    "riscv32imac-unknown-none-elf": {
+        "triple": "riscv32-unknown-none-elf",
+        # Call relaxation (pc-relative jal/c.jal) stays on: it is valid in a PIE and leaves
+        # the R_RISCV_RELATIVE count of hello unchanged. Only gp relaxation would tie an
+        # image to the firmware's global pointer; lld does it only with --relax-gp and a
+        # __global_pointer$ symbol, neither of which the SDK has (check_elf.py rejects the
+        # symbol).
+        "flags": ["-march=rv32imac", "-mabi=ilp32"],
+        "meson_cpu_family": "riscv32",
+        "meson_cpu": "rv32imac",
+        "processor": "riscv32",
+        "machine": "riscv32",
+        "data_alignment": 16,
+        "float_abi": "soft",
+        # Bare-metal GCC supplies the RV32 ILP32 multilib without needing newlib.
+        "builtins": ["riscv64-unknown-elf-gcc", "-march=rv32imac", "-mabi=ilp32",
+                     "-print-libgcc-file-name"],
     },
 }
 
@@ -159,9 +176,12 @@ skip_sanity_check = true
 needs_exe_wrapper = true
 """
     # Rewriting an identical file would make meson regenerate (and uv's throwaway
-    # environment, which build.ninja remembers, is gone by the next run).
-    if not path.exists() or path.read_text() != text:
+    # environment, which build.ninja remembers, is gone by the next run). Report a change to
+    # an existing file: meson keeps the old compiler flags across --reconfigure.
+    changed = path.exists() and path.read_text() != text
+    if not path.exists() or changed:
         path.write_text(text)
+    return changed
 
 
 # picolibc configuration. TLS is off and errno is a function so the loader never sees PT_TLS
@@ -192,11 +212,17 @@ def build_picolibc(source, target, work):
     build = work / "picolibc-build"
     install = work / "picolibc"
     cross = work / "picolibc.cross"
-    write_cross_file(target, cross)
+    cross_changed = write_cross_file(target, cross)
     options = [f"-D{key}={value}" for key, value in PICOLIBC_OPTIONS.items()]
     if not (build / "build.ninja").exists():
         run(["meson", "setup", build, source, "--cross-file", cross, f"--prefix={install}",
              *options])
+    elif cross_changed:
+        # --reconfigure keeps the compiler and flags of the original cross file, so a changed
+        # cross file (a new -march or -m flag) would silently not apply. --wipe empties the
+        # build directory and configures it again from the cross file as it is now.
+        run(["meson", "setup", "--wipe", build, source, "--cross-file", cross,
+             f"--prefix={install}", *options])
     else:
         # build.ninja remembers the meson that configured it, which may be gone.
         run(["meson", "setup", "--reconfigure", build, source, *options])
@@ -448,18 +474,30 @@ def build(args):
 
 def map_sizes(text):
     """Bytes per origin and output section from an lld map: {origin: {section: size}}.
-    Origins are the application object, crt0, and each SDK archive."""
+    Origins are the application object, crt0, and each SDK archive.
+
+    The map has fixed columns (VMA LMA Size Align Out In Symbol): an output section starts in
+    the "Out" column, an input section in "In", a symbol after that. Labels such as RISC-V's
+    `.Lpcrel_hiN` also start with a dot, so the column decides, never the name."""
     sizes = {}
+    output_column = None
     output_section = None
+    rows = []
     for line in text.splitlines():
-        match = re.match(r"\s+[0-9a-f]+\s+[0-9a-f]+\s+([0-9a-f]+)\s+\d+\s+(\S.*)$", line)
-        if not match:
+        if output_column is None and re.search(r"\bOut\s+In\s+Symbol\b", line):
+            output_column = line.index("Out")
+        match = re.match(r"(\s+[0-9a-f]+\s+[0-9a-f]+\s+([0-9a-f]+)\s+\d+\s+)(\S.*)$", line)
+        if match:
+            rows.append((len(match.group(1)), int(match.group(2), 16), match.group(3)))
+    if output_column is None and rows:
+        # No header (an excerpt): the output sections are the leftmost text.
+        output_column = min(column for column, _size, _rest in rows)
+    for column, size, rest in rows:
+        if column <= output_column:
+            output_section = rest.split()[0]
             continue
-        size, rest = int(match.group(1), 16), match.group(2)
         member = re.match(r"(.+?):\((\.\S+)\)$", rest)
         if member is None:
-            if rest.startswith("."):
-                output_section = rest.split()[0]
             continue
         path = member.group(1)
         archive = re.match(r".*?([^/]+\.a)\(", path)
@@ -489,21 +527,26 @@ def check_target(data, target):
     return check(data, config["machine"], float_abi=config["float_abi"])
 
 
-def verify_stack_protector(target, sdk):
-    """Link a program built with -fstack-protector-strong (SDK_SOURCE/sdk/test/ssp) and
-    check the image: the SDK must define __stack_chk_guard and __stack_chk_fail."""
-    build = OUTPUT / target / "example-ssp"
-    run(["cmake", "-S", SDK_SOURCE / "sdk/test/ssp", "-B", build,
-         f"-DCMAKE_TOOLCHAIN_FILE={sdk / 'cmake/xila-toolchain.cmake'}",
-         "-DCMAKE_BUILD_TYPE=MinSizeRel"])
-    run(["cmake", "--build", build])
-    image = build / "ssp.elf"
+def verify_image(image, target):
     problems = check_target(image.read_bytes(), target)
     for problem in problems:
         print(f"{image}: {problem}", file=sys.stderr)
     if problems:
         sys.exit(1)
-    print(f"{image}: stack protector program linked, ELF checks passed")
+    print(f"{image}: ELF checks passed")
+
+
+def verify_c_program(target, sdk, name, source, *options):
+    build = OUTPUT / target / f"example-{name}"
+    # --fresh (CMake 3.24): the cache keeps the first configure's flags, so an SDK rebuilt
+    # with different target flags would otherwise leave the example on the old ones.
+    run(["cmake", "--fresh", "-S", source, "-B", build,
+         f"-DCMAKE_TOOLCHAIN_FILE={sdk / 'cmake/xila-toolchain.cmake'}",
+         "-DCMAKE_BUILD_TYPE=MinSizeRel", *options])
+    run(["cmake", "--build", build])
+    image = build / f"{name}.elf"
+    verify_image(image, target)
+    return image
 
 
 def verify_rust_crate(sdk):
@@ -548,22 +591,15 @@ def verify(args):
     target = args.target
     sdk = sdk_directory(target)
     verify_rust_crate(sdk)
-    build = OUTPUT / target / "example-hello"
-    run(["cmake", "-S", sdk / "share/xila/example/hello", "-B", build,
-         f"-DCMAKE_TOOLCHAIN_FILE={sdk / 'cmake/xila-toolchain.cmake'}",
-         "-DCMAKE_BUILD_TYPE=MinSizeRel", f"-DCMAKE_EXE_LINKER_FLAGS=-Map={build / 'hello.map'}"])
-    run(["cmake", "--build", build])
-    image = build / "hello.elf"
-    problems = check_target(image.read_bytes(), target)
-    for problem in problems:
-        print(f"{image}: {problem}", file=sys.stderr)
-    if problems:
-        sys.exit(1)
-    print(f"{image}: ELF checks passed")
-    verify_stack_protector(target, sdk)
+    map_file = OUTPUT / target / "example-hello/hello.map"
+    image = verify_c_program(target, sdk, "hello", sdk / "share/xila/example/hello",
+                             f"-DCMAKE_EXE_LINKER_FLAGS=-Map={map_file}")
+    # The probe includes the pipe and poll tests.
+    for name in ("probe", "threads", "ssp"):
+        verify_c_program(target, sdk, name, SDK_SOURCE / "sdk/test" / name)
     run([find_tool("llvm-size"), image])
     print("\nBytes by origin (map):")
-    sizes = map_sizes((build / "hello.map").read_text())
+    sizes = map_sizes(map_file.read_text())
     print(f"{'origin':<18}{'.text':>8}{'.rodata':>9}{'.data+.got':>12}{'.bss':>7}")
     for origin, sections in sorted(sizes.items()):
         data = sections.get(".data", 0) + sections.get(".got", 0)
@@ -572,12 +608,12 @@ def verify(args):
     run([find_tool("llvm-size"), "-t", "libxila_posix.a", "libxila.a", "crt0.o"], cwd=sdk / "lib")
 
 
-def rust_example(_args):
-    """Build an independent PIC sysroot for the Rust guest and verify both images."""
+def rust_example(args):
+    """Build an independent PIC sysroot for each selected Rust guest and verify its image."""
     nightly = tomllib.loads((ROOT / "mise.toml").read_text())["vars"]["nightly_version"]
     example = SDK_SOURCE / "sdk/rust/hello"
     output = OUTPUT / "rust-hello"
-    for target in (HOST_TARGET, "thumbv7em-none-eabihf"):
+    for target in (args.target,) if args.target else TARGETS:
         linker = [
             "-pie", "--no-dynamic-linker", "-Bsymbolic", "-z", "max-page-size=16",
             "--gc-sections", "--build-id=none",
@@ -595,12 +631,7 @@ def rust_example(_args):
              "--target", target, "--target-dir", output, "-Z", "build-std=core,alloc,compiler_builtins",
              "-Z", "build-std-features=compiler-builtins-mem"], cwd=example, env=env)
         image = output / target / "release/xila-rust-hello"
-        problems = check_target(image.read_bytes(), target)
-        for problem in problems:
-            print(f"{image}: {problem}", file=sys.stderr)
-        if problems:
-            sys.exit(1)
-        print(f"{image}: ELF checks passed")
+        verify_image(image, target)
         run([find_tool("llvm-size"), image])
         print(f"ELF file: {image.stat().st_size} bytes")
 
@@ -619,6 +650,7 @@ def main():
     verify_parser.add_argument("--target", default=HOST_TARGET, choices=sorted(TARGETS))
     verify_parser.set_defaults(function=verify)
     rust_parser = commands.add_parser("rust-example", help="build and check the Rust static PIE example")
+    rust_parser.add_argument("--target", choices=sorted(TARGETS), help="build only this target")
     rust_parser.set_defaults(function=rust_example)
     args = parser.parse_args()
     args.function(args)
