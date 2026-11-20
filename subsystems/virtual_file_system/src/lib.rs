@@ -13,6 +13,7 @@ mod item;
 mod r#macro;
 mod operation;
 mod pipe;
+mod readiness;
 mod synchronous_directory;
 mod synchronous_file;
 
@@ -23,6 +24,7 @@ pub use file::*;
 pub use file_system::*;
 pub use hierarchy::*;
 pub use item::*;
+pub use readiness::*;
 pub use synchronous_directory::*;
 pub use synchronous_file::*;
 

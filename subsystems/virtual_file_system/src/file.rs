@@ -102,10 +102,27 @@ impl<'a> File<'a> {
     // - Operations
 
     pub async fn write(&mut self, buffer: &[u8]) -> Result<usize> {
+        self.write_with_offset(buffer, None).await
+    }
+
+    /// Transfer at an explicit offset without changing this opening's cursor.
+    pub async fn write_at(&mut self, buffer: &[u8], offset: Size) -> Result<usize> {
+        self.write_with_offset(buffer, Some(offset)).await
+    }
+
+    /// Transfer using an explicit offset, or the opening's cursor when absent.
+    pub async fn write_with_offset(
+        &mut self,
+        buffer: &[u8],
+        offset: Option<Size>,
+    ) -> Result<usize> {
         if self.nonblocking() {
-            return self.0.write(buffer);
+            return match offset {
+                Some(offset) => self.0.write_at(buffer, offset),
+                None => self.0.write(buffer),
+            };
         }
-        crate::operation::write(&mut self.0, buffer).await
+        crate::operation::write(&mut self.0, buffer, offset).await
     }
 
     /// Fill the entire slice, returning an I/O error on premature EOF.
@@ -287,10 +304,27 @@ impl<'a> File<'a> {
     }
 
     pub async fn read(&mut self, buffer: &mut [u8]) -> Result<usize> {
+        self.read_with_offset(buffer, None).await
+    }
+
+    /// Transfer at an explicit offset without changing this opening's cursor.
+    pub async fn read_at(&mut self, buffer: &mut [u8], offset: Size) -> Result<usize> {
+        self.read_with_offset(buffer, Some(offset)).await
+    }
+
+    /// Transfer using an explicit offset, or the opening's cursor when absent.
+    pub async fn read_with_offset(
+        &mut self,
+        buffer: &mut [u8],
+        offset: Option<Size>,
+    ) -> Result<usize> {
         if self.nonblocking() {
-            return self.0.read(buffer);
+            return match offset {
+                Some(offset) => self.0.read_at(buffer, offset),
+                None => self.0.read(buffer),
+            };
         }
-        crate::operation::read(&mut self.0, buffer).await
+        crate::operation::read(&mut self.0, buffer, offset).await
     }
 
     pub async fn read_until(&mut self, buffer: &mut [u8], delimiter: &[u8]) -> Result<usize> {

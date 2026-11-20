@@ -147,14 +147,28 @@ the ABI table (`libraries/executable/tests/sdk.rs`).
 ## POSIX subset
 
 Provided: `open`, `openat`, `creat`, `close`, `read`, `write`, `pread`, `pwrite`
-(emulated by seeking and restoring the cursor: not atomic against other users of the
-descriptor), `lseek`, `fsync`, `fdatasync`, `ftruncate`, `fstat`, `stat`, `lstat`,
+(positional I/O with the cursor preserved), `lseek`, `fsync`, `fdatasync`, `ftruncate`, `fstat`, `stat`, `lstat`,
 `fstatat`, `mkdir`, `mkdirat`, `unlink`, `unlinkat`, `rmdir`, `rename`, `renameat`,
 `opendir`, `readdir`, `rewinddir`, `closedir` (no `.` or `..` entries), `getcwd`,
-`chdir`, `isatty` (always false), `clock_gettime`, `clock_getres` (`CLOCK_REALTIME`,
+`chdir`, `isatty`, `clock_gettime`, `clock_getres` (`CLOCK_REALTIME`,
 `CLOCK_MONOTONIC`), `nanosleep`, `sleep`, `usleep` (not interruptible: there are no
 signals), `time`, `gettimeofday`, `getentropy`, `getrandom`, the `malloc` family, C
 `stdio`, `exit`, `_exit` and `abort`. Mode bits passed to `open` and `mkdir` are ignored.
+
+The descriptor table allocates the lowest free fd for `dup`, `open` and
+`pipe`. `dup2` replaces a specific fd. File duplicates share their VFS cursor,
+including across `read`, `write` and `lseek`. `fcntl` supports `F_DUPFD`,
+`F_DUPFD_CLOEXEC`, `F_GETFD` and `F_SETFD`. The close-on-exec bit is stored
+per descriptor for future process-spawn support. `pipe2` accepts `O_NONBLOCK`
+and `O_CLOEXEC`. Pipes hold 512 bytes and report partial transfers. Core's
+pipe opening limit also applies to pipe duplicates.
+
+`poll` supports read/write readiness, error, hangup and invalid descriptors.
+Negative descriptors are ignored. A poll wait snapshots its descriptors at
+entry. Applications should coordinate closing or replacing a descriptor with
+other threads that are waiting on it. `ioctl(fd, FIONREAD, &queued)` writes the
+number of bytes queued in a pipe to an `int`. Other ioctl requests fail with
+`ENOTTY`.
 
 The SDK provides `pthread_create`, `pthread_join`, `pthread_detach`, `pthread_self`,
 `pthread_equal`, `pthread_once`, stack and detach attributes, TLS keys with up to
@@ -175,7 +189,6 @@ Return `ENOSYS`, until the ABI slots they need exist:
 | Calls | Waiting for |
 |---|---|
 | `posix_spawn`, `waitpid`, environment, user and process ids | core#717 (process and environment capabilities) |
-| `poll`, `pipe`, `dup`, `dup2` | core#719 (readiness, pipes, descriptor operations) |
 | `socket`, `connect`, `bind`, `listen`, `accept`, `send*`, `recv*`, `shutdown` | the network capability in the startup structure (core#717); DNS (`getaddrinfo`) is not declared |
 
 Never provided: `fork`, asynchronous signals, general `mmap`.

@@ -101,9 +101,14 @@ impl<'a> SynchronousFile<'a> {
         &mut self,
         cx: &mut core::task::Context<'_>,
         buffer: &mut [u8],
+        offset: Option<Size>,
     ) -> core::task::Poll<Result<usize>> {
         if !self.flags.get_access().contains(AccessFlags::Read) {
             return core::task::Poll::Ready(Err(IoErrorKind::BadDescriptor));
+        }
+        if let Some(offset) = offset {
+            let operations = Self::positional_operations(&self.item)?;
+            return operations.read(&mut self.context, cx, buffer, offset);
         }
         let operations = self
             .item
@@ -151,9 +156,14 @@ impl<'a> SynchronousFile<'a> {
         &mut self,
         cx: &mut core::task::Context<'_>,
         buffer: &[u8],
+        offset: Option<Size>,
     ) -> core::task::Poll<Result<usize>> {
         if !self.flags.get_access().contains(AccessFlags::Write) {
             return core::task::Poll::Ready(Err(IoErrorKind::BadDescriptor));
+        }
+        if let Some(offset) = offset {
+            let operations = Self::positional_operations(&self.item)?;
+            return operations.write(&mut self.context, cx, buffer, offset);
         }
         let append_position = self.append_position();
         let operations = self
@@ -356,15 +366,19 @@ impl<'a> SynchronousFile<'a> {
         self.set_metadata(&attributes)
     }
 
+    fn positional_operations(item: &ItemStatic) -> Result<&dyn file_system::BaseOperations> {
+        if matches!(item, ItemStatic::Pipe(_) | ItemStatic::CharacterDevice(_)) {
+            return Err(IoErrorKind::InvalidSeek);
+        }
+        item.as_base_operations().ok_or(IoErrorKind::Unsupported)
+    }
+
     /// Read at an explicit offset, leaving the shared cursor unchanged.
     pub fn read_at(&mut self, buffer: &mut [u8], offset: Size) -> Result<usize> {
         if !self.flags.get_access().contains(AccessFlags::Read) {
             return Err(IoErrorKind::BadDescriptor);
         }
-        self.item
-            .as_base_operations()
-            .ok_or(IoErrorKind::Unsupported)?
-            .read_sync(&mut self.context, buffer, offset)
+        Self::positional_operations(&self.item)?.read_sync(&mut self.context, buffer, offset)
     }
 
     /// Write at an explicit offset, leaving the shared cursor unchanged.
@@ -372,10 +386,7 @@ impl<'a> SynchronousFile<'a> {
         if !self.flags.get_access().contains(AccessFlags::Write) {
             return Err(IoErrorKind::BadDescriptor);
         }
-        self.item
-            .as_base_operations()
-            .ok_or(IoErrorKind::Unsupported)?
-            .write_sync(&mut self.context, buffer, offset)
+        Self::positional_operations(&self.item)?.write_sync(&mut self.context, buffer, offset)
     }
 
     pub fn set_owner(

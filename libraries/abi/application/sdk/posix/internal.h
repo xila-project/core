@@ -19,6 +19,8 @@ enum { XILA_FD_FILE = 1, XILA_FD_DIRECTORY = 2 };
    releasing them. */
 #define XILA_FD_BORROWED 1
 #define XILA_FD_EXIT_FLUSH 2
+#define XILA_FD_CLOEXEC 4
+#define XILA_OPEN_MAX 256
 
 struct xila_fd {
     void *object; /* XilaFile * or XilaDirectory * */

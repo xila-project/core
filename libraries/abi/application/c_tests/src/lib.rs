@@ -27,6 +27,7 @@ mod tests {
             network: *const Network,
             denied: *const Network,
             listen_only: *const Network,
+            cooperative: bool,
         ) -> i32;
     }
 
@@ -282,12 +283,29 @@ mod tests {
         let authority = Network::new(network, 7).unwrap();
         let denied = Network::new(network, 0).unwrap();
         let listen_only = Network::new(network, XILA_NETWORK_LISTEN).unwrap();
-        unsafe {
-            assert_eq!(
-                application_c_network(&XILA_API, &authority, &denied, &listen_only),
-                0
-            );
+        #[cfg(all(
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        ))]
+        {
+            // Run socket waits on a coroutine while the loopback runner wakes it from
+            // its executor thread. The C fixture fits the stack and cannot unwind.
+            let result = unsafe {
+                stackful::Coroutine::new(stackful::Stack::new(64 * 1024), move || {
+                    application_c_network(&XILA_API, &authority, &denied, &listen_only, true)
+                })
+            }
+            .await;
+            assert_eq!(result, 0, "network C fixture failed");
         }
+        #[cfg(not(all(
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        )))]
+        assert_eq!(
+            unsafe { application_c_network(&XILA_API, &authority, &denied, &listen_only, false) },
+            0
+        );
 
         install_entropy().await;
         unsafe {
@@ -517,7 +535,7 @@ mod tests {
         use core::task::{Context as TaskContext, Poll, Waker};
         use file_system::{
             BaseOperations, CharacterDevice, Context as DeviceContext, MountOperations, Operation,
-            Size,
+            ReadyEvents, Size, notify_readiness,
         };
         use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
         use std::sync::Mutex;
@@ -526,6 +544,7 @@ mod tests {
         struct ReadState {
             ready: AtomicBool,
             polls: AtomicUsize,
+            readiness_seen: AtomicBool,
             waker: Mutex<Option<Waker>>,
         }
         struct PendingDevice(&'static ReadState);
@@ -560,6 +579,22 @@ mod tests {
                 Poll::Ready(Err(file_system::IoErrorKind::Unsupported))
             }
 
+            fn control(
+                &self,
+                _: &mut DeviceContext,
+                _: &mut TaskContext<'_>,
+                command: file_system::ControlCommandIdentifier,
+                _: &shared::AnyByLayout,
+                output: &mut shared::AnyByLayout,
+            ) -> Poll<file_system::Result<()>> {
+                use file_system::{ControlCommand, character_device::IS_A_TERMINAL};
+                if command != IS_A_TERMINAL::IDENTIFIER {
+                    return Poll::Ready(Err(file_system::IoErrorKind::Unsupported));
+                }
+                *IS_A_TERMINAL::cast_output(output).unwrap() = true;
+                Poll::Ready(Ok(()))
+            }
+
             fn clone_context(&self, _: &DeviceContext) -> file_system::Result<DeviceContext> {
                 Ok(DeviceContext::new_empty())
             }
@@ -569,7 +604,16 @@ mod tests {
             }
         }
         impl MountOperations for PendingDevice {}
-        impl CharacterDevice for PendingDevice {}
+        impl CharacterDevice for PendingDevice {
+            fn readiness(&self, interests: ReadyEvents) -> file_system::Result<ReadyEvents> {
+                self.0.readiness_seen.store(true, Ordering::Relaxed);
+                Ok(if self.0.ready.load(Ordering::Relaxed) {
+                    interests
+                } else {
+                    ReadyEvents::empty()
+                })
+            }
+        }
 
         let time = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
         let tasks = task::test_manager();
@@ -609,12 +653,15 @@ mod tests {
             let status = xila_file_read(file, buffer.as_mut_ptr().cast(), buffer.len(), &mut count);
             assert_eq!(status, Status::WouldBlock);
             assert_eq!(count, 99);
+            let mut terminal = false;
+            assert_eq!(xila_file_is_terminal(file, &mut terminal), Status::Ok);
+            assert!(terminal);
         }
         assert_eq!(state.polls.swap(0, Ordering::Relaxed), 1);
         assert!(state.waker.lock().unwrap().is_none());
 
         // SAFETY: The bounded ABI call chain fits within the supplied stack.
-        // The resulting task owns the handle until xila_file_close.
+        // The fixture closes the handle after both tasks complete.
         let (reader, _) = unsafe {
             stackful::spawn(
                 tasks,
@@ -626,13 +673,30 @@ mod tests {
                     let mut count = 0;
                     let status =
                         xila_file_read(file, buffer.as_mut_ptr().cast(), buffer.len(), &mut count);
-                    let close = xila_file_close(file);
-                    i32::from(
-                        status != Status::Ok
-                            || close != Status::Ok
-                            || count != 2
-                            || &buffer != b"ok",
-                    )
+                    i32::from(status != Status::Ok || count != 2 || &buffer != b"ok")
+                },
+            )
+            .await
+            .unwrap()
+        };
+        // The readiness wait and the read are independently registered on
+        // the same handle. A readiness probe never consumes the data.
+        let (poller, _) = unsafe {
+            stackful::spawn(
+                tasks,
+                task,
+                "ABI poller",
+                stackful::Stack::new(64 * 1024),
+                move || {
+                    let mut entry = PollEntry {
+                        handle: file.cast(),
+                        kind: XILA_POLL_FILE,
+                        events: XILA_POLL_IN,
+                        revents: 0,
+                    };
+                    let mut ready = 0;
+                    let status = xila_poll_wait(&mut entry, 1, 1000, &mut ready);
+                    i32::from(status != Status::Ok || ready != 1 || entry.revents != XILA_POLL_IN)
                 },
             )
             .await
@@ -644,11 +708,14 @@ mod tests {
                 "device readiness",
                 Some(spawner),
                 move |_| async move {
-                    while state.polls.load(Ordering::Relaxed) == 0 {
+                    while state.polls.load(Ordering::Relaxed) == 0
+                        || !state.readiness_seen.load(Ordering::Relaxed)
+                    {
                         task::yield_now().await;
                     }
                     assert_eq!(state.polls.load(Ordering::Relaxed), 1);
                     state.ready.store(true, Ordering::Relaxed);
+                    notify_readiness();
                     state.waker.lock().unwrap().take().unwrap().wake();
                 },
             )
@@ -656,7 +723,9 @@ mod tests {
             .unwrap();
 
         assert_eq!(reader.join().await, 0);
+        assert_eq!(poller.join().await, 0);
         peer.join().await;
+        assert_eq!(unsafe { xila_file_close(file) }, Status::Ok);
         assert_eq!(state.polls.load(Ordering::Relaxed), 2);
     }
     #[cfg(all(

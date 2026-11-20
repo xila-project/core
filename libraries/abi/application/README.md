@@ -70,6 +70,50 @@ The host constructs capabilities with `Directory::new` and wraps existing stream
 with `File::new`. `into_raw` transfers ownership and unsafe `from_raw` reclaims it
 exactly once.
 
+## Readiness and descriptor operations
+
+`xila_poll_wait` takes an array of `XilaPollEntry` records. Set each kind and
+handle, and request `XILA_POLL_IN` and/or `XILA_POLL_OUT`. The call returns the
+number of entries with nonzero `revents`. Errors and hangups are reported even
+when neither data event was requested. A null handle or invalid kind produces
+`XILA_POLL_NVAL`. Use `XILA_POLL_IGNORE` to skip an entry. As with the other
+native ABI calls, an arbitrary non-null pointer is outside the contract.
+
+Zero timeout probes once. Positive timeouts are relative milliseconds on the
+executor clock, and negative timeouts wait indefinitely. A wait that would
+block outside a coroutine returns `WouldBlock`. An empty set may be used to
+sleep in a coroutine. Regular files and block devices report readiness for
+operations allowed by the opening, including at EOF. Directory capabilities
+report read readiness. A character driver supplies its own non-consuming
+readiness snapshot and notifies the shared hub when readiness changes. Drivers
+without this contract report `XILA_POLL_ERR`. With the `network` feature, TCP
+connections, TCP listeners and UDP sockets are pollable. The network runner
+notifies the hub when socket state changes, without taking over the individual
+socket's read or write waker. Keep sockets live and serialize their other ABI
+calls while polling. Multiple pollers may wait on the same socket or file.
+
+Pipe readiness tracks queued bytes, free space and peer shutdown. The last
+writer closing reports `XILA_POLL_HUP` to readers, together with
+`XILA_POLL_IN` when bytes remain. Once drained, reads return zero. The last
+reader closing reports `XILA_POLL_ERR` to writers, and a nonempty write then
+returns `BrokenPipe`. A file readiness snapshot keeps a pipe's storage
+accessible without keeping its endpoints open. The wait registers one hub
+waker and stores one result per entry. The hub and snapshots are released on
+completion, timeout or coroutine cancellation.
+
+`xila_pipe_create` uses the supplied process capability to return an owned read
+and write handle for a 512-byte unnamed pipe. Pass `XILA_OPEN_NON_BLOCKING` for
+probe-only I/O. Transfers can be short. `xila_file_control` accepts only
+`XILA_CONTROL_BYTES_AVAILABLE` with zero input bytes and an aligned four-byte
+`uint32_t` output. Either pipe endpoint can report its queued byte count.
+`xila_file_is_terminal` queries the VFS terminal capability.
+
+`xila_file_duplicate` returns an independently closable handle that shares
+the original VFS cursor. `xila_file_read_at` and `xila_file_write_at` perform
+I/O without moving that cursor. Positional writes use their explicit offset
+when the opening was created for append. Pipes and character streams return
+`InvalidSeek`.
+
 ## Clocks, sleep and randomness
 
 Core's `NativeFormat` handler (`native-dev`) installs the time manager from

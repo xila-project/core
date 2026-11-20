@@ -130,11 +130,26 @@ impl Default for TerminalAttributes {
     }
 }
 
-pub trait CharacterDevice: BaseOperations + MountOperations {}
+pub trait CharacterDevice: BaseOperations + MountOperations {
+    /// Snapshot device readiness without consuming data. Implementations must
+    /// call [`crate::notify_readiness`] after changes that can wake a poller.
+    fn readiness(&self, _interests: crate::ReadyEvents) -> crate::Result<crate::ReadyEvents> {
+        Err(crate::IoErrorKind::Unsupported)
+    }
+}
 
-pub trait DirectCharacterDevice: DirectBaseOperations + MountOperations {}
+pub trait DirectCharacterDevice: DirectBaseOperations + MountOperations {
+    /// See [`CharacterDevice::readiness`].
+    fn readiness(&self, _interests: crate::ReadyEvents) -> crate::Result<crate::ReadyEvents> {
+        Err(crate::IoErrorKind::Unsupported)
+    }
+}
 
-impl<T: DirectCharacterDevice> CharacterDevice for T {}
+impl<T: DirectCharacterDevice> CharacterDevice for T {
+    fn readiness(&self, interests: crate::ReadyEvents) -> crate::Result<crate::ReadyEvents> {
+        DirectCharacterDevice::readiness(self, interests)
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -408,17 +408,19 @@ impl StackInner {
         });
     }
 
-    pub fn poll(&mut self, device: &mut impl Device) -> Option<Duration> {
+    pub fn poll(&mut self, device: &mut impl Device) -> (Option<Duration>, bool) {
         let now = crate::get_smoltcp_time(self.time_manager);
 
-        self.interface.poll(now, device, &mut self.sockets);
+        let changed = self.interface.poll(now, device, &mut self.sockets)
+            == iface::PollResult::SocketStateChanged;
         self.reap_retired_sockets();
 
         let poll_at = self.interface.poll_at(now, &self.sockets);
 
-        poll_at
-            .map(|instant| instant - now)
-            .map(|smoltcp_duration| Duration::from_micros(smoltcp_duration.total_micros()))
+        (
+            poll_at.map(|instant| Duration::from_micros((instant - now).total_micros())),
+            changed,
+        )
     }
 
     pub fn get_socket<S: AnySocket<'static>>(

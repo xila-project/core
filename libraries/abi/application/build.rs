@@ -37,6 +37,7 @@ fn main() {
         ("ThreadLibc", "XilaThreadLibc"),
         ("Mutex", "XilaMutex"),
         ("Condition", "XilaCondition"),
+        ("PollEntry", "XilaPollEntry"),
     ] {
         config.export.rename.insert(rust.into(), c.into());
     }

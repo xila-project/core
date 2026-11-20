@@ -71,3 +71,10 @@
 69	xila_thread_has_workers
 70	xila_thread_stop_others
 71	xila_thread_exit
+72	xila_poll_wait
+73	xila_file_read_at
+74	xila_file_write_at
+75	xila_file_duplicate
+76	xila_file_control
+77	xila_file_is_terminal
+78	xila_pipe_create

@@ -72,7 +72,7 @@ COMMON_FLAGS = [
 ]
 
 POSIX_SOURCES = ["errno", "exit_flush", "fd", "file", "heap", "onexit", "path", "stack_protector", "startup", "status", "stderr", "stdin", "stdout",
-                 "time", "unsupported", "thread", "thread_keys", "thread_sync", "libc_lock", "strtok", "random"]
+                 "time", "poll", "unsupported", "thread", "thread_keys", "thread_sync", "libc_lock", "strtok", "random"]
 
 
 def pins():
@@ -295,9 +295,9 @@ def compile_sdk(target, install, work):
     objects.mkdir(exist_ok=True)
     include = [
         "-nostdinc",
+        f"-isystem{SDK_SOURCE / 'sdk/posix/include'}",
         f"-isystem{install / 'include'}",
         f"-isystem{resource_dir(target)}/include",
-        f"-isystem{SDK_SOURCE / 'sdk/posix/include'}",
         f"-I{SDK_SOURCE / 'include/xila'}",
         f"-I{SDK_SOURCE / 'include'}",
         f"-I{SDK_SOURCE / 'sdk'}",

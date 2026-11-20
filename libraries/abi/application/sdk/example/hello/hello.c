@@ -104,7 +104,8 @@ int main(int argc, char **argv) {
 
     /* Unsupported calls say so. */
     int ends[2];
-    CHECK("pipe is ENOSYS", pipe(ends) == -1 && errno == ENOSYS);
+    CHECK("pipe", pipe(ends) == 0);
+    CHECK("close pipe", close(ends[0]) == 0 && close(ends[1]) == 0);
 
     /* A stream the program never closes is flushed when it returns from main. */
     stream = fopen("/sdk-exit.txt", "w");

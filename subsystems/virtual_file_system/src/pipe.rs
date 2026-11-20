@@ -4,7 +4,8 @@ use core::{
     task::{Context as TaskContext, Poll, Waker},
 };
 use file_system::{
-    AccessFlags, BaseOperations, Context, IoErrorKind, MountOperations, Operation, Result, Size,
+    AccessFlags, BaseOperations, Context, IoErrorKind, MountOperations, Operation, ReadyEvents,
+    Result, Size, notify_readiness,
 };
 use synchronization::blocking_mutex::{Mutex, raw::CriticalSectionRawMutex};
 
@@ -85,6 +86,7 @@ impl Pipe {
             .get_private_data_mutable_of_type::<Opening>()
             .unwrap()
             .slot = slot;
+        notify_readiness();
         Ok(context)
     }
 
@@ -96,6 +98,34 @@ impl Pipe {
             return Err(IoErrorKind::BadDescriptor);
         }
         Ok(opening)
+    }
+
+    pub(crate) fn readiness(&self, access: AccessFlags, interests: ReadyEvents) -> ReadyEvents {
+        self.state.lock(|state| {
+            let state = state.borrow();
+            let mut events = ReadyEvents::empty();
+            if access.contains(AccessFlags::Read) {
+                events.set(ReadyEvents::HANGUP, state.writers == 0);
+                events.set(
+                    ReadyEvents::READ,
+                    interests.contains(ReadyEvents::READ) && !state.buffer.is_empty(),
+                );
+            }
+            if access.contains(AccessFlags::Write) {
+                events.set(ReadyEvents::ERROR, state.readers == 0);
+                events.set(
+                    ReadyEvents::WRITE,
+                    interests.contains(ReadyEvents::WRITE)
+                        && state.readers != 0
+                        && state.buffer.len() < self.capacity,
+                );
+            }
+            events
+        })
+    }
+
+    pub(crate) fn bytes_available(&self) -> usize {
+        self.state.lock(|state| state.borrow().buffer.len())
     }
 
     fn transact(
@@ -135,6 +165,9 @@ impl Pipe {
         drop(registration);
         for waker in wake.into_iter().flatten() {
             waker.wake();
+        }
+        if matches!(result, Poll::Ready(Ok(count)) if count != 0) {
+            notify_readiness();
         }
         result
     }
@@ -213,6 +246,7 @@ impl BaseOperations for Pipe {
         for waker in wake.into_iter().flatten() {
             waker.wake();
         }
+        notify_readiness();
         Ok(())
     }
     fn clone_context(&self, context: &Context) -> Result<Context> {

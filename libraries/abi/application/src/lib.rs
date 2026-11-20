@@ -24,6 +24,7 @@ mod metadata;
 #[cfg(feature = "network")]
 mod network;
 mod network_types;
+mod poll;
 mod process;
 mod startup;
 #[cfg(feature = "network")]
@@ -39,6 +40,7 @@ pub use directory::*;
 pub use file::*;
 pub use iterator::*;
 pub use metadata::*;
+pub use poll::*;
 pub use process::*;
 pub use random::*;
 pub use startup::*;
@@ -80,7 +82,7 @@ pub use heap::*;
         target_os = "none"
     )
 ))]
-use stackful::{is_in_coroutine, suspend_on};
+use stackful::{is_in_coroutine, suspend_on, suspend_on_cancellable};
 
 /// End the running coroutine with an exit status. Callers have checked
 /// `is_in_coroutine`.
@@ -120,6 +122,23 @@ fn exit_coroutine(status: i32) -> ! {
     )
 )))]
 use task::block_on as suspend_on;
+
+#[cfg(not(any(
+    all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_os = "linux"
+    ),
+    all(
+        any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "arm",
+            target_arch = "riscv32"
+        ),
+        target_os = "none"
+    )
+)))]
+use task::block_on as suspend_on_cancellable;
 
 #[cfg(not(any(
     all(

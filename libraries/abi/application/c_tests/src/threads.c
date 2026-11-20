@@ -36,6 +36,21 @@ static void *worker(void *argument) {
 
 static void *peer(void *argument) { return argument; }
 
+struct PipeThread {
+    const XilaApi *api;
+    XilaFile *reader;
+};
+
+static void *poll_reader(void *argument) {
+    const struct PipeThread *pipe = argument;
+    XilaPollEntry entry = {pipe->reader, XILA_POLL_FILE, XILA_POLL_IN, 0};
+    size_t ready = 0;
+    if (pipe->api->poll_wait(&entry, 1, 1000, &ready) == XILA_STATUS_OK &&
+        ready == 1 && entry.revents == XILA_POLL_IN)
+        return argument;
+    return NULL;
+}
+
 int32_t threads_main(const XilaStartup *startup) {
     const XilaApi *api = startup->api;
     struct Shared shared = { .api = api, .process = startup->process };
@@ -80,5 +95,55 @@ int32_t threads_main(const XilaStartup *startup) {
     OK(api->thread_key_delete(shared.key));
     OK(api->condition_destroy(&shared.condition));
     OK(api->mutex_destroy(&shared.mutex));
+    XilaFile *reader = NULL, *writer = NULL;
+    OK(api->pipe_create(process, XILA_OPEN_NON_BLOCKING, &reader, &writer));
+    struct PipeThread pipe = {api, reader};
+    size_t pollers[2];
+    for (size_t i = 0; i < 2; ++i)
+        OK(api->thread_spawn(process, 0, poll_reader, &pipe, &pollers[i]));
+    OK(api->time_sleep(2000000));
+
+    XilaPollEntry entries[] = {
+        {reader, XILA_POLL_FILE, XILA_POLL_IN, 0},
+        {NULL, XILA_POLL_FILE, 0, 0},
+    };
+    size_t ready = 0, count = 0;
+    OK(api->poll_wait(entries, 2, 0, &ready));
+    CHECK(ready == 1 && entries[0].revents == 0 && entries[1].revents == XILA_POLL_NVAL);
+    OK(api->poll_wait(entries, 1, 2, &ready));
+    CHECK(ready == 0 && entries[0].revents == 0);
+
+    OK(api->file_write(writer, "hi", 2, &count));
+    CHECK(count == 2);
+    for (size_t i = 0; i < 2; ++i) {
+        OK(api->thread_join(pollers[i], &value));
+        CHECK(value == &pipe);
+    }
+    uint32_t available = 0;
+    OK(api->file_control(reader, XILA_CONTROL_BYTES_AVAILABLE, NULL, 0,
+                         &available, sizeof(available)));
+    CHECK(available == 2);
+    CHECK(api->file_control(reader, XILA_CONTROL_BYTES_AVAILABLE, NULL, 0,
+                            &available, 1) == XILA_STATUS_INVALID_ARGUMENT);
+    CHECK(available == 2);
+    CHECK(api->file_control(reader, 0, NULL, 0, NULL, 0) == XILA_STATUS_UNSUPPORTED);
+    OK(api->file_close(writer));
+    OK(api->poll_wait(entries, 1, 0, &ready));
+    CHECK(ready == 1 && entries[0].revents == (XILA_POLL_IN | XILA_POLL_HUP));
+
+    char data[4] = {0};
+    OK(api->file_read(reader, data, sizeof(data), &count));
+    CHECK(count == 2 && data[0] == 'h' && data[1] == 'i');
+    OK(api->file_read(reader, data, sizeof(data), &count));
+    CHECK(count == 0);
+    OK(api->file_close(reader));
+
+    OK(api->pipe_create(process, 0, &reader, &writer));
+    OK(api->file_close(reader));
+    entries[0] = (XilaPollEntry){writer, XILA_POLL_FILE, 0, 0};
+    OK(api->poll_wait(entries, 1, 0, &ready));
+    CHECK(ready == 1 && entries[0].revents == XILA_POLL_ERR);
+    CHECK(api->file_write(writer, "x", 1, &count) == XILA_STATUS_BROKEN_PIPE);
+    OK(api->file_close(writer));
     return 0;
 }

@@ -24,4 +24,11 @@ impl DirectBaseOperations for NullDevice {
 
 impl MountOperations for NullDevice {}
 
-impl CharacterDevice for NullDevice {}
+impl CharacterDevice for NullDevice {
+    fn readiness(
+        &self,
+        interests: file_system::ReadyEvents,
+    ) -> file_system::Result<file_system::ReadyEvents> {
+        Ok(interests)
+    }
+}

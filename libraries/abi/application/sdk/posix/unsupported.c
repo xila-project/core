@@ -2,37 +2,14 @@
  * portable code can probe for them at run time. Each group names the work that
  * provides it:
  *   processes and environment (posix_spawn, waitpid, kill): core#717
- *   readiness, pipes and descriptor duplication (poll, pipe): core#719
  *   sockets and name resolution: needs the startup network capability, core#717 */
 #include <sys/types.h>
-#include <poll.h>
 #include <spawn.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include "internal.h"
-
-/* ---- core#719 ---- */
-int pipe(int fds[2]) {
-    (void)fds;
-    return xila_fail_errno(ENOSYS);
-}
-int poll(struct pollfd *fds, nfds_t count, int timeout) {
-    (void)fds;
-    (void)count;
-    (void)timeout;
-    return xila_fail_errno(ENOSYS);
-}
-int dup(int fd) {
-    (void)fd;
-    return xila_fail_errno(ENOSYS);
-}
-int dup2(int fd, int target) {
-    (void)fd;
-    (void)target;
-    return xila_fail_errno(ENOSYS);
-}
 
 /* ---- core#717 ---- */
 int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *actions,

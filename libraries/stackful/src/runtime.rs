@@ -25,6 +25,11 @@ pub enum TlsError {
 }
 
 type ErasedFuture = *mut (dyn Future<Output = ()> + 'static);
+#[derive(Clone, Copy)]
+struct Pending {
+    future: ErasedFuture,
+    cancel: bool,
+}
 struct Control {
     stack: Stack,
     coroutine_sp: UnsafeCell<usize>,
@@ -32,7 +37,7 @@ struct Control {
     entry: Cell<*mut u8>,
     run: unsafe fn(*mut u8) -> i32,
     destroy: unsafe fn(*mut u8),
-    pending: Cell<Option<ErasedFuture>>,
+    pending: Cell<Option<Pending>>,
     started: Cell<bool>,
     result: Cell<Option<Result<i32, Cancelled>>>,
     waker: RefCell<Option<Waker>>,
@@ -158,7 +163,7 @@ impl Coroutine {
             if let Some(Ok(result)) = self.control.result.get() {
                 return Poll::Ready(result);
             }
-            if let Some(future) = self.control.pending.get() {
+            if let Some(Pending { future, .. }) = self.control.pending.get() {
                 // SAFETY: the future remains pinned on the suspended native stack. No
                 // coroutine runs while the driver polls it; it is cleared before resume.
                 if unsafe { Pin::new_unchecked(&mut *future) }
@@ -195,12 +200,22 @@ impl Drop for Coroutine {
         self.control.native_context.set(core::ptr::null());
         if self.control.started.get() && self.control.result.get().is_none() {
             self.control.result.set(Some(Err(Cancelled)));
-            if let Some(w) = self.control.waker.borrow_mut().take() {
-                w.wake();
-            }
             // Never free a suspended stack containing live objects. In particular,
             // destructors may hold pointers into that stack. Cancellation leaks it.
             core::mem::forget(self.control.clone());
+            if let Some(w) = self.control.waker.borrow_mut().take() {
+                w.wake();
+            }
+            // Opted-in bridge futures can release their state on cancellation.
+            if let Some(Pending {
+                future,
+                cancel: true,
+            }) = self.control.pending.take()
+            {
+                // SAFETY: the wrapper is initialized and pinned on the suspended stack.
+                // The coroutine will never resume, so it cannot drop the wrapper again.
+                unsafe { core::ptr::drop_in_place(future) };
+            }
         }
     }
 }
@@ -232,6 +247,16 @@ pub fn is_in_coroutine() -> bool {
 /// No heap allocation occurs here. The future and output stay on the native stack.
 /// Do not call this from a future's poll method: poll methods must return Pending.
 pub fn suspend_on<F: Future>(future: F) -> F::Output {
+    suspend(future, false)
+}
+
+/// Like [`suspend_on`], but drops this future in place if the driver cancels
+/// the coroutine. The future's destructor runs on the executor's stack.
+pub fn suspend_on_cancellable<F: Future>(future: F) -> F::Output {
+    suspend(future, true)
+}
+
+fn suspend<F: Future>(future: F, cancel: bool) -> F::Output {
     let c = current();
     if c.is_null() {
         return task::block_on(future);
@@ -249,14 +274,29 @@ pub fn suspend_on<F: Future>(future: F) -> F::Output {
             )
         };
         unsafe {
-            (*c).stack.check_guard();
-            (*c).pending.set(Some(erased));
-            arch::switch((*c).coroutine_sp.get(), (*c).caller_sp.get());
-            (*c).stack.check_guard();
-        }
+            suspend_pending(
+                c,
+                Pending {
+                    future: erased,
+                    cancel,
+                },
+            )
+        };
         // End the future's mutable borrow before reading its result.
     }
     output.expect("coroutine resumed before future completed")
+}
+
+#[inline(never)]
+unsafe fn suspend_pending(control: *const Control, pending: Pending) {
+    // SAFETY: the caller is on this control's coroutine stack and the pending
+    // future remains pinned until completion or cancellation of that stack.
+    unsafe {
+        (*control).stack.check_guard();
+        (*control).pending.set(Some(pending));
+        arch::switch((*control).coroutine_sp.get(), (*control).caller_sp.get());
+        (*control).stack.check_guard();
+    }
 }
 
 /// Pointer privately installed by the native ABI; null on other coroutines.
