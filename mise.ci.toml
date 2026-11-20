@@ -80,6 +80,7 @@ env = { MBX_CARGO_SHIM_MODE = "1" }
 "apt:cmake" = { env = "sdk" }
 "apt:zstd" = { env = "sdk" }
 "apt:gcc-arm-none-eabi" = { env = "sdk-arm" }
+"apt:gcc-riscv64-unknown-elf" = { env = "sdk-riscv" }
 
 [tasks."ci:packages-linker"]
 description = "Install CI linker packages only when a build task needs them"
@@ -134,6 +135,10 @@ run = "mise -E ci,sdk bootstrap packages apply --manager apt --update --yes"
 [tasks."ci:packages-sdk-arm"]
 description = "Install the native SDK build packages and the Arm GNU toolchain (libgcc for Cortex-M)"
 run = "mise -E ci,sdk,sdk-arm bootstrap packages apply --manager apt --update --yes"
+
+[tasks."ci:packages-sdk-riscv"]
+description = "Install the SDK tools and the RISC-V ILP32 compiler runtime"
+run = "mise -E ci,sdk,sdk-riscv bootstrap packages apply --manager apt --update --yes"
 
 [tasks."ci:packages-benchmark"]
 description = "Install benchmark packages before timed commands"
