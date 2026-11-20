@@ -944,6 +944,10 @@ mod tests {
     unsafe extern "C" fn located_return_entry(startup: *const XilaStartup) -> i32 {
         check!(in_host_state(startup as usize));
         check!(in_host_state(unsafe { (*startup).process } as usize));
+        // The resources `xila_process_exit` empties are in the state, behind the capability.
+        check!(in_host_state(
+            unsafe { (*(*startup).process).resources } as usize
+        ));
         4
     }
 
@@ -951,14 +955,19 @@ mod tests {
         check!(in_host_state(startup as usize));
         let startup = unsafe { &*startup };
         check!(in_host_state(startup.process as usize));
+        check!(in_host_state(
+            unsafe { (*startup.process).resources } as usize
+        ));
         let api = unsafe { &*startup.api };
         let _ = unsafe { (api.process_exit)(startup.process, 5) };
         1 // Exit returned.
     }
 
-    /// The startup block and the process capability the entry is given belong to the
-    /// host state the loader owns, whichever way the entry ends, so nothing the exit
-    /// path or the SDK reads is stored in the coroutine's frames (#766).
+    /// The startup block, the process capability and the resources it empties on exit
+    /// belong to the host state the loader owns, whichever way the entry ends, so nothing
+    /// the exit path or the SDK reads is stored in the coroutine's frames (#766). The
+    /// standard streams, which need a file system to open, are checked in the C tests
+    /// crate.
     #[cfg(all(
         target_os = "linux",
         any(target_arch = "x86_64", target_arch = "aarch64")

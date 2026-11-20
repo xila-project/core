@@ -1214,4 +1214,122 @@ mod tests {
             .await
             .unwrap();
     }
+
+    std::thread_local! {
+        /// Start and length of the host state under test.
+        static HOST_STATE: core::cell::Cell<(usize, usize)> = const { core::cell::Cell::new((0, 0)) };
+    }
+
+    /// Whether `address` lies in the host state, not on the calling coroutine's stack.
+    fn in_host_state(address: usize) -> bool {
+        let (start, length) = HOST_STATE.get();
+        (start..start + length).contains(&address)
+    }
+
+    /// The line of the first failed check, so a failure names it.
+    macro_rules! check {
+        ($condition:expr) => {
+            if !$condition {
+                return line!() as i32;
+            }
+        };
+    }
+
+    /// The streams `write(2)` and the SDK reach, and the exit path, are in the host state.
+    unsafe fn streams_in_host_state(startup: *const XilaStartup) -> i32 {
+        let startup = unsafe { &*startup };
+        check!(in_host_state(startup as *const XilaStartup as usize));
+        check!(in_host_state(startup.process as usize));
+        check!(in_host_state(startup.standard_input as usize));
+        check!(in_host_state(startup.standard_output as usize));
+        check!(in_host_state(startup.standard_error as usize));
+        0
+    }
+
+    unsafe extern "C" fn streams_return_entry(startup: *const XilaStartup) -> i32 {
+        let failed = unsafe { streams_in_host_state(startup) };
+        if failed != 0 { failed } else { 6 }
+    }
+
+    unsafe extern "C" fn streams_exit_entry(startup: *const XilaStartup) -> i32 {
+        let failed = unsafe { streams_in_host_state(startup) };
+        if failed != 0 {
+            return failed;
+        }
+        let startup = unsafe { &*startup };
+        let api = unsafe { &*startup.api };
+        let _ = unsafe { (api.process_exit)(startup.process, 7) };
+        1 // Exit returned.
+    }
+
+    /// The standard streams of a process live in the host state the loader owns, not in
+    /// the coroutine's frames, whether the entry returns or exits early (#766).
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    #[task::test]
+    async fn standard_streams_stay_off_the_coroutine_stack() {
+        use file_system::StateFlags;
+
+        let tasks = task::test_manager();
+        let task = tasks.get_current_task_identifier().await;
+        let users = Box::leak(Box::new(users::Manager::new()));
+        let time = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+        let device = file_system::MemoryDevice::<512>::new_static(128 * 1024);
+        let fs = little_fs::FileSystem::new_format(device, little_fs::Options::new(128)).unwrap();
+        let vfs = Box::leak(Box::new(virtual_file_system::VirtualFileSystem::new(
+            tasks, users, time, fs,
+        )));
+        let host = Box::leak(Box::new(TestHost { tasks, vfs }));
+        for (entry, expected) in [
+            (
+                streams_return_entry as unsafe extern "C" fn(*const XilaStartup) -> i32,
+                6,
+            ),
+            (streams_exit_entry, 7),
+        ] {
+            let (input, kept_input) = vfs
+                .create_unnamed_pipe(XILA_PIPE_CAPACITY, StateFlags::empty())
+                .await
+                .unwrap();
+            let (kept_output, output) = vfs
+                .create_unnamed_pipe(XILA_PIPE_CAPACITY, StateFlags::empty())
+                .await
+                .unwrap();
+            let (kept_error, error) = vfs
+                .create_unnamed_pipe(XILA_PIPE_CAPACITY, StateFlags::empty())
+                .await
+                .unwrap();
+            let stream = |file: virtual_file_system::File<'static>| {
+                Some(File::new(file.into_synchronous_file()))
+            };
+            let (state, heap) = run_state(Vec::new(), stream(input), stream(output), stream(error));
+            HOST_STATE.set((state.as_ptr() as usize, core::mem::size_of::<HostState>()));
+            let launch = ProcessLaunch {
+                host,
+                environment: None,
+                home: None,
+            };
+            // SAFETY: the bounded entries fit the stack and never unwind, and the closure
+            // holds only pointers to the state and heap, which are leaked.
+            let (handle, _) = unsafe {
+                stackful::spawn_with_driver(
+                    tasks,
+                    task,
+                    "streams",
+                    stackful::Stack::new(64 * 1024),
+                    move || launch.run(state, entry, heap),
+                    drive_process,
+                    |status| status as isize,
+                )
+                .await
+                .unwrap()
+            };
+            assert_eq!(handle.join().await, expected, "line of the failed check");
+            for kept in [kept_input, kept_output, kept_error] {
+                kept.close(vfs).await.unwrap();
+            }
+        }
+    }
 }
