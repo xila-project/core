@@ -5,7 +5,7 @@ extern crate std;
 
 use super::*;
 use crate::test;
-use alloc::{collections::BTreeMap, format, vec::Vec};
+use alloc::{collections::BTreeMap, format, vec, vec::Vec};
 use core::time::Duration;
 use users::{GroupIdentifier, UserIdentifier};
 
@@ -171,6 +171,102 @@ async fn test_environment_variables() {
             .await
             .is_err()
     );
+}
+
+#[test(task_path = crate)]
+async fn test_environment_replacement() {
+    let manager = initialize();
+
+    let task = manager.get_current_task_identifier().await;
+    manager
+        .set_environment_variable(task, "Old", "1")
+        .await
+        .unwrap();
+    let spawner = manager.get_spawner(task).await.unwrap();
+    manager
+        .spawn(task, "Replaced", Some(spawner), async move |child| {
+            let manager = get_instance();
+            // The child starts with a copy of its parent's environment.
+            assert_eq!(
+                manager
+                    .get_environment_variable(child, "Old")
+                    .await
+                    .unwrap()
+                    .get_value(),
+                "1"
+            );
+            // An explicit list replaces it. Later entries win and the parent is unaffected.
+            manager
+                .replace_environment_variables(
+                    child,
+                    vec![
+                        EnvironmentVariable::new("A", "1"),
+                        EnvironmentVariable::new("B", "2"),
+                        EnvironmentVariable::new("A", "3"),
+                    ],
+                )
+                .await
+                .unwrap();
+            assert!(
+                manager
+                    .get_environment_variable(child, "Old")
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                manager
+                    .get_environment_variable(child, "A")
+                    .await
+                    .unwrap()
+                    .get_value(),
+                "3"
+            );
+            assert_eq!(
+                manager
+                    .get_environment_variables(child)
+                    .await
+                    .unwrap()
+                    .len(),
+                2
+            );
+            manager
+                .replace_environment_variables(child, Vec::new())
+                .await
+                .unwrap();
+            assert!(
+                manager
+                    .get_environment_variables(child)
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(
+                manager
+                    .replace_environment_variables(
+                        TaskIdentifier::new(TaskIdentifier::MAXIMUM),
+                        Vec::new()
+                    )
+                    .await
+                    .is_err()
+            );
+        })
+        .await
+        .unwrap()
+        .0
+        .join()
+        .await;
+    assert_eq!(
+        manager
+            .get_environment_variable(task, "Old")
+            .await
+            .unwrap()
+            .get_value(),
+        "1"
+    );
+    manager
+        .remove_environment_variable(task, "Old")
+        .await
+        .unwrap();
 }
 
 #[test(task_path = crate)]

@@ -196,6 +196,7 @@ fn c_type(ty: &Type, export: &cbindgen::ExportConfig) -> String {
                 "c_char" => "char",
                 "c_void" => "void",
                 "usize" => "size_t",
+                "i32" => "int32_t",
                 "u32" => "uint32_t",
                 "u64" => "uint64_t",
                 "i64" => "int64_t",

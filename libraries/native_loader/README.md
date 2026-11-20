@@ -64,7 +64,13 @@ when migrating literal initializers that do not use file-format dispatch.
 Callers loading trusted bytes directly can use `LoadedImage::load` and
 `LoadedImage::spawn`. These employ the same entry convention and grant only
 supplied capabilities. The file handler passes the standard streams and
-arguments and leaves the optional home capability unset. The task future, not
+arguments, a process capability (`XilaStartup.process`, which lets the program
+spawn, wait, exit and use its environment: see the ABI README) and, for a
+program that a native process spawned, its explicit environment and home
+directory. Set `Startup.process` to make a program a process; without it the
+program is started like a linked one, with no process capability. A spawned
+program's environment replaces the copy its task made of its parent's before
+the entry runs. The task future, not
 the coroutine stack, owns the image and the process `XilaHeap` granted through
 `startup->heap`. Both are released when the program returns or when the task is
 dropped. A cancelled coroutine's stack, arguments and startup streams stay

@@ -459,6 +459,109 @@ XilaStatus xila_random_fill(void * buffer, size_t size) {
     return xila_sdk_api->random_fill(buffer, size);
 }
 
+static XilaStatus unavailable_process_id(XilaProcess const * process, uint32_t * id) {
+    (void)process;
+    (void)id;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_process_id(XilaProcess const * process, uint32_t * id) {
+    return xila_sdk_api->process_id(process, id);
+}
+
+static XilaStatus unavailable_process_parent_id(XilaProcess const * process, uint32_t * id) {
+    (void)process;
+    (void)id;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_process_parent_id(XilaProcess const * process, uint32_t * id) {
+    return xila_sdk_api->process_parent_id(process, id);
+}
+
+static XilaStatus unavailable_process_exit(XilaProcess const * process, int32_t status) {
+    (void)process;
+    (void)status;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_process_exit(XilaProcess const * process, int32_t status) {
+    return xila_sdk_api->process_exit(process, status);
+}
+
+static XilaStatus unavailable_process_spawn(XilaProcess const * process, XilaDirectory const * directory, char const * path, size_t path_length, XilaSpawn const * spawn, XilaChild * * child) {
+    (void)process;
+    (void)directory;
+    (void)path;
+    (void)path_length;
+    (void)spawn;
+    (void)child;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_process_spawn(XilaProcess const * process, XilaDirectory const * directory, char const * path, size_t path_length, XilaSpawn const * spawn, XilaChild * * child) {
+    return xila_sdk_api->process_spawn(process, directory, path, path_length, spawn, child);
+}
+
+static XilaStatus unavailable_process_wait(XilaProcess const * process, XilaChild * child, uint32_t flags, int32_t * status) {
+    (void)process;
+    (void)child;
+    (void)flags;
+    (void)status;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_process_wait(XilaProcess const * process, XilaChild * child, uint32_t flags, int32_t * status) {
+    return xila_sdk_api->process_wait(process, child, flags, status);
+}
+
+static XilaStatus unavailable_process_child_close(XilaChild * child) {
+    (void)child;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_process_child_close(XilaChild * child) {
+    return xila_sdk_api->process_child_close(child);
+}
+
+static XilaStatus unavailable_env_get(XilaProcess const * process, char const * name, size_t name_length, char * buffer, size_t capacity, size_t * value_length) {
+    (void)process;
+    (void)name;
+    (void)name_length;
+    (void)buffer;
+    (void)capacity;
+    (void)value_length;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_env_get(XilaProcess const * process, char const * name, size_t name_length, char * buffer, size_t capacity, size_t * value_length) {
+    return xila_sdk_api->env_get(process, name, name_length, buffer, capacity, value_length);
+}
+
+static XilaStatus unavailable_env_set(XilaProcess const * process, char const * name, size_t name_length, char const * value, size_t value_length) {
+    (void)process;
+    (void)name;
+    (void)name_length;
+    (void)value;
+    (void)value_length;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_env_set(XilaProcess const * process, char const * name, size_t name_length, char const * value, size_t value_length) {
+    return xila_sdk_api->env_set(process, name, name_length, value, value_length);
+}
+
+static XilaStatus unavailable_env_remove(XilaProcess const * process, char const * name, size_t name_length) {
+    (void)process;
+    (void)name;
+    (void)name_length;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_env_remove(XilaProcess const * process, char const * name, size_t name_length) {
+    return xila_sdk_api->env_remove(process, name, name_length);
+}
+
 const XilaApi xila_sdk_fallback_api = {
     .version = (XILA_ABI_VERSION_MAJOR << 16) | XILA_ABI_VERSION_MINOR,
     .size = sizeof(XilaApi),
@@ -504,4 +607,13 @@ const XilaApi xila_sdk_fallback_api = {
     .time_resolution = unavailable_time_resolution,
     .time_sleep = unavailable_time_sleep,
     .random_fill = unavailable_random_fill,
+    .process_id = unavailable_process_id,
+    .process_parent_id = unavailable_process_parent_id,
+    .process_exit = unavailable_process_exit,
+    .process_spawn = unavailable_process_spawn,
+    .process_wait = unavailable_process_wait,
+    .process_child_close = unavailable_process_child_close,
+    .env_get = unavailable_env_get,
+    .env_set = unavailable_env_set,
+    .env_remove = unavailable_env_remove,
 };

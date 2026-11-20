@@ -8,7 +8,7 @@ use core::{
 use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::{process::Command, sync::Mutex};
 
-use executable::{Error, ExecutableContext, NativeFormat, Standard, execute};
+use executable::{Error, ExecutableContext, Home, NativeFormat, Standard, execute, execute_with};
 use file_system::{
     AccessFlags, BaseOperations, CharacterDevice, Context as DeviceContext, CreateFlags,
     DirectBaseOperations, DirectCharacterDevice, Flags, MountOperations, Permissions, Position,
@@ -165,7 +165,37 @@ impl MountOperations for FixtureEntropy {
 }
 impl DirectCharacterDevice for FixtureEntropy {}
 
+/// A sink that records its writes, to prove that finished processes released their streams.
+static SINK: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+
+struct Sink;
+impl DirectBaseOperations for Sink {
+    fn read(&self, _: &mut Context<'_>, _: &mut [u8], _: Size) -> Poll<file_system::Result<usize>> {
+        Poll::Ready(Err(file_system::IoErrorKind::Unsupported))
+    }
+
+    fn write(
+        &self,
+        _: &mut Context<'_>,
+        buffer: &[u8],
+        _: Size,
+    ) -> Poll<file_system::Result<usize>> {
+        SINK.lock().unwrap().extend_from_slice(buffer);
+        Poll::Ready(Ok(buffer.len()))
+    }
+}
+impl MountOperations for Sink {
+    fn unmount(&self) -> file_system::Result<()> {
+        Ok(())
+    }
+}
+impl DirectCharacterDevice for Sink {}
+
 fn build_fixture(name: &str, flags: &str) -> Vec<u8> {
+    build_fixture_from("start.c", name, flags)
+}
+
+fn build_fixture_from(source: &str, name: &str, flags: &str) -> Vec<u8> {
     let output = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
     let recipe = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -176,6 +206,7 @@ fn build_fixture(name: &str, flags: &str) -> Vec<u8> {
             .arg(recipe)
             .arg(&output)
             .env("XILA_FIXTURE_FLAGS", flags)
+            .env("XILA_FIXTURE_SOURCE", source)
             .status()
             .unwrap()
             .success()
@@ -346,4 +377,95 @@ async fn executes_c_elf_from_vfs_with_host_services() {
         Err(LoaderError::IncompatibleAbi(_))
     ));
     assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
+}
+
+/// A native program spawns copies of itself through `xila_process_spawn`, which goes
+/// through `executable::execute`, waits for them and collects their statuses.
+#[task::test]
+async fn native_process_spawns_waits_and_exits_through_the_host() {
+    let bytes = build_fixture_from("process.c", "xila-process.elf", "");
+    let time = Box::leak(Box::new(
+        time::Manager::new(&testing_support::TimeDevice).unwrap(),
+    ));
+    let tasks = task::test_manager();
+    let users = Box::leak(Box::new(users::Manager::new()));
+    let parent = tasks.get_current_task_identifier().await;
+    let device = file_system::MemoryDevice::<512>::new_static(128 * 1024);
+    let fs = little_fs::FileSystem::new_format(device, little_fs::Options::new(128)).unwrap();
+    let vfs = Box::leak(Box::new(
+        virtual_file_system::initialize(tasks, users, time, fs).unwrap(),
+    ));
+    let mut context = ExecutableContext::new(tasks, users, vfs, time);
+    context.formats = const { &[LOADER.registration()] };
+    let context = Box::leak(Box::new(context));
+
+    let create = Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None);
+    let write = async |path: &str, contents: &[u8], permissions: Permissions| {
+        let mut file = File::open(vfs, parent, path, create).await.unwrap();
+        assert_eq!(file.write(contents).await.unwrap(), contents.len());
+        file.close(vfs).await.unwrap();
+        vfs.set_permissions(parent, path, permissions)
+            .await
+            .unwrap();
+    };
+    write("/process.elf", &bytes, Permissions::EXECUTABLE).await;
+    write("/noexec.elf", &bytes, Permissions::NONE).await;
+    write("/bad.elf", b"\x7fELFnot an image", Permissions::EXECUTABLE).await;
+    write("/stdin", b"", Permissions::ALL_READ_WRITE).await;
+    vfs.mount_character_device(parent, "/sink", Sink)
+        .await
+        .unwrap();
+    let sink = File::open(vfs, parent, "/sink", AccessFlags::Write.into())
+        .await
+        .unwrap();
+    // The parent's task is the program's parent: its environment is copied at launch.
+    tasks
+        .set_environment_variable(parent, "FROM_HOST", "host")
+        .await
+        .unwrap();
+    let tasks_before = tasks.get_task_count().await;
+
+    let standard = Standard::new(
+        context,
+        File::open(vfs, parent, "/stdin", AccessFlags::Read.into())
+            .await
+            .unwrap(),
+        sink.duplicate().await.unwrap(),
+        sink.duplicate().await.unwrap(),
+    );
+    let launch = executable::Launch::default().with_home(Home {
+        path: file_system::PathOwned::new("/".into()).unwrap(),
+        rights: 3,
+    });
+    let handle = execute_with(
+        context,
+        "/process.elf",
+        vec!["parent".into(), parent.to_string()],
+        standard,
+        None,
+        launch,
+    )
+    .await
+    .unwrap();
+    // A nonzero status below 73 is the line of the failed check in process.c.
+    assert_eq!(handle.join().await, 73);
+
+    // Every image mapping and task is gone, and the exiting child's output was written.
+    assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
+    assert_eq!(tasks.get_task_count().await, tasks_before);
+    assert_eq!(SINK.lock().unwrap().as_slice(), b"bye");
+    // Each process, including the one that exited from a nested frame, closed its
+    // duplicates of the sink: only this handle keeps the device busy.
+    assert!(vfs.unmount("/sink", false).await.is_err());
+    sink.close(vfs).await.unwrap();
+    vfs.unmount("/sink", false).await.unwrap();
+    // The explicit environment of a child never touched the parent's task.
+    assert_eq!(
+        tasks
+            .get_environment_variable(parent, "FROM_HOST")
+            .await
+            .unwrap()
+            .get_value(),
+        "host"
+    );
 }
