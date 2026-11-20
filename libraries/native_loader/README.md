@@ -78,11 +78,11 @@ arguments and startup streams they point into. The coroutine entry receives
 only a pointer to it, so a program that overruns its own frames cannot damage the
 state `xila_process_exit` and the SDK's heap and standard error access depend
 on, and the host can reach the streams whatever the coroutine was doing. The
-allocation is released when the program returns or when the task is dropped. A
-cancelled coroutine's stack stays leaked, as stackful documents, and its
-streams are closed only when that allocation is dropped; closing them
-earlier and releasing the pipes a cancelled process holds is
-[Core #731](https://github.com/xila-project/core/issues/731).
+allocation is released when the program returns or when the task is
+dropped. A cancelled coroutine's stack, arguments and startup streams stay
+leaked, as stackful documents: the host state is reachable but its resources
+are not dropped. Closing them and releasing the pipes a cancelled process holds
+is [Core #731](https://github.com/xila-project/core/issues/731).
 
 The platform implements `ExecutableMemory`, including cache synchronization
 and executable permissions appropriate to its hardware

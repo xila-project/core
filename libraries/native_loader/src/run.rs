@@ -1,7 +1,7 @@
 extern crate alloc;
 
 use alloc::{alloc::alloc, boxed::Box, string::String, vec::Vec};
-use core::{alloc::Layout, cell::UnsafeCell, ptr::NonNull};
+use core::{alloc::Layout, cell::UnsafeCell, mem::ManuallyDrop, ptr::NonNull};
 
 use abi_application::{File, Heap, HostState, ProcessLaunch, XilaStartup, drive_process};
 
@@ -34,7 +34,10 @@ pub struct Startup {
 struct Process {
     _image: LoadedImage,
     heap: UnsafeCell<Heap>,
-    state: UnsafeCell<HostState>,
+    /// Never dropped by the allocation: every way a run ends but cancellation has
+    /// already emptied its resources. Closing what a cancelled process still holds
+    /// is #731's job, from the host side, with the state this field keeps.
+    state: ManuallyDrop<UnsafeCell<HostState>>,
 }
 
 /// The owner of a leaked [`Process`] allocation, freeing it on drop.
@@ -118,12 +121,12 @@ impl LoadedImage {
         let process = Owned::new(Process {
             _image: self,
             heap: UnsafeCell::new(Heap::new()),
-            state: UnsafeCell::new(HostState::new(
+            state: ManuallyDrop::new(UnsafeCell::new(HostState::new(
                 arguments,
                 standard_input,
                 standard_output,
                 standard_error,
-            )),
+            ))),
         })?;
         let heap = process.heap();
         let state = process.state();
