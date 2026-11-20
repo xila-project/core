@@ -41,13 +41,11 @@ static uint32_t open_flags(int flags) {
     return native;
 }
 
-static int open_directory(const struct xila_path *path, int flags) {
-    uint32_t rights = XILA_RIGHT_READ;
-    if ((flags & O_ACCMODE) != O_RDONLY)
-        rights |= XILA_RIGHT_WRITE;
+/* A directory descriptor is read-only: callers have rejected every write access mode. */
+static int open_directory(const struct xila_path *path) {
     XilaDirectory *directory = NULL;
-    XilaStatus status =
-        xila_directory_open(path->directory, path->relative, path->length, rights, &directory);
+    XilaStatus status = xila_directory_open(path->directory, path->relative, path->length,
+                                            XILA_RIGHT_READ, &directory);
     if (status != XILA_STATUS_OK)
         return xila_fail(status);
     int fd = xila_fd_allocate(directory, XILA_FD_DIRECTORY, 0);
@@ -61,17 +59,21 @@ int openat(int dirfd, const char *path, int flags, ...) {
     struct xila_path resolved;
     if (xila_path_resolve(dirfd, path, buffer, &resolved) != 0)
         return -1;
+    int read_only = (flags & O_ACCMODE) == O_RDONLY && !(flags & (O_CREAT | O_TRUNC));
     if (flags & O_DIRECTORY)
-        return open_directory(&resolved, flags);
+        return (flags & O_ACCMODE) == O_RDONLY ? open_directory(&resolved)
+                                               : xila_fail_errno(EISDIR);
 
     XilaFile *file = NULL;
     XilaStatus status = xila_file_open(resolved.directory, resolved.relative, resolved.length,
                                        open_flags(flags), &file);
-    if (status == XILA_STATUS_IS_A_DIRECTORY && (flags & O_ACCMODE) == O_RDONLY &&
-        !(flags & (O_CREAT | O_TRUNC)))
-        return open_directory(&resolved, flags); /* POSIX allows read-only open of a directory */
+    /* POSIX allows a read-only open of a directory. The root has an empty relative path,
+       which a file open rejects as an invalid argument. */
+    if (read_only && (status == XILA_STATUS_IS_A_DIRECTORY ||
+                      (status == XILA_STATUS_INVALID_ARGUMENT && resolved.length == 0)))
+        return open_directory(&resolved);
     if (status == XILA_STATUS_INVALID_ARGUMENT && resolved.length == 0)
-        return xila_fail_errno(EISDIR); /* the root itself */
+        return xila_fail_errno(EISDIR); /* the root opened for writing */
     if (status != XILA_STATUS_OK)
         return xila_fail(status);
     int fd = xila_fd_allocate(file, XILA_FD_FILE, 0);
@@ -181,12 +183,14 @@ static ssize_t positional(int fd, void *buffer, const void *source, size_t size,
         return xila_fail_errno(EINVAL);
     uint64_t saved = 0, ignored = 0;
     XilaStatus status = xila_file_seek(file, 0, XILA_SEEK_CURRENT, &saved);
-    if (status == XILA_STATUS_OK)
-        status = xila_file_seek(file, offset, XILA_SEEK_START, &ignored);
+    if (status != XILA_STATUS_OK)
+        return xila_fail(status); /* the cursor is unknown and nothing moved: leave it */
+    status = xila_file_seek(file, offset, XILA_SEEK_START, &ignored);
     size_t count = 0;
     if (status == XILA_STATUS_OK)
         status = buffer != NULL ? xila_file_read(file, buffer, size, &count)
                                 : xila_file_write(file, source, size, &count);
+    /* The cursor may have moved, even when the transfer failed: put it back. */
     XilaStatus restore = xila_file_seek(file, (int64_t)saved, XILA_SEEK_START, &ignored);
     if (status == XILA_STATUS_OK)
         status = restore;
@@ -398,11 +402,24 @@ int chdir(const char *path) {
 
 /* ---- directory streams --------------------------------------------------------- */
 
-/* DIR is opaque to applications: the stream keeps the listing and one entry. */
+/* DIR is opaque to applications: the stream keeps the listing and one entry, plus the
+   hash of the directory's absolute path that seeds d_ino. */
 struct xila_dir {
     XilaDirectoryIterator *iterator;
+    uint32_t seed;
     struct dirent entry;
 };
+
+/* The directory iterator reports a name and a kind, not an inode, and a statistics call
+   per entry would need the directory's path kept for the life of the stream. d_ino is
+   therefore a stable nonzero identifier derived from the absolute path (FNV-1a): the
+   same entry of the same directory always has the same value, which is what readdir
+   callers need (zero marks a deleted entry on some systems), but it is not st_ino. */
+static uint32_t fnv(uint32_t hash, const char *text, size_t length) {
+    for (size_t index = 0; index < length; ++index)
+        hash = (hash ^ (unsigned char)text[index]) * 16777619u;
+    return hash;
+}
 
 static unsigned char dirent_type(uint32_t kind) {
     switch (kind) {
@@ -431,6 +448,8 @@ DIR *opendir(const char *path) {
     struct xila_dir *stream = xila_heap_alloc(sizeof(*stream));
     if (stream == NULL)
         return NULL;
+    stream->seed = fnv(2166136261u, buffer, strlen(buffer));
+    stream->seed = fnv(stream->seed, "/", 1);
     XilaStatus status = xila_directory_iterator_open(resolved.directory, resolved.relative,
                                                      resolved.length, &stream->iterator);
     if (status != XILA_STATUS_OK) {
@@ -459,7 +478,8 @@ struct dirent *readdir(DIR *directory) {
     }
     stream->entry.d_name[length] = '\0';
     stream->entry.d_type = dirent_type(kind);
-    stream->entry.d_ino = 0;
+    uint32_t inode = fnv(stream->seed, stream->entry.d_name, length);
+    stream->entry.d_ino = (ino_t)(inode != 0 ? inode : 1);
     return &stream->entry;
 }
 

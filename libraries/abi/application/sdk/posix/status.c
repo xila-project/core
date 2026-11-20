@@ -48,7 +48,7 @@ static const struct xila_status_map status_map[] = {
     {XILA_STATUS_PROCESS_FILE_LIMIT, EMFILE},
     {XILA_STATUS_SYSTEM_FILE_LIMIT, ENFILE},
     {XILA_STATUS_CROSS_DEVICE, EXDEV},
-    {XILA_STATUS_PATH_ESCAPES_ROOT, EXDEV}, /* Linux reports RESOLVE_BENEATH escapes as EXDEV. */
+    {XILA_STATUS_PATH_ESCAPES_ROOT, EACCES}, /* the projection Core's io_error catalog defines */
     {XILA_STATUS_CORRUPT_DATA, EIO},
     {XILA_STATUS_MISSING_ATTRIBUTE, ENODATA},
     {XILA_STATUS_STALE_HANDLE, ESTALE},

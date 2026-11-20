@@ -31,7 +31,7 @@ int xila_cwd_set(const char *absolute) {
 
 /* Append the components of `path` to `output` (an absolute normalized path with room
    for XILA_PATH_MAX bytes). With allow_escape clear, ".." above the start of the
-   path fails with EACCES instead of stopping at the root. */
+   path fails with the errno of a path-escape status instead of stopping at the root. */
 static int append(char *output, size_t *length, const char *path, int allow_escape) {
     const char *cursor = path;
     while (*cursor != '\0') {
@@ -45,7 +45,7 @@ static int append(char *output, size_t *length, const char *path, int allow_esca
             continue;
         if (size == 2 && start[0] == '.' && start[1] == '.') {
             if (*length <= 1)
-                return allow_escape ? 0 : EACCES;
+                return allow_escape ? 0 : xila_errno_from_status(XILA_STATUS_PATH_ESCAPES_ROOT);
             while (*length > 1 && output[*length - 1] != '/')
                 --*length;
             if (*length > 1)

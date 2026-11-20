@@ -127,6 +127,6 @@ ssize_t getrandom(void *buffer, size_t size, unsigned int flags) {
 
 int getentropy(void *buffer, size_t size) {
     if (size > 256)
-        return xila_fail_errno(EIO);
+        return xila_fail_errno(EINVAL); /* POSIX.1-2024 */
     return getrandom(buffer, size, 0) < 0 ? -1 : 0;
 }
