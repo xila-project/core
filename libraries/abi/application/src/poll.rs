@@ -203,7 +203,7 @@ pub unsafe extern "C" fn xila_poll_wait(
     if in_coroutine && ready.count != 0 && !ready.precise {
         // Fallback events may be followed by WouldBlock on a nonblocking read.
         // Give the input producer a chance to run before native code retries.
-        crate::suspend_on_cancellable(task::yield_now());
+        crate::yield_once();
     }
     unsafe { ready_count.write(ready.count) };
     Status::Ok

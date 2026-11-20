@@ -186,6 +186,23 @@ fn suspend_dynamic(future: core::pin::Pin<&mut dyn core::future::Future<Output =
     suspend_on(future)
 }
 
+/// Give every other ready task on the executor one turn, then resume.
+///
+/// Shared by `xila_thread_yield` and fallback-only polls. It reuses the non-generic
+/// [`suspend_dynamic`] so a yield adds no new copy of the suspension machinery.
+#[inline(never)]
+fn yield_once() {
+    let mut yielded = false;
+    suspend_dynamic(core::pin::pin!(core::future::poll_fn(|cx| {
+        if core::mem::replace(&mut yielded, true) {
+            core::task::Poll::Ready(())
+        } else {
+            cx.waker().wake_by_ref();
+            core::task::Poll::Pending
+        }
+    })));
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)] // Fixture setup may report errors through Debug.
 mod tests {
