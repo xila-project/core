@@ -10,6 +10,10 @@ extern "C" {
 
 int32_t _xila_start(const XilaStartup *startup);
 
+/* The running process's capability, borrowed from the startup block for the entry
+   call; null outside it. The generated graphics functions pass it to the host. */
+extern const XilaProcess *xila_sdk_process;
+
 XilaStatus xila_directory_open(XilaDirectory const * parent, char const * path, size_t path_length, uint32_t rights, XilaDirectory * * directory);
 XilaStatus xila_directory_close(XilaDirectory * directory);
 XilaStatus xila_directory_create(XilaDirectory const * directory, char const * path, size_t length);
@@ -90,6 +94,7 @@ XilaStatus xila_file_duplicate(XilaFile const * file, XilaFile * * output);
 XilaStatus xila_file_control(XilaFile * file, uint32_t command, void const * input, size_t input_size, void * output, size_t output_size);
 XilaStatus xila_file_is_terminal(XilaFile * file, bool * terminal);
 XilaStatus xila_pipe_create(XilaProcess const * process, uint32_t flags, XilaFile * * reader, XilaFile * * writer);
+XilaStatus xila_graphics_call(XilaProcess const * process, uint32_t function, size_t const * arguments, size_t argument_count, void * result);
 
 #ifdef __cplusplus
 }

@@ -860,6 +860,19 @@ XilaStatus xila_pipe_create(XilaProcess const * process, uint32_t flags, XilaFil
     return xila_sdk_api->pipe_create(process, flags, reader, writer);
 }
 
+static XilaStatus unavailable_graphics_call(XilaProcess const * process, uint32_t function, size_t const * arguments, size_t argument_count, void * result) {
+    (void)process;
+    (void)function;
+    (void)arguments;
+    (void)argument_count;
+    (void)result;
+    return XILA_STATUS_UNAVAILABLE;
+}
+
+XilaStatus xila_graphics_call(XilaProcess const * process, uint32_t function, size_t const * arguments, size_t argument_count, void * result) {
+    return xila_sdk_api->graphics_call(process, function, arguments, argument_count, result);
+}
+
 const XilaApi xila_sdk_fallback_api = {
     .version = (XILA_ABI_VERSION_MAJOR << 16) | XILA_ABI_VERSION_MINOR,
     .size = sizeof(XilaApi),
@@ -943,4 +956,5 @@ const XilaApi xila_sdk_fallback_api = {
     .file_control = unavailable_file_control,
     .file_is_terminal = unavailable_file_is_terminal,
     .pipe_create = unavailable_pipe_create,
+    .graphics_call = unavailable_graphics_call,
 };

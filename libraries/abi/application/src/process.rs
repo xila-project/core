@@ -67,6 +67,12 @@ pub type SpawnFuture = Pin<Box<dyn Future<Output = Result<JoinHandle<isize>, Sta
 pub trait ProcessHost: Sync {
     fn task_manager(&self) -> &'static task::Manager;
     fn virtual_file_system(&self) -> &'static VirtualFileSystem;
+    /// The graphics manager the process draws on, or `None` when the system has
+    /// no display. `xila_graphics_call` reports Unavailable without one.
+    #[cfg(feature = "graphics")]
+    fn graphics_manager(&self) -> Option<&'static graphics::Manager> {
+        None
+    }
     /// Start the executable as a child task on the caller's executor. The child's
     /// coroutine must enter its program through [`ProcessLaunch::run`].
     fn spawn(&'static self, request: SpawnRequest) -> SpawnFuture;
@@ -206,7 +212,7 @@ async fn is_current(process: &Process) -> Result<(), Status> {
     }
 }
 
-fn this<'a>(process: *const Process) -> Result<&'a Process, Status> {
+pub(crate) fn this<'a>(process: *const Process) -> Result<&'a Process, Status> {
     // SAFETY: the caller guarantees a non-null pointer is a live capability.
     unsafe { process.as_ref() }.ok_or(Status::InvalidArgument)
 }

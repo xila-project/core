@@ -22,6 +22,9 @@ const NETWORK_SLOTS: &[&str] = &[
     "network_resolve",
 ];
 
+// This slot remains in the table when the runtime omits graphics.
+const GRAPHICS_SLOTS: &[&str] = &["graphics_call"];
+
 pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig) {
     let source = fs::read_to_string(root.join("src/api.rs")).unwrap();
     let syntax = syn::parse_file(&source).unwrap();
@@ -44,7 +47,10 @@ pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig) {
         #ifndef XILA_SDK_STUBS_H\n#define XILA_SDK_STUBS_H\n\n\
         #include \"application.h\"\n\n\
         #ifdef __cplusplus\nextern \"C\" {{\n#endif\n\n\
-        int32_t _xila_start(const XilaStartup *startup);\n\n"
+        int32_t _xila_start(const XilaStartup *startup);\n\n\
+        /* The running process's capability, borrowed from the startup block for the entry\n   \
+        call; null outside it. The generated graphics functions pass it to the host. */\n\
+        extern const XilaProcess *xila_sdk_process;\n\n"
     );
     let mut stubs = format!(
         "{generated}\
@@ -57,8 +63,10 @@ pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig) {
          .size = sizeof(XilaApi),\n",
     );
     let mut network_slots: BTreeSet<_> = NETWORK_SLOTS.iter().copied().collect();
+    let mut graphics_slots: BTreeSet<_> = GRAPHICS_SLOTS.iter().copied().collect();
     let mut slots = String::from("# Zero-based slot\tC symbol\n");
     let mut disabled_network = String::new();
+    let mut disabled_graphics = String::new();
     let mut disabled_threads = String::new();
     let mut layout = String::from(
         "const _: () = {\n\
@@ -144,6 +152,8 @@ pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig) {
 
         let disabled = if network_slots.remove(name.as_str()) {
             Some(&mut disabled_network)
+        } else if graphics_slots.remove(name.as_str()) {
+            Some(&mut disabled_graphics)
         } else if ["thread_", "mutex_", "condition_"]
             .iter()
             .any(|prefix| name.starts_with(prefix))
@@ -170,6 +180,10 @@ pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig) {
         network_slots.is_empty(),
         "Unknown network slots: {network_slots:?}"
     );
+    assert!(
+        graphics_slots.is_empty(),
+        "Unknown graphics slots: {graphics_slots:?}"
+    );
     fallback.push_str("};\n");
     stubs.push_str(&fallback);
     header.push_str("\n#ifdef __cplusplus\n}\n#endif\n\n#endif\n");
@@ -183,6 +197,7 @@ pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig) {
         ("stubs.c", stubs),
         ("slots.tsv", slots),
         ("disabled_network.rs", disabled_network),
+        ("disabled_graphics.rs", disabled_graphics),
         ("disabled_threads.rs", disabled_threads),
         ("api_layout.rs", layout),
     ] {

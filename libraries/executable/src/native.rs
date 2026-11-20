@@ -39,6 +39,11 @@ impl ProcessHost for ExecutableContext {
         self.virtual_file_system
     }
 
+    #[cfg(feature = "graphics")]
+    fn graphics_manager(&self) -> Option<&'static graphics::Manager> {
+        self.graphics_manager
+    }
+
     fn spawn(&'static self, request: SpawnRequest) -> SpawnFuture {
         Box::pin(async move {
             let SpawnRequest {

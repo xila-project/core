@@ -165,5 +165,5 @@ description = "Test ELF validation, executable dispatch, native C startup and th
 depends = ["sdk:build"]
 run = """
 set -eu
-cargo test --locked -p xila-executable --features native-dev
+cargo test --locked -p xila-executable --features native-dev,graphics
 """

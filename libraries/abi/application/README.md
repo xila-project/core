@@ -65,6 +65,7 @@ OutOfMemory.
 - `xila_process_id`, `xila_process_parent_id`, `xila_process_exit`: identity and termination.
 - `xila_process_spawn`, `xila_process_wait`, `xila_process_child_close`: children.
 - `xila_env_get`, `xila_env_set`, `xila_env_remove`, `xila_env_entry`: the process's environment.
+- `xila_graphics_call`: one graphics call (see [Optional graphics](#optional-graphics-graphics)).
 
 The host constructs capabilities with `Directory::new` and wraps existing streams
 with `File::new`. `into_raw` transfers ownership and unsafe `from_raw` reclaims it
@@ -368,7 +369,8 @@ The `#[repr(C)] XilaApi` struct in `src/api.rs` defines the slot order and
 signatures. All calls return the 32-bit `XilaStatus`. The table starts with
 the packed version and total byte size, then one function pointer per slot.
 Builds without the `network` feature keep the network slots and return
-`XILA_STATUS_UNSUPPORTED` from them.
+`XILA_STATUS_UNSUPPORTED` from them; builds without `graphics` do the same for
+`xila_graphics_call`.
 
 cbindgen generates `include/xila/application.h` without macro expansion. The
 build also parses `XilaApi` with syn to produce the SDK stubs and the zero-based
@@ -517,6 +519,44 @@ resources are dropped exactly once: when the entry returns, or when
 never starts the run drops the state itself. `run_main`
 is the exception: it is for a linked program on the caller's own stack and
 keeps the state in its frame.
+
+## Optional graphics (`graphics`)
+
+Graphics is disabled by default. With the `graphics` feature (the facade's `graphics`
+feature enables it through `xila-executable`), `xila_graphics_call(process, function,
+words, count, result)` runs one call of Core's graphics executor for the process. It is
+the native transport of the service the Wasm host also uses: the executor
+(`graphics::call`) owns the graphics lock, the per-process object table and cleanup,
+the event queue and the Xila extension calls; the transport only says how a pointer
+becomes memory. Here pointers are host pointers, read in place because native code is
+trusted. Strings are scanned with a bound (`strnlen` style), so the executor's limits cap
+how much memory an unterminated string makes the host read. Beyond those limits the only
+check is that a buffer's length can be a slice at all (at most `isize::MAX`, no wrap). `function` is a call ID from the catalog, `words` the call's `count` (at most 7)
+arguments, and `result` receives a pointer-sized word or a 32-bit value, depending on the
+call. The SDK generates a function for every call from the declaration that generates the
+executor, with the names of the Wasm guest API (`xila/graphics.h`, `xila_sys::graphics`);
+see the [SDK README](sdk/README.md#graphics).
+
+* **Per-process state.** The call's object table (`graphics::call::State`) belongs to the
+  process's host-owned `Resources`, off the coroutine stack, and is allocated by the
+  process's first call: a process that never draws holds one null pointer
+  (`Option<Box<State>>`; 4 bytes on a 32-bit target). It is deleted, with the LVGL objects
+  it names, when the process ends through a return from the entry or `xila_process_exit`,
+  before the files are closed. If the coroutine is cancelled while it waits to delete,
+  the table stays in the host state for the host to finish, as for every other resource.
+* **The lock.** A call waits for the graphics lock with `Manager::lock().await` inside
+  `suspend_on`, so a contended lock suspends the process, never the executor, and runs
+  the call with `graphics::call::execute_locked` once it has the lock. It never awaits
+  while holding it. Outside a coroutine the wait falls back to `block_on`, like every
+  other bridge.
+* **Status.** Wrong handles, arguments and values are `InvalidArgument`, a string, buffer
+  or table over its limit is `OutOfMemory`, no graphics manager in the executable context
+  (`ProcessHost::graphics_manager`) is `Unavailable`, and a build without the feature is
+  `Unsupported`. A process without the capability (a linked entry) gets `InvalidArgument`.
+* **No raw LVGL.** `lv_*` functions are not part of the ABI. They would bypass the
+  lock and the ownership above, so the objects of an exited or cancelled process would
+  leak (#731) and a process could delete another's. The call table is the whole surface; an
+  `lv_*` layer can be built on it later.
 
 ## Optional networking (`network`)
 

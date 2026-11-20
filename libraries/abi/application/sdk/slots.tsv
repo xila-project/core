@@ -79,3 +79,4 @@
 77	xila_file_control
 78	xila_file_is_terminal
 79	xila_pipe_create
+80	xila_graphics_call

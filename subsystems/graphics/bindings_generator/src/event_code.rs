@@ -77,5 +77,7 @@ pub enum EventCode {
     MarkedDeleting = 0x10000,
 }
 
+// A literal, `EventCode::Last + 3`: cbindgen cannot name the enum's variant in
+// a C expression, so the executor's tests check the two agree.
 /// Xila window close request, separate from LVGL's standard events.
-pub const EVENT_CLOSE_REQUESTED: u32 = EventCode::Last as u32 + 3;
+pub const EVENT_CLOSE_REQUESTED: u32 = 70;

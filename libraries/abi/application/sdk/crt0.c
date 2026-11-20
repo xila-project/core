@@ -11,6 +11,7 @@ __attribute__((section(".note.xila.abi"), aligned(4), used)) static const struct
 /* One instance per loaded image. The host calls _xila_start once per image. */
 extern const XilaApi xila_sdk_fallback_api;
 const XilaApi *xila_sdk_api = &xila_sdk_fallback_api;
+const XilaProcess *xila_sdk_process = NULL;
 
 extern int32_t xila_main(const XilaStartup *startup);
 
@@ -24,7 +25,9 @@ int32_t _xila_start(const XilaStartup *startup) {
     /* Install the table before calling the application. Code that runs before _xila_start sees
        the fallback table. */
     xila_sdk_api = startup->api;
+    xila_sdk_process = startup->process;
     int32_t result = xila_main(startup);
+    xila_sdk_process = NULL;
     xila_sdk_api = &xila_sdk_fallback_api;
     return result;
 }

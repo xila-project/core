@@ -2,7 +2,8 @@ use crate::*;
 use core::ffi::{c_char, c_void};
 
 /// Native application entry points, in slot order. The header precedes slot zero.
-/// Networking slots return Unsupported when the runtime omits networking.
+/// Networking slots return Unsupported when the runtime omits networking, and so does
+/// the graphics slot when it omits graphics.
 #[repr(C)]
 pub struct XilaApi {
     /// Packed major and minor ABI version.
@@ -319,12 +320,27 @@ pub struct XilaApi {
         reader: *mut *mut File,
         writer: *mut *mut File,
     ) -> Status,
+    /// Run one graphics call by its ID from `xila/graphics.h`. `arguments` holds
+    /// `argument_count` words (at most seven; null at zero) and `result` receives the
+    /// call's word or 32-bit result. The SDK's generated functions pack the words.
+    pub graphics_call: unsafe extern "C" fn(
+        process: *const Process,
+        function: u32,
+        arguments: *const usize,
+        argument_count: usize,
+        result: *mut c_void,
+    ) -> Status,
 }
 
 include!(concat!(env!("OUT_DIR"), "/api_layout.rs"));
 
 #[cfg(not(feature = "network"))]
 include!(concat!(env!("OUT_DIR"), "/disabled_network.rs"));
+
+#[cfg(feature = "graphics")]
+use crate::xila_graphics_call;
+#[cfg(not(feature = "graphics"))]
+include!(concat!(env!("OUT_DIR"), "/disabled_graphics.rs"));
 
 /// Shared API table. Native code receives its address through XilaStartup.
 pub static XILA_API: XilaApi = XilaApi {
@@ -410,4 +426,5 @@ pub static XILA_API: XilaApi = XilaApi {
     file_control: xila_file_control,
     file_is_terminal: xila_file_is_terminal,
     pipe_create: xila_pipe_create,
+    graphics_call: xila_graphics_call,
 };

@@ -2,7 +2,8 @@
 
 use core::ffi::{c_char, c_void};
 /// Native application entry points, in slot order. The header precedes slot zero.
-/// Networking slots return Unsupported when the runtime omits networking.
+/// Networking slots return Unsupported when the runtime omits networking, and so does
+/// the graphics slot when it omits graphics.
 #[repr(C)]
 pub struct XilaApi {
     /// Packed major and minor ABI version.
@@ -357,6 +358,16 @@ pub struct XilaApi {
         flags: u32,
         reader: *mut *mut File,
         writer: *mut *mut File,
+    ) -> Status,
+    /// Run one graphics call by its ID from `xila/graphics.h`. `arguments` holds
+    /// `argument_count` words (at most seven; null at zero) and `result` receives the
+    /// call's word or 32-bit result. The SDK's generated functions pack the words.
+    pub graphics_call: unsafe extern "C" fn(
+        process: *const Process,
+        function: u32,
+        arguments: *const usize,
+        argument_count: usize,
+        result: *mut c_void,
     ) -> Status,
 }
 pub const XILA_RIGHT_READ: u32 = 1;
