@@ -364,8 +364,11 @@ Builds without the `network` feature keep the network slots and return
 
 cbindgen generates `include/xila/application.h` without macro expansion. The
 build also parses `XilaApi` with syn to produce the SDK stubs and the zero-based
-slot snapshot `sdk/slots.tsv`. The build checks every slot offset and the table
-size on the compilation target. Refresh and verify the committed files with:
+slot snapshot `sdk/slots.tsv`, plus the bindings in `sdk/rust/xila-sys`. Both
+bindings use the status enum generated from the I/O kind catalog. Compile-time
+checks compare the Rust guest's type sizes, alignments and field offsets to the
+host, including every slot in snapshot order. Opaque handles expose only their
+pointer representation. Refresh and verify the committed files with:
 
 ```sh
 XILA_UPDATE_HEADER=1 cargo test -p xila-abi-application generated_header
@@ -374,8 +377,13 @@ cargo test -p xila-abi-application-c-tests
 
 ABI 0.1 is pre-release. Rebuild native apps against the matching SDK when the
 table or status numbers change. After the first release, append slots for minor
-versions and increment the major version for incompatible changes. Keep Rust
-object layouts opaque to C callers.
+versions and increment the major version for incompatible changes. Keep host object layouts opaque to guests
+in both languages.
+
+Rust applications can depend on the standalone `no_std` crate `xila-sys`
+and call through `XilaStartup.api`. Its optional runtime supplies an entry
+macro, a panic hook, and a process allocator. See [Rust in the SDK
+README](sdk/README.md#rust) for the guest build and example.
 
 Status zero is success. The unified status ranges are `0x0100–0x01FF` for
 common errors, `0x0200–0x02FF` for storage and paths, `0x0300–0x03FF` for

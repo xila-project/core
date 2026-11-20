@@ -18,7 +18,7 @@ use std::{
 
 use common::{FixtureEntropy, MAPPINGS, Mmap};
 use core::sync::atomic::Ordering;
-use executable::{ExecutableContext, Home, Launch, NativeFormat, Standard, execute_with};
+use executable::{ExecutableContext, Home, Launch, NativeFormat, Standard, execute, execute_with};
 use file_system::{AccessFlags, CreateFlags, Flags, PathOwned, Permissions};
 use task::TaskIdentifier;
 use virtual_file_system::{File, VirtualFileSystem};
@@ -201,8 +201,7 @@ async fn launch(
     )
 }
 
-#[task::test]
-async fn runs_sdk_c_program_through_the_posix_layer() {
+async fn setup() -> (&'static ExecutableContext, TaskIdentifier) {
     let time = Box::leak(Box::new(
         time::Manager::new(&testing_support::TimeDevice).unwrap(),
     ));
@@ -218,6 +217,62 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
     context.formats = const { &[LOADER.registration()] };
     let context = Box::leak(Box::new(context));
 
+    (context, parent)
+}
+
+#[task::test]
+#[ignore = "run with mise run sdk:rust-example"]
+async fn runs_sdk_rust_hello() {
+    let path = std::env::var_os("XILA_RUST_HELLO").expect("set by sdk:rust-example");
+    let bytes = std::fs::read(path).unwrap();
+    let (context, parent) = setup().await;
+    let vfs = context.virtual_file_system;
+    install(vfs, parent, "/rust-hello", &bytes).await;
+    let create = Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None);
+
+    for (arguments, status, stdout, stderr) in [
+        (
+            vec![],
+            73,
+            b"Hello from Rust on Xila!\n".as_slice(),
+            b"".as_slice(),
+        ),
+        (
+            vec!["panic".into()],
+            134,
+            b"".as_slice(),
+            b"panicked\n".as_slice(),
+        ),
+    ] {
+        let output_path = format!("/rust-{status}.out");
+        let error_path = format!("/rust-{status}.err");
+        let input = File::open(vfs, parent, "/input", create).await.unwrap();
+        let output = File::open(vfs, parent, output_path.as_str(), create)
+            .await
+            .unwrap();
+        let error = File::open(vfs, parent, error_path.as_str(), create)
+            .await
+            .unwrap();
+        let handle = execute(
+            context,
+            "/rust-hello",
+            arguments,
+            Standard::new(context, input, output, error),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(handle.join().await, status);
+        assert_eq!(read_all(vfs, parent, &output_path).await, stdout);
+        assert_eq!(read_all(vfs, parent, &error_path).await, stderr);
+        assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
+    }
+}
+
+#[task::test]
+async fn runs_sdk_c_program_through_the_posix_layer() {
+    let (context, parent) = setup().await;
+    let vfs = context.virtual_file_system;
     vfs.create_directory(parent, &"/devices").await.unwrap();
     vfs.create_directory(parent, &"/devices/random")
         .await

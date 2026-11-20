@@ -1,0 +1,20 @@
+[package]
+name = "xila-rust-hello"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+
+[workspace]
+
+[dependencies]
+xila-sys = { path = "../xila-sys", features = ["runtime"] }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+codegen-units = 1
+strip = "symbols"

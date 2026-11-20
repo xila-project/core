@@ -1,7 +1,8 @@
 # Xila native SDK
 
-Compile C against picolibc and a POSIX layer, link a static PIE, and run it on
-Xila without rebuilding the firmware. Core's CI builds one archive per target
+Compile C against picolibc and a POSIX layer, or Rust against the raw
+`xila-sys` bindings. Link a static PIE and run it on Xila without rebuilding
+the firmware. Core's CI builds one archive per target
 and uploads it as a workflow artifact:
 
     xila-sdk-<abi>-<target>.tar.zst      for example xila-sdk-0.1-thumbv7em-none-eabihf.tar.zst
@@ -24,6 +25,7 @@ xila-sdk-0.1-<target>/
     libxila_posix.a         the POSIX layer; also defines xila_main, which calls main
     libc.a, libm.a          picolibc (libm.a is empty: the math library is inside libc.a)
     xila-static-pie.ld      the loader's linker script
+  rust/xila-sys/             standalone Rust bindings and optional entry runtime
   cmake/xila-toolchain.cmake
   share/xila/example/hello  the example below
 ```
@@ -65,6 +67,48 @@ discards buffered output and skips exit handlers.
 clocks, `nanosleep` and `getentropy`. Core's test builds it with this toolchain file
 and runs it through the VFS, the executable dispatch table, the native loader and
 the ABI table (`libraries/executable/tests/sdk.rs`).
+
+## Rust
+
+Add a path dependency on `rust/xila-sys` from the SDK archive (or
+`libraries/abi/application/sdk/rust/xila-sys` in Core). The crate has no
+dependencies and works with Rust 1.97. It exposes the same startup record,
+opaque capabilities, ABI constants and table as the C header. Calls through the
+table are unsafe. Follow the ABI's buffer, lifetime and ownership rules,
+especially for the borrowed startup streams. `Status` preserves every 32-bit
+value, including status codes introduced by later hosts. Use `Mutex::ZERO` and
+`Condition::ZERO` for initial synchronization storage.
+
+Enable the `runtime` feature for `xila_sys::entry!(main)`. It emits
+`_xila_start` and the ELF ABI note, checks both sizes and the table
+version, then calls your `unsafe fn main(*const xila_sys::XilaStartup) -> i32`.
+The result is the process exit status. During entry, `xila_sys::runtime::api()`
+returns `Some(&XilaApi)`, and it returns `None` outside entry. Define a
+`#[panic_handler]` and call `xila_sys::runtime::panic_abort()` to report
+`panicked` on standard error and exit with status 134. If you use
+`alloc`, you can install `xila_sys::runtime::ProcessAllocator` as your
+`#[global_allocator]`. The host reclaims the guest heap on exit.
+
+From a Core checkout on Linux x86-64 with Rustup and LLVM (including LLD):
+
+```sh
+mise run sdk:rust-example
+```
+
+This builds `sdk/rust/hello` for Linux x86-64 and Cortex-M4F, checks both
+ELFs with `tools/sdk/check_elf.py`, and runs the Linux image through
+`executable::execute`. The program reads the monotonic clock, exercises the
+process heap by growing a `Vec` and resizing a 64-byte-aligned block, writes to
+its borrowed stdout and returns status 73. A second launch checks the panic
+diagnostic and exit status.
+
+For a standalone build, use the nightly pinned in Core's `mise.toml` with
+`rust-src` and `-Z build-std=core,compiler_builtins` (add `alloc` if used).
+Compile with `panic = "abort"` and `-C relocation-model=pic`, including the
+rebuilt sysroot. Link directly with LLD using the SDK's
+`lib/xila-static-pie.ld` and the options in `tools/sdk/build.py`, including
+`-pie --no-dynamic-linker -Bsymbolic` and the target's data alignment. The
+Rust entry shim provides the ABI note and needs no C startup object or libc.
 
 ## How it maps onto the native ABI
 

@@ -27,6 +27,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 ROOT = Path(__file__).resolve().parents[2]
 SDK_SOURCE = ROOT / "libraries/abi/application"
+RUST_CRATE = SDK_SOURCE / "sdk/rust/xila-sys"
+RUST_MANIFESTS = ("Cargo.toml", "Cargo.lock")
 LOADER = ROOT / "libraries/native_loader"
 OUTPUT = ROOT / "target/sdk"
 
@@ -358,6 +360,10 @@ def assemble(target, pin, install, crt0, libraries, work):
     for example in (SDK_SOURCE / "sdk/example/hello").iterdir():
         shutil.copy(example, root / "share/xila/example/hello" / example.name)
     shutil.copy(SDK_SOURCE / "sdk/README.md", root / "README.md")
+    rust = root / "rust/xila-sys"
+    shutil.copytree(RUST_CRATE / "src", rust / "src", dirs_exist_ok=True)
+    for manifest in RUST_MANIFESTS:
+        shutil.copy(RUST_CRATE / manifest, rust / manifest)
 
     config = TARGETS[target]
     template = (SDK_SOURCE / "sdk/cmake/xila-toolchain.cmake.in").read_text()
@@ -500,11 +506,48 @@ def verify_stack_protector(target, sdk):
     print(f"{image}: stack protector program linked, ELF checks passed")
 
 
+def verify_rust_crate(sdk):
+    """Compare the archive's rust/ tree against the SDK crate in the checkout."""
+    prefix = f"{sdk.name}/rust"
+    crate = f"{prefix}/xila-sys"
+    expected = {prefix: None, crate: None}
+    paths = [RUST_CRATE / name for name in RUST_MANIFESTS]
+    paths.extend([RUST_CRATE / "src", *(RUST_CRATE / "src").rglob("*")])
+    for path in paths:
+        name = f"{crate}/{path.relative_to(RUST_CRATE).as_posix()}"
+        expected[name] = None if path.is_dir() else path.read_bytes()
+
+    archive = OUTPUT / f"{sdk.name}.tar.zst"
+    differences = []
+    with subprocess.Popen(["zstd", "-dc", archive], stdout=subprocess.PIPE) as decompressor:
+        with tarfile.open(fileobj=decompressor.stdout, mode="r|") as tar:
+            for member in tar:
+                if member.name != prefix and not member.name.startswith(f"{prefix}/"):
+                    continue
+                if member.name not in expected:
+                    differences.append(f"unexpected {member.name}")
+                    continue
+                contents = expected.pop(member.name)
+                matches = (member.isdir() if contents is None else
+                           member.isfile() and tar.extractfile(member).read() == contents)
+                if not matches:
+                    differences.append(f"differs: {member.name}")
+        # The decompressor may still have tar padding buffered in its output.
+        decompressor.stdout.read()
+        if decompressor.wait() != 0:
+            sys.exit(f"error: could not decompress {archive}")
+    differences.extend(f"missing {name}" for name in sorted(expected))
+    if differences:
+        sys.exit(f"error: Rust SDK crate in {archive} differs from the checkout:\n"
+                 + "\n".join(differences))
+    print(f"{archive}: rust/ matches the SDK source crate")
+
+
 def verify(args):
-    """Build the hello example with the SDK's CMake toolchain, assert the ELF contract and
-    report the image footprint."""
+    """Verify the archive's Rust crate and the C examples' ELF contract, and report sizes."""
     target = args.target
     sdk = sdk_directory(target)
+    verify_rust_crate(sdk)
     build = OUTPUT / target / "example-hello"
     run(["cmake", "-S", sdk / "share/xila/example/hello", "-B", build,
          f"-DCMAKE_TOOLCHAIN_FILE={sdk / 'cmake/xila-toolchain.cmake'}",
@@ -529,6 +572,39 @@ def verify(args):
     run([find_tool("llvm-size"), "-t", "libxila_posix.a", "libxila.a", "crt0.o"], cwd=sdk / "lib")
 
 
+def rust_example(_args):
+    """Build an independent PIC sysroot for the Rust guest and verify both images."""
+    nightly = tomllib.loads((ROOT / "mise.toml").read_text())["vars"]["nightly_version"]
+    example = SDK_SOURCE / "sdk/rust/hello"
+    output = OUTPUT / "rust-hello"
+    for target in (HOST_TARGET, "thumbv7em-none-eabihf"):
+        linker = [
+            "-pie", "--no-dynamic-linker", "-Bsymbolic", "-z", "max-page-size=16",
+            "--gc-sections", "--build-id=none",
+            f"--defsym=XILA_DATA_ALIGN={TARGETS[target]['data_alignment']}",
+            f"-T{LOADER / 'xila-static-pie.ld'}",
+        ]
+        flags = [
+            "-C", "relocation-model=pic",
+            "-C", f"linker={find_tool('ld.lld')}",
+            "-C", "linker-flavor=ld.lld",
+            *(f"-Clink-arg={arg}" for arg in linker),
+        ]
+        env = dict(os.environ, CARGO_ENCODED_RUSTFLAGS="\x1f".join(flags))
+        run(["rustup", "run", nightly, "cargo", "build", "--locked", "--release",
+             "--target", target, "--target-dir", output, "-Z", "build-std=core,alloc,compiler_builtins",
+             "-Z", "build-std-features=compiler-builtins-mem"], cwd=example, env=env)
+        image = output / target / "release/xila-rust-hello"
+        problems = check_target(image.read_bytes(), target)
+        for problem in problems:
+            print(f"{image}: {problem}", file=sys.stderr)
+        if problems:
+            sys.exit(1)
+        print(f"{image}: ELF checks passed")
+        run([find_tool("llvm-size"), image])
+        print(f"ELF file: {image.stat().st_size} bytes")
+
+
 def main():
     # LLVM tools may live in a versioned directory that is not on PATH (clang finds them
     # next to itself): put lld's directory first so meson's and clang's linker probes work.
@@ -542,6 +618,8 @@ def main():
     verify_parser = commands.add_parser("verify", help="build the example and check the ELF")
     verify_parser.add_argument("--target", default=HOST_TARGET, choices=sorted(TARGETS))
     verify_parser.set_defaults(function=verify)
+    rust_parser = commands.add_parser("rust-example", help="build and check the Rust static PIE example")
+    rust_parser.set_defaults(function=rust_example)
     args = parser.parse_args()
     args.function(args)
 

@@ -1,4 +1,5 @@
 mod generate_api;
+mod generate_rust;
 mod generate_status;
 
 use std::{env, path::PathBuf};

@@ -19,6 +19,8 @@ EXPECTED_PACKAGE_NAMES = {
     "drivers/peripherals/Cargo.toml": "xila-drivers-peripherals",
     "libraries/abi/application/Cargo.toml": "xila-abi-application",
     "libraries/abi/application/c_tests/Cargo.toml": "xila-abi-application-c-tests",
+    "libraries/abi/application/sdk/rust/hello/Cargo.toml": "xila-rust-hello",
+    "libraries/abi/application/sdk/rust/xila-sys/Cargo.toml": "xila-sys",
     "libraries/c_support/Cargo.toml": "xila-c-support",
     "libraries/audio/Cargo.toml": "xila-audio",
     "libraries/authentication/Cargo.toml": "xila-authentication",

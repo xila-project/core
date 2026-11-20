@@ -449,6 +449,16 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn("ci:packages-sdk", ci_config()["tasks"]["ci:host-tests"]["depends"])
         self.assertIn("sdk:build", configured_tasks("ci")["test:native-loader"]["depends"])
 
+    def test_rust_sdk_keeps_the_guest_toolchain_isolated(self):
+        tasks = ci_config()["tasks"]
+        self.assertIn("mise run sdk:rust-example", tasks["ci:host-tests"]["run"])
+        shared = tomllib.loads((ROOT / "mise.toml").read_text())
+        example = shared["tasks"]["sdk:rust-example"]
+        self.assertEqual(example["tools"]["rust"]["version"], "{{ vars.rust_version }}")
+        self.assertIn("rustup toolchain install {{ vars.nightly_version }}", example["run"])
+        self.assertIn("uv run --no-project python tools/sdk/build.py rust-example", example["run"])
+        self.assertIn("runs_sdk_rust_hello --ignored --exact", example["run"])
+
     def test_verification_failure_blocks_required_check(self):
         required = job("ci.yml", "required")
         script = textwrap.dedent(required.split("        run: |\n", 1)[1])

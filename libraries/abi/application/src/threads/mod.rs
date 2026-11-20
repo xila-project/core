@@ -38,6 +38,9 @@ pub struct Condition {
     waiters: *mut c_void,
 }
 
+// Compare the guest ABI on every target, including the private thread record fields.
+include!(concat!(env!("OUT_DIR"), "/rust_layout.rs"));
+
 #[cfg(any(
     all(
         any(target_arch = "x86_64", target_arch = "aarch64"),
