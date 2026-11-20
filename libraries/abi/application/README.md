@@ -128,38 +128,30 @@ unregisters. A task identifier can be reused after the task ends, so hold a
 
 ### Exit
 
-`xila_process_exit(process, status)` ends the process at once and does not return.
-It does not unwind. It closes the standard streams and frees the startup strings,
-home capability and arguments that the host handed over, then switches off the
-coroutine for good: the coroutine finishes with `status` exactly as if the entry
-had returned it, the join handle reports it, and the host frees the stack with the
-coroutine control block (`stackful::exit`). The frames between the call and the
-entry are abandoned without running anything, like a `longjmp` that never lands, so
-buffered stdio, `atexit` handlers and objects the application opened or allocated
-itself stay unreleased, exactly as when `_xila_start` returns without closing them.
-The process heap and the loaded image belong to the task's owner, not the coroutine
-stack, and are released when the task ends, so the rule in the heap section holds. A
-Rust native application that exits abandons its live destructors the same way.
+A return from the native entry or a successful `xila_process_exit(process, status)`
+ends all threads in the process, including detached ones. The host does not wait
+for them or resume their pending operations. The task's join handle reports the
+entry's return value or the explicit exit status. Child processes have their
+usual independent lifetimes.
 
-Abandoning the stack is sound only because the host never calls back into C with
-host state on the stack. Every host frame between the entry and the exit call has
-returned before C runs again, so the frames that are abandoned are C's alone and own
-nothing the host must release: no lock, guard or borrowed capability. No ABI call
-takes a C callback today. A future call that did would have to keep its host state
-out of the callback's frames, or `xila_process_exit` from the callback would leak it.
-Native code is trusted, so the invariant is documented here and on `enter` instead of
-being checked at run time.
+The coroutine that calls `xila_process_exit` leaves through `stackful::exit`.
+Its native frames are abandoned without unwinding or running destructors. The
+main coroutine releases the granted startup streams, strings and home directory
+on return. An explicit process exit from any thread stops its peers and releases
+the same startup resources. Unstarted workers and workers that finish release
+their stacks. Suspended peers leak their stacks and anything held by
+abandoned frames, such as a temporary VFS handle, under
+[Core #731](https://github.com/xila-project/core/issues/731). The process heap and
+mapped image belong to the loader's task future and are reclaimed after all C
+execution has ended.
 
-Only a process on its own coroutine can exit. Elsewhere (a built-in application, or a
-target without stack switching) the call returns Unsupported and the entry must
-return. Passing another process's capability returns InvalidArgument without effect.
-
-Cancellation is a different path. Core has no kill call: signals are advisory, and
-a task is dropped only by executor teardown. Dropping the task releases the image and
-the heap and leaks the coroutine stack, the startup streams and the objects the
-application opened, as stackful and
-[Core #731](https://github.com/xila-project/core/issues/731) describe.
-`xila_process_exit` is the clean way out.
+The host invokes native entry points with no owned guards in their callback
+frames. The SDK first calls `xila_thread_stop_others(process)` for terminal
+cleanup. The driver thereafter polls only that caller, including if a cleanup
+operation suspends. The caller must complete process exit without waiting for
+a peer. New worker creation returns InvalidState.
+A process on a target without stack switching must return from its entry.
+Passing another process's capability fails with InvalidArgument.
 
 ### Spawn, wait and ownership
 
@@ -231,6 +223,70 @@ length and leaves the buffer unchanged; a null buffer is allowed at capacity zer
 `=` or NUL and values are UTF-8 without NUL, otherwise InvalidArgument. Entries are not
 bounded: the memory comes from the system allocator, which follows its usual
 failure policy, and applications are trusted not to flood it.
+
+## Native threads and local storage
+
+`xila_thread_spawn(process, stack_size, entry, argument, &id)` creates a local
+stackful coroutine. A worker shares the process's task identity, permissions,
+heap and executor with main. The driver polls main and the workers as one Core
+task using its real executor waker. Drivers keep their existing affinity.
+Scheduling is cooperative. A worker starts when the caller suspends and can
+yield explicitly through `xila_thread_yield`. A worker that never yields or
+waits can monopolize the executor.
+
+A zero stack size selects 4 KiB on bare metal or 64 KiB on Linux. Explicit sizes
+are 2–64 KiB inclusive, rounded up to 16 bytes with a 64-byte guard. Size for the
+deepest ABI call, debug frames and any interrupts that share the stack. Stacks
+and worker records are allocated on demand. Stack allocation and worker-table
+growth can return OutOfMemory. Stackful control block allocation follows the
+runtime allocator's failure policy.
+
+`xila_thread_current` reports a nonzero ID unique within that process lifetime.
+Main has ID 1. A worker returns one opaque pointer-sized result. Only its creator
+can join and reap the result. Self-joins return Deadlock, join by another thread
+returns NoChild and a missing worker returns NoSuchTask. Any thread in the process
+can detach a worker that is still joinable. Detaching discards its result and
+reaps it once it finishes. A returning worker's unjoined children are detached
+automatically. Completion frees the stack immediately, even while a join result
+is pending. `xila_thread_exit(result)` lets a worker finish with a join result by
+abandoning its own frames. SDK workers run their TLS destructors before calling it.
+
+The process can create up to eight TLS keys. Each key holds a pointer-sized value
+for each coroutine, initially null. Deleting a key invalidates it and leaves
+ownership of its values with the application. A new key starts empty, including
+when it reuses a deleted key's slot. The host does not call TLS destructors. The
+SDK layers POSIX destructors on top, and reserves a separate coroutine-local
+`XilaThreadLibc` for errno, strtok and the rand/random family.
+
+The native loader wraps process entries with `drive_process`. Other loaders can
+wrap a `ProcessLaunch::run` coroutine the same way. Thread calls without a process
+driver, including on targets without native stack switching, return Unsupported.
+
+### Mutexes and condition variables
+
+`XilaMutex` and `XilaCondition` are caller-owned objects with fixed addresses.
+Zero initialization gives a plain mutex or an empty condition variable. Use
+`xila_mutex_init` with `XILA_MUTEX_RECURSIVE` to select recursive locking.
+Only the owner can unlock. A plain self-lock returns Deadlock, and a contended
+`XILA_MUTEX_TRY` returns WouldBlock. Final unlock transfers ownership directly
+to the oldest queued locker. Destroy while locked or waiting returns ResourceBusy.
+The mutex must stay live throughout a condition wait, including reacquisition.
+
+A condition wait enqueues the caller before it releases the mutex, without
+a suspension in between. It accepts a mutex held exactly once and reacquires
+it before returning. Signal removes and wakes the oldest waiter. Broadcast removes
+and wakes all waiters, so the condition can be destroyed immediately afterward.
+Callers should recheck their predicate under the mutex. A non-null deadline is absolute signed
+nanoseconds on the selected ABI clock. The host samples that clock once and
+uses the executor timer for the remaining duration. Realtime requires a
+synchronized clock and later UTC adjustments do not change an armed wait.
+Timeout returns TimedOut after reacquiring the mutex.
+
+Join and synchronization waits suspend through `suspend_on`. Queue nodes are
+stored on waiting stacks. No wait allocates or wakes itself while pending.
+A worker must release its locks before ending. Individual worker cancellation and
+robust-lock recovery are outside this ABI. Terminal cleanup stops peers permanently
+under #731, so the cleanup caller must avoid waiting on locks they own.
 
 ## Header and compatibility
 
@@ -333,8 +389,7 @@ links `sdk/crt0.c` and `sdk/stubs.c`, using `-Iinclude/xila -Isdk` and including
 `stubs.h`. crt0 also carries the `XILA` ABI note the loader requires. The host calls `_xila_start` once per image. crt0 checks the startup
 and table sizes and the ABI version, installs the image-local table pointer,
 then calls `xila_main`. Before startup and after `xila_main` returns, all stubs
-return `XILA_STATUS_UNAVAILABLE`. The entry must join any users of the stubs
-before returning. Invalid startup returns -1. The [native loader](../../native_loader/README.md) maps
+return `XILA_STATUS_UNAVAILABLE`. Once the entry returns, the host ends all remaining workers. Invalid startup returns -1. The [native loader](../../native_loader/README.md) maps
 such an image and calls `_xila_start`.
 Built-in callers use their startup pointer directly so concurrent executions can
 borrow different capabilities.

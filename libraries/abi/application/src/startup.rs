@@ -88,8 +88,8 @@ pub unsafe fn run_main(
 /// abandoned by that call without running a destructor. That is sound only because
 /// the host never calls back into C with host state (a lock, guard or borrow) on the
 /// stack: whenever C runs, the only host frames below it are this one and the
-/// coroutine's own, and `resources` is emptied by exit before they are abandoned. No
-/// ABI call takes a C callback today; one that did would break the invariant.
+/// coroutine's own. Explicit process exit empties `resources` after stopping peers.
+/// Worker callbacks are separate coroutine entries and carry no host-owned guards.
 ///
 /// # Safety
 /// Same as [`run_main`].
@@ -137,5 +137,12 @@ pub(crate) unsafe fn enter(
             .map_or(ptr::null_mut(), ptr::from_mut),
         process: process.as_ref().map_or(ptr::null(), ptr::from_ref),
     };
-    unsafe { entry(&startup) }
+    if !startup.process.is_null() {
+        crate::threads::bind_process(startup.process);
+    }
+    let status = unsafe { entry(&startup) };
+    if !startup.process.is_null() {
+        crate::threads::stop_workers();
+    }
+    status
 }

@@ -61,6 +61,27 @@ XilaStatus xila_process_child_close(XilaChild * child);
 XilaStatus xila_env_get(XilaProcess const * process, char const * name, size_t name_length, char * buffer, size_t capacity, size_t * value_length);
 XilaStatus xila_env_set(XilaProcess const * process, char const * name, size_t name_length, char const * value, size_t value_length);
 XilaStatus xila_env_remove(XilaProcess const * process, char const * name, size_t name_length);
+XilaStatus xila_thread_spawn(XilaProcess const * process, size_t stack_size, XilaThreadEntry entry, void * argument, size_t * thread);
+XilaStatus xila_thread_join(size_t thread, void * * result);
+XilaStatus xila_thread_detach(size_t thread);
+XilaStatus xila_thread_yield(void);
+XilaStatus xila_thread_current(size_t * thread);
+XilaStatus xila_thread_key_create(size_t * key);
+XilaStatus xila_thread_key_delete(size_t key);
+XilaStatus xila_thread_tls_get(size_t key, void * * value);
+XilaStatus xila_thread_tls_set(size_t key, void * value);
+XilaStatus xila_thread_libc(XilaThreadLibc * * location);
+XilaStatus xila_mutex_init(XilaMutex * mutex, uint32_t flags);
+XilaStatus xila_mutex_destroy(XilaMutex * mutex);
+XilaStatus xila_mutex_lock(XilaMutex * mutex, uint32_t flags);
+XilaStatus xila_mutex_unlock(XilaMutex * mutex);
+XilaStatus xila_condition_init(XilaCondition * condition);
+XilaStatus xila_condition_destroy(XilaCondition * condition);
+XilaStatus xila_condition_wait(XilaCondition * condition, XilaMutex * mutex, uint32_t clock, int64_t const * deadline);
+XilaStatus xila_condition_notify(XilaCondition * condition, bool all);
+XilaStatus xila_thread_has_workers(bool * live);
+XilaStatus xila_thread_stop_others(XilaProcess const * process);
+XilaStatus xila_thread_exit(void * result);
 
 #ifdef __cplusplus
 }

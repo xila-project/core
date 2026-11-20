@@ -2,6 +2,7 @@ fn main() {
     cc::Build::new()
         .file("src/clock_random.c")
         .file("src/process.c")
+        .file("src/threads.c")
         .file("src/round_trip.c")
         .file("src/startup.c")
         .file("src/sdk.c")

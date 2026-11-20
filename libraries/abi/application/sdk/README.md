@@ -53,10 +53,9 @@ rejects an image with `DT_INIT`, a non-empty `DT_INIT_ARRAY` or `PT_TLS`.
 Copy `hello.elf` to a filesystem the platform's native format reads (Core's
 `NativeFormat`, the `native-dev` feature) and execute it. `main(int argc, char **argv)`
 receives the arguments; `argv[0]` is empty until the host passes the program name.
-Returning from `main` and `exit` end the program after the `atexit` handlers have run and
-every stream is flushed; `_exit` ends it at once, without handlers and without flushing,
-as POSIX requires (the descriptors the program left open are still closed). A stream
-written and not flushed before `_exit` loses its data.
+Returning from `main` uses `exit` and performs the cleanup described below.
+Both `exit` and `_exit` close the descriptors the program left open. `_exit`
+discards buffered output and skips exit handlers.
 
 ### The example
 
@@ -93,15 +92,24 @@ the ABI table (`libraries/executable/tests/sdk.rs`).
   `stderr` is unbuffered, so each write reaches the host when it is made. `printf` and `scanf` are integer-only by default;
   configure with `-DXILA_PRINTF_FORMAT=double` (or `float`, `long-long`, `minimal`)
   to link picolibc's other variants. Floating point costs several KB of flash.
-* **errno and libc state.** picolibc is built with `-Dthread-local-storage=false
-  -Derrno-function=__xila_errno_location`. There is one coroutine per application
-  today, so `errno` is process-wide; `__xila_errno_location` is the only function to
-  change when the ABI exposes coroutine-local storage (core#718). `strtok`, `rand`
-  and the other libc statics stay process-wide until then.
-* **Exit.** `exit` runs the `atexit`, `on_exit` and `__cxa_atexit` handlers in reverse
-  order, then `fflush(NULL)`, which flushes every `FILE` picolibc tracked
-  (`stdio-exit-flush`) and `stdout` and `stderr`, then calls `_exit`. `_exit` jumps back
-  to `xila_main`, which closes the descriptors and returns the status. picolibc's own
+* **Coroutine-local libc state.** The SDK keeps `errno`, `strtok` and the
+  `rand`/`random` seed in the calling coroutine. Other picolibc state that
+  depends on ELF TLS, including `rand48`, `gmtime` and `localtime` result
+  buffers and the implicit multibyte conversion state, remains process-wide.
+  Use the reentrant variants or caller-supplied state when these calls span
+  yields. Picolibc is built with `single-thread=false` and `stdio-locking=true`.
+  Its global and per-stream locks are ABI mutexes. ELF TLS remains disabled.
+  Applications serialize descriptor operations that share an underlying handle,
+  changes to the working directory, and `fflush(NULL)` against open and close
+  of streams.
+* **Exit.** With no live workers, `exit` runs the `atexit`, `on_exit` and
+  `__cxa_atexit` handlers in reverse order and flushes stdio. With live workers,
+  it stops all peers, skips exit handlers, closes descriptors outside stdio,
+  flushes streams it can acquire, then closes the descriptors backing those
+  streams. Streams owned by a stopped thread skip the flush. `_exit` performs the
+  descriptor sweep without handlers or flushing. Main returns through `xila_main`
+  and a worker reports status through `xila_process_exit`. See the ABI README for
+  resource lifetimes. Picolibc's own
   exit-time machinery is replaced because it cannot run here: its handler table runs from
   a `.fini_array` entry and its stdio flush registers itself from a constructor, and
   that flush also forgot each stream it flushed, so a program that called `fflush(NULL)`
@@ -148,12 +156,25 @@ descriptor), `lseek`, `fsync`, `fdatasync`, `ftruncate`, `fstat`, `stat`, `lstat
 signals), `time`, `gettimeofday`, `getentropy`, `getrandom`, the `malloc` family, C
 `stdio`, `exit`, `_exit` and `abort`. Mode bits passed to `open` and `mkdir` are ignored.
 
+The SDK provides `pthread_create`, `pthread_join`, `pthread_detach`, `pthread_self`,
+`pthread_equal`, `pthread_once`, stack and detach attributes, TLS keys with up to
+four destructor passes, plain and recursive mutexes, condition variables including
+timed waits, and `sched_yield`. Threads use the process's single executor, and only
+the creator can join a worker. Blocking calls let peers run. Mutexes hand ownership
+to queued lockers in arrival order.
+
+The SDK defaults condition variables to `CLOCK_MONOTONIC`, including
+`PTHREAD_COND_INITIALIZER`, so default deadlines work before UTC is synchronized.
+Set `CLOCK_REALTIME` explicitly with `pthread_condattr_setclock` for UTC deadlines.
+Workers can return a result or call `pthread_exit`, both of which run their TLS
+destructors. Main ends the process by returning or calling `exit`. Calling
+`pthread_exit` from main aborts. Worker cancellation is outside this subset.
+
 Return `ENOSYS`, until the ABI slots they need exist:
 
 | Calls | Waiting for |
 |---|---|
 | `posix_spawn`, `waitpid`, environment, user and process ids | core#717 (process and environment capabilities) |
-| `pthread_create`, `pthread_join`, `pthread_detach` (no mutexes or condition variables are declared) | core#718 (threads, coroutine TLS, synchronization) |
 | `poll`, `pipe`, `dup`, `dup2` | core#719 (readiness, pipes, descriptor operations) |
 | `socket`, `connect`, `bind`, `listen`, `accept`, `send*`, `recv*`, `shutdown` | the network capability in the startup structure (core#717); DNS (`getaddrinfo`) is not declared |
 

@@ -18,6 +18,7 @@ enum { XILA_FD_FILE = 1, XILA_FD_DIRECTORY = 2 };
 /* The three startup streams are borrowed from the host: close() detaches without
    releasing them. */
 #define XILA_FD_BORROWED 1
+#define XILA_FD_EXIT_FLUSH 2
 
 struct xila_fd {
     void *object; /* XilaFile * or XilaDirectory * */
@@ -51,6 +52,8 @@ void xila_heap_release(void *pointer);
 /* Descriptor table. */
 int xila_fd_allocate(void *object, uint8_t kind, uint8_t flags);
 struct xila_fd *xila_fd_get(int fd);
+void xila_fd_keep_for_exit_flush(int fd);
+void xila_fd_close_before_exit_flush(void);
 void xila_fd_close_all(void);
 int xila_fd_initialize(const XilaStartup *startup);
 
@@ -70,5 +73,12 @@ int xila_path_normalize(const char *base, const char *path, char *output, int al
 /* Startup and shutdown. */
 int xila_posix_initialize(const XilaStartup *startup, int *argc, char ***argv);
 void xila_posix_shutdown(void);
+void xila_stdio_exit_with_stopped_threads(void);
+
+static inline XilaThreadLibc *xila_libc_state(void) {
+    XilaThreadLibc *state = NULL;
+    (void)xila_thread_libc(&state);
+    return state;
+}
 
 #endif

@@ -31,7 +31,9 @@ pub use network::*;
 pub use network_types::*;
 mod random;
 mod status;
+mod threads;
 mod time;
+pub use threads::*;
 
 pub use directory::*;
 pub use file::*;

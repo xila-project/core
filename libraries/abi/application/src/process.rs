@@ -89,9 +89,10 @@ impl ProcessLaunch {
     /// the coroutine is not on a registered task or the task is gone.
     ///
     /// Every resource the process owns is held by the arguments or by this call's
-    /// own state, which `xila_process_exit` releases before it abandons the stack.
-    /// The caller must keep no other owned object live on the coroutine stack
-    /// above this call.
+    /// own state. `xila_process_exit` releases the startup grants before
+    /// ending the process. A worker that exits the process cancels main as
+    /// described in #731.
+    /// The caller must keep no other owned object live above this call.
     ///
     /// # Safety
     /// Same contract as [`crate::run_main`].
@@ -254,23 +255,12 @@ pub unsafe extern "C" fn xila_process_parent_id(process: *const Process, id: *mu
     result.map_or_else(|error| error, |()| Status::Ok)
 }
 
-/// End the process at once with an exit status. Only a native process running on its own
-/// coroutine can exit: elsewhere the call returns `Unsupported`.
+/// Stop every peer, release the startup grants, and exit without unwinding.
+/// Stopped peers follow stackful's cancellation policy (#731), including
+/// leaked stack resources. The loader releases the process heap and image.
 ///
-/// The coroutine does not unwind. The call closes the standard streams and frees the
-/// startup strings and home capability the host handed over, then abandons the
-/// stack, which the host frees with the coroutine. Objects the application opened or
-/// allocated stay open and allocated until the process owner releases them, exactly as
-/// when the entry returns without closing them; the process heap, if granted, is
-/// released with the process. The caller must not hold a lock or other resource a
-/// destructor would release.
-///
-/// Abandoning the stack is sound only because the host never calls back into C with
-/// host state on the stack. Every host frame between the entry and this call has
-/// returned before C runs again, so the abandoned frames are C's alone and own nothing
-/// the host must release. No ABI call takes a C callback today. A call that did would
-/// have to keep its host guards out of the callback's frames, or `xila_process_exit`
-/// from the callback would leak them.
+/// Both main and worker entries run without host-owned guards in callback
+/// frames, so abandoning the calling stack does not skip their cleanup.
 /// # Safety
 /// Process must be the running process's capability.
 pub unsafe extern "C" fn xila_process_exit(process: *const Process, status: i32) -> Status {
@@ -281,6 +271,9 @@ pub unsafe extern "C" fn xila_process_exit(process: *const Process, status: i32)
     if !is_in_coroutine() {
         return Status::Unsupported;
     }
+    if let Err(error) = crate::threads::prepare_exit(ptr::from_ref(process)) {
+        return error;
+    }
     let mut current = Err(Status::Unavailable);
     suspend_dynamic(pin!(async {
         current = is_current(process).await;
@@ -288,8 +281,8 @@ pub unsafe extern "C" fn xila_process_exit(process: *const Process, status: i32)
     if let Err(error) = current {
         return error;
     }
-    // SAFETY: the pointer is the live startup state of this very coroutine. Closing the
-    // streams may suspend, which is fine before the stack is abandoned.
+    // SAFETY: the pointer is the live startup state on main's stack. The
+    // driver will never poll another coroutine, even if cleanup suspends.
     unsafe { *process.resources = Resources::default() };
     crate::exit_coroutine(status)
 }

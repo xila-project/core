@@ -19,6 +19,7 @@ mod tests {
         fn startup_heap_main(startup: *const XilaStartup) -> i32;
         fn startup_empty_main(startup: *const XilaStartup) -> i32;
         fn startup_clock_random_main(startup: *const XilaStartup) -> i32;
+        fn threads_main(startup: *const XilaStartup) -> i32;
         fn process_parent_main(startup: *const XilaStartup) -> i32;
         fn process_test_entry(name: *const core::ffi::c_char, length: usize) -> Option<ChildEntry>;
         fn application_c_network(
@@ -828,6 +829,26 @@ mod tests {
         };
         // A nonzero status is the line of the failed check in process.c.
         assert_eq!(parent.join().await, 0);
+
+        let launch = ProcessLaunch {
+            host,
+            environment: None,
+            home: None,
+        };
+        let (thread_test, _) = unsafe {
+            stackful::spawn_with_driver(
+                tasks,
+                task,
+                "thread test",
+                stackful::Stack::new(64 * 1024),
+                move || launch.run(threads_main, &mut Heap::new(), Vec::new(), None, None, None),
+                drive_process,
+                core::convert::identity,
+            )
+            .await
+            .unwrap()
+        };
+        assert_eq!(thread_test.join().await, 0, "failed check in threads.c");
 
         // The exiting child's stream was closed (flushed) by exit, and the child's home
         // capability created a file under the root.

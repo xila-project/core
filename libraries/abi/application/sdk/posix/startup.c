@@ -1,14 +1,9 @@
 /* Process startup and exit.
  *
  * crt0's _xila_start installs the API table and calls xila_main, which lives here so
- * that an image links the POSIX layer only when it uses it. exit() and _exit() leave
- * from any depth by jumping back to this frame: a Xila application ends by returning
- * from its entry point. The one exception is a detected stack smash, which must not
- * trust this frame or the stack above it (stack_protector.c).
- *
- * exit() runs the registered handlers and flushes every open stream before it calls
- * _exit(); _exit() flushes nothing, as POSIX requires, and only the descriptors the
- * program left open are closed on the way out. */
+ * that an image links the POSIX layer only when it uses it. Only the thread
+ * calling exit continues during terminal cleanup. Main returns through its
+ * saved frame; a worker returns the status through the host process API. */
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -94,21 +89,35 @@ int32_t xila_main(const XilaStartup *startup) {
     return status;
 }
 
-/* picolibc tracks every FILE the application opened (stdio-exit-flush; see
-   exit_flush.c), so fflush(NULL) reaches the streams that were never closed, as POSIX
-   exit() requires, and stdout and stderr. It does not forget them: a program that
-   called fflush(NULL) itself still gets its later writes flushed here. */
 void exit(int status) {
-    if (xila_run_exit_handlers != NULL)
+    bool live = false;
+    (void)xila_thread_has_workers(&live);
+    if (!live && xila_run_exit_handlers != NULL) {
         xila_run_exit_handlers(status);
-    (void)fflush(NULL);
+        (void)xila_thread_has_workers(&live);
+    }
+    if (live) {
+        (void)xila_thread_stop_others(xila_process.process);
+        xila_stdio_exit_with_stopped_threads();
+    } else {
+        (void)fflush(NULL);
+    }
     _exit(status);
 }
 
 void _exit(int status) {
+    (void)xila_thread_stop_others(xila_process.process);
+    size_t thread = 1;
+    (void)xila_thread_current(&thread);
+    if (thread != 1) {
+        /* The jump target belongs to main's stack. Finish cleanup here. */
+        xila_posix_shutdown();
+        (void)xila_process_exit(xila_process.process, status);
+        __builtin_trap();
+    }
     exit_status = status;
     if (exit_target != NULL)
         longjmp(*exit_target, 1);
-    /* Outside an application there is nowhere to go back to: stop instead of spinning. */
+    /* Outside an application there is nowhere to go back to. */
     __builtin_trap();
 }
