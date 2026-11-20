@@ -9,7 +9,11 @@ static const struct {
 } abi_note = {5, 4, 1, "XILA", (XILA_ABI_VERSION_MAJOR << 16) | XILA_ABI_VERSION_MINOR};
 
 static const char answer[] = "ok";
+#ifdef XILA_FIXTURE_NO_RELOCATIONS
+#define expected answer
+#else
 static const char *volatile expected = answer; /* Force a RELATIVE relocation. */
+#endif
 static volatile unsigned int calls;           /* Exercise writable, zeroed BSS. */
 
 #ifdef XILA_FIXTURE_CONSTRUCTOR
