@@ -25,6 +25,8 @@ pub mod metrics;
 mod environment_variable;
 mod error;
 mod join_handle;
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+mod macrotask;
 mod manager;
 mod signal;
 mod task;
@@ -75,18 +77,56 @@ pub async fn sleep(duration: impl Into<Duration>) {
     Timer::at(deadline_after_nanoseconds(nanoseconds)).await
 }
 
+/// How long [`yield_throttled`] sleeps on WebAssembly targets.
+#[cfg(target_arch = "wasm32")]
+const THROTTLED_YIELD: Duration = Duration::from_millis(10);
+
 /// Yield the current thread, allowing other tasks to run.
+///
+/// The task is rescheduled as soon as the other ready tasks have run. Use this
+/// to slice long computations into quanta. A task that polls for an event
+/// should call [`yield_throttled`] instead, so that it does not keep a
+/// single-threaded host busy.
+///
+/// On `wasm32-unknown-unknown` this ends the current browser task: timers,
+/// input and rendering that are already due run before the task resumes, and it
+/// costs far less than a millisecond. Embassy's own wasm yield is a microtask
+/// that would starve all of them, and a timer-backed yield costs 10 ms or more
+/// per call, which throttles anything that yields often (the Wasm runtime
+/// yields once per fuel quantum, so a timer made audio rendering choppy).
+/// Where the browser exposes no `MessageChannel`, it falls back to a zero-delay
+/// timer. On `wasm32-wasip1` it sleeps 10 ms: there is no host event loop to
+/// give control to.
 pub async fn yield_now() {
-    #[cfg(target_arch = "wasm32")]
-    // Embassy 0.10's wasm pender uses Promise.then (a microtask). A
-    // self-waking yield repeatedly schedules microtasks, starving browser
-    // rendering, input and timer macrotasks. Keep a timer-backed yield until
-    // the platform executor provides a macrotask scheduling primitive. The
-    // 10 ms policy is retained pending browser latency/fairness validation.
-    sleep(Duration::from_millis(10)).await;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    macrotask::yield_now().await;
+
+    // Embassy's wasm pender uses `Promise.then` (a microtask), so a self-waking
+    // yield cannot let the host run. Keep a timer-backed yield.
+    #[cfg(all(target_arch = "wasm32", not(target_os = "unknown")))]
+    sleep(THROTTLED_YIELD).await;
 
     #[cfg(not(target_arch = "wasm32"))]
     embassy_futures::yield_now().await;
+}
+
+/// Yield the current thread, but never resume faster than a polling loop should.
+///
+/// For guest-initiated busy-waits (`sched_yield`, a zero-delay poll) whose
+/// caller makes no progress until something else changes: such a loop must not
+/// peg a single-threaded host at 100 %. On WebAssembly targets this sleeps
+/// 10 ms (the timer-backed yield [`yield_now`] used to be); elsewhere it is
+/// [`yield_now`], since the scheduler there already runs other tasks and idles
+/// when none is ready.
+///
+/// Do not use it to slice work that is making progress, because the wait is
+/// not cheap: use [`yield_now`].
+pub async fn yield_throttled() {
+    #[cfg(target_arch = "wasm32")]
+    sleep(THROTTLED_YIELD).await;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    yield_now().await;
 }
 
 /// Suspend the current task until the provided function is called with a context.

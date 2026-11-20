@@ -144,6 +144,10 @@ extends = "dev:rust"
 [tasks."docs:guest"]
 extends = "dev:rust-wasi"
 
+[tasks."test:browser-task"]
+extends = "dev:rust-browser"
+tools."github:wasm-bindgen/wasm-bindgen" = "{{ vars.wasm_bindgen_version }}"
+
 [tasks."test:workspace"]
 extends = "dev:rust"
 

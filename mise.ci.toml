@@ -189,6 +189,7 @@ run = """
 set -euo pipefail
 mise run ci:wasm-clippy
 mise run ci:wasm-audio-check
+mise run ci:wasm-task-tests
 """
 
 [tasks."ci:wasm".tools]
@@ -340,6 +341,24 @@ extends = "ci:rust-browser-lint"
 description = "Lint WASM guest targets"
 depends = ["ci:packages-linker"]
 run = "mise run clippy:guest"
+
+[tasks."ci:wasm-task-tests"]
+extends = "ci:rust-browser"
+description = "Test the browser task yield in headless Chrome"
+tools."github:wasm-bindgen/wasm-bindgen" = "{{ vars.wasm_bindgen_version }}"
+depends = ["ci:packages-linker"]
+env.CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER = "wasm-bindgen-test-runner"
+# Same command as `test:browser-task`: a nested `mise run` would drop this task's tools.
+run = """
+set -eu
+if [ -z "${CHROMEDRIVER:-}" ] && [ -n "${CHROMEWEBDRIVER:-}" ]; then
+  export CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver"
+fi
+cargo test --locked -p xila-task --target wasm32-unknown-unknown \\
+  --test browser_yield \\
+  --test browser_yield_without_message_channel \\
+  --test browser_yield_without_timers
+"""
 
 [tasks."ci:wasm-audio-check"]
 extends = "ci:rust-browser"
