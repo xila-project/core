@@ -1,8 +1,4 @@
-/* Calls that need ABI slots which do not exist yet. They fail with ENOSYS so that
- * portable code can probe for them at run time. Each group names the work that
- * provides it:
- *   processes and environment (posix_spawn, waitpid, kill): core#717
- *   sockets and name resolution: needs the startup network capability, core#717 */
+/* ENOSYS stubs for POSIX calls whose implementations are pending. */
 #include <sys/types.h>
 #include <spawn.h>
 #include <sys/socket.h>
@@ -11,7 +7,7 @@
 
 #include "internal.h"
 
-/* ---- core#717 ---- */
+/* ---- Process wrappers: core#762 ---- */
 int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *actions,
                 const posix_spawnattr_t *attributes, char *const arguments[],
                 char *const environment[]) {

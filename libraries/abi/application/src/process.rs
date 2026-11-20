@@ -123,19 +123,20 @@ impl ProcessLaunch {
                         .replace_environment_variables(task, environment)
                         .await?;
                 }
-                Ok::<_, task::Error>(task)
+                Ok::<_, task::Error>((task, manager.get_name(task).await?))
             }
             .await
             .map_err(task_status);
         }));
         let resources = unsafe { &raw mut (*state.as_ptr()).resources };
-        let Ok(task) = identity else {
+        let Ok((task, program_name)) = identity else {
             // SAFETY: nothing has started that could use the resources.
             unsafe { Resources::release(resources) };
             return START_FAILURE;
         };
         // SAFETY: the caller guarantees the state is live; nothing else uses it yet.
         unsafe {
+            (*resources).program_name = program_name;
             (*resources).home = home.map(|grant| {
                 Directory::granted(host.virtual_file_system(), task, grant.path, grant.rights)
             });
@@ -301,6 +302,39 @@ unsafe fn env_value<'a>(value: *const c_char, length: usize) -> Result<&'a str, 
     Ok(value)
 }
 
+/// A caller-owned environment output buffer and length pointer.
+struct EnvOutput {
+    buffer: *mut c_char,
+    capacity: usize,
+    length: *mut usize,
+}
+
+impl EnvOutput {
+    fn new(buffer: *mut c_char, capacity: usize, length: *mut usize) -> Result<Self, Status> {
+        if length.is_null() || capacity > isize::MAX as usize || (capacity != 0 && buffer.is_null())
+        {
+            return Err(Status::InvalidArgument);
+        }
+        Ok(Self {
+            buffer,
+            capacity,
+            length,
+        })
+    }
+
+    /// The caller must have provided writable output pointers.
+    unsafe fn write(self, bytes: &[u8]) -> Result<(), Status> {
+        unsafe { self.length.write(bytes.len()) };
+        if bytes.len() > self.capacity {
+            return Err(Status::BufferTooSmall);
+        }
+        if !bytes.is_empty() {
+            unsafe { ptr::copy_nonoverlapping(bytes.as_ptr(), self.buffer.cast(), bytes.len()) };
+        }
+        Ok(())
+    }
+}
+
 /// Read an environment variable. The value is copied without a terminator; the
 /// length is stored on success and on `BufferTooSmall`, which leaves the buffer
 /// unchanged. A null buffer is allowed at capacity zero. A missing variable returns
@@ -318,12 +352,7 @@ pub unsafe extern "C" fn xila_env_get(
 ) -> Status {
     let result = (|| {
         let process = this(process)?;
-        if value_length.is_null()
-            || capacity > isize::MAX as usize
-            || (capacity != 0 && buffer.is_null())
-        {
-            return Err(Status::InvalidArgument);
-        }
+        let output = EnvOutput::new(buffer, capacity, value_length)?;
         let name = unsafe { env_name(name, name_length)? };
         let mut found = Err(Status::Unavailable);
         suspend_dynamic(pin!(async {
@@ -339,14 +368,7 @@ pub unsafe extern "C" fn xila_env_get(
                 });
         }));
         let variable = found?;
-        let value = variable.get_value();
-        unsafe { value_length.write(value.len()) };
-        if value.len() > capacity {
-            return Err(Status::BufferTooSmall);
-        }
-        // SAFETY: a nonzero length implies a nonzero capacity, hence a non-null buffer.
-        unsafe { ptr::copy_nonoverlapping(value.as_ptr(), buffer.cast(), value.len()) };
-        Ok(())
+        unsafe { output.write(variable.get_value().as_bytes()) }
     })();
     result.map_or_else(|error| error, |()| Status::Ok)
 }
@@ -403,6 +425,37 @@ pub unsafe extern "C" fn xila_env_remove(
                 .map_err(task_status);
         }));
         removed
+    })();
+    result.map_or_else(|error| error, |()| Status::Ok)
+}
+
+/// Copy the zero-based environment entry as `NAME=VALUE` without a terminator.
+/// Output follows the same rules as `xila_env_get`. `NotFound` marks the end.
+/// Indices can change when the environment is mutated.
+/// # Safety
+/// Process must be a live capability, the buffer writable for its capacity and
+/// the length output aligned and writable.
+pub unsafe extern "C" fn xila_env_entry(
+    process: *const Process,
+    index: usize,
+    buffer: *mut c_char,
+    capacity: usize,
+    entry_length: *mut usize,
+) -> Status {
+    let result = (|| {
+        let process = this(process)?;
+        let output = EnvOutput::new(buffer, capacity, entry_length)?;
+        let mut entry = Err(Status::Unavailable);
+        suspend_dynamic(pin!(async {
+            entry = process
+                .host
+                .task_manager()
+                .get_environment_variable_at(process.task, index)
+                .await
+                .map_err(task_status);
+        }));
+        let entry = entry?.ok_or(Status::NotFound)?;
+        unsafe { output.write(entry.get_raw().to_bytes()) }
     })();
     result.map_or_else(|error| error, |()| Status::Ok)
 }

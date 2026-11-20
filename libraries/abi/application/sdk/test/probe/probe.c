@@ -5,6 +5,7 @@
  *
  *   underscore-exit  buffered writes, then _exit: nothing buffered may reach a file
  *   flush-then-exit  fflush(NULL), more writes, an atexit handler, then exit: all of it
+ *   environment      POSIX access and raw ABI interoperation
  *   root             open of the root and "." , readdir inodes, errno values
  */
 #include <dirent.h>
@@ -21,7 +22,8 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
-#include <xila/application.h>
+#include <xila/posix.h>
+#include <xila/stubs.h>
 
 #define CHECK(step, condition)                                                           \
     do {                                                                                 \
@@ -351,6 +353,336 @@ static int descriptors(void) {
     return 0;
 }
 
+/* Capture the raw capability only for the interoperation tests. */
+static const XilaProcess *process;
+/* Count live SDK allocations across raw rewrites and inject guest heap failures. */
+static size_t live_blocks;
+static bool fail_allocation;
+static bool shrank_probe;
+static bool retried_entry;
+
+XilaStatus __real_xila_env_entry(const XilaProcess *, size_t, char *, size_t, size_t *);
+
+XilaStatus __wrap_xila_env_entry(const XilaProcess *capability, size_t index, char *buffer,
+                                size_t capacity, size_t *length) {
+    XilaStatus status = __real_xila_env_entry(capability, index, buffer, capacity, length);
+    if (status == XILA_STATUS_BUFFER_TOO_SMALL && index == 0) {
+        if (buffer == NULL && !shrank_probe && *length > 1) {
+            /* Simulate an entry that grows before startup copies it. */
+            --*length;
+            shrank_probe = true;
+        } else if (buffer != NULL && shrank_probe) {
+            retried_entry = true;
+        }
+    }
+    return status;
+}
+
+XilaStatus __real_xila_heap_allocate(XilaHeap *, size_t, void **);
+XilaStatus __real_xila_heap_reallocate(XilaHeap *, void *, size_t, void **);
+XilaStatus __real_xila_heap_free(XilaHeap *, void *);
+
+XilaStatus __wrap_xila_heap_allocate(XilaHeap *heap, size_t size, void **allocation) {
+    if (fail_allocation)
+        return XILA_STATUS_OUT_OF_MEMORY;
+    XilaStatus status = __real_xila_heap_allocate(heap, size, allocation);
+    if (status == XILA_STATUS_OK)
+        ++live_blocks;
+    return status;
+}
+
+XilaStatus __wrap_xila_heap_reallocate(XilaHeap *heap, void *allocation, size_t size, void **output) {
+    XilaStatus status = __real_xila_heap_reallocate(heap, allocation, size, output);
+    if (status == XILA_STATUS_OK && allocation == NULL)
+        ++live_blocks;
+    return status;
+}
+
+XilaStatus __wrap_xila_heap_free(XilaHeap *heap, void *allocation) {
+    XilaStatus status = __real_xila_heap_free(heap, allocation);
+    if (status == XILA_STATUS_OK && allocation != NULL)
+        --live_blocks;
+    return status;
+}
+
+int32_t __real_xila_main(const XilaStartup *startup);
+
+int32_t __wrap_xila_main(const XilaStartup *startup) {
+    process = startup->process;
+    return __real_xila_main(startup);
+}
+
+static void *environment_worker(void *expected) {
+    if (getenv("SDK_PROBE") == expected && unsetenv("") == -1 && errno == EINVAL)
+        return expected;
+    return NULL;
+}
+
+static const char *environment_entry(const char *name) {
+    size_t length = strlen(name);
+    for (char **entry = environ; *entry != NULL; ++entry)
+        if (strncmp(*entry, name, length) == 0 && (*entry)[length] == '=')
+            return *entry + length + 1;
+    return NULL;
+}
+
+static bool environment_value_is(const char *name, const char *expected) {
+    const char *value = environment_entry(name);
+    return value != NULL && strcmp(value, expected) == 0;
+}
+
+static int environment(const char *program) {
+    CHECK("retry a growing startup entry", retried_entry);
+    CHECK("iterate inherited environ",
+          environ != NULL && environment_value_is("SDK_PROBE", "inherited") &&
+          environment_value_is("SDK_OTHER", "a=b"));
+    uint32_t id = 0, parent = 0;
+    CHECK("getpid reads the process capability",
+          xila_process_id(process, &id) == XILA_STATUS_OK && getpid() == (pid_t)id);
+    CHECK("getppid reads the process capability",
+          xila_process_parent_id(process, &parent) == XILA_STATUS_OK && getppid() == (pid_t)parent);
+
+    const char *name = "SDK_PROBE";
+    char *initial = getenv(name);
+    CHECK("inherited environment", initial != NULL && strcmp(initial, "inherited") == 0);
+    CHECK("program name", strcmp(program, "probe") == 0);
+    errno = EDOM;
+    CHECK("missing value preserves errno", getenv("SDK_MISSING") == NULL && errno == EDOM);
+    pthread_t worker;
+    void *worker_value = NULL;
+    CHECK("start environment reader", pthread_create(&worker, NULL, environment_worker, initial) == 0);
+    CHECK("worker sees the same value and has its own errno",
+          pthread_join(worker, &worker_value) == 0 && worker_value == initial && errno == EDOM);
+    CHECK("existing value without overwrite", setenv(name, "ignored", 0) == 0 &&
+          getenv(name) == initial);
+
+    CHECK("set empty value", setenv("SDK_EMPTY", "", 0) == 0);
+    CHECK("environ includes new empty value", environment_value_is("SDK_EMPTY", ""));
+    const char *empty = getenv("SDK_EMPTY");
+    CHECK("get empty value", empty != NULL && *empty == '\0');
+    CHECK("empty value counts as present", setenv("SDK_EMPTY", "ignored", 0) == 0 &&
+          getenv("SDK_EMPTY") == empty);
+    CHECK("unrelated set and get preserve the pointer", strcmp(initial, "inherited") == 0);
+
+    CHECK("overwrite", setenv(name, "new", 1) == 0);
+    CHECK("environ includes overwritten value", environment_value_is(name, "new"));
+    const char *current = getenv(name);
+    CHECK("read overwritten value", current != NULL && strcmp(current, "new") == 0);
+    char raw[3];
+    size_t length;
+    CHECK("POSIX change visible to ABI",
+          xila_env_get(process, name, strlen(name), raw, sizeof(raw), &length) == XILA_STATUS_OK &&
+          length == sizeof(raw) && memcmp(raw, "new", sizeof(raw)) == 0);
+
+    size_t cached_blocks = live_blocks;
+    char large[513];
+    memset(large, 'x', sizeof(large) - 1);
+    large[sizeof(large) - 1] = '\0';
+    CHECK("set long value through ABI",
+          xila_env_set(process, name, strlen(name), large, strlen(large)) == XILA_STATUS_OK);
+    const char *long_value = getenv(name);
+    CHECK("get long value with terminator", long_value != NULL && strcmp(long_value, large) == 0);
+    CHECK("replacing a cached value keeps one allocation per name", live_blocks == cached_blocks);
+    CHECK("repeated long lookup", getenv(name) == long_value);
+    for (char byte = 'a'; byte <= 'z'; ++byte) {
+        large[0] = byte;
+        CHECK("rewrite through ABI",
+              xila_env_set(process, name, strlen(name), large, strlen(large)) == XILA_STATUS_OK);
+        const char *updated = getenv(name);
+        CHECK("get rewritten value", updated != NULL && strcmp(updated, large) == 0);
+        CHECK("raw rewrites do not grow the cache", live_blocks == cached_blocks);
+        CHECK("other name retains its cached pointer", getenv("SDK_EMPTY") == empty);
+    }
+    CHECK("raw removal is visible",
+          xila_env_remove(process, name, strlen(name)) == XILA_STATUS_OK && getenv(name) == NULL);
+    CHECK("raw removal releases the cached value", live_blocks == cached_blocks - 1);
+    CHECK("unset absent name", unsetenv(name) == 0);
+
+    CHECK("set after removal", setenv(name, "again", 0) == 0);
+    CHECK("unset present name", unsetenv(name) == 0 && getenv(name) == NULL);
+    CHECK("ABI sees unset",
+          xila_env_get(process, name, strlen(name), raw, sizeof(raw), &length) == XILA_STATUS_NOT_FOUND);
+    CHECK("environ no longer includes unset name", environment_entry(name) == NULL);
+    char assignment[] = "SDK_EMPTY=put";
+    CHECK("putenv updates through setenv", putenv(assignment) == 0);
+    assignment[sizeof(assignment) - 2] = 'x';
+    CHECK("environ includes copied putenv value", environment_value_is("SDK_EMPTY", "put"));
+    const char *put = getenv("SDK_EMPTY");
+    CHECK("get putenv value", put != NULL && strcmp(put, "put") == 0);
+    CHECK("invalid set name", setenv("A=B", "bad", 0) == -1 && errno == EINVAL);
+    errno = 0;
+    CHECK("empty set name", setenv("", "bad", 1) == -1 && errno == EINVAL);
+    errno = 0;
+    CHECK("invalid get name", getenv("A=B") == NULL && errno == EINVAL);
+    errno = 0;
+    CHECK("invalid unset name", unsetenv("") == -1 && errno == EINVAL);
+    errno = 0;
+    CHECK("NULL set name", setenv(NULL, "bad", 1) == -1 && errno == EINVAL);
+    errno = 0;
+    CHECK("NULL unset name", unsetenv(NULL) == -1 && errno == EINVAL);
+    CHECK("set prefix names", setenv("A", "a", 1) == 0 && setenv("AB", "ab", 1) == 0);
+    CHECK("environ contains both prefix names",
+          environment_value_is("A", "a") && environment_value_is("AB", "ab"));
+    const char *ab = getenv("AB");
+    const char *a = getenv("A");
+    CHECK("look up prefix names independently",
+          ab != NULL && strcmp(ab, "ab") == 0 && a != NULL && strcmp(a, "a") == 0);
+    CHECK("unset prefix while retaining the longer name",
+          unsetenv("A") == 0 && getenv("A") == NULL && getenv("AB") == ab);
+    CHECK("environ distinguishes prefix names after removal",
+          environment_entry("A") == NULL && environment_value_is("AB", "ab"));
+    fail_allocation = true;
+    errno = 0;
+    int result = setenv("AB", "cannot store", 1);
+    int update_errno = errno;
+    errno = 0;
+    const char *uncached = getenv("SDK_OTHER");
+    int allocation_errno = errno;
+    fail_allocation = false;
+    CHECK("environ and the host preserve the old value after an allocation failure",
+          result == -1 && update_errno == ENOMEM && environment_value_is("AB", "ab") &&
+          getenv("AB") == ab);
+    CHECK("getenv allocation failure", uncached == NULL && allocation_errno == ENOMEM);
+
+    char **before_last_unset = environ;
+    CHECK("remove all table entries",
+          unsetenv("SDK_GREETING") == 0 && unsetenv("SDK_OTHER") == 0 &&
+          unsetenv("SDK_EMPTY") == 0 && unsetenv("AB") == 0 &&
+          environ == before_last_unset && before_last_unset[0] == NULL);
+    CHECK("add after emptying the table",
+          setenv("A", "again", 1) == 0 && environment_value_is("A", "again") &&
+          environ[1] == NULL);
+
+    CHECK("write a host-only variable",
+          xila_env_set(process, "RAW", 3, "present", 7) == XILA_STATUS_OK);
+    static char *custom[] = {
+        "SDK_CUSTOM=a=b", "malformed", "SDK_CUSTOM=later", "SDK_STATIC=keep", NULL,
+    };
+    char **saved = environ;
+    environ = custom;
+    const char *temporary = getenv("SDK_CUSTOM");
+    CHECK("getenv adopts the temporary table", temporary != NULL && strcmp(temporary, "a=b") == 0);
+    environ = saved;
+    const char *restored = getenv("A");
+    CHECK("getenv adopts a saved SDK table",
+          restored != NULL && strcmp(restored, "again") == 0 &&
+          environment_value_is("A", "again") && getenv("SDK_CUSTOM") == NULL);
+    environ = custom;
+    const char *adopted = getenv("SDK_CUSTOM");
+    CHECK("getenv reads the assigned environment", adopted != NULL && strcmp(adopted, "a=b") == 0);
+    CHECK("getenv publishes an SDK-owned copy", environ != custom);
+    CHECK("adoption removes the old environment", getenv("A") == NULL && getenv("RAW") == NULL);
+    CHECK("adoption keeps valid entries and skips malformed ones",
+          environment_value_is("SDK_STATIC", "keep") && environ[2] == NULL);
+    CHECK("replace and remove entries after adopting a static environ",
+          setenv("SDK_CUSTOM", "updated", 1) == 0 && unsetenv("SDK_STATIC") == 0 &&
+          environment_value_is("SDK_CUSTOM", "updated") && environ[1] == NULL &&
+          strcmp(custom[0], "SDK_CUSTOM=a=b") == 0 && strcmp(custom[3], "SDK_STATIC=keep") == 0);
+    static char *invalid[] = {
+        "SDK_INVALID=\xff", "SDK_OVERLONG=\xe0\x80\x80", "SDK_SURROGATE=\xed\xa0\x80",
+        "SDK_TOO_HIGH=\xf4\x90\x80\x80", "SDK_TRUNCATED=\xc2", "\xff=value",
+        "SDK_UTF8=\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80", NULL,
+    };
+    environ = invalid;
+    const char *utf8 = getenv("SDK_UTF8");
+    CHECK("adoption skips invalid UTF-8 and installs the valid entries",
+          utf8 != NULL && strcmp(utf8, "\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80") == 0 &&
+          environment_value_is("SDK_UTF8", utf8) && environ[1] == NULL &&
+          getenv("SDK_INVALID") == NULL && getenv("SDK_CUSTOM") == NULL);
+
+    static char *remove_first[] = {"SDK_REMOVE=present", NULL};
+    environ = remove_first;
+    CHECK("unsetenv adopts before removing the name",
+          unsetenv("SDK_REMOVE") == 0 && environ[0] == NULL && getenv("SDK_UTF8") == NULL);
+    environ = NULL;
+    CHECK("adopting another table discards the oldest table", getenv("SDK_REMOVE") == NULL);
+    size_t empty_blocks = live_blocks;
+
+    char **allocated = malloc(2 * sizeof(*allocated));
+    char *allocated_entry = strdup("SDK_ALLOCATED=original");
+    CHECK("allocate a caller-owned environ", allocated != NULL && allocated_entry != NULL);
+    allocated[0] = allocated_entry;
+    allocated[1] = NULL;
+    environ = allocated;
+    fail_allocation = true;
+    int adoption_result = setenv("SDK_ALLOCATED", "ignored", 0);
+    fail_allocation = false;
+    CHECK("allocation failure leaves the assigned table available for retry",
+          adoption_result == -1 && errno == ENOMEM && environ == allocated &&
+          live_blocks == empty_blocks + 2);
+    CHECK("setenv adopts before checking overwrite",
+          setenv("SDK_ALLOCATED", "ignored", 0) == 0 && environ != allocated &&
+          environment_value_is("SDK_ALLOCATED", "original"));
+    CHECK("only the caller owns the supplied table and string",
+          allocated[0] == allocated_entry && allocated[1] == NULL &&
+          strcmp(allocated_entry, "SDK_ALLOCATED=original") == 0);
+    free(allocated_entry);
+    free(allocated);
+
+    environ = NULL;
+    CHECK("setenv adopts a NULL environ",
+          setenv("SDK_AFTER_CLEAR", "present", 1) == 0 &&
+          environment_value_is("SDK_AFTER_CLEAR", "present"));
+    const char *after_clear = getenv("SDK_AFTER_CLEAR");
+    CHECK("NULL assignment clears the host environment",
+          after_clear != NULL && strcmp(after_clear, "present") == 0 &&
+          getenv("SDK_ALLOCATED") == NULL);
+    CHECK("the current empty array and one previous table remain allocated",
+          unsetenv("SDK_AFTER_CLEAR") == 0 && environ[0] == NULL &&
+          live_blocks <= empty_blocks + 4);
+    environ = NULL;
+    CHECK("another adoption releases the previous table's strings",
+          getenv("SDK_AFTER_CLEAR") == NULL && environ[0] == NULL);
+
+    /* Restoring a table saved before the most recent adoption is unsupported
+     * but safe: the array is kept, so it reads as that slot's current content. */
+    CHECK("set the base value", setenv("REVIEW_BASE", "base", 1) == 0);
+    static char *first[] = {"REVIEW_ONE=1", NULL};
+    static char *second[] = {"REVIEW_TWO=2", NULL};
+    char **older = environ;
+    environ = first;
+    CHECK("adopt the first temporary table",
+          getenv("REVIEW_ONE") != NULL && getenv("REVIEW_BASE") == NULL);
+    char **newer = environ;
+    environ = second;
+    CHECK("adopt the second temporary table",
+          getenv("REVIEW_TWO") != NULL && getenv("REVIEW_ONE") == NULL);
+    environ = older;
+    CHECK("restoring the older save reads its slot without crashing",
+          getenv("REVIEW_BASE") == NULL && getenv("REVIEW_ONE") == NULL &&
+          getenv("REVIEW_TWO") == NULL && environ[0] == NULL);
+    environ = newer;
+    CHECK("restoring the newer save reads its slot without crashing",
+          getenv("REVIEW_BASE") == NULL && getenv("REVIEW_ONE") == NULL &&
+          getenv("REVIEW_TWO") == NULL);
+    CHECK("the environment works after stale restores",
+          setenv("REVIEW_AFTER", "ok", 1) == 0 && environment_value_is("REVIEW_AFTER", "ok"));
+
+    /* Each cycle adopts a table, and every second one saves and restores. */
+    static char *cycle[] = {"CYCLE_A=a", "CYCLE_B=b", "CYCLE_C=c", "CYCLE_D=d", "CYCLE_E=e", NULL};
+    environ = cycle;
+    getenv("CYCLE_A");
+    size_t cycle_blocks = live_blocks;
+    bool cycles_ok = true;
+    for (int cycle_index = 0; cycle_index < 300; ++cycle_index) {
+        char **cycle_saved = environ;
+        environ = cycle;
+        cycles_ok = cycles_ok && getenv("CYCLE_E") != NULL;
+        if (cycle_index % 2 == 0) {
+            environ = cycle_saved;
+            cycles_ok = cycles_ok && getenv("CYCLE_E") != NULL;
+        }
+        cycles_ok = cycles_ok && live_blocks <= cycle_blocks + 16;
+    }
+    CHECK("hundreds of adoptions keep the heap bounded", cycles_ok &&
+          live_blocks <= cycle_blocks + 16);
+    environ = NULL;
+    getenv("CYCLE_A");
+
+    puts("environment: ok");
+    return 0;
+}
+
 int main(int argc, char **argv) {
     const char *mode = argc > 1 ? argv[1] : "";
     if (strcmp(mode, "underscore-exit") == 0)
@@ -359,6 +691,8 @@ int main(int argc, char **argv) {
         return flush_then_exit();
     if (strcmp(mode, "root") == 0)
         return root();
+    if (strcmp(mode, "environment") == 0)
+        return environment(argv[0]);
     if (strcmp(mode, "descriptors") == 0)
         return descriptors();
     fprintf(stderr, "probe: unknown scenario \"%s\"\n", mode);

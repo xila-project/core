@@ -30,6 +30,8 @@ pub struct XilaStartup {
     pub standard_error: *mut File,
     pub home: *mut Directory,
     pub process: *const Process,
+    /// Executable's launch name. Empty for a linked entry without a process.
+    pub program_name: XilaString,
 }
 
 /// What the entry call borrows and the process owner releases when it ends. Kept in
@@ -39,6 +41,8 @@ pub(crate) struct Resources {
     /// Strings that `arguments` points into.
     pub(crate) _owned: Vec<String>,
     pub(crate) arguments: Vec<XilaString>,
+    /// Bytes that `XilaStartup::program_name` points into.
+    pub(crate) program_name: String,
     pub(crate) standard_input: Option<File>,
     pub(crate) standard_output: Option<File>,
     pub(crate) standard_error: Option<File>,
@@ -93,6 +97,7 @@ impl HostState {
         Self::from_resources(Resources {
             arguments: argument_pointers(&mut arguments.iter().map(String::as_str)),
             _owned: arguments,
+            program_name: String::new(),
             standard_input,
             standard_output,
             standard_error,
@@ -114,6 +119,10 @@ impl HostState {
                 standard_error: ptr::null_mut(),
                 home: ptr::null_mut(),
                 process: ptr::null(),
+                program_name: XilaString {
+                    data: ptr::null(),
+                    length: 0,
+                },
             },
             process: None,
             resources,
@@ -174,6 +183,7 @@ pub unsafe fn run_main(
 ) -> i32 {
     let mut state = HostState::from_resources(Resources {
         _owned: Vec::new(),
+        program_name: String::new(),
         arguments: argument_pointers(&mut arguments.iter().copied()),
         standard_input,
         standard_output,
@@ -242,6 +252,10 @@ pub(crate) unsafe fn enter(
                 .as_mut()
                 .map_or(ptr::null_mut(), ptr::from_mut),
             process: (*state).process.as_ref().map_or(ptr::null(), ptr::from_ref),
+            program_name: XilaString {
+                data: resources.program_name.as_ptr().cast(),
+                length: resources.program_name.len(),
+            },
         };
         &raw const (*state).startup
     };

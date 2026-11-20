@@ -29,6 +29,7 @@ xila-sdk-0.1-<target>/
   COPYING.picolibc          picolibc's licence (BSD); LICENSE-xila.md is Core's (Apache-2.0)
   include/                  picolibc headers, xila/application.h, xila/stubs.h,
                             xila/posix.h, sys/random.h, sys/socket.h, pthread.h
+    posix/stdlib.h          wrapper for the SDK's getenv declaration
   lib/
     crt0.o                  _xila_start: checks the startup, installs the API table
     libxila.a               indirect-call stubs for every XilaApi slot
@@ -68,9 +69,15 @@ names executables `*.elf`. `CMAKE_EXE_LINKER_FLAGS` takes `ld.lld` flags, withou
 `-Wl,`. Constructors, `__thread` variables and `dlopen` are not supported: the loader
 rejects an image with `DT_INIT`, a non-empty `DT_INIT_ARRAY` or `PT_TLS`.
 
+For custom C builds, put `<sdk>/include/posix` before `<sdk>/include` on the
+system include path. The SDK's `<stdlib.h>` wrapper includes picolibc's header
+and binds `getenv` to a symbol the compiler treats as an ordinary function.
+
 Copy `hello.elf` to a filesystem the platform's native format reads (Core's
 `NativeFormat`, the `native-dev` feature) and execute it. `main(int argc, char **argv)`
-receives the arguments; `argv[0]` is empty until the host passes the program name.
+receives the arguments. For a native executable, `argv[0]` is its launch name
+(the executable's basename when launched through `executable::execute`). A linked
+entry with no process capability gets an empty `argv[0]`.
 Returning from `main` uses `exit` and performs the cleanup described below.
 Both `exit` and `_exit` close the descriptors the program left open. `_exit`
 discards buffered output and skips exit handlers.
@@ -80,9 +87,9 @@ discards buffered output and skips exit handlers.
 `share/xila/example/hello/hello.c` exercises `printf`/`snprintf`, `malloc`, files
 (`open`, `read`, `write`, `lseek`, `pread`, `fstat`, `rename`, `unlink`), directories
 (`mkdir`, `chdir`, `getcwd`, `opendir`, `readdir`), `fopen`/`fgets`/`fprintf`,
-clocks, `nanosleep` and `getentropy`. Core's test builds it with this toolchain file
-and runs it through the VFS, the executable dispatch table, the native loader and
-the ABI table (`libraries/executable/tests/sdk.rs`).
+clocks, `nanosleep`, `getentropy` and `getenv`. Core's test builds it with this
+toolchain file and runs it through the VFS, the executable dispatch table, the
+native loader and the ABI table (`libraries/executable/tests/sdk.rs`).
 
 ## Rust
 
@@ -191,6 +198,73 @@ diagnostic and exit status.
 * **Heap.** `malloc`, `calloc`, `realloc` and friends are the process heap
   (`xila_heap_*`); picolibc's own allocator is not built. Alignments above
   `XILA_HEAP_ALIGNMENT` fail.
+* **Environment.** `getenv`, `setenv` and `unsetenv` use the process capability
+  and see inherited or explicitly supplied launch values. Names and values
+  follow the ABI's UTF-8 rules. `getenv` returns NULL for a missing name
+  without changing `errno`. It can return NULL with `ENOMEM` if allocation
+  fails or with `ENOMEM` or `EINVAL` if adoption of an assigned table fails.
+  `setenv` honors its overwrite flag and `unsetenv` succeeds for an
+  absent name. Mutations reject a NULL or invalid name with `EINVAL`.
+  Without a process capability, `getenv` returns NULL and valid mutations fail
+  with `ENOSYS`. Picolibc's `putenv` copies the assignment and calls `setenv`.
+
+  Each lookup checks the ABI, so it sees direct ABI updates. The SDK keeps one
+  NUL-terminated cached value per name. A lookup of that name that observes a
+  changed or removed value can invalidate the earlier pointer, as can a POSIX
+  mutation of the same name or process exit. Lookups and mutations of other
+  names preserve the pointer. A long lookup may briefly allocate a buffer to
+  compare with the cached value. The libc lock serializes the POSIX calls
+  across coroutines. Coordinate same-name pointer use with those calls.
+
+  `environ` (declared in `<xila/posix.h>`) points to a NULL-terminated array of
+  `NAME=VALUE` strings. It reflects the launch environment and subsequent
+  changes made by `setenv`, `unsetenv` and `putenv`. It starts empty if the program
+  has no process capability. Treat the array and strings
+  as read-only and coordinate iteration and assignments with POSIX accessors.
+  A program may assign a different NULL-terminated table to `environ`, or
+  assign NULL for an empty environment. With a process capability, the next
+  environment accessor replaces the host environment and publishes an SDK-owned
+  table. Entries without a nonempty name followed by `=` or with invalid UTF-8
+  are skipped. For duplicate names the first valid entry wins. Keep the supplied array and strings
+  alive until adoption succeeds. The program retains ownership of both.
+  Coordinate adoption with direct task or ABI writes to the environment.
+
+  The SDK retains one previous table after adoption. Save `environ` before
+  assigning a temporary table and restore it before adopting another table.
+  Restoring the retained table reinstalls its array as is, without UTF-8
+  validation or duplicate removal, and retains the outgoing table. Writing your
+  own pointers into slots of an SDK-owned array is unsupported.
+
+  The SDK never returns an array it built to the heap once `environ` has
+  exposed it. An array that leaves the environment loses its strings, reads as
+  empty (`array[0]` is NULL) and joins a small pool that later tables reuse, so
+  memory is bounded by the peak number of tables in use, not by the number of
+  adoptions. Restoring a table saved before the most recent adoption is
+  therefore safe but not supported: the next accessor adopts whatever that array
+  holds, which is empty unless a later table reused it, in which case it is that
+  table's current contents. A mutation of the current table can invalidate
+  saved pointers to its strings, and can change its entries in place or move
+  them to another array. Removing the last entry leaves the current array in
+  place with a NULL first slot.
+
+  Compile with `<stdlib.h>` from the SDK. Its `getenv` declaration carries an
+  asm-label wrapper that stops the compiler from assuming `environ` is unchanged
+  across the call. A program that declares `char *getenv(const char *);` itself,
+  or is built without the SDK's `include/posix` path, bypasses that wrapper, and
+  the compiler may then fold comparisons on `environ` after `getenv`.
+
+  To observe direct task or ABI changes, use `getenv` or enumerate through
+  `xila_env_entry`.
+  Referencing `environ` pulls in the archive member that overrides the SDK's
+  hidden weak startup and accessor hooks. The startup hook builds the table
+  before `main`. Each mutation reserves any needed memory before updating the
+  host. Accessor-only programs retain the default hooks and use zero RAM for
+  this table.
+* **Process IDs.** `getpid` and `getppid` read the current and parent process IDs
+  from the native process capability. A process adopted by the root task has
+  parent ID zero. Without a process capability, `getpid` returns 1 and
+  `getppid` returns 0. The SDK provides no user or group ID wrappers such as
+  `getuid`, `geteuid`, `getgid`, `getegid`, `getgroups`, `setuid` or `setgid`.
 * **stdio.** `stdin`, `stdout` and `stderr` are descriptors 0-2 through picolibc's
   buffered POSIX streams, each in its own object, so a program that never reads
   `stdin` carries neither its `FILE` nor its buffer. `stdout` is line buffered (128
@@ -314,11 +388,11 @@ Workers can return a result or call `pthread_exit`, both of which run their TLS
 destructors. Main ends the process by returning or calling `exit`. Calling
 `pthread_exit` from main aborts. Worker cancellation is outside this subset.
 
-Return `ENOSYS`, until the ABI slots they need exist:
+The following stubs report `ENOSYS`:
 
-| Calls | Waiting for |
+| Calls | Pending support |
 |---|---|
-| `posix_spawn`, `waitpid`, environment, user and process ids | core#717 (process and environment capabilities) |
+| `posix_spawn`, `waitpid` | POSIX wrappers for the process ABI (core#762) |
 | `socket`, `connect`, `bind`, `listen`, `accept`, `send*`, `recv*`, `shutdown` | the network capability in the startup structure (core#717); DNS (`getaddrinfo`) is not declared |
 
 Never provided: `fork`, asynchronous signals, general `mmap`.

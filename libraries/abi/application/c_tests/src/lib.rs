@@ -1243,6 +1243,17 @@ mod tests {
         check!(in_host_state(startup.standard_input as usize));
         check!(in_host_state(startup.standard_output as usize));
         check!(in_host_state(startup.standard_error as usize));
+        check!(in_host_state(ptr::from_ref(&startup.program_name) as usize));
+        check!(startup.program_name.length == b"streams".len());
+        check!(!startup.program_name.data.is_null());
+        check!(
+            unsafe {
+                core::slice::from_raw_parts(
+                    startup.program_name.data.cast::<u8>(),
+                    startup.program_name.length,
+                )
+            } == b"streams"
+        );
         0
     }
 

@@ -75,11 +75,12 @@ program's environment replaces the copy its task made of its parent's before
 the entry runs. The task future, not the coroutine stack, owns one allocation
 that holds the `LoadedImage` handle, the process `XilaHeap` granted through
 `startup->heap` and the host state: the `XilaStartup` block, the process
-capability and the arguments and startup streams they point into. The image
-bytes stay in the platform's `ExecutableMemory`, which the handle releases, and
+capability and the launch name, arguments and startup streams they point into.
+The image bytes stay in the platform's `ExecutableMemory`, which the handle releases, and
 the C heap's blocks are separate allocations the `XilaHeap` tracks: neither is
-part of it. The state takes 368 B per process on 32-bit targets (408 B for the
-allocation, with the heap and the handle). The coroutine entry receives only a
+part of it. The state takes 384 B per process on 32-bit targets (424 B for the
+allocation, with the heap and the handle). The launch-name bytes are allocated
+separately, like the argument strings. The coroutine entry receives only a
 pointer to it, so a program that overruns its own frames cannot damage the state
 `xila_process_exit` and the SDK's heap and standard error access depend on, and
 the host can reach the streams whatever the coroutine was doing. The allocation

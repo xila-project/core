@@ -72,6 +72,10 @@ int xila_cwd_set(const char *absolute);
 /* Normalize `path` onto the absolute `base`. Returns 0 or an errno value. */
 int xila_path_normalize(const char *base, const char *path, char *output, int allow_escape);
 
+/* Commit a validated POSIX environment mutation with the libc lock held.
+   A null value removes the name. */
+int xila_posix_env_commit(const char *name, size_t name_length, const char *value);
+
 /* Startup and shutdown. */
 int xila_posix_initialize(const XilaStartup *startup, int *argc, char ***argv);
 void xila_posix_shutdown(void);

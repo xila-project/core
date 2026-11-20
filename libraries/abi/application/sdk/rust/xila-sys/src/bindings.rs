@@ -249,6 +249,14 @@ pub struct XilaApi {
         name: *const c_char,
         name_length: usize,
     ) -> Status,
+    /// Read a counted NAME=VALUE entry by index; NotFound marks the end.
+    pub env_entry: unsafe extern "C" fn(
+        process: *const Process,
+        index: usize,
+        buffer: *mut c_char,
+        capacity: usize,
+        entry_length: *mut usize,
+    ) -> Status,
     /// Spawn a worker of the current process; stack_size zero chooses the default.
     pub thread_spawn: unsafe extern "C" fn(
         process: *const Process,
@@ -542,6 +550,8 @@ pub struct XilaStartup {
     pub standard_error: *mut File,
     pub home: *mut Directory,
     pub process: *const Process,
+    /// Executable's launch name. Empty for a linked entry without a process.
+    pub program_name: XilaString,
 }
 /// A native worker entry. Null is rejected.
 pub type ThreadEntry = Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>;

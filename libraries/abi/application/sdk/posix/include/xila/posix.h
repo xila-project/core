@@ -12,6 +12,8 @@
 extern "C" {
 #endif
 
+extern char **environ;
+
 int openat(int dirfd, const char *path, int flags, ...);
 int mkdirat(int dirfd, const char *path, mode_t mode);
 int unlinkat(int dirfd, const char *path, int flags);

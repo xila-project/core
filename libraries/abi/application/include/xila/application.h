@@ -601,6 +601,14 @@ typedef struct XilaApi {
    */
   XilaStatus (*env_remove)(const struct XilaProcess *process, const char *name, size_t name_length);
   /**
+   * Read a counted NAME=VALUE entry by index; NotFound marks the end.
+   */
+  XilaStatus (*env_entry)(const struct XilaProcess *process,
+                          size_t index,
+                          char *buffer,
+                          size_t capacity,
+                          size_t *entry_length);
+  /**
    * Spawn a worker of the current process; stack_size zero chooses the default.
    */
   XilaStatus (*thread_spawn)(const struct XilaProcess *process,
@@ -724,6 +732,10 @@ typedef struct XilaStartup {
   struct XilaFile *standard_error;
   struct XilaDirectory *home;
   const struct XilaProcess *process;
+  /**
+   * Executable's launch name. Empty for a linked entry without a process.
+   */
+  struct XilaString program_name;
 } XilaStartup;
 
 #endif  /* XILA_APPLICATION_H */
