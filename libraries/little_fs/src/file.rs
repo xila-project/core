@@ -1,23 +1,15 @@
 use super::{convert_flags, convert_result, littlefs};
 use crate::attributes::InternalAttributes;
+use crate::constants;
 use alloc::{boxed::Box, ffi::CString};
 use core::ffi::c_void;
 use file_system::{AttributeFlags, Attributes, Flags, IoErrorKind, Path, Position, Result, Size};
 
 fn convert_position(position: &Position) -> (i32, i32) {
     match position {
-        Position::Start(position) => (
-            *position as i32,
-            littlefs::lfs_whence_flags_LFS_SEEK_SET as i32,
-        ),
-        Position::Current(position) => (
-            *position as i32,
-            littlefs::lfs_whence_flags_LFS_SEEK_CUR as i32,
-        ),
-        Position::End(position) => (
-            *position as i32,
-            littlefs::lfs_whence_flags_LFS_SEEK_END as i32,
-        ),
+        Position::Start(position) => (*position as i32, constants::SEEK_START),
+        Position::Current(position) => (*position as i32, constants::SEEK_CURRENT),
+        Position::End(position) => (*position as i32, constants::SEEK_END),
     }
 }
 
@@ -80,8 +72,7 @@ impl File {
                 file_system,
                 &mut file,
                 path.as_ptr(),
-                littlefs::lfs_open_flags_LFS_O_CREAT as i32
-                    | littlefs::lfs_open_flags_LFS_O_EXCL as i32,
+                constants::OPEN_CREATE | constants::OPEN_EXCLUSIVE,
             ))?;
 
             convert_result(littlefs::lfs_file_close(file_system, &mut file))?;
@@ -129,15 +120,15 @@ impl File {
 
         // Read-only opens cannot persist configured attributes. Never report a
         // successful chmod that disappears when the descriptor closes.
-        if self.file.flags & 3 == littlefs::lfs_open_flags_LFS_O_RDONLY {
+        if self.file.flags & constants::FILE_ACCESS_MASK == constants::FILE_READ_ONLY {
             return Err(IoErrorKind::Unsupported);
         }
         // sync skips errored files and commits data together with attributes.
         // A dusty independent open has stale data; callers must reopen it.
-        if self.file.flags & littlefs::lfs_open_flags_LFS_F_ERRED != 0 {
+        if self.file.flags & constants::FILE_ERRORED != 0 {
             return Err(IoErrorKind::InputOutput);
         }
-        if self.file.flags & littlefs::lfs_open_flags_LFS_F_DUSTY != 0 {
+        if self.file.flags & constants::FILE_DUSTY != 0 {
             return Err(IoErrorKind::ResourceBusy);
         }
         if let Some(size) = attributes.get_size() {
@@ -150,7 +141,7 @@ impl File {
         let previous = self.internal_attributes.clone();
         self.internal_attributes
             .update_with_attributes(attributes)?;
-        self.file.flags |= littlefs::lfs_open_flags_LFS_F_DIRTY;
+        self.file.flags |= constants::FILE_DIRTY;
         if let Err(error) =
             convert_result(unsafe { littlefs::lfs_file_sync(file_system, &mut self.file) })
         {
@@ -183,7 +174,7 @@ impl File {
                 file_system,
                 &mut self.file,
                 absolue_position as i32,
-                littlefs::lfs_whence_flags_LFS_SEEK_SET as i32,
+                constants::SEEK_START,
             ))?;
 
             convert_result(littlefs::lfs_file_read(
@@ -208,7 +199,7 @@ impl File {
                 file_system,
                 &mut self.file,
                 absolue_position as i32,
-                littlefs::lfs_whence_flags_LFS_SEEK_SET as i32,
+                constants::SEEK_START,
             ))?;
 
             convert_result(littlefs::lfs_file_write(
@@ -266,7 +257,7 @@ mod tests {
             let original = file.internal_attributes.permissions;
             // Fault state left by LittleFS after a failed write/commit. Its
             // sync function returns success immediately in this state.
-            file.file.flags |= littlefs::lfs_open_flags_LFS_F_ERRED;
+            file.file.flags |= constants::FILE_ERRORED;
             assert_eq!(
                 file.set_attributes(
                     native,

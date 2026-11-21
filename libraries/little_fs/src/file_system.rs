@@ -5,6 +5,7 @@ use crate::{
     File,
     attributes::InternalAttributes,
     configuration::{self},
+    constants,
 };
 use alloc::{boxed::Box, ffi::CString};
 use file_system::{
@@ -237,7 +238,7 @@ impl FileSystemOperations for FileSystem {
                         file_system,
                         &mut probe,
                         source.as_ptr(),
-                        littlefs::lfs_open_flags_LFS_O_RDONLY as i32,
+                        constants::OPEN_READ_ONLY,
                     )
                 };
                 if opened >= 0 {
@@ -376,7 +377,7 @@ impl FileSystemOperations for FileSystem {
                     file_system,
                     &mut probe,
                     path.as_ptr(),
-                    littlefs::lfs_open_flags_LFS_O_RDONLY as i32,
+                    constants::OPEN_READ_ONLY,
                 )
             };
             if opened < 0 && opened != littlefs::lfs_error_LFS_ERR_ISDIR {
@@ -1156,8 +1157,7 @@ mod tests {
                     native,
                     &mut raw_file,
                     c"/external-file".as_ptr(),
-                    littlefs::lfs_open_flags_LFS_O_CREAT as i32
-                        | littlefs::lfs_open_flags_LFS_O_WRONLY as i32,
+                    constants::OPEN_CREATE | constants::OPEN_WRITE_ONLY,
                 ))?;
                 convert_result(littlefs::lfs_file_close(native, &mut raw_file))?;
                 convert_result(littlefs::lfs_mkdir(native, c"/external-dir".as_ptr()))?;

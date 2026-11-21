@@ -3,7 +3,7 @@
 //! LittleFS already maintains the live object identities through rename,
 //! relocation and unlink in `mlist`. Use that list under the filesystem lock;
 //! pathname caches would alias replacement entries and require another registry.
-use crate::{attributes::InternalAttributes, littlefs};
+use crate::{attributes::InternalAttributes, constants, littlefs};
 
 /// Caller holds the LittleFS filesystem lock; `identity` is an open native file
 /// still linked into that filesystem. No Rust reference to another open's
@@ -26,7 +26,7 @@ pub(crate) fn synchronize(
         unsafe {
             let current = &*node;
             let next = current.next;
-            if current.type_ as u32 == littlefs::lfs_type_LFS_TYPE_REG
+            if current.type_ == constants::TYPE_REGULAR
                 && current.id == identity.id
                 && current
                     .m
@@ -67,7 +67,7 @@ pub(crate) fn has_other_open(
         unsafe {
             let current = &*node;
             if !core::ptr::eq(node, identity_ptr)
-                && current.type_ as u32 == littlefs::lfs_type_LFS_TYPE_REG
+                && current.type_ == constants::TYPE_REGULAR
                 && current.id == identity.id
                 && current
                     .m

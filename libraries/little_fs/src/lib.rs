@@ -7,6 +7,7 @@ use littlefs2_sys as littlefs;
 mod attributes;
 mod callbacks;
 mod configuration;
+mod constants;
 mod directory;
 mod error;
 mod file;
