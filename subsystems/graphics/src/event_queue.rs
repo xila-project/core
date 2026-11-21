@@ -17,18 +17,30 @@ pub enum PushOutcome {
     Queued,
     /// The event replaced the queued pointer move it superseded.
     Coalesced,
-    /// The ring was full: the oldest expendable event was dropped to make room
-    /// and the event was appended.
+    /// The event replaced the oldest queued event eligible for eviction.
     EvictedOldest,
-    /// The ring was full of events that must be kept: the event was dropped.
+    /// The event replaced the oldest high-priority event and the window should
+    /// warn about this burst of input loss.
+    FirstInputEvictionInBurst,
+    /// The ring was full of high-priority events and rejected a low-priority arrival.
     Dropped,
 }
 
-/// Bounded FIFO of window events.
+/// Bounded queue of window events in arrival order.
+///
+/// Consecutive pointer moves for the same target coalesce. When full, the queue
+/// evicts its oldest low-priority event first. Scroll steps, hover, style and
+/// drawing notifications are low priority. If all queued events are high
+/// priority, a high-priority arrival replaces the oldest and a low-priority
+/// arrival is rejected.
+///
+/// Each overflow loss is counted. The first high-priority eviction requests a
+/// warning, and another warning can be requested once the queue empties.
 pub struct EventQueue {
     slots: [Option<Event>; WINDOW_EVENT_QUEUE_CAPACITY],
     head: u8,
     length: u8,
+    input_eviction_in_burst: bool,
     dropped: u32,
 }
 
@@ -42,14 +54,25 @@ const fn is_coalescible(event: &Event) -> bool {
     matches!(event.code, EventKind::Pressing)
 }
 
-/// Whether a full ring may sacrifice this event for a newer one: pointer moves,
-/// scroll animation steps and the style refreshes a press or release emits for
-/// every affected object. Otherwise one click or tile animation can fill the ring
-/// and push out its own release, click or value change.
-const fn is_expendable(event: &Event) -> bool {
+/// Notifications that can be sacrificed to preserve input and state changes.
+const fn is_low_priority(event: &Event) -> bool {
     matches!(
         event.code,
-        EventKind::Pressing | EventKind::Scroll | EventKind::StyleChanged
+        EventKind::Scroll
+            | EventKind::StyleChanged
+            | EventKind::HoverOver
+            | EventKind::HoverLeave
+            | EventKind::CoverCheck
+            | EventKind::RefreshExtDrawSize
+            | EventKind::DrawMainBegin
+            | EventKind::DrawMain
+            | EventKind::DrawMainEnd
+            | EventKind::DrawPostBegin
+            | EventKind::DrawPost
+            | EventKind::DrawPostEnd
+            | EventKind::DrawTaskAdded
+            | EventKind::GetSelfSize
+            | EventKind::LayoutChanged
     )
 }
 
@@ -59,6 +82,7 @@ impl EventQueue {
             slots: [const { None }; WINDOW_EVENT_QUEUE_CAPACITY],
             head: 0,
             length: 0,
+            input_eviction_in_burst: false,
             dropped: 0,
         }
     }
@@ -75,21 +99,13 @@ impl EventQueue {
         self.length as usize == WINDOW_EVENT_QUEUE_CAPACITY
     }
 
-    /// Number of events lost to overflow since creation, both rejected events
-    /// and coalescible events evicted to make room.
+    /// Number of events lost to overflow since creation, including rejections
+    /// and evictions.
     pub const fn dropped(&self) -> u32 {
         self.dropped
     }
 
-    /// Append an event, keeping the ring bounded.
-    ///
-    /// 1. A pointer move (`Pressing`) directly following a pointer move for the
-    ///    same target replaces it: only the latest position is useful.
-    /// 2. Otherwise, if the ring is full, the oldest queued expendable event (a
-    ///    pointer move, scroll step or style change) is dropped to make room, so key, click, press, release and value events are never lost
-    ///    while such an event can be sacrificed.
-    /// 3. If the ring is still full, the new event is dropped (keeping the
-    ///    queue order and front stable) and counted in [`Self::dropped`].
+    /// Append an event according to the queue's eviction policy.
     pub fn push(&mut self, event: Event) -> PushOutcome {
         if is_coalescible(&event)
             && let Some(last) = self.last_mut()
@@ -100,18 +116,26 @@ impl EventQueue {
             return PushOutcome::Coalesced;
         }
 
-        let mut outcome = PushOutcome::Queued;
-        if self.is_full() {
-            let Some(index) =
-                (0..self.len()).find(|&index| self.get(index).is_some_and(is_expendable))
-            else {
-                self.dropped = self.dropped.saturating_add(1);
-                return PushOutcome::Dropped;
-            };
-            self.remove(index);
+        let outcome = if self.is_full() {
             self.dropped = self.dropped.saturating_add(1);
-            outcome = PushOutcome::EvictedOldest;
-        }
+            match (0..self.len()).find(|&index| self.get(index).is_some_and(is_low_priority)) {
+                Some(index) => {
+                    self.remove(index);
+                    PushOutcome::EvictedOldest
+                }
+                None if is_low_priority(&event) => return PushOutcome::Dropped,
+                None => {
+                    self.pop_front();
+                    if core::mem::replace(&mut self.input_eviction_in_burst, true) {
+                        PushOutcome::EvictedOldest
+                    } else {
+                        PushOutcome::FirstInputEvictionInBurst
+                    }
+                }
+            }
+        } else {
+            PushOutcome::Queued
+        };
 
         let slot = self.physical(self.len());
         self.slots[slot] = Some(event);
@@ -130,6 +154,9 @@ impl EventQueue {
         let event = self.slots[self.head as usize].take();
         self.head = ((self.head as usize + 1) % WINDOW_EVENT_QUEUE_CAPACITY) as u8;
         self.length -= 1;
+        if self.is_empty() {
+            self.input_eviction_in_burst = false;
+        }
         event
     }
 
@@ -149,6 +176,9 @@ impl EventQueue {
             }
         }
         self.length = kept as u8;
+        if self.is_empty() {
+            self.input_eviction_in_burst = false;
+        }
     }
 
     /// Keep every event but null the ones aimed at `target`.
@@ -202,6 +232,10 @@ impl EventQueue {
 
     /// Remove the event at logical `index`, shifting later events forward.
     fn remove(&mut self, index: usize) {
+        if index == 0 {
+            self.pop_front();
+            return;
+        }
         for position in index..self.len() - 1 {
             let (from, to) = (self.physical(position + 1), self.physical(position));
             self.slots[to] = self.slots[from].take();
@@ -309,13 +343,13 @@ mod tests {
     }
 
     #[test]
-    fn full_ring_evicts_the_oldest_pointer_move_and_keeps_everything_else() {
+    fn full_ring_evicts_the_oldest_scroll_and_keeps_pointer_moves() {
         let mut queue = EventQueue::new();
         queue.push(event(EventKind::Pressed, 1));
-        queue.push(pointer_move(1, 1)); // oldest move: evicted first
+        queue.push(pointer_move(1, 1));
         queue.push(event(EventKind::Key, 1));
-        queue.push(pointer_move(2, 2));
-        queue.push(event(EventKind::Key, 2)); // so the next move is not coalesced
+        queue.push(event(EventKind::Scroll, 2));
+        queue.push(event(EventKind::StyleChanged, 3));
         while !queue.is_full() {
             queue.push(event(EventKind::Clicked, 3));
         }
@@ -329,16 +363,10 @@ mod tests {
         let drained = drain(&mut queue);
         assert_eq!(drained.len(), WINDOW_EVENT_QUEUE_CAPACITY);
         assert_eq!(drained[0], (EventKind::Pressed, 1));
-        assert_eq!(drained[1], (EventKind::Key, 1));
-        assert_eq!(drained[2], (EventKind::Pressing, 2));
+        assert_eq!(drained[1], (EventKind::Pressing, 1));
+        assert_eq!(drained[2], (EventKind::Key, 1));
+        assert_eq!(drained[3], (EventKind::StyleChanged, 3));
         assert_eq!(*drained.last().unwrap(), (EventKind::Released, 1));
-        assert_eq!(
-            drained
-                .iter()
-                .filter(|(code, _)| *code == EventKind::Pressing)
-                .count(),
-            1
-        );
     }
 
     #[test]
@@ -384,20 +412,100 @@ mod tests {
     }
 
     #[test]
-    fn full_ring_of_important_events_drops_the_new_one_and_counts_it() {
+    fn full_ring_of_scroll_events_keeps_the_next_press() {
         let mut queue = EventQueue::new();
-        for index in 0..WINDOW_EVENT_QUEUE_CAPACITY {
-            queue.push(event(EventKind::Clicked, index + 1));
+        for address in 1..=WINDOW_EVENT_QUEUE_CAPACITY {
+            queue.push(event(EventKind::Scroll, address));
         }
-        for _ in 0..3 {
-            assert_eq!(queue.push(event(EventKind::Key, 99)), PushOutcome::Dropped);
-        }
-        assert_eq!(queue.push(pointer_move(1, 0)), PushOutcome::Dropped);
-        assert_eq!(queue.dropped(), 4);
-        assert_eq!(queue.len(), WINDOW_EVENT_QUEUE_CAPACITY);
+        assert_eq!(
+            queue.push(event(EventKind::Pressed, 99)),
+            PushOutcome::EvictedOldest
+        );
         let drained = drain(&mut queue);
-        assert!(drained.iter().all(|(code, _)| *code == EventKind::Clicked));
-        assert_eq!(drained[0].1, 1);
+        assert_eq!(drained.len(), WINDOW_EVENT_QUEUE_CAPACITY);
+        assert_eq!(drained[0], (EventKind::Scroll, 2));
+        assert_eq!(*drained.last().unwrap(), (EventKind::Pressed, 99));
+    }
+
+    #[test]
+    fn full_ring_of_input_events_evicts_the_oldest_for_new_input() {
+        let mut queue = EventQueue::new();
+        for address in 1..=WINDOW_EVENT_QUEUE_CAPACITY {
+            queue.push(event(EventKind::Clicked, address));
+        }
+        assert_eq!(
+            queue.push(event(EventKind::Released, 99)),
+            PushOutcome::FirstInputEvictionInBurst
+        );
+        let drained = drain(&mut queue);
+        assert_eq!(drained.len(), WINDOW_EVENT_QUEUE_CAPACITY);
+        assert_eq!(
+            drained[..drained.len() - 1],
+            (2..=WINDOW_EVENT_QUEUE_CAPACITY)
+                .map(|address| (EventKind::Clicked, address))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(*drained.last().unwrap(), (EventKind::Released, 99));
+        assert_eq!(queue.dropped(), 1);
+    }
+
+    #[test]
+    fn full_ring_of_input_events_rejects_low_priority_events() {
+        let mut queue = EventQueue::new();
+        for address in 1..=WINDOW_EVENT_QUEUE_CAPACITY {
+            queue.push(pointer_move(address, 0));
+        }
+        let noise = [
+            EventKind::Scroll,
+            EventKind::StyleChanged,
+            EventKind::DrawMain,
+            EventKind::HoverOver,
+            EventKind::HoverLeave,
+        ];
+        for code in noise {
+            assert_eq!(queue.push(event(code, 99)), PushOutcome::Dropped);
+        }
+        assert_eq!(queue.dropped() as usize, noise.len());
+        assert_eq!(
+            drain(&mut queue),
+            (1..=WINDOW_EVENT_QUEUE_CAPACITY)
+                .map(|address| (EventKind::Pressing, address))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn input_evictions_request_one_warning_per_burst() {
+        let mut queue = EventQueue::new();
+        for clear_by_discard in [false, true, false] {
+            for _ in 0..WINDOW_EVENT_QUEUE_CAPACITY {
+                queue.push(event(EventKind::Clicked, 1));
+            }
+            assert_eq!(
+                queue.push(event(EventKind::Scroll, 1)),
+                PushOutcome::Dropped
+            );
+
+            let mut warning_count = 0;
+            for _ in 0..10 {
+                let outcome = queue.push(event(EventKind::Released, 1));
+                warning_count += usize::from(outcome == PushOutcome::FirstInputEvictionInBurst);
+                queue.pop_front();
+                assert_eq!(
+                    queue.push(event(EventKind::Clicked, 1)),
+                    PushOutcome::Queued
+                );
+            }
+            assert_eq!(warning_count, 1);
+
+            if clear_by_discard {
+                queue.discard_target(object(1));
+            } else {
+                while queue.pop_front().is_some() {}
+            }
+            assert!(queue.is_empty());
+        }
+        assert_eq!(queue.dropped(), 33);
     }
 
     #[test]

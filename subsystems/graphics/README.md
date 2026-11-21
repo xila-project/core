@@ -75,10 +75,10 @@ LVGL releases the strings it duplicates (`lv_strdup`, `lv_strndup`) with `lv_fre
 Each window queues the events of its widgets in a fixed ring of `WINDOW_EVENT_QUEUE_CAPACITY` (16) events that lives inside the window object: no allocation, and it never grows. Overflow policy, applied when an event is pushed:
 
 1. A pointer move (`Pressing`) that directly follows a pointer move for the same target replaces it, so only the latest position is kept.
-2. If the ring is full, the oldest queued pointer move is dropped to make room: key, click, press and release events are never lost while a move can be sacrificed.
-3. If it is still full, the new event is dropped, which keeps the order of the queue and its front stable.
+2. If the ring is full, the oldest low-priority event is dropped to make room. Scroll steps, style changes and drawing notifications have low priority.
+3. If the ring is full of high-priority events, an incoming high-priority event replaces the oldest event. An incoming low-priority event is rejected. Surviving events keep their order.
 
-Every dropped event is counted; read it with `Window::dropped_event_count()`. A consumer that falls behind by more than 16 events loses events, so drain the queue every time the window wakes it.
+The window handles widget creation and deletion internally and filters hover notifications before queuing. `Window::dropped_event_count()` counts losses from overflow. The first loss of a high-priority event logs a warning and the next warning can occur after the queue empties.
 
 RAM budget (excluding allocator bookkeeping): on x86_64, `Event` is 32 bytes,
 so the old queue started at 32 bytes inline plus a 320-byte allocation, and
