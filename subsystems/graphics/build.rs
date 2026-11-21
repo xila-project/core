@@ -8,8 +8,6 @@ mod config;
 mod fonts;
 #[path = "build/generate.rs"]
 mod generate;
-#[path = "build/target.rs"]
-mod target;
 
 use std::{
     env, fs,
@@ -31,6 +29,7 @@ fn main() {
         "DEP_LVGL_RUST_SYS_INCLUDE_PATHS",
         "DEP_LVGL_RUST_SYS_DEFINES",
         "DEP_LVGL_RUST_SYS_CFLAGS",
+        "DEP_LVGL_RUST_SYS_COMPILER_FLAGS",
         "DEP_LVGL_RUST_SYS_TARGET",
         "DEP_LVGL_RUST_SYS_BINDINGS",
     ] {
@@ -184,19 +183,20 @@ fn required_metadata(name: &str) -> String {
         .unwrap_or_else(|_| panic!("Required {name} metadata is missing from lvgl_rust_sys build"))
 }
 
-/// Use exactly the same includes, defines and target as LVGL and the fonts.
+/// Use exactly the same includes, defines, compiler flags and target as LVGL.
 fn lvgl_build() -> cc::Build {
     let include_paths = required_metadata("DEP_LVGL_RUST_SYS_INCLUDE_PATHS");
     let defines = required_metadata("DEP_LVGL_RUST_SYS_DEFINES");
     let cflags = required_metadata("DEP_LVGL_RUST_SYS_CFLAGS");
+    let compiler_flags = required_metadata("DEP_LVGL_RUST_SYS_COMPILER_FLAGS");
     let target = required_metadata("DEP_LVGL_RUST_SYS_TARGET");
 
     let mut build = cc::Build::new();
     build.target(&target).warnings(true);
-    let target_abi = env::var("CARGO_CFG_TARGET_ABI").unwrap_or_default();
-    if let Some((architecture_flag, abi_flag)) = target::riscv_compiler_flags(&target, &target_abi)
-    {
-        build.flag(&architecture_flag).flag(&abi_flag);
+    // Architecture and calling convention flags (RISC-V `-march`/`-mabi`), so the
+    // font objects use the same floating-point calling convention as LVGL.
+    for flag in compiler_flags.split_whitespace() {
+        build.flag(flag);
     }
     for include in include_paths.split(';').filter(|path| !path.is_empty()) {
         build.include(include);

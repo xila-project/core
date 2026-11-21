@@ -493,9 +493,8 @@ done
 # Graphics is C-backed and its FFI differs by target: `c_char` is unsigned on ARM and RISC-V.
 cargo check --locked -p xila-graphics --features rendering_rgb565 --target thumbv7em-none-eabihf
 cargo check --locked -p xila-graphics --features rendering_rgb565 --target riscv32imac-unknown-none-elf
-# Upstream lvgl-rust-sys relies on cc defaults, which omit ilp32f on riscv32imafc.
-CFLAGS_riscv32imafc_unknown_none_elf="-march=rv32imafc -mabi=ilp32f" \\
-  cargo check --locked -p xila-graphics --features rendering_rgb565 --target riscv32imafc-unknown-none-elf
+# lvgl-rust-sys derives -march/-mabi from the target and exports them to the font build.
+cargo check --locked -p xila-graphics --features rendering_rgb565 --target riscv32imafc-unknown-none-elf
 # Verify that the C static archives built by this run for riscv32imafc use the
 # single-float ABI (EF_RISCV_FLOAT_ABI_SINGLE). Take the build script output
 # directories from Cargo's messages (the checks above are fresh, so this is fast),
@@ -503,8 +502,7 @@ CFLAGS_riscv32imafc_unknown_none_elf="-march=rv32imafc -mabi=ilp32f" \\
 out_directories=$(
   {
     cargo check --locked -p xila --target riscv32imafc-unknown-none-elf --message-format=json
-    CFLAGS_riscv32imafc_unknown_none_elf="-march=rv32imafc -mabi=ilp32f" \\
-      cargo check --locked -p xila-graphics --features rendering_rgb565 --target riscv32imafc-unknown-none-elf --message-format=json
+    cargo check --locked -p xila-graphics --features rendering_rgb565 --target riscv32imafc-unknown-none-elf --message-format=json
   } | grep '"reason":"build-script-executed"' | grep -o '"out_dir":"[^"]*"' | cut -d '"' -f 4 | sort -u
 )
 for expected in liblfs-sys.a liblvgl.a libfont_assets.a; do
