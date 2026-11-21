@@ -8,14 +8,16 @@ use core::{
 use portable_atomic::{AtomicBool, Ordering};
 use std::{process::Command, sync::Mutex};
 
+use abi_application::ProcessLaunch;
 use executable::{Error, ExecutableContext, Home, NativeFormat, Standard, execute, execute_with};
 use file_system::{
     AccessFlags, BaseOperations, CharacterDevice, Context as DeviceContext, CreateFlags,
     DirectBaseOperations, DirectCharacterDevice, Flags, MountOperations, Permissions, Position,
     Size, Special,
 };
-use native_loader::{Error as LoaderError, ExecutableMemory, LoadedImage, Region};
-use virtual_file_system::File;
+use native_loader::{Error as LoaderError, ExecutableMemory, LoadedImage, Region, Startup};
+use stackful::Stack;
+use virtual_file_system::{File, VirtualFileSystem};
 
 mod common;
 
@@ -430,4 +432,170 @@ fn dropped_spawn_future_releases_the_startup_arguments() {
         .since(before)
         .net_bytes();
     assert_eq!(net, 0, "dropping an unpolled spawn leaked {net} bytes");
+}
+
+/// A character device whose reads never finish, and that can be unmounted. It is not
+/// zero-sized: the file system tells devices apart by address.
+struct Blocked(#[allow(dead_code)] u8);
+impl BaseOperations for Blocked {
+    fn read(
+        &self,
+        _: &mut DeviceContext,
+        _: &mut Context<'_>,
+        _: &mut [u8],
+        _: Size,
+    ) -> Poll<file_system::Result<usize>> {
+        Poll::Pending
+    }
+
+    fn write(
+        &self,
+        _: &mut DeviceContext,
+        _: &mut Context<'_>,
+        _: &[u8],
+        _: Size,
+    ) -> Poll<file_system::Result<usize>> {
+        Poll::Ready(Err(file_system::IoErrorKind::Unsupported))
+    }
+
+    fn clone_context(&self, _: &DeviceContext) -> file_system::Result<DeviceContext> {
+        Ok(DeviceContext::new_empty())
+    }
+}
+impl MountOperations for Blocked {
+    fn unmount(&self) -> file_system::Result<()> {
+        Ok(())
+    }
+}
+impl CharacterDevice for Blocked {}
+
+/// A file system with a blocked device at `/blocked`, the context of a process running on
+/// it, and a handle the test keeps on the device, to tell a closed handle from a leaked one
+/// and from one closed twice: the device stays in use until the test closes its own.
+async fn blocked_world() -> (
+    &'static task::Manager,
+    task::TaskIdentifier,
+    &'static VirtualFileSystem,
+    &'static ExecutableContext,
+    File<'static>,
+) {
+    let time = Box::leak(Box::new(
+        time::Manager::new(&testing_support::TimeDevice).unwrap(),
+    ));
+    let tasks = task::test_manager();
+    let users = Box::leak(Box::new(users::Manager::new()));
+    let parent = tasks.get_current_task_identifier().await;
+    let device = file_system::MemoryDevice::<512>::new_static(128 * 1024);
+    let fs = little_fs::FileSystem::new_format(device, little_fs::Options::new(128)).unwrap();
+    let vfs = Box::leak(Box::new(
+        virtual_file_system::initialize(tasks, users, time, fs).unwrap(),
+    ));
+    let context = Box::leak(Box::new(ExecutableContext::new(tasks, users, vfs, time)));
+    vfs.mount_character_device(parent, "/blocked", Blocked(0))
+        .await
+        .unwrap();
+    let kept = File::open(vfs, parent, "/blocked", AccessFlags::Read.into())
+        .await
+        .unwrap();
+    (tasks, parent, vfs, context, kept)
+}
+
+/// The startup of a process whose standard input is a handle on the blocked device.
+async fn blocked_startup(
+    vfs: &'static VirtualFileSystem,
+    parent: task::TaskIdentifier,
+    context: &'static ExecutableContext,
+) -> Startup {
+    let input = File::open(vfs, parent, "/blocked", AccessFlags::Read.into())
+        .await
+        .unwrap();
+    Startup {
+        arguments: vec!["blocked".into(), "x".repeat(3000)],
+        standard_input: Some(abi_application::File::new(input.into_synchronous_file())),
+        process: Some(ProcessLaunch {
+            host: context,
+            environment: None,
+            home: None,
+        }),
+        ..Default::default()
+    }
+}
+
+/// The device is in use while the test's handle is open, and only then.
+async fn only_the_test_holds(vfs: &'static VirtualFileSystem, kept: File<'static>) {
+    assert!(
+        vfs.unmount("/blocked", false).await.is_err(),
+        "the test's own handle keeps the device in use: the program closed its own twice"
+    );
+    kept.close(vfs).await.unwrap();
+    vfs.unmount("/blocked", false)
+        .await
+        .expect("the program's handle was closed");
+}
+
+/// A native program cancelled while it is suspended in a read: its task future is dropped,
+/// the coroutine's frames are discarded, and the host closes its startup streams, frees its
+/// stack, heap and state, and unmaps its image (#731).
+#[task::test]
+async fn cancelled_native_program_releases_its_streams_image_and_state() {
+    let bytes = build_fixture_from("cancel.c", "xila-cancel.elf", "");
+    let (_, parent, vfs, context, kept) = blocked_world().await;
+    let before = testing_support::MemoryManager::thread_allocations();
+    let startup = blocked_startup(vfs, parent, context).await;
+    let image = LoadedImage::load(&bytes, &Mmap, 32 * 1024).unwrap();
+    assert_eq!(MAPPINGS.load(Ordering::Relaxed), 1);
+    let mut program = Box::pin(unsafe { image.start(Stack::new(64 * 1024), startup) }.unwrap());
+    // The program blocks reading its standard input.
+    let polled = core::future::poll_fn(|cx| Poll::Ready(program.as_mut().poll(cx))).await;
+    assert!(polled.is_pending());
+    assert!(vfs.unmount("/blocked", false).await.is_err());
+
+    drop(program);
+    assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0, "the image is unmapped");
+    let net = testing_support::MemoryManager::thread_allocations()
+        .since(before)
+        .net_bytes();
+    assert_eq!(net, 0, "stack, heap, state and arguments are all freed");
+    only_the_test_holds(vfs, kept).await;
+}
+
+/// The same program cancelled before it ran: nothing started, and the streams are still
+/// released by the owner of the allocation.
+#[task::test]
+async fn native_program_cancelled_before_its_first_poll_releases_its_streams() {
+    let bytes = build_fixture_from("cancel.c", "xila-cancel.elf", "");
+    let (_, parent, vfs, context, kept) = blocked_world().await;
+    let startup = blocked_startup(vfs, parent, context).await;
+    let image = LoadedImage::load(&bytes, &Mmap, 32 * 1024).unwrap();
+    let program = unsafe { image.start(Stack::new(64 * 1024), startup) }.unwrap();
+    assert!(vfs.unmount("/blocked", false).await.is_err());
+    drop(program);
+    assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
+    only_the_test_holds(vfs, kept).await;
+}
+
+/// The task manager refuses the spawn: the spawn future resolves to an error, and the
+/// streams and the image it took are released with it.
+#[task::test]
+async fn refused_spawn_releases_the_startup_streams_and_the_image() {
+    let bytes = build_fixture_from("cancel.c", "xila-cancel.elf", "");
+    let (tasks, parent, vfs, context, kept) = blocked_world().await;
+    let startup = blocked_startup(vfs, parent, context).await;
+    let image = LoadedImage::load(&bytes, &Mmap, 32 * 1024).unwrap();
+    let unknown_parent = task::TaskIdentifier::new(task::TaskIdentifier::MAXIMUM);
+    assert_ne!(unknown_parent, parent);
+    let spawned = unsafe {
+        image.spawn(
+            tasks,
+            unknown_parent,
+            "refused",
+            Stack::new(64 * 1024),
+            startup,
+            |status| status,
+        )
+    }
+    .unwrap();
+    assert!(spawned.await.is_err(), "the parent is not a task");
+    assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
+    only_the_test_holds(vfs, kept).await;
 }

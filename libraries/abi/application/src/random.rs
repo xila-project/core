@@ -1,5 +1,5 @@
 use crate::Status;
-use core::{ffi::c_void, pin::pin, slice};
+use core::{ffi::c_void, slice};
 use file_system::Kind;
 use synchronization::once_lock::OnceLock;
 use task::Manager;
@@ -43,21 +43,19 @@ pub unsafe extern "C" fn xila_random_fill(buffer: *mut c_void, size: usize) -> S
     // A native coroutine opens the source with its own VFS permissions.
     // Direct calls by the Rust host use the system task.
     let in_coroutine = crate::is_in_coroutine();
-    let mut result = Ok(());
-    crate::suspend_dynamic(pin!(async {
-        result = async {
-            let task = if in_coroutine {
-                vfs.task_manager()
-                    .try_get_current_task_identifier()
-                    .await
-                    .map_err(file_system::IntoIoErrorKind::into_io_error_kind)?
-            } else {
-                Manager::ROOT_TASK_IDENTIFIER
-            };
-            File::read_slice_from_character_device(vfs, task, ENTROPY_PATH, buffer).await
-        }
-        .await;
-    }));
+    // The source file is open only inside this future, so a cancelled process drops the
+    // future in place and closes it, which keeps the device from reading as busy.
+    let result = crate::suspend_on_cancellable(async {
+        let task = if in_coroutine {
+            vfs.task_manager()
+                .try_get_current_task_identifier()
+                .await
+                .map_err(file_system::IntoIoErrorKind::into_io_error_kind)?
+        } else {
+            Manager::ROOT_TASK_IDENTIFIER
+        };
+        File::read_slice_from_character_device(vfs, task, ENTROPY_PATH, buffer).await
+    });
     match result {
         Ok(()) => Status::Ok,
         Err(error) => error.into(),

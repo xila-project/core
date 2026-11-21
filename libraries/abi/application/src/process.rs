@@ -6,7 +6,9 @@
 //! the task manager, and starts children through the host's executable path.
 use crate::{
     Directory, File, Heap, HostState, Resources, Status, XILA_RIGHT_READ, XilaString, canonical,
-    enter, is_in_coroutine, path_input, suspend_dynamic,
+    enter, is_in_coroutine, path_input,
+    registry::{self, Handle},
+    suspend_dynamic, suspend_on_cancellable,
 };
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::{
@@ -98,10 +100,13 @@ impl ProcessLaunch {
     ///
     /// Every resource the process owns is held by `state`, which belongs to the
     /// host side of the task, not to this coroutine's stack: the call keeps only
-    /// pointers to it. Returning from the entry, a failed setup and
-    /// `xila_process_exit` each drop the state's resources once, before the
-    /// process ends. A worker that exits the process cancels main as described in
-    /// #731.
+    /// pointers to it. The home grant moves into the state before the first
+    /// suspension, and the environment is owned by that suspended future, which a
+    /// cancellation drops in place. Returning from the entry, a failed setup and
+    /// `xila_process_exit` each release the state's resources once, before the
+    /// process ends; a cancellation leaves them for the host to release with
+    /// [`HostState::release`]. A worker that exits the process discards the main
+    /// coroutine's frames, which own nothing for the same reason.
     ///
     /// # Safety
     /// Same contract as [`crate::run_main`], and `state` and `heap` stay at their
@@ -119,10 +124,23 @@ impl ProcessLaunch {
             home,
         } = self;
         let manager = host.task_manager();
-        let mut identity = Err(Status::Unavailable);
-        // `environment` is consumed here: nothing owned remains live when C starts.
-        suspend_dynamic(pin!(async {
-            identity = async {
+        let resources = unsafe { &raw mut (*state.as_ptr()).resources };
+        // SAFETY: the caller guarantees the state is live; nothing else uses it yet.
+        // The capability belongs to the root task until the process learns its own, below.
+        unsafe {
+            (*resources).home = home.map(|grant| {
+                Directory::granted(
+                    host.virtual_file_system(),
+                    task::Manager::ROOT_TASK_IDENTIFIER,
+                    grant.path,
+                    grant.rights,
+                )
+            });
+        }
+        // `environment` is consumed here, by a future that owns it: nothing owned remains
+        // live in a frame when C starts.
+        let identity = suspend_on_cancellable(async {
+            async {
                 let task = manager.try_get_current_task_identifier().await?;
                 if let Some(environment) = environment {
                     manager
@@ -132,9 +150,8 @@ impl ProcessLaunch {
                 Ok::<_, task::Error>((task, manager.get_name(task).await?))
             }
             .await
-            .map_err(task_status);
-        }));
-        let resources = unsafe { &raw mut (*state.as_ptr()).resources };
+            .map_err(task_status)
+        });
         let Ok((task, program_name)) = identity else {
             // SAFETY: nothing has started that could use the resources.
             unsafe { Resources::release(resources) };
@@ -143,9 +160,9 @@ impl ProcessLaunch {
         // SAFETY: the caller guarantees the state is live; nothing else uses it yet.
         unsafe {
             (*resources).program_name = program_name;
-            (*resources).home = home.map(|grant| {
-                Directory::granted(host.virtual_file_system(), task, grant.path, grant.rights)
-            });
+            if let Some(home) = (*resources).home.as_mut() {
+                home.task = task;
+            }
             enter(state, entry, heap, Some((host, task)))
         }
     }
@@ -167,6 +184,13 @@ pub struct Process {
 pub struct Child {
     owner: TaskIdentifier,
     handle: Option<JoinHandle<isize>>,
+}
+
+impl Handle for Child {
+    unsafe fn close(raw: *mut Self) {
+        // SAFETY: the registry holds only live handles that `xila_process_spawn` made.
+        let _ = unsafe { xila_process_child_close(raw) };
+    }
 }
 
 /// Arguments of `xila_process_spawn`. Set `size` to `sizeof(XilaSpawn)`. All
@@ -255,9 +279,10 @@ pub unsafe extern "C" fn xila_process_parent_id(process: *const Process, id: *mu
     result.map_or_else(|error| error, |()| Status::Ok)
 }
 
-/// Stop every peer, release the startup grants, and exit without unwinding.
-/// Stopped peers follow stackful's cancellation policy (#731), including
-/// leaked stack resources. The loader releases the process heap and image.
+/// Stop every peer, release the process's resources, and exit without unwinding.
+/// Stopped peers are never resumed: their frames are discarded and their stacks freed
+/// when the process's driver ends, as for a cancelled process. The loader then releases
+/// the process heap and image.
 ///
 /// Both main and worker entries run without host-owned guards in callback
 /// frames, so abandoning the calling stack does not skip their cleanup.
@@ -589,48 +614,57 @@ pub unsafe extern "C" fn xila_process_spawn(
         };
         let host = process.host;
         let parent = process.task;
-        // Allocated before the child starts, so a started child is never left unowned.
-        let mut owned = Box::new(Child {
+        // Registered before the child starts: a call cancelled while it waits for the host
+        // leaves the handle to the registry, and a started child is never left unowned.
+        let owned = registry::register(Child {
             owner: parent,
             handle: None,
         });
-        let mut started = Err(Status::Unavailable);
-        suspend_dynamic(pin!(async {
-            started = async {
-                is_current(process).await?;
-                // One duplication site for the three streams. A failure drops, and so
-                // closes, the duplicates already made.
-                let mut duplicates = [None, None, None];
-                for (duplicate, stream) in duplicates.iter_mut().zip(streams) {
-                    *duplicate = Some(stream.inner.duplicate().await?);
-                }
-                let [
-                    Some(standard_input),
-                    Some(standard_output),
-                    Some(standard_error),
-                ] = duplicates
-                else {
-                    return Err(Status::InvalidState);
-                };
-                host.spawn(SpawnRequest {
-                    path,
-                    arguments,
-                    environment,
-                    standard_input,
-                    standard_output,
-                    standard_error,
-                    home,
-                })
-                .await
+        // The future owns the duplicated streams and the request, which a cancellation
+        // drops in place.
+        let started = suspend_on_cancellable(async {
+            is_current(process).await?;
+            // One duplication site for the three streams. A failure drops, and so
+            // closes, the duplicates already made.
+            let mut duplicates = [None, None, None];
+            for (duplicate, stream) in duplicates.iter_mut().zip(streams) {
+                *duplicate = Some(stream.inner.duplicate().await?);
             }
-            .await;
-        }));
-        owned.handle = Some(started?);
-        Ok(owned)
+            let [
+                Some(standard_input),
+                Some(standard_output),
+                Some(standard_error),
+            ] = duplicates
+            else {
+                return Err(Status::InvalidState);
+            };
+            host.spawn(SpawnRequest {
+                path,
+                arguments,
+                environment,
+                standard_input,
+                standard_output,
+                standard_error,
+                home,
+            })
+            .await
+        });
+        match started {
+            Ok(handle) => {
+                // SAFETY: the handle was just allocated and is not shared yet.
+                unsafe { (*owned).handle = Some(handle) };
+                Ok(owned)
+            }
+            Err(error) => {
+                // SAFETY: as above.
+                unsafe { xila_process_child_close(owned) };
+                Err(error)
+            }
+        }
     })();
     match result {
         Ok(value) => {
-            unsafe { child.write(Box::into_raw(value)) };
+            unsafe { child.write(value) };
             Status::Ok
         }
         Err(error) => error,
@@ -669,10 +703,9 @@ pub unsafe extern "C" fn xila_process_wait(
             return Err(Status::WouldBlock);
         }
         let handle = child.handle.take().ok_or(Status::NoChild)?;
-        let mut exit = 0;
-        suspend_dynamic(pin!(async {
-            exit = handle.join().await;
-        }));
+        // The future owns the handle, which a cancellation drops in place: the child runs on
+        // and its status is discarded, as for a child handle that is closed.
+        let exit = suspend_on_cancellable(handle.join());
         // Statuses wider than 32 bits come only from non-native children.
         Ok(exit as i32)
     })();
@@ -693,7 +726,8 @@ pub unsafe extern "C" fn xila_process_wait(
 /// A non-null child must be owned and released exactly once.
 pub unsafe extern "C" fn xila_process_child_close(child: *mut Child) -> Status {
     if !child.is_null() {
-        drop(unsafe { Box::from_raw(child) });
+        // SAFETY: the caller guarantees the handle is owned and live.
+        drop(unsafe { registry::reclaim(child) });
     }
     Status::Ok
 }

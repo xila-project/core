@@ -130,9 +130,10 @@ mod tests {
     }
 
     /// Entropy source that reads at most three bytes at a time, is pending on every
-    /// other read, fills with 0xA5, is unavailable for 13-byte requests and makes
-    /// no progress for 17-byte requests. It keeps no per-test mode, so tests that
-    /// share the process-wide installation cannot disturb each other.
+    /// other read, fills with 0xA5, is unavailable for 13-byte requests, makes
+    /// no progress for 17-byte requests and never answers 19-byte requests. It keeps no
+    /// per-test mode, so tests that share the process-wide installation cannot
+    /// disturb each other.
     struct ScriptedEntropy(portable_atomic::AtomicUsize);
     static ENTROPY: ScriptedEntropy = ScriptedEntropy(portable_atomic::AtomicUsize::new(0));
     impl file_system::DirectBaseOperations for ScriptedEntropy {
@@ -149,6 +150,7 @@ mod tests {
                     ));
                 }
                 17 => return core::task::Poll::Ready(Ok(0)),
+                19 => return core::task::Poll::Pending,
                 _ => {}
             }
             if self
@@ -172,9 +174,13 @@ mod tests {
             core::task::Poll::Ready(Err(file_system::IoErrorKind::Unsupported))
         }
     }
-    impl file_system::MountOperations for ScriptedEntropy {}
+    impl file_system::MountOperations for ScriptedEntropy {
+        fn unmount(&self) -> file_system::Result<()> {
+            Ok(())
+        }
+    }
     impl file_system::DirectCharacterDevice for ScriptedEntropy {}
-    async fn install_entropy() {
+    async fn install_entropy() -> &'static virtual_file_system::VirtualFileSystem {
         use virtual_file_system::{ItemStatic, VirtualFileSystem};
 
         // The task test harness serializes these tests and reuses its manager.
@@ -202,6 +208,7 @@ mod tests {
             assert!(VFS.set(vfs).is_ok());
         }
         initialize_random(VFS.get().unwrap()).await;
+        VFS.get().unwrap()
     }
 
     #[test]
@@ -1341,6 +1348,588 @@ mod tests {
             for kept in [kept_input, kept_output, kept_error] {
                 kept.close(vfs).await.unwrap();
             }
+        }
+    }
+
+    /// A native process that is cancelled while it is suspended: the executor drops its
+    /// task, the coroutine's frames are discarded without running anything on them, and the
+    /// host releases what the process held from its own state (#731).
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    mod cancellation {
+        use super::*;
+        use core::{
+            future::Future,
+            pin::Pin,
+            task::{Context as TaskContext, Poll},
+        };
+        use file_system::{AccessFlags, BaseOperations, CharacterDevice, MountOperations, Size};
+        use virtual_file_system::{
+            Directory as VfsDirectory, File as VfsFile, ItemStatic, VirtualFileSystem,
+        };
+
+        /// A character device whose reads never finish. It is not zero-sized: the file system
+        /// tells devices apart by address, which every box of a zero-sized type shares.
+        struct Blocked(#[allow(dead_code)] u8);
+        impl BaseOperations for Blocked {
+            fn read(
+                &self,
+                _: &mut file_system::Context,
+                _: &mut TaskContext<'_>,
+                _: &mut [u8],
+                _: Size,
+            ) -> Poll<file_system::Result<usize>> {
+                Poll::Pending
+            }
+
+            fn write(
+                &self,
+                _: &mut file_system::Context,
+                _: &mut TaskContext<'_>,
+                _: &[u8],
+                _: Size,
+            ) -> Poll<file_system::Result<usize>> {
+                Poll::Ready(Err(file_system::IoErrorKind::Unsupported))
+            }
+
+            fn clone_context(
+                &self,
+                _: &file_system::Context,
+            ) -> file_system::Result<file_system::Context> {
+                Ok(file_system::Context::new_empty())
+            }
+        }
+        impl MountOperations for Blocked {
+            fn unmount(&self) -> file_system::Result<()> {
+                Ok(())
+            }
+        }
+        impl CharacterDevice for Blocked {}
+
+        type Entry = unsafe extern "C" fn(*const XilaStartup) -> i32;
+
+        struct World {
+            task: task::TaskIdentifier,
+            vfs: &'static VirtualFileSystem,
+            host: &'static TestHost,
+        }
+
+        /// A file system with two blocked devices, `/blocked` and `/device`, and a second
+        /// file system at `/mnt`.
+        async fn world() -> World {
+            let tasks = task::test_manager();
+            let task = tasks.get_current_task_identifier().await;
+            let users = Box::leak(Box::new(users::Manager::new()));
+            let time = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+            let device = file_system::MemoryDevice::<512>::new_static(128 * 1024);
+            let fs =
+                little_fs::FileSystem::new_format(device, little_fs::Options::new(128)).unwrap();
+            let vfs = Box::leak(Box::new(VirtualFileSystem::new(tasks, users, time, fs)));
+            vfs.mount_character_device(task, "/blocked", Blocked(0))
+                .await
+                .unwrap();
+            vfs.mount_character_device(task, "/device", Blocked(0))
+                .await
+                .unwrap();
+            vfs.create_directory(task, &"/mnt").await.unwrap();
+            let device = file_system::MemoryDevice::<512>::new_static(128 * 1024);
+            let fs =
+                little_fs::FileSystem::new_format(device, little_fs::Options::new(128)).unwrap();
+            vfs.mount_file_system(fs, "/mnt", task).await.unwrap();
+            let host = Box::leak(Box::new(TestHost { tasks, vfs }));
+            World { task, vfs, host }
+        }
+
+        /// One process, started the way the native loader starts one: its host state and
+        /// heap are separate allocations, and the coroutine's entry holds only pointers to
+        /// them. Dropping `driver` is the cancellation; the loader then releases the state.
+        struct Run {
+            state: NonNull<HostState>,
+            heap: NonNull<Heap>,
+            driver: Option<Pin<Box<dyn Future<Output = i32>>>>,
+        }
+
+        impl Run {
+            fn new(
+                host: &'static TestHost,
+                entry: Entry,
+                standard_input: Option<File>,
+                home: Option<HomeGrant>,
+            ) -> Self {
+                let (state, heap) = run_state(Vec::new(), standard_input, None, None);
+                let launch = ProcessLaunch {
+                    host,
+                    environment: None,
+                    home,
+                };
+                // SAFETY: the bounded entries fit the stack and never unwind, and the closure
+                // holds only pointers to the state and heap, which `Run` frees last.
+                let coroutine = unsafe {
+                    stackful::Coroutine::new(stackful::Stack::new(64 * 1024), move || {
+                        launch.run(state, entry, heap)
+                    })
+                };
+                Self {
+                    state,
+                    heap,
+                    driver: Some(Box::pin(drive_process(coroutine))),
+                }
+            }
+
+            /// Poll the process once, inside the calling task, as the process's own task
+            /// would, so that it learns its identity from the real waker.
+            async fn poll(&mut self) -> Poll<i32> {
+                let driver = self.driver.as_mut().unwrap();
+                core::future::poll_fn(|cx| Poll::Ready(driver.as_mut().poll(cx))).await
+            }
+
+            fn open_handles(&self) -> usize {
+                // SAFETY: the state is live until `Run` is dropped.
+                unsafe { self.state.as_ref() }.open_handles()
+            }
+
+            /// Drop the process's task future while it is suspended.
+            fn cancel(&mut self) {
+                self.driver = None;
+            }
+
+            /// What the loader does once the coroutine is gone.
+            fn release(&self) {
+                // SAFETY: the coroutine is gone, or ran to its end.
+                unsafe { HostState::release(self.state) };
+            }
+        }
+
+        impl Drop for Run {
+            fn drop(&mut self) {
+                self.driver = None;
+                // SAFETY: both came from `Box::leak` in `run_state`, and nothing runs now.
+                unsafe {
+                    HostState::release(self.state);
+                    drop(Box::from_raw(self.state.as_ptr()));
+                    drop(Box::from_raw(self.heap.as_ptr()));
+                }
+            }
+        }
+
+        fn home() -> Option<HomeGrant> {
+            Some(HomeGrant {
+                path: file_system::PathOwned::new("/".into()).unwrap(),
+                rights: 3,
+            })
+        }
+
+        fn stream(file: VfsFile<'static>) -> Option<File> {
+            Some(File::new(file.into_synchronous_file()))
+        }
+
+        macro_rules! check {
+            ($condition:expr) => {
+                if !$condition {
+                    return line!() as i32;
+                }
+            };
+        }
+
+        /// Open every kind of handle the program can own without a network, then do what
+        /// `finish` says.
+        unsafe fn open_handles(startup: *const XilaStartup) -> i32 {
+            let startup = unsafe { &*startup };
+            let (mut file, mut directory, mut listing) =
+                (ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
+            let (mut reader, mut writer) = (ptr::null_mut(), ptr::null_mut());
+            unsafe {
+                check!(
+                    xila_file_open(
+                        startup.home,
+                        c"device".as_ptr(),
+                        6,
+                        XILA_OPEN_READ,
+                        &mut file
+                    ) == Status::Ok
+                );
+                check!(
+                    xila_directory_open(
+                        startup.home,
+                        c"mnt".as_ptr(),
+                        3,
+                        XILA_RIGHT_READ,
+                        &mut directory
+                    ) == Status::Ok
+                );
+                check!(
+                    xila_directory_iterator_open(directory, c"".as_ptr(), 0, &mut listing)
+                        == Status::Ok
+                );
+                check!(
+                    xila_pipe_create(startup.process, 0, &mut reader, &mut writer) == Status::Ok
+                );
+            }
+            0
+        }
+
+        /// Opens its handles, then blocks reading its standard input.
+        unsafe extern "C" fn open_then_block(startup: *const XilaStartup) -> i32 {
+            let failed = unsafe { open_handles(startup) };
+            if failed != 0 {
+                return failed;
+            }
+            let (mut byte, mut count) = (0u8, 0);
+            let _ = unsafe {
+                xila_file_read(
+                    (*startup).standard_input,
+                    (&raw mut byte).cast(),
+                    1,
+                    &mut count,
+                )
+            };
+            1 // The read never returns.
+        }
+
+        /// Opens its handles and returns without closing them.
+        unsafe extern "C" fn open_then_return(startup: *const XilaStartup) -> i32 {
+            unsafe { open_handles(startup) }
+        }
+
+        /// Opens its handles and exits without closing them.
+        unsafe extern "C" fn open_then_exit(startup: *const XilaStartup) -> i32 {
+            let failed = unsafe { open_handles(startup) };
+            if failed != 0 {
+                return failed;
+            }
+            let _ = unsafe { xila_process_exit((*startup).process, 5) };
+            1 // Exit returned.
+        }
+
+        /// A worker thread that opens a file and blocks reading it.
+        unsafe extern "C" fn worker_opens_then_blocks(
+            startup: *mut core::ffi::c_void,
+        ) -> *mut core::ffi::c_void {
+            let startup = unsafe { &*startup.cast::<XilaStartup>() };
+            let mut file = ptr::null_mut();
+            let opened = unsafe {
+                xila_file_open(
+                    startup.home,
+                    c"device".as_ptr(),
+                    6,
+                    XILA_OPEN_READ,
+                    &mut file,
+                )
+            };
+            if opened != Status::Ok {
+                return ptr::dangling_mut();
+            }
+            let (mut byte, mut count) = (0u8, 0);
+            let _ = unsafe { xila_file_read(file, (&raw mut byte).cast(), 1, &mut count) };
+            ptr::dangling_mut() // The read never returns.
+        }
+
+        /// Starts a worker, lets it run, and blocks reading its standard input itself.
+        unsafe extern "C" fn main_and_worker_block(startup: *const XilaStartup) -> i32 {
+            let mut worker = 0;
+            unsafe {
+                check!(
+                    xila_thread_spawn(
+                        (*startup).process,
+                        0,
+                        Some(worker_opens_then_blocks),
+                        startup.cast_mut().cast(),
+                        &mut worker,
+                    ) == Status::Ok
+                );
+                check!(xila_thread_yield() == Status::Ok);
+                let (mut byte, mut count) = (0u8, 0);
+                let _ = xila_file_read(
+                    (*startup).standard_input,
+                    (&raw mut byte).cast(),
+                    1,
+                    &mut count,
+                );
+            }
+            1 // The read never returns.
+        }
+
+        std::thread_local! {
+            /// What `exercise` allocated inside the process: allocations and bytes.
+            static MEASURED: core::cell::Cell<(usize, usize)> = const { core::cell::Cell::new((0, 0)) };
+        }
+
+        /// Open and close one of each handle that needs no process capability, and report
+        /// what that allocated. The calls are the same inside and outside a process: only
+        /// inside one are the handles registered.
+        unsafe fn exercise(home: *const Directory) -> (usize, usize) {
+            let before = testing::MemoryManager::thread_allocations();
+            let (mut file, mut directory, mut listing) =
+                (ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
+            unsafe {
+                assert_eq!(
+                    xila_file_open(home, c"device".as_ptr(), 6, XILA_OPEN_READ, &mut file),
+                    Status::Ok
+                );
+                assert_eq!(
+                    xila_directory_open(home, c"mnt".as_ptr(), 3, XILA_RIGHT_READ, &mut directory),
+                    Status::Ok
+                );
+                assert_eq!(
+                    xila_directory_iterator_open(directory, c"".as_ptr(), 0, &mut listing),
+                    Status::Ok
+                );
+                assert_eq!(xila_directory_iterator_close(listing), Status::Ok);
+                assert_eq!(xila_directory_close(directory), Status::Ok);
+                assert_eq!(xila_file_close(file), Status::Ok);
+            }
+            let delta = testing::MemoryManager::thread_allocations().since(before);
+            assert_eq!(delta.net_bytes(), 0);
+            (delta.allocations(), delta.allocated_bytes())
+        }
+
+        unsafe extern "C" fn measure_in_process(startup: *const XilaStartup) -> i32 {
+            // The first round settles anything the calls initialize once.
+            unsafe { exercise((*startup).home) };
+            MEASURED.set(unsafe { exercise((*startup).home) });
+            0
+        }
+
+        /// Blocks in a random fill that never finishes.
+        unsafe extern "C" fn block_in_random_fill(_: *const XilaStartup) -> i32 {
+            let mut bytes = [0u8; 19];
+            let _ = unsafe { xila_random_fill(bytes.as_mut_ptr().cast(), bytes.len()) };
+            1 // The fill never returns.
+        }
+
+        async fn busy(vfs: &VirtualFileSystem, path: &str, when: &str) {
+            assert!(
+                vfs.unmount(path, false).await.is_err(),
+                "{path} should still be in use {when}"
+            );
+        }
+
+        async fn unmounts(vfs: &VirtualFileSystem, path: &str, when: &str) {
+            let result = vfs.unmount(path, false).await;
+            assert!(
+                result.is_ok(),
+                "{path} should be free to unmount {when}: {result:?}"
+            );
+        }
+
+        /// The device handle a test keeps beside a process's: unmounting stays refused until
+        /// the test closes it, which a process closing its own twice would break.
+        async fn keep(world: &World, path: &str) -> VfsFile<'static> {
+            VfsFile::open(world.vfs, world.task, path, AccessFlags::Read.into())
+                .await
+                .unwrap()
+        }
+
+        #[task::test]
+        async fn cancelled_process_releases_its_streams_and_handles() {
+            let world = world().await;
+            let World { vfs, task, .. } = world;
+            let input = VfsFile::open(vfs, task, "/blocked", AccessFlags::Read.into())
+                .await
+                .unwrap();
+            let mut run = Run::new(world.host, open_then_block, stream(input), home());
+            // The process opens a file, a directory, a listing and a pipe, and blocks on a read
+            // of its standard input.
+            assert_eq!(run.poll().await, Poll::Pending);
+            assert_eq!(run.open_handles(), 5, "file, directory, listing, pipe ends");
+            for path in ["/blocked", "/device", "/mnt"] {
+                busy(vfs, path, "(line 287)").await;
+            }
+
+            // The test keeps one handle of each beside the process's.
+            let kept_input = keep(&world, "/blocked").await;
+            let kept_device = keep(&world, "/device").await;
+            let kept_listing = VfsDirectory::open(vfs, task, "/mnt").await.unwrap();
+
+            run.cancel();
+            run.release();
+            assert_eq!(run.open_handles(), 0);
+            // The process's handles are closed, and only once: the test's still hold each.
+            for path in ["/blocked", "/device", "/mnt"] {
+                busy(vfs, path, "(line 300)").await;
+            }
+            kept_input.close(vfs).await.unwrap();
+            kept_device.close(vfs).await.unwrap();
+            kept_listing.close(vfs).await.unwrap();
+            for path in ["/blocked", "/device", "/mnt"] {
+                unmounts(vfs, path, "(line 306)").await;
+            }
+            // Releasing again does nothing.
+            run.release();
+        }
+
+        #[task::test]
+        async fn process_cancelled_before_its_first_poll_releases_its_streams() {
+            let world = world().await;
+            let World { vfs, task, .. } = world;
+            let input = VfsFile::open(vfs, task, "/blocked", AccessFlags::Read.into())
+                .await
+                .unwrap();
+            let mut run = Run::new(world.host, open_then_block, stream(input), home());
+            let kept = keep(&world, "/blocked").await;
+            busy(vfs, "/blocked", "(line 321)").await;
+            // The coroutine never started: its entry is dropped unrun, with the launch request.
+            run.cancel();
+            assert_eq!(run.open_handles(), 0);
+            run.release();
+            busy(vfs, "/blocked", "(line 326)").await;
+            kept.close(vfs).await.unwrap();
+            unmounts(vfs, "/blocked", "(line 328)").await;
+        }
+
+        #[task::test]
+        async fn cancel_inside_a_random_fill_closes_the_entropy_source() {
+            let world = world().await;
+            let vfs = install_entropy().await;
+            let source = "/devices/random/source";
+            let mut run = Run::new(world.host, block_in_random_fill, None, None);
+            assert_eq!(run.poll().await, Poll::Pending);
+            // The fill holds the source open while it waits.
+            busy(vfs, source, "(line 339)").await;
+            let kept = VfsFile::open(vfs, world.task, source, AccessFlags::Read.into())
+                .await
+                .unwrap();
+            run.cancel();
+            run.release();
+            // Closed once: only the test's own handle keeps it in use.
+            busy(vfs, source, "(line 346)").await;
+            kept.close(vfs).await.unwrap();
+            unmounts(vfs, source, "(line 348)").await;
+            // Put the shared device back for the other tests.
+            vfs.mount_static(world.task, source, ItemStatic::CharacterDevice(&ENTROPY))
+                .await
+                .unwrap();
+        }
+
+        /// The handles a worker thread opened belong to the process, so a cancellation closes
+        /// them too, and the worker's stack goes with the main one.
+        #[task::test]
+        async fn cancel_closes_the_handles_of_worker_threads_and_frees_their_stacks() {
+            let world = world().await;
+            let World { vfs, task, .. } = world;
+            let start = async || {
+                let input = VfsFile::open(vfs, task, "/blocked", AccessFlags::Read.into())
+                    .await
+                    .unwrap();
+                Run::new(world.host, main_and_worker_block, stream(input), home())
+            };
+            // The first round grows the task manager's retained pool.
+            let mut warm = start().await;
+            assert!(warm.poll().await.is_pending());
+            warm.cancel();
+            drop(warm);
+
+            let before = testing::MemoryManager::thread_allocations();
+            let mut run = start().await;
+            assert!(run.poll().await.is_pending());
+            assert_eq!(run.open_handles(), 1, "the worker's file");
+            let kept = keep(&world, "/device").await;
+            busy(vfs, "/device", "while the worker holds its file").await;
+            run.cancel();
+            run.release();
+            assert_eq!(run.open_handles(), 0);
+            busy(vfs, "/device", "with only the test's handle open").await;
+            drop(run);
+            let delta = testing::MemoryManager::thread_allocations().since(before);
+            kept.close(vfs).await.unwrap();
+            assert_eq!(
+                delta.net_bytes(),
+                0,
+                "both stacks and every handle are freed"
+            );
+            unmounts(vfs, "/device", "once the test's handle is closed").await;
+        }
+
+        /// Registering a handle costs no allocation: the same calls allocate the same count and
+        /// bytes inside a process, where the handles are registered, as outside one.
+        #[task::test]
+        async fn tracking_handles_allocates_nothing() {
+            let world = world().await;
+            let World { vfs, task, .. } = world;
+            let mut run = Run::new(world.host, measure_in_process, None, home());
+            assert_eq!(run.poll().await, Poll::Ready(0));
+            drop(run);
+            let inside = MEASURED.get();
+
+            let home = Directory::new(vfs, task, "/", XILA_RIGHT_READ | XILA_RIGHT_WRITE).unwrap();
+            unsafe { exercise(&home) };
+            let outside = unsafe { exercise(&home) };
+            assert_eq!(inside, outside);
+            assert!(inside.0 > 0, "the calls allocate their objects");
+        }
+
+        /// A process that ends by returning or by exiting closes the handles it forgot, once.
+        #[task::test]
+        async fn handles_left_open_at_exit_are_closed_once() {
+            for (entry, expected) in [(open_then_return as Entry, 0), (open_then_exit as Entry, 5)]
+            {
+                let world = world().await;
+                let World { vfs, .. } = world;
+                let mut run = Run::new(world.host, entry, None, home());
+                let kept_device = keep(&world, "/device").await;
+                let kept_listing = VfsDirectory::open(vfs, world.task, "/mnt").await.unwrap();
+                assert_eq!(run.poll().await, Poll::Ready(expected));
+                assert_eq!(run.open_handles(), 0);
+                busy(vfs, "/device", "(line 373)").await;
+                busy(vfs, "/mnt", "(line 374)").await;
+                // Releasing a process that ended changes nothing.
+                run.release();
+                busy(vfs, "/device", "(line 377)").await;
+                busy(vfs, "/mnt", "(line 378)").await;
+                kept_device.close(vfs).await.unwrap();
+                kept_listing.close(vfs).await.unwrap();
+                unmounts(vfs, "/device", "(line 381)").await;
+                unmounts(vfs, "/mnt", "(line 382)").await;
+            }
+        }
+
+        /// Every way a process can end, cancellation included, gives back every byte it took:
+        /// its stack, its state, its handles and its streams.
+        #[task::test]
+        async fn every_ending_returns_all_memory() {
+            let world = world().await;
+            let World { vfs, task, .. } = world;
+            for _ in 0..2 {
+                // The first rounds grow the task manager's retained pool.
+                for entry in [open_then_return, open_then_exit] {
+                    let mut run = Run::new(world.host, entry, None, home());
+                    assert!(run.poll().await.is_ready());
+                }
+                let input = VfsFile::open(vfs, task, "/blocked", AccessFlags::Read.into())
+                    .await
+                    .unwrap();
+                let mut run = Run::new(world.host, open_then_block, stream(input), home());
+                assert!(run.poll().await.is_pending());
+                run.cancel();
+            }
+            let mut counts = Vec::new();
+            for entry in [open_then_return, open_then_exit] {
+                let before = testing::MemoryManager::thread_allocations();
+                let mut run = Run::new(world.host, entry, None, home());
+                assert!(run.poll().await.is_ready());
+                drop(run);
+                let delta = testing::MemoryManager::thread_allocations().since(before);
+                assert_eq!(delta.net_bytes(), 0, "a process that ends leaves nothing");
+                counts.push(delta.allocations());
+            }
+            let before = testing::MemoryManager::thread_allocations();
+            let input = VfsFile::open(vfs, task, "/blocked", AccessFlags::Read.into())
+                .await
+                .unwrap();
+            let mut run = Run::new(world.host, open_then_block, stream(input), home());
+            assert!(run.poll().await.is_pending());
+            run.cancel();
+            drop(run);
+            let delta = testing::MemoryManager::thread_allocations().since(before);
+            assert_eq!(
+                delta.net_bytes(),
+                0,
+                "a cancelled process leaves nothing, its stack included"
+            );
+            // Returning and exiting allocate the same: tracking handles costs no allocation.
+            assert_eq!(counts[0], counts[1]);
         }
     }
 }

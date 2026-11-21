@@ -1,5 +1,7 @@
-use crate::{Directory, Status, XILA_RIGHT_READ};
-use alloc::boxed::Box;
+use crate::{
+    Directory, Status, XILA_RIGHT_READ,
+    registry::{self, Handle},
+};
 use core::ffi::c_char;
 use file_system::Entry;
 use virtual_file_system::SynchronousDirectory;
@@ -8,6 +10,13 @@ use virtual_file_system::SynchronousDirectory;
 pub struct DirectoryIterator {
     inner: SynchronousDirectory<'static>,
     pending: Option<Entry>,
+}
+
+impl Handle for DirectoryIterator {
+    unsafe fn close(raw: *mut Self) {
+        // SAFETY: the registry holds only live listings that `xila_directory_iterator_open` made.
+        let _ = unsafe { xila_directory_iterator_close(raw) };
+    }
 }
 
 /// Open a relative directory for listing with READ authority; empty means itself.
@@ -36,7 +45,7 @@ pub unsafe extern "C" fn xila_directory_iterator_open(
     match result {
         Ok(value) => {
             unsafe {
-                output.write(Box::into_raw(Box::new(value)));
+                output.write(registry::register(value));
             }
             Status::Ok
         }
@@ -126,8 +135,8 @@ pub unsafe extern "C" fn xila_directory_iterator_close(iterator: *mut DirectoryI
     if iterator.is_null() {
         return Status::Ok;
     }
-    let DirectoryIterator { inner, .. } = *unsafe { Box::from_raw(iterator) };
-    inner
-        .close_owned()
-        .map_or_else(Status::from, |()| Status::Ok)
+    // Closed in place, as a file is: see `xila_file_close`.
+    let result = unsafe { &mut (*iterator).inner }.close_in_place();
+    drop(unsafe { registry::reclaim(iterator) });
+    result.map_or_else(Status::from, |()| Status::Ok)
 }

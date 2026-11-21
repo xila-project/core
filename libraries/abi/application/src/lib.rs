@@ -28,6 +28,7 @@ mod network;
 mod network_types;
 mod poll;
 mod process;
+mod registry;
 mod startup;
 #[cfg(feature = "network")]
 pub use network::*;
@@ -984,6 +985,43 @@ mod tests {
         assert_eq!((returned, exited), (4, 5));
         assert_eq!(returned_bytes, 0);
         assert_eq!(exited_bytes, returned_bytes);
+    }
+
+    /// A process cancelled while it holds graphics objects must not leave the identity file
+    /// pickers act with (the task of its last call) behind: a task identifier is reused, and
+    /// whoever inherits it would act as the dead process.
+    #[cfg(feature = "graphics")]
+    #[task::test]
+    async fn release_drops_the_graphics_state_with_its_task_identity() {
+        let tasks = task::test_manager();
+        let task = tasks.get_current_task_identifier().await;
+        let users = Box::leak(Box::new(users::Manager::new()));
+        let time = Box::leak(Box::new(
+            ::time::Manager::new(&testing::TimeDevice).unwrap(),
+        ));
+        let vfs = Box::leak(Box::new(virtual_file_system::VirtualFileSystem::new(
+            tasks,
+            users,
+            time,
+            memory_file_system::FileSystem::new(),
+        )));
+        let mut state = HostState::new(Vec::new(), None, None, None);
+        state.resources.graphics = Some(Box::new(::graphics::call::State::with_file_system(
+            None, vfs, task,
+        )));
+        assert_eq!(
+            state
+                .resources
+                .graphics
+                .as_ref()
+                .and_then(|graphics| graphics.file_system_task()),
+            Some(task)
+        );
+        // SAFETY: nothing runs the program, and the state is where it ran.
+        unsafe { HostState::release(NonNull::from(&mut state)) };
+        assert!(state.resources.graphics.is_none(), "the identity is gone");
+        // Releasing again does nothing.
+        unsafe { HostState::release(NonNull::from(&mut state)) };
     }
 
     std::thread_local! {

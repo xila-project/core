@@ -1,5 +1,7 @@
-use crate::{Directory, Process, Status, XILA_RIGHT_READ, XILA_RIGHT_WRITE, canonical, path_input};
-use alloc::boxed::Box;
+use crate::{
+    Directory, Process, Status, XILA_RIGHT_READ, XILA_RIGHT_WRITE, canonical, path_input,
+    registry::{self, Handle},
+};
 use core::{
     ffi::{c_char, c_void},
     slice,
@@ -32,14 +34,23 @@ impl File {
             readiness,
         }
     }
+    /// Hand the file to a program as an owned pointer. Inside a native process the file
+    /// is also registered, so the host closes it if the process ends without doing so.
     pub fn into_raw(self) -> *mut Self {
-        Box::into_raw(Box::new(self))
+        registry::register(self)
     }
     /// Reclaim an owned file.
     /// # Safety
     /// `raw` must be a live pointer returned by `into_raw`, reclaimed exactly once.
-    pub unsafe fn from_raw(raw: *mut Self) -> Box<Self> {
-        unsafe { Box::from_raw(raw) }
+    pub unsafe fn from_raw(raw: *mut Self) -> Self {
+        unsafe { registry::reclaim(raw) }
+    }
+}
+
+impl Handle for File {
+    unsafe fn close(raw: *mut Self) {
+        // SAFETY: the registry holds only live files that came from `into_raw`.
+        let _ = unsafe { xila_file_close(raw) };
     }
 }
 const XILA_OPEN_ALL: u32 = XILA_OPEN_READ
@@ -306,11 +317,13 @@ pub unsafe extern "C" fn xila_file_close(file: *mut File) -> Status {
     if file.is_null() {
         return Status::Ok;
     }
-    let File { inner, .. } = *unsafe { File::from_raw(file) };
-    inner
-        .into_synchronous_file()
-        .close_owned()
-        .map_or_else(Status::from, |()| Status::Ok)
+    // Closed in place: the file stays registered while the close waits for the file system,
+    // so a process cancelled in the middle leaves it to the host, which closes it again.
+    let result = unsafe { &mut (*file).inner }
+        .as_synchronous_file_mut()
+        .close_in_place();
+    drop(unsafe { File::from_raw(file) });
+    result.map_or_else(Status::from, |()| Status::Ok)
 }
 
 /// Resize a writable file without changing its cursor.

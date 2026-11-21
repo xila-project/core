@@ -80,7 +80,8 @@ fn set_current(value: *const Control) {
 pub struct Coroutine {
     control: Rc<Control>,
 }
-/// The driver was dropped before completion; its suspended stack is intentionally leaked.
+/// The driver was dropped before completion: the coroutine was cancelled, and its suspended
+/// frames were discarded without running anything on them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Cancelled;
 /// One completion observer, sharing the coroutine's control allocation.
@@ -97,6 +98,17 @@ impl Coroutine {
     /// Entry must never unwind. On bare metal, all coroutines must run on a single core
     /// and must never be entered or suspended from an interrupt. Do not migrate a live
     /// coroutine or its handles to another OS thread, including via foreign code.
+    ///
+    /// Dropping the coroutine after it started and before it finished cancels it: the
+    /// suspended frames are discarded and the stack is freed, without running a destructor
+    /// on them (see [`Cancelled`]). The entry and everything it calls must therefore not
+    /// leave an object that owns a resource (an open file, an allocation, a lock guard)
+    /// only in a frame across a suspension, because nothing would ever release it: keep
+    /// it in a place the host owns and releases itself. A future passed to
+    /// [`suspend_on`] counts as such a place only if it is passed to
+    /// [`suspend_on_cancellable`], which the cancellation drops in place. Nothing outside
+    /// the coroutine may keep a pointer into its stack beyond the call that is suspended:
+    /// the stack is freed and reused once the coroutine is dropped.
     ///
     /// On bare metal the current coroutine is one global, so while any coroutine is
     /// live, no other core may call an API that reaches [`suspend_on`]: the native
@@ -204,13 +216,11 @@ impl Drop for Coroutine {
         self.control.native_context.set(core::ptr::null());
         if self.control.started.get() && self.control.result.get().is_none() {
             self.control.result.set(Some(Err(Cancelled)));
-            // Never free a suspended stack containing live objects. In particular,
-            // destructors may hold pointers into that stack. Cancellation leaks it.
-            core::mem::forget(self.control.clone());
             if let Some(w) = self.control.waker.borrow_mut().take() {
                 w.wake();
             }
-            // Opted-in bridge futures can release their state on cancellation.
+            // Opted-in bridge futures can release their state on cancellation. This
+            // runs first, while the stack they are pinned on is intact.
             if let Some(Pending {
                 future,
                 cancel: true,
@@ -220,6 +230,13 @@ impl Drop for Coroutine {
                 // The coroutine will never resume, so it cannot drop the wrapper again.
                 unsafe { core::ptr::drop_in_place(future) };
             }
+            // SAFETY: the driver is the only user of `native`, and it is being dropped,
+            // so nothing resumes the coroutine again. The frames are discarded, never
+            // unwound: `Coroutine::new` makes the caller keep every owner of a resource
+            // out of them and every pointer to them out of the rest of the system. This
+            // keeps corosensei's own drop, which would try to unwind a suspended
+            // coroutine and abort without its `unwind` feature, from running on them.
+            unsafe { (*self.control.native.get()).force_reset() };
         }
     }
 }
@@ -273,7 +290,8 @@ fn suspend<F: Future>(future: F, cancel: bool) -> F::Output {
             output = Some(future.await);
         });
         // SAFETY: erased lifetime is bounded by the suspended call frame; resume only
-        // occurs once polling completes. Dropping the driver leaks the entire stack.
+        // occurs once polling completes. Dropping the driver discards the stack, and runs
+        // this future's destructor only if it was opted in with `suspend_on_cancellable`.
         let erased: ErasedFuture = unsafe {
             core::mem::transmute::<*mut dyn Future<Output = ()>, ErasedFuture>(
                 wrapper.as_mut().get_unchecked_mut(),
