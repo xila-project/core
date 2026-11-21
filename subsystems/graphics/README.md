@@ -72,23 +72,34 @@ LVGL releases the strings it duplicates (`lv_strdup`, `lv_strndup`) with `lv_fre
 
 ## Window events
 
-Each window queues the events of its widgets in a fixed ring of `WINDOW_EVENT_QUEUE_CAPACITY` (16) events that lives inside the window object: no allocation, and it never grows. Overflow policy, applied when an event is pushed:
+Each window queues the events of its widgets in a fixed ring of `WINDOW_EVENT_QUEUE_CAPACITY` (16) events that lives inside the window object: no allocation, and it never grows. The window handles widget creation and deletion internally and never queues hover, drawing, hit test, invalidation or layout notifications. The rest falls in four tiers, from the least to the most important:
 
-1. A pointer move (`Pressing`) that directly follows a pointer move for the same target replaces it, so only the latest position is kept.
-2. If the ring is full, the oldest queued pointer move is dropped to make room: key, click, press and release events are never lost while a move can be sacrificed.
-3. If it is still full, the new event is dropped, which keeps the order of the queue and its front stable.
+| Tier | Events | Coalesced |
+|---|---|---|
+| Low | the scroll family (`Scroll`, `ScrollBegin`, `ScrollThrowBegin`, `ScrollEnd`), `Refresh`, `Create` and the filtered notifications | no |
+| Transient | `Pressing`, `LongPressedRepeat` | yes |
+| State | `ValueChanged`, `SizeChanged`, `StyleChanged` | yes |
+| Lifecycle | everything else: `Pressed`, `Released`, `PressLost`, the clicks, `LongPressed`, `Key`, `Focused`, `Defocused`, `CloseRequested`, `Delete`, `Ready`, `Cancel`, `Custom1`, `Custom2`... | no |
 
-Every dropped event is counted; read it with `Window::dropped_event_count()`. A consumer that falls behind by more than 16 events loses events, so drain the queue every time the window wakes it.
+Overflow policy, applied when an event is pushed:
+
+1. A transient or state event replaces the queued event of the same kind and target, wherever it is, and moves to the back with the latest data ("latest wins"). It never moves across a lifecycle event of its own target, so the event order of a press is kept. A burst therefore never drops the last value, size or style change of a widget: a resize survives any number of scroll events.
+2. If the ring is full, the arrival evicts the oldest low event, or else the oldest transient event, or else the oldest state event, but never an event more important than itself. Lifecycle events are never evicted or reordered. An arrival that finds nothing to evict is rejected.
+3. Presses are followed per input device: LVGL passes the device with every press event, a device presses one widget at a time, and it may end the press on another widget (a keypad releases on the widget focused at that time). A `Pressed` event is queued only if the ring keeps room for the rest of its press: four slots, enough for `Released`, `ShortClicked`, `SingleClicked` (or `DoubleClicked`, `TripleClicked`) and `Clicked`, for `LongPressed`, `Released` and `Clicked`, or for `PressLost`. Other lifecycle events cannot take that room, so the end of an accepted press always gets in. If the `Pressed` event is rejected, the rest of that press is dropped too: the queue never drops a `Pressed` event while keeping the end of its press. LVGL itself may still deliver an end without a `Pressed` to the same widget, after a drag onto another widget without press lock, or for a keypad released on a newly focused widget.
+4. The reservation is given back as the press ends: at `Clicked` or `PressLost`, at the next press of any device after a release without a click (a scroll), or at the next press of the same device when LVGL never ended the press (an encoder long press that leaves edit mode, or a widget disabled while pressed). Deleting the pressed widget gives the reservation back. Press events sent by code, without an input device, are queued by tier only.
+5. Up to four devices are followed at once. A fifth pressing at the same time makes the queue forget the oldest accepted press (only its reservation is lost), or else the oldest rejected press, whose end could then get through.
+
+`Window::dropped_event_count()` counts every evicted or rejected event. Losses are logged at most once per second (`LOSS_REPORT_INTERVAL`, in LVGL ticks) with the number lost since the previous report, both when events are pushed and when the consumer pops them, so a consumer that never empties the queue keeps getting periodic summaries.
 
 RAM budget (excluding allocator bookkeeping): on x86_64, `Event` is 32 bytes,
 so the old queue started at 32 bytes inline plus a 320-byte allocation, and
-could grow indefinitely. The new queue is 520 bytes inline (16 slots plus
-indices and a saturating loss counter): 168 more bytes than the old initial
-capacity, with no separate allocation or growth. The whole host `Window` is
-624 bytes. On 32-bit targets the corresponding layout is expected to be
-16 + 280 bytes before, 456 bytes after; verify target layouts when budgeting
-board RAM. This trades a slightly larger initial reservation for a fixed
-upper bound and fewer heap blocks.
+could grow indefinitely. The new queue is 632 bytes inline (16 slots, indices,
+four 24-byte press records and the loss counters), with no separate
+allocation or growth. The whole host `Window` is 744 bytes. On 32-bit targets
+the corresponding layout is expected to be 16 + 280 bytes before and about
+516 bytes after; verify target layouts when budgeting board RAM. This trades a
+slightly larger initial reservation for a fixed upper bound and fewer heap
+blocks.
 
 ## Window ownership
 

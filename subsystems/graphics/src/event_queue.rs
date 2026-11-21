@@ -2,55 +2,225 @@
 //!
 //! The ring lives inline in the window object, so it never allocates, never
 //! grows and never fragments a heap, however many events a burst produces.
-//! Overflow is resolved by an explicit policy (see [`EventQueue::push`]).
+//! Overflow is resolved by the policy documented on [`EventQueue`].
 
-use crate::{Event, EventKind};
+use crate::{Event, EventKind, lvgl};
 use core::ptr;
 
 /// Number of events a window can hold before its overflow policy applies.
 pub const WINDOW_EVENT_QUEUE_CAPACITY: usize = 16;
+
+/// Slots kept for the rest of each accepted press. A short press ends with
+/// `Released`, `ShortClicked`, one of `SingleClicked`, `DoubleClicked` or
+/// `TripleClicked`, and `Clicked`; a long press sends `LongPressed`,
+/// `Released` and `Clicked`; a lost press ends with `PressLost`.
+const PRESS_END_RESERVATION: u8 = 4;
+
+/// Input devices whose current press, accepted or rejected, the queue
+/// follows at once.
+const PRESS_TRACKING_CAPACITY: usize = 4;
+
+/// Minimum time between two loss reports, in LVGL ticks (milliseconds).
+pub const LOSS_REPORT_INTERVAL: u32 = 1000;
+
+// Indices are stored as `u8`.
+const _: () =
+    assert!(WINDOW_EVENT_QUEUE_CAPACITY > 0 && WINDOW_EVENT_QUEUE_CAPACITY <= u8::MAX as usize);
+// A pointer press and a keypad press fit with their whole ends, and room
+// remains for other events.
+const _: () = assert!(2 * (PRESS_END_RESERVATION as usize + 1) < WINDOW_EVENT_QUEUE_CAPACITY);
+
+/// The LVGL input device that sent an event, compared by address only. Null
+/// for events sent by code.
+pub type InputDevice = *const lvgl::lv_indev_t;
 
 /// What [`EventQueue::push`] did with an event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PushOutcome {
     /// The event was appended.
     Queued,
-    /// The event replaced the queued pointer move it superseded.
+    /// The event replaced the queued event of the same kind and target that
+    /// it supersedes, and moved to the back of the queue.
     Coalesced,
-    /// The ring was full: the oldest expendable event was dropped to make room
-    /// and the event was appended.
+    /// The event was appended after evicting the oldest evictable event.
     EvictedOldest,
-    /// The ring was full of events that must be kept: the event was dropped.
+    /// The event was rejected.
     Dropped,
 }
 
-/// Bounded FIFO of window events.
+impl PushOutcome {
+    /// Whether an event was lost: evicted or rejected.
+    pub const fn lost_an_event(self) -> bool {
+        matches!(self, Self::EvictedOldest | Self::Dropped)
+    }
+}
+
+/// Events lost since the previous report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LossReport {
+    /// Events lost since the previous report.
+    pub lost: u32,
+    /// Events lost since the queue was created.
+    pub total: u32,
+}
+
+/// How much an event may be sacrificed when the queue is full, from the
+/// least to the most important. An arrival only evicts events of its own tier
+/// or a less important one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Tier {
+    /// Notifications no consumer depends on: evicted first.
+    Low,
+    /// Pointer moves and press repeats: coalescible, and soon superseded by
+    /// the next move or by the end of the press.
+    Transient,
+    /// State changes: coalescible, and the latest one per target must reach
+    /// the consumer, which reads the new state when it handles it.
+    State,
+    /// Input, focus and window lifecycle events: never evicted, never reordered.
+    Lifecycle,
+}
+
+impl Tier {
+    /// Whether a newer event replaces the queued one of the same kind and
+    /// target ("latest wins").
+    const fn coalesces(self) -> bool {
+        matches!(self, Self::Transient | Self::State)
+    }
+}
+
+const fn tier(kind: EventKind) -> Tier {
+    match kind {
+        EventKind::Scroll
+        | EventKind::ScrollBegin
+        | EventKind::ScrollThrowBegin
+        | EventKind::ScrollEnd
+        | EventKind::LayoutChanged
+        | EventKind::GetSelfSize
+        | EventKind::HoverOver
+        | EventKind::HoverLeave
+        | EventKind::HitTest
+        | EventKind::CoverCheck
+        | EventKind::RefreshExtDrawSize
+        | EventKind::DrawMainBegin
+        | EventKind::DrawMain
+        | EventKind::DrawMainEnd
+        | EventKind::DrawPostBegin
+        | EventKind::DrawPost
+        | EventKind::DrawPostEnd
+        | EventKind::DrawTaskAdded
+        | EventKind::InvalidateArea
+        | EventKind::Refresh
+        | EventKind::Create => Tier::Low,
+        EventKind::Pressing | EventKind::LongPressedRepeat => Tier::Transient,
+        EventKind::ValueChanged | EventKind::SizeChanged | EventKind::StyleChanged => Tier::State,
+        _ => Tier::Lifecycle,
+    }
+}
+
+/// Whether `kind` takes part in a press, so that the window must tell which
+/// input device sent it.
+pub const fn is_press_event(kind: EventKind) -> bool {
+    press_role(kind).is_some()
+}
+
+/// The part an event plays in a press, from `Pressed` to its last click.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PressRole {
+    Start,
+    /// Movement and repeats: coalescible, so they need no reserved slot.
+    Progress,
+    LongPress,
+    Release,
+    Lost,
+    Click,
+    Final,
+}
+
+const fn press_role(kind: EventKind) -> Option<PressRole> {
+    match kind {
+        EventKind::Pressed => Some(PressRole::Start),
+        EventKind::Pressing | EventKind::LongPressedRepeat => Some(PressRole::Progress),
+        EventKind::LongPressed => Some(PressRole::LongPress),
+        EventKind::Released => Some(PressRole::Release),
+        EventKind::PressLost => Some(PressRole::Lost),
+        EventKind::ShortClicked
+        | EventKind::SingleClicked
+        | EventKind::DoubleClicked
+        | EventKind::TripleClicked => Some(PressRole::Click),
+        EventKind::Clicked => Some(PressRole::Final),
+        _ => None,
+    }
+}
+
+/// The current press of an input device, followed from its `Pressed` event
+/// to its end.
+#[derive(Debug, Clone, Copy)]
+struct PressGroup {
+    device: InputDevice,
+    /// The pressed widget. A keypad may end the press on another one: the
+    /// widget focused when the key is released.
+    target: *mut lvgl::lv_obj_t,
+    /// Whether `Pressed` was queued. The rest of a rejected press is dropped.
+    accepted: bool,
+    /// Whether `Released` arrived: only clicks can follow.
+    released: bool,
+    /// Slots still reserved for the end of an accepted press.
+    reserved: u8,
+}
+
+impl PressGroup {
+    const EMPTY: Self = Self {
+        device: ptr::null(),
+        target: ptr::null_mut(),
+        accepted: false,
+        released: false,
+        reserved: 0,
+    };
+}
+
+/// Bounded queue of window events in arrival order.
+///
+/// Events fall in four tiers, from the least to the most important:
+///
+/// - low: the scroll family, layout changes, hover, hit tests and drawing
+///   notifications;
+/// - transient: `Pressing` and `LongPressedRepeat`;
+/// - state: `ValueChanged`, `SizeChanged` and `StyleChanged`;
+/// - lifecycle: everything else, such as presses, releases, clicks, keys,
+///   focus changes, `Ready`, `Cancel`, `Delete` and `CloseRequested`.
+///
+/// Transient and state events are "latest wins": a newer one replaces the
+/// queued event of the same kind and target and moves to the back, unless a
+/// lifecycle event for that target lies between them.
+///
+/// When the queue is full, an arrival evicts the oldest low event, or else the
+/// oldest transient event, or else the oldest state event, but never an event
+/// more important than itself. Lifecycle events are never evicted or
+/// reordered. An arrival that finds nothing to evict is rejected.
+///
+/// Presses are followed per input device (press events sent by code, without
+/// one, are queued by tier only). A `Pressed` event is accepted only
+/// with room for the rest of its press (`LongPressed`, `Released` or
+/// `PressLost`, then the clicks), which stays reserved until those events
+/// arrive or the device presses again. Other lifecycle events cannot take
+/// that room. When a `Pressed` event is rejected, the rest of that press is
+/// dropped as well: the queue never drops a `Pressed` event while keeping
+/// the end of its press.
+///
+/// Every evicted or rejected event is counted, and
+/// [`EventQueue::take_loss_report`] summarizes the losses at most once per
+/// [`LOSS_REPORT_INTERVAL`].
 pub struct EventQueue {
     slots: [Option<Event>; WINDOW_EVENT_QUEUE_CAPACITY],
     head: u8,
     length: u8,
+    /// Number of valid entries at the start of `presses`, oldest first.
+    press_count: u8,
+    presses: [PressGroup; PRESS_TRACKING_CAPACITY],
     dropped: u32,
-}
-
-// Indices are stored as `u8`.
-const _: () =
-    assert!(WINDOW_EVENT_QUEUE_CAPACITY > 0 && WINDOW_EVENT_QUEUE_CAPACITY <= u8::MAX as usize);
-
-/// Whether a later event of the same kind and target supersedes this one:
-/// pointer moves only carry the latest position.
-const fn is_coalescible(event: &Event) -> bool {
-    matches!(event.code, EventKind::Pressing)
-}
-
-/// Whether a full ring may sacrifice this event for a newer one: pointer moves,
-/// scroll animation steps and the style refreshes a press or release emits for
-/// every affected object. Otherwise one click or tile animation can fill the ring
-/// and push out its own release, click or value change.
-const fn is_expendable(event: &Event) -> bool {
-    matches!(
-        event.code,
-        EventKind::Pressing | EventKind::Scroll | EventKind::StyleChanged
-    )
+    unreported: u32,
+    last_report: Option<u32>,
 }
 
 impl EventQueue {
@@ -59,7 +229,11 @@ impl EventQueue {
             slots: [const { None }; WINDOW_EVENT_QUEUE_CAPACITY],
             head: 0,
             length: 0,
+            press_count: 0,
+            presses: [PressGroup::EMPTY; PRESS_TRACKING_CAPACITY],
             dropped: 0,
+            unreported: 0,
+            last_report: None,
         }
     }
 
@@ -75,48 +249,138 @@ impl EventQueue {
         self.length as usize == WINDOW_EVENT_QUEUE_CAPACITY
     }
 
-    /// Number of events lost to overflow since creation, both rejected events
-    /// and coalescible events evicted to make room.
+    /// Whether a press is followed: its target must be forgotten when it dies.
+    pub const fn follows_presses(&self) -> bool {
+        self.press_count > 0
+    }
+
+    /// Number of events lost to overflow since creation, including rejections
+    /// and evictions.
     pub const fn dropped(&self) -> u32 {
         self.dropped
     }
 
-    /// Append an event, keeping the ring bounded.
-    ///
-    /// 1. A pointer move (`Pressing`) directly following a pointer move for the
-    ///    same target replaces it: only the latest position is useful.
-    /// 2. Otherwise, if the ring is full, the oldest queued expendable event (a
-    ///    pointer move, scroll step or style change) is dropped to make room, so key, click, press, release and value events are never lost
-    ///    while such an event can be sacrificed.
-    /// 3. If the ring is still full, the new event is dropped (keeping the
-    ///    queue order and front stable) and counted in [`Self::dropped`].
-    pub fn push(&mut self, event: Event) -> PushOutcome {
-        if is_coalescible(&event)
-            && let Some(last) = self.last_mut()
-            && is_coalescible(last)
-            && last.target == event.target
+    /// Whether losses happened since the last report.
+    pub const fn has_unreported_losses(&self) -> bool {
+        self.unreported > 0
+    }
+
+    /// Summarize the losses since the last report, unless there were none or
+    /// the last report is less than [`LOSS_REPORT_INTERVAL`] ticks old. `now`
+    /// is the current LVGL tick.
+    pub fn take_loss_report(&mut self, now: u32) -> Option<LossReport> {
+        if self.unreported == 0 {
+            return None;
+        }
+        if let Some(last) = self.last_report
+            && now.wrapping_sub(last) < LOSS_REPORT_INTERVAL
         {
-            *last = event;
+            return None;
+        }
+        self.last_report = Some(now);
+        Some(LossReport {
+            lost: core::mem::take(&mut self.unreported),
+            total: self.dropped,
+        })
+    }
+
+    /// Append an event that `device` sent, according to the queue's overflow
+    /// policy. `device` only matters for press events (see
+    /// [`is_press_event`]). Press events sent by code, without a device, are
+    /// queued by tier only: nothing ends such a press reliably.
+    pub fn push(&mut self, event: Event, device: InputDevice) -> PushOutcome {
+        let Some(role) = press_role(event.code).filter(|_| !device.is_null()) else {
+            return self.insert(event, false);
+        };
+        if role == PressRole::Start {
+            return self.push_press(event, device);
+        }
+        // LVGL sends the rest of a press from the same device, possibly to
+        // another widget: a keypad releases on the focused widget.
+        let Some(index) = self.press_index(device) else {
+            return self.insert(event, false);
+        };
+
+        let group = &mut self.presses[index];
+        let accepted = group.accepted;
+        let uses_reservation = accepted && role != PressRole::Progress && group.reserved > 0;
+        if uses_reservation {
+            group.reserved -= 1;
+        }
+        match role {
+            PressRole::Release => group.released = true,
+            PressRole::Lost | PressRole::Final => self.forget_press(index),
+            _ => {}
+        }
+
+        if accepted {
+            self.insert(event, uses_reservation)
+        } else {
+            self.lose()
+        }
+    }
+
+    fn push_press(&mut self, event: Event, device: InputDevice) -> PushOutcome {
+        // A device presses one widget at a time, so a new press ends its
+        // previous one, even one LVGL never ended (an encoder long press that
+        // leaves edit mode, or a widget disabled while pressed). LVGL also
+        // sends a release and its clicks back to back, so a new press means
+        // every released press has ended.
+        self.forget_presses(|group| group.released || group.device == device);
+
+        let accepted =
+            self.lifecycle_count() + 1 + self.reserved() + PRESS_END_RESERVATION as usize
+                <= WINDOW_EVENT_QUEUE_CAPACITY;
+        self.follow_press(PressGroup {
+            device,
+            target: event.target,
+            accepted,
+            released: false,
+            reserved: if accepted { PRESS_END_RESERVATION } else { 0 },
+        });
+        if accepted {
+            self.insert(event, false)
+        } else {
+            self.lose()
+        }
+    }
+
+    /// Queue `event` by its tier. `uses_reservation` means a slot reserved
+    /// for the end of its press was just released for it.
+    fn insert(&mut self, event: Event, uses_reservation: bool) -> PushOutcome {
+        let tier = tier(event.code);
+        if tier.coalesces()
+            && let Some(index) = self.superseded_by(&event)
+        {
+            self.remove(index);
+            self.append(event);
             return PushOutcome::Coalesced;
         }
-
-        let mut outcome = PushOutcome::Queued;
-        if self.is_full() {
-            let Some(index) =
-                (0..self.len()).find(|&index| self.get(index).is_some_and(is_expendable))
-            else {
-                self.dropped = self.dropped.saturating_add(1);
-                return PushOutcome::Dropped;
-            };
-            self.remove(index);
-            self.dropped = self.dropped.saturating_add(1);
-            outcome = PushOutcome::EvictedOldest;
+        // Lifecycle events never take the room reserved for press ends.
+        if tier == Tier::Lifecycle
+            && !uses_reservation
+            && self.lifecycle_count() + self.reserved() >= WINDOW_EVENT_QUEUE_CAPACITY
+        {
+            return self.lose();
+        }
+        if !self.is_full() {
+            self.append(event);
+            return PushOutcome::Queued;
         }
 
-        let slot = self.physical(self.len());
-        self.slots[slot] = Some(event);
-        self.length += 1;
-        outcome
+        let victim = [Tier::Low, Tier::Transient, Tier::State]
+            .into_iter()
+            .take_while(|candidate| *candidate <= tier)
+            .find_map(|candidate| self.oldest(candidate));
+        match victim {
+            Some(index) => {
+                self.remove(index);
+                self.append(event);
+                self.lose();
+                PushOutcome::EvictedOldest
+            }
+            None => self.lose(),
+        }
     }
 
     pub fn front(&self) -> Option<&Event> {
@@ -133,9 +397,10 @@ impl EventQueue {
         event
     }
 
-    /// Remove every event aimed at `target`, preserving the order of the rest.
+    /// Remove every event aimed at `target`, preserving the order of the rest,
+    /// and give up the reservation of an accepted press of `target`.
     /// Only compares addresses; never dereferences `target`.
-    pub fn discard_target(&mut self, target: *mut crate::lvgl::lv_obj_t) {
+    pub fn discard_target(&mut self, target: *mut lvgl::lv_obj_t) {
         let mut kept = 0;
         for index in 0..self.len() {
             let source = self.physical(index);
@@ -149,25 +414,27 @@ impl EventQueue {
             }
         }
         self.length = kept as u8;
+        self.forget_accepted_presses(|pressed| pressed == target);
     }
 
-    /// Keep every event but null the ones aimed at `target`.
+    /// Keep every event but null the ones aimed at `target`, and give up the
+    /// reservation of an accepted press of `target`.
     /// Only compares addresses; never dereferences `target`.
-    pub fn clear_target(&mut self, target: *mut crate::lvgl::lv_obj_t) {
+    pub fn clear_target(&mut self, target: *mut lvgl::lv_obj_t) {
         for event in self.slots.iter_mut().flatten() {
             if event.target == target {
                 event.target = ptr::null_mut();
             }
         }
+        self.forget_accepted_presses(|pressed| pressed == target);
     }
 
-    /// Null the target of every event whose target `is_live` rejects, and keep
-    /// the events. `is_live` is called once per distinct run of targets and
-    /// must only compare the address; the targets may already be deleted.
-    pub fn clear_dead_targets(
-        &mut self,
-        mut is_live: impl FnMut(*mut crate::lvgl::lv_obj_t) -> bool,
-    ) {
+    /// Null the target of every event whose target `is_live` rejects, keep
+    /// the events, and give up the reservations of accepted presses of
+    /// rejected targets. `is_live` is called once per distinct run of targets
+    /// and once per accepted press, and must only compare the address; the
+    /// targets may already be deleted.
+    pub fn clear_dead_targets(&mut self, mut is_live: impl FnMut(*mut lvgl::lv_obj_t) -> bool) {
         let mut last = (ptr::null_mut(), true);
         for event in self.slots.iter_mut().flatten() {
             if event.target.is_null() {
@@ -178,6 +445,106 @@ impl EventQueue {
             }
             if !last.1 {
                 event.target = ptr::null_mut();
+            }
+        }
+        self.forget_accepted_presses(|pressed| !is_live(pressed));
+    }
+
+    /// Forget the accepted presses whose widget `is_gone`. Forgetting one
+    /// only gives up its reservation. A rejected press is kept: its device
+    /// may still end it on another widget, and that end must be dropped.
+    fn forget_accepted_presses(&mut self, mut is_gone: impl FnMut(*mut lvgl::lv_obj_t) -> bool) {
+        self.forget_presses(|group| group.accepted && is_gone(group.target));
+    }
+
+    fn lose(&mut self) -> PushOutcome {
+        self.dropped = self.dropped.saturating_add(1);
+        self.unreported = self.unreported.saturating_add(1);
+        PushOutcome::Dropped
+    }
+
+    /// The queued event that `event` supersedes: the newest one of the same
+    /// kind and target, unless a lifecycle event for that target follows it.
+    fn superseded_by(&self, event: &Event) -> Option<usize> {
+        for index in (0..self.len()).rev() {
+            let queued = self.get(index)?;
+            if queued.target != event.target {
+                continue;
+            }
+            if queued.code == event.code {
+                return Some(index);
+            }
+            if tier(queued.code) == Tier::Lifecycle {
+                return None;
+            }
+        }
+        None
+    }
+
+    fn oldest(&self, wanted: Tier) -> Option<usize> {
+        (0..self.len()).find(|&index| {
+            self.get(index)
+                .is_some_and(|event| tier(event.code) == wanted)
+        })
+    }
+
+    fn lifecycle_count(&self) -> usize {
+        (0..self.len())
+            .filter(|&index| {
+                self.get(index)
+                    .is_some_and(|event| tier(event.code) == Tier::Lifecycle)
+            })
+            .count()
+    }
+
+    fn reserved(&self) -> usize {
+        self.followed_presses()
+            .iter()
+            .map(|group| group.reserved as usize)
+            .sum()
+    }
+
+    fn followed_presses(&self) -> &[PressGroup] {
+        &self.presses[..self.press_count as usize]
+    }
+
+    fn press_index(&self, device: InputDevice) -> Option<usize> {
+        self.followed_presses()
+            .iter()
+            .position(|group| group.device == device)
+    }
+
+    /// Start following a press. With more than [`PRESS_TRACKING_CAPACITY`]
+    /// input devices pressing at once, this makes room by forgetting the
+    /// oldest accepted press, or else the oldest press; only the latter can
+    /// let the end of a rejected press through.
+    fn follow_press(&mut self, group: PressGroup) {
+        if self.press_count as usize == PRESS_TRACKING_CAPACITY {
+            let index = self
+                .followed_presses()
+                .iter()
+                .position(|group| group.accepted)
+                .unwrap_or(0);
+            self.forget_press(index);
+        }
+        self.presses[self.press_count as usize] = group;
+        self.press_count += 1;
+    }
+
+    fn forget_press(&mut self, index: usize) {
+        let count = self.press_count as usize;
+        self.presses.copy_within(index + 1..count, index);
+        self.presses[count - 1] = PressGroup::EMPTY;
+        self.press_count -= 1;
+    }
+
+    fn forget_presses(&mut self, mut forget: impl FnMut(&PressGroup) -> bool) {
+        let mut index = 0;
+        while index < self.press_count as usize {
+            if forget(&self.presses[index]) {
+                self.forget_press(index);
+            } else {
+                index += 1;
             }
         }
     }
@@ -194,14 +561,19 @@ impl EventQueue {
         }
     }
 
-    fn last_mut(&mut self) -> Option<&mut Event> {
-        let index = self.len().checked_sub(1)?;
-        let slot = self.physical(index);
-        self.slots[slot].as_mut()
+    /// Append to a queue that is not full.
+    fn append(&mut self, event: Event) {
+        let slot = self.physical(self.len());
+        self.slots[slot] = Some(event);
+        self.length += 1;
     }
 
     /// Remove the event at logical `index`, shifting later events forward.
     fn remove(&mut self, index: usize) {
+        if index == 0 {
+            self.pop_front();
+            return;
+        }
         for position in index..self.len() - 1 {
             let (from, to) = (self.physical(position + 1), self.physical(position));
             self.slots[to] = self.slots[from].take();
@@ -221,8 +593,24 @@ impl Default for EventQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Key, lvgl};
+    use crate::Key;
     use alloc::vec::Vec;
+
+    impl EventQueue {
+        /// Push an event from the pointer.
+        fn send(&mut self, event: Event) -> PushOutcome {
+            self.push(event, device(1))
+        }
+
+        /// Push an event sent by code, without an input device.
+        fn send_by_code(&mut self, event: Event) -> PushOutcome {
+            self.push(event, ptr::null())
+        }
+    }
+
+    fn device(address: usize) -> InputDevice {
+        address as InputDevice
+    }
 
     fn object(address: usize) -> *mut lvgl::lv_obj_t {
         address as *mut lvgl::lv_obj_t
@@ -244,13 +632,37 @@ mod tests {
             .collect()
     }
 
+    fn only(drained: &[(EventKind, usize)], target: usize) -> Vec<EventKind> {
+        drained
+            .iter()
+            .filter(|(_, address)| *address == target)
+            .map(|(code, _)| *code)
+            .collect()
+    }
+
+    /// Fill the queue with lifecycle events for `target` until one is rejected.
+    fn flood(queue: &mut EventQueue, code: EventKind, target: usize) -> usize {
+        let mut queued = 0;
+        while queue.send(event(code, target)) != PushOutcome::Dropped {
+            queued += 1;
+        }
+        queued
+    }
+
+    const SHORT_PRESS_END: [EventKind; 4] = [
+        EventKind::Released,
+        EventKind::ShortClicked,
+        EventKind::SingleClicked,
+        EventKind::Clicked,
+    ];
+
     #[test]
     fn pops_in_push_order_across_wraparound() {
         let mut queue = EventQueue::new();
         for round in 0..5 {
             for index in 0..10 {
                 assert_eq!(
-                    queue.push(event(EventKind::Clicked, round * 100 + index + 1)),
+                    queue.send(event(EventKind::Clicked, round * 100 + index + 1)),
                     PushOutcome::Queued
                 );
             }
@@ -267,8 +679,8 @@ mod tests {
     fn peek_front_does_not_consume() {
         let mut queue = EventQueue::new();
         assert!(queue.front().is_none());
-        queue.push(event(EventKind::Pressed, 1));
-        queue.push(event(EventKind::Released, 1));
+        queue.send(event(EventKind::Pressed, 1));
+        queue.send(event(EventKind::Released, 1));
         assert_eq!(queue.front().unwrap().code, EventKind::Pressed);
         assert_eq!(queue.len(), 2);
         assert_eq!(queue.pop_front().unwrap().code, EventKind::Pressed);
@@ -276,12 +688,12 @@ mod tests {
     }
 
     #[test]
-    fn consecutive_pointer_moves_for_one_target_keep_the_latest() {
+    fn pointer_moves_for_one_target_keep_the_latest() {
         let mut queue = EventQueue::new();
-        queue.push(event(EventKind::Pressed, 1));
-        assert_eq!(queue.push(pointer_move(1, 10)), PushOutcome::Queued);
+        queue.send(event(EventKind::Pressed, 1));
+        assert_eq!(queue.send(pointer_move(1, 10)), PushOutcome::Queued);
         for x in 11..200 {
-            assert_eq!(queue.push(pointer_move(1, x)), PushOutcome::Coalesced);
+            assert_eq!(queue.send(pointer_move(1, x)), PushOutcome::Coalesced);
         }
         assert_eq!(queue.len(), 2);
         queue.pop_front();
@@ -290,120 +702,904 @@ mod tests {
     }
 
     #[test]
-    fn pointer_moves_for_other_targets_or_after_other_events_are_not_coalesced() {
+    fn coalescing_moves_the_latest_event_to_the_back_even_when_not_at_the_tail() {
         let mut queue = EventQueue::new();
-        queue.push(pointer_move(1, 1));
-        assert_eq!(queue.push(pointer_move(2, 2)), PushOutcome::Queued);
-        queue.push(event(EventKind::Key, 2));
-        assert_eq!(queue.push(pointer_move(2, 3)), PushOutcome::Queued);
-        assert_eq!(queue.len(), 4);
-    }
-
-    #[test]
-    fn non_pointer_events_never_coalesce() {
-        let mut queue = EventQueue::new();
-        for _ in 0..4 {
-            queue.push(event(EventKind::ValueChanged, 1));
-        }
-        assert_eq!(queue.len(), 4);
-    }
-
-    #[test]
-    fn full_ring_evicts_the_oldest_pointer_move_and_keeps_everything_else() {
-        let mut queue = EventQueue::new();
-        queue.push(event(EventKind::Pressed, 1));
-        queue.push(pointer_move(1, 1)); // oldest move: evicted first
-        queue.push(event(EventKind::Key, 1));
-        queue.push(pointer_move(2, 2));
-        queue.push(event(EventKind::Key, 2)); // so the next move is not coalesced
-        while !queue.is_full() {
-            queue.push(event(EventKind::Clicked, 3));
+        queue.send(event(EventKind::Pressed, 1));
+        queue.send(pointer_move(1, 1));
+        queue.send(event(EventKind::ValueChanged, 1));
+        queue.send(event(EventKind::Scroll, 1));
+        queue.send(pointer_move(2, 5));
+        assert_eq!(queue.send(pointer_move(1, 2)), PushOutcome::Coalesced);
+        assert_eq!(
+            queue.send(event(EventKind::ValueChanged, 1)),
+            PushOutcome::Coalesced
+        );
+        assert_eq!(
+            queue.send(event(EventKind::LongPressedRepeat, 1)),
+            PushOutcome::Queued
+        );
+        assert_eq!(
+            queue.send(event(EventKind::LongPressedRepeat, 1)),
+            PushOutcome::Coalesced
+        );
+        let mut positions = Vec::new();
+        while let Some(event) = queue.pop_front() {
+            positions.push((event.code, event.target as usize, event.pointer));
         }
         assert_eq!(
-            queue.push(event(EventKind::Released, 1)),
-            PushOutcome::EvictedOldest
+            positions,
+            [
+                (EventKind::Pressed, 1, None),
+                (EventKind::Scroll, 1, None),
+                (EventKind::Pressing, 2, Some([5, 0, 100, 100])),
+                (EventKind::Pressing, 1, Some([2, 0, 100, 100])),
+                (EventKind::ValueChanged, 1, None),
+                (EventKind::LongPressedRepeat, 1, None),
+            ]
         );
+        assert_eq!(queue.dropped(), 0);
+    }
+
+    #[test]
+    fn coalescing_never_crosses_a_lifecycle_event_of_the_same_target() {
+        let mut queue = EventQueue::new();
+        queue.send(pointer_move(1, 1));
+        queue.send(event(EventKind::Key, 1));
+        assert_eq!(queue.send(pointer_move(1, 2)), PushOutcome::Queued);
+        queue.send(event(EventKind::ValueChanged, 2));
+        queue.send(event(EventKind::Clicked, 3));
+        assert_eq!(
+            queue.send(event(EventKind::ValueChanged, 2)),
+            PushOutcome::Coalesced
+        );
+        assert_eq!(
+            drain(&mut queue),
+            [
+                (EventKind::Pressing, 1),
+                (EventKind::Key, 1),
+                (EventKind::Pressing, 1),
+                (EventKind::Clicked, 3),
+                (EventKind::ValueChanged, 2),
+            ]
+        );
+    }
+
+    #[test]
+    fn full_queue_never_evicts_a_more_important_event() {
+        let mut queue = EventQueue::new();
+        for address in 1..=5 {
+            queue.send(event(EventKind::ValueChanged, address));
+            queue.send(pointer_move(address, 0));
+            queue.send(event(EventKind::ScrollEnd, address));
+        }
+        queue.send(event(EventKind::Focused, 99));
         assert!(queue.is_full());
-        assert_eq!(queue.dropped(), 1);
+        let expect = |queue: &mut EventQueue, code, address, outcome| {
+            assert_eq!(queue.send(event(code, address)), outcome, "{code:?}");
+        };
+        use PushOutcome::{Dropped, EvictedOldest};
+
+        // Low and transient arrivals evict low events first.
+        expect(&mut queue, EventKind::ScrollBegin, 50, EvictedOldest);
+        expect(&mut queue, EventKind::Pressing, 60, EvictedOldest);
+        for address in 10..=13 {
+            expect(&mut queue, EventKind::Focused, address, EvictedOldest);
+        }
+        // No low event is left: a low arrival is rejected, the others evict
+        // the oldest transient event.
+        expect(&mut queue, EventKind::ScrollBegin, 51, Dropped);
+        expect(&mut queue, EventKind::Pressing, 61, EvictedOldest);
+        for address in 14..=19 {
+            expect(&mut queue, EventKind::Focused, address, EvictedOldest);
+        }
+        // Only state and lifecycle events are left: a transient arrival is
+        // rejected, a state or lifecycle arrival evicts the oldest state event.
+        expect(&mut queue, EventKind::Pressing, 62, Dropped);
+        expect(&mut queue, EventKind::SizeChanged, 70, EvictedOldest);
+        expect(&mut queue, EventKind::Focused, 20, EvictedOldest);
+
+        let mut expected: Vec<_> = (3..=5)
+            .map(|address| (EventKind::ValueChanged, address))
+            .collect();
+        expected.push((EventKind::Focused, 99));
+        expected.extend((10..=19).map(|address| (EventKind::Focused, address)));
+        expected.push((EventKind::SizeChanged, 70));
+        expected.push((EventKind::Focused, 20));
+        assert_eq!(drain(&mut queue), expected);
+        assert_eq!(queue.dropped(), 17);
+    }
+
+    /// The window is resized while a list inside it is flung, and the consumer
+    /// is busy: the scroll burst must not push out the resize.
+    #[test]
+    fn a_scroll_burst_keeps_the_latest_resize() {
+        let mut queue = EventQueue::new();
+        let (window, list) = (1, 2);
+        queue.send(event(EventKind::SizeChanged, window));
+        queue.send(event(EventKind::StyleChanged, window));
+        for step in 0..500 {
+            queue.send(event(EventKind::Scroll, list));
+            if step == 250 {
+                assert_eq!(
+                    queue.send(event(EventKind::SizeChanged, window)),
+                    PushOutcome::Coalesced
+                );
+            }
+            if step % 50 == 0 {
+                queue.send(event(EventKind::ScrollBegin, list));
+                queue.send(event(EventKind::ScrollEnd, list));
+            }
+        }
+        let drained = drain(&mut queue);
+        assert_eq!(
+            only(&drained, window),
+            [EventKind::StyleChanged, EventKind::SizeChanged]
+        );
+        assert_eq!(drained.len(), WINDOW_EVENT_QUEUE_CAPACITY);
+    }
+
+    #[test]
+    fn lifecycle_events_are_never_evicted() {
+        let mut queue = EventQueue::new();
+        for address in 1..=WINDOW_EVENT_QUEUE_CAPACITY {
+            queue.send(event(EventKind::Clicked, address));
+        }
+        for code in [
+            EventKind::Clicked,
+            EventKind::Pressing,
+            EventKind::ValueChanged,
+            EventKind::Scroll,
+            EventKind::CloseRequested,
+        ] {
+            assert_eq!(queue.send(event(code, 99)), PushOutcome::Dropped);
+        }
+        assert_eq!(
+            drain(&mut queue),
+            (1..=WINDOW_EVENT_QUEUE_CAPACITY)
+                .map(|address| (EventKind::Clicked, address))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(queue.dropped(), 5);
+    }
+
+    #[test]
+    fn events_are_sorted_in_tiers() {
+        for code in [EventKind::Pressing, EventKind::LongPressedRepeat] {
+            assert_eq!(tier(code), Tier::Transient, "{code:?}");
+        }
+        for code in [
+            EventKind::ValueChanged,
+            EventKind::SizeChanged,
+            EventKind::StyleChanged,
+        ] {
+            assert_eq!(tier(code), Tier::State, "{code:?}");
+        }
+        for code in [
+            EventKind::Scroll,
+            EventKind::ScrollBegin,
+            EventKind::ScrollThrowBegin,
+            EventKind::ScrollEnd,
+            EventKind::LayoutChanged,
+            EventKind::HoverOver,
+            EventKind::HoverLeave,
+            EventKind::DrawMain,
+            EventKind::Refresh,
+            EventKind::InvalidateArea,
+            EventKind::HitTest,
+            EventKind::Create,
+        ] {
+            assert_eq!(tier(code), Tier::Low, "{code:?}");
+        }
+        for code in [
+            EventKind::Pressed,
+            EventKind::Released,
+            EventKind::PressLost,
+            EventKind::Clicked,
+            EventKind::ShortClicked,
+            EventKind::LongPressed,
+            EventKind::Key,
+            EventKind::Focused,
+            EventKind::Defocused,
+            EventKind::CloseRequested,
+            EventKind::Delete,
+            EventKind::Ready,
+            EventKind::Cancel,
+            EventKind::Custom1,
+            EventKind::Custom2,
+        ] {
+            assert_eq!(tier(code), Tier::Lifecycle, "{code:?}");
+        }
+    }
+
+    /// A slider drag inside one LVGL poll: `Pressing` and `ValueChanged`
+    /// alternate hundreds of times while unrelated input fills the queue.
+    #[test]
+    fn slider_drag_burst_keeps_the_press_whole() {
+        let mut queue = EventQueue::new();
+        assert_eq!(
+            queue.send(event(EventKind::Pressed, 1)),
+            PushOutcome::Queued
+        );
+        for step in 0..512 {
+            queue.send(pointer_move(1, step));
+            queue.send(event(EventKind::ValueChanged, 1));
+            queue.send(event(EventKind::Scroll, 3));
+            queue.send_by_code(event(EventKind::Clicked, 2));
+        }
+        for code in SHORT_PRESS_END {
+            assert_ne!(queue.send(event(code, 1)), PushOutcome::Dropped, "{code:?}");
+        }
+        assert!(queue.dropped() > 0);
 
         let drained = drain(&mut queue);
-        assert_eq!(drained.len(), WINDOW_EVENT_QUEUE_CAPACITY);
-        assert_eq!(drained[0], (EventKind::Pressed, 1));
-        assert_eq!(drained[1], (EventKind::Key, 1));
-        assert_eq!(drained[2], (EventKind::Pressing, 2));
-        assert_eq!(*drained.last().unwrap(), (EventKind::Released, 1));
         assert_eq!(
-            drained
-                .iter()
-                .filter(|(code, _)| *code == EventKind::Pressing)
-                .count(),
-            1
+            only(&drained, 1),
+            [
+                EventKind::Pressed,
+                EventKind::Released,
+                EventKind::ShortClicked,
+                EventKind::SingleClicked,
+                EventKind::Clicked,
+            ],
+            "drag moves are evicted for the unrelated clicks, the press is kept whole"
         );
+        assert!(only(&drained, 2).len() >= WINDOW_EVENT_QUEUE_CAPACITY / 2);
+    }
+
+    /// A held button: `LongPressed`, then `Pressing` and `LongPressedRepeat`
+    /// alternate while the user types into another widget.
+    #[test]
+    fn held_button_while_typing_keeps_the_press_whole() {
+        let mut queue = EventQueue::new();
+        queue.send(event(EventKind::Pressed, 1));
+        queue.send(event(EventKind::Focused, 2));
+        for step in 0..300 {
+            if step == 3 {
+                assert_eq!(
+                    queue.send(event(EventKind::LongPressed, 1)),
+                    PushOutcome::Queued
+                );
+            }
+            queue.send(pointer_move(1, step));
+            queue.send(event(EventKind::LongPressedRepeat, 1));
+            queue.send(Event::new(
+                EventKind::Key,
+                object(2),
+                Some(Key::Character(b'a')),
+            ));
+            queue.send(event(EventKind::ValueChanged, 2));
+        }
+        for code in [EventKind::Released, EventKind::Clicked] {
+            assert_ne!(queue.send(event(code, 1)), PushOutcome::Dropped, "{code:?}");
+        }
+        assert!(queue.dropped() > 0, "keys beyond the free room are lost");
+
+        let drained = drain(&mut queue);
+        assert_eq!(
+            only(&drained, 1)
+                .into_iter()
+                .filter(|code| tier(*code) == Tier::Lifecycle)
+                .collect::<Vec<_>>(),
+            [
+                EventKind::Pressed,
+                EventKind::LongPressed,
+                EventKind::Released,
+                EventKind::Clicked,
+            ]
+        );
+        let first_key = drained
+            .iter()
+            .position(|(code, _)| *code == EventKind::Key)
+            .unwrap();
+        assert_eq!(drained[1], (EventKind::Focused, 2));
+        assert!(first_key > 1);
     }
 
     #[test]
-    fn full_ring_coalesces_the_tail_before_evicting_an_older_move() {
+    fn a_rejected_press_drops_the_rest_of_its_press() {
         let mut queue = EventQueue::new();
-        queue.push(pointer_move(1, 1));
-        for _ in 0..WINDOW_EVENT_QUEUE_CAPACITY - 2 {
-            queue.push(event(EventKind::Clicked, 1));
-        }
-        queue.push(pointer_move(2, 2));
-        assert_eq!(queue.push(pointer_move(2, 3)), PushOutcome::Coalesced);
-        assert!(queue.is_full());
-        assert_eq!(queue.dropped(), 0);
-        assert_eq!(queue.pop_front().unwrap().pointer, Some([1, 0, 100, 100]));
-        for _ in 0..WINDOW_EVENT_QUEUE_CAPACITY - 2 {
-            assert_eq!(queue.pop_front().unwrap().code, EventKind::Clicked);
-        }
-        assert_eq!(queue.pop_front().unwrap().pointer, Some([3, 0, 100, 100]));
-    }
-
-    #[test]
-    fn full_ring_sacrifices_scroll_and_style_events_for_input_and_value_events() {
-        let mut queue = EventQueue::new();
-        queue.push(event(EventKind::Pressed, 1));
-        while !queue.is_full() {
-            queue.push(event(EventKind::StyleChanged, 1));
-            queue.push(event(EventKind::Scroll, 2));
-        }
-        let important = [
+        let room = flood(&mut queue, EventKind::Key, 9);
+        assert_eq!(room, WINDOW_EVENT_QUEUE_CAPACITY);
+        queue.pop_front();
+        queue.pop_front();
+        // Two free slots: not enough for the press and its end.
+        assert_eq!(
+            queue.send(event(EventKind::Pressed, 1)),
+            PushOutcome::Dropped
+        );
+        for code in [
+            EventKind::Pressing,
+            EventKind::LongPressed,
+            EventKind::LongPressedRepeat,
             EventKind::Released,
             EventKind::ShortClicked,
+            EventKind::DoubleClicked,
             EventKind::Clicked,
-            EventKind::ValueChanged,
-        ];
-        for code in important {
-            assert_eq!(queue.push(event(code, 1)), PushOutcome::EvictedOldest);
+        ] {
+            assert_eq!(queue.send(event(code, 1)), PushOutcome::Dropped, "{code:?}");
         }
+        // A press lost to a slide onto another widget is dropped too.
+        assert_eq!(
+            queue.send(event(EventKind::Pressed, 2)),
+            PushOutcome::Dropped
+        );
+        assert_eq!(
+            queue.send(event(EventKind::PressLost, 2)),
+            PushOutcome::Dropped
+        );
         let drained = drain(&mut queue);
-        assert_eq!(drained.len(), WINDOW_EVENT_QUEUE_CAPACITY);
-        assert_eq!(drained[0], (EventKind::Pressed, 1));
-        let codes: Vec<_> = drained.iter().map(|(code, _)| *code).collect();
-        assert_eq!(codes[codes.len() - important.len()..], important);
+        assert!(only(&drained, 1).is_empty());
+        assert!(only(&drained, 2).is_empty());
+        assert_eq!(queue.dropped(), 1 + 1 + 7 + 2);
+
+        // The next press of the same target is accepted again.
+        assert_eq!(
+            queue.send(event(EventKind::Pressed, 1)),
+            PushOutcome::Queued
+        );
+        assert_eq!(
+            queue.send(event(EventKind::Released, 1)),
+            PushOutcome::Queued
+        );
+        assert_eq!(
+            drain(&mut queue),
+            [(EventKind::Pressed, 1), (EventKind::Released, 1)]
+        );
     }
 
     #[test]
-    fn full_ring_of_important_events_drops_the_new_one_and_counts_it() {
+    fn an_accepted_press_reserves_room_for_its_end() {
         let mut queue = EventQueue::new();
-        for index in 0..WINDOW_EVENT_QUEUE_CAPACITY {
-            queue.push(event(EventKind::Clicked, index + 1));
+        queue.send(event(EventKind::Pressed, 1));
+        let room = flood(&mut queue, EventKind::Key, 9);
+        assert_eq!(
+            room,
+            WINDOW_EVENT_QUEUE_CAPACITY - 1 - PRESS_END_RESERVATION as usize
+        );
+        for code in SHORT_PRESS_END {
+            assert_eq!(queue.send(event(code, 1)), PushOutcome::Queued, "{code:?}");
         }
-        for _ in 0..3 {
-            assert_eq!(queue.push(event(EventKind::Key, 99)), PushOutcome::Dropped);
-        }
-        assert_eq!(queue.push(pointer_move(1, 0)), PushOutcome::Dropped);
-        assert_eq!(queue.dropped(), 4);
-        assert_eq!(queue.len(), WINDOW_EVENT_QUEUE_CAPACITY);
+        assert!(queue.is_full());
+        assert!(!queue.follows_presses(), "the click ends the press");
         let drained = drain(&mut queue);
-        assert!(drained.iter().all(|(code, _)| *code == EventKind::Clicked));
-        assert_eq!(drained[0].1, 1);
+        assert_eq!(drained[0], (EventKind::Pressed, 1));
+        assert_eq!(only(&drained, 1)[1..], SHORT_PRESS_END);
+    }
+
+    #[test]
+    fn a_full_queue_of_moves_still_takes_the_end_of_the_press() {
+        let mut queue = EventQueue::new();
+        queue.send(event(EventKind::Pressed, 1));
+        for address in 2..=WINDOW_EVENT_QUEUE_CAPACITY {
+            queue.send(pointer_move(address, 0));
+        }
+        assert!(queue.is_full());
+        for code in SHORT_PRESS_END {
+            assert_eq!(
+                queue.send(event(code, 1)),
+                PushOutcome::EvictedOldest,
+                "{code:?}"
+            );
+        }
+        let drained = drain(&mut queue);
+        assert_eq!(drained[0], (EventKind::Pressed, 1));
+        assert_eq!(only(&drained, 1)[1..], SHORT_PRESS_END);
+    }
+
+    #[test]
+    fn press_lost_and_clicks_give_back_the_reservation() {
+        let mut queue = EventQueue::new();
+        queue.send(event(EventKind::Pressed, 1));
+        queue.send(event(EventKind::PressLost, 1));
+        assert!(!queue.follows_presses());
+        queue.send(event(EventKind::Pressed, 2));
+        queue.send(event(EventKind::LongPressed, 2));
+        queue.send(event(EventKind::Released, 2));
+        queue.send(event(EventKind::Clicked, 2));
+        assert!(!queue.follows_presses());
+        assert_eq!(
+            flood(&mut queue, EventKind::Key, 9),
+            WINDOW_EVENT_QUEUE_CAPACITY - 6
+        );
+    }
+
+    #[test]
+    fn a_release_without_click_keeps_its_reservation_until_the_next_press() {
+        let mut queue = EventQueue::new();
+        // A scroll ends the press with a release and no click.
+        queue.send(event(EventKind::Pressed, 1));
+        queue.send(event(EventKind::Released, 1));
+        assert_eq!(drain(&mut queue).len(), 2);
+        assert_eq!(
+            flood(&mut queue, EventKind::Key, 9),
+            WINDOW_EVENT_QUEUE_CAPACITY - 3
+        );
+        drain(&mut queue);
+        queue.send(event(EventKind::Pressed, 2));
+        queue.send(event(EventKind::PressLost, 2));
+        assert!(!queue.follows_presses());
+        drain(&mut queue);
+        assert_eq!(
+            flood(&mut queue, EventKind::Key, 9),
+            WINDOW_EVENT_QUEUE_CAPACITY
+        );
+    }
+
+    #[test]
+    fn a_press_without_end_holds_one_reservation_until_its_device_presses_again() {
+        let mut queue = EventQueue::new();
+        let encoder = device(3);
+        // An encoder long press that leaves edit mode sends nothing after
+        // `Pressed`, twice.
+        for target in [1, 2] {
+            assert_eq!(
+                queue.push(event(EventKind::Pressed, target), encoder),
+                PushOutcome::Queued
+            );
+        }
+        assert_eq!(queue.followed_presses().len(), 1);
+        assert_eq!(
+            flood(&mut queue, EventKind::Key, 9),
+            WINDOW_EVENT_QUEUE_CAPACITY - 2 - PRESS_END_RESERVATION as usize
+        );
+        drain(&mut queue);
+        // The next press of the encoder ends and reserves for itself only.
+        queue.push(event(EventKind::Pressed, 3), encoder);
+        queue.push(event(EventKind::Released, 3), encoder);
+        queue.push(event(EventKind::Clicked, 3), encoder);
+        assert!(!queue.follows_presses());
+        drain(&mut queue);
+        assert_eq!(
+            flood(&mut queue, EventKind::Key, 9),
+            WINDOW_EVENT_QUEUE_CAPACITY
+        );
+    }
+
+    #[test]
+    fn a_pointer_press_stays_whole_while_the_encoder_presses_twice() {
+        let mut queue = EventQueue::new();
+        let (pointer, encoder) = (device(1), device(3));
+        queue.push(event(EventKind::Pressed, 1), pointer);
+        queue.push(event(EventKind::Pressed, 7), encoder);
+        queue.push(pointer_move(1, 4), pointer);
+        queue.push(event(EventKind::Pressed, 8), encoder);
+        queue.push(event(EventKind::Released, 8), encoder);
+        queue.push(event(EventKind::Clicked, 8), encoder);
+        assert_eq!(
+            flood(&mut queue, EventKind::Key, 9),
+            WINDOW_EVENT_QUEUE_CAPACITY - 5 - PRESS_END_RESERVATION as usize,
+            "only the pointer press still holds a reservation"
+        );
+        for code in SHORT_PRESS_END {
+            assert_ne!(
+                queue.push(event(code, 1), pointer),
+                PushOutcome::Dropped,
+                "{code:?}"
+            );
+        }
+        let drained = drain(&mut queue);
+        assert_eq!(
+            only(&drained, 1)
+                .into_iter()
+                .filter(|code| tier(*code) == Tier::Lifecycle)
+                .collect::<Vec<_>>(),
+            [
+                EventKind::Pressed,
+                EventKind::Released,
+                EventKind::ShortClicked,
+                EventKind::SingleClicked,
+                EventKind::Clicked,
+            ]
+        );
+        assert_eq!(
+            only(&drained, 8),
+            [EventKind::Pressed, EventKind::Released, EventKind::Clicked]
+        );
+    }
+
+    #[test]
+    fn a_keypad_press_ends_on_the_focused_widget() {
+        let mut queue = EventQueue::new();
+        let keypad = device(2);
+        queue.push(event(EventKind::Pressed, 1), keypad);
+        flood(&mut queue, EventKind::Key, 9);
+        // The focus moved to widget 2 before the key was released.
+        for code in SHORT_PRESS_END {
+            assert_eq!(
+                queue.push(event(code, 2), keypad),
+                PushOutcome::Queued,
+                "{code:?}"
+            );
+        }
+        let drained = drain(&mut queue);
+        assert_eq!(only(&drained, 1), [EventKind::Pressed]);
+        assert_eq!(only(&drained, 2), SHORT_PRESS_END);
+
+        // The end of a rejected keypad press is dropped on any widget.
+        flood(&mut queue, EventKind::Key, 9);
+        assert_eq!(
+            queue.push(event(EventKind::Pressed, 1), keypad),
+            PushOutcome::Dropped
+        );
+        drain(&mut queue);
+        for code in SHORT_PRESS_END {
+            assert_eq!(
+                queue.push(event(code, 2), keypad),
+                PushOutcome::Dropped,
+                "{code:?}"
+            );
+        }
+        assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn two_devices_pressing_one_widget_keep_separate_presses() {
+        let mut queue = EventQueue::new();
+        let (pointer, keypad) = (device(1), device(2));
+        queue.push(event(EventKind::Pressed, 1), pointer);
+        queue.push(event(EventKind::Pressed, 1), keypad);
+        assert_eq!(queue.followed_presses().len(), 2);
+        assert_eq!(
+            flood(&mut queue, EventKind::Key, 9),
+            WINDOW_EVENT_QUEUE_CAPACITY - 2 - 2 * PRESS_END_RESERVATION as usize
+        );
+        for code in SHORT_PRESS_END {
+            assert_eq!(queue.push(event(code, 1), pointer), PushOutcome::Queued);
+        }
+        assert_eq!(queue.followed_presses().len(), 1);
+        assert_eq!(queue.followed_presses()[0].device, keypad);
+        for code in [
+            EventKind::LongPressed,
+            EventKind::Released,
+            EventKind::Clicked,
+        ] {
+            assert_eq!(queue.push(event(code, 1), keypad), PushOutcome::Queued);
+        }
+        assert!(!queue.follows_presses());
+    }
+
+    #[test]
+    fn presses_sent_by_code_are_queued_by_tier_only() {
+        let mut queue = EventQueue::new();
+        flood(&mut queue, EventKind::Key, 9);
+        assert_eq!(
+            queue.send_by_code(event(EventKind::Pressed, 1)),
+            PushOutcome::Dropped
+        );
+        assert!(!queue.follows_presses());
+        drain(&mut queue);
+        // A rejected press sent by code never blocks later clicks sent by code.
+        for code in [EventKind::Released, EventKind::Clicked] {
+            assert_eq!(
+                queue.send_by_code(event(code, 2)),
+                PushOutcome::Queued,
+                "{code:?}"
+            );
+        }
+        // And a press sent by code reserves nothing.
+        queue.send_by_code(event(EventKind::Pressed, 3));
+        assert!(!queue.follows_presses());
+        assert_eq!(
+            flood(&mut queue, EventKind::Key, 9),
+            WINDOW_EVENT_QUEUE_CAPACITY - 3
+        );
+    }
+
+    #[test]
+    fn forgetting_a_target_forgets_its_accepted_press() {
+        let mut queue = EventQueue::new();
+        queue.push(event(EventKind::Pressed, 1), device(1));
+        queue.discard_target(object(1));
+        assert!(!queue.follows_presses());
+
+        queue.push(event(EventKind::Pressed, 2), device(1));
+        queue.clear_target(object(2));
+        assert!(!queue.follows_presses());
+
+        queue.push(event(EventKind::Pressed, 3), device(1));
+        queue.push(event(EventKind::Pressed, 4), device(2));
+        queue.clear_dead_targets(|target| target == object(4));
+        assert_eq!(queue.followed_presses().len(), 1);
+        assert_eq!(queue.followed_presses()[0].target, object(4));
+        drain(&mut queue);
+
+        // A rejected press is kept: its device may end it on another widget.
+        flood(&mut queue, EventKind::Key, 9);
+        assert_eq!(
+            queue.push(event(EventKind::Pressed, 5), device(3)),
+            PushOutcome::Dropped
+        );
+        drain(&mut queue);
+        queue.discard_target(object(5));
+        queue.clear_dead_targets(|target| target != object(5));
+        assert_eq!(
+            queue.push(event(EventKind::Released, 6), device(3)),
+            PushOutcome::Dropped
+        );
+    }
+
+    #[test]
+    fn losses_are_reported_at_most_once_per_interval() {
+        let mut queue = EventQueue::new();
+        assert_eq!(queue.take_loss_report(0), None);
+        flood(&mut queue, EventKind::Key, 1);
+        queue.send(event(EventKind::Key, 1));
+        assert!(queue.has_unreported_losses());
+        assert_eq!(
+            queue.take_loss_report(5_000),
+            Some(LossReport { lost: 2, total: 2 })
+        );
+        assert!(!queue.has_unreported_losses());
+
+        // The consumer never drains the queue: losses keep being reported.
+        for now in [5_100, 5_900] {
+            queue.send(event(EventKind::Key, 1));
+            assert_eq!(queue.take_loss_report(now), None);
+        }
+        queue.send(event(EventKind::Key, 1));
+        assert_eq!(
+            queue.take_loss_report(6_000),
+            Some(LossReport { lost: 3, total: 5 })
+        );
+        assert_eq!(queue.take_loss_report(60_000), None, "nothing new lost");
+
+        // Ticks wrap around.
+        let mut queue = EventQueue::new();
+        flood(&mut queue, EventKind::Key, 1);
+        assert!(queue.take_loss_report(u32::MAX - 10).is_some());
+        queue.send(event(EventKind::Key, 1));
+        assert_eq!(queue.take_loss_report(100), None);
+        assert_eq!(
+            queue.take_loss_report(LOSS_REPORT_INTERVAL - 11),
+            Some(LossReport { lost: 1, total: 2 })
+        );
+        assert_eq!(queue.dropped(), 2);
+    }
+
+    /// Deterministic pseudo-random numbers (xorshift64*).
+    struct Random(u64);
+
+    impl Random {
+        fn below(&mut self, bound: usize) -> usize {
+            self.0 ^= self.0 >> 12;
+            self.0 ^= self.0 << 25;
+            self.0 ^= self.0 >> 27;
+            (self.0.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) as usize % bound
+        }
+    }
+
+    /// One input device and its current press: target, press number and
+    /// whether `LongPressed` was sent.
+    struct Device {
+        identifier: usize,
+        first_target: usize,
+        targets: usize,
+        /// Whether it may release on another widget, like a keypad.
+        releases_elsewhere: bool,
+        press: Option<(usize, usize, bool)>,
+        abandoned: bool,
+    }
+
+    /// Random LVGL-like streams from a pointer, a keypad and an encoder,
+    /// with random consumer pauses. Presses may be left without an end, two
+    /// devices press the same widgets, and the keypad may release on another
+    /// widget. The consumer never receives the end of a press whose `Pressed`
+    /// was dropped, events keep their order, value changes stay inside their
+    /// press, and an accepted press always arrives whole.
+    #[test]
+    fn random_bursts_keep_presses_whole_and_in_order() {
+        let mut random = Random(0x9E37_79B9_7F4A_7C15);
+        let mut queue = EventQueue::new();
+        let mut devices = [(1, 1, 4, false), (2, 3, 4, true), (3, 5, 3, false)].map(
+            |(identifier, first_target, targets, releases_elsewhere)| Device {
+                identifier,
+                first_target,
+                targets,
+                releases_elsewhere,
+                press: None,
+                abandoned: false,
+            },
+        );
+        let mut sequence = 0;
+        let mut delivered = Vec::new();
+        // Per press: its device, then the events that hold a reservation,
+        // pushed and delivered.
+        let mut presses: Vec<(usize, usize, usize)> = Vec::new();
+        let mut replacements = 0;
+
+        let mut push = |queue: &mut EventQueue, code, target, press: usize, source| {
+            sequence += 1;
+            let mut queued = event(code, target);
+            queued.pointer = Some([sequence, press as i32, 0, 0]);
+            queue.push(queued, device(source));
+        };
+
+        for _ in 0..300_000 {
+            match random.below(10) {
+                0..=4 => {
+                    let device = &mut devices[random.below(3)];
+                    let source = device.identifier;
+                    match device.press {
+                        None => {
+                            let target = device.first_target + random.below(device.targets);
+                            presses.push((source, 0, 0));
+                            let press = presses.len();
+                            replacements += usize::from(core::mem::take(&mut device.abandoned));
+                            device.press = Some((target, press, false));
+                            push(&mut queue, EventKind::Pressed, target, press, source);
+                        }
+                        Some((target, press, long)) => match random.below(14) {
+                            0..=5 => push(&mut queue, EventKind::Pressing, target, press, source),
+                            6 => push(&mut queue, EventKind::ValueChanged, target, press, source),
+                            7 if !long => {
+                                push(&mut queue, EventKind::LongPressed, target, press, source);
+                                presses[press - 1].1 += 1;
+                                device.press = Some((target, press, true));
+                            }
+                            7 => push(
+                                &mut queue,
+                                EventKind::LongPressedRepeat,
+                                target,
+                                press,
+                                source,
+                            ),
+                            8 => {
+                                push(&mut queue, EventKind::PressLost, target, press, source);
+                                presses[press - 1].1 += 1;
+                                device.press = None;
+                            }
+                            9 => {
+                                // Released after a scroll: no click.
+                                push(&mut queue, EventKind::Released, target, press, source);
+                                presses[press - 1].1 += 1;
+                                device.press = None;
+                            }
+                            10 => {
+                                // No end at all: an encoder long press that
+                                // leaves edit mode.
+                                device.press = None;
+                                device.abandoned = true;
+                            }
+                            _ => {
+                                let target = if device.releases_elsewhere && random.below(2) == 0 {
+                                    device.first_target + random.below(device.targets)
+                                } else {
+                                    target
+                                };
+                                // LVGL sends a release and its clicks back to back.
+                                let mut codes = Vec::from([EventKind::Released]);
+                                if !long {
+                                    codes.push(EventKind::ShortClicked);
+                                    codes.push(
+                                        [
+                                            EventKind::SingleClicked,
+                                            EventKind::DoubleClicked,
+                                            EventKind::TripleClicked,
+                                        ][random.below(3)],
+                                    );
+                                }
+                                codes.push(EventKind::Clicked);
+                                for code in codes {
+                                    push(&mut queue, code, target, press, source);
+                                    presses[press - 1].1 += 1;
+                                }
+                                device.press = None;
+                            }
+                        },
+                    }
+                }
+                5 => push(
+                    &mut queue,
+                    [EventKind::Key, EventKind::Focused, EventKind::Custom1][random.below(3)],
+                    10 + random.below(3),
+                    0,
+                    0,
+                ),
+                6 => push(
+                    &mut queue,
+                    [
+                        EventKind::Scroll,
+                        EventKind::ScrollEnd,
+                        EventKind::ScrollBegin,
+                    ][random.below(3)],
+                    1 + random.below(12),
+                    0,
+                    0,
+                ),
+                7 => push(
+                    &mut queue,
+                    [EventKind::ValueChanged, EventKind::SizeChanged][random.below(2)],
+                    20 + random.below(2),
+                    0,
+                    0,
+                ),
+                _ => {
+                    if random.below(4) != 0 {
+                        delivered.extend(queue.pop_front());
+                    }
+                }
+            }
+        }
+        delivered.extend(core::iter::from_fn(|| queue.pop_front()));
+        assert!(queue.dropped() > 10_000, "the stream must overflow");
+        assert!(
+            replacements > 1_000,
+            "presses without an end must be replaced"
+        );
+
+        // Per device: the press being delivered and whether it was released.
+        let mut state = [None::<(usize, bool)>; 4];
+        let mut ended = alloc::vec![false; presses.len() + 1];
+        let mut last_sequence = 0;
+        let mut accepted = 0;
+        for event in &delivered {
+            let [sequence, press, _, _] = event.pointer.unwrap();
+            let press = press as usize;
+            assert!(sequence > last_sequence, "events were reordered");
+            last_sequence = sequence;
+            if press == 0 {
+                continue;
+            }
+            let source = presses[press - 1].0;
+            let Some(role) = press_role(event.code) else {
+                assert_eq!(event.code, EventKind::ValueChanged);
+                assert!(!ended[press], "a value change crossed the end of its press");
+                continue;
+            };
+            let current = state[source];
+            match role {
+                PressRole::Start => {
+                    accepted += 1;
+                    state[source] = Some((press, false));
+                }
+                PressRole::Progress | PressRole::LongPress | PressRole::Lost => {
+                    assert_eq!(
+                        current,
+                        Some((press, false)),
+                        "{:?} without its press",
+                        event.code
+                    );
+                }
+                PressRole::Release => {
+                    assert_eq!(current, Some((press, false)), "release without its press");
+                    state[source] = Some((press, true));
+                }
+                PressRole::Click | PressRole::Final => {
+                    assert_eq!(
+                        current,
+                        Some((press, true)),
+                        "{:?} without its release",
+                        event.code
+                    );
+                }
+            }
+            if matches!(
+                role,
+                PressRole::Lost | PressRole::Release | PressRole::Final
+            ) {
+                ended[press] = true;
+            }
+            if matches!(role, PressRole::Lost | PressRole::Final) {
+                state[source] = None;
+            }
+            if role != PressRole::Start && role != PressRole::Progress {
+                presses[press - 1].2 += 1;
+            }
+        }
+        assert!(accepted > 1_000, "presses must get through");
+        for event in &delivered {
+            let press = event.pointer.unwrap()[1] as usize;
+            if event.code == EventKind::Pressed && press > 0 {
+                let (_, pushed, received) = presses[press - 1];
+                assert_eq!(pushed, received, "press {press} arrived incomplete");
+            }
+        }
     }
 
     #[test]
     fn key_information_is_captured_with_the_event() {
         let mut queue = EventQueue::new();
-        queue.push(Event::new(EventKind::Key, object(1), Some(Key::Escape)));
+        queue.send(Event::new(EventKind::Key, object(1), Some(Key::Escape)));
         assert_eq!(queue.pop_front().unwrap().key, Some(Key::Escape));
     }
 
@@ -412,17 +1608,17 @@ mod tests {
         let mut queue = EventQueue::new();
         // Wrap the ring so the compaction crosses the end of the array.
         for _ in 0..12 {
-            queue.push(event(EventKind::Clicked, 7));
+            queue.send(event(EventKind::Clicked, 7));
         }
         for _ in 0..12 {
             queue.pop_front();
         }
         for (index, target) in [1, 2, 1, 3, 2, 1, 3, 3].into_iter().enumerate() {
-            queue.push(event(
+            queue.send(event(
                 if index % 2 == 0 {
-                    EventKind::Pressed
+                    EventKind::Focused
                 } else {
-                    EventKind::Released
+                    EventKind::Defocused
                 },
                 target,
             ));
@@ -431,17 +1627,17 @@ mod tests {
         assert_eq!(
             drain(&mut queue),
             [
-                (EventKind::Released, 2),
-                (EventKind::Released, 3),
-                (EventKind::Pressed, 2),
-                (EventKind::Pressed, 3),
-                (EventKind::Released, 3),
+                (EventKind::Defocused, 2),
+                (EventKind::Defocused, 3),
+                (EventKind::Focused, 2),
+                (EventKind::Focused, 3),
+                (EventKind::Defocused, 3),
             ]
         );
         assert!(queue.is_empty());
         // The ring is fully usable afterwards.
         for index in 0..WINDOW_EVENT_QUEUE_CAPACITY {
-            queue.push(event(EventKind::Clicked, index + 1));
+            queue.send(event(EventKind::Clicked, index + 1));
         }
         assert!(queue.is_full());
     }
@@ -449,9 +1645,9 @@ mod tests {
     #[test]
     fn clearing_a_target_keeps_events_but_nulls_the_target() {
         let mut queue = EventQueue::new();
-        queue.push(event(EventKind::Pressed, 1));
-        queue.push(event(EventKind::Clicked, 2));
-        queue.push(event(EventKind::Released, 1));
+        queue.send(event(EventKind::Pressed, 1));
+        queue.send(event(EventKind::Clicked, 2));
+        queue.send(event(EventKind::Released, 1));
         queue.clear_target(object(1));
         assert_eq!(
             drain(&mut queue),
@@ -467,7 +1663,7 @@ mod tests {
     fn dead_targets_are_cleared_and_live_ones_kept() {
         let mut queue = EventQueue::new();
         for target in [1, 1, 2, 3, 2, 1] {
-            queue.push(event(EventKind::Clicked, target));
+            queue.send(event(EventKind::Clicked, target));
         }
         let mut calls = 0;
         queue.clear_dead_targets(|target| {
@@ -494,16 +1690,22 @@ mod tests {
         extern crate std;
         use alloc::collections::VecDeque;
         std::println!(
-            "Event={} Option<Event>={} old queue={}+{} new queue={} Window={}",
+            "Event={} Option<Event>={} PressGroup={} old queue={}+{} new queue={} Window={}",
             size_of::<Event>(),
             size_of::<Option<Event>>(),
+            size_of::<PressGroup>(),
             size_of::<VecDeque<Event>>(),
             10 * size_of::<Event>(),
             size_of::<EventQueue>(),
             size_of::<crate::Window>()
         );
         assert!(size_of::<crate::Window>() < 65536);
-        assert!(size_of::<EventQueue>() <= WINDOW_EVENT_QUEUE_CAPACITY * size_of::<Event>() + 8);
+        assert!(
+            size_of::<EventQueue>()
+                <= WINDOW_EVENT_QUEUE_CAPACITY * size_of::<Option<Event>>()
+                    + PRESS_TRACKING_CAPACITY * size_of::<PressGroup>()
+                    + 24
+        );
     }
 
     #[test]
@@ -519,8 +1721,9 @@ mod tests {
                 3 => EventKind::Key,
                 _ => EventKind::Released,
             };
-            queue.push(event(code, index % 3 + 1));
+            queue.send(event(code, index % 3 + 1));
             assert!(queue.len() <= WINDOW_EVENT_QUEUE_CAPACITY);
+            assert!(queue.followed_presses().len() <= PRESS_TRACKING_CAPACITY);
             if index % 7 == 0 {
                 queue.pop_front();
             }
