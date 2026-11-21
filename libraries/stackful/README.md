@@ -129,7 +129,8 @@ nothing today.
   Rust target (for example softfp C on `thumbv7em-none-eabi`) is only covered when
   the build enables the FPU registers with `-C target-feature=+vfp4` (or the
   matching feature): the compiler then treats `d8`-`d15` as clobbered across the
-  switch. The former `fpu` Cargo feature is gone.
+  switch. Rust 1.97 accepts `vfp4` with an "unstable feature" warning. The former
+  `fpu` Cargo feature is gone.
 * Xtensa needs the esp-rs toolchain (`espup`, channel `+esp`) and
   `-Zbuild-std=core,alloc`; all Xtensa targets are `panic = "abort"`. Every switch
   spills the live register windows (a `call12` chain and one window underflow),
@@ -153,13 +154,15 @@ nothing today.
 
 ### Guard contract
 
-corosensei's `Stack` trait asks for a guard page, but corosensei itself never checks
-for one with a custom stack. Xila's stacks are heap blocks on targets without an
-MMU, where no guard page is possible, so the stack handed to corosensei is a
-private wrapper (`stack::Backing`) and the guarantee comes from the unsafe
-`Coroutine::new` instead: the caller bounds all native stack use (the entry, its
-callees and interrupt frames), and the 64-byte painted guard detects damage when
-the coroutine suspends, resumes or finishes. This is detection, not protection.
+corosensei's `Stack` trait asks for a guard page and at least 4 KiB of usable
+memory (`MIN_STACK_SIZE`), but corosensei itself never checks either with a custom
+stack; only its built-in stacks use them. Xila's stacks are heap blocks without a
+guard page, on every target (microcontrollers have no MMU to provide one), and may
+be as small as 2 KiB. The stack handed to corosensei is therefore a private wrapper
+(`stack::Backing`) and the guarantee comes from the unsafe `Coroutine::new` instead:
+the caller bounds all native stack use (the entry, its callees and interrupt
+frames), and the 64-byte painted guard detects damage when the coroutine suspends,
+resumes or finishes. This is detection, not protection.
 
 Host tests cover real Embassy executor interleaving, signal wakeups and poll
 counts, nested synchronous calls, async/native joins, results, thread isolation,
@@ -188,7 +191,9 @@ stays correct. Under Espressif's QEMU the Xtensa round trip is 534 (ESP32) and 5
 ## ABI integration status and remaining decisions
 
 Synchronous VFS calls that bridge async operations and the native application
-ABI use `suspend_on` on supported targets. The synchronous VFS polling
+ABI use `suspend_on` on supported targets. On Xtensa, `xila-stackful` builds
+and runs, but the application ABI, the native loader and the VFS do not enable
+it yet, so ESP32 targets keep the busy-polling fallback. The synchronous VFS polling
 adapters still return resource-busy on pending device I/O. The application ABI
 waits cooperatively for blocking file I/O when called from a coroutine.
 

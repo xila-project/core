@@ -496,8 +496,7 @@ for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf; do
   cargo clippy --locked -p xila-abi-application --features network --target "$target" -- -D warnings
 done
 # `check` never assembles inline assembly. Build the floating-point control code (`vmrs`, `frcsr`)
-# of every float target. corosensei's switch is generic and assembles where the application ABI
-# instantiates it.
+# and corosensei's switch, which `xila-stackful` instantiates itself, for every float target.
 for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imafc-unknown-none-elf; do
   cargo build --locked -p xila-stackful --target "$target" --release
 done

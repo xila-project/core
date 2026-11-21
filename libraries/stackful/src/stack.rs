@@ -70,12 +70,16 @@ impl Stack {
 #[repr(transparent)]
 pub(crate) struct Backing(pub(crate) Stack);
 
-// SAFETY: the allocation is 16-byte aligned, stable for the lifetime of the value and
-// at least 2 KiB. It has no guard page, which is acceptable here: Xila's targets have
-// no MMU, so none is possible. The painted guard detects an overflow at the next switch,
-// and the caller of the unsafe `Coroutine::new` sizes the stack to cover native code,
-// its callees and interrupt frames (on Xtensa, `xtensa-lx-rt` pushes 256 bytes per
-// interrupt level on the coroutine stack).
+// SAFETY: the allocation is 16-byte aligned and stable for the lifetime of the value.
+// It deviates from two documented requirements of corosensei's `Stack` trait, neither of
+// which corosensei checks for a custom stack (only its built-in stacks use them):
+// - No guard page. Microcontrollers have no MMU to provide one, and on hosts the heap
+//   block has none either. The painted guard only detects an overflow at the next switch.
+// - At least 2 KiB of usable memory instead of corosensei's `MIN_STACK_SIZE` (4 KiB).
+// Both are covered by the caller of the unsafe `Coroutine::new`, which must size the
+// stack for all native stack use: the entry, its callees and interrupt frames (on
+// Xtensa, `xtensa-lx-rt` pushes 256 bytes per interrupt level on the coroutine stack).
+// Revisit this if a corosensei feature that relies on either requirement is enabled.
 unsafe impl corosensei::stack::Stack for Backing {
     fn base(&self) -> corosensei::stack::StackPointer {
         // SAFETY: both addresses lie in a live allocation, so they are not zero. The
