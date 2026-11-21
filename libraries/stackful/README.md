@@ -89,14 +89,43 @@ No references to an exclusively borrowed control block cross the switch.
 
 Native code must not unwind across a switch. The C-ABI entry boundary aborts if
 an entry panic escapes on Linux; embedded applications should use panic=abort.
-Panics from Future::poll happen on the driver stack, whose normal Drop leaks any
-suspended native stack. Native destructors that panic also abort at the boundary.
-An unstarted entry is dropped normally. A finished entry frees its stack normally.
-Dropping a started, unfinished driver deliberately leaks its stack and control
-block, including live future/resources, and wakes its observer with Cancelled.
-This avoids freeing live stack objects; there is no forced unwinding or safe
-cancellation of arbitrary C code. Prefer driving to completion. Process exit can
-reclaim leaked host memory. Native code must never longjmp across these boundaries.
+Panics from Future::poll happen on the driver stack, whose normal Drop cancels any
+suspended native stack, as described next. Native destructors that panic also abort
+at the boundary. An unstarted entry is dropped normally. A finished entry frees its
+stack normally. Native code must never longjmp across these boundaries.
+
+### Cancellation
+
+Dropping a started, unfinished driver cancels the coroutine. It wakes the join
+observer with `Cancelled`, drops the pending future in place if that future was passed
+to `suspend_on_cancellable` (the destructor runs on the executor, while the stack it is
+pinned on is intact), and then discards the suspended frames with corosensei's
+`force_reset`: nothing is unwound and no destructor runs on them. The stack is freed
+with the control block, as soon as the single join observer, if any, is gone. Before
+this release the stack was leaked instead, because a destructor running on a suspended
+stack might hold a pointer into it. A freed stack is sound only under the contract of
+the unsafe `Coroutine::new`:
+
+* **No owner lives only in a frame across a suspension.** An open file, an allocation
+  the host must release, a lock guard: a frame that holds one leaks it, since its
+  destructor never runs. Keep such an object where the host owns it and can release it
+  without running the program's code, or in a future passed to `suspend_on_cancellable`.
+  The native ABI keeps everything a program opens in a per-process registry that its
+  host state owns and releases (see `xila-abi-application`), and its few suspended
+  futures that own a resource are cancellable.
+* **Nothing outside the stack keeps a pointer into it** once the call that is suspended
+  has returned or been cancelled. The ABI's one structure that does, the wait queue of a
+  mutex or condition variable, links nodes that live in the suspended calls, but its
+  heads live in the process's own memory, which goes away with the process. A
+  registration made by address and never dereferenced, such as the I/O readiness hub's
+  key, is harmless: its entry holds a waker, which is woken once and discarded.
+
+The destructors that do not run are the price: an owner that was left in a frame leaks,
+as it did before, but the stack no longer leaks with it. A cancellation that lands while a
+close waits for a lock loses that one close.
+
+Prefer driving to completion. A process that exits with suspended worker threads
+cancels them when its driver ends, so their stacks are freed too.
 
 ## Switch implementation and targets
 
@@ -200,8 +229,8 @@ waits cooperatively for blocking file I/O when called from a coroutine.
 Remaining work for later milestones: native thread creation must construct and
 spawn a driver on the owning executor, set a bounded stack size and resource
 policy, and map integer results/join state to the C ABI. Decide detach/cancel
-semantics before exposing thread termination; forced cancellation currently
-leaks. Interrupt/signal delivery, foreign callbacks and libc TLS slot
+semantics before exposing thread termination; forced cancellation discards the frames
+(see Cancellation). Interrupt/signal delivery, foreign callbacks and libc TLS slot
 assignments need an explicit policy. Mutex/condition-variable adapters need
 real async wait queues, atomic unlock plus wait registration, wake-one/wake-all
 semantics and cancellation handling; recursive locks and ownership must

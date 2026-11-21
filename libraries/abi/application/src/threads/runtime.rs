@@ -1,5 +1,5 @@
 use super::*;
-use crate::{Process, Status, suspend_dynamic};
+use crate::{Process, Status, registry::Registry, suspend_dynamic};
 use alloc::vec::Vec;
 use core::{
     cell::{Cell, RefCell, UnsafeCell},
@@ -48,6 +48,8 @@ struct Worker {
 
 struct Group {
     process: Cell<*const Process>,
+    /// The handles the process opened: the host state's registry.
+    registry: Cell<*const Registry>,
     workers: RefCell<Vec<Option<Worker>>>,
     next_thread: Cell<usize>,
     keys: [Cell<usize>; XILA_THREAD_KEYS_MAX],
@@ -60,6 +62,7 @@ impl Group {
     const fn new() -> Self {
         Self {
             process: Cell::new(ptr::null()),
+            registry: Cell::new(ptr::null()),
             workers: RefCell::new(Vec::new()),
             next_thread: Cell::new(MAIN_THREAD + 1),
             keys: [const { Cell::new(0) }; XILA_THREAD_KEYS_MAX],
@@ -159,6 +162,23 @@ pub(crate) fn bind_process(process: *const Process) {
     }
 }
 
+/// Record where the calling process's handles are registered, for every thread of it.
+pub(crate) fn bind_registry(registry: *const Registry) {
+    if let Ok((group, _)) = current() {
+        group.registry.set(registry);
+    }
+}
+
+/// The registry of the calling thread's process, once its entry has started.
+///
+/// # Safety
+/// The reference must not be used after the process's host state is released.
+pub(crate) unsafe fn registry<'a>() -> Option<&'a Registry> {
+    let (group, _) = current().ok()?;
+    // SAFETY: the host state outlives every coroutine of the process, as the caller assures.
+    unsafe { group.registry.get().as_ref() }
+}
+
 pub(crate) fn stop_workers() {
     if let Ok((group, local)) = current() {
         group.shutdown_thread.set(local.id);
@@ -211,8 +231,9 @@ pub(crate) fn prepare_exit(process: *const Process) -> Result<(), Status> {
 }
 
 /// Drive the process entry and all its workers on the same executor task.
-/// The group and its workers are dropped before this future returns. A
-/// suspended coroutine follows stackful's cancellation policy (#731).
+/// The group and its workers are dropped before this future returns. A suspended
+/// coroutine, main or worker, is cancelled: its frames are discarded and its stack freed.
+/// What the process owns lives in the host state, which the caller releases afterwards.
 pub async fn drive_process(mut main: Coroutine) -> i32 {
     let group = Group::new();
     let local = Local::new(&group, MAIN_THREAD);

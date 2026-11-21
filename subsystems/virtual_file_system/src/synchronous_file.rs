@@ -502,8 +502,19 @@ impl<'a> SynchronousFile<'a> {
         if self.closed {
             return Ok(());
         }
+        let result = suspend_on(virtual_file_system.close(&self.item, &mut self.context));
+        // Marked only once the close has run. A coroutine cancelled while the close waits
+        // for the file system never gets here, and whoever owns the file next, which is the
+        // native host closing what a cancelled process held, closes it instead of skipping it.
         self.closed = true;
-        suspend_on(virtual_file_system.close(&self.item, &mut self.context))
+        result
+    }
+
+    /// Close using the VFS retained by this file, without consuming it, so that its owner
+    /// can keep it where a cancellation can still reach it until the close is done. Closing
+    /// again, or dropping, does nothing more once this has returned.
+    pub fn close_in_place(&mut self) -> crate::Result<()> {
+        self.close_internal(self.virtual_file_system)
     }
 
     /// Close using the VFS retained by this file, reporting any close error.

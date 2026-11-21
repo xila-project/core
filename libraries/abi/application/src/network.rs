@@ -1,7 +1,9 @@
 use crate::{
     Network, NetworkAddress, Status, Tcp, TcpListener, Udp, XILA_ADDRESS_IPV4, XILA_ADDRESS_IPV6,
     XILA_NETWORK_CONNECT, XILA_NETWORK_LISTEN, XILA_NETWORK_RESOLVE, XILA_SHUTDOWN_WRITE,
-    path_input, suspend_on,
+    path_input,
+    registry::{self, Handle},
+    suspend_on, suspend_on_cancellable,
 };
 use ::network::{IpAddress, IpEndpoint, IpListenEndpoint, Ipv6, Manager, Port, TcpSocket};
 use alloc::boxed::Box;
@@ -66,6 +68,9 @@ impl Network {
     }
 }
 
+/// Box and unbox the objects the ABI hands out. A `registered` object also lists itself in
+/// the registry of the process that opened it, so the host closes it if the process ends
+/// without doing so. A network capability is granted by the host and owns nothing to close.
 macro_rules! ownership {
     ($name:ty) => {
         impl $name {
@@ -80,11 +85,31 @@ macro_rules! ownership {
             }
         }
     };
+    ($name:ty, registered, $close:ident) => {
+        impl $name {
+            pub fn into_raw(self) -> *mut Self {
+                registry::register(self)
+            }
+            /// Reclaim an owned object exactly once.
+            /// # Safety
+            /// Pointer must be live and returned by `into_raw`.
+            pub unsafe fn from_raw(raw: *mut Self) -> Self {
+                unsafe { registry::reclaim(raw) }
+            }
+        }
+        impl Handle for $name {
+            unsafe fn close(raw: *mut Self) {
+                // SAFETY: the registry holds only live objects that came from `into_raw`.
+                let _ = unsafe { $close(raw) };
+            }
+        }
+    };
 }
 ownership!(Network);
-ownership!(Tcp);
-ownership!(TcpListener);
-ownership!(Udp);
+ownership!(Tcp, registered, xila_tcp_close);
+ownership!(TcpListener, registered, xila_tcp_listener_close);
+ownership!(Udp, registered, xila_udp_close);
+
 fn status(result: Result<(), Status>) -> Status {
     result.map_or_else(|e| e, |()| Status::Ok)
 }
@@ -116,20 +141,31 @@ unsafe fn write_buffer<'a>(p: *mut c_void, size: usize) -> Result<&'a mut [u8], 
 }
 // Small fixed socket buffers; no ABI-side staging buffer on I/O paths.
 const BUFFER_SIZE: usize = 1024;
-fn tcp_socket(network: &Network) -> Result<TcpSocket, Status> {
-    suspend_on(
-        network
-            .manager
-            .new_tcp_socket(BUFFER_SIZE, BUFFER_SIZE, None),
-    )
-    .map_err(Status::from)
+
+/// A new socket, which the caller owns as soon as the future completes.
+async fn new_tcp_socket(network: &Network) -> Result<TcpSocket, Status> {
+    network
+        .manager
+        .new_tcp_socket(BUFFER_SIZE, BUFFER_SIZE, None)
+        .await
+        .map_err(Status::from)
 }
-fn listen(socket: &TcpSocket, address: NetworkAddress) -> Result<(), Status> {
+
+/// A new socket, listening on `address`. The socket lives only inside the future until it
+/// completes, so a process cancelled while it waits drops the future and the socket with it.
+async fn listening_socket(network: &Network, address: NetworkAddress) -> Result<TcpSocket, Status> {
     let endpoint = address.endpoint()?;
-    suspend_on(socket.with_mutable(|s| {
-        s.listen(IpListenEndpoint::new(Some(endpoint.address), endpoint.port).into_smoltcp())
-    }))
-    .map_err(|_| Status::InvalidArgument)
+    let mut socket = new_tcp_socket(network).await?;
+    let listening = socket
+        .with_mutable(|s| {
+            s.listen(IpListenEndpoint::new(Some(endpoint.address), endpoint.port).into_smoltcp())
+        })
+        .await;
+    if listening.is_err() {
+        socket.close_forced().await;
+        return Err(Status::InvalidArgument);
+    }
+    Ok(socket)
 }
 
 /// Release network authority; existing sockets remain valid. Null succeeds.
@@ -165,41 +201,45 @@ pub unsafe extern "C" fn xila_tcp_connect(
         let network = input(network)?;
         let endpoint = input(address)?.endpoint()?;
         network.require(XILA_NETWORK_CONNECT)?;
-        let mut inner = tcp_socket(network)?;
-        let result = suspend_on(async {
-            if timeout_ms == 0 {
-                return inner.connect(endpoint.address, endpoint.port).await;
+        // The socket exists only inside the future until the connection is made, so a
+        // process cancelled while it connects drops the future and the socket with it.
+        let connected = suspend_on_cancellable(async {
+            let mut inner = new_tcp_socket(network).await?;
+            let result = if timeout_ms == 0 {
+                inner.connect(endpoint.address, endpoint.port).await
+            } else {
+                use embassy_futures::select::{Either, select};
+                let start = time::MonotonicClock::now(&time::EmbassyClock);
+                match select(
+                    inner.connect(endpoint.address, endpoint.port),
+                    // A plain deadline check: embassy-time timers need an Embassy executor
+                    // waker, which the non-coroutine `block_on` fallback does not provide.
+                    // Re-waking yields cleanly inside a coroutine and keeps the deadline
+                    // live under executors that sleep until woken.
+                    core::future::poll_fn(|context| {
+                        if time::MonotonicClock::now(&time::EmbassyClock).saturating_sub(start)
+                            >= core::time::Duration::from_millis(u64::from(timeout_ms))
+                        {
+                            core::task::Poll::Ready(())
+                        } else {
+                            context.waker().wake_by_ref();
+                            core::task::Poll::Pending
+                        }
+                    }),
+                )
+                .await
+                {
+                    Either::First(result) => result,
+                    Either::Second(_) => Err(::network::IoErrorKind::TimedOut),
+                }
+            };
+            if let Err(error) = result {
+                inner.close_forced().await;
+                return Err(Status::from(error));
             }
-            use embassy_futures::select::{Either, select};
-            let start = time::MonotonicClock::now(&time::EmbassyClock);
-            match select(
-                inner.connect(endpoint.address, endpoint.port),
-                // A plain deadline check: embassy-time timers need an Embassy executor
-                // waker, which the non-coroutine `block_on` fallback does not provide.
-                // Re-waking yields cleanly inside a coroutine and keeps the deadline
-                // live under executors that sleep until woken.
-                core::future::poll_fn(|context| {
-                    if time::MonotonicClock::now(&time::EmbassyClock).saturating_sub(start)
-                        >= core::time::Duration::from_millis(u64::from(timeout_ms))
-                    {
-                        core::task::Poll::Ready(())
-                    } else {
-                        context.waker().wake_by_ref();
-                        core::task::Poll::Pending
-                    }
-                }),
-            )
-            .await
-            {
-                Either::First(result) => result,
-                Either::Second(_) => Err(::network::IoErrorKind::TimedOut),
-            }
+            Ok::<_, Status>(inner)
         });
-        if let Err(error) = result {
-            suspend_on(inner.close_forced());
-            return Err(error.into());
-        }
-        Ok(Tcp { inner }.into_raw())
+        Ok(Tcp { inner: connected? }.into_raw())
     })();
     match result {
         Ok(value) => {
@@ -230,11 +270,7 @@ pub unsafe extern "C" fn xila_tcp_listen(
         let address = *input(address)?;
         address.endpoint()?;
         network.require(XILA_NETWORK_LISTEN)?;
-        let mut inner = tcp_socket(network)?;
-        if let Err(error) = listen(&inner, address) {
-            suspend_on(inner.close_forced());
-            return Err(error);
-        }
+        let inner = suspend_on_cancellable(listening_socket(network, address))?;
         Ok(TcpListener {
             network: Network::new(network.manager, u32::from(network.rights))?,
             address,
@@ -277,11 +313,8 @@ pub unsafe extern "C" fn xila_tcp_accept(
         {
             return Err(Status::ConnectionReset);
         }
-        let mut replacement = tcp_socket(&listener.network)?;
-        if let Err(error) = listen(&replacement, listener.address) {
-            suspend_on(replacement.close_forced());
-            return Err(error);
-        }
+        let replacement =
+            suspend_on_cancellable(listening_socket(&listener.network, listener.address))?;
         let inner = core::mem::replace(&mut listener.inner, replacement);
         Ok(Tcp { inner }.into_raw())
     })();
@@ -303,8 +336,10 @@ pub unsafe extern "C" fn xila_tcp_accept(
 pub unsafe extern "C" fn xila_tcp_close(socket: *mut Tcp) -> Status {
     status(unsafe {
         if !socket.is_null() {
-            let mut socket = Tcp::from_raw(socket);
-            suspend_on(socket.inner.close_forced());
+            // Closed while still registered: a process cancelled in the middle of this
+            // call leaves the socket to the host, which aborts it again.
+            suspend_on((*socket).inner.close_forced());
+            drop(Tcp::from_raw(socket));
         }
         Ok(())
     })
@@ -318,8 +353,9 @@ pub unsafe extern "C" fn xila_tcp_close(socket: *mut Tcp) -> Status {
 pub unsafe extern "C" fn xila_tcp_listener_close(socket: *mut TcpListener) -> Status {
     status(unsafe {
         if !socket.is_null() {
-            let mut socket = TcpListener::from_raw(socket);
-            suspend_on(socket.inner.close_forced());
+            // Closed while still registered, as for a connection.
+            suspend_on((*socket).inner.close_forced());
+            drop(TcpListener::from_raw(socket));
         }
         Ok(())
     })
@@ -489,22 +525,28 @@ pub unsafe extern "C" fn xila_udp_bind(
         let network = input(network)?;
         let endpoint = input(address)?.endpoint()?;
         network.require(XILA_NETWORK_LISTEN)?;
-        let inner =
-            suspend_on(
-                network
-                    .manager
-                    .new_udp_socket(BUFFER_SIZE, BUFFER_SIZE, 1, 1, None),
-            )
-            .map_err(Status::from)?;
-        let result = suspend_on(inner.with_mutable(|s| {
-            s.bind(IpListenEndpoint::new(Some(endpoint.address), endpoint.port).into_smoltcp())
-        }));
-        if result.is_err() {
-            suspend_on(inner.close());
-            return Err(Status::InvalidArgument);
-        }
+        // The socket exists only inside the future until it is bound, as for a connection.
+        let bound = suspend_on_cancellable(async {
+            let inner = network
+                .manager
+                .new_udp_socket(BUFFER_SIZE, BUFFER_SIZE, 1, 1, None)
+                .await
+                .map_err(Status::from)?;
+            let result = inner
+                .with_mutable(|s| {
+                    s.bind(
+                        IpListenEndpoint::new(Some(endpoint.address), endpoint.port).into_smoltcp(),
+                    )
+                })
+                .await;
+            if result.is_err() {
+                inner.close().await;
+                return Err(Status::InvalidArgument);
+            }
+            Ok::<_, Status>(inner)
+        });
         Ok(Udp {
-            inner,
+            inner: bound?,
             rights: network.rights,
         }
         .into_raw())
@@ -527,7 +569,7 @@ pub unsafe extern "C" fn xila_udp_bind(
 pub unsafe extern "C" fn xila_udp_close(socket: *mut Udp) -> Status {
     status(unsafe {
         if !socket.is_null() {
-            let Udp { inner, .. } = *Udp::from_raw(socket);
+            let Udp { inner, .. } = Udp::from_raw(socket);
             suspend_on(inner.close());
         }
         Ok(())

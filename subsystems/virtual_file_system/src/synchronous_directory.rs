@@ -8,6 +8,7 @@ use task::TaskIdentifier;
 use crate::{IoErrorKind, ItemStatic, Result, VirtualFileSystem, blocking_operation, suspend_on};
 
 pub struct SynchronousDirectory<'a> {
+    closed: bool,
     virtual_file_system: &'a VirtualFileSystem,
     pub(crate) directory: &'static dyn file_system::FileSystemOperations,
     pub(crate) flags: Flags,
@@ -22,6 +23,7 @@ impl<'a> SynchronousDirectory<'a> {
         context: Context,
     ) -> Self {
         Self {
+            closed: false,
             virtual_file_system,
             directory,
             flags,
@@ -108,9 +110,23 @@ impl<'a> SynchronousDirectory<'a> {
     }
 
     pub fn close_internal(&mut self, virtual_file_system: &VirtualFileSystem) -> Result<()> {
-        suspend_on(
+        if self.closed {
+            return Ok(());
+        }
+        let result = suspend_on(
             virtual_file_system.close(&ItemStatic::Directory(self.directory), &mut self.context),
-        )
+        );
+        // Marked only once the close has run, as for a file: a close that is cancelled
+        // while it waits is closed again by the next owner, not skipped.
+        self.closed = true;
+        result
+    }
+
+    /// Close using the retained VFS without consuming the listing, so that its owner can
+    /// keep it where a cancellation can still reach it until the close is done. Closing
+    /// again, or dropping, does nothing more once this has returned.
+    pub fn close_in_place(&mut self) -> Result<()> {
+        self.close_internal(self.virtual_file_system)
     }
 
     /// Close using the retained VFS, reporting any close error.

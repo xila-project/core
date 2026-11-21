@@ -1,8 +1,11 @@
-use crate::Status;
-use alloc::{boxed::Box, string::String};
+use crate::{
+    Status,
+    registry::{self, Handle},
+};
+use alloc::string::String;
 use core::{ffi::c_char, slice, str};
 use file_system::PathOwned;
-use virtual_file_system::{SynchronousDirectory, VirtualFileSystem};
+use virtual_file_system::VirtualFileSystem;
 
 pub const XILA_RIGHT_READ: u32 = 1;
 pub const XILA_RIGHT_WRITE: u32 = 2;
@@ -35,16 +38,16 @@ impl Directory {
         path: PathOwned,
         rights: u8,
     ) -> Result<Self, Status> {
-        SynchronousDirectory::open(vfs, task, &path)
-            .map_err(Status::from)?
-            .close(vfs)
-            .map_err(Status::from)?;
-        Ok(Self {
-            vfs,
-            task,
-            path,
-            rights,
+        // Open and close in one suspension: the listing exists only inside the future,
+        // which a cancellation drops in place, so it never sits in the program's frames.
+        crate::suspend_on_cancellable(async {
+            virtual_file_system::Directory::open(vfs, task, &path)
+                .await?
+                .close(vfs)
+                .await
         })
+        .map_err(Status::from)?;
+        Ok(Self::granted(vfs, task, path, rights))
     }
     /// A capability a process was granted for a directory the granter holds already,
     /// bound to the process's own task. The granter validated it, so this does not.
@@ -61,14 +64,23 @@ impl Directory {
             rights,
         }
     }
+    /// Hand the capability to a program as an owned pointer. Inside a native process it is
+    /// also registered, so the host frees it if the process ends without doing so.
     pub fn into_raw(self) -> *mut Self {
-        Box::into_raw(Box::new(self))
+        registry::register(self)
     }
     /// Reclaim an owned capability.
     /// # Safety
     /// `raw` must be a live pointer returned by `into_raw`, reclaimed exactly once.
-    pub unsafe fn from_raw(raw: *mut Self) -> Box<Self> {
-        unsafe { Box::from_raw(raw) }
+    pub unsafe fn from_raw(raw: *mut Self) -> Self {
+        unsafe { registry::reclaim(raw) }
+    }
+}
+
+impl Handle for Directory {
+    unsafe fn close(raw: *mut Self) {
+        // SAFETY: the registry holds only live capabilities that came from `into_raw`.
+        let _ = unsafe { xila_directory_close(raw) };
     }
 }
 #[inline]

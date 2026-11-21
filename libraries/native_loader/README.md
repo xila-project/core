@@ -75,23 +75,31 @@ program's environment replaces the copy its task made of its parent's before
 the entry runs. The task future, not the coroutine stack, owns one allocation
 that holds the `LoadedImage` handle, the process `XilaHeap` granted through
 `startup->heap` and the host state: the `XilaStartup` block, the process
-capability and the launch name, arguments and startup streams they point into.
+capability and the launch name, arguments and startup streams they point into, and the
+registry of the files, directories, listings, children and sockets the program opened.
 The image bytes stay in the platform's `ExecutableMemory`, which the handle releases, and
 the C heap's blocks are separate allocations the `XilaHeap` tracks: neither is
-part of it. The state takes 384 B per process on 32-bit targets (424 B for the
-allocation, with the heap and the handle). The launch-name bytes are allocated
+part of it. The state takes 392 B per process on 32-bit targets (424 B for the
+allocation, with the heap and the handle: the registry's 8 B replace the `started`
+flag the loader needed before). The launch-name bytes are allocated
 separately, like the argument strings. The coroutine entry receives only a
 pointer to it, so a program that overruns its own frames cannot damage the state
 `xila_process_exit` and the SDK's heap and standard error access depend on, and
-the host can reach the streams whatever the coroutine was doing. The allocation
-is released when the program returns or when the task is dropped. The
-arguments and startup streams of a program that never started (the allocation
-failed, the spawn future was dropped before its first poll, or the task was
-cancelled before it ran) are dropped too. A coroutine cancelled after it
-started keeps its stack, arguments and startup streams leaked, as stackful
-documents: the host state is reachable but its resources are not dropped.
-Closing them and releasing the pipes a cancelled process holds
-is [Core #731](https://github.com/xila-project/core/issues/731).
+the host can reach everything the program holds whatever the coroutine was doing.
+
+The allocation is released when the program returns, exits or is cancelled, and in
+that order on every path: the coroutine is dropped first, then the state is released,
+then it and the allocation are freed. Dropping the task future of `LoadedImage::spawn`
+(or the future of `LoadedImage::start`, which runs the program on the calling task)
+while the program is suspended cancels it. Stackful discards its frames, frees its
+stack and drops the cancellable futures it was suspended on; the loader then closes
+every handle the program still held, its startup streams and its home directory,
+deletes its graphics objects (and with them the task identity file pickers act with),
+frees its arguments and unmaps its image. A program that never started, a spawn the task
+manager refused and an allocation that failed release the same things. Nothing is
+leaked on any of these paths, and a program that returns without closing its files has
+them closed. A program cancelled while a close waits for the network stack's lock loses
+that one UDP socket: see the ABI README's *Ownership and cancellation*.
 
 The platform implements `ExecutableMemory`, including cache synchronization
 and executable permissions appropriate to its hardware

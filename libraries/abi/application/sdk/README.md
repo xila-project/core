@@ -233,8 +233,9 @@ How it works, and why raw `lv_*` functions are not exposed:
   an object that is not the process's is refused. When the process ends (`main`
   returns, `exit` or `xila_process_exit`), the host deletes every object it still
   owns, windows included, so nothing needs cleaning up by hand. The table lives in the
-  process's host-owned state, not on its stack, so that cleanup can later cover a
-  task cancelled while suspended; until #731 lands, its objects stay.
+  process's host-owned state, not on its stack, so the same cleanup covers a task
+  cancelled while suspended, and with it goes the task identity that file pickers act
+  with.
 * Raw LVGL functions would bypass both: they would not take the lock, and the objects
   they create would belong to nobody, so an exited or cancelled process would leak them
   and could corrupt the display by deleting an object another process owns. An `lv_*`

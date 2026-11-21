@@ -293,6 +293,13 @@ impl State {
         self.manager
     }
 
+    /// The task whose identity file pickers act with: the calling process's, as of its last
+    /// call. It lives only as long as the state, so a process that ends, or is cancelled,
+    /// leaves no identity behind for a reused task identifier to inherit.
+    pub fn file_system_task(&self) -> Option<task::TaskIdentifier> {
+        self.file_system.map(|(_, task)| task)
+    }
+
     /// Replace the file-system context of the calling process.
     pub fn set_file_system(
         &mut self,

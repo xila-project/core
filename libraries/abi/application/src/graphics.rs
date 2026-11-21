@@ -11,10 +11,10 @@
 //! The process's identity table ([`State`]) lives in its host-owned
 //! [`Resources`](crate::Resources), not on the coroutine's stack, and is
 //! allocated by the process's first graphics call: a process that never draws
-//! pays one empty pointer. `xila_process_exit` and a return from the entry
-//! delete the objects the process still owns. A process the loader cancels
-//! while it is suspended does not get that cleanup yet: its objects stay until
-//! #731, which the host-owned table makes possible.
+//! pays one empty pointer. `xila_process_exit`, a return from the entry and the
+//! host that cancels the process (`HostState::release`) delete the objects the
+//! process still owns and drop the state, with the task identity file pickers act
+//! with, so a reused task identifier cannot inherit it.
 //!
 //! Raw `lv_*` functions are not exposed. They would bypass the graphics lock
 //! and the per-process ownership that lets a process's objects be deleted

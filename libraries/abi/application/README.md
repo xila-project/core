@@ -203,14 +203,14 @@ usual independent lifetimes.
 
 The coroutine that calls `xila_process_exit` leaves through `stackful::exit`.
 Its native frames are abandoned without unwinding or running destructors. The
-main coroutine releases the granted startup streams, strings and home directory
-on return. An explicit process exit from any thread stops its peers and releases
-the same startup resources. Unstarted workers and workers that finish release
-their stacks. Suspended peers leak their stacks and anything held by
-abandoned frames, such as a temporary VFS handle, under
-[Core #731](https://github.com/xila-project/core/issues/731). The process heap and
-mapped image belong to the loader's task future and are reclaimed after all C
-execution has ended.
+main coroutine releases the process's resources on return: the handles the program
+opened and did not close, its graphics objects, the granted startup streams, its home
+directory and its strings (see [Ownership and cancellation](#ownership-and-cancellation)).
+An explicit process exit from any thread stops its peers and releases the same
+resources. Unstarted workers and workers that finish release their stacks. Suspended
+peers have their frames discarded and their stacks freed when the process's driver
+ends, like a cancelled process's. The process heap and mapped image belong to the
+loader's task future and are reclaimed after all C execution has ended.
 
 The host invokes native entry points with no owned guards in their callback
 frames. The SDK first calls `xila_thread_stop_others(process)` for terminal
@@ -267,7 +267,8 @@ has: its task is gone (Core unregisters it before it signals), and its status wa
 the signal owned by its `XilaChild`, a few bytes released by `xila_process_child_close`.
 Closing a handle of a running child detaches it: it keeps running, is adopted by the
 root task if its parent ends first, and its status is dropped. Null closes succeed. A
-parent that returns with unclosed handles leaks them, like any object it opened.
+parent that ends with unclosed handles has them closed for it, like any other handle it
+opened.
 
 ### Environment
 
@@ -361,7 +362,7 @@ Join and synchronization waits suspend through `suspend_on`. Queue nodes are
 stored on waiting stacks. No wait allocates or wakes itself while pending.
 A worker must release its locks before ending. Individual worker cancellation and
 robust-lock recovery are outside this ABI. Terminal cleanup stops peers permanently
-under #731, so the cleanup caller must avoid waiting on locks they own.
+and discards their frames, so the cleanup caller must avoid waiting on locks they own.
 
 ## Header and compatibility
 
@@ -514,11 +515,76 @@ an unfinished coroutine. The same holds for the host state of a run
 arguments and streams they point into. The loader allocates it beside the heap
 and passes the coroutine entry only a pointer to it, so the entry call keeps no
 host state in its frames and `xila_process_exit` finds none there. The
-resources are dropped exactly once: when the entry returns, or when
-`xila_process_exit` empties them before it abandons the coroutine. A loader that
-never starts the run drops the state itself. `run_main`
+resources are released by whichever ends the run first: the entry returning,
+`xila_process_exit` before it abandons the coroutine, or the host cancelling the
+process (`HostState::release`); releasing is idempotent, so a later release finds
+nothing. A loader that never starts the run releases the state itself. `run_main`
 is the exception: it is for a linked program on the caller's own stack and
-keeps the state in its frame.
+keeps the state in its frame. See [Ownership and cancellation](#ownership-and-cancellation).
+
+## Ownership and cancellation
+
+A native process ends in one of three ways: its entry returns, it calls
+`xila_process_exit`, or the host cancels it by dropping its task future while its
+coroutine is suspended (executor teardown, or a dropped spawner: the task manager has no
+cancel call, and a future preemptive kill would take this path too). In every case the
+host releases everything the process holds, in the same order, from state it owns, and
+runs none of the program's code: a cancelled coroutine's frames are discarded, never
+unwound (see `stackful`'s Cancellation).
+
+That works because **no frame owns a resource across a suspension**. Where each one lives:
+
+| What the process holds | Owner | Released by |
+|---|---|---|
+| Image and process heap (and the blocks C allocated) | the process allocation, owned by the task future | the loader, with the allocation |
+| Startup streams, home directory, arguments, program name, startup block | `HostState`, in that allocation | `HostState::release` |
+| Files, directories, listings, children, sockets the program opened (`File`, `Directory`, `DirectoryIterator`, `Child`, `Tcp`, `TcpListener`, `Udp`) | the process's handle registry, in `HostState` | `HostState::release`, newest first |
+| Graphics objects and the identity file pickers act with (the task) | `Resources.graphics`, in `HostState` | `HostState::release`, then dropping the state |
+| A file the call itself opens (the entropy source), a socket being connected or bound, the duplicated streams and the request of a spawn, the handle a wait holds | the suspended future, passed to `suspend_on_cancellable` | stackful, which drops the future in place on cancellation |
+| The coroutine stack | the coroutine's control block | stackful, which frees it on cancellation |
+| Worker threads' stacks | their coroutines, owned by the process's driver | the same: they are cancelled when the driver ends |
+
+A host that cancels a process drops its coroutine first (which frees the stack and drops
+the cancellable futures), then calls `HostState::release`, then frees the state, the heap
+and the image. The native loader does this in that order on every path, including a
+program that never started and a spawn the task manager refused. Releasing is idempotent,
+so it also runs after a normal end, where it finds nothing to do except the handles the
+program forgot to close: those are closed too, once, and the standard streams are closed
+whether or not the program returned.
+
+**Handles.** An object that `into_raw` hands to a program is boxed behind a link that
+lists it in the registry of the process whose coroutine opened it, and `from_raw` (every
+`xila_*_close`) unlinks it. A worker thread registers in the same registry as the main
+thread. Outside a coroutine nothing registers: the caller keeps the object, as a host that
+builds a `Directory` capability to grant. Closing goes through the same `xila_*_close`
+function as the program's own call, and each close runs while the object is still
+registered (a file, a listing and a socket are closed in place, then unlinked), so a
+cancellation that lands while a close waits for a lock leaves the object to the host,
+which closes it again. A UDP socket is the exception: its close consumes it, so a
+cancellation in the middle of it leaks that one socket.
+
+**Cost.** The registry is one pointer per process, and a link is three pointers in front
+of each handle: 12 bytes on a 32-bit target (16 for files and listings, whose contents
+are 8-aligned), with no allocation, no growth policy and no failure mode. The standard
+streams and the home directory carry no link. On Arm and RV32 the state grows from 384 to
+392 bytes.
+
+**Rules for the ABI.** A call that opens an object registers it before it can suspend
+again, or keeps it inside the future it suspends on and passes that future to
+`suspend_on_cancellable`; it never leaves one in its own frame while it waits. A future
+passed to `suspend_on_cancellable` borrows nothing the host frees before the coroutine is
+dropped. Native code is trusted, so none of this guards against a program that closes a
+handle twice or passes another process's handle.
+
+**What a cancellation still leaves behind.** A call suspended inside the VFS or a driver is
+not dropped unless it is one of the cancellable suspensions above, so a device keeps whatever
+registration it made for a pending read or write: a clone of the dead task's waker, which is
+harmless to wake. The VFS drops such a call's `cancel_operation` guard only with the future,
+and that guard touches the file the call borrowed; a stopped worker's pending read outlives
+the process's exit by one driver drop, by which time the exit has closed and freed the file,
+so those futures stay non-cancellable. A close that was waiting for the network stack when
+the process was cancelled loses that one UDP socket (above). No ABI call holds a lock guard
+across a suspension.
 
 ## Optional graphics (`graphics`)
 
@@ -541,9 +607,11 @@ see the [SDK README](sdk/README.md#graphics).
   process's host-owned `Resources`, off the coroutine stack, and is allocated by the
   process's first call: a process that never draws holds one null pointer
   (`Option<Box<State>>`; 4 bytes on a 32-bit target). It is deleted, with the LVGL objects
-  it names, when the process ends through a return from the entry or `xila_process_exit`,
-  before the files are closed. If the coroutine is cancelled while it waits to delete,
-  the table stays in the host state for the host to finish, as for every other resource.
+  it names, when the process ends through a return from the entry, `xila_process_exit` or a
+  cancellation, after the handles the program opened and before its standard streams are
+  closed. The state, with the task identity file pickers act with, is dropped then. If the
+  coroutine is cancelled while it waits to delete, the table stays in the host state for
+  the host to finish, as for every other resource.
 * **The lock.** A call waits for the graphics lock with `Manager::lock().await` inside
   `suspend_on`, so a contended lock suspends the process, never the executor, and runs
   the call with `graphics::call::execute_locked` once it has the lock. It never awaits
@@ -555,7 +623,7 @@ see the [SDK README](sdk/README.md#graphics).
   `Unsupported`. A process without the capability (a linked entry) gets `InvalidArgument`.
 * **No raw LVGL.** `lv_*` functions are not part of the ABI. They would bypass the
   lock and the ownership above, so the objects of an exited or cancelled process would
-  leak (#731) and a process could delete another's. The call table is the whole surface; an
+  leak and a process could delete another's. The call table is the whole surface; an
   `lv_*` layer can be built on it later.
 
 ## Optional networking (`network`)

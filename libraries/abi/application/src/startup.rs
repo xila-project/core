@@ -1,5 +1,5 @@
 //! Startup capabilities borrowed by a linked native C application.
-use crate::{Directory, File, Heap, Process, ProcessHost, XILA_API, XilaApi};
+use crate::{Directory, File, Heap, Process, ProcessHost, XILA_API, XilaApi, registry::Registry};
 use alloc::{string::String, vec::Vec};
 use core::{ffi::c_char, ptr, ptr::NonNull};
 use task::TaskIdentifier;
@@ -35,9 +35,12 @@ pub struct XilaStartup {
 }
 
 /// What the entry call borrows and the process owner releases when it ends. Kept in
-/// one place so `xila_process_exit` can release it before it abandons the stack.
-#[derive(Default)]
+/// one place so `xila_process_exit` can release it before it abandons the stack, and so
+/// the host can release it when it cancels the process.
 pub(crate) struct Resources {
+    /// The handles the program opened itself and has not closed: files, directories,
+    /// listings, children and sockets. See [`crate::registry`].
+    pub(crate) handles: Registry,
     /// Strings that `arguments` points into.
     pub(crate) _owned: Vec<String>,
     pub(crate) arguments: Vec<XilaString>,
@@ -67,9 +70,11 @@ pub(crate) struct Resources {
 /// run has ended for good. Building it, and moving it into that allocation, are
 /// free to move it, because nothing points into it yet.
 ///
-/// It owns the arguments and streams until a run starts. A loader that stops the state
-/// from being dropped with its allocation, to leave it alone after a cancellation, must
-/// still drop it when the run never starts: nothing else holds those streams.
+/// It owns everything the program holds that the kernel or the host must release: the
+/// arguments, the standard streams, the home directory, the graphics objects and a registry
+/// of the handles the program opened itself. The program's frames own none of it, so
+/// [`HostState::release`] can close it all without running any of the program's code,
+/// whether the program returned, exited or was cancelled.
 pub struct HostState {
     startup: XilaStartup,
     process: Option<Process>,
@@ -98,6 +103,7 @@ impl HostState {
         standard_error: Option<File>,
     ) -> Self {
         Self::from_resources(Resources {
+            handles: Registry::new(),
             arguments: argument_pointers(&mut arguments.iter().map(String::as_str)),
             _owned: arguments,
             program_name: String::new(),
@@ -151,30 +157,80 @@ impl HostState {
 }
 
 impl Resources {
-    /// Drop what the process owns, once. Dropping an empty set does nothing, so a
-    /// return from the entry and `xila_process_exit` can both call it.
+    /// Close and free what the process owns, once. Releasing an empty set does nothing, so
+    /// a return from the entry, `xila_process_exit` and the host that cancels the process
+    /// can all call it.
+    ///
+    /// Each kind is emptied before the next is closed, and each stream is closed where it
+    /// is and taken out afterwards, so a close that suspends and is then cancelled leaves
+    /// everything not yet closed in the state, for the host to release. The order is the
+    /// reverse of how a program acquires them: the handles it opened, its graphics objects,
+    /// its streams, its home directory, then its strings.
     ///
     /// # Safety
-    /// The pointer addresses live resources and no reference to them is in use.
+    /// The pointer addresses live resources, no reference to them is in use and no code of
+    /// the program that owns them runs, or ever will, while this does.
     #[inline(never)]
     pub(crate) unsafe fn release(resources: *mut Self) {
-        // The process's graphics objects go first, under the graphics lock, which
-        // the process waits for by suspending. The state stays in the resources, so
-        // a coroutine cancelled in that wait leaves it for the loader to drop.
-        #[cfg(feature = "graphics")]
-        {
-            // SAFETY: the caller guarantees the pointer is valid.
-            let state = unsafe { (*resources).graphics.as_mut() }.map(|state| &raw mut **state);
-            if let Some(state) = state {
-                // SAFETY: the state is live and no reference to it is in use.
-                unsafe { crate::graphics::release(state) };
+        // SAFETY: the caller guarantees the pointer is valid and unaliased.
+        unsafe {
+            (*resources).handles.release_all();
+            // The process's graphics objects go next, under the graphics lock, which the
+            // process waits for by suspending. The state stays in the resources until
+            // it is dropped, so a coroutine cancelled in that wait leaves it for the host.
+            #[cfg(feature = "graphics")]
+            {
+                let state = (*resources).graphics.as_mut().map(|state| &raw mut **state);
+                if let Some(state) = state {
+                    crate::graphics::release(state);
+                }
+                drop((*resources).graphics.take());
             }
+            for stream in [
+                &mut (*resources).standard_input,
+                &mut (*resources).standard_output,
+                &mut (*resources).standard_error,
+            ] {
+                // Closed in place and then taken: a close that is cancelled while it waits
+                // leaves the stream in the state, for the host to close again.
+                if let Some(file) = stream {
+                    let _ = file.inner.as_synchronous_file_mut().close_in_place();
+                }
+                drop(stream.take());
+            }
+            drop((*resources).home.take());
+            (*resources).arguments = Vec::new();
+            (*resources)._owned = Vec::new();
+            (*resources).program_name = String::new();
         }
-        // SAFETY: the caller guarantees the pointer is valid. `take` writes the empty
-        // set before anything is dropped, so a destructor that suspends (a `File` closes
-        // through the VFS) and is then cancelled leaves an empty state behind, never a
-        // half-dropped one that a later release would drop again.
-        drop(unsafe { core::mem::take(&mut *resources) });
+    }
+}
+
+impl HostState {
+    /// How many handles the program has opened and not closed: files, directories,
+    /// listings, children and sockets. It counts what a cancellation would close, and
+    /// excludes the standard streams and the home directory, which are not the program's
+    /// to close.
+    pub fn open_handles(&self) -> usize {
+        self.resources.handles.len()
+    }
+
+    /// Close and free everything the program still holds: the handles it opened, its
+    /// graphics objects, its standard streams, its home directory and its strings. A
+    /// program that returned or exited has released them already, so this does nothing
+    /// then; one that was cancelled, or never ran, still holds them.
+    ///
+    /// This is how a host cancels a program without running any of its code: drop the
+    /// coroutine first (which discards its frames), then release the state, then free it.
+    /// Closing may wait for the file system and the graphics lock, which blocks the
+    /// calling task as `task::block_on` does when no coroutine is running.
+    ///
+    /// # Safety
+    /// `state` is live and at the address the program ran with, and no code of the program
+    /// runs, or ever will, while this does.
+    pub unsafe fn release(state: NonNull<Self>) {
+        // SAFETY: the caller guarantees the state is live and unaliased.
+        unsafe { Resources::release(&raw mut (*state.as_ptr()).resources) }
     }
 }
 
@@ -199,6 +255,7 @@ pub unsafe fn run_main(
     home: Option<Directory>,
 ) -> i32 {
     let mut state = HostState::from_resources(Resources {
+        handles: Registry::new(),
         _owned: Vec::new(),
         program_name: String::new(),
         arguments: argument_pointers(&mut arguments.iter().copied()),
@@ -283,6 +340,8 @@ pub(crate) unsafe fn enter(
     if managed {
         crate::threads::bind_process(process);
     }
+    // Every thread of the program registers the handles it opens here.
+    crate::threads::bind_registry(unsafe { &raw const (*resources).handles });
     let status = unsafe { entry(startup) };
     if managed {
         crate::threads::stop_workers();

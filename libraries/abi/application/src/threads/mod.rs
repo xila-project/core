@@ -95,6 +95,7 @@ mod unsupported {
     include!(concat!(env!("OUT_DIR"), "/disabled_threads.rs"));
 
     pub(crate) fn bind_process(_: *const Process) {}
+    pub(crate) fn bind_registry(_: *const crate::registry::Registry) {}
     pub(crate) fn stop_workers() {}
     pub(crate) fn prepare_exit(_: *const Process) -> Result<(), Status> {
         Ok(())

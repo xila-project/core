@@ -296,6 +296,7 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]
     fn owner_reclaims_heap_after_coroutine_cancellation() {
+        let before = testing::MemoryManager::thread_allocations();
         let mut heap = Heap::new();
         let capability = &mut heap as *mut Heap;
         let mut coroutine = unsafe {
@@ -315,11 +316,11 @@ mod tests {
         assert_eq!(delta.allocations(), 2);
         assert_eq!(delta.allocated_bytes(), 123 + 45 + 2 * HEADER_SIZE);
 
-        // Stackful retains the suspended stack. Check only the allocations
-        // made after entering it, which belong to the external heap.
+        // Cancelling frees the suspended stack, which holds no owner of the heap's blocks:
+        // the heap releases them when the owner drops it. Nothing is left.
         drop(coroutine);
         drop(heap);
-        let delta = testing::MemoryManager::thread_allocations().since(before_resume);
+        let delta = testing::MemoryManager::thread_allocations().since(before);
         assert_eq!(delta.net_bytes(), 0);
     }
 }
