@@ -362,6 +362,8 @@ fn checks_riscv_flags() {
     // Single, double and quad float ABIs must match the target exactly.
     assert!(!riscv_flags_supported(2, true, 0, false));
     assert!(!riscv_flags_supported(4, true, 0, false));
+    assert!(!riscv_flags_supported(0, true, 2, false));
+    assert!(!riscv_flags_supported(1, true, 2, false));
     assert!(riscv_flags_supported(1 | 2, true, 2, false));
     assert!(!riscv_flags_supported(1 | 4, true, 2, false));
     assert!(!riscv_flags_supported(6, true, 4, false));
@@ -375,6 +377,37 @@ fn checks_riscv_flags() {
     check::<Riscv32>(&file).unwrap();
     write(&mut file, fields.flags, &4u32.to_le_bytes());
     assert_eq!(check::<Riscv32>(&file), Err(Error::IncompatibleFlags(4)));
+
+    // Hard-float single-precision RISC-V rejects soft-float and double-float images.
+    struct Riscv32SingleFloat;
+    impl Abi for Riscv32SingleFloat {
+        const WORD: usize = 4;
+        const MACHINE: u16 = 243;
+        const RELATIVE: u32 = 3;
+        const ARCH: Arch = Arch::Riscv32;
+        const THUMB_ONLY: bool = false;
+        fn flags_supported(flags: u32) -> bool {
+            riscv_flags_supported(flags, true, 2, false)
+        }
+    }
+
+    let mut hard_float = fixture::<Riscv32SingleFloat>(true);
+    assert_eq!(
+        check::<Riscv32SingleFloat>(&hard_float),
+        Err(Error::IncompatibleFlags(0))
+    );
+    write(&mut hard_float, fields.flags, &1u32.to_le_bytes());
+    assert_eq!(
+        check::<Riscv32SingleFloat>(&hard_float),
+        Err(Error::IncompatibleFlags(1))
+    );
+    write(&mut hard_float, fields.flags, &(1u32 | 2).to_le_bytes());
+    check::<Riscv32SingleFloat>(&hard_float).unwrap();
+    write(&mut hard_float, fields.flags, &(1u32 | 4).to_le_bytes());
+    assert_eq!(
+        check::<Riscv32SingleFloat>(&hard_float),
+        Err(Error::IncompatibleFlags(5))
+    );
 }
 
 #[test]
