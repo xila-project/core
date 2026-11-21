@@ -496,22 +496,35 @@ cargo check --locked -p xila-graphics --features rendering_rgb565 --target riscv
 # Upstream lvgl-rust-sys relies on cc defaults, which omit ilp32f on riscv32imafc.
 CFLAGS_riscv32imafc_unknown_none_elf="-march=rv32imafc -mabi=ilp32f" \\
   cargo check --locked -p xila-graphics --features rendering_rgb565 --target riscv32imafc-unknown-none-elf
-# Verify every C static archive produced for riscv32imafc uses the single-float ABI (EF_RISCV_FLOAT_ABI_SINGLE).
-found_archives=0
-for archive in "${CARGO_TARGET_DIR:-target}"/riscv32imafc-unknown-none-elf/debug/build/*/out/lib*.a; do
-  [ -f "$archive" ] || continue
-  found_archives=$((found_archives + 1))
-  flags_output=$(LC_ALL=C readelf -h "$archive" | grep 'Flags:')
-  if [ -z "$flags_output" ] || printf '%s\\n' "$flags_output" | grep -qv 'single-float ABI'; then
-    echo "error: $archive contains objects without EF_RISCV_FLOAT_ABI_SINGLE" >&2
-    printf '%s\\n' "$flags_output" >&2
+# Verify that the C static archives built by this run for riscv32imafc use the
+# single-float ABI (EF_RISCV_FLOAT_ABI_SINGLE). Take the build script output
+# directories from Cargo's messages (the checks above are fresh, so this is fast),
+# not from a glob that would also match archives restored from the target cache.
+out_directories=$(
+  {
+    cargo check --locked -p xila --target riscv32imafc-unknown-none-elf --message-format=json
+    CFLAGS_riscv32imafc_unknown_none_elf="-march=rv32imafc -mabi=ilp32f" \\
+      cargo check --locked -p xila-graphics --features rendering_rgb565 --target riscv32imafc-unknown-none-elf --message-format=json
+  } | grep '"reason":"build-script-executed"' | grep -o '"out_dir":"[^"]*"' | cut -d '"' -f 4 | sort -u
+)
+for expected in liblfs-sys.a liblvgl.a libfont_assets.a; do
+  found=0
+  for directory in $out_directories; do
+    archive="$directory/$expected"
+    [ -f "$archive" ] || continue
+    found=1
+    flags_output=$(LC_ALL=C readelf -h "$archive" | grep 'Flags:' || true)
+    if [ -z "$flags_output" ] || printf '%s\\n' "$flags_output" | grep -qv 'single-float ABI'; then
+      echo "error: $archive contains objects without EF_RISCV_FLOAT_ABI_SINGLE" >&2
+      printf '%s\\n' "$flags_output" >&2
+      exit 1
+    fi
+  done
+  if [ "$found" -eq 0 ]; then
+    echo "error: this run built no $expected for riscv32imafc-unknown-none-elf" >&2
     exit 1
   fi
 done
-if [ "$found_archives" -eq 0 ]; then
-  echo "error: no C static archives found for riscv32imafc-unknown-none-elf" >&2
-  exit 1
-fi
 for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf riscv32imafc-unknown-none-elf; do
   cargo clippy --locked -p xila-abi-application --no-default-features --target "$target" -- -D warnings
   cargo clippy --locked -p xila-abi-application --features network --target "$target" -- -D warnings

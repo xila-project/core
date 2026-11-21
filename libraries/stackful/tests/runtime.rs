@@ -302,6 +302,13 @@ fn floating_point_control_is_local() {
     assert_eq!(read(), original);
 }
 
+/// Floating-point values live across suspensions of interleaved coroutines.
+///
+/// This is a generic regression test. On x86_64 hosts no floating-point
+/// register is callee-saved, so the compiler spills these values to the
+/// coroutine stack and the test cannot detect a switch that drops `fs0`–`fs11`
+/// on RISC-V (or `d8`–`d15` on AArch64). It only checks those saves when it
+/// runs on such a target.
 #[test]
 fn floating_point_values_survive_stack_switches() {
     let mut drivers = Vec::new();
