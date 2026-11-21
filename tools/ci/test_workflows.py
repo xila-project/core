@@ -104,7 +104,7 @@ class WorkflowPolicy(unittest.TestCase):
         )
         bare = tasks["ci:bare-metal"]
         self.assertIn("clippy", bare["tools"]["rust"]["components"])
-        for target in ("thumbv7em-none-eabihf", "riscv32imac-unknown-none-elf"):
+        for target in ("thumbv7em-none-eabihf", "riscv32imac-unknown-none-elf", "riscv32imafc-unknown-none-elf"):
             self.assertIn(target, bare["tools"]["rust"]["targets"])
         for features in ("--no-default-features", "--features network"):
             self.assertIn(
@@ -363,7 +363,7 @@ class WorkflowPolicy(unittest.TestCase):
     def test_graphics_builds_for_bare_metal_arm_and_riscv(self):
         task = ci_config()["tasks"]["ci:bare-metal"]
         raw = tomllib.loads((ROOT / "mise.ci.toml").read_text())["tasks"]["ci:bare-metal"]
-        for target in ("thumbv7em-none-eabihf", "riscv32imac-unknown-none-elf"):
+        for target in ("thumbv7em-none-eabihf", "riscv32imac-unknown-none-elf", "riscv32imafc-unknown-none-elf"):
             env_target = target.replace("-", "_")
             with self.subTest(target=target):
                 self.assertIn(

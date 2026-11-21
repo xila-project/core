@@ -8,6 +8,8 @@ mod config;
 mod fonts;
 #[path = "build/generate.rs"]
 mod generate;
+#[path = "build/target.rs"]
+mod target;
 
 use std::{
     env, fs,
@@ -191,6 +193,11 @@ fn lvgl_build() -> cc::Build {
 
     let mut build = cc::Build::new();
     build.target(&target).warnings(true);
+    let target_abi = env::var("CARGO_CFG_TARGET_ABI").unwrap_or_default();
+    if let Some((architecture_flag, abi_flag)) = target::riscv_compiler_flags(&target, &target_abi)
+    {
+        build.flag(&architecture_flag).flag(&abi_flag);
+    }
     for include in include_paths.split(';').filter(|path| !path.is_empty()) {
         build.include(include);
     }

@@ -302,6 +302,70 @@ fn floating_point_control_is_local() {
     assert_eq!(read(), original);
 }
 
+/// Floating-point values live across suspensions of interleaved coroutines.
+///
+/// This is a generic regression test. On x86_64 hosts no floating-point
+/// register is callee-saved, so the compiler spills these values to the
+/// coroutine stack and the test cannot detect a switch that drops `fs0`–`fs11`
+/// on RISC-V (or `d8`–`d15` on AArch64). It only checks those saves when it
+/// runs on such a target.
+#[test]
+fn floating_point_values_survive_stack_switches() {
+    let mut drivers = Vec::new();
+    for index in 0..8usize {
+        drivers.push(coroutine(move || {
+            let base = (index + 1) as f32;
+            let first = core::hint::black_box(base * 1.125 + 0.0625);
+            let second = core::hint::black_box(-base * 3.75 + 0.25);
+            let third = core::hint::black_box(base / 7.0);
+            let fourth = core::hint::black_box((index as f64 + 1.5) * 1.333_333_333_333);
+            let fifth = core::hint::black_box(-((index as f64) + 2.25) * 42.125);
+
+            suspend_on(embassy_futures::yield_now());
+
+            let scratch_single = core::hint::black_box(first * 2.0 + second - third);
+            let scratch_double = core::hint::black_box(fourth * 3.0 - fifth);
+
+            suspend_on(embassy_futures::yield_now());
+
+            assert_eq!(first.to_bits(), (base * 1.125 + 0.0625).to_bits());
+            assert_eq!(second.to_bits(), (-base * 3.75 + 0.25).to_bits());
+            assert_eq!(third.to_bits(), (base / 7.0).to_bits());
+            assert_eq!(
+                fourth.to_bits(),
+                ((index as f64 + 1.5) * 1.333_333_333_333).to_bits()
+            );
+            assert_eq!(
+                fifth.to_bits(),
+                (-((index as f64) + 2.25) * 42.125).to_bits()
+            );
+            assert_eq!(
+                scratch_single.to_bits(),
+                (first * 2.0 + second - third).to_bits()
+            );
+            assert_eq!(scratch_double.to_bits(), (fourth * 3.0 - fifth).to_bits());
+            index as i32
+        }));
+    }
+
+    let mut context = Context::from_waker(Waker::noop());
+    for round in 0..2 {
+        for driver in &mut drivers {
+            assert_eq!(
+                std::pin::Pin::new(driver).poll(&mut context),
+                Poll::Pending,
+                "expected coroutine to suspend on round {round}"
+            );
+        }
+    }
+    for (index, driver) in drivers.iter_mut().enumerate() {
+        assert_eq!(
+            std::pin::Pin::new(driver).poll(&mut context),
+            Poll::Ready(index as i32)
+        );
+    }
+}
+
 #[test]
 fn tls_slots_are_isolated_and_zero_allocation() {
     use stackful::{TLS_SLOTS, TlsError, tls_get, tls_set};
