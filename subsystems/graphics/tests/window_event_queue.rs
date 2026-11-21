@@ -41,8 +41,8 @@ fn event_bursts_do_not_allocate_and_keep_clicks() {
     assert!(window.pop_event().is_none());
     assert_eq!(window.dropped_event_count(), 0);
 
-    // Distinct events fill the ring and are then dropped and counted: the queue
-    // never grows and the first events stay in order.
+    // Distinct events fill the ring. Further events replace the oldest ones
+    // and each eviction is counted.
     let before = thread_allocated_bytes();
     for _ in 0..10_000 {
         send(lvgl::lv_event_code_t_LV_EVENT_CLICKED);
@@ -173,10 +173,9 @@ fn queued_events_never_match_widgets_created_after_a_rebuild() {
 }
 
 /// Building a page creates a widget per label and button without draining the
-/// queue in between (a guest builds in fuel slices): creating and deleting
-/// widgets must not take ring slots, or the next click is dropped.
+/// queue in between. Tree and hover notifications must leave room for input.
 #[test]
-fn building_a_page_does_not_drop_the_next_click() {
+fn tree_and_hover_notifications_are_never_queued() {
     let _lvgl = LVGL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     unsafe { lvgl::lv_init() };
     unsafe { lvgl::lv_display_create(320, 240) };
@@ -192,7 +191,14 @@ fn building_a_page_does_not_drop_the_next_click() {
         .collect();
     children.extend((0..40).map(|_| unsafe { lvgl::lv_obj_create(window.as_object_mutable()) }));
     let button = children[79];
+    let window_object = window.as_object_mutable();
     unsafe {
+        for code in [
+            lvgl::lv_event_code_t_LV_EVENT_HOVER_OVER,
+            lvgl::lv_event_code_t_LV_EVENT_HOVER_LEAVE,
+        ] {
+            lvgl::lv_obj_send_event(window_object, code, core::ptr::null_mut());
+        }
         lvgl::lv_obj_send_event(
             button,
             lvgl::lv_event_code_t_LV_EVENT_CLICKED,

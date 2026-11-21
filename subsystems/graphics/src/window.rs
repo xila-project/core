@@ -1,5 +1,9 @@
 use super::{icon_text::IconText, lvgl};
-use crate::{Color, Error, EventKind, Key, Result, event::Event, event_queue::EventQueue};
+use crate::{
+    Color, Error, EventKind, Key, Result,
+    event::Event,
+    event_queue::{EventQueue, PushOutcome},
+};
 use core::{
     mem::ManuallyDrop,
     ops::{Deref, DerefMut},
@@ -162,6 +166,11 @@ unsafe extern "C" fn window_event_callback(
                 forget_dead_targets(window);
                 return;
             }
+            // The shared window queue has no subscription for hover events.
+            lvgl::lv_event_code_t_LV_EVENT_HOVER_OVER
+            | lvgl::lv_event_code_t_LV_EVENT_HOVER_LEAVE => {
+                return;
+            }
             lvgl::lv_event_code_t_LV_EVENT_KEY => {
                 let key = lvgl::lv_indev_get_key(lvgl::lv_indev_active());
                 let key = Key::from(key);
@@ -214,7 +223,9 @@ unsafe extern "C" fn window_event_callback(
                 ]);
             }
         }
-        (*window).event_queue.push(queued);
+        if (*window).event_queue.push(queued) == PushOutcome::FirstInputEvictionInBurst {
+            log::warning!("Dropped a high-priority window event because the queue is full");
+        }
         (*window).waker.wake();
     }
 }
