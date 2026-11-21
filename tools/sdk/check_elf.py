@@ -433,7 +433,8 @@ def main():
     parser.add_argument("--no-compressed", action="store_true",
                         help="the RISC-V target has no C extension")
     parser.add_argument("--embedded", action="store_true", help="the RISC-V target is RV32E")
-    parser.add_argument("--xila-version",
+    # `--abi` is the earlier name, still passed by the native C application template.
+    parser.add_argument("--xila-version", "--abi", dest="xila_version",
                         help="host Xila version MAJOR.MINOR (default: from application.h)")
     args = parser.parse_args()
     xila_version = (tuple(int(part) for part in args.xila_version.split("."))

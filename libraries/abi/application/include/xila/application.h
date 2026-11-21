@@ -433,7 +433,7 @@ typedef struct XilaPollEntry {
  */
 typedef struct XilaApi {
   /**
-   * Packed major and minor ABI version.
+   * Packed major and minor Xila version: `(major << 16) | minor`.
    */
   uint32_t version;
   /**

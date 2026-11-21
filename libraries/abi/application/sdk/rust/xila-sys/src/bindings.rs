@@ -6,7 +6,7 @@ use core::ffi::{c_char, c_void};
 /// the graphics slot when it omits graphics.
 #[repr(C)]
 pub struct XilaApi {
-    /// Packed major and minor ABI version.
+    /// Packed major and minor Xila version: `(major << 16) | minor`.
     pub version: u32,
     /// Total size in bytes, including this header.
     pub size: u32,
