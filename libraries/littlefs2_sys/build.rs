@@ -45,6 +45,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         builder.flag("-ffreestanding");
     }
 
+    let target = env::var("TARGET").unwrap_or_default();
+    let target_abi = env::var("CARGO_CFG_TARGET_ABI").unwrap_or_default();
+    let riscv_flags = riscv_compiler_flags(&target, &target_abi);
+    if let Some((architecture_flag, abi_flag)) = &riscv_flags {
+        builder.flag(architecture_flag).flag(abi_flag);
+    }
+
     #[cfg(feature = "software-intrinsics")]
     let builder = builder.flag("-DLFS_NO_INTRINSICS");
 
@@ -94,10 +101,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         bindings_builder = bindings_builder.clang_arg("-ffreestanding");
     }
 
-    if let Ok(target) = env::var("TARGET") {
-        if target == "wasm32-unknown-unknown" {
-            bindings_builder = bindings_builder.clang_arg("-fvisibility=default");
-        }
+    if let Some((architecture_flag, abi_flag)) = &riscv_flags {
+        bindings_builder = bindings_builder
+            .clang_arg(architecture_flag)
+            .clang_arg(abi_flag);
+    }
+
+    if target == "wasm32-unknown-unknown" {
+        bindings_builder = bindings_builder.clang_arg("-fvisibility=default");
     }
 
     let bindings = bindings_builder
@@ -109,4 +120,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Couldn't write bindings!");
 
     Ok(())
+}
+
+/// Derives `-march=` and `-mabi=` flags for RISC-V targets from the Rust target
+/// triple and `CARGO_CFG_TARGET_ABI`.
+///
+/// Both `cc` and `bindgen` translate bare-metal Rust triples such as
+/// `riscv32imafc-unknown-none-elf` to `riscv32-unknown-none-elf`, and `cc`
+/// defaults bare-metal GNU RISC-V builds to `-mabi=ilp32`. Passing explicit
+/// architecture and ABI flags ensures C objects match Rust's floating-point
+/// calling convention (for example `ilp32f` on `riscv32imafc-unknown-none-elf`).
+fn riscv_compiler_flags(target: &str, target_abi: &str) -> Option<(String, String)> {
+    let architecture = target.split('-').next()?;
+    let (width, extensions) = if let Some(rest) = architecture.strip_prefix("riscv32") {
+        (32u8, rest)
+    } else {
+        let rest = architecture.strip_prefix("riscv64")?;
+        (64u8, rest)
+    };
+
+    if extensions.is_empty()
+        || !matches!(extensions.as_bytes()[0], b'i' | b'e' | b'g')
+        || !extensions
+            .bytes()
+            .all(|byte| matches!(byte, b'i' | b'e' | b'm' | b'a' | b'f' | b'd' | b'c' | b'g'))
+    {
+        return None;
+    }
+
+    let abi = match target_abi {
+        "ilp32" | "ilp32e" | "ilp32f" | "ilp32d" | "lp64" | "lp64f" | "lp64d" => target_abi,
+        _ if width == 32 => {
+            if extensions.starts_with('e') {
+                "ilp32e"
+            } else if extensions.contains('g') || extensions.contains('d') {
+                "ilp32d"
+            } else if extensions.contains('f') {
+                "ilp32f"
+            } else {
+                "ilp32"
+            }
+        }
+        _ => {
+            if extensions.contains('g') || extensions.contains('d') {
+                "lp64d"
+            } else if extensions.contains('f') {
+                "lp64f"
+            } else {
+                "lp64"
+            }
+        }
+    };
+
+    Some((format!("-march=rv{width}{extensions}"), format!("-mabi={abi}")))
 }

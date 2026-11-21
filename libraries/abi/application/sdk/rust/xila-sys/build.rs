@@ -13,7 +13,9 @@ fn main() {
     let target = env::var("TARGET").unwrap();
     let alignment = match target.as_str() {
         "x86_64-unknown-linux-gnu" => 4096, // The host separates permissions with mprotect.
-        "thumbv7em-none-eabihf" | "riscv32imac-unknown-none-elf" => 16,
+        "thumbv7em-none-eabihf"
+        | "riscv32imac-unknown-none-elf"
+        | "riscv32imafc-unknown-none-elf" => 16,
         _ => {
             println!(
                 "cargo::warning=xila-sys: target {target} has no Xila static PIE link configuration"
