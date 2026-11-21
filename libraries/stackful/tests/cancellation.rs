@@ -1,11 +1,11 @@
 #![allow(
     clippy::disallowed_types,
-    reason = "host-only test counts allocations with std atomics and the system allocator"
+    reason = "host-only test counts allocations in a thread-local over the system allocator"
 )]
 
 //! Cancelling a started coroutine frees its stack, and only runs the destructors
-//! it opted in to. This binary holds one test: it counts the live bytes of the
-//! whole process, so another test running beside it would disturb the counts.
+//! it opted in to. The allocator counts the live bytes of the calling thread, so the
+//! test harness's other threads cannot disturb the counts.
 
 use core::{
     future::Future,
@@ -17,22 +17,25 @@ use std::{
     alloc::{GlobalAlloc, Layout, System},
     cell::Cell,
     rc::Rc,
-    sync::atomic::{AtomicIsize, Ordering},
 };
 
 struct Counting;
 
-static LIVE: AtomicIsize = AtomicIsize::new(0);
+std::thread_local! {
+    /// Bytes allocated and not yet freed by this thread, as far as it has seen. Constant
+    /// initialization means reading it never allocates.
+    static LIVE: Cell<isize> = const { Cell::new(0) };
+}
 
 // SAFETY: every call forwards to the system allocator with the same arguments.
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        LIVE.fetch_add(layout.size() as isize, Ordering::Relaxed);
+        LIVE.with(|live| live.set(live.get() + layout.size() as isize));
         unsafe { System.alloc(layout) }
     }
 
     unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-        LIVE.fetch_sub(layout.size() as isize, Ordering::Relaxed);
+        LIVE.with(|live| live.set(live.get() - layout.size() as isize));
         unsafe { System.dealloc(pointer, layout) }
     }
 }
@@ -49,7 +52,7 @@ impl Drop for DropCount {
 }
 
 fn live() -> isize {
-    LIVE.load(Ordering::Relaxed)
+    LIVE.with(Cell::get)
 }
 
 const STACK: usize = 64 * 1024;
