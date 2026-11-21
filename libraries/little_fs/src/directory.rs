@@ -1,6 +1,6 @@
 use core::{ffi::CStr, mem::MaybeUninit};
 
-use crate::{attributes::InternalAttributes, error::convert_result, littlefs};
+use crate::{attributes::InternalAttributes, constants, error::convert_result, littlefs};
 use alloc::{borrow::ToOwned, boxed::Box, ffi::CString, string::ToString};
 use file_system::{Attributes, Entry, IoErrorKind, Kind, Path, PathOwned, Result, Size, Time};
 
@@ -145,7 +145,7 @@ impl Directory {
             Err(error) => return Err(error),
         };
 
-        let r#type = if informations.type_ == littlefs::lfs_type_LFS_TYPE_DIR as u8 {
+        let r#type = if informations.type_ == constants::TYPE_DIRECTORY {
             Kind::Directory
         } else if has_attributes && stored_attributes.kind == Kind::SymbolicLink {
             Kind::SymbolicLink

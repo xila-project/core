@@ -1,4 +1,4 @@
-use super::littlefs;
+use crate::constants;
 use file_system::{AccessFlags, CreateFlags, Flags, StateFlags};
 
 pub fn convert_flags(flags: Flags) -> i32 {
@@ -7,28 +7,28 @@ pub fn convert_flags(flags: Flags) -> i32 {
     let mut little_fs_flags = 0;
 
     if mode.contains(AccessFlags::Write) {
-        little_fs_flags |= littlefs::lfs_open_flags_LFS_O_RDWR;
+        little_fs_flags |= constants::OPEN_READ_WRITE;
     } else {
-        little_fs_flags |= littlefs::lfs_open_flags_LFS_O_RDONLY;
+        little_fs_flags |= constants::OPEN_READ_ONLY;
     }
 
     let open = flags.get_create();
 
     if open.contains(CreateFlags::Create) {
-        little_fs_flags |= littlefs::lfs_open_flags_LFS_O_CREAT;
+        little_fs_flags |= constants::OPEN_CREATE;
     }
 
     if open.contains(CreateFlags::Exclusive) {
-        little_fs_flags |= littlefs::lfs_open_flags_LFS_O_EXCL;
+        little_fs_flags |= constants::OPEN_EXCLUSIVE;
     }
 
     if open.contains(CreateFlags::Truncate) {
-        little_fs_flags |= littlefs::lfs_open_flags_LFS_O_TRUNC;
+        little_fs_flags |= constants::OPEN_TRUNCATE;
     }
 
     if flags.get_state().contains(StateFlags::Append) {
-        little_fs_flags |= littlefs::lfs_open_flags_LFS_O_APPEND;
+        little_fs_flags |= constants::OPEN_APPEND;
     }
 
-    little_fs_flags as i32
+    little_fs_flags
 }
