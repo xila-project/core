@@ -4,10 +4,6 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
-[features]
-# Preserve FP callee state for native soft-float/softfp callers using an FPU.
-fpu = []
-
 [lib]
 name = "stackful"
 
@@ -19,7 +15,8 @@ embassy-sync = { workspace = true }
 embassy-futures = { workspace = true }
 critical-section = { workspace = true, features = ["std"] }
 
-[target.'cfg(not(any(target_arch = "xtensa", target_arch = "wasm32")))'.dependencies]
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+corosensei = { workspace = true }
 task = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]

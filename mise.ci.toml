@@ -495,8 +495,8 @@ for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf; do
   cargo clippy --locked -p xila-abi-application --no-default-features --target "$target" -- -D warnings
   cargo clippy --locked -p xila-abi-application --features network --target "$target" -- -D warnings
 done
-# `check` never assembles inline assembly, and a debug build wouldn't either: only an optimised
-# build with several codegen units hits the toolchain issue. Build every float context switch.
+# `check` never assembles inline assembly. Build the floating-point control code (`vmrs`, `frcsr`)
+# and corosensei's switch, which `xila-stackful` instantiates itself, for every float target.
 for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imafc-unknown-none-elf; do
   cargo build --locked -p xila-stackful --target "$target" --release
 done
@@ -515,7 +515,7 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", compone
 tools.node = "{{ vars.node_version }}"
 
 [tasks."ci:xtensa"]
-description = "Build LittleFS and RGB565 graphics for bare-metal ESP32-S3"
+description = "Build LittleFS and RGB565 graphics for bare-metal ESP32-S3, and the stackful switch for ESP32, ESP32-S2 and ESP32-S3"
 extends = "ci:node"
 # Locally, run ci:toolchain-xtensa and source target/espup/export-esp.sh to put
 # Xtensa GCC on PATH and point LIBCLANG_PATH at Espressif's libclang.
@@ -523,7 +523,15 @@ extends = "ci:node"
 # integer types for LVGL bindgen instead of deferring to later include paths.
 env = { CC_xtensa_esp32s3_none_elf = "xtensa-esp32s3-elf-gcc", BINDGEN_EXTRA_CLANG_ARGS_xtensa_esp32s3_none_elf = "-ffreestanding" }
 # Run Cargo directly with the esp toolchain, which supplies Xtensa Rust and rust-src.
-run = "rustup run esp cargo build --locked -Zbuild-std=core,alloc --target xtensa-esp32s3-none-elf -p xila-little-fs -p xila-graphics --features xila-graphics/rendering_rgb565"
+# The stackful switch (corosensei's Xtensa backend) needs no C toolchain, so the
+# other chips only build that crate. The ESP32-S2 has no atomic CAS: like esp-hal
+# for these chips, select portable-atomic's single-core backend.
+run = """
+set -eu
+rustup run esp cargo build --locked -Zbuild-std=core,alloc --target xtensa-esp32s3-none-elf -p xila-little-fs -p xila-graphics -p xila-stackful --features xila-graphics/rendering_rgb565
+rustup run esp cargo build --locked -Zbuild-std=core,alloc --target xtensa-esp32-none-elf -p xila-stackful
+RUSTFLAGS="--cfg portable_atomic_unsafe_assume_single_core" rustup run esp cargo build --locked -Zbuild-std=core,alloc --target xtensa-esp32s2-none-elf -p xila-stackful
+"""
 
 [tasks."ci:bare-metal-no-cas"]
 description = "Check the façade and peripheral adapters for a RISC-V target without atomic compare-and-swap"

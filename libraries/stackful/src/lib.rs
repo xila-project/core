@@ -1,14 +1,15 @@
 //! Stackful, executor-affine native coroutines. See README.md for the safety contract.
 #![no_std]
+// The floating-point control registers are read with Xtensa inline assembly.
+#![cfg_attr(
+    all(target_arch = "xtensa", stackful_fp_control),
+    feature(asm_experimental_arch)
+)]
 
 extern crate alloc;
 #[cfg(target_os = "linux")]
 extern crate std;
 
-#[cfg(target_arch = "xtensa")]
-compile_error!(
-    "stackful: Xtensa windowed ABI is not supported yet (window spill/restore required)"
-);
 #[cfg(target_arch = "wasm32")]
 compile_error!("stackful: Wasm cannot switch native stacks");
 #[cfg(not(any(
@@ -28,7 +29,8 @@ compile_error!("stackful: supported operating systems are Linux and bare metal")
         target_arch = "x86_64",
         target_arch = "aarch64",
         target_arch = "arm",
-        target_arch = "riscv32"
+        target_arch = "riscv32",
+        target_arch = "xtensa"
     ),
     any(target_os = "linux", target_os = "none")
 ))]
@@ -38,7 +40,8 @@ mod runtime;
         target_arch = "x86_64",
         target_arch = "aarch64",
         target_arch = "arm",
-        target_arch = "riscv32"
+        target_arch = "riscv32",
+        target_arch = "xtensa"
     ),
     any(target_os = "linux", target_os = "none")
 ))]

@@ -146,7 +146,7 @@ jobs:
         run: mise run ci:toolchain-xtensa
       - name: "Setup | Locked npm dependencies"
         run: mise run deps:npm
-      - name: "Build | Bare-metal ESP32-S3 LittleFS and graphics"
+      - name: "Build | Bare-metal ESP32-S3 LittleFS and graphics, Xtensa stackful"
         run: mise run ci:xtensa
 
   wasm:

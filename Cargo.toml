@@ -74,6 +74,10 @@ proc-macro2 = { version = "1.0" }
 # safe layer defines LVGL's OBJ_ID hooks for the bindings' library.
 lvgl_rust_sys = { git = "https://github.com/AlixANNERAUD/lvgl_rust.git", rev = "7f95bed0e7bd75b4ac78e57ee0911910aa5cf3b7", package = "lvgl-rust-sys", default-features = false }
 lvgl-rust = { git = "https://github.com/AlixANNERAUD/lvgl_rust.git", rev = "7f95bed0e7bd75b4ac78e57ee0911910aa5cf3b7", default-features = false }
+# Fork branch `xila`: corosensei 0.3.4 with the Xtensa backend (proposed in the issue
+# Amanieu/corosensei#79) and the Cortex-M `d8`-`d15` clobber fix (Amanieu/corosensei#80). Drop the
+# fork once both are released.
+corosensei = { git = "https://github.com/AlixANNERAUD/corosensei.git", rev = "994bad103b32b88319797352f21ade0508e239fc", default-features = false }
 embassy-executor = { version = "0.10", default-features = false }
 embassy-futures = { version = "0.1" }
 embassy-sync = { version = "0.8" }

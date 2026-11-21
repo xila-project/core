@@ -100,37 +100,69 @@ reclaim leaked host memory. Native code must never longjmp across these boundari
 
 ## Switch implementation and targets
 
-[corosensei 0.3.4](https://docs.rs/corosensei/0.3.4/corosensei/) was evaluated.
-It supports no_std with all default features disabled and is MIT OR Apache-2.0;
-its default allocator and unwind support require std. It supports ELF x86_64,
-AArch64, ARM and RISC-V, but not Xtensa/Wasm. Its unsafe Stack trait explicitly
-requires a protected guard page, which a painted embedded heap stack cannot
-satisfy. We therefore use a small independent naked-assembly switch and do not
-add that dependency or its allocator/unwinding machinery. No comparable linked
-code-size measurement was made for corosensei because its stack contract excludes
-this configuration.
+The context switch is [corosensei](https://github.com/Amanieu/corosensei) 0.3.4
+(MIT OR Apache-2.0) with all default features disabled, so it is `no_std` and
+needs no allocator or unwinding. Core depends on the `xila` branch of the
+`AlixANNERAUD/corosensei` fork, pinned by revision. The branch adds the Xtensa
+backend ([Amanieu/corosensei#79](https://github.com/Amanieu/corosensei/issues/79))
+and the Cortex-M `d8`-`d15` clobber fix
+([#80](https://github.com/Amanieu/corosensei/pull/80): upstream's `q4`-`q7` have no
+effect on targets without NEON). Xila owns no assembly for the switch, only
+`src/fp.rs`. Core does not publish to crates.io, so the git dependency blocks
+nothing today.
 
-* x86_64 Linux SysV: six saved integer registers, SP/return PC, MXCSR and x87
-  control word. No red-zone data is live across the ordinary switch call.
-* AArch64 Linux/bare metal: x19-x30, SP, d8-d15, FPCR/FPSR.
-* Cortex-M thumbv6m, thumbv7em, thumbv8m.main: r4-r11, SP/LR. Thumb-1 compatible
-  integer sequence; hard-float targets additionally save d8-d15 and FPSCR.
-  Explicit +vfp/+fp-arm/+fpregs features or Cargo feature `fpu` on soft-float
-  targets also enable the FP frame. Enable this for native C built with softfp;
-  the target must enable the corresponding hardware instructions.
-  Switches are thread-mode calls, never exception returns; platform exception
-  handlers own exception frames and interrupt state.
-* RV32IMAC/IMAFC: s0-s11, SP/ra; IMAFC additionally saves fs0-fs11 and FCSR.
-  The build script accounts for Rust not exposing unstable FP features in cfg,
-  using built-in target names plus explicit +f/-f flags. Custom target specs
-  need an audit of feature selection. RV32D and other custom ABIs are not claimed.
-* Xtensa ESP32/ESP32-S3: deliberate compile-time error. Windowed ABI requires
-  spilling every live register window to its owning stack before switching,
-  restoring window base/start and return state using a verified call-window
-  protocol, preserving ABI callee state/SAR as applicable, and handling spill
-  exceptions under interrupts. This needs target-specific assembly and hardware
-  tests; an SP-only swap is incorrect. Call0 is not implemented either.
+| Architecture | Targets | Switched by corosensei | Xila adds |
+| --- | --- | --- | --- |
+| x86_64 | Linux | callee-saved integer registers, SP | MXCSR, x87 control word |
+| AArch64 | Linux, bare metal | x19-x30, d8-d15, SP | FPCR, FPSR |
+| Arm | Cortex-M `thumbv6m`, `thumbv7em`, `thumbv8m.main` | r4-r11, d8-d15 on VFP targets, SP | FPSCR on hard-float targets |
+| RV32 | `riscv32imc`, `riscv32imac`, `riscv32imafc` | s0-s11, fs0-fs11 with F, SP | FCSR with F |
+| Xtensa | ESP32, ESP32-S2, ESP32-S3 (`xtensa-*-none-elf`) | windowed ABI: all live register windows are spilled to their stacks, then SP is swapped | FCR, FSR on ESP32 and ESP32-S3 |
+
+* The "Xila adds" column is `src/fp.rs`. corosensei saves the data registers of
+  the ABI but not the floating-point control registers, so without it a rounding
+  mode set by a coroutine would leak into the executor and the other coroutines.
+  New coroutines start with the ABI's default control state.
+* Cortex-M switches are thread-mode calls, never exception returns; platform
+  exception handlers own exception frames and interrupt state. Soft-float Arm and
+  RV32 targets save no FP state. Native code built for another float ABI than the
+  Rust target (for example softfp C on `thumbv7em-none-eabi`) is only covered when
+  the build enables the FPU registers with `-C target-feature=+vfp4` (or the
+  matching feature): the compiler then treats `d8`-`d15` as clobbered across the
+  switch. Rust 1.97 accepts `vfp4` with an "unstable feature" warning. The former
+  `fpu` Cargo feature is gone.
+* Xtensa needs the esp-rs toolchain (`espup`, channel `+esp`) and
+  `-Zbuild-std=core,alloc`; all Xtensa targets are `panic = "abort"`. Every switch
+  spills the live register windows (a `call12` chain and one window underflow),
+  so it costs more as the call depth grows. The ESP32-S2 has no atomic
+  compare-and-swap: build `xila-task` with `--cfg portable_atomic_unsafe_assume_single_core`,
+  as for the other chips without CAS (see the Core readme). The platform must
+  enable the FPU coprocessor (`CPENABLE` bit 0) before the first interrupt on ESP32
+  and ESP32-S3, and every coroutine stack must also hold the interrupt frames of
+  an interrupt taken while it runs: `xtensa-lx-rt` pushes 256 bytes per interrupt
+  level on the interrupted stack. Never resume a coroutine from an interrupt or
+  exception handler. (`xtensa-lx-rt` also faults on its FPU save if `CPENABLE` is
+  clear, as in Espressif's QEMU; that concerns any esp-hal application.)
+* The interrupt mask belongs to the CPU, not to the coroutine: the switch does not
+  save `PS.INTLEVEL` (Xtensa), `PRIMASK`/`BASEPRI` (Cortex-M) or `mstatus.MIE` (RISC-V).
+  Suspending while holding a critical section would run the executor with
+  interrupts masked, and the coroutine's own unmasking later would be lost. Never
+  call `suspend_on` inside `critical_section::with`.
+* The entry closure is copied to the top of the stack by corosensei, which caps
+  its captures at 1024 bytes. Keep larger state behind a pointer or `Box`.
 * Wasm: deliberate compile-time error; no native stack switching.
+
+### Guard contract
+
+corosensei's `Stack` trait asks for a guard page and at least 4 KiB of usable
+memory (`MIN_STACK_SIZE`), but corosensei itself never checks either with a custom
+stack; only its built-in stacks use them. Xila's stacks are heap blocks without a
+guard page, on every target (microcontrollers have no MMU to provide one), and may
+be as small as 2 KiB. The stack handed to corosensei is therefore a private wrapper
+(`stack::Backing`) and the guarantee comes from the unsafe `Coroutine::new` instead:
+the caller bounds all native stack use (the entry, its callees and interrupt
+frames), and the 64-byte painted guard detects damage when the coroutine suspends,
+resumes or finishes. This is detection, not protection.
 
 Host tests cover real Embassy executor interleaving, signal wakeups and poll
 counts, nested synchronous calls, async/native joins, results, thread isolation,
@@ -143,22 +175,25 @@ manager's existing pool, metadata and join allocations (including its current
 leaked task-pool behavior).
 
 On x86_64: `Stack` is 24 bytes; `Coroutine` and `JoinHandle` are each 8 bytes;
-the shared control allocation is 168 bytes including `Rc` counts (up from 136
-bytes by 32 bytes for `4 * usize` inline TLS slots). On 32-bit ARM
-(`thumbv7em-none-eabihf`), the shared control allocation is 88 bytes including
-`Rc` counts (up from 72 bytes by 16 bytes for the 4 TLS slots; `Control` itself
-grew from 64 to 80 bytes). Each stack adds 64 guard bytes plus up to 15
-rounding bytes; the closure and initial register frame occupy usable stack
-space. The x86_64 switch is 51 bytes and has 21 instructions per direction,
-including FP control save/restore. `footprint_and_switch_timing` measures
-two switches plus runtime work per suspend/resume round trip. Run it in release
-mode for representative timings. FP/context frame sizes are 72 bytes initially on x86_64, 176
-on AArch64, 40/112 on ARM, and 64/128 on RV32 (integer/FP).
+the shared control allocation is 184 bytes including `Rc` counts. On 32-bit
+targets (`thumbv7em-none-eabihf`, `riscv32imac-unknown-none-elf`) `Control` is 88
+bytes and the allocation 96 bytes, the same as with the former hand-written
+switch. Each stack adds 64 guard bytes plus up to 15 rounding bytes; corosensei's
+initial frame and the entry closure occupy usable stack space. On Xtensa a
+coroutine that yields once paints 320 bytes of its stack (windowed frames reserve
+a register save area each). `footprint_and_switch_timing` measures two switches
+plus runtime work per suspend/resume round trip; run it in release mode. On
+x86_64 that is about 85 ns, against about 125 ns for the former hand-written
+switch: corosensei keeps `call` and `ret` paired, so the return-stack predictor
+stays correct. Under Espressif's QEMU the Xtensa round trip is 534 (ESP32) and 568
+(ESP32-S3) `CCOUNT` ticks, which are not cycle counts.
 
 ## ABI integration status and remaining decisions
 
 Synchronous VFS calls that bridge async operations and the native application
-ABI use `suspend_on` on supported targets. The synchronous VFS polling
+ABI use `suspend_on` on supported targets. On Xtensa, `xila-stackful` builds
+and runs, but the application ABI, the native loader and the VFS do not enable
+it yet, so ESP32 targets keep the busy-polling fallback. The synchronous VFS polling
 adapters still return resource-busy on pending device I/O. The application ABI
 waits cooperatively for blocking file I/O when called from a coroutine.
 
@@ -170,5 +205,4 @@ leaks. Interrupt/signal delivery, foreign callbacks and libc TLS slot
 assignments need an explicit policy. Mutex/condition-variable adapters need
 real async wait queues, atomic unlock plus wait registration, wake-one/wake-all
 semantics and cancellation handling; recursive locks and ownership must
-identify coroutines. Per-core current state and the Xtensa windowed switch
-remain prerequisites for multi-core (core#682) and ESP32-S3 (core#648).
+identify coroutines. Per-core current state remains a prerequisite for multi-core (core#682).
