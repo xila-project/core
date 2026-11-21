@@ -378,7 +378,9 @@ jobs:
       - name: "Setup | Activate mise"
         uses: jdx/mise-action@v5.2.8
       - name: "Setup | SDK build packages"
-        timeout-minutes: 15
+        # The Arm SDK runs the bounded package helper twice (common, then Arm
+        # packages), so leave room for both retry budgets before the job timeout.
+        timeout-minutes: 25
         env:
           SDK_PACKAGES: ${{ matrix.packages }}
         run: mise run "$SDK_PACKAGES"
