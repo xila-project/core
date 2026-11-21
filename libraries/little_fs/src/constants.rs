@@ -19,7 +19,7 @@
 
 use crate::littlefs;
 
-// `flags` argument of `lfs_file_open` (`int`).
+// `flags` argument of `lfs_file_open` and `lfs_file_opencfg` (`int`).
 
 pub const OPEN_READ_ONLY: i32 = littlefs::lfs_open_flags_LFS_O_RDONLY as i32;
 #[cfg(test)]
