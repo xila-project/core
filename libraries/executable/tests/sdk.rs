@@ -3,7 +3,7 @@
 //! table, the native loader, the ABI table and the C library with its POSIX layer on top.
 //!
 //! The SDK comes from `mise run sdk:build`, which `test:native-loader` runs first. It lives
-//! in `target/sdk/<target>/xila-sdk-<abi>-<target>` under the workspace; set
+//! in `target/sdk/<target>/xila-sdk-<xila_version>-<target>` under the workspace; set
 //! `XILA_SDK_DIRECTORY` to test another build.
 #![cfg(all(feature = "native-dev", target_os = "linux", target_arch = "x86_64"))]
 

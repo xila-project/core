@@ -8,7 +8,7 @@ locales.
 
 The `sdk` job (one run per SDK target) builds the native SDK archive with `mise run ci:sdk-build`,
 checks the example image's ELF contract with `ci:sdk-verify` and uploads
-`xila-sdk-<abi>-<target>.tar.zst` as a workflow artifact; publishing it as a release asset is
+`xila-sdk-<xila_version>-<target>.tar.zst` as a workflow artifact; publishing it as a release asset is
 not automated yet. Its packages (`lld`, `llvm`, `cmake`, `zstd`, and the Arm GNU toolchain
 for Cortex-M) come from mise bootstrap packages in the `sdk` and `sdk-arm` environments.
 `ci:host-tests` also builds the host SDK, because `test:native-loader` compiles the example

@@ -15,14 +15,15 @@ EM_ARM, EM_X86_64, EM_XTENSA, EM_RISCV = 40, 62, 94, 243
 R_X86_64_RELATIVE, R_X86_64_64 = 8, 1
 R_RISCV_RELATIVE = 3
 R_ARM_RELATIVE, R_XTENSA_RELATIVE = 23, 5
-HOST_ABI = (0, 1)
+HOST_XILA_VERSION = (0, 1)
 VERSION = struct.pack("<I", (0 << 16) | 1)
 FIXTURES = Path(__file__).resolve().parents[2] / "libraries/native_loader/fixtures"
 
 
-def check(data, machine=None, abi=HOST_ABI, **target):
-    """check_elf.check against a fixed host ABI, so the tests do not move with the header."""
-    return check_elf.check(data, machine, abi, **target)
+def check(data, machine=None, xila_version=HOST_XILA_VERSION, **target):
+    """check_elf.check against a fixed host Xila version, so the tests do not move with the
+    header."""
+    return check_elf.check(data, machine, xila_version, **target)
 
 
 def note(name=b"XILA\0", kind=1, descriptor=VERSION):
@@ -184,19 +185,32 @@ class CheckElf(unittest.TestCase):
         self.assertTrue(any("PT_NOTE ends" in p for p in problems))
         self.assertTrue(any("XILA" in p for p in problems))
 
-    def test_checks_the_abi_version_like_the_loader(self):
+    def test_checks_the_xila_version_like_the_loader(self):
         def version(major, minor):
             return image(notes=note(descriptor=struct.pack("<I", (major << 16) | minor)))
-        self.assertEqual(check(version(0, 1), abi=(0, 1)), [])
-        self.assertTrue(any("not accepted" in p for p in check(version(0, 2), abi=(0, 1))))
-        self.assertTrue(any("not accepted" in p for p in check(version(0, 1), abi=(0, 2))))
-        self.assertTrue(any("not accepted" in p for p in check(version(1, 0), abi=(0, 1))))
-        # After 1.0 a program built against an older minor still loads, a newer one does not.
-        self.assertEqual(check(version(1, 1), abi=(1, 2)), [])
-        self.assertTrue(any("not accepted" in p for p in check(version(1, 3), abi=(1, 2))))
+        # The boundary cases of xila_version::compatible and xila_package_manifest::compatible.
+        for declared, running, accepted in [
+            ((0, 1), (0, 1), True),
+            ((0, 1), (0, 2), False),
+            ((0, 2), (0, 1), False),
+            ((1, 3), (1, 2), False),
+            ((1, 3), (1, 3), True),
+            ((1, 3), (1, 9), True),
+            ((1, 3), (2, 0), False),
+            ((0, 9), (1, 0), False),
+            ((0, 0), (0, 0), True),
+            ((0, 0), (0, 1), False),
+            ((0, 1), (0, 0), False),
+        ]:
+            with self.subTest(declared=declared, running=running):
+                problems = check(version(*declared), xila_version=running)
+                if accepted:
+                    self.assertEqual(problems, [])
+                else:
+                    self.assertTrue(any("not accepted" in p for p in problems))
 
-    def test_the_abi_defaults_to_the_headers_in_this_checkout(self):
-        major, minor = check_elf.host_abi()
+    def test_the_xila_version_defaults_to_the_headers_in_this_checkout(self):
+        major, minor = check_elf.host_xila_version()
         data = image(notes=note(descriptor=struct.pack("<I", (major << 16) | minor)))
         self.assertEqual(check_elf.check(data, "x86_64"), [])
 

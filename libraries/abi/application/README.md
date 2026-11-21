@@ -48,7 +48,8 @@ OutOfMemory.
 
 ## Functions
 
-- `XilaApi.version`: packed major/minor version, currently 0.1.
+- `XilaApi.version`: the running Xila version, packed as `(major << 16) | minor`
+  (currently 0.1).
 - `xila_directory_open`, `xila_directory_close`: attenuated path capabilities.
 - `xila_file_open`, `xila_file_close`: typed owned file objects.
 - `xila_file_read`, `xila_file_write`: direct buffer I/O.
@@ -386,9 +387,18 @@ XILA_UPDATE_HEADER=1 cargo test -p xila-abi-application generated_header
 cargo test -p xila-abi-application-c-tests
 ```
 
-ABI 0.1 is pre-release. Rebuild native apps against the matching SDK when the
-table or status numbers change. After the first release, append slots for minor
-versions and increment the major version for incompatible changes. Keep host object layouts opaque to guests
+There is no separate ABI number: the ABI follows the Xila version
+(xila-project/core#276). The build script generates `XILA_VERSION_MAJOR` and
+`XILA_VERSION_MINOR` from `xila_version::RUNNING`, which is derived from Core's
+`[workspace.package] version`, so bumping that version changes the header, the
+`xila-sys` bindings, the ABI note and `XilaApi.version` together; regenerate
+the committed files after a bump. An image built for `major.minor` runs on a
+compatible Xila version only (`xila_version::compatible`, which mirrors
+`xila_package_manifest::compatible`): before 1.0 the minor versions must be
+equal, and from 1.0 the majors must be equal and the running minor at least the
+image's. Xila 0.x is pre-release: rebuild native apps against the matching SDK
+for every minor release. From 1.0, append slots in minor releases and make
+incompatible changes only in a major release. Keep host object layouts opaque to guests
 in both languages.
 
 Rust applications can depend on the standalone `no_std` crate `xila-sys`
@@ -447,7 +457,7 @@ A linked C entry has the signature `int32_t c_demo_main(const XilaStartup *start
 Rust passes the entry pointer to `run_main`. Built-in applications such as
 `c_demo` include `application.h` and call through the instance's `startup->api`.
 For example, `startup->api->file_write(startup->standard_output, data, length, &written)`
-writes to the borrowed output stream. Read the ABI version from
+writes to the borrowed output stream. Read the running Xila version from
 `startup->api->version`.
 
 `XilaStartup.size` is the structure size in bytes. Check it before reading its
@@ -473,7 +483,8 @@ is the layer underneath, for images that do not use the C library.
 A separately linked C image defines `int32_t xila_main(const XilaStartup *)` and
 links `sdk/crt0.c` and `sdk/stubs.c`, using `-Iinclude/xila -Isdk` and including
 `stubs.h`. crt0 also carries the `XILA` ABI note the loader requires. The host calls `_xila_start` once per image. crt0 checks the startup
-and table sizes and the ABI version, installs the image-local table pointer,
+and table sizes and that the running Xila version is compatible with the one
+it was built for, installs the image-local table pointer,
 then calls `xila_main`. Before startup and after `xila_main` returns, all stubs
 return `XILA_STATUS_UNAVAILABLE`. Once the entry returns, the host ends all remaining workers. Invalid startup returns -1. The [native loader](../../native_loader/README.md) maps
 such an image and calls `_xila_start`.

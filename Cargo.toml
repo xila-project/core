@@ -17,6 +17,7 @@ repository = "https://github.com/xila-project/core"
 
 [workspace.dependencies]
 native_loader = { package = "xila-native-loader", path = "libraries/native_loader" }
+xila_version = { package = "xila-version", path = "libraries/version" }
 stackful = { package = "xila-stackful", path = "libraries/stackful" }
 xila = { path = "core" }
 xila_http = { path = "libraries/http", default-features = false }
@@ -107,6 +108,7 @@ default-members = ["core"]
 members = [
   "libraries/stackful",
   "libraries/native_loader",
+  "libraries/version",
   "core",
   "libraries/testing",
   "libraries/testing/support",

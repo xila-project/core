@@ -490,3 +490,77 @@ fn byte_mutations_do_not_panic_in_either_class() {
     byte_mutations_do_not_panic::<Riscv32>();
     byte_mutations_do_not_panic::<Arm32>();
 }
+
+const NOTE: usize = 0x1c0;
+
+/// The fixture with a fourth program header: a `XILA` ABI note recording `version`,
+/// packed as `(major << 16) | minor`.
+fn with_note<A: Abi>(version: u32) -> [u8; FILE] {
+    let fields = Fields::of::<A>();
+    let mut elf = fixture::<A>(true);
+    write(&mut elf, fields.flags + 8, &4u16.to_le_bytes());
+    let header = fields.program_field(3, 0);
+    write(&mut elf, header, &4u32.to_le_bytes());
+    for (field, value) in [
+        (fields.offset, NOTE),
+        (fields.offset + A::WORD, NOTE),
+        (fields.size, 24),
+        (fields.memory, 24),
+        (fields.align, 4),
+    ] {
+        put::<A>(&mut elf, header + field, value);
+    }
+    for (index, value) in [5u32, 4, 1].into_iter().enumerate() {
+        write(&mut elf, NOTE + 4 * index, &value.to_le_bytes());
+    }
+    write(&mut elf, NOTE + 12, b"XILA\0\0\0\0");
+    write(&mut elf, NOTE + 20, &version.to_le_bytes());
+    elf
+}
+
+fn checks_the_xila_version<A: Abi>() {
+    let running = xila_version::RUNNING;
+    let check = |declared: Version| {
+        let file = with_note::<A>(declared.packed());
+        Elf::<A>::parse(&file)?.check_abi()
+    };
+    assert_eq!(check(running), Ok(()));
+    // Before 1.0 an older minor is refused as well; from 1.0 it runs.
+    let older = running
+        .minor
+        .checked_sub(1)
+        .map(|minor| Version::new(running.major, minor));
+    if let Some(older) = older
+        && running.major != 0
+    {
+        assert_eq!(check(older), Ok(()));
+    }
+    let older = older.filter(|_| running.major == 0);
+    for declared in [
+        Some(Version::new(running.major, running.minor.wrapping_add(1))),
+        Some(Version::new(running.major.wrapping_add(1), running.minor)),
+        Some(Version::new(running.major.wrapping_add(1), 0)),
+        older,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        assert_eq!(
+            check(declared),
+            Err(Error::IncompatibleXilaVersion { declared, running }),
+            "accepted an image built for {declared} on {running}"
+        );
+    }
+    let missing = fixture::<A>(true);
+    assert_eq!(
+        Elf::<A>::parse(&missing).unwrap().check_abi(),
+        Err(Error::MissingAbiNote)
+    );
+}
+
+#[test]
+fn checks_the_xila_version_in_either_class() {
+    checks_the_xila_version::<Native>();
+    checks_the_xila_version::<Riscv32>();
+    checks_the_xila_version::<Arm32>();
+}

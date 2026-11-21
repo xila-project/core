@@ -6,7 +6,7 @@ use core::ffi::{c_char, c_void};
 /// the graphics slot when it omits graphics.
 #[repr(C)]
 pub struct XilaApi {
-    /// Packed major and minor ABI version.
+    /// Packed major and minor Xila version: `(major << 16) | minor`.
     pub version: u32,
     /// Total size in bytes, including this header.
     pub size: u32,
@@ -344,7 +344,7 @@ include!(concat!(env!("OUT_DIR"), "/disabled_graphics.rs"));
 
 /// Shared API table. Native code receives its address through XilaStartup.
 pub static XILA_API: XilaApi = XilaApi {
-    version: (XILA_ABI_VERSION_MAJOR << 16) | XILA_ABI_VERSION_MINOR,
+    version: (XILA_VERSION_MAJOR << 16) | XILA_VERSION_MINOR,
     size: core::mem::size_of::<XilaApi>() as u32,
     directory_open: xila_directory_open,
     directory_close: xila_directory_close,

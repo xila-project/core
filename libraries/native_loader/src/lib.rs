@@ -5,6 +5,7 @@ mod elf;
 
 use core::{alloc::Layout, ptr::NonNull};
 use elf::{Elf, Native};
+pub use xila_version::Version;
 
 pub const ELF_MAGIC: &[u8; 4] = b"\x7fELF";
 
@@ -26,7 +27,12 @@ pub enum Error {
     InvalidEntry,
     InvalidAbiNote,
     MissingAbiNote,
-    IncompatibleAbi(u32),
+    /// The image was built for a Xila version that the running one does not run
+    /// (see [`xila_version::compatible`]).
+    IncompatibleXilaVersion {
+        declared: Version,
+        running: Version,
+    },
     InvalidDynamic,
     /// DT_INIT, DT_FINI or an init, fini or preinit array: the loader runs no
     /// constructors or destructors.

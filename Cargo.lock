@@ -1973,6 +1973,7 @@ dependencies = [
  "xila-testing",
  "xila-time",
  "xila-users",
+ "xila-version",
  "xila-virtual-file-system",
 ]
 
@@ -2287,6 +2288,7 @@ dependencies = [
  "xila-abi-application",
  "xila-stackful",
  "xila-task",
+ "xila-version",
 ]
 
 [[package]]
@@ -2453,6 +2455,10 @@ dependencies = [
  "xila-synchronization",
  "xila-task",
 ]
+
+[[package]]
+name = "xila-version"
+version = "0.1.0"
 
 [[package]]
 name = "xila-virtual-file-system"

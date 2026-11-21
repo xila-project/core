@@ -13,6 +13,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 EXPECTED_PACKAGE_NAMES = {
     "libraries/stackful/Cargo.toml": "xila-stackful",
     "libraries/native_loader/Cargo.toml": "xila-native-loader",
+    "libraries/version/Cargo.toml": "xila-version",
     "core/Cargo.toml": "xila",
     "devices/Cargo.toml": "xila-device",
     "drivers/core/Cargo.toml": "xila-drivers-core",
@@ -63,6 +64,7 @@ EXPECTED_BINARY_TARGETS = {
 EXPECTED_LIBRARY_TARGETS = {
     "libraries/stackful/Cargo.toml": "stackful",
     "libraries/native_loader/Cargo.toml": "native_loader",
+    "libraries/version/Cargo.toml": "xila_version",
     "subsystems/task/Cargo.toml": "task",
     "subsystems/lifecycle/Cargo.toml": "lifecycle",
     "libraries/synchronization/Cargo.toml": "synchronization",

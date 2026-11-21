@@ -1,0 +1,9 @@
+[package]
+name = "xila-version"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "The running Xila version and its compatibility rule"
+
+[lib]
+name = "xila_version"

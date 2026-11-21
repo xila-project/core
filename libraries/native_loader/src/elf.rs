@@ -1,4 +1,4 @@
-use crate::{ELF_MAGIC, Error, Region};
+use crate::{ELF_MAGIC, Error, Region, Version};
 use core::{alloc::Layout, marker::PhantomData};
 
 const PT_LOAD: u32 = 1;
@@ -504,12 +504,12 @@ impl<'a, A: Abi> Elf<'a, A> {
                 bytes = rest;
             }
         }
-        let version = version.ok_or(Error::MissingAbiNote)?;
-        let (major, minor) = (version >> 16, version & 0xffff);
-        let host_major = abi_application::XILA_ABI_VERSION_MAJOR;
-        let host_minor = abi_application::XILA_ABI_VERSION_MINOR;
-        if major != host_major || minor > host_minor || (major == 0 && minor != host_minor) {
-            return Err(Error::IncompatibleAbi(version));
+        // The descriptor is the Xila version the image was built for, packed as
+        // `(major << 16) | minor`.
+        let declared = Version::from_packed(version.ok_or(Error::MissingAbiNote)?);
+        let running = xila_version::RUNNING;
+        if !xila_version::compatible(declared, running) {
+            return Err(Error::IncompatibleXilaVersion { declared, running });
         }
         Ok(())
     }
