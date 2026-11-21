@@ -170,7 +170,14 @@ class WorkflowPolicy(unittest.TestCase):
                 self.assertEqual(re.findall(r"^mise run ([\w:-]+)$", wrapper, re.M), leaves)
                 self.assertNotIn("cargo ", wrapper)
                 steps = re.findall(r"^      - name: .+\n        run: mise run (ci:[\w:-]+)$", job(workflow, group), re.M)
-                self.assertEqual(steps, leaves)
+                if group == "host":
+                    bare_metal_leaves = ["ci:bare-metal", "ci:bare-metal-no-cas", "ci:native-loader-targets"]
+                    self.assertEqual(steps, [leaf for leaf in leaves if leaf not in bare_metal_leaves])
+                    bare_metal = re.findall(r"^      - name: .+\n        run: mise run (ci:[\w:-]+)$",
+                                            job(workflow, "bare-metal"), re.M)
+                    self.assertEqual(bare_metal, bare_metal_leaves)
+                else:
+                    self.assertEqual(steps, leaves)
                 for leaf in leaves:
                     task = tasks[leaf]
                     self.assertIn("run", task)
@@ -408,7 +415,7 @@ class WorkflowPolicy(unittest.TestCase):
     def test_primary_ci_jobs_are_parallel_and_required_aggregates_results(self):
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
         self.assertIn("workflow_call:", ci)
-        primary = ["quality", "verification", "host", "xtensa", "wasm", "abi", "localization", "sdk"]
+        primary = ["quality", "verification", "host", "bare-metal", "xtensa", "wasm", "abi", "localization", "sdk"]
         for name in primary:
             with self.subTest(job=name):
                 self.assertNotRegex(job("ci.yml", name), r"(?m)^    needs:")

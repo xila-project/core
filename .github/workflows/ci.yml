@@ -111,12 +111,6 @@ jobs:
         run: mise run ci:host-tests
       - name: "Test | Native firmware simulator"
         run: mise run ci:firmware
-      - name: "Test | Bare-metal façade"
-        run: mise run ci:bare-metal
-      - name: "Test | Bare-metal façade without CAS"
-        run: mise run ci:bare-metal-no-cas
-      - name: "Test | Bare-metal native loader"
-        run: mise run ci:native-loader-targets
       - name: "Test | Task profiling and metrics"
         run: mise run ci:profiling-task-tests
       - name: "Test | Font linking"
@@ -128,6 +122,43 @@ jobs:
           name: font-pipeline-evidence
           path: target/font-pipeline-evidence/
           if-no-files-found: warn
+
+  bare-metal:
+    name: Bare metal
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      MISE_ENV: ci
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
+      XILA_FONT_CATALOG_ROOTS: ${{ github.workspace }}/.application-src
+    steps:
+      - name: "Setup | Checkout sources"
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: "Setup | Checkout pinned applications"
+        uses: actions/checkout@v7
+        with:
+          repository: xila-project/applications
+          ref: 3f6c71017a543cfefc19bd54d2d8fdd59ebc8098
+          path: .application-src
+          persist-credentials: false
+      - name: "Setup | Rust toolchain and build cache"
+        uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
+        with:
+          cache-mode: objects
+          cache-generation: v1-ci-bare-metal
+      - name: "Setup | Locked npm dependencies"
+        run: mise run deps:npm
+      - name: "Test | Bare-metal façade"
+        run: mise run ci:bare-metal
+      - name: "Test | Bare-metal façade without CAS"
+        run: mise run ci:bare-metal-no-cas
+      - name: "Test | Bare-metal native loader"
+        run: mise run ci:native-loader-targets
 
   xtensa:
     name: Xtensa
@@ -347,7 +378,7 @@ jobs:
   required:
     name: required
     if: always()
-    needs: [quality, verification, host, xtensa, wasm, abi, localization, sdk]
+    needs: [quality, verification, host, bare-metal, xtensa, wasm, abi, localization, sdk]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -356,6 +387,7 @@ jobs:
           QUALITY_RESULT: ${{ needs.quality.result }}
           VERIFICATION_RESULT: ${{ needs.verification.result }}
           HOST_RESULT: ${{ needs.host.result }}
+          BARE_METAL_RESULT: ${{ needs.bare-metal.result }}
           XTENSA_RESULT: ${{ needs.xtensa.result }}
           WASM_RESULT: ${{ needs.wasm.result }}
           ABI_RESULT: ${{ needs.abi.result }}
@@ -363,7 +395,7 @@ jobs:
           SDK_RESULT: ${{ needs.sdk.result }}
         run: |
           set -euo pipefail
-          for result in "$QUALITY_RESULT" "$VERIFICATION_RESULT" "$HOST_RESULT" "$XTENSA_RESULT" "$WASM_RESULT" "$ABI_RESULT" "$LOCALIZATION_RESULT" "$SDK_RESULT"; do
+          for result in "$QUALITY_RESULT" "$VERIFICATION_RESULT" "$HOST_RESULT" "$BARE_METAL_RESULT" "$XTENSA_RESULT" "$WASM_RESULT" "$ABI_RESULT" "$LOCALIZATION_RESULT" "$SDK_RESULT"; do
             if [[ "$result" != success ]]; then
               echo "::error::A required validation job finished with result: $result"
               exit 1
