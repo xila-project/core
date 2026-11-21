@@ -910,7 +910,7 @@ dependencies = [
 [[package]]
 name = "lvgl-rust"
 version = "0.3.0+lvgl.9.6.0"
-source = "git+https://github.com/AlixANNERAUD/lvgl_rust.git?rev=7f95bed0e7bd75b4ac78e57ee0911910aa5cf3b7#7f95bed0e7bd75b4ac78e57ee0911910aa5cf3b7"
+source = "git+https://github.com/AlixANNERAUD/lvgl_rust.git?rev=280edb16980fa412a4d13d3eaf1aa8c948445304#280edb16980fa412a4d13d3eaf1aa8c948445304"
 dependencies = [
  "loom",
  "lvgl-rust-gen",
@@ -920,7 +920,7 @@ dependencies = [
 [[package]]
 name = "lvgl-rust-gen"
 version = "0.2.0"
-source = "git+https://github.com/AlixANNERAUD/lvgl_rust.git?rev=7f95bed0e7bd75b4ac78e57ee0911910aa5cf3b7#7f95bed0e7bd75b4ac78e57ee0911910aa5cf3b7"
+source = "git+https://github.com/AlixANNERAUD/lvgl_rust.git?rev=280edb16980fa412a4d13d3eaf1aa8c948445304#280edb16980fa412a4d13d3eaf1aa8c948445304"
 dependencies = [
  "prettyplease",
  "proc-macro2",
@@ -933,7 +933,7 @@ dependencies = [
 [[package]]
 name = "lvgl-rust-sys"
 version = "0.3.0+lvgl.9.6.0"
-source = "git+https://github.com/AlixANNERAUD/lvgl_rust.git?rev=7f95bed0e7bd75b4ac78e57ee0911910aa5cf3b7#7f95bed0e7bd75b4ac78e57ee0911910aa5cf3b7"
+source = "git+https://github.com/AlixANNERAUD/lvgl_rust.git?rev=280edb16980fa412a4d13d3eaf1aa8c948445304#280edb16980fa412a4d13d3eaf1aa8c948445304"
 dependencies = [
  "bindgen 0.72.1",
  "cc",

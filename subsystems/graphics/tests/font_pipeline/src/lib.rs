@@ -8,8 +8,6 @@ pub mod config;
 pub mod fonts;
 #[path = "../../../build/generate.rs"]
 pub mod generate;
-#[path = "../../../build/target.rs"]
-pub mod target;
 
 #[cfg(test)]
 #[allow(
