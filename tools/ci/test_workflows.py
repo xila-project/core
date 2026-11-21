@@ -455,19 +455,25 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertEqual(packages["apt:gcc-riscv64-unknown-elf"]["env"], "sdk-riscv")
         self.assertIn("packages: ci:packages-sdk-riscv", sdk)
         # The SDK links picolibc and only takes libgcc.a from the Arm compiler package. mise cannot
-        # skip recommended packages, which would add 489 MB of newlib (550 MB instead of 61 MB) to every
-        # Arm SDK job. The apt setting is system-wide and permanent, so it must only be written on a
-        # GitHub Actions runner, from a dedicated env file, never from [bootstrap.files] in mise.ci.toml.
+        # skip recommended packages, which would add newlib to every Arm SDK job (about a 607 MB
+        # download instead of about 70.6 MB). The apt setting is system-wide and permanent, so it must
+        # only be written on a GitHub Actions runner, from a dedicated env file, never from
+        # [bootstrap.files] in mise.ci.toml, and only after the other SDK packages are installed.
         arm = ci_config()["tasks"]["ci:packages-sdk-arm"]
         self.assertIn("ci:packages-sdk", arm["depends"])
         self.assertNotIn("files", tomllib.loads((ROOT / "mise.ci.toml").read_text()).get("bootstrap", {}))
         script = "\n".join(line for line in arm["run"].splitlines() if not line.startswith("#"))
-        self.assertIn('[ "${GITHUB_ACTIONS:-}" = "true" ]', script)
         self.assertEqual(script.count("bootstrap files apply"), 1)
-        self.assertIn("mise -E apt-no-recommends bootstrap files apply --yes", script)
         self.assertNotIn("-E ci bootstrap files", script)
         self.assertNotIn("--update", script)
-        self.assertLess(script.index("bootstrap files apply"), script.index("bootstrap packages apply"))
+        positions = [
+            script.index('if [ "${GITHUB_ACTIONS:-}" = "true" ]; then'),
+            script.index("mise -E apt-no-recommends bootstrap files apply --yes"),
+            script.index("\nelse\n"),
+            script.index("\nfi\n"),
+            script.index("python3 tools/ci/install_packages.py ci,sdk-arm"),
+        ]
+        self.assertEqual(positions, sorted(positions))
         apt_files = tomllib.loads((ROOT / "mise.apt-no-recommends.toml").read_text())["bootstrap"]["files"]
         self.assertEqual(list(apt_files), ["/etc/apt/apt.conf.d/90xila-no-install-recommends"])
         self.assertEqual(
@@ -475,7 +481,7 @@ class WorkflowPolicy(unittest.TestCase):
             'APT::Install-Recommends "false";',
         )
         # The host job builds the example for the Linux loader test.
-        self.assertIn("ci:packages-sdk", ci_config()["tasks"]["ci:host-tests"]["depends"])
+        self.assertIn("ci:packages-host-sdk", ci_config()["tasks"]["ci:host-tests"]["depends"])
         self.assertIn("sdk:build", configured_tasks("ci")["test:native-loader"]["depends"])
 
     def test_rust_sdk_keeps_the_guest_toolchain_isolated(self):
@@ -706,20 +712,57 @@ class WorkflowPolicy(unittest.TestCase):
         workflows = "\n".join(path.read_text() for path in ACTIVE_WORKFLOWS)
         self.assertNotIn("apt-get", workflows)
         tasks = ci_config()["tasks"]
+        # Every package set goes through the one bounded helper (core#792), never straight to mise or apt.
         for name, environment in {
             "ci:packages-linker": "ci",
             "ci:packages-host": "ci,host",
+            "ci:packages-host-sdk": "ci,host,sdk",
+            "ci:packages-sdk": "ci,sdk",
+            "ci:packages-sdk-riscv": "ci,sdk,sdk-riscv",
             "ci:packages-benchmark": "ci,host,benchmark",
         }.items():
             self.assertIn(name, tasks)
-            self.assertEqual(tasks[name]["run"], f"mise -E {environment} bootstrap packages apply --manager apt --update --yes")
-        for name in ["ci:host", "ci:localization", "ci:coverage"]:
+            self.assertEqual(tasks[name]["run"], f"python3 tools/ci/install_packages.py {environment}")
+        for name, task in tasks.items():
+            if name.startswith("ci:packages-"):
+                commands = "\n".join(line for line in task["run"].splitlines() if not line.lstrip().startswith("#"))
+                with self.subTest(task=name):
+                    self.assertIn("python3 tools/ci/install_packages.py ", commands)
+                    self.assertNotIn("bootstrap packages apply", commands)
+                    self.assertNotIn("apt-get", commands)
+        self.assertIn("ci:packages-host-sdk", tasks["ci:host"]["depends"])
+        for name in ["ci:localization", "ci:coverage"]:
             self.assertIn("ci:packages-host", tasks[name]["depends"])
         for name in ["ci:wasm", "ci:abi", "ci:abi-deep"]:
             self.assertIn("ci:packages-linker", tasks[name]["depends"])
         for name in ["ci:format-rust", "ci:format-toml", "ci:quality-js", "ci:lint-workflows"]:
             self.assertFalse(tasks[name].get("depends"), name)
         self.assertNotIn("bootstrap packages apply", job("ci.yml", "quality"))
+        self.assertNotIn("ci:packages-", job("ci.yml", "quality"))
+
+    def test_build_jobs_install_native_packages_in_one_bounded_setup_step(self):
+        # Packages install once, in a named step with its own time limit, before the first build
+        # step; the build tasks' package dependencies then find them installed and do nothing.
+        expected = {
+            "verification": "ci:packages-linker",
+            "host": "ci:packages-host-sdk",
+            "bare-metal": "ci:packages-host",
+            "wasm": "ci:packages-linker",
+            "abi": "ci:packages-linker",
+            "localization": "ci:packages-host",
+        }
+        for name, task in expected.items():
+            with self.subTest(job=name):
+                steps = re.findall(r'- name: "([^"]+)"\n(.*?)(?=\n      - name: |\Z)', job("ci.yml", name), re.S)
+                names = [step for step, _ in steps]
+                self.assertEqual(names.count("Setup | Native packages"), 1)
+                body = dict(steps)["Setup | Native packages"]
+                self.assertIn("timeout-minutes: 15", body)
+                self.assertIn(f"run: mise run {task}", body)
+                first_build = next(index for index, step in enumerate(names) if not step.startswith("Setup | "))
+                self.assertLess(names.index("Setup | Native packages"), first_build)
+        sdk_packages = re.search(r'- name: "Setup \| SDK build packages"\n(.*?)\n      - name: ', job("ci.yml", "sdk"), re.S)[1]
+        self.assertIn("timeout-minutes: 15", sdk_packages)
 
     def test_mise_multiline_ci_tasks_run_with_bash(self):
         tasks = ci_config()["tasks"]
