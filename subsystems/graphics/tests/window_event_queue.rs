@@ -248,21 +248,26 @@ fn a_press_survives_a_burst_bubbled_from_child_widgets() {
     let send = |target, code| unsafe {
         lvgl::lv_obj_send_event(target, code, core::ptr::null_mut());
     };
+    // LVGL passes the input device with every press event.
+    let pointer = unsafe { lvgl::lv_indev_create() };
+    let press = |target, code| unsafe {
+        lvgl::lv_obj_send_event(target, code, pointer.cast());
+    };
     while window.pop_event().is_some() {}
 
-    send(slider, lvgl::lv_event_code_t_LV_EVENT_PRESSED);
+    press(slider, lvgl::lv_event_code_t_LV_EVENT_PRESSED);
     for step in 0..512 {
-        send(slider, lvgl::lv_event_code_t_LV_EVENT_PRESSING);
-        send(slider, lvgl::lv_event_code_t_LV_EVENT_VALUE_CHANGED);
+        press(slider, lvgl::lv_event_code_t_LV_EVENT_PRESSING);
+        press(slider, lvgl::lv_event_code_t_LV_EVENT_VALUE_CHANGED);
         if step == 100 {
-            send(slider, lvgl::lv_event_code_t_LV_EVENT_LONG_PRESSED);
+            press(slider, lvgl::lv_event_code_t_LV_EVENT_LONG_PRESSED);
         }
-        send(slider, lvgl::lv_event_code_t_LV_EVENT_LONG_PRESSED_REPEAT);
+        press(slider, lvgl::lv_event_code_t_LV_EVENT_LONG_PRESSED_REPEAT);
         send(text, lvgl::lv_event_code_t_LV_EVENT_SCROLL);
         send(other, lvgl::lv_event_code_t_LV_EVENT_CLICKED);
     }
-    send(slider, lvgl::lv_event_code_t_LV_EVENT_RELEASED);
-    send(slider, lvgl::lv_event_code_t_LV_EVENT_CLICKED);
+    press(slider, lvgl::lv_event_code_t_LV_EVENT_RELEASED);
+    press(slider, lvgl::lv_event_code_t_LV_EVENT_CLICKED);
     assert!(window.dropped_event_count() > 0, "the burst overflows");
 
     let queued: Vec<_> = core::iter::from_fn(|| window.pop_event()).collect();
@@ -297,7 +302,7 @@ fn a_press_survives_a_burst_bubbled_from_child_widgets() {
         lvgl::lv_event_code_t_LV_EVENT_PRESSED,
         lvgl::lv_event_code_t_LV_EVENT_PRESSING,
     ] {
-        send(slider, code);
+        press(slider, code);
     }
     while window.pop_event().is_some() {}
     for code in [
@@ -305,13 +310,14 @@ fn a_press_survives_a_burst_bubbled_from_child_widgets() {
         lvgl::lv_event_code_t_LV_EVENT_SHORT_CLICKED,
         lvgl::lv_event_code_t_LV_EVENT_CLICKED,
     ] {
-        send(slider, code);
+        press(slider, code);
     }
     assert!(
         window.pop_event().is_none(),
         "the end of a rejected press is dropped"
     );
 
+    unsafe { lvgl::lv_indev_delete(pointer) };
     unsafe { lvgl::lv_obj_delete(window.as_object_mutable()) };
 }
 
@@ -393,6 +399,43 @@ fn rendering_notifications_are_never_queued() {
         );
     }
     assert_eq!(window.dropped_event_count(), 0);
+
+    unsafe { lvgl::lv_obj_delete(window.as_object_mutable()) };
+}
+
+/// The window is resized while a list inside it is flung and the consumer is
+/// busy: the bubbled scroll burst must not push the resize out.
+#[test]
+fn a_scroll_burst_keeps_the_window_resize() {
+    let _lvgl = LVGL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    unsafe { lvgl::lv_init() };
+    unsafe { lvgl::lv_display_create(320, 240) };
+    let screen = unsafe { lvgl::lv_obj_create(core::ptr::null_mut()) };
+    let mut window = unsafe { Window::new(screen).unwrap() };
+    let window = unsafe { window.as_mut() };
+    let list = unsafe { lvgl::lv_obj_create(window.as_object_mutable()) };
+    unsafe { lvgl::lv_obj_update_layout(window.as_object_mutable()) };
+    while window.pop_event().is_some() {}
+
+    unsafe {
+        lvgl::lv_obj_set_size(window.as_object_mutable(), 200, 120);
+        lvgl::lv_obj_update_layout(window.as_object_mutable());
+    }
+    for step in 0..500 {
+        let code = match step % 50 {
+            0 => lvgl::lv_event_code_t_LV_EVENT_SCROLL_BEGIN,
+            49 => lvgl::lv_event_code_t_LV_EVENT_SCROLL_END,
+            _ => lvgl::lv_event_code_t_LV_EVENT_SCROLL,
+        };
+        unsafe { lvgl::lv_obj_send_event(list, code, core::ptr::null_mut()) };
+    }
+    assert!(window.dropped_event_count() > 0, "the burst overflows");
+
+    let window_object = window.as_object_mutable() as *mut lvgl::lv_obj_t;
+    let resizes = core::iter::from_fn(|| window.pop_event())
+        .filter(|event| event.code == EventKind::SizeChanged && event.is_target(window_object))
+        .count();
+    assert_eq!(resizes, 1, "the latest resize reaches the consumer");
 
     unsafe { lvgl::lv_obj_delete(window.as_object_mutable()) };
 }

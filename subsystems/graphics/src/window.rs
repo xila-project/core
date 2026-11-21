@@ -1,5 +1,9 @@
 use super::{icon_text::IconText, lvgl};
-use crate::{Color, Error, EventKind, Key, Result, event::Event, event_queue::EventQueue};
+use crate::{
+    Color, Error, EventKind, Key, Result,
+    event::Event,
+    event_queue::{self, EventQueue},
+};
 use core::{
     mem::ManuallyDrop,
     ops::{Deref, DerefMut},
@@ -60,15 +64,20 @@ pub fn get_window_class() -> &'static lvgl::lv_obj_class_t {
 /// An LVGL object that queues the events of its widgets for one consumer.
 ///
 /// The queue is a fixed ring of [`crate::WINDOW_EVENT_QUEUE_CAPACITY`]
-/// events inside the window: it never allocates. When it is full, an arrival
-/// first evicts the oldest scroll, style, layout, hover or drawing
-/// notification, then the oldest `Pressing`, `ValueChanged` or
-/// `LongPressedRepeat` (a newer one of these replaces the queued one for the
-/// same target anyway). Other events (presses, releases, clicks, keys, focus
-/// changes, `Ready`, `Cancel`, `Delete`, `CloseRequested`...) are never evicted
-/// or reordered; one that finds no room is rejected. A press is only queued
-/// with room for the rest of it, and the rest of a rejected press is dropped,
-/// so the consumer never receives a release or a click without its press.
+/// events inside the window: it never allocates. A newer `Pressing`,
+/// `LongPressedRepeat`, `ValueChanged`, `SizeChanged` or `StyleChanged`
+/// replaces the queued one for the same target. When the queue is full, an
+/// arrival evicts the oldest scroll or other notification, then the oldest
+/// `Pressing` or `LongPressedRepeat`, then the oldest value, size or style
+/// change, but never an event more important than itself. Other events
+/// (presses, releases, clicks, keys, focus changes, `Ready`, `Cancel`,
+/// `Delete`, `CloseRequested`...) are never evicted or reordered; one that
+/// finds no room is rejected. A press is only queued with room for the rest
+/// of it, reserved per input device, and the rest of a rejected press is
+/// dropped: the queue never drops a `Pressed` event while keeping the end of
+/// its press. LVGL itself may end a press on a widget that never got
+/// `Pressed`: after a drag onto another widget without press lock, or when a
+/// keypad is released on a newly focused widget.
 /// Losses are counted ([`Window::dropped_event_count`]) and logged at most
 /// once per second. The crate README ("Window events") details the policy.
 #[repr(C)]
@@ -249,7 +258,13 @@ unsafe extern "C" fn window_event_callback(
                 ]);
             }
         }
-        if (*window).event_queue.push(queued).lost_an_event() {
+        // LVGL passes the input device as the parameter of every press event.
+        let device = if event_queue::is_press_event(kind) {
+            lvgl::lv_event_get_param(event) as event_queue::InputDevice
+        } else {
+            ptr::null()
+        };
+        if (*window).event_queue.push(queued, device).lost_an_event() {
             report_losses(&mut (*window).event_queue);
         }
         (*window).waker.wake();
@@ -292,8 +307,9 @@ impl Window {
     }
 
     /// Take the oldest queued event. Events arrive in order, except that a
-    /// newer `Pressing`, `ValueChanged` or `LongPressedRepeat` replaces the
-    /// queued one for the same target and takes its place at the back; see
+    /// newer "latest wins" event (`Pressing`, `LongPressedRepeat`,
+    /// `ValueChanged`, `SizeChanged`, `StyleChanged`) replaces the queued one
+    /// for the same target and takes its place at the back; see
     /// [`Window`] for what is dropped when the queue is full.
     pub fn pop_event(&mut self) -> Option<Event> {
         if self.event_queue.has_unreported_losses() {
