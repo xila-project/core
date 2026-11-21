@@ -762,7 +762,8 @@ class WorkflowPolicy(unittest.TestCase):
                 first_build = next(index for index, step in enumerate(names) if not step.startswith("Setup | "))
                 self.assertLess(names.index("Setup | Native packages"), first_build)
         sdk_packages = re.search(r'- name: "Setup \| SDK build packages"\n(.*?)\n      - name: ', job("ci.yml", "sdk"), re.S)[1]
-        self.assertIn("timeout-minutes: 15", sdk_packages)
+        # The Arm SDK runs the bounded helper twice, so its step allows both budgets.
+        self.assertIn("timeout-minutes: 25", sdk_packages)
 
     def test_mise_multiline_ci_tasks_run_with_bash(self):
         tasks = ci_config()["tasks"]
