@@ -276,17 +276,23 @@ async fn executes_c_elf_from_vfs_with_host_services() {
     assert_eq!(output.read(&mut received).await.unwrap(), 2);
     assert_eq!(&received, b"ok");
 
-    // Reject a changed ABI before allocating.
+    // Reject an image built for another Xila minor version before allocating.
     let mut malformed = bytes;
     let note = malformed
         .windows(5)
         .position(|bytes| bytes == b"XILA\0")
         .unwrap();
+    // The descriptor follows the padded name: its low byte is the low byte of the minor version.
     malformed[note + 8] ^= 0x80;
-    assert!(matches!(
-        LoadedImage::load(&malformed, &Mmap, 32 * 1024),
-        Err(LoaderError::IncompatibleAbi(_))
-    ));
+    let running = native_loader::Version::new(
+        abi_application::XILA_VERSION_MAJOR as u16,
+        abi_application::XILA_VERSION_MINOR as u16,
+    );
+    let declared = native_loader::Version::new(running.major, running.minor ^ 0x80);
+    assert_eq!(
+        LoadedImage::load(&malformed, &Mmap, 32 * 1024).err(),
+        Some(LoaderError::IncompatibleXilaVersion { declared, running })
+    );
     assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
 
     // lld omits the empty relocation section in this fixture. Its dynamic

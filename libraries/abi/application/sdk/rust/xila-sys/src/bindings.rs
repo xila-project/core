@@ -640,8 +640,6 @@ pub struct Heap {
     _opaque: [u8; 0],
     _marker: core::marker::PhantomData<(*mut u8, core::marker::PhantomPinned)>,
 }
-pub const XILA_ABI_VERSION_MAJOR: u32 = 0;
-pub const XILA_ABI_VERSION_MINOR: u32 = 1;
 /// Native status values mirror the unified error kinds one-to-one. Zero is success.
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -724,3 +722,8 @@ impl Status {
     pub const End: Self = Self(0x0701);
     pub const BufferTooSmall: Self = Self(0x0702);
 }
+/// Major version of the Xila release this ABI belongs to. Native images
+/// record `(XILA_VERSION_MAJOR << 16) | XILA_VERSION_MINOR` in their ABI note.
+pub const XILA_VERSION_MAJOR: u32 = 0;
+/// Minor version of the Xila release this ABI belongs to.
+pub const XILA_VERSION_MINOR: u32 = 1;

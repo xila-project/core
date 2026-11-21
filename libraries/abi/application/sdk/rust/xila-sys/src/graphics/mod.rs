@@ -53,7 +53,7 @@ unsafe fn call<T>(function: FunctionCall, arguments: &[usize]) -> Result<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{XILA_ABI_VERSION_MAJOR, XILA_ABI_VERSION_MINOR, XilaApi, XilaStartup};
+    use crate::{XILA_VERSION_MAJOR, XILA_VERSION_MINOR, XilaApi, XilaStartup};
     use core::{
         ffi::{CStr, c_void},
         mem::{MaybeUninit, size_of},
@@ -139,8 +139,7 @@ mod tests {
         let table = api.as_mut_ptr();
         // SAFETY: only the header and the graphics slot are ever read.
         unsafe {
-            addr_of_mut!((*table).version)
-                .write((XILA_ABI_VERSION_MAJOR << 16) | XILA_ABI_VERSION_MINOR);
+            addr_of_mut!((*table).version).write((XILA_VERSION_MAJOR << 16) | XILA_VERSION_MINOR);
             addr_of_mut!((*table).size).write(size_of::<XilaApi>() as u32);
             addr_of_mut!((*table).graphics_call).write(host);
         }

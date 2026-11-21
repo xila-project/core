@@ -5,7 +5,7 @@ Compile C against picolibc and a POSIX layer, or Rust against the raw
 the firmware. Core's CI builds one archive per target
 and uploads it as a workflow artifact:
 
-    xila-sdk-<abi>-<target>.tar.zst      for example xila-sdk-0.1-thumbv7em-none-eabihf.tar.zst
+    xila-sdk-<xila_version>-<target>.tar.zst      for example xila-sdk-0.1-thumbv7em-none-eabihf.tar.zst
 
 | Target | Class | Float ABI | Compiler runtime |
 |---|---|---|---|
@@ -25,7 +25,7 @@ run on the Linux host loader, so CI validates them structurally with
 
 ```text
 xila-sdk-0.1-<target>/
-  sdk.json                  target, ABI, picolibc pin and options, compiler
+  sdk.json                  target, Xila version (`abi`), picolibc pin and options, compiler
   COPYING.picolibc          picolibc's licence (BSD); LICENSE-xila.md is Core's (Apache-2.0)
   include/                  picolibc headers, xila/application.h, xila/stubs.h,
                             xila/graphics.h, xila/posix.h, sys/random.h, sys/socket.h,
@@ -119,8 +119,8 @@ value, including status codes introduced by later hosts. Use `Mutex::ZERO` and
 `Condition::ZERO` for initial synchronization storage.
 
 The `link` feature enables `runtime`, which provides `xila_sys::entry!(main)`.
-The entry macro emits `_xila_start` and the ELF ABI note, checks both sizes and the table
-version, then calls your `unsafe fn main(*const xila_sys::XilaStartup) -> i32`.
+The entry macro emits `_xila_start` and the ELF ABI note, checks both sizes and that the
+table's Xila version is compatible with the one the crate was generated for, then calls your `unsafe fn main(*const xila_sys::XilaStartup) -> i32`.
 The result is the process exit status. During entry, `xila_sys::runtime::api()`
 returns `Some(&XilaApi)`, and it returns `None` outside entry. Define a
 `#[panic_handler]` and call `xila_sys::runtime::panic_abort()` to report
@@ -482,7 +482,7 @@ does not redistribute it.
 ## Building the SDK
 
 ```sh
-mise run sdk:build      # target/sdk/xila-sdk-<abi>-<target>.tar.zst
+mise run sdk:build      # target/sdk/xila-sdk-<xila_version>-<target>.tar.zst
 mise run sdk:verify     # build the example, assert the ELF contract, report sizes
 XILA_SDK_TARGET=thumbv7em-none-eabihf mise run sdk:build ::: sdk:verify
 XILA_SDK_TARGET=riscv32imac-unknown-none-elf mise run sdk:build ::: sdk:verify

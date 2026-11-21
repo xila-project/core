@@ -32,10 +32,17 @@ everything below in a CMake toolchain file. To link by hand, use the
 [linker script](../abi/application/sdk/rust/xila-sys/xila-static-pie.ld) and define the C entry
 `int32_t _xila_start(const XilaStartup *startup)`. The entry receives borrowed
 [application ABI capabilities](../abi/application/README.md). Emit a
-`PT_NOTE` record named `XILA\0` of type 1 with a four-byte version descriptor
-in ELF byte order. The descriptor holds the major version in its high 16 bits
-and minor version in its low 16 bits. ABI 0.x requires an exact match. The
-[fixture](fixtures/start.c) shows how to take the version from the C header.
+`PT_NOTE` record named `XILA\0` of type 1 with a four-byte descriptor in ELF
+byte order: the Xila version the image was built for, with the major version in
+its high 16 bits and the minor version in its low 16 bits. The loader compares
+it with the running version (`xila_version::RUNNING`) by the rule of
+`xila_version::compatible`, which mirrors `xila_package_manifest::compatible`:
+before 1.0 the minor versions must be equal (an image for 0.1 runs on every
+0.1.z and is refused on 0.2); from 1.0 the majors must be equal and the running
+minor at least the image's (an image for 1.3 runs on 1.3 and 1.9, not on 1.2 or
+2.0). Any other image fails with `Error::IncompatibleXilaVersion`, which names
+both versions. The [fixture](fixtures/start.c) shows how to take the version
+from the C header.
 
 Link with `-fPIE -pie -nostdlib` and
 `-Wl,--no-dynamic-linker,-Bsymbolic,-z,max-page-size=16`. On RV32, also pass

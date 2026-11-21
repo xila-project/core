@@ -5,9 +5,16 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-#define XILA_ABI_VERSION_MAJOR 0
+/**
+ * Major version of the Xila release this ABI belongs to. Native images
+ * record `(XILA_VERSION_MAJOR << 16) | XILA_VERSION_MINOR` in their ABI note.
+ */
+#define XILA_VERSION_MAJOR 0
 
-#define XILA_ABI_VERSION_MINOR 1
+/**
+ * Minor version of the Xila release this ABI belongs to.
+ */
+#define XILA_VERSION_MINOR 1
 
 #define XILA_RIGHT_READ 1
 

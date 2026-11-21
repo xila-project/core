@@ -59,7 +59,7 @@ pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig) {
     );
     let mut fallback = String::from(
         "\nconst XilaApi xila_sdk_fallback_api = {\n    \
-         .version = (XILA_ABI_VERSION_MAJOR << 16) | XILA_ABI_VERSION_MINOR,\n    \
+         .version = (XILA_VERSION_MAJOR << 16) | XILA_VERSION_MINOR,\n    \
          .size = sizeof(XilaApi),\n",
     );
     let mut network_slots: BTreeSet<_> = NETWORK_SLOTS.iter().copied().collect();

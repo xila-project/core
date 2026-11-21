@@ -10,13 +10,18 @@ use core::{
     sync::atomic::{AtomicPtr, Ordering},
 };
 
-use crate::{Status, XILA_ABI_VERSION_MAJOR, XILA_ABI_VERSION_MINOR, XILA_HEAP_ALIGNMENT};
+use crate::{Status, XILA_HEAP_ALIGNMENT, XILA_VERSION_MAJOR, XILA_VERSION_MINOR};
 use crate::{XilaApi, XilaStartup};
 
-const VERSION: u32 = (XILA_ABI_VERSION_MAJOR << 16) | XILA_ABI_VERSION_MINOR;
+/// The Xila version this crate was generated for, packed as `(major << 16) | minor`.
+const VERSION: u32 = (XILA_VERSION_MAJOR << 16) | XILA_VERSION_MINOR;
 static STARTUP: AtomicPtr<XilaStartup> = AtomicPtr::new(ptr::null_mut());
 
-/// ABI version note consumed by the native ELF loader.
+/// ABI note consumed by the native ELF loader: an ELF note named `XILA` of type 1
+/// whose four-byte descriptor is the Xila version the executable was built for,
+/// packed as `(major << 16) | minor`. The loader runs the executable only when the
+/// running Xila version is compatible with it, by the same rule that `start`
+/// applies to the host's `XilaApi.version`.
 #[doc(hidden)]
 #[repr(C)]
 pub struct AbiNote {
@@ -75,7 +80,7 @@ pub unsafe fn start(
     let api = unsafe { (*startup).api };
     if api.is_null()
         || (unsafe { (*api).size } as usize) < size_of::<XilaApi>()
-        || unsafe { (*api).version } != VERSION
+        || !compatible(VERSION, unsafe { (*api).version })
     {
         return -1;
     }
@@ -84,6 +89,22 @@ pub unsafe fn start(
     let result = unsafe { main(startup) };
     STARTUP.store(ptr::null_mut(), Ordering::Release);
     result
+}
+
+/// Whether a host running the packed Xila version `running` can run an
+/// executable built for the packed version `declared`. Before 1.0 the minor
+/// versions must be equal; from 1.0 the majors must be equal and the running
+/// minor at least the declared one. This mirrors `xila_version::compatible` in
+/// Core and `xila_package_manifest::compatible` in package_manager.
+const fn compatible(declared: u32, running: u32) -> bool {
+    let (major, minor) = (declared >> 16, declared & 0xffff);
+    let (running_major, running_minor) = (running >> 16, running & 0xffff);
+    major == running_major
+        && if major == 0 {
+            minor == running_minor
+        } else {
+            minor <= running_minor
+        }
 }
 
 /// Return the host's startup data during entry.
@@ -252,5 +273,38 @@ unsafe impl GlobalAlloc for ProcessAllocator {
             return ptr::null_mut();
         }
         resized.cast()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compatible;
+
+    // The same cases as `xila_version` and `xila_package_manifest`.
+    #[test]
+    fn checks_compatibility_at_major_and_minor_boundaries() {
+        let version = |major: u32, minor: u32| (major << 16) | minor;
+        for (declared, running, expected) in [
+            ((0, 1), (0, 1), true),
+            ((0, 1), (0, 2), false),
+            ((0, 2), (0, 1), false),
+            ((1, 3), (1, 2), false),
+            ((1, 3), (1, 3), true),
+            ((1, 3), (1, 9), true),
+            ((1, 3), (2, 0), false),
+            ((0, 9), (1, 0), false),
+            ((0, 0), (0, 0), true),
+            ((0, 0), (0, 1), false),
+            ((0, 1), (0, 0), false),
+        ] {
+            assert_eq!(
+                compatible(
+                    version(declared.0, declared.1),
+                    version(running.0, running.1)
+                ),
+                expected,
+                "{declared:?} on {running:?}"
+            );
+        }
     }
 }

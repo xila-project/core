@@ -874,7 +874,7 @@ XilaStatus xila_graphics_call(XilaProcess const * process, uint32_t function, si
 }
 
 const XilaApi xila_sdk_fallback_api = {
-    .version = (XILA_ABI_VERSION_MAJOR << 16) | XILA_ABI_VERSION_MINOR,
+    .version = (XILA_VERSION_MAJOR << 16) | XILA_VERSION_MINOR,
     .size = sizeof(XilaApi),
     .directory_open = unavailable_directory_open,
     .directory_close = unavailable_directory_close,

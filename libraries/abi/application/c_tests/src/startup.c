@@ -35,7 +35,7 @@ int32_t startup_empty_main(const XilaStartup *startup) {
 int32_t startup_heap_main(const XilaStartup *startup) {
     const XilaApi *api = startup->api;
     assert(api->size == sizeof(*api));
-    assert(api->version == ((XILA_ABI_VERSION_MAJOR << 16) | XILA_ABI_VERSION_MINOR));
+    assert(api->version == ((XILA_VERSION_MAJOR << 16) | XILA_VERSION_MINOR));
     void *first = NULL;
     void *last = NULL;
     assert(api->heap_allocate(startup->heap, 24, &first) == XILA_STATUS_OK);

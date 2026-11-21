@@ -25,6 +25,7 @@ pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig, table:
     let mut bindings = String::from("use core::ffi::{c_char, c_void};\n");
     let mut layout = String::from("use crate::guest_bindings as guest;\n");
     let status = read(&out.join("status.rs"));
+    let version = read(&out.join("version.rs"));
 
     let mut items = vec![(None, Item::Struct(table.clone()))];
     for item in &lib.items {
@@ -48,6 +49,7 @@ pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig, table:
     }
     items.extend(lib.items.iter().cloned().map(|item| (None, item)));
     items.extend(status.items.into_iter().map(|item| (None, item)));
+    items.extend(version.items.into_iter().map(|item| (None, item)));
 
     for (module, item) in items {
         let check_export = |attrs: &[Attribute], name: &syn::Ident| {

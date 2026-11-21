@@ -5,7 +5,7 @@
 
 The SDK is picolibc (built from the pinned upstream release), the Xila POSIX layer,
 crt0, the generated API stubs, the static-PIE linker script and a CMake toolchain
-file, packed as target/sdk/xila-sdk-<abi>-<target>.tar.zst. Everything is produced
+file, packed as target/sdk/xila-sdk-<xila_version>-<target>.tar.zst. Everything is produced
 under target/sdk; nothing outside it is written. Python 3.12 or later, clang, lld,
 llvm-ar, meson and ninja are required.
 """
@@ -374,10 +374,11 @@ def resource_dir(target):
 
 def assemble(target, pin, install, crt0, libraries, work):
     header = (SDK_SOURCE / "include/xila/application.h").read_text()
-    major = int(header.split("XILA_ABI_VERSION_MAJOR ")[1].split()[0])
-    minor = int(header.split("XILA_ABI_VERSION_MINOR ")[1].split()[0])
-    abi_version = f"{major}.{minor}"
-    name = f"xila-sdk-{abi_version}-{target}"
+    major, minor = (
+        int(re.search(rf"^#define XILA_VERSION_{part} (\d+)$", header, re.M).group(1))
+        for part in ("MAJOR", "MINOR"))
+    xila_version = f"{major}.{minor}"
+    name = f"xila-sdk-{xila_version}-{target}"
     root = work / name
     # Files are overwritten in place: the build never deletes anything.
     (root / "include/xila").mkdir(parents=True, exist_ok=True)
@@ -426,7 +427,8 @@ def assemble(target, pin, install, crt0, libraries, work):
     (root / "sdk.json").write_text(json.dumps({
         "name": name,
         "target": target,
-        "abi": abi_version,
+        # The Xila version the SDK builds for. The key keeps its name for existing readers.
+        "abi": xila_version,
         "picolibc": {"version": pin["version"], "sha256": pin["sha256"],
                      "options": PICOLIBC_OPTIONS},
         "compiler": clang.stdout.splitlines()[0],

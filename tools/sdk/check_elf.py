@@ -11,8 +11,9 @@ The checks mirror the loader (libraries/native_loader) and the SDK contract:
   executable PT_LOAD (a Thumb entry on Arm), and the `e_flags` the loader accepts: Arm
   EABI5 with the target's float ABI, RISC-V float ABI and RVC/RVE flags, zero on x86-64 and
   AArch64 (Xtensa flags are not checked, as in the loader);
-* exactly one PT_NOTE record "XILA" type 1 with a four-byte ABI version the host loader
-  accepts (every note of every PT_NOTE is read, as the loader does);
+* exactly one PT_NOTE record "XILA" type 1 with a four-byte Xila version,
+  `(major << 16) | minor`, that the host loader accepts (every note of every PT_NOTE is
+  read, as the loader does);
 * only the dynamic tags the loader consumes or ignores (libraries/native_loader/src/elf.rs):
   anything else, such as DT_RELR from -z pack-relative-relocs, fails the load; no DT_NEEDED,
   DT_INIT, DT_FINI or non-empty init/fini/preinit arrays (the loader runs no constructors);
@@ -84,18 +85,22 @@ class ElfError(Exception):
     pass
 
 
-def host_abi():
-    """(major, minor) of the application ABI in this checkout."""
+def host_xila_version():
+    """(major, minor) of the Xila version in this checkout, as the generated header states it."""
     header = Path(__file__).resolve().parents[2] / "libraries/abi/application/include/xila/application.h"
     text = header.read_text()
-    return tuple(int(re.search(rf"XILA_ABI_VERSION_{part}\s+(\d+)", text).group(1))
+    return tuple(int(re.search(rf"^#define XILA_VERSION_{part}\s+(\d+)", text, re.M).group(1))
                  for part in ("MAJOR", "MINOR"))
 
 
-def abi_accepted(version, host):
-    """The loader's compatibility rule (Elf::check_abi)."""
+def version_accepted(version, host):
+    """The loader's compatibility rule (xila_version::compatible, which mirrors
+    xila_package_manifest::compatible): before 1.0 the minor versions must be equal; from 1.0
+    the majors must be equal and the host minor at least the one the image was built for."""
     major, minor = version >> 16, version & 0xFFFF
-    return major == host[0] and minor <= host[1] and (major != 0 or minor == host[1])
+    if major != host[0]:
+        return False
+    return minor == host[1] if major == 0 else minor <= host[1]
 
 
 class Elf:
@@ -265,18 +270,18 @@ def instruction_alignment(elf):
     return 2 if elf.arch == "riscv" else 1
 
 
-def check(data, machine=None, abi=None, float_abi=None, compressed=True, embedded=False):
-    """Return a list of problems; empty means the image passes. `abi` is the host's
-    (major, minor), by default the one in this checkout. `float_abi`, `compressed` and
+def check(data, machine=None, xila_version=None, float_abi=None, compressed=True, embedded=False):
+    """Return a list of problems; empty means the image passes. `xila_version` is the host's
+    Xila (major, minor), by default the one in this checkout. `float_abi`, `compressed` and
     `embedded` describe the target for the `e_flags` check (see flags_problem). A truncated
     image raises ElfError."""
     try:
-        return _check(data, machine, abi, float_abi, compressed, embedded)
+        return _check(data, machine, xila_version, float_abi, compressed, embedded)
     except struct.error as error:
         raise ElfError(f"truncated ELF: {error}") from error
 
 
-def _check(data, machine, abi, float_abi, compressed, embedded):
+def _check(data, machine, xila_version, float_abi, compressed, embedded):
     elf = Elf(data)
     problems = []
     actual_machine = f"riscv{64 if elf.is64 else 32}" if elf.arch == "riscv" else elf.arch
@@ -354,10 +359,10 @@ def _check(data, machine, abi, float_abi, compressed, embedded):
     elif len(versions) > 1:
         problems.append('more than one "XILA" ABI note')
     else:
-        host = abi or host_abi()
-        if not abi_accepted(versions[0], host):
-            problems.append(f"ABI {versions[0] >> 16}.{versions[0] & 0xFFFF} is not accepted by "
-                            f"the {host[0]}.{host[1]} loader")
+        host = xila_version or host_xila_version()
+        if not version_accepted(versions[0], host):
+            problems.append(f"built for Xila {versions[0] >> 16}.{versions[0] & 0xFFFF}, which is "
+                            f"not accepted by the Xila {host[0]}.{host[1]} loader")
 
     relocation = RELATIVE.get(elf.arch)
     if dynamic:
@@ -428,13 +433,15 @@ def main():
     parser.add_argument("--no-compressed", action="store_true",
                         help="the RISC-V target has no C extension")
     parser.add_argument("--embedded", action="store_true", help="the RISC-V target is RV32E")
-    parser.add_argument("--abi", help="host ABI MAJOR.MINOR (default: from application.h)")
+    parser.add_argument("--xila-version",
+                        help="host Xila version MAJOR.MINOR (default: from application.h)")
     args = parser.parse_args()
-    abi = tuple(int(part) for part in args.abi.split(".")) if args.abi else None
+    xila_version = (tuple(int(part) for part in args.xila_version.split("."))
+                    if args.xila_version else None)
     with open(args.image, "rb") as handle:
         data = handle.read()
     try:
-        problems = check(data, args.machine, abi, args.float_abi,
+        problems = check(data, args.machine, xila_version, args.float_abi,
                          not args.no_compressed, args.embedded)
     except ElfError as error:
         problems = [str(error)]

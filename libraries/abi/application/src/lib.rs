@@ -42,6 +42,7 @@ mod guest_bindings {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 mod time;
+mod version;
 pub use threads::*;
 
 pub use directory::*;
@@ -56,21 +57,7 @@ pub use random::*;
 pub use startup::*;
 pub use status::*;
 pub use time::*;
-
-/// Compatibility level of the application ABI, as recorded in package
-/// manifests (`minimum_xila_abi`) and registry entries. Version 1 is the first
-/// level that package manifests declare; unversioned historical builds have no
-/// declared compatibility. Increment it for a breaking ABI change.
-///
-/// It versions the whole application contract, Wasm and native, as seen by
-/// the package manager. `XILA_ABI_VERSION_MAJOR`/`MINOR` version only the
-/// native `XilaApi` table layout.
-///
-/// cbindgen:ignore
-pub const APPLICATION_ABI_VERSION: u32 = 1;
-
-pub const XILA_ABI_VERSION_MAJOR: u32 = 0;
-pub const XILA_ABI_VERSION_MINOR: u32 = 1;
+pub use version::*;
 
 mod api;
 mod heap;

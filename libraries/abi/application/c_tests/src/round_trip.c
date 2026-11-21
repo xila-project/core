@@ -6,7 +6,7 @@ int application_c_round_trip(const XilaApi *api, const XilaDirectory *directory)
     size_t count = 99;
     uint64_t position = 99;
     char buffer[5] = {0};
-    if (api->version != ((XILA_ABI_VERSION_MAJOR << 16) | XILA_ABI_VERSION_MINOR)) return 1;
+    if (api->version != ((XILA_VERSION_MAJOR << 16) | XILA_VERSION_MINOR)) return 1;
     if (api->file_open(directory, "c-file", 6, XILA_OPEN_READ | XILA_OPEN_WRITE | XILA_OPEN_CREATE, &file) != XILA_STATUS_OK) return 2;
     if (api->file_write(file, "hello", 5, &count) != XILA_STATUS_OK || count != 5) return 3;
     if (api->file_seek(file, 0, XILA_SEEK_START, &position) != XILA_STATUS_OK || position != 0) return 4;
