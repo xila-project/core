@@ -93,9 +93,30 @@ not load the development toolset. Shared commands include `check:host`,
 
 CI native package declarations live in `mise.ci.toml`, not workflow APT commands.
 CI build tasks depend on `ci:packages-linker` (Clang/Mold) or `ci:packages-host`
-(also GUI libraries). These setup tasks explicitly apply mise bootstrap
-packages with the appropriate environment filter. Formatting and quality tasks
-have no package-setup dependency, and local development behavior is unchanged.
+(also GUI libraries), and the host tests on `ci:packages-host-sdk`. Every
+`ci:packages-*` task runs `tools/ci/install_packages.py` with its environment
+filter, so the package rules live in one place:
+
+- When mise reports every package of the set as installed, it does nothing. Each
+  build job therefore installs its packages once, in a `Setup | Native packages`
+  step (`Setup | SDK build packages` in the SDK job), and the build tasks'
+  dependencies then cost nothing. A developer who runs a build task directly still
+  gets the packages through that dependency.
+- On a developer machine it runs the same
+  `mise bootstrap packages apply --manager apt --update --yes` as before, and
+  changes no apt configuration.
+- On a GitHub Actions runner, apt mirrors sometimes serve archives at a trickle
+  (core#792: 95 MB at 67 kB/s, 24 minutes). The helper downloads first, under
+  limits: `apt-get update` once per job (60 seconds), then
+  `apt-get install --download-only` (180 seconds), both with apt retries and
+  30-second read timeouts. A failed or slow attempt is retried up to three times
+  in all, with the next mirror of `/etc/apt/apt-mirrors.txt` first, and apt resumes
+  the archives it started. mise then installs from the local archive cache. Each
+  package step also has a 15-minute step timeout.
+
+Formatting and quality tasks have no package-setup dependency. Run the helper
+with `--dry-run` (and `GITHUB_ACTIONS=true` to see the runner path) to print its
+commands without changing the system.
 Benchmarks run package setup, including GNU time, before their timed commands.
 
 ```sh

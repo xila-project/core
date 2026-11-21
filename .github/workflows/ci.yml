@@ -66,6 +66,9 @@ jobs:
         uses: actions/checkout@v7
       - name: "Setup | Activate mise"
         uses: jdx/mise-action@v5.2.8
+      - name: "Setup | Native packages"
+        timeout-minutes: 15
+        run: mise run ci:packages-linker
       - name: "Verify | Subsystem invariants"
         run: mise run ci:verification
 
@@ -103,6 +106,9 @@ jobs:
           cache-generation: v1-ci-host-line-tables
       - name: "Setup | Locked npm dependencies"
         run: mise run deps:npm
+      - name: "Setup | Native packages"
+        timeout-minutes: 15
+        run: mise run ci:packages-host-sdk
       - name: "Lint | Host workspace"
         run: mise run ci:host-clippy
       - name: "Lint | Host WASM runtime"
@@ -153,6 +159,9 @@ jobs:
           cache-generation: v1-ci-bare-metal
       - name: "Setup | Locked npm dependencies"
         run: mise run deps:npm
+      - name: "Setup | Native packages"
+        timeout-minutes: 15
+        run: mise run ci:packages-host
       - name: "Test | Bare-metal façade"
         run: mise run ci:bare-metal
       - name: "Test | Bare-metal façade without CAS"
@@ -207,6 +216,9 @@ jobs:
           cache-generation: v1-ci-wasm
       - name: "Setup | Locked npm dependencies"
         run: mise run deps:npm
+      - name: "Setup | Native packages"
+        timeout-minutes: 15
+        run: mise run ci:packages-linker
       - name: "Lint | WASM guests"
         run: mise run ci:wasm-clippy
       - name: "Test | Browser audio"
@@ -244,6 +256,9 @@ jobs:
           cache-mode: target
           cache-generation: v1-ci-abi-${{ matrix.memory }}
           working-directory: .application-src/executables/wasm/tests/translation
+      - name: "Setup | Native packages"
+        timeout-minutes: 15
+        run: mise run ci:packages-linker
       - name: "Test | ABI compatibility"
         run: mise run ci:abi
 
@@ -327,6 +342,10 @@ jobs:
       - name: "Setup | Locked npm dependencies"
         run: mise run deps:npm
         if: steps.locales.outputs.run-check == 'true'
+      - name: "Setup | Native packages"
+        if: steps.locales.outputs.run-check == 'true'
+        timeout-minutes: 15
+        run: mise run ci:packages-host
       - name: "Validate | Strict localization catalogs"
         if: steps.locales.outputs.run-check == 'true'
         env:
@@ -359,6 +378,9 @@ jobs:
       - name: "Setup | Activate mise"
         uses: jdx/mise-action@v5.2.8
       - name: "Setup | SDK build packages"
+        # The Arm SDK runs the bounded package helper twice (common, then Arm
+        # packages), so leave room for both retry budgets before the job timeout.
+        timeout-minutes: 25
         env:
           SDK_PACKAGES: ${{ matrix.packages }}
         run: mise run "$SDK_PACKAGES"
