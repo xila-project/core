@@ -72,23 +72,32 @@ LVGL releases the strings it duplicates (`lv_strdup`, `lv_strndup`) with `lv_fre
 
 ## Window events
 
-Each window queues the events of its widgets in a fixed ring of `WINDOW_EVENT_QUEUE_CAPACITY` (16) events that lives inside the window object: no allocation, and it never grows. Overflow policy, applied when an event is pushed:
+Each window queues the events of its widgets in a fixed ring of `WINDOW_EVENT_QUEUE_CAPACITY` (16) events that lives inside the window object: no allocation, and it never grows. The window handles widget creation and deletion internally and never queues hover, drawing, hit test, invalidation or layout notifications. The rest falls in three tiers:
 
-1. A pointer move (`Pressing`) that directly follows a pointer move for the same target replaces it, so only the latest position is kept.
-2. If the ring is full, the oldest low-priority event is dropped to make room. Scroll steps, style changes and drawing notifications have low priority.
-3. If the ring is full of high-priority events, an incoming high-priority event replaces the oldest event. An incoming low-priority event is rejected. Surviving events keep their order.
+| Tier | Events | When the ring is full |
+|---|---|---|
+| Low | the scroll family (`Scroll`, `ScrollBegin`, `ScrollThrowBegin`, `ScrollEnd`), `StyleChanged`, `SizeChanged`, `Refresh`, `Create` and the filtered notifications | evicted first, oldest first |
+| Coalescible | `Pressing`, `ValueChanged`, `LongPressedRepeat` ("latest wins") | evicted once no low event is left |
+| Lifecycle | everything else: `Pressed`, `Released`, `PressLost`, the clicks, `LongPressed`, `Key`, `Focused`, `Defocused`, `CloseRequested`, `Delete`, `Ready`, `Cancel`, `Custom1`, `Custom2`... | never evicted or reordered |
 
-The window handles widget creation and deletion internally and filters hover notifications before queuing. `Window::dropped_event_count()` counts losses from overflow. The first loss of a high-priority event logs a warning and the next warning can occur after the queue empties.
+Overflow policy, applied when an event is pushed:
+
+1. A coalescible event replaces the queued event of the same kind and target, wherever it is, and moves to the back with the latest data. It never moves across a lifecycle event of its own target, so the event order of a press is kept.
+2. If the ring is full, the arrival evicts the oldest low event, or else the oldest coalescible event; a low arrival only evicts low events. An arrival that finds nothing to evict is rejected.
+3. Presses are never split. A `Pressed` event is queued only if the ring keeps room for the rest of its press: four slots, enough for `Released`, `ShortClicked`, `SingleClicked` (or `DoubleClicked`, `TripleClicked`) and `Clicked`, for `LongPressed`, `Released` and `Clicked`, or for `PressLost`. Other lifecycle events cannot take that room, so the end of an accepted press always gets in. If the `Pressed` event is rejected, the rest of that press is dropped too: a consumer never receives a release or a click without its press.
+4. The reservation is given back as the press ends: at `Clicked` or `PressLost`, or at the next press after a release without a click (a scroll). At most two presses (one pointer, one keypad or encoder) hold a reservation; a third forgets the oldest, which only happens when a press never ended (its widget was disabled while pressed, for example). Deleting a widget forgets its press.
+
+`Window::dropped_event_count()` counts every evicted or rejected event. Losses are logged at most once per second (`LOSS_REPORT_INTERVAL`, in LVGL ticks) with the number lost since the previous report, both when events are pushed and when the consumer pops them, so a consumer that never empties the queue keeps getting periodic summaries.
 
 RAM budget (excluding allocator bookkeeping): on x86_64, `Event` is 32 bytes,
 so the old queue started at 32 bytes inline plus a 320-byte allocation, and
-could grow indefinitely. The new queue is 520 bytes inline (16 slots plus
-indices and a saturating loss counter): 168 more bytes than the old initial
-capacity, with no separate allocation or growth. The whole host `Window` is
-624 bytes. On 32-bit targets the corresponding layout is expected to be
-16 + 280 bytes before, 456 bytes after; verify target layouts when budgeting
-board RAM. This trades a slightly larger initial reservation for a fixed
-upper bound and fewer heap blocks.
+could grow indefinitely. The new queue is 600 bytes inline (16 slots, indices,
+four 16-byte press records and the loss counters), with no separate
+allocation or growth. The whole host `Window` is 712 bytes. On 32-bit targets
+the corresponding layout is expected to be 16 + 280 bytes before and about
+500 bytes after; verify target layouts when budgeting board RAM. This trades a
+slightly larger initial reservation for a fixed upper bound and fewer heap
+blocks.
 
 ## Window ownership
 

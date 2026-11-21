@@ -1,9 +1,5 @@
 use super::{icon_text::IconText, lvgl};
-use crate::{
-    Color, Error, EventKind, Key, Result,
-    event::Event,
-    event_queue::{EventQueue, PushOutcome},
-};
+use crate::{Color, Error, EventKind, Key, Result, event::Event, event_queue::EventQueue};
 use core::{
     mem::ManuallyDrop,
     ops::{Deref, DerefMut},
@@ -61,6 +57,20 @@ pub fn get_window_class() -> &'static lvgl::lv_obj_class_t {
     &class_ref.0
 }
 
+/// An LVGL object that queues the events of its widgets for one consumer.
+///
+/// The queue is a fixed ring of [`crate::WINDOW_EVENT_QUEUE_CAPACITY`]
+/// events inside the window: it never allocates. When it is full, an arrival
+/// first evicts the oldest scroll, style, layout, hover or drawing
+/// notification, then the oldest `Pressing`, `ValueChanged` or
+/// `LongPressedRepeat` (a newer one of these replaces the queued one for the
+/// same target anyway). Other events (presses, releases, clicks, keys, focus
+/// changes, `Ready`, `Cancel`, `Delete`, `CloseRequested`...) are never evicted
+/// or reordered; one that finds no room is rejected. A press is only queued
+/// with room for the rest of it, and the rest of a rejected press is dropped,
+/// so the consumer never receives a release or a click without its press.
+/// Losses are counted ([`Window::dropped_event_count`]) and logged at most
+/// once per second. The crate README ("Window events") details the policy.
 #[repr(C)]
 pub struct Window {
     object: lvgl::lv_obj_t,
@@ -119,11 +129,24 @@ unsafe fn is_in_tree(root: *mut lvgl::lv_obj_t, target: *mut lvgl::lv_obj_t) -> 
 unsafe fn forget_dead_targets(window: *mut Window) {
     unsafe {
         let queue = &mut (*window).event_queue;
-        if queue.is_empty() {
+        if queue.is_empty() && !queue.follows_presses() {
             return;
         }
         let root = window as *mut lvgl::lv_obj_t;
         queue.clear_dead_targets(|target| is_in_tree(root, target));
+    }
+}
+
+/// Log the events lost since the last report, at most once per
+/// [`crate::event_queue::LOSS_REPORT_INTERVAL`].
+fn report_losses(queue: &mut EventQueue) {
+    let now = unsafe { lvgl::lv_tick_get() };
+    if let Some(report) = queue.take_loss_report(now) {
+        log::warning!(
+            "Window event queue full: dropped {} events ({} since the window was created)",
+            report.lost,
+            report.total
+        );
     }
 }
 
@@ -186,9 +209,12 @@ unsafe extern "C" fn window_event_callback(
             | lvgl::lv_event_code_t_LV_EVENT_REFR_EXT_DRAW_SIZE
             | lvgl::lv_event_code_t_LV_EVENT_GET_SELF_SIZE
             | lvgl::lv_event_code_t_LV_EVENT_COVER_CHECK
+            | lvgl::lv_event_code_t_LV_EVENT_HIT_TEST
+            | lvgl::lv_event_code_t_LV_EVENT_INVALIDATE_AREA
             | lvgl::lv_event_code_t_LV_EVENT_LAYOUT_CHANGED => {
+                // Drawing, hit testing and layout: their parameters only live
+                // during the dispatch, and no consumer handles them.
                 return;
-                // Ignore draw events
             }
             _ => (code, None),
         };
@@ -223,8 +249,8 @@ unsafe extern "C" fn window_event_callback(
                 ]);
             }
         }
-        if (*window).event_queue.push(queued) == PushOutcome::FirstInputEvictionInBurst {
-            log::warning!("Dropped a high-priority window event because the queue is full");
+        if (*window).event_queue.push(queued).lost_an_event() {
+            report_losses(&mut (*window).event_queue);
         }
         (*window).waker.wake();
     }
@@ -265,7 +291,14 @@ impl Window {
         self.event_queue.front().cloned()
     }
 
+    /// Take the oldest queued event. Events arrive in order, except that a
+    /// newer `Pressing`, `ValueChanged` or `LongPressedRepeat` replaces the
+    /// queued one for the same target and takes its place at the back; see
+    /// [`Window`] for what is dropped when the queue is full.
     pub fn pop_event(&mut self) -> Option<Event> {
+        if self.event_queue.has_unreported_losses() {
+            report_losses(&mut self.event_queue);
+        }
         self.event_queue.pop_front()
     }
 
@@ -443,6 +476,7 @@ impl OwnedWindow {
         self.0.as_ptr().cast()
     }
 
+    /// See [`Window::pop_event`].
     pub fn pop_event(&mut self) -> Option<Event> {
         self.window_mut().pop_event()
     }
