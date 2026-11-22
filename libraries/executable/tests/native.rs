@@ -125,6 +125,55 @@ fn build_fixture_from(source: &str, name: &str, flags: &str) -> Vec<u8> {
     std::fs::read(output).unwrap()
 }
 
+/// Compiler flags that link with lld. `-fuse-ld=lld` looks for `ld.lld` on `PATH`;
+/// distributions often install it only in a versioned LLVM directory, which clang
+/// knows, so that directory is added as a program search path (`-B`, which gcc and
+/// clang both accept).
+fn lld_flags() -> String {
+    let on_path = std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|directory| directory.join("ld.lld").is_file())
+    });
+    if on_path {
+        return "-fuse-ld=lld".into();
+    }
+    let candidate = Command::new("clang")
+        .arg("-print-prog-name=ld.lld")
+        .output()
+        .ok()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_absolute() && path.is_file());
+    let Some(directory) = candidate.as_deref().and_then(std::path::Path::parent) else {
+        panic!("ld.lld not found on PATH or next to clang; install lld (LLVM's linker)");
+    };
+    format!("-fuse-ld=lld -B{}", directory.display())
+}
+
+/// The section names of a little-endian ELF64 image.
+fn section_names(bytes: &[u8]) -> Vec<String> {
+    let word = |offset: usize, size: usize| {
+        let mut value = [0; 8];
+        value[..size].copy_from_slice(&bytes[offset..offset + size]);
+        u64::from_le_bytes(value) as usize
+    };
+    assert_eq!(
+        &bytes[..6],
+        b"\x7fELF\x02\x01",
+        "a little-endian ELF64 image"
+    );
+    let (table, entry_size, count, names) =
+        (word(0x28, 8), word(0x3a, 2), word(0x3c, 2), word(0x3e, 2));
+    let header = |index: usize| table + index * entry_size;
+    let strings = word(header(names) + 0x18, 8);
+    (0..count)
+        .map(|index| {
+            let start = strings + word(header(index), 4);
+            let end = start + bytes[start..].iter().position(|&byte| byte == 0).unwrap();
+            String::from_utf8_lossy(&bytes[start..end]).into_owned()
+        })
+        .collect()
+}
+
 /// Memory backend that fails the test if the loader allocates.
 struct NoMemory;
 
@@ -299,7 +348,27 @@ async fn executes_c_elf_from_vfs_with_host_services() {
     // metadata must stay outside the ABI note segment.
     let bytes = build_fixture(
         "xila-no-relocations.elf",
-        "-fuse-ld=lld -DXILA_FIXTURE_NO_RELOCATIONS",
+        &format!("{} -DXILA_FIXTURE_NO_RELOCATIONS", lld_flags()),
+    );
+    let sections = section_names(&bytes);
+    assert!(
+        !sections
+            .iter()
+            .any(|name| name == ".rel.dyn" || name == ".rela.dyn"),
+        "the fixture no longer covers an image without relocations: {sections:?}"
+    );
+    drop(LoadedImage::load(&bytes, &Mmap, 32 * 1024).unwrap());
+    assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
+
+    // A note the linker script does not name must not join the ABI note segment.
+    let bytes = build_fixture(
+        "xila-custom-note.elf",
+        &format!("{} -DXILA_FIXTURE_CUSTOM_NOTE", lld_flags()),
+    );
+    assert!(
+        section_names(&bytes)
+            .iter()
+            .any(|name| name == ".note.other")
     );
     drop(LoadedImage::load(&bytes, &Mmap, 32 * 1024).unwrap());
     assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);

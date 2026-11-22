@@ -647,9 +647,24 @@ for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf riscv32imafc-un
   cargo build --locked --release -p xila-executable --features native-dev --target "$target"
 done
 cargo check --locked -p xila-abi-application --target aarch64-unknown-linux-gnu
-for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu thumbv7em-none-eabihf riscv32imac-unknown-none-elf riscv32imafc-unknown-none-elf; do
-  cargo clippy --locked --manifest-path libraries/abi/application/sdk/rust/xila-sys/Cargo.toml \
-    --all-features --target-dir target/sdk/rust-bindings --target "$target" -- -D warnings
+# Stable lints the bindings and, on Linux, the runtime. `link` needs the nightly,
+# and `runtime` alone on bare metal warns that a guest needs `link`.
+xila_sys=libraries/abi/application/sdk/rust/xila-sys/Cargo.toml
+for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+  cargo clippy --locked --manifest-path "$xila_sys" --features runtime \
+    --target-dir target/sdk/rust-bindings --target "$target" -- -D warnings
+done
+for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf riscv32imafc-unknown-none-elf; do
+  cargo clippy --locked --manifest-path "$xila_sys" \
+    --target-dir target/sdk/rust-bindings --target "$target" -- -D warnings
+done
+# The guest nightly lints `link`, including the generated link.rs.
+guest_targets="x86_64-unknown-linux-gnu thumbv7em-none-eabihf riscv32imac-unknown-none-elf riscv32imafc-unknown-none-elf"
+rustup toolchain install {{ vars.nightly_version }} --profile minimal --component clippy \
+  $(for target in $guest_targets; do printf -- '--target %s ' "$target"; done)
+for target in $guest_targets; do
+  rustup run {{ vars.nightly_version }} cargo clippy --locked --manifest-path "$xila_sys" \
+    --features link --target-dir target/sdk/rust-bindings-nightly --target "$target" -- -D warnings
 done
 """
 tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
