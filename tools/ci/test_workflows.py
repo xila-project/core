@@ -89,8 +89,14 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn("--workspace", lint)
         self.assertNotIn("--package xila-drivers-headless", lint)
         self.assertNotIn("drivers_native/audio", lint)
-        self.assertIn("cargo nextest run --locked --workspace --features xila/graphics_rendering_xrgb8888", tasks["ci:host-tests"]["run"])
-        self.assertIn("cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888 --doc", tasks["ci:host-tests"]["run"])
+        self.assertIn(
+            "cargo nextest run --locked --workspace --features xila/graphics_rendering_xrgb8888,xila-graphics/headless_screen,xila-io-error/std",
+            tasks["ci:host-tests"]["run"],
+        )
+        self.assertIn(
+            "cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888,xila-graphics/headless_screen,xila-io-error/std --doc",
+            tasks["ci:host-tests"]["run"],
+        )
         # Guards #711: environment crates must not link the C glue symbols twice.
         self.assertIn(
             "--features xila/graphics_rendering_xrgb8888,xila-testing/graphics --no-run",

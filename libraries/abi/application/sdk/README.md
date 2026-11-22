@@ -43,6 +43,8 @@ xila-sdk-0.1-<target>/
     src/                    raw bindings, optional entry runtime and graphics module
     build.rs                supplies the guest linker arguments with the link feature
     xila-static-pie.ld      copy of the loader's linker script used by build.rs
+  rust/xila-version/         bundled Xila version crate
+    Cargo.toml, src/lib.rs
   cmake/xila-toolchain.cmake
   share/xila/example/hello  the example below
 ```

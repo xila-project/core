@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import tomllib
 import urllib.request
 from pathlib import Path
@@ -28,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 ROOT = Path(__file__).resolve().parents[2]
 SDK_SOURCE = ROOT / "libraries/abi/application"
 RUST_CRATE = SDK_SOURCE / "sdk/rust/xila-sys"
+VERSION_CRATE = ROOT / "libraries/version"
 LINKER_SCRIPT = RUST_CRATE / "xila-static-pie.ld"
 RUST_CRATE_FILES = ("Cargo.toml", "Cargo.lock", "build.rs", LINKER_SCRIPT.name)
 OUTPUT = ROOT / "target/sdk"
@@ -372,6 +374,32 @@ def resource_dir(target):
     return out.stdout.strip()
 
 
+def rust_sdk_files():
+    """Return the standalone Rust sources, with paths relative to the SDK's rust directory."""
+    sources = [RUST_CRATE / name for name in RUST_CRATE_FILES]
+    sources.extend(source for source in (RUST_CRATE / "src").rglob("*") if source.is_file())
+    files = {
+        Path("xila-sys") / source.relative_to(RUST_CRATE): source.read_bytes()
+        for source in sources
+    }
+
+    # Replace the checkout-relative dependency path with the bundled sibling crate.
+    manifest = Path("xila-sys/Cargo.toml")
+    bindings = files[manifest].decode()
+    checkout_path = tomllib.loads(bindings)["dependencies"]["xila-version"]["path"]
+    files[manifest] = bindings.replace(f'path = "{checkout_path}"', 'path = "../xila-version"').encode()
+
+    # Resolve the version crate's inherited fields without shipping the full Core workspace.
+    workspace = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]
+    version = (VERSION_CRATE / "Cargo.toml").read_text()
+    for field in ("version", "edition", "rust-version"):
+        version = re.sub(rf"^{field}\.workspace = true$", f'{field} = "{workspace[field]}"',
+                         version, flags=re.M)
+    files[Path("xila-version/Cargo.toml")] = version.encode()
+    files[Path("xila-version/src/lib.rs")] = (VERSION_CRATE / "src/lib.rs").read_bytes()
+    return files
+
+
 def assemble(target, pin, install, crt0, libraries, work):
     header = (SDK_SOURCE / "include/xila/application.h").read_text()
     major, minor = (
@@ -400,10 +428,10 @@ def assemble(target, pin, install, crt0, libraries, work):
     for example in (SDK_SOURCE / "sdk/example/hello").iterdir():
         shutil.copy(example, root / "share/xila/example/hello" / example.name)
     shutil.copy(SDK_SOURCE / "sdk/README.md", root / "README.md")
-    rust = root / "rust/xila-sys"
-    shutil.copytree(RUST_CRATE / "src", rust / "src", dirs_exist_ok=True)
-    for filename in RUST_CRATE_FILES:
-        shutil.copy(RUST_CRATE / filename, rust / filename)
+    for relative, contents in rust_sdk_files().items():
+        destination = root / "rust" / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(contents)
 
     config = TARGETS[target]
     template = (SDK_SOURCE / "sdk/cmake/xila-toolchain.cmake.in").read_text()
@@ -565,40 +593,48 @@ def verify_c_program(target, sdk, name, source, *options):
 
 
 def verify_rust_crate(sdk):
-    """Compare the archive's rust/ tree against the SDK crate in the checkout."""
+    """Check the archived Rust sources and build them outside the checkout."""
     prefix = f"{sdk.name}/rust"
-    crate = f"{prefix}/xila-sys"
-    expected = {prefix: None, crate: None}
-    paths = [RUST_CRATE / name for name in RUST_CRATE_FILES]
-    paths.extend([RUST_CRATE / "src", *(RUST_CRATE / "src").rglob("*")])
-    for path in paths:
-        name = f"{crate}/{path.relative_to(RUST_CRATE).as_posix()}"
-        expected[name] = None if path.is_dir() else path.read_bytes()
+    expected = {prefix: None}
+    for relative, contents in rust_sdk_files().items():
+        expected[f"{prefix}/{relative.as_posix()}"] = contents
+        for parent in relative.parents:
+            if parent != Path("."):
+                expected.setdefault(f"{prefix}/{parent.as_posix()}", None)
 
     archive = OUTPUT / f"{sdk.name}.tar.zst"
     differences = []
-    with subprocess.Popen(["zstd", "-dc", archive], stdout=subprocess.PIPE) as decompressor:
-        with tarfile.open(fileobj=decompressor.stdout, mode="r|") as tar:
-            for member in tar:
-                if member.name != prefix and not member.name.startswith(f"{prefix}/"):
-                    continue
-                if member.name not in expected:
-                    differences.append(f"unexpected {member.name}")
-                    continue
-                contents = expected.pop(member.name)
-                matches = (member.isdir() if contents is None else
-                           member.isfile() and tar.extractfile(member).read() == contents)
-                if not matches:
+    with tempfile.TemporaryDirectory(prefix="xila-rust-sdk-") as temporary:
+        with subprocess.Popen(["zstd", "-dc", archive], stdout=subprocess.PIPE) as decompressor:
+            with tarfile.open(fileobj=decompressor.stdout, mode="r|") as tar:
+                for member in tar:
+                    if member.name != prefix and not member.name.startswith(f"{prefix}/"):
+                        continue
+                    if member.name not in expected:
+                        differences.append(f"unexpected {member.name}")
+                        continue
+                    contents = expected.pop(member.name)
+                    if contents is None and member.isdir():
+                        continue
+                    if contents is not None and member.isfile():
+                        archived = tar.extractfile(member).read()
+                        if archived == contents:
+                            destination = Path(temporary) / member.name.removeprefix(f"{prefix}/")
+                            destination.parent.mkdir(parents=True, exist_ok=True)
+                            destination.write_bytes(archived)
+                            continue
                     differences.append(f"differs: {member.name}")
-        # The decompressor may still have tar padding buffered in its output.
-        decompressor.stdout.read()
-        if decompressor.wait() != 0:
-            sys.exit(f"error: could not decompress {archive}")
-    differences.extend(f"missing {name}" for name in sorted(expected))
-    if differences:
-        sys.exit(f"error: Rust SDK crate in {archive} differs from the checkout:\n"
-                 + "\n".join(differences))
-    print(f"{archive}: rust/ matches the SDK source crate")
+            # The decompressor may still have tar padding buffered in its output.
+            decompressor.stdout.read()
+            if decompressor.wait() != 0:
+                sys.exit(f"error: could not decompress {archive}")
+        differences.extend(f"missing {name}" for name in sorted(expected))
+        if differences:
+            sys.exit(f"error: Rust SDK sources in {archive} differ from the checkout:\n"
+                     + "\n".join(differences))
+        run(["cargo", "check", "--offline", "--locked", "--features", "runtime",
+             "--target-dir", Path(temporary) / "target"], cwd=Path(temporary) / "xila-sys")
+    print(f"{archive}: Rust SDK sources match the checkout and build offline")
 
 
 def verify(args):
