@@ -63,6 +63,7 @@ impl ProcessHost for ExecutableContext {
                     path: grant.path,
                     rights: grant.rights,
                 }),
+                identity: None,
             };
             // The child's coroutine must stay on the spawner's executor.
             execute_with(self, &path, arguments, standard, None, launch)
