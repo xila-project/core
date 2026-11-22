@@ -578,7 +578,12 @@ impl Watchdog {
             if let Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
                 receiver.recv_timeout(core::time::Duration::from_secs(seconds))
             {
-                eprintln!("{name}: still running after {seconds} s: the graphics lock hangs");
+                // The harness captures `eprintln!`, and `exit` would discard it.
+                use std::io::Write;
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "{name}: still running after {seconds} s: the graphics lock hangs"
+                );
                 std::process::exit(1);
             }
         });
