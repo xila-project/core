@@ -168,7 +168,11 @@ C startup object, or libc.
 
 Enable only `runtime` when building host tests or doctests that use the runtime
 API. Cargo unifies dependency features within a build, so keep host tests and
-guest builds that enable `link` in separate Cargo invocations.
+guest builds that enable `link` in separate Cargo invocations. To keep host tests
+off `link`, put the host-tested code in a library that depends on `runtime` only,
+or enable `xila-sys/link` through a feature of the application. A bare-metal build
+with `runtime` but not `link` does not link (`cannot find entry symbol _start`), so
+`xila-sys` warns that it needs `link`.
 
 From a Core checkout on Linux x86-64 with Rustup and `llvm-size`:
 

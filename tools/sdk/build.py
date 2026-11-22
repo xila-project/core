@@ -667,9 +667,28 @@ def verify(args):
     run([find_tool("llvm-size"), "-t", "libxila_posix.a", "libxila.a", "crt0.o"], cwd=sdk / "lib")
 
 
+def check_data_alignment(image, elf, alignment):
+    """The data segment must start at the end of the text segment rounded up to the
+    target's alignment: exactly where XILA_DATA_ALIGN puts it. A vaddr that is merely
+    a multiple of the alignment would pass even if the alignment were not applied."""
+    from check_elf import PF_W, PT_LOAD
+
+    loads = [segment for segment in elf.segments() if segment["type"] == PT_LOAD]
+    text = [segment for segment in loads if not segment["flags"] & PF_W]
+    writable = [segment for segment in loads if segment["flags"] & PF_W]
+    if not text or not writable:
+        sys.exit(f"{image}: expected a text PT_LOAD followed by a writable PT_LOAD")
+    end = max(segment["vaddr"] + segment["memsz"] for segment in text)
+    expected = (end + alignment - 1) // alignment * alignment
+    first = min(segment["vaddr"] for segment in writable)
+    if first != expected:
+        sys.exit(f"{image}: the first writable PT_LOAD starts at {first:#x}, expected {expected:#x}"
+                 f" (the text end {end:#x} rounded up to {alignment} bytes)")
+
+
 def rust_example(args):
     """Build an independent PIC sysroot for each selected Rust guest and verify its image."""
-    from check_elf import Elf, PF_W, PT_LOAD, SHT_REL, SHT_RELA
+    from check_elf import Elf, SHT_REL, SHT_RELA
 
     nightly = tomllib.loads((ROOT / "mise.toml").read_text())["vars"]["nightly_version"]
     example = SDK_SOURCE / "sdk/rust/hello"
@@ -688,11 +707,7 @@ def rust_example(args):
         if any(section["size"] and section["type"] in (SHT_REL, SHT_RELA)
                for section in elf.sections()):
             sys.exit(f"{image}: the zero-relocation regression fixture has relocations")
-        alignment = TARGETS[target]["data_alignment"]
-        writable_loads = [segment for segment in elf.segments()
-                          if segment["type"] == PT_LOAD and segment["flags"] & PF_W]
-        if not writable_loads or any(segment["vaddr"] % alignment for segment in writable_loads):
-            sys.exit(f"{image}: expected writable PT_LOAD segments aligned to {alignment} bytes")
+        check_data_alignment(image, elf, TARGETS[target]["data_alignment"])
         run([find_tool("llvm-size"), image])
         print(f"ELF file: {image.stat().st_size} bytes")
 

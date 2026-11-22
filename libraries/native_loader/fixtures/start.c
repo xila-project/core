@@ -21,6 +21,15 @@ static volatile unsigned int calls;           /* Exercise writable, zeroed BSS. 
 __attribute__((constructor)) static void construct(void) { calls = 0; }
 #endif
 
+#ifdef XILA_FIXTURE_CUSTOM_NOTE
+/* An 8-byte-aligned note other than the ABI one must stay out of its segment. */
+__attribute__((used, section(".note.custom"), aligned(8))) static const struct {
+    uint32_t name_size, descriptor_size, type;
+    char name[8];
+    uint64_t descriptor;
+} custom_note = {7, 8, 1, "CUSTOM", 0};
+#endif
+
 int32_t _xila_start(const XilaStartup *startup) {
     if (startup->size != sizeof(*startup) || startup->argument_count > 1 ||
         !startup->api || !startup->standard_input || !startup->standard_output ||

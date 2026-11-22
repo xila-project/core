@@ -25,9 +25,13 @@ SECTIONS
   .note.gnu.build-id : { *(.note.gnu.build-id) } :text
   .note.gnu.property : { *(.note.gnu.property) } :text
   .note.xila.abi : ALIGN(4) { KEEP(*(.note.xila.abi)) } :text :abi
+  /* Any other note (.note.package, custom notes) would otherwise follow the ABI
+     note and inherit its segments; the explicit :text keeps it out of :abi. */
+  .note.other : { *(.note .note.*) } :text
   .rel.dyn : { *(.rel.dyn) } :text
   .rela.dyn : { *(.rela.dyn) } :text
-  /* .dynsym resets PHDR inheritance even when there are no relocations. */
+  /* lld always emits .dynsym for -pie, so its explicit :text resets the
+     inherited segments even when there are no relocations. */
   .dynsym : { *(.dynsym) } :text
   .gnu.hash : { *(.gnu.hash) } :text
   .hash : { *(.hash) } :text

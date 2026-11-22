@@ -8,6 +8,13 @@ fn main() {
     println!("cargo::rerun-if-changed={SCRIPT}");
 
     if env::var_os("CARGO_FEATURE_LINK").is_none() {
+        // A bare-metal guest without `link` gets no entry point or linker script:
+        // the link fails, or yields an image the loader rejects.
+        if env::var_os("CARGO_FEATURE_RUNTIME").is_some()
+            && env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("none")
+        {
+            println!("cargo::warning=xila-sys: enable xila-sys/link to build a Xila executable");
+        }
         return;
     }
     let target = env::var("TARGET").unwrap();
@@ -49,7 +56,8 @@ fn main() {
     // Cargo's rustc-link-arg instruction only affects this package's targets.
     // These attributes put the arguments in the rlib so rustc forwards them
     // when linking the downstream guest.
-    let mut attributes = String::new();
+    // Each attribute carries one argument, so they share their `kind`.
+    let mut attributes = String::from("#[allow(clippy::duplicated_attributes)]\n");
     for arg in [
         "-pie",
         "--no-dynamic-linker",
