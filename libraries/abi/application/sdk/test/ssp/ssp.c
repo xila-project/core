@@ -8,7 +8,12 @@
  *          stack: the process still ends with status 134 and the message, without
  *          returning through those frames. The host's own state is not on that stack, so
  *          the size may be anything that stays inside the stack
+ *   thread-large  the same overflow in a worker thread, over the worker's frames and the
+ *          host's entry on its coroutine stack: the worker's own state (its thread
+ *          identifier and its process group) is not on that stack either, so the process
+ *          still ends with status 134 and the message
  */
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,6 +29,11 @@ __attribute__((noinline)) static int fill(size_t count) {
     for (size_t index = 0; index < count; ++index)
         cursor[index] = 'A';
     return buffer[0];
+}
+
+static void *overflow_thread(void *argument) {
+    fill((size_t)(uintptr_t)argument);
+    return NULL;
 }
 
 int main(int argc, char **argv) {
@@ -48,6 +58,15 @@ int main(int argc, char **argv) {
     if (strcmp(mode, "large") == 0) {
         fill(argc > 2 ? (size_t)atoi(argv[2]) : 256);
         puts("ssp: large smash returned");
+        return 3;
+    }
+    if (strcmp(mode, "thread-large") == 0) {
+        size_t count = argc > 2 ? (size_t)atoi(argv[2]) : 256;
+        pthread_t thread;
+        if (pthread_create(&thread, NULL, overflow_thread, (void *)(uintptr_t)count) != 0)
+            return 5;
+        pthread_join(thread, NULL);
+        puts("ssp: thread smash returned");
         return 3;
     }
     fprintf(stderr, "ssp: unknown scenario \"%s\"\n", mode);

@@ -481,6 +481,31 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
         assert_eq!(stdout, b"", "{size}");
         assert_eq!(stderr, b"*** stack smashing detected ***\n", "{size}");
     }
+
+    // The same overflow in a worker thread runs over the worker's frames and the host's
+    // entry on the worker's coroutine stack. The worker's own state, which the handler's
+    // xila_process_exit reads to find the process group, is in the worker's record on the
+    // heap (#778): these sizes used to overwrite it and crash the host (from 160 bytes in
+    // debug, 128 in release). A worker has few frames above the program's, so the overflow
+    // soon reaches the top of its stack, where the coroutine switch keeps its link back to
+    // the executor's stack, and crashes there instead: from 224 bytes in release, 768 in
+    // debug. The largest size is one both profiles hold.
+    for size in ["160", "192", "208"] {
+        let (status, stdout, stderr) = launch(
+            context,
+            parent,
+            "/ssp",
+            "ssp-thread-large",
+            &["thread-large", size],
+        )
+        .await;
+        assert_eq!(status, 134, "thread {size}");
+        assert_eq!(stdout, b"", "thread {size}");
+        assert_eq!(
+            stderr, b"*** stack smashing detected ***\n",
+            "thread {size}"
+        );
+    }
 }
 
 /// A display the graphics manager draws on and nobody looks at.
