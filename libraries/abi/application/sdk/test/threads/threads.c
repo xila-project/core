@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <sched.h>
+#include <semaphore.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -188,6 +189,78 @@ static int check_wait_queues(void) {
     return 0;
 }
 
+static sem_t semaphore;
+static int semaphore_order[2];
+static int semaphore_taken;
+
+/* Blocks on the semaphore and records the order in which waiters got their unit. */
+static void *take_semaphore(void *argument) {
+    if (sem_wait(&semaphore) != 0)
+        return NULL;
+    semaphore_order[semaphore_taken++] = *(int *)argument;
+    return argument;
+}
+
+static int add_milliseconds(clockid_t clock, struct timespec *deadline, long milliseconds) {
+    if (clock_gettime(clock, deadline) != 0)
+        return -1;
+    deadline->tv_nsec += milliseconds * 1000 * 1000;
+    while (deadline->tv_nsec >= 1000000000) {
+        ++deadline->tv_sec;
+        deadline->tv_nsec -= 1000000000;
+    }
+    return 0;
+}
+
+static int check_semaphores(void) {
+    int value = -1;
+    CHECK(sem_init(&semaphore, 1, 0) == -1 && errno == ENOSYS);
+    CHECK(sem_init(&semaphore, 0, (unsigned int)SEM_VALUE_MAX + 1u) == -1 && errno == EINVAL);
+    OK(sem_init(&semaphore, 0, 1));
+    OK(sem_getvalue(&semaphore, &value));
+    CHECK(value == 1);
+    /* A unit is available: no deadline check, even for a malformed one. */
+    struct timespec deadline = {0, -1};
+    OK(sem_timedwait(&semaphore, &deadline));
+    CHECK(sem_trywait(&semaphore) == -1 && errno == EAGAIN);
+    CHECK(sem_timedwait(&semaphore, &deadline) == -1 && errno == EINVAL);
+    CHECK(sem_clockwait(&semaphore, CLOCK_MONOTONIC, NULL) == -1 && errno == EINVAL);
+    CHECK(add_milliseconds(CLOCK_MONOTONIC, &deadline, 2) == 0);
+    CHECK(sem_clockwait(&semaphore, CLOCK_MONOTONIC, &deadline) == -1 && errno == ETIMEDOUT);
+    CHECK(add_milliseconds(CLOCK_REALTIME, &deadline, 2) == 0);
+    CHECK(sem_timedwait(&semaphore, &deadline) == -1 && errno == ETIMEDOUT);
+
+    /* Two blocked waiters get their units in arrival order, one per post. */
+    pthread_t first, second;
+    int first_name = 1, second_name = 2;
+    OK(pthread_create(&first, NULL, take_semaphore, &first_name));
+    OK(sched_yield());
+    OK(pthread_create(&second, NULL, take_semaphore, &second_name));
+    OK(sched_yield());
+    CHECK(semaphore_taken == 0);
+    OK(sem_post(&semaphore));
+    void *result = NULL;
+    OK(pthread_join(first, &result));
+    CHECK(result == &first_name && semaphore_taken == 1);
+    OK(sem_post(&semaphore));
+    OK(pthread_join(second, &result));
+    CHECK(result == &second_name && semaphore_taken == 2);
+    CHECK(semaphore_order[0] == 1 && semaphore_order[1] == 2);
+    OK(sem_getvalue(&semaphore, &value));
+    CHECK(value == 0);
+    OK(sem_destroy(&semaphore));
+
+    OK(sem_init(&semaphore, 0, SEM_VALUE_MAX));
+    CHECK(sem_post(&semaphore) == -1 && errno == EOVERFLOW);
+    OK(sem_getvalue(&semaphore, &value));
+    CHECK(value == SEM_VALUE_MAX);
+    OK(sem_destroy(&semaphore));
+
+    CHECK(sem_open("/named", 0) == SEM_FAILED && errno == ENOSYS);
+    CHECK(sem_unlink("/named") == -1 && errno == ENOSYS);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     pthread_t thread;
     if (argc > 1 && strcmp(argv[1], "print-contention") == 0) {
@@ -266,6 +339,9 @@ int main(int argc, char **argv) {
     int queue_status = check_wait_queues();
     if (queue_status != 0)
         return queue_status;
+    int semaphore_status = check_semaphores();
+    if (semaphore_status != 0)
+        return semaphore_status;
 
     pthread_mutexattr_t attributes;
     pthread_mutex_t recursive;

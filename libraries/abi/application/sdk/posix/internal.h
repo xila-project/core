@@ -47,6 +47,11 @@ int xila_errno_from_status(XilaStatus status);
 /* Set errno and return -1. */
 int xila_fail_errno(int error);
 
+/* Convert an absolute deadline to nanoseconds. Returns 0, EINVAL for a null deadline or
+   an out-of-range tv_nsec, or EOVERFLOW. */
+struct timespec;
+int xila_deadline_nanoseconds(const struct timespec *deadline, int64_t *nanoseconds);
+
 /* Process heap used by malloc and by the layer itself. */
 void *xila_heap_alloc(size_t size);
 void xila_heap_release(void *pointer);
