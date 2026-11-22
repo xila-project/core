@@ -10,7 +10,7 @@
 
 mod devices;
 mod hash;
-mod logger;
+pub mod logger;
 mod memory_manager;
 
 pub use devices::{ConsoleDevice, RandomDevice, TimeDevice};

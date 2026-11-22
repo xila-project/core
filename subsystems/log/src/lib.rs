@@ -1,8 +1,53 @@
+//! Xila's log subsystem.
+//!
+//! Code logs through the `log` crate's front end, re-exported here as
+//! [`error!`], [`warning!`], [`information!`], [`debug!`] and [`trace!`]; one
+//! [`LoggerTrait`] installed with [`initialize`] receives every message,
+//! including those of third-party crates that use `log` directly. Outside
+//! Core, use the re-export `xila::log`.
+//!
+//! # Levels
+//!
+//! [`Level`] has five levels, from the most to the least severe: `error`,
+//! `warning`, `information`, `debug` and `trace`. [`LevelFilter`] adds `off`
+//! and selects a level and every more severe one. Both print and parse as
+//! those lowercase names (parsing ignores ASCII case), for options such as
+//! `--log-level warning`.
+//!
+//! - `error`: an operation failed, and something the person or the system
+//!   expected did not happen.
+//! - `warning`: something unexpected happened, and the system recovered or
+//!   carried on in a degraded way.
+//! - `information`: rare, notable events, such as a subsystem starting. Not
+//!   per request, per packet or per click.
+//! - `debug`: details that help diagnose a problem.
+//! - `trace`: very frequent details, such as every call of a hot path.
+//!
+//! # Message style
+//!
+//! - Write in English. Messages are for developers and are not localised, so
+//!   never pass them through translation.
+//! - Use sentence case: start with a capital letter, and keep the rest
+//!   lowercase except names and acronyms (`Failed to mount the root file
+//!   system`).
+//! - Do not end a message with a period, an exclamation mark or a colon.
+//! - Do not start a message with `Xila:` or with the subsystem name (`UDP:`,
+//!   `WASI:`): the target, the module path by default, already says where it
+//!   comes from.
+//! - Show errors with their `Display` text (`{error}`), not with `{:?}`.
+//! - Put values after the text that names them (`Failed to open {path}:
+//!   {error}`), with no space before a colon.
+//! - Never log secrets or personal data: typed or pasted characters,
+//!   passwords, keys, random generator output, user names or full response
+//!   bodies. Log a count or a result instead.
+
 #![no_std]
 
 extern crate alloc;
 
 use alloc::fmt;
+use core::cmp::Ordering;
+use core::str::FromStr;
 use log_external::Log;
 use log_external::Metadata;
 pub use log_external::{debug, error, info as information, trace, warn as warning};
@@ -16,14 +61,193 @@ const GREEN: &str = "\x1b[0;42m";
 const GREY: &str = "\x1b[0;100m";
 const RESET: &str = "\x1b[0m";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The severity of a log message, from the most severe ([`Level::Error`]) to
+/// the least ([`Level::Trace`]).
+///
+/// Levels are ordered by verbosity, like the `log` crate's: `Error` is the
+/// smallest and `Trace` the largest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
 pub enum Level {
     Error = 1,
-    Warn,
-    Info,
+    Warning,
+    Information,
     Debug,
     Trace,
 }
+
+#[allow(non_upper_case_globals)]
+impl Level {
+    /// Former name of [`Level::Warning`], kept for one release.
+    #[deprecated(note = "use `Level::Warning`")]
+    pub const Warn: Level = Level::Warning;
+
+    /// Former name of [`Level::Information`], kept for one release.
+    #[deprecated(note = "use `Level::Information`")]
+    pub const Info: Level = Level::Information;
+}
+
+impl Level {
+    /// Every level, from the most to the least severe.
+    pub const ALL: [Level; 5] = [
+        Level::Error,
+        Level::Warning,
+        Level::Information,
+        Level::Debug,
+        Level::Trace,
+    ];
+
+    /// The lowercase name of the level, as it prints and parses.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Level::Error => "error",
+            Level::Warning => "warning",
+            Level::Information => "information",
+            Level::Debug => "debug",
+            Level::Trace => "trace",
+        }
+    }
+}
+
+impl fmt::Display for Level {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.pad(self.as_str())
+    }
+}
+
+impl FromStr for Level {
+    type Err = ParseLevelError;
+
+    /// Parses a level name, ignoring ASCII case. Abbreviations such as `warn`
+    /// or `info` are refused.
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        Level::ALL
+            .into_iter()
+            .find(|level| level.as_str().eq_ignore_ascii_case(name))
+            .ok_or(ParseLevelError(()))
+    }
+}
+
+/// The most verbose level that passes a filter, or [`LevelFilter::Off`] to let
+/// nothing pass.
+///
+/// A filter lets a level pass when the level is at most as verbose as the
+/// filter: [`LevelFilter::Warning`] lets errors and warnings pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum LevelFilter {
+    Off = 0,
+    Error,
+    Warning,
+    Information,
+    Debug,
+    Trace,
+}
+
+impl LevelFilter {
+    /// Every filter, from [`LevelFilter::Off`] to the most verbose.
+    pub const ALL: [LevelFilter; 6] = [
+        LevelFilter::Off,
+        LevelFilter::Error,
+        LevelFilter::Warning,
+        LevelFilter::Information,
+        LevelFilter::Debug,
+        LevelFilter::Trace,
+    ];
+
+    /// The lowercase name of the filter, as it prints and parses.
+    pub const fn as_str(self) -> &'static str {
+        match self.level() {
+            Some(level) => level.as_str(),
+            None => "off",
+        }
+    }
+
+    /// The most verbose level that passes, or `None` for [`LevelFilter::Off`].
+    pub const fn level(self) -> Option<Level> {
+        match self {
+            LevelFilter::Off => None,
+            LevelFilter::Error => Some(Level::Error),
+            LevelFilter::Warning => Some(Level::Warning),
+            LevelFilter::Information => Some(Level::Information),
+            LevelFilter::Debug => Some(Level::Debug),
+            LevelFilter::Trace => Some(Level::Trace),
+        }
+    }
+
+    /// Whether messages of `level` pass this filter.
+    pub const fn enables(self, level: Level) -> bool {
+        level as u8 <= self as u8
+    }
+}
+
+impl From<Level> for LevelFilter {
+    fn from(level: Level) -> Self {
+        match level {
+            Level::Error => LevelFilter::Error,
+            Level::Warning => LevelFilter::Warning,
+            Level::Information => LevelFilter::Information,
+            Level::Debug => LevelFilter::Debug,
+            Level::Trace => LevelFilter::Trace,
+        }
+    }
+}
+
+impl fmt::Display for LevelFilter {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.pad(self.as_str())
+    }
+}
+
+impl FromStr for LevelFilter {
+    type Err = ParseLevelError;
+
+    /// Parses `off` or a level name, ignoring ASCII case. Abbreviations such
+    /// as `warn` or `info` are refused.
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        LevelFilter::ALL
+            .into_iter()
+            .find(|filter| filter.as_str().eq_ignore_ascii_case(name))
+            .ok_or(ParseLevelError(()))
+    }
+}
+
+impl PartialEq<LevelFilter> for Level {
+    fn eq(&self, other: &LevelFilter) -> bool {
+        *self as u8 == *other as u8
+    }
+}
+
+impl PartialOrd<LevelFilter> for Level {
+    fn partial_cmp(&self, other: &LevelFilter) -> Option<Ordering> {
+        Some((*self as u8).cmp(&(*other as u8)))
+    }
+}
+
+impl PartialEq<Level> for LevelFilter {
+    fn eq(&self, other: &Level) -> bool {
+        *self as u8 == *other as u8
+    }
+}
+
+impl PartialOrd<Level> for LevelFilter {
+    fn partial_cmp(&self, other: &Level) -> Option<Ordering> {
+        Some((*self as u8).cmp(&(*other as u8)))
+    }
+}
+
+/// The text given to [`Level::from_str`] or [`LevelFilter::from_str`] is not a
+/// level name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParseLevelError(());
+
+impl fmt::Display for ParseLevelError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("Unknown log level")
+    }
+}
+
+impl core::error::Error for ParseLevelError {}
 
 pub struct Record<'a> {
     pub level: Level,
@@ -45,8 +269,8 @@ impl From<log_external::Level> for Level {
     fn from(level: log_external::Level) -> Self {
         match level {
             log_external::Level::Error => Level::Error,
-            log_external::Level::Warn => Level::Warn,
-            log_external::Level::Info => Level::Info,
+            log_external::Level::Warn => Level::Warning,
+            log_external::Level::Info => Level::Information,
             log_external::Level::Debug => Level::Debug,
             log_external::Level::Trace => Level::Trace,
         }
@@ -61,8 +285,8 @@ pub trait LoggerTrait: Send + Sync {
     fn log(&self, record: &Record) {
         let (letter, color) = match record.level {
             Level::Error => ("E", RED),
-            Level::Warn => ("W", YELLOW),
-            Level::Info => ("I", BLUE),
+            Level::Warning => ("W", YELLOW),
+            Level::Information => ("I", BLUE),
             Level::Debug => ("D", GREEN),
             Level::Trace => ("T", GREY),
         };
@@ -106,7 +330,7 @@ pub fn initialize(logger: &'static dyn LoggerTrait) -> Result<(), log_external::
         logger.log(&Record {
             level: Level::Error,
             target: "log",
-            arguments: format_args!("Logger has already been initialized."),
+            arguments: format_args!("Logger has already been initialized"),
         });
     }
 
@@ -143,42 +367,4 @@ fn install(log: &'static Logger) -> Result<(), log_external::SetLoggerError> {
 
 pub fn is_initialized() -> bool {
     LOGGER_INSTANCE.try_get().is_some()
-}
-
-pub fn test_write(logger: &impl LoggerTrait) {
-    for i in 0..5 {
-        logger.write(format_args!("This is a test message number {i}."));
-    }
-}
-
-pub fn test_log(logger: &impl LoggerTrait) {
-    logger.log(&Record {
-        level: Level::Info,
-        target: "test_target",
-        arguments: format_args!("This is a test log message."),
-    });
-    logger.log(&Record {
-        level: Level::Warn,
-        target: "test_target",
-        arguments: format_args!("This is a test warning message."),
-    });
-    logger.log(&Record {
-        level: Level::Error,
-        target: "test_target",
-        arguments: format_args!("This is a test error message."),
-    });
-    logger.log(&Record {
-        level: Level::Debug,
-        target: "test_target",
-        arguments: format_args!("This is a test debug message."),
-    });
-    logger.log(&Record {
-        level: Level::Trace,
-        target: "test_target",
-        arguments: format_args!("This is a test trace message."),
-    });
-}
-
-pub fn test_flush(logger: &impl LoggerTrait) {
-    logger.flush();
 }
