@@ -216,6 +216,10 @@ impl MountOperations for FileSystem {
 }
 
 impl FileSystemOperations for FileSystem {
+    fn supports_confined_namespace(&self) -> bool {
+        true
+    }
+
     fn writable_attributes(&self) -> file_system::AttributeFlags {
         InternalAttributes::PERSISTED_ATTRIBUTE_FLAGS
     }

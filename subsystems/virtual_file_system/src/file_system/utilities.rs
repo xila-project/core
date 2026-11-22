@@ -3,11 +3,15 @@ use crate::{
 };
 use alloc::{borrow::ToOwned, collections::btree_map::BTreeMap, string::String, vec::Vec};
 use exported_file_system::{
-    AccessFlags, AttributeFlags, Attributes, BlockDevice, CharacterDevice, Context,
-    FileSystemOperations, Flags, Inode, Kind, Path, PathOwned, Permission, Permissions, Time,
+    AccessFlags, AttributeFlags, AttributeOperations, Attributes, BaseOperations, BlockDevice,
+    CharacterDevice, Context, DirectoryOperations, FileSystemOperations, Flags, Inode, Kind, Path,
+    PathOwned, Permission, Permissions, Time,
 };
 use task::TaskIdentifier;
 use users::{GroupIdentifier, UserIdentifier};
+
+const MAX_PATH_LENGTH: usize = 4096;
+const MAX_SYMLINKS: usize = 40;
 
 pub(super) struct InternalFileSystem {
     pub reference_count: usize,
@@ -43,11 +47,123 @@ pub(super) enum ResolvedPath<'a> {
     Owned(PathOwned),
 }
 
+/// Pinned directory handle used during component-wise traversal on backends
+/// that perform entry operations relative to an opened directory [`Context`].
+pub(super) struct OpenDirectoryHandle {
+    file_system: &'static dyn FileSystemOperations,
+    context: Context,
+    closed: bool,
+}
+
+impl OpenDirectoryHandle {
+    pub async fn open_root(file_system: &'static dyn FileSystemOperations) -> Result<Self> {
+        let mut context = Context::new_empty();
+        poll(|| file_system.lookup_directory(&mut context, Path::ROOT)).await?;
+        Ok(Self {
+            file_system,
+            context,
+            closed: false,
+        })
+    }
+
+    pub async fn open_child(&self, name: &str) -> Result<Self> {
+        let mut context = Context::new_empty();
+        poll(|| {
+            self.file_system
+                .lookup_directory_entry(&self.context, name, &mut context)
+        })
+        .await?;
+        Ok(Self {
+            file_system: self.file_system,
+            context,
+            closed: false,
+        })
+    }
+
+    pub fn duplicate(&self) -> Result<Self> {
+        let context = self.file_system.clone_context(&self.context)?;
+        Ok(Self {
+            file_system: self.file_system,
+            context,
+            closed: false,
+        })
+    }
+
+    pub fn context(&self) -> &Context {
+        &self.context
+    }
+
+    pub fn context_mutable(&mut self) -> &mut Context {
+        &mut self.context
+    }
+
+    pub fn into_context(mut self) -> Context {
+        self.closed = true;
+        core::mem::replace(&mut self.context, Context::new_empty())
+    }
+}
+
+impl Drop for OpenDirectoryHandle {
+    fn drop(&mut self) {
+        if !self.closed {
+            let _ = DirectoryOperations::close(self.file_system, &mut self.context);
+        }
+    }
+}
+
+pub(super) struct ResolvedTarget<'a> {
+    pub path: ResolvedPath<'a>,
+    pub mount_index: usize,
+    pub current_directory: Option<OpenDirectoryHandle>,
+    pub parent_directory: Option<OpenDirectoryHandle>,
+}
+
+impl<'a> ResolvedTarget<'a> {
+    pub fn relative_path<'b>(&'b self, file_systems: &[InternalFileSystem]) -> Result<&'b Path>
+    where
+        'a: 'b,
+    {
+        self.path
+            .strip_prefix_absolute(&file_systems[self.mount_index].mount_point)
+            .ok_or(IoErrorKind::InvalidPath)
+    }
+
+    pub fn entry_name<'b>(&'b self, file_systems: &[InternalFileSystem]) -> Result<&'b str>
+    where
+        'a: 'b,
+    {
+        self.relative_path(file_systems)?
+            .get_file_name()
+            .ok_or(IoErrorKind::InvalidPath)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ResolutionOptions<'a> {
+    follow_final: bool,
+    allow_missing_final: bool,
+    user: UserIdentifier,
+    task: TaskIdentifier,
+    root: Option<&'a Path>,
+}
+
+pub(super) struct ConfinedRoot {
+    path: PathOwned,
+    mount_index: usize,
+    directory: Option<OpenDirectoryHandle>,
+}
+
 struct ResolutionState {
-    resolved: PathOwned,
+    resolved: String,
+    candidate: String,
     pending: String,
     links_followed: usize,
     target_buffer: Vec<u8>,
+    mount_index: usize,
+    current_directory: Option<OpenDirectoryHandle>,
+    parent_directory: Option<OpenDirectoryHandle>,
+    root_mount_index: usize,
+    root_directory: Option<OpenDirectoryHandle>,
 }
 
 impl core::ops::Deref for ResolvedPath<'_> {
@@ -75,11 +191,10 @@ impl VirtualFileSystem {
         path: &Path,
         buffer: &mut Vec<u8>,
     ) -> Result<usize> {
-        const MAX_TARGET_LENGTH: usize = 4096;
         let mut attributes = Attributes::new().set_mask(AttributeFlags::Size);
         Self::get_attributes(file_system, path, &mut attributes).await?;
         let size = *attributes.get_size().ok_or(IoErrorKind::InputOutput)? as usize;
-        if size == 0 || size > MAX_TARGET_LENGTH {
+        if size == 0 || size > MAX_PATH_LENGTH {
             return Err(IoErrorKind::CorruptData);
         }
 
@@ -99,7 +214,52 @@ impl VirtualFileSystem {
         poll(|| file_system.lookup_file(&mut context, path, Flags::from(AccessFlags::Read)))
             .await?;
         let read = file_system.read_sync(&mut context, buffer.as_mut_slice(), 0);
-        let close = exported_file_system::BaseOperations::close(file_system, &mut context);
+        let close = BaseOperations::close(file_system, &mut context);
+        let read = read?;
+        close?;
+        if read != size {
+            return Err(IoErrorKind::CorruptData);
+        }
+        Ok(read)
+    }
+
+    pub(super) async fn read_entry_link_payload(
+        file_system: &dyn FileSystemOperations,
+        parent: &Context,
+        name: &str,
+        buffer: &mut Vec<u8>,
+    ) -> Result<usize> {
+        let mut attributes = Attributes::new().set_mask(AttributeFlags::Size);
+        poll(|| file_system.get_entry_attributes(parent, name, &mut attributes)).await?;
+        let size = *attributes.get_size().ok_or(IoErrorKind::InputOutput)? as usize;
+        if size == 0 || size > MAX_PATH_LENGTH {
+            return Err(IoErrorKind::CorruptData);
+        }
+
+        buffer.resize(size, 0);
+        match poll(|| file_system.read_symlink_entry(parent, name, buffer.as_mut_slice())).await {
+            Ok(read) => {
+                if read != size {
+                    return Err(IoErrorKind::CorruptData);
+                }
+                return Ok(read);
+            }
+            Err(IoErrorKind::Unsupported) => {}
+            Err(error) => return Err(error),
+        }
+
+        let mut context = Context::new_empty();
+        poll(|| {
+            file_system.lookup_file_entry(
+                parent,
+                name,
+                &mut context,
+                Flags::from(AccessFlags::Read),
+            )
+        })
+        .await?;
+        let read = file_system.read_sync(&mut context, buffer.as_mut_slice(), 0);
+        let close = BaseOperations::close(file_system, &mut context);
         let read = read?;
         close?;
         if read != size {
@@ -109,7 +269,8 @@ impl VirtualFileSystem {
     }
 
     /// Resolve symlinks component by component. Canonical paths without links
-    /// stay borrowed; scratch storage is created only after normalization or a link.
+    /// stay borrowed on path-based backends; scratch storage is created only
+    /// after normalization or a link.
     pub(super) async fn resolve_path<'a>(
         &self,
         file_systems: &FileSystemsArray,
@@ -118,59 +279,244 @@ impl VirtualFileSystem {
         allow_missing_final: bool,
         user: UserIdentifier,
         task: TaskIdentifier,
-    ) -> Result<ResolvedPath<'a>> {
+    ) -> Result<ResolvedTarget<'a>> {
         let require_directory = path.as_str().len() > 1 && path.as_str().ends_with('/');
-        let resolved = if require_directory {
+        let mut resolved = if require_directory {
             let normalized = PathOwned::try_from(path.as_str().trim_end_matches('/'))
                 .map_err(|_| IoErrorKind::InvalidPath)?;
-            let resolved = self
+            let ResolvedTarget {
+                path: resolved_path,
+                mount_index,
+                current_directory,
+                parent_directory,
+            } = self
                 .resolve_path_inner(
                     file_systems,
                     &normalized,
-                    follow_final,
-                    allow_missing_final,
-                    user,
-                    task,
+                    ResolutionOptions {
+                        follow_final,
+                        allow_missing_final,
+                        user,
+                        task,
+                        root: None,
+                    },
                     None,
                 )
                 .await?;
-            ResolvedPath::Owned(
-                PathOwned::try_from(resolved.as_str()).map_err(|_| IoErrorKind::InvalidPath)?,
-            )
+            let owned = PathOwned::try_from(resolved_path.as_str())
+                .map_err(|_| IoErrorKind::InvalidPath)?;
+            ResolvedTarget {
+                path: ResolvedPath::Owned(owned),
+                mount_index,
+                current_directory,
+                parent_directory,
+            }
         } else {
             self.resolve_path_inner(
                 file_systems,
                 path,
-                follow_final,
-                allow_missing_final,
-                user,
-                task,
+                ResolutionOptions {
+                    follow_final,
+                    allow_missing_final,
+                    user,
+                    task,
+                    root: None,
+                },
                 None,
             )
             .await?
         };
         if require_directory {
-            let (file_system, relative_path, _) =
-                Self::get_file_system_from_path(file_systems, &resolved)?;
-            let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
-            match Self::get_attributes(file_system.file_system, relative_path, &mut attributes)
-                .await
-            {
-                Ok(()) => {}
-                Err(IoErrorKind::NotFound) if allow_missing_final => {
-                    return Ok(resolved);
-                }
-                Err(error) => return Err(error),
-            }
-            if attributes.get_kind() != Some(&Kind::Directory) {
-                return Err(IoErrorKind::NotADirectory);
-            }
+            Self::verify_resolved_directory(file_systems, &mut resolved, allow_missing_final)
+                .await?;
         }
         Ok(resolved)
     }
 
+    async fn verify_resolved_directory(
+        file_systems: &FileSystemsArray,
+        resolved: &mut ResolvedTarget<'_>,
+        allow_missing_final: bool,
+    ) -> Result<()> {
+        let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
+        match Self::target_attributes(file_systems, resolved, &mut attributes).await {
+            Ok(()) => {}
+            Err(IoErrorKind::NotFound) if allow_missing_final => {
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        }
+        if attributes.get_kind() != Some(&Kind::Directory) {
+            return Err(IoErrorKind::NotADirectory);
+        }
+        Ok(())
+    }
+
+    /// Revalidate a pre-resolved confinement root without following any
+    /// symbolic links, verifying mount namespace guarantees along the path.
+    pub(super) async fn validate_confined_root(
+        &self,
+        file_systems: &FileSystemsArray,
+        root: &Path,
+        user: UserIdentifier,
+        task: TaskIdentifier,
+    ) -> Result<ConfinedRoot> {
+        if !root.is_valid() || !root.is_absolute() || root.get_length() > MAX_PATH_LENGTH {
+            return Err(IoErrorKind::InvalidPath);
+        }
+
+        let (root_file_system, _, mut mount_index) =
+            Self::get_file_system_from_path(file_systems, Path::ROOT)?;
+        if !root_file_system.file_system.supports_confined_namespace() {
+            return Err(IoErrorKind::PathEscapesRoot);
+        }
+        let mut current_directory = if root_file_system
+            .file_system
+            .supports_directory_entry_operations()
+        {
+            Some(OpenDirectoryHandle::open_root(root_file_system.file_system).await?)
+        } else {
+            None
+        };
+
+        if root.is_root() {
+            let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
+            if let Some(directory) = current_directory.as_mut() {
+                poll(|| {
+                    AttributeOperations::get_attributes(
+                        root_file_system.file_system,
+                        directory.context_mutable(),
+                        &mut attributes,
+                    )
+                })
+                .await?;
+            } else {
+                Self::get_attributes(root_file_system.file_system, Path::ROOT, &mut attributes)
+                    .await?;
+            }
+            if attributes.get_kind() != Some(&Kind::Directory) {
+                return Err(IoErrorKind::NotADirectory);
+            }
+            return Ok(ConfinedRoot {
+                path: PathOwned::root(),
+                mount_index,
+                directory: current_directory,
+            });
+        }
+
+        let text = root.as_str();
+        let mut parent_end = 1usize;
+        let mut component_start = 1usize;
+        while component_start < text.len() {
+            let component_end = text[component_start..]
+                .find('/')
+                .map_or(text.len(), |offset| component_start + offset);
+            let component = &text[component_start..component_end];
+            if component.is_empty() || component == "." || component == ".." {
+                return Err(IoErrorKind::InvalidPath);
+            }
+
+            let parent_path = Path::from_str(&text[..parent_end]);
+            self.check_directory_execute_permission(
+                file_systems,
+                mount_index,
+                parent_path,
+                current_directory.as_mut(),
+                user,
+                task,
+            )
+            .await?;
+
+            let candidate_path = Path::from_str(&text[..component_end]);
+            let (candidate_file_system, candidate_relative, candidate_mount_index) =
+                Self::get_file_system_from_path(file_systems, candidate_path)?;
+            if !candidate_file_system
+                .file_system
+                .supports_confined_namespace()
+            {
+                return Err(IoErrorKind::PathEscapesRoot);
+            }
+
+            let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
+            if candidate_mount_index != mount_index {
+                let mut new_directory = if candidate_file_system
+                    .file_system
+                    .supports_directory_entry_operations()
+                {
+                    Some(OpenDirectoryHandle::open_root(candidate_file_system.file_system).await?)
+                } else {
+                    None
+                };
+                if let Some(directory) = new_directory.as_mut() {
+                    poll(|| {
+                        AttributeOperations::get_attributes(
+                            candidate_file_system.file_system,
+                            directory.context_mutable(),
+                            &mut attributes,
+                        )
+                    })
+                    .await?;
+                } else {
+                    Self::get_attributes(
+                        candidate_file_system.file_system,
+                        Path::ROOT,
+                        &mut attributes,
+                    )
+                    .await?;
+                }
+                let kind = *attributes.get_kind().ok_or(IoErrorKind::InputOutput)?;
+                if kind == Kind::SymbolicLink {
+                    return Err(IoErrorKind::PathEscapesRoot);
+                }
+                if kind != Kind::Directory {
+                    return Err(IoErrorKind::NotADirectory);
+                }
+                current_directory = new_directory;
+                mount_index = candidate_mount_index;
+            } else {
+                if let Some(directory) = current_directory.as_ref() {
+                    poll(|| {
+                        candidate_file_system.file_system.get_entry_attributes(
+                            directory.context(),
+                            component,
+                            &mut attributes,
+                        )
+                    })
+                    .await?;
+                } else {
+                    Self::get_attributes(
+                        candidate_file_system.file_system,
+                        candidate_relative,
+                        &mut attributes,
+                    )
+                    .await?;
+                }
+                let kind = *attributes.get_kind().ok_or(IoErrorKind::InputOutput)?;
+                if kind == Kind::SymbolicLink {
+                    return Err(IoErrorKind::PathEscapesRoot);
+                }
+                if kind != Kind::Directory {
+                    return Err(IoErrorKind::NotADirectory);
+                }
+                if let Some(directory) = current_directory.as_ref() {
+                    current_directory = Some(directory.open_child(component).await?);
+                }
+            }
+
+            parent_end = component_end;
+            component_start = component_end + 1;
+        }
+
+        Ok(ConfinedRoot {
+            path: root.to_owned(),
+            mount_index,
+            directory: current_directory,
+        })
+    }
+
     /// Resolve a relative path beneath a trusted directory while the caller holds
-    /// the mount table guard. Absolute link targets never acquire ambient authority.
+    /// the mount table guard. Absolute link targets never acquire ambient authority,
+    /// and revalidating `root` never follows symbolic links.
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn resolve_path_with_root<'a>(
         &self,
@@ -181,7 +527,7 @@ impl VirtualFileSystem {
         user: UserIdentifier,
         task: TaskIdentifier,
         root: Option<&Path>,
-    ) -> Result<ResolvedPath<'a>> {
+    ) -> Result<ResolvedTarget<'a>> {
         let Some(root) = root else {
             return self
                 .resolve_path(
@@ -197,73 +543,169 @@ impl VirtualFileSystem {
         if path.is_absolute() {
             return Err(IoErrorKind::PathEscapesRoot);
         }
-        let root = self
-            .resolve_path(file_systems, root, true, false, user, task)
+        let confined_root = self
+            .validate_confined_root(file_systems, root, user, task)
             .await?;
-        let (fs, relative, _) = Self::get_file_system_from_path(file_systems, &root)?;
-        let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
-        Self::get_attributes(fs.file_system, relative, &mut attributes).await?;
-        if attributes.get_kind() != Some(&Kind::Directory) {
-            return Err(IoErrorKind::NotADirectory);
-        }
-        let mut joined = String::with_capacity(root.get_length() + 1 + path.get_length());
-        joined.push_str(root.as_str().trim_end_matches('/'));
-        joined.push('/');
-        joined.push_str(path.as_str());
-        let joined = PathOwned::new(joined).ok_or(IoErrorKind::InvalidPath)?;
+
         let require_directory = path.as_str().ends_with('/');
-        let resolved = self
+        let trimmed_path = path.as_str().trim_end_matches('/');
+        let mut joined =
+            String::with_capacity(confined_root.path.get_length() + 1 + trimmed_path.len());
+        joined.push_str(confined_root.path.as_str().trim_end_matches('/'));
+        if !trimmed_path.is_empty() {
+            joined.push('/');
+            joined.push_str(trimmed_path);
+        } else if joined.is_empty() {
+            joined.push('/');
+        }
+        let joined = PathOwned::try_from(joined).map_err(|_| IoErrorKind::InvalidPath)?;
+        let root_path = confined_root.path.clone();
+        let target = self
             .resolve_path_inner(
                 file_systems,
                 &joined,
-                follow_final,
-                allow_missing_final,
-                user,
-                task,
-                Some(&root),
+                ResolutionOptions {
+                    follow_final,
+                    allow_missing_final,
+                    user,
+                    task,
+                    root: Some(&root_path),
+                },
+                Some(confined_root),
             )
             .await?;
-        if require_directory {
-            let (fs, relative, _) = Self::get_file_system_from_path(file_systems, &resolved)?;
-            let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
-            match Self::get_attributes(fs.file_system, relative, &mut attributes).await {
-                Err(IoErrorKind::NotFound) if allow_missing_final => {}
-                Err(error) => return Err(error),
-                Ok(()) if attributes.get_kind() != Some(&Kind::Directory) => {
-                    return Err(IoErrorKind::NotADirectory);
-                }
-                Ok(()) => {}
+        let ResolvedTarget {
+            path: target_path,
+            mount_index,
+            current_directory,
+            parent_directory,
+        } = target;
+        let owned = match target_path {
+            ResolvedPath::Borrowed(borrowed) => {
+                PathOwned::try_from(borrowed.as_str()).map_err(|_| IoErrorKind::InvalidPath)?
             }
-        }
-        Ok(ResolvedPath::Owned(match resolved {
-            ResolvedPath::Borrowed(_) => joined,
             ResolvedPath::Owned(path) => path,
-        }))
+        };
+        let mut owned_target = ResolvedTarget {
+            path: ResolvedPath::Owned(owned),
+            mount_index,
+            current_directory,
+            parent_directory,
+        };
+        if require_directory {
+            Self::verify_resolved_directory(file_systems, &mut owned_target, allow_missing_final)
+                .await?;
+        }
+        Ok(owned_target)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    async fn check_directory_execute_permission(
+        &self,
+        file_systems: &FileSystemsArray,
+        mount_index: usize,
+        path: &Path,
+        directory_handle: Option<&mut OpenDirectoryHandle>,
+        user: UserIdentifier,
+        task: TaskIdentifier,
+    ) -> Result<()> {
+        let internal_file_system = &file_systems[mount_index];
+        if let Some(directory) = directory_handle {
+            let mut attributes = Attributes::default().set_mask(
+                AttributeFlags::User | AttributeFlags::Group | AttributeFlags::Permissions,
+            );
+            poll(|| {
+                AttributeOperations::get_attributes(
+                    internal_file_system.file_system,
+                    directory.context_mutable(),
+                    &mut attributes,
+                )
+            })
+            .await?;
+            return self
+                .check_attributes_permissions(&attributes, Permission::Execute, user)
+                .await;
+        }
+        let relative = path
+            .strip_prefix_absolute(&internal_file_system.mount_point)
+            .ok_or(IoErrorKind::InvalidPath)?;
+        self.check_permissions(
+            internal_file_system.file_system,
+            relative,
+            Permission::Execute,
+            user,
+            task,
+        )
+        .await
+    }
+
     async fn resolve_path_inner<'a>(
         &self,
         file_systems: &FileSystemsArray,
         path: &'a Path,
-        follow_final: bool,
-        allow_missing_final: bool,
-        user: UserIdentifier,
-        task: TaskIdentifier,
-        root: Option<&Path>,
-    ) -> Result<ResolvedPath<'a>> {
-        const MAX_PATH_LENGTH: usize = 4096;
+        options: ResolutionOptions<'_>,
+        confined_root: Option<ConfinedRoot>,
+    ) -> Result<ResolvedTarget<'a>> {
         if !path.is_valid() || !path.is_absolute() || path.get_length() > MAX_PATH_LENGTH {
             return Err(IoErrorKind::InvalidPath);
         }
 
-        // Fast path: walk borrowed prefixes first. This avoids allocating a
-        // String/PathOwned and a target buffer for ordinary paths.
         let text = path.as_str();
-        let mut parent_end =
-            root.map_or(1, |root| root.as_str().trim_end_matches('/').len().max(1));
+        let (
+            mut parent_end,
+            mut mount_index,
+            mut current_directory,
+            root_mount_index,
+            root_directory,
+        ) = if let Some(confined) = confined_root {
+            let root_length = confined.path.as_str().len().max(1);
+            let root_mount_index = confined.mount_index;
+            let current_directory = if text.len() > root_length {
+                confined
+                    .directory
+                    .as_ref()
+                    .map(OpenDirectoryHandle::duplicate)
+                    .transpose()?
+            } else {
+                None
+            };
+            let (current_directory, root_directory) = if text.len() > root_length {
+                (current_directory, confined.directory)
+            } else {
+                (confined.directory, None)
+            };
+            (
+                root_length,
+                root_mount_index,
+                current_directory,
+                root_mount_index,
+                root_directory,
+            )
+        } else {
+            let (root_file_system, _, root_mount_index) =
+                Self::get_file_system_from_path(file_systems, Path::ROOT)?;
+            let current_directory = if root_file_system
+                .file_system
+                .supports_directory_entry_operations()
+            {
+                Some(OpenDirectoryHandle::open_root(root_file_system.file_system).await?)
+            } else {
+                None
+            };
+            (
+                1usize,
+                root_mount_index,
+                current_directory,
+                root_mount_index,
+                None,
+            )
+        };
+
+        let mut parent_directory: Option<OpenDirectoryHandle> = None;
         let mut component_start = if parent_end > 1 { parent_end + 1 } else { 1 };
         let mut target_buffer = Vec::new();
+
+        // Fast path: walk borrowed canonical prefixes first. This avoids
+        // allocating working Strings or a target buffer for ordinary paths.
         while component_start < text.len() {
             let component_end = text[component_start..]
                 .find('/')
@@ -273,196 +715,437 @@ impl VirtualFileSystem {
                 break;
             }
             let has_remaining = component_end < text.len();
-            let parent = Path::from_str(&text[..parent_end]);
-            let (parent_file_system, parent_relative, _) =
-                Self::get_file_system_from_path(file_systems, parent)?;
-            self.check_permissions(
-                parent_file_system.file_system,
-                parent_relative,
-                Permission::Execute,
-                user,
-                task,
+            let parent_path = Path::from_str(&text[..parent_end]);
+            self.check_directory_execute_permission(
+                file_systems,
+                mount_index,
+                parent_path,
+                current_directory.as_mut(),
+                options.user,
+                options.task,
             )
             .await?;
 
-            let candidate = Path::from_str(&text[..component_end]);
-            let (file_system, relative_path, _) =
-                Self::get_file_system_from_path(file_systems, candidate)?;
-            let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
-            match Self::get_attributes(file_system.file_system, relative_path, &mut attributes)
-                .await
+            let candidate_path = Path::from_str(&text[..component_end]);
+            let (candidate_file_system, candidate_relative, candidate_mount_index) =
+                Self::get_file_system_from_path(file_systems, candidate_path)?;
+            if options.root.is_some()
+                && !candidate_file_system
+                    .file_system
+                    .supports_confined_namespace()
             {
+                return Err(IoErrorKind::PathEscapesRoot);
+            }
+
+            let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
+            let crossed_mount = candidate_mount_index != mount_index;
+            let mut entered_mount_directory = None;
+            let found = if crossed_mount {
+                if candidate_file_system
+                    .file_system
+                    .supports_directory_entry_operations()
+                {
+                    let mut new_directory =
+                        OpenDirectoryHandle::open_root(candidate_file_system.file_system).await?;
+                    let result = poll(|| {
+                        AttributeOperations::get_attributes(
+                            candidate_file_system.file_system,
+                            new_directory.context_mutable(),
+                            &mut attributes,
+                        )
+                    })
+                    .await;
+                    entered_mount_directory = Some(new_directory);
+                    result
+                } else {
+                    Self::get_attributes(
+                        candidate_file_system.file_system,
+                        Path::ROOT,
+                        &mut attributes,
+                    )
+                    .await
+                }
+            } else if let Some(directory) = current_directory.as_ref() {
+                poll(|| {
+                    candidate_file_system.file_system.get_entry_attributes(
+                        directory.context(),
+                        component,
+                        &mut attributes,
+                    )
+                })
+                .await
+            } else {
+                Self::get_attributes(
+                    candidate_file_system.file_system,
+                    candidate_relative,
+                    &mut attributes,
+                )
+                .await
+            };
+
+            match found {
                 Ok(()) => {}
-                Err(IoErrorKind::NotFound) if !has_remaining && allow_missing_final => {
-                    return Ok(ResolvedPath::Borrowed(path));
+                Err(IoErrorKind::NotFound) if !has_remaining && options.allow_missing_final => {
+                    return Ok(ResolvedTarget {
+                        path: ResolvedPath::Borrowed(path),
+                        mount_index: if crossed_mount {
+                            candidate_mount_index
+                        } else {
+                            mount_index
+                        },
+                        current_directory: None,
+                        parent_directory: if crossed_mount {
+                            None
+                        } else {
+                            current_directory
+                        },
+                    });
                 }
                 Err(error) => return Err(error),
             }
+
             let kind = *attributes.get_kind().ok_or(IoErrorKind::InputOutput)?;
-            if kind == Kind::SymbolicLink && (has_remaining || follow_final) {
-                let length = Self::read_link_payload(
-                    file_system.file_system,
-                    relative_path,
-                    &mut target_buffer,
-                )
-                .await?;
+            if kind == Kind::SymbolicLink && (has_remaining || options.follow_final) {
+                let length = if let Some(directory) = current_directory.as_ref()
+                    && !crossed_mount
+                {
+                    Self::read_entry_link_payload(
+                        candidate_file_system.file_system,
+                        directory.context(),
+                        component,
+                        &mut target_buffer,
+                    )
+                    .await?
+                } else {
+                    Self::read_link_payload(
+                        candidate_file_system.file_system,
+                        candidate_relative,
+                        &mut target_buffer,
+                    )
+                    .await?
+                };
                 let target = core::str::from_utf8(&target_buffer[..length])
                     .map_err(|_| IoErrorKind::CorruptData)?;
                 if !Path::new(target).is_valid() || target.is_empty() {
                     return Err(IoErrorKind::CorruptData);
                 }
-
-                if root.is_some() && target.starts_with('/') {
+                if options.root.is_some() && target.starts_with('/') {
                     return Err(IoErrorKind::PathEscapesRoot);
                 }
-                let mut pending = String::with_capacity(target.len() + text.len() - component_end);
-                pending.push_str(target);
-                pending.push_str(&text[component_end..]);
-                let resolved = if target.starts_with('/') {
-                    PathOwned::root()
+
+                let (resolved, mount_index, current_directory) = if target.starts_with('/') {
+                    let (root_file_system, _, root_mount) =
+                        Self::get_file_system_from_path(file_systems, Path::ROOT)?;
+                    let root_directory = if root_file_system
+                        .file_system
+                        .supports_directory_entry_operations()
+                    {
+                        Some(OpenDirectoryHandle::open_root(root_file_system.file_system).await?)
+                    } else {
+                        None
+                    };
+                    (String::from("/"), root_mount, root_directory)
                 } else {
-                    PathOwned::try_from(&text[..parent_end])
-                        .map_err(|_| IoErrorKind::InvalidPath)?
+                    (
+                        String::from(&text[..parent_end]),
+                        mount_index,
+                        current_directory,
+                    )
                 };
+
+                let target_trimmed = target.trim_start_matches('/');
+                let suffix = text[component_end..].trim_start_matches('/');
+                let needs_separator = !target_trimmed.is_empty() && !suffix.is_empty();
+                let pending_length =
+                    target_trimmed.len() + usize::from(needs_separator) + suffix.len();
+                if resolved.len().saturating_add(pending_length) > MAX_PATH_LENGTH {
+                    return Err(IoErrorKind::NameTooLong);
+                }
+                let mut pending = String::with_capacity(pending_length);
+                pending.push_str(target_trimmed);
+                if needs_separator {
+                    pending.push('/');
+                }
+                pending.push_str(suffix);
+
                 return self
                     .resolve_pending(
                         file_systems,
                         ResolutionState {
                             resolved,
+                            candidate: String::new(),
                             pending,
                             links_followed: 1,
                             target_buffer,
+                            mount_index,
+                            current_directory,
+                            parent_directory: None,
+                            root_mount_index,
+                            root_directory,
                         },
-                        follow_final,
-                        allow_missing_final,
-                        user,
-                        task,
-                        root,
+                        options,
                     )
                     .await;
             }
+
             if has_remaining && kind != Kind::Directory {
                 return Err(IoErrorKind::NotADirectory);
             }
+
+            if crossed_mount {
+                mount_index = candidate_mount_index;
+                parent_directory = None;
+                current_directory = entered_mount_directory;
+            } else if candidate_file_system
+                .file_system
+                .supports_directory_entry_operations()
+            {
+                if has_remaining {
+                    let next_directory = current_directory
+                        .as_ref()
+                        .ok_or(IoErrorKind::InvalidState)?
+                        .open_child(component)
+                        .await?;
+                    parent_directory = current_directory.take();
+                    current_directory = Some(next_directory);
+                } else {
+                    parent_directory = current_directory.take();
+                    current_directory = None;
+                }
+            }
+
             parent_end = component_end;
             component_start = component_end + 1;
         }
 
         if component_start >= text.len() {
-            return Ok(ResolvedPath::Borrowed(path));
+            return Ok(ResolvedTarget {
+                path: ResolvedPath::Borrowed(path),
+                mount_index,
+                current_directory,
+                parent_directory,
+            });
         }
 
-        // Dot components and repeated separators need a normalized working
-        // path. This allocation is outside the common canonical-path flow.
-        let pending = String::from(if let Some(root) = root {
-            text[root.as_str().trim_end_matches('/').len()..].trim_start_matches('/')
-        } else {
-            text.strip_prefix('/').unwrap_or(text)
-        });
+        // Dot components and repeated separators need a normalized working path.
+        // Resume from the already-validated prefix instead of re-walking it.
+        let pending = String::from(text[component_start..].trim_start_matches('/'));
         self.resolve_pending(
             file_systems,
             ResolutionState {
-                resolved: root.map_or_else(PathOwned::root, |root| root.to_owned()),
+                resolved: String::from(&text[..parent_end]),
+                candidate: String::new(),
                 pending,
                 links_followed: 0,
                 target_buffer,
+                mount_index,
+                current_directory,
+                parent_directory,
+                root_mount_index,
+                root_directory,
             },
-            follow_final,
-            allow_missing_final,
-            user,
-            task,
-            root,
+            options,
         )
         .await
     }
 
-    #[allow(clippy::too_many_arguments)]
+    async fn rewalk_handles_to_resolved(
+        file_systems: &FileSystemsArray,
+        state: &mut ResolutionState,
+        root: Option<&Path>,
+    ) -> Result<()> {
+        let resolved_path = Path::from_str(&state.resolved);
+        let (target_file_system, relative_path, mount_index) =
+            Self::get_file_system_from_path(file_systems, resolved_path)?;
+        state.mount_index = mount_index;
+        if !target_file_system
+            .file_system
+            .supports_directory_entry_operations()
+        {
+            state.parent_directory = None;
+            state.current_directory = None;
+            return Ok(());
+        }
+
+        let (mut current, walk_relative) = if let Some(root_directory) =
+            state.root_directory.as_ref()
+            && mount_index == state.root_mount_index
+            && let Some(root_path) = root
+        {
+            let suffix = resolved_path.strip_prefix(root_path).unwrap_or(Path::EMPTY);
+            (root_directory.duplicate()?, suffix)
+        } else {
+            (
+                OpenDirectoryHandle::open_root(target_file_system.file_system).await?,
+                relative_path,
+            )
+        };
+
+        let mut parent = None;
+        for part in walk_relative
+            .as_str()
+            .split('/')
+            .filter(|part| !part.is_empty())
+        {
+            let next = current.open_child(part).await?;
+            parent = Some(current);
+            current = next;
+        }
+        state.parent_directory = parent;
+        state.current_directory = Some(current);
+        Ok(())
+    }
+
     async fn resolve_pending<'a>(
         &self,
         file_systems: &FileSystemsArray,
-        state: ResolutionState,
-        follow_final: bool,
-        allow_missing_final: bool,
-        user: UserIdentifier,
-        task: TaskIdentifier,
-        root: Option<&Path>,
-    ) -> Result<ResolvedPath<'a>> {
-        const MAX_PATH_LENGTH: usize = 4096;
-        const MAX_SYMLINKS: usize = 40;
-
-        let ResolutionState {
-            mut resolved,
-            mut pending,
-            mut links_followed,
-            mut target_buffer,
-        } = state;
-
-        while !pending.is_empty() {
-            let separator = pending.find('/').unwrap_or(pending.len());
-            let component = &pending[..separator];
+        mut state: ResolutionState,
+        options: ResolutionOptions<'_>,
+    ) -> Result<ResolvedTarget<'a>> {
+        while !state.pending.is_empty() {
+            let separator = state.pending.find('/').unwrap_or(state.pending.len());
             let mut consumed = separator;
-            while consumed < pending.len() && pending.as_bytes()[consumed] == b'/' {
+            while consumed < state.pending.len() && state.pending.as_bytes()[consumed] == b'/' {
                 consumed += 1;
             }
-            let has_remaining = consumed < pending.len();
+            let has_remaining = consumed < state.pending.len();
+            let component_length = separator;
 
-            if component.is_empty() || component == "." {
-                pending.drain(..consumed.max(1));
+            if component_length == 0 || (component_length == 1 && &state.pending[..1] == ".") {
+                state.pending.drain(..consumed.max(1));
                 continue;
             }
 
-            let (parent_file_system, parent_relative, _) =
-                Self::get_file_system_from_path(file_systems, &resolved)?;
-            self.check_permissions(
-                parent_file_system.file_system,
-                parent_relative,
-                Permission::Execute,
-                user,
-                task,
+            self.check_directory_execute_permission(
+                file_systems,
+                state.mount_index,
+                Path::from_str(&state.resolved),
+                state.current_directory.as_mut(),
+                options.user,
+                options.task,
             )
             .await?;
 
-            if component == ".." {
-                if root.is_some_and(|root| resolved.as_str() == root.as_str()) {
+            if component_length == 2 && &state.pending[..2] == ".." {
+                if options
+                    .root
+                    .is_some_and(|root| state.resolved.as_str() == root.as_str())
+                {
                     return Err(IoErrorKind::PathEscapesRoot);
                 }
-                if let Some(parent) = resolved.go_parent() {
-                    resolved = parent.to_owned();
+                if let Some(last_separator) = state.resolved.rfind('/') {
+                    if last_separator == 0 {
+                        state.resolved.truncate(1);
+                    } else {
+                        state.resolved.truncate(last_separator);
+                    }
                 }
-                pending.drain(..consumed.max(1));
+                state.pending.drain(..consumed.max(1));
+                Self::rewalk_handles_to_resolved(file_systems, &mut state, options.root).await?;
                 continue;
             }
 
-            let candidate = resolved
-                .to_owned()
-                .join(Path::from_str(component))
-                .ok_or(IoErrorKind::InvalidPath)?;
-            let (file_system, relative_path, _) =
-                Self::get_file_system_from_path(file_systems, &candidate)?;
+            let component = &state.pending[..component_length];
+            state.candidate.clear();
+            state.candidate.push_str(&state.resolved);
+            if !state.resolved.ends_with('/') {
+                state.candidate.push('/');
+            }
+            state.candidate.push_str(component);
+            if !Path::new(&state.candidate).is_valid() || state.candidate.len() > MAX_PATH_LENGTH {
+                return Err(IoErrorKind::InvalidPath);
+            }
+
+            let (file_system, relative_path, candidate_mount_index) =
+                Self::get_file_system_from_path(file_systems, Path::from_str(&state.candidate))?;
+            if options.root.is_some() && !file_system.file_system.supports_confined_namespace() {
+                return Err(IoErrorKind::PathEscapesRoot);
+            }
+
+            let crossed_mount = candidate_mount_index != state.mount_index;
+            let mut entered_mount_directory = None;
             let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
-            match Self::get_attributes(file_system.file_system, relative_path, &mut attributes)
+            let found = if crossed_mount {
+                if file_system
+                    .file_system
+                    .supports_directory_entry_operations()
+                {
+                    let mut new_directory =
+                        OpenDirectoryHandle::open_root(file_system.file_system).await?;
+                    let result = poll(|| {
+                        AttributeOperations::get_attributes(
+                            file_system.file_system,
+                            new_directory.context_mutable(),
+                            &mut attributes,
+                        )
+                    })
+                    .await;
+                    entered_mount_directory = Some(new_directory);
+                    result
+                } else {
+                    Self::get_attributes(file_system.file_system, Path::ROOT, &mut attributes).await
+                }
+            } else if let Some(directory) = state.current_directory.as_ref() {
+                poll(|| {
+                    file_system.file_system.get_entry_attributes(
+                        directory.context(),
+                        component,
+                        &mut attributes,
+                    )
+                })
                 .await
-            {
+            } else {
+                Self::get_attributes(file_system.file_system, relative_path, &mut attributes).await
+            };
+
+            match found {
                 Ok(()) => {}
-                Err(IoErrorKind::NotFound) if !has_remaining && allow_missing_final => {
-                    return Ok(ResolvedPath::Owned(candidate));
+                Err(IoErrorKind::NotFound) if !has_remaining && options.allow_missing_final => {
+                    let owned = PathOwned::try_from(core::mem::take(&mut state.candidate))
+                        .map_err(|_| IoErrorKind::InvalidPath)?;
+                    return Ok(ResolvedTarget {
+                        path: ResolvedPath::Owned(owned),
+                        mount_index: if crossed_mount {
+                            candidate_mount_index
+                        } else {
+                            state.mount_index
+                        },
+                        current_directory: None,
+                        parent_directory: if crossed_mount {
+                            None
+                        } else {
+                            state.current_directory
+                        },
+                    });
                 }
                 Err(error) => return Err(error),
             }
-            let kind = *attributes.get_kind().ok_or(IoErrorKind::InputOutput)?;
 
-            if kind == Kind::SymbolicLink && (has_remaining || follow_final) {
-                links_followed += 1;
-                if links_followed > MAX_SYMLINKS {
+            let kind = *attributes.get_kind().ok_or(IoErrorKind::InputOutput)?;
+            if kind == Kind::SymbolicLink && (has_remaining || options.follow_final) {
+                state.links_followed += 1;
+                if state.links_followed > MAX_SYMLINKS {
                     return Err(IoErrorKind::SymlinkLoop);
                 }
-                let target_length = Self::read_link_payload(
-                    file_system.file_system,
-                    relative_path,
-                    &mut target_buffer,
-                )
-                .await?;
-                let target = core::str::from_utf8(&target_buffer[..target_length])
+                let target_length = if let Some(directory) = state.current_directory.as_ref()
+                    && !crossed_mount
+                {
+                    Self::read_entry_link_payload(
+                        file_system.file_system,
+                        directory.context(),
+                        component,
+                        &mut state.target_buffer,
+                    )
+                    .await?
+                } else {
+                    Self::read_link_payload(
+                        file_system.file_system,
+                        relative_path,
+                        &mut state.target_buffer,
+                    )
+                    .await?
+                };
+                let target = core::str::from_utf8(&state.target_buffer[..target_length])
                     .map_err(|_| IoErrorKind::CorruptData)?;
                 if target.is_empty()
                     || target_length > MAX_PATH_LENGTH
@@ -471,32 +1154,385 @@ impl VirtualFileSystem {
                     return Err(IoErrorKind::CorruptData);
                 }
 
-                if root.is_some() && target.starts_with('/') {
+                if options.root.is_some() && target.starts_with('/') {
                     return Err(IoErrorKind::PathEscapesRoot);
                 }
                 if target.starts_with('/') {
-                    resolved = PathOwned::root();
+                    state.resolved.clear();
+                    state.resolved.push('/');
+                    state.parent_directory = None;
+                    let (root_file_system, _, root_mount) =
+                        Self::get_file_system_from_path(file_systems, Path::ROOT)?;
+                    state.mount_index = root_mount;
+                    state.current_directory = if root_file_system
+                        .file_system
+                        .supports_directory_entry_operations()
+                    {
+                        Some(OpenDirectoryHandle::open_root(root_file_system.file_system).await?)
+                    } else {
+                        None
+                    };
                 }
-                pending.drain(..consumed);
-                let target = target.trim_start_matches('/');
-                if !target.is_empty() && !pending.is_empty() {
-                    pending.insert(0, '/');
-                }
-                pending.insert_str(0, target);
-                if resolved.get_length().saturating_add(pending.len()) > MAX_PATH_LENGTH {
+
+                let target_trimmed = target.trim_start_matches('/');
+                let remaining_length = state.pending.len() - consumed;
+                let needs_separator = !target_trimmed.is_empty() && remaining_length > 0;
+                let new_pending_length =
+                    target_trimmed.len() + usize::from(needs_separator) + remaining_length;
+                if state.resolved.len().saturating_add(new_pending_length) > MAX_PATH_LENGTH {
                     return Err(IoErrorKind::NameTooLong);
                 }
+
+                state.pending.drain(..consumed);
+                if needs_separator {
+                    state.pending.insert(0, '/');
+                }
+                state.pending.insert_str(0, target_trimmed);
                 continue;
             }
 
             if has_remaining && kind != Kind::Directory {
                 return Err(IoErrorKind::NotADirectory);
             }
-            resolved = candidate;
-            pending.drain(..consumed);
+
+            if crossed_mount {
+                state.mount_index = candidate_mount_index;
+                state.parent_directory = None;
+                state.current_directory = entered_mount_directory;
+            } else if file_system
+                .file_system
+                .supports_directory_entry_operations()
+            {
+                if has_remaining {
+                    let next_directory = state
+                        .current_directory
+                        .as_ref()
+                        .ok_or(IoErrorKind::InvalidState)?
+                        .open_child(component)
+                        .await?;
+                    state.parent_directory = state.current_directory.take();
+                    state.current_directory = Some(next_directory);
+                } else {
+                    state.parent_directory = state.current_directory.take();
+                    state.current_directory = None;
+                }
+            }
+
+            core::mem::swap(&mut state.resolved, &mut state.candidate);
+            state.pending.drain(..consumed);
         }
 
-        Ok(ResolvedPath::Owned(resolved))
+        let owned = PathOwned::try_from(core::mem::take(&mut state.resolved))
+            .map_err(|_| IoErrorKind::InvalidPath)?;
+        Ok(ResolvedTarget {
+            path: ResolvedPath::Owned(owned),
+            mount_index: state.mount_index,
+            current_directory: state.current_directory,
+            parent_directory: state.parent_directory,
+        })
+    }
+
+    pub(super) async fn target_attributes(
+        file_systems: &FileSystemsArray,
+        target: &mut ResolvedTarget<'_>,
+        attributes: &mut Attributes,
+    ) -> Result<()> {
+        if attributes.get_mask().is_empty() {
+            return Ok(());
+        }
+        let file_system = file_systems[target.mount_index].file_system;
+        if let Some(directory) = target.current_directory.as_mut() {
+            poll(|| {
+                AttributeOperations::get_attributes(
+                    file_system,
+                    directory.context_mutable(),
+                    attributes,
+                )
+            })
+            .await
+        } else if let Some(parent) = target.parent_directory.as_ref() {
+            let entry_name = target.entry_name(file_systems)?;
+            poll(|| file_system.get_entry_attributes(parent.context(), entry_name, attributes))
+                .await
+        } else {
+            let relative_path = target.relative_path(file_systems)?;
+            Self::get_attributes(file_system, relative_path, attributes).await
+        }
+    }
+
+    pub(super) async fn set_target_attributes(
+        file_systems: &FileSystemsArray,
+        target: &mut ResolvedTarget<'_>,
+        attributes: &Attributes,
+    ) -> Result<()> {
+        let mask = attributes.get_mask();
+        if mask.is_empty() {
+            return Ok(());
+        }
+        let mut current = Attributes::new().set_mask(mask);
+        Self::target_attributes(file_systems, target, &mut current).await?;
+        if attributes_equal(&current, attributes) {
+            return Ok(());
+        }
+        let file_system = file_systems[target.mount_index].file_system;
+        if let Some(directory) = target.current_directory.as_mut() {
+            poll(|| {
+                AttributeOperations::set_attributes(
+                    file_system,
+                    directory.context_mutable(),
+                    attributes,
+                )
+            })
+            .await
+        } else if let Some(parent) = target.parent_directory.as_ref() {
+            let entry_name = target.entry_name(file_systems)?;
+            poll(|| file_system.set_entry_attributes(parent.context(), entry_name, attributes))
+                .await
+        } else {
+            let relative_path = target.relative_path(file_systems)?;
+            poll(|| FileSystemOperations::set_attributes(file_system, relative_path, attributes))
+                .await
+        }
+    }
+
+    pub(super) async fn update_target_read_access_time(
+        file_systems: &FileSystemsArray,
+        target: &mut ResolvedTarget<'_>,
+        time: Time,
+    ) -> Result<()> {
+        const SECONDS_PER_DAY: u64 = 24 * 60 * 60;
+        let internal_file_system = &file_systems[target.mount_index];
+        if !internal_file_system
+            .file_system
+            .writable_attributes()
+            .contains(AttributeFlags::AccessTime)
+        {
+            return Ok(());
+        }
+
+        let should_update = match internal_file_system.access_time_policy {
+            AccessTimePolicy::Never => false,
+            AccessTimePolicy::Always => true,
+            AccessTimePolicy::Relative => {
+                let mut current = Attributes::new().set_mask(
+                    AttributeFlags::AccessTime
+                        | AttributeFlags::ModificationTime
+                        | AttributeFlags::StatusTime,
+                );
+                Self::target_attributes(file_systems, target, &mut current).await?;
+                if let Some(&access) = current.get_access() {
+                    let older_than_modification = current
+                        .get_modification()
+                        .is_some_and(|modification| access < *modification);
+                    let older_than_status =
+                        current.get_status().is_some_and(|status| access < *status);
+                    let older_than_one_day =
+                        time.as_u64().saturating_sub(access.as_u64()) >= SECONDS_PER_DAY;
+                    older_than_modification || older_than_status || older_than_one_day
+                } else {
+                    false
+                }
+            }
+        };
+
+        if should_update {
+            let attributes = Attributes::new().set_access(time);
+            Self::set_target_attributes(file_systems, target, &attributes).await?;
+        }
+        Ok(())
+    }
+
+    pub(super) async fn check_attributes_permissions(
+        &self,
+        attributes: &Attributes,
+        asked_permissions: Permission,
+        current_user: UserIdentifier,
+    ) -> Result<()> {
+        if asked_permissions.contains(Permission::Write)
+            && self.writes_frozen.load(portable_atomic::Ordering::Acquire)
+        {
+            return Err(IoErrorKind::ResourceBusy);
+        }
+
+        let owner_user = *attributes.get_user().ok_or(IoErrorKind::InputOutput)?;
+        let owner_group = *attributes.get_group().ok_or(IoErrorKind::InputOutput)?;
+        let owner_permissions = *attributes
+            .get_permissions()
+            .ok_or(IoErrorKind::InputOutput)?;
+
+        if !Self::has_permissions(
+            self.users_manager,
+            current_user,
+            asked_permissions,
+            owner_user,
+            owner_group,
+            owner_permissions,
+        )
+        .await
+        {
+            log::error!(
+                "Asked permissions {:?} not granted for user {:?} (owner: {:?}, group: {:?}, permissions: {:?})",
+                asked_permissions,
+                current_user,
+                owner_user,
+                owner_group,
+                owner_permissions,
+            );
+            return Err(IoErrorKind::PermissionDenied);
+        }
+
+        Ok(())
+    }
+
+    pub(super) async fn check_target_parent_permissions(
+        &self,
+        file_systems: &FileSystemsArray,
+        target: &mut ResolvedTarget<'_>,
+        asked_permissions: Permission,
+        user: UserIdentifier,
+        task: TaskIdentifier,
+    ) -> Result<()> {
+        if let Some(parent) = target.parent_directory.as_mut() {
+            let file_system = file_systems[target.mount_index].file_system;
+            let mut attributes = Attributes::default().set_mask(
+                AttributeFlags::User | AttributeFlags::Group | AttributeFlags::Permissions,
+            );
+            poll(|| {
+                AttributeOperations::get_attributes(
+                    file_system,
+                    parent.context_mutable(),
+                    &mut attributes,
+                )
+            })
+            .await?;
+            return self
+                .check_attributes_permissions(&attributes, asked_permissions, user)
+                .await;
+        }
+        let parent_path = target.path.go_parent().ok_or(IoErrorKind::InvalidPath)?;
+        let (parent_file_system, relative_path, _) =
+            Self::get_file_system_from_path(file_systems, parent_path)?;
+        if parent_file_system
+            .file_system
+            .supports_directory_entry_operations()
+        {
+            let mut directory =
+                OpenDirectoryHandle::open_root(parent_file_system.file_system).await?;
+            for component in relative_path
+                .as_str()
+                .split('/')
+                .filter(|component| !component.is_empty())
+            {
+                directory = directory.open_child(component).await?;
+            }
+            let mut attributes = Attributes::default().set_mask(
+                AttributeFlags::User | AttributeFlags::Group | AttributeFlags::Permissions,
+            );
+            poll(|| {
+                AttributeOperations::get_attributes(
+                    parent_file_system.file_system,
+                    directory.context_mutable(),
+                    &mut attributes,
+                )
+            })
+            .await?;
+            return self
+                .check_attributes_permissions(&attributes, asked_permissions, user)
+                .await;
+        }
+        self.check_permissions(
+            parent_file_system.file_system,
+            relative_path,
+            asked_permissions,
+            user,
+            task,
+        )
+        .await
+    }
+
+    pub(super) async fn check_target_permissions_with_parent(
+        &self,
+        file_systems: &FileSystemsArray,
+        target: &mut ResolvedTarget<'_>,
+        current_permission: Permission,
+        parent_permission: Permission,
+        user: UserIdentifier,
+        task: TaskIdentifier,
+    ) -> Result<()> {
+        if !target.path.is_root() {
+            self.check_target_parent_permissions(
+                file_systems,
+                target,
+                parent_permission,
+                user,
+                task,
+            )
+            .await?;
+        }
+        let mut attributes = Attributes::default()
+            .set_mask(AttributeFlags::User | AttributeFlags::Group | AttributeFlags::Permissions);
+        Self::target_attributes(file_systems, target, &mut attributes).await?;
+        self.check_attributes_permissions(&attributes, current_permission, user)
+            .await
+    }
+
+    pub(super) async fn check_target_sticky_permissions(
+        &self,
+        file_systems: &FileSystemsArray,
+        target: &mut ResolvedTarget<'_>,
+        current_user: UserIdentifier,
+    ) -> Result<()> {
+        if current_user == UserIdentifier::ROOT {
+            return Ok(());
+        }
+        let file_system = file_systems[target.mount_index].file_system;
+        if let Some(parent) = target.parent_directory.as_mut() {
+            let mut parent_attributes = Attributes::default().set_mask(
+                AttributeFlags::User | AttributeFlags::Group | AttributeFlags::Permissions,
+            );
+            poll(|| {
+                AttributeOperations::get_attributes(
+                    file_system,
+                    parent.context_mutable(),
+                    &mut parent_attributes,
+                )
+            })
+            .await?;
+            let parent_owner = *parent_attributes
+                .get_user()
+                .ok_or(IoErrorKind::InputOutput)?;
+            let parent_permissions = *parent_attributes
+                .get_permissions()
+                .ok_or(IoErrorKind::InputOutput)?;
+            if !parent_permissions.get_special().get_sticky() || parent_owner == current_user {
+                return Ok(());
+            }
+            let entry_name = target
+                .path
+                .strip_prefix_absolute(&file_systems[target.mount_index].mount_point)
+                .and_then(|relative| relative.get_file_name())
+                .ok_or(IoErrorKind::InvalidPath)?;
+            let mut entry_attributes = Attributes::default().set_mask(AttributeFlags::User);
+            poll(|| {
+                file_system.get_entry_attributes(
+                    parent.context(),
+                    entry_name,
+                    &mut entry_attributes,
+                )
+            })
+            .await?;
+            let entry_owner = *entry_attributes
+                .get_user()
+                .ok_or(IoErrorKind::InputOutput)?;
+            if entry_owner != current_user {
+                return Err(IoErrorKind::PermissionDenied);
+            }
+            return Ok(());
+        }
+        let relative_path = target.relative_path(file_systems)?;
+        let parent_path = relative_path.go_parent().ok_or(IoErrorKind::InvalidPath)?;
+        self.check_sticky_permissions(file_system, parent_path, relative_path, current_user)
+            .await
     }
 
     pub(super) async fn has_permissions(
@@ -666,54 +1702,6 @@ impl VirtualFileSystem {
         (1..Inode::MAX).find(|&inode| !devices.contains_key(&inode))
     }
 
-    pub(super) async fn update_read_access_time(
-        file_system: &dyn FileSystemOperations,
-        policy: AccessTimePolicy,
-        path: &Path,
-        time: Time,
-    ) -> Result<()> {
-        const SECONDS_PER_DAY: u64 = 24 * 60 * 60;
-
-        if !file_system
-            .writable_attributes()
-            .contains(AttributeFlags::AccessTime)
-        {
-            return Ok(());
-        }
-
-        let should_update = match policy {
-            AccessTimePolicy::Never => false,
-            AccessTimePolicy::Always => true,
-            AccessTimePolicy::Relative => {
-                let mut current = Attributes::new().set_mask(
-                    AttributeFlags::AccessTime
-                        | AttributeFlags::ModificationTime
-                        | AttributeFlags::StatusTime,
-                );
-                Self::get_attributes(file_system, path, &mut current).await?;
-                if let Some(&access) = current.get_access() {
-                    let older_than_modification = current
-                        .get_modification()
-                        .is_some_and(|modification| access < *modification);
-                    let older_than_status =
-                        current.get_status().is_some_and(|status| access < *status);
-                    let older_than_one_day =
-                        time.as_u64().saturating_sub(access.as_u64()) >= SECONDS_PER_DAY;
-                    older_than_modification || older_than_status || older_than_one_day
-                } else {
-                    false
-                }
-            }
-        };
-
-        if should_update {
-            let attributes = Attributes::new().set_access(time);
-            Self::set_attributes(file_system, path, &attributes).await?;
-        }
-
-        Ok(())
-    }
-
     pub(super) async fn set_attributes(
         file_system: &dyn FileSystemOperations,
         path: &Path,
@@ -822,45 +1810,6 @@ impl VirtualFileSystem {
         if entry_owner != current_user {
             return Err(IoErrorKind::PermissionDenied);
         }
-
-        Ok(())
-    }
-
-    pub(super) async fn check_permissions_with_parent(
-        &self,
-        file_systems: &FileSystemsArray,
-        path: &Path,
-        current_permission: Permission,
-        parent_permission: Permission,
-        user: UserIdentifier,
-        task: TaskIdentifier,
-    ) -> Result<()> {
-        if !path.is_root() {
-            let parent_path = path.go_parent().ok_or(IoErrorKind::InvalidPath)?;
-
-            let (parent_file_system, relative_path, _) =
-                Self::get_file_system_from_path(file_systems, parent_path)?; // Get the file system identifier and the relative path
-
-            self.check_permissions(
-                parent_file_system.file_system,
-                relative_path,
-                parent_permission,
-                user,
-                task,
-            )
-            .await?;
-        }
-
-        let (file_system, relative_path, _) = Self::get_file_system_from_path(file_systems, path)?; // Get the file system identifier and the relative path
-
-        self.check_permissions(
-            file_system.file_system,
-            relative_path,
-            current_permission,
-            user,
-            task,
-        )
-        .await?;
 
         Ok(())
     }

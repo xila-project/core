@@ -1523,6 +1523,227 @@ async fn existing_files_remain_accessible_without_representable_utc() {
 
 #[cfg(target_os = "linux")]
 #[test]
+async fn confined_operations_reject_a_replaced_root_or_root_ancestor() {
+    let (task, virtual_file_system) = initialize().await;
+    for path in ["/granted", "/granted/child", "/other", "/other/child"] {
+        virtual_file_system
+            .create_directory(task, &path)
+            .await
+            .unwrap();
+    }
+    File::write_to_path(
+        virtual_file_system,
+        task,
+        "/granted/child/value",
+        b"granted",
+    )
+    .await
+    .unwrap();
+    File::write_to_path(virtual_file_system, task, "/other/child/value", b"other")
+        .await
+        .unwrap();
+
+    let relative = Path::new("value");
+    let root = Path::new("/granted/child");
+    let flags = Flags::from(AccessFlags::Read);
+    assert!(
+        virtual_file_system
+            .open_beneath(&relative, flags, task, root)
+            .await
+            .is_ok()
+    );
+
+    virtual_file_system
+        .rename(task, &"/granted", &"/original")
+        .await
+        .unwrap();
+    virtual_file_system
+        .create_symlink(task, Path::new("/other"), Path::new("/granted"))
+        .await
+        .unwrap();
+    assert!(matches!(
+        virtual_file_system
+            .open_beneath(&relative, flags, task, root)
+            .await,
+        Err(IoErrorKind::PathEscapesRoot)
+    ));
+
+    virtual_file_system.remove(task, "/granted").await.unwrap();
+    virtual_file_system
+        .rename(task, &"/original", &"/granted")
+        .await
+        .unwrap();
+    virtual_file_system
+        .rename(task, &"/granted/child", &"/granted/original")
+        .await
+        .unwrap();
+    virtual_file_system
+        .create_symlink(task, Path::new("../other/child"), root)
+        .await
+        .unwrap();
+    assert!(matches!(
+        virtual_file_system
+            .open_beneath(&relative, flags, task, root)
+            .await,
+        Err(IoErrorKind::PathEscapesRoot)
+    ));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn confined_operations_do_not_dispatch_to_backends_without_namespace_guarantees() {
+    let (task, virtual_file_system) = initialize().await;
+    let path = Path::new("/sandbox/mounted");
+    virtual_file_system
+        .create_directory(task, &"/sandbox")
+        .await
+        .unwrap();
+    virtual_file_system
+        .create_directory(task, &path)
+        .await
+        .unwrap();
+    // The dummy backend panics on namespace operations, so this verifies
+    // rejection before the VFS delegates any part of a confined lookup.
+    virtual_file_system
+        .mount_file_system(file_system::DummyFileSystem, path, task)
+        .await
+        .unwrap();
+    assert_eq!(
+        virtual_file_system
+            .get_statistics_beneath(task, &Path::new("mounted"), true, Path::new("/sandbox"))
+            .await,
+        Err(IoErrorKind::PathEscapesRoot)
+    );
+    assert_eq!(
+        virtual_file_system
+            .get_statistics_beneath(task, &Path::new("."), true, path)
+            .await,
+        Err(IoErrorKind::PathEscapesRoot)
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn confined_namespace_changes_cannot_target_the_resolved_root() {
+    let (task, virtual_file_system) = initialize().await;
+    let root = Path::new("/sandbox");
+    virtual_file_system
+        .create_directory(task, &root)
+        .await
+        .unwrap();
+    virtual_file_system
+        .create_symlink(task, Path::new("."), Path::new("/sandbox/alias"))
+        .await
+        .unwrap();
+    let root_alias = Path::new("alias/.");
+    assert_eq!(
+        virtual_file_system
+            .remove_beneath(task, root_alias, root)
+            .await,
+        Err(IoErrorKind::ResourceBusy)
+    );
+    assert_eq!(
+        virtual_file_system
+            .rename_beneath(task, &root_alias, &Path::new("moved"), root, Path::ROOT)
+            .await,
+        Err(IoErrorKind::ResourceBusy)
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn confined_open_can_decline_to_follow_the_final_link() {
+    let (task, virtual_file_system) = initialize().await;
+    let root = Path::new("/sandbox");
+    virtual_file_system
+        .create_directory(task, &root)
+        .await
+        .unwrap();
+    virtual_file_system
+        .create_directory(task, &"/sandbox/subdirectory")
+        .await
+        .unwrap();
+    File::write_to_path(
+        virtual_file_system,
+        task,
+        "/sandbox/subdirectory/value",
+        b"data",
+    )
+    .await
+    .unwrap();
+    for (name, target) in [("alias", "subdirectory"), ("dangling", "missing")] {
+        let link = format!("/sandbox/{name}");
+        virtual_file_system
+            .create_symlink(task, Path::new(target), Path::new(&link))
+            .await
+            .unwrap();
+    }
+
+    let flags = Flags::from(AccessFlags::Read);
+    let dangling = Path::new("dangling");
+    assert!(matches!(
+        virtual_file_system
+            .open_beneath_with_lookup(&dangling, flags, task, root, false)
+            .await,
+        Err(IoErrorKind::SymlinkLoop)
+    ));
+    assert!(matches!(
+        virtual_file_system
+            .open_beneath_with_lookup(&dangling, flags, task, root, true)
+            .await,
+        Err(IoErrorKind::NotFound)
+    ));
+    let create = Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None);
+    assert!(matches!(
+        virtual_file_system
+            .open_beneath_with_lookup(&dangling, create, task, root, false)
+            .await,
+        Err(IoErrorKind::SymlinkLoop)
+    ));
+    let exclusive = create.set_open(CreateFlags::CREATE_EXCLUSIVE);
+    for follow in [false, true] {
+        assert!(matches!(
+            virtual_file_system
+                .open_beneath_with_lookup(&dangling, exclusive, task, root, follow)
+                .await,
+            Err(IoErrorKind::AlreadyExists)
+        ));
+    }
+    let mut target = [0; 16];
+    let length = virtual_file_system
+        .read_symlink_beneath(task, dangling, &mut target, root)
+        .await
+        .unwrap();
+    assert_eq!(&target[..length], b"missing");
+    assert_eq!(
+        virtual_file_system
+            .get_statistics_beneath(task, &Path::new("missing"), false, root)
+            .await,
+        Err(IoErrorKind::NotFound)
+    );
+
+    assert!(matches!(
+        virtual_file_system
+            .open_directory_beneath_with_lookup(task, &Path::new("alias"), root, false)
+            .await,
+        Err(IoErrorKind::SymlinkLoop)
+    ));
+    assert!(
+        virtual_file_system
+            .open_directory_beneath_with_lookup(task, &Path::new("alias"), root, true)
+            .await
+            .is_ok()
+    );
+    assert!(
+        virtual_file_system
+            .open_beneath_with_lookup(&Path::new("alias/value"), flags, task, root, false)
+            .await
+            .is_ok()
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 async fn beneath_resolution_confines_links_and_all_namespace_operations() {
     use virtual_file_system::IoErrorKind;
     let (task, vfs) = initialize().await;
@@ -2796,4 +3017,2165 @@ async fn read_symlink_on_a_regular_file_is_invalid_argument() {
         .unwrap_err();
     assert_eq!(error, IoErrorKind::InvalidArgument);
     assert_eq!(error.posix_errno(), PosixErrno::EINVAL);
+}
+
+#[cfg(target_os = "linux")]
+mod symlink_confinement_regression_tests {
+    use super::*;
+    use core::{
+        future::Future,
+        pin::pin,
+        task::{Context as TaskContext, Poll, Waker},
+    };
+    use file_system::{
+        AttributeFlags, AttributeOperations, Attributes, BaseOperations, DirectoryOperations,
+        Entry, FileOperations, FileSystemOperations, Inode, Kind, MountOperations, Permissions,
+        Size, Time,
+    };
+    use std::{
+        collections::BTreeMap,
+        sync::{Mutex, MutexGuard},
+    };
+    use users::{GroupIdentifier, UserIdentifier};
+
+    #[derive(Clone)]
+    enum SimulatedNodeKind {
+        Directory { entries: BTreeMap<String, Inode> },
+        File { contents: Vec<u8> },
+        SymbolicLink { target: String },
+    }
+
+    #[derive(Clone)]
+    struct SimulatedNode {
+        inode: Inode,
+        kind: SimulatedNodeKind,
+        user: UserIdentifier,
+        group: GroupIdentifier,
+        permissions: Permissions,
+        creation: Time,
+        modification: Time,
+        access: Time,
+        status: Time,
+    }
+
+    #[derive(Clone)]
+    enum EntrySwapAction {
+        RenameDirectoryAndReplaceWithSymlink {
+            parent_inode: Inode,
+            old_name: String,
+            new_name: String,
+            symlink_target: String,
+        },
+        ReplaceEntryWithSymlink {
+            parent_inode: Inode,
+            name: String,
+            symlink_target: String,
+        },
+    }
+
+    struct ScheduledHook {
+        trigger_name: String,
+        action: EntrySwapAction,
+        after_attribute_check: bool,
+    }
+
+    struct SimulatedState {
+        next_inode: Inode,
+        nodes: BTreeMap<Inode, SimulatedNode>,
+        hook: Option<ScheduledHook>,
+    }
+
+    #[derive(Clone, Copy)]
+    struct HandleState {
+        inode: Inode,
+        position: Size,
+    }
+
+    #[derive(Clone, Copy)]
+    struct SimulatedDirectoryEntryFileSystem {
+        state: &'static Mutex<SimulatedState>,
+        confined_namespace: bool,
+    }
+
+    impl SimulatedDirectoryEntryFileSystem {
+        fn new() -> Self {
+            Self::with_confinement(true)
+        }
+
+        fn new_unconfined() -> Self {
+            Self::with_confinement(false)
+        }
+
+        fn with_confinement(confined_namespace: bool) -> Self {
+            let mut nodes = BTreeMap::new();
+            nodes.insert(
+                1,
+                SimulatedNode {
+                    inode: 1,
+                    kind: SimulatedNodeKind::Directory {
+                        entries: BTreeMap::new(),
+                    },
+                    user: UserIdentifier::ROOT,
+                    group: GroupIdentifier::ROOT,
+                    permissions: Permissions::DIRECTORY_DEFAULT,
+                    creation: Time::new(1),
+                    modification: Time::new(1),
+                    access: Time::new(1),
+                    status: Time::new(1),
+                },
+            );
+            Self {
+                state: Box::leak(Box::new(Mutex::new(SimulatedState {
+                    next_inode: 2,
+                    nodes,
+                    hook: None,
+                }))),
+                confined_namespace,
+            }
+        }
+
+        fn state(&self) -> MutexGuard<'_, SimulatedState> {
+            self.state.lock().unwrap()
+        }
+
+        fn schedule_hook_on_entry_check(
+            &self,
+            trigger_name: &str,
+            action: EntrySwapAction,
+            after_attribute_check: bool,
+        ) {
+            self.state().hook = Some(ScheduledHook {
+                trigger_name: String::from(trigger_name),
+                action,
+                after_attribute_check,
+            });
+        }
+
+        fn insert_node(
+            state: &mut SimulatedState,
+            parent_inode: Inode,
+            name: &str,
+            kind: SimulatedNodeKind,
+            permissions: Permissions,
+        ) -> file_system::Result<Inode> {
+            if let Some(SimulatedNode {
+                kind: SimulatedNodeKind::Directory { entries },
+                ..
+            }) = state.nodes.get(&parent_inode)
+                && entries.contains_key(name)
+            {
+                return Err(IoErrorKind::AlreadyExists);
+            }
+            let inode = state.next_inode;
+            state.next_inode += 1;
+            state.nodes.insert(
+                inode,
+                SimulatedNode {
+                    inode,
+                    kind,
+                    user: UserIdentifier::ROOT,
+                    group: GroupIdentifier::ROOT,
+                    permissions,
+                    creation: Time::new(1),
+                    modification: Time::new(1),
+                    access: Time::new(1),
+                    status: Time::new(1),
+                },
+            );
+            if let Some(SimulatedNode {
+                kind: SimulatedNodeKind::Directory { entries },
+                ..
+            }) = state.nodes.get_mut(&parent_inode)
+            {
+                entries.insert(String::from(name), inode);
+            } else {
+                return Err(IoErrorKind::NotADirectory);
+            }
+            Ok(inode)
+        }
+
+        fn populate_directory(
+            &self,
+            parent_inode: Inode,
+            name: &str,
+        ) -> file_system::Result<Inode> {
+            let mut state = self.state();
+            Self::insert_node(
+                &mut state,
+                parent_inode,
+                name,
+                SimulatedNodeKind::Directory {
+                    entries: BTreeMap::new(),
+                },
+                Permissions::DIRECTORY_DEFAULT,
+            )
+        }
+
+        fn populate_file(
+            &self,
+            parent_inode: Inode,
+            name: &str,
+            contents: &[u8],
+        ) -> file_system::Result<Inode> {
+            let mut state = self.state();
+            Self::insert_node(
+                &mut state,
+                parent_inode,
+                name,
+                SimulatedNodeKind::File {
+                    contents: contents.to_vec(),
+                },
+                Permissions::FILE_DEFAULT,
+            )
+        }
+
+        fn populate_symlink(
+            &self,
+            parent_inode: Inode,
+            name: &str,
+            target: &str,
+        ) -> file_system::Result<Inode> {
+            let mut state = self.state();
+            Self::insert_node(
+                &mut state,
+                parent_inode,
+                name,
+                SimulatedNodeKind::SymbolicLink {
+                    target: String::from(target),
+                },
+                Permissions::ALL_FULL,
+            )
+        }
+
+        fn apply_action(state: &mut SimulatedState, action: EntrySwapAction) {
+            match action {
+                EntrySwapAction::RenameDirectoryAndReplaceWithSymlink {
+                    parent_inode,
+                    old_name,
+                    new_name,
+                    symlink_target,
+                } => {
+                    let moved_inode = if let Some(SimulatedNode {
+                        kind: SimulatedNodeKind::Directory { entries },
+                        ..
+                    }) = state.nodes.get_mut(&parent_inode)
+                    {
+                        entries
+                            .remove(&old_name)
+                            .expect("directory entry to rename must exist")
+                    } else {
+                        panic!("expected directory node");
+                    };
+                    if let Some(SimulatedNode {
+                        kind: SimulatedNodeKind::Directory { entries },
+                        ..
+                    }) = state.nodes.get_mut(&parent_inode)
+                    {
+                        entries.insert(new_name, moved_inode);
+                    }
+                    Self::insert_node(
+                        state,
+                        parent_inode,
+                        &old_name,
+                        SimulatedNodeKind::SymbolicLink {
+                            target: symlink_target,
+                        },
+                        Permissions::ALL_FULL,
+                    )
+                    .unwrap();
+                }
+                EntrySwapAction::ReplaceEntryWithSymlink {
+                    parent_inode,
+                    name,
+                    symlink_target,
+                } => {
+                    if let Some(SimulatedNode {
+                        kind: SimulatedNodeKind::Directory { entries },
+                        ..
+                    }) = state.nodes.get_mut(&parent_inode)
+                    {
+                        entries.remove(&name);
+                    }
+                    Self::insert_node(
+                        state,
+                        parent_inode,
+                        &name,
+                        SimulatedNodeKind::SymbolicLink {
+                            target: symlink_target,
+                        },
+                        Permissions::ALL_FULL,
+                    )
+                    .unwrap();
+                }
+            }
+        }
+
+        fn context_inode(context: &Context) -> file_system::Result<Inode> {
+            context
+                .get_private_data_of_type::<HandleState>()
+                .map(|handle| handle.inode)
+                .ok_or(IoErrorKind::BadDescriptor)
+        }
+
+        fn lookup_child_inode(
+            state: &SimulatedState,
+            parent_inode: Inode,
+            name: &str,
+        ) -> file_system::Result<Inode> {
+            let parent = state
+                .nodes
+                .get(&parent_inode)
+                .ok_or(IoErrorKind::StaleHandle)?;
+            let SimulatedNodeKind::Directory { entries } = &parent.kind else {
+                return Err(IoErrorKind::NotADirectory);
+            };
+            entries.get(name).copied().ok_or(IoErrorKind::NotFound)
+        }
+
+        fn read_node_attributes(node: &SimulatedNode, attributes: &mut Attributes) {
+            let request = attributes.get_mask();
+            let mut output = Attributes::new();
+            let mut populated = AttributeFlags::empty();
+            if request.contains(AttributeFlags::Inode) {
+                output = output.set_inode(node.inode);
+                populated.insert(AttributeFlags::Inode);
+            }
+            if request.contains(AttributeFlags::Kind) {
+                let kind = match node.kind {
+                    SimulatedNodeKind::Directory { .. } => Kind::Directory,
+                    SimulatedNodeKind::File { .. } => Kind::File,
+                    SimulatedNodeKind::SymbolicLink { .. } => Kind::SymbolicLink,
+                };
+                output = output.set_kind(kind);
+                populated.insert(AttributeFlags::Kind);
+            }
+            if request.contains(AttributeFlags::Size) {
+                let size = match &node.kind {
+                    SimulatedNodeKind::Directory { entries } => entries.len() as Size,
+                    SimulatedNodeKind::File { contents } => contents.len() as Size,
+                    SimulatedNodeKind::SymbolicLink { target } => target.len() as Size,
+                };
+                output = output.set_size(size);
+                populated.insert(AttributeFlags::Size);
+            }
+            if request.contains(AttributeFlags::User) {
+                output = output.set_user(node.user);
+                populated.insert(AttributeFlags::User);
+            }
+            if request.contains(AttributeFlags::Group) {
+                output = output.set_group(node.group);
+                populated.insert(AttributeFlags::Group);
+            }
+            if request.contains(AttributeFlags::Permissions) {
+                output = output.set_permissions(node.permissions);
+                populated.insert(AttributeFlags::Permissions);
+            }
+            if request.contains(AttributeFlags::CreationTime) {
+                output = output.set_creation(node.creation);
+                populated.insert(AttributeFlags::CreationTime);
+            }
+            if request.contains(AttributeFlags::ModificationTime) {
+                output = output.set_modification(node.modification);
+                populated.insert(AttributeFlags::ModificationTime);
+            }
+            if request.contains(AttributeFlags::AccessTime) {
+                output = output.set_access(node.access);
+                populated.insert(AttributeFlags::AccessTime);
+            }
+            if request.contains(AttributeFlags::StatusTime) {
+                output = output.set_status(node.status);
+                populated.insert(AttributeFlags::StatusTime);
+            }
+            *attributes = output.set_mask(populated);
+        }
+
+        fn write_node_attributes(node: &mut SimulatedNode, attributes: &Attributes) {
+            if let Some(&user) = attributes.get_user() {
+                node.user = user;
+            }
+            if let Some(&group) = attributes.get_group() {
+                node.group = group;
+            }
+            if let Some(&permissions) = attributes.get_permissions() {
+                node.permissions = permissions;
+            }
+            if let Some(&creation) = attributes.get_creation() {
+                node.creation = creation;
+            }
+            if let Some(&modification) = attributes.get_modification() {
+                node.modification = modification;
+            }
+            if let Some(&access) = attributes.get_access() {
+                node.access = access;
+            }
+            if let Some(&status) = attributes.get_status() {
+                node.status = status;
+            }
+        }
+    }
+
+    impl MountOperations for SimulatedDirectoryEntryFileSystem {}
+
+    impl BaseOperations for SimulatedDirectoryEntryFileSystem {
+        fn read(
+            &self,
+            context: &mut Context,
+            _context_waker: &mut TaskContext<'_>,
+            buffer: &mut [u8],
+            position: Size,
+        ) -> Poll<file_system::Result<usize>> {
+            Poll::Ready((|| {
+                let inode = Self::context_inode(context)?;
+                let state = self.state();
+                let node = state.nodes.get(&inode).ok_or(IoErrorKind::StaleHandle)?;
+                let SimulatedNodeKind::File { contents } = &node.kind else {
+                    return Err(IoErrorKind::IsADirectory);
+                };
+                let offset = usize::try_from(position).map_err(|_| IoErrorKind::InvalidArgument)?;
+                if offset >= contents.len() {
+                    return Ok(0);
+                }
+                let available = contents.len() - offset;
+                let copied = available.min(buffer.len());
+                buffer[..copied].copy_from_slice(&contents[offset..offset + copied]);
+                Ok(copied)
+            })())
+        }
+
+        fn write(
+            &self,
+            context: &mut Context,
+            _context_waker: &mut TaskContext<'_>,
+            buffer: &[u8],
+            position: Size,
+        ) -> Poll<file_system::Result<usize>> {
+            Poll::Ready((|| {
+                let inode = Self::context_inode(context)?;
+                let mut state = self.state();
+                let node = state
+                    .nodes
+                    .get_mut(&inode)
+                    .ok_or(IoErrorKind::StaleHandle)?;
+                let SimulatedNodeKind::File { contents } = &mut node.kind else {
+                    return Err(IoErrorKind::IsADirectory);
+                };
+                let offset = usize::try_from(position).map_err(|_| IoErrorKind::InvalidArgument)?;
+                let end = offset
+                    .checked_add(buffer.len())
+                    .ok_or(IoErrorKind::InvalidArgument)?;
+                if contents.len() < end {
+                    contents.resize(end, 0);
+                }
+                contents[offset..end].copy_from_slice(buffer);
+                Ok(buffer.len())
+            })())
+        }
+
+        fn set_position(
+            &self,
+            context: &mut Context,
+            _position: Size,
+            from: &Position,
+        ) -> file_system::Result<Size> {
+            let inode = Self::context_inode(context)?;
+            let state = self.state();
+            let node = state.nodes.get(&inode).ok_or(IoErrorKind::StaleHandle)?;
+            let size = match &node.kind {
+                SimulatedNodeKind::File { contents } => contents.len() as Size,
+                SimulatedNodeKind::Directory { entries } => entries.len() as Size,
+                SimulatedNodeKind::SymbolicLink { target } => target.len() as Size,
+            };
+            let handle = context
+                .get_private_data_mutable_of_type::<HandleState>()
+                .ok_or(IoErrorKind::BadDescriptor)?;
+            let target = match from {
+                Position::Start(offset) => *offset,
+                Position::Current(delta) => handle
+                    .position
+                    .checked_add_signed(*delta)
+                    .ok_or(IoErrorKind::InvalidArgument)?,
+                Position::End(delta) => size
+                    .checked_add_signed(*delta)
+                    .ok_or(IoErrorKind::InvalidArgument)?,
+            };
+            handle.position = target;
+            Ok(target)
+        }
+
+        fn clone_context(&self, context: &Context) -> file_system::Result<Context> {
+            let handle = context
+                .get_private_data_of_type::<HandleState>()
+                .ok_or(IoErrorKind::BadDescriptor)?;
+            Ok(Context::new(Some(*handle)))
+        }
+
+        fn close(&self, context: &mut Context) -> file_system::Result<()> {
+            let _ = context.take_private_data_of_type::<HandleState>();
+            Ok(())
+        }
+    }
+
+    impl FileOperations for SimulatedDirectoryEntryFileSystem {}
+
+    impl AttributeOperations for SimulatedDirectoryEntryFileSystem {
+        fn get_attributes(
+            &self,
+            context: &mut Context,
+            attributes: &mut Attributes,
+        ) -> file_system::Result<()> {
+            let inode = Self::context_inode(context)?;
+            let state = self.state();
+            let node = state.nodes.get(&inode).ok_or(IoErrorKind::StaleHandle)?;
+            Self::read_node_attributes(node, attributes);
+            Ok(())
+        }
+
+        fn set_attributes(
+            &self,
+            context: &mut Context,
+            attributes: &Attributes,
+        ) -> file_system::Result<()> {
+            let inode = Self::context_inode(context)?;
+            let mut state = self.state();
+            let node = state
+                .nodes
+                .get_mut(&inode)
+                .ok_or(IoErrorKind::StaleHandle)?;
+            Self::write_node_attributes(node, attributes);
+            Ok(())
+        }
+    }
+
+    impl DirectoryOperations for SimulatedDirectoryEntryFileSystem {
+        fn read(&self, context: &mut Context) -> file_system::Result<Option<Entry>> {
+            let handle = context
+                .get_private_data_mutable_of_type::<HandleState>()
+                .ok_or(IoErrorKind::BadDescriptor)?;
+            let position =
+                usize::try_from(handle.position).map_err(|_| IoErrorKind::InvalidArgument)?;
+            let state = self.state();
+            let directory = state
+                .nodes
+                .get(&handle.inode)
+                .ok_or(IoErrorKind::StaleHandle)?;
+            let SimulatedNodeKind::Directory { entries } = &directory.kind else {
+                return Err(IoErrorKind::NotADirectory);
+            };
+            let Some((name, child_inode)) = entries.iter().nth(position) else {
+                return Ok(None);
+            };
+            let child = state
+                .nodes
+                .get(child_inode)
+                .ok_or(IoErrorKind::StaleHandle)?;
+            let kind = match child.kind {
+                SimulatedNodeKind::Directory { .. } => Kind::Directory,
+                SimulatedNodeKind::File { .. } => Kind::File,
+                SimulatedNodeKind::SymbolicLink { .. } => Kind::SymbolicLink,
+            };
+            let size = match &child.kind {
+                SimulatedNodeKind::Directory { entries } => entries.len() as Size,
+                SimulatedNodeKind::File { contents } => contents.len() as Size,
+                SimulatedNodeKind::SymbolicLink { target } => target.len() as Size,
+            };
+            handle.position += 1;
+            Ok(Some(Entry::new(
+                child.inode,
+                name.clone(),
+                kind,
+                size,
+                child.modification,
+            )))
+        }
+
+        fn set_position(&self, context: &mut Context, position: Size) -> file_system::Result<()> {
+            let handle = context
+                .get_private_data_mutable_of_type::<HandleState>()
+                .ok_or(IoErrorKind::BadDescriptor)?;
+            handle.position = position;
+            Ok(())
+        }
+
+        fn get_position(&self, context: &mut Context) -> file_system::Result<Size> {
+            let handle = context
+                .get_private_data_of_type::<HandleState>()
+                .ok_or(IoErrorKind::BadDescriptor)?;
+            Ok(handle.position)
+        }
+
+        fn rewind(&self, context: &mut Context) -> file_system::Result<()> {
+            let handle = context
+                .get_private_data_mutable_of_type::<HandleState>()
+                .ok_or(IoErrorKind::BadDescriptor)?;
+            handle.position = 0;
+            Ok(())
+        }
+
+        fn close(&self, context: &mut Context) -> file_system::Result<()> {
+            let _ = context.take_private_data_of_type::<HandleState>();
+            Ok(())
+        }
+    }
+
+    impl FileSystemOperations for SimulatedDirectoryEntryFileSystem {
+        fn supports_confined_namespace(&self) -> bool {
+            self.confined_namespace
+        }
+
+        fn supports_directory_entry_operations(&self) -> bool {
+            true
+        }
+
+        fn lookup_directory(&self, context: &mut Context, path: &Path) -> file_system::Result<()> {
+            assert!(
+                path.is_root(),
+                "directory-entry backend must never re-resolve a non-root path"
+            );
+            *context = Context::new(Some(HandleState {
+                inode: 1,
+                position: 0,
+            }));
+            Ok(())
+        }
+
+        fn lookup_directory_entry(
+            &self,
+            parent: &Context,
+            name: &str,
+            context: &mut Context,
+        ) -> file_system::Result<()> {
+            let parent_inode = Self::context_inode(parent)?;
+            let state = self.state();
+            let child_inode = Self::lookup_child_inode(&state, parent_inode, name)?;
+            let child = state
+                .nodes
+                .get(&child_inode)
+                .ok_or(IoErrorKind::StaleHandle)?;
+            match child.kind {
+                SimulatedNodeKind::Directory { .. } => {
+                    *context = Context::new(Some(HandleState {
+                        inode: child_inode,
+                        position: 0,
+                    }));
+                    Ok(())
+                }
+                SimulatedNodeKind::SymbolicLink { .. } => Err(IoErrorKind::SymlinkLoop),
+                SimulatedNodeKind::File { .. } => Err(IoErrorKind::NotADirectory),
+            }
+        }
+
+        fn lookup_file(
+            &self,
+            _context: &mut Context,
+            _path: &Path,
+            _flags: Flags,
+        ) -> file_system::Result<()> {
+            panic!("directory-entry backend must not receive path-based lookup_file");
+        }
+
+        fn lookup_file_entry(
+            &self,
+            parent: &Context,
+            name: &str,
+            context: &mut Context,
+            flags: Flags,
+        ) -> file_system::Result<()> {
+            let parent_inode = Self::context_inode(parent)?;
+            let mut state = self.state();
+            let child_inode = Self::lookup_child_inode(&state, parent_inode, name)?;
+            let is_directory = matches!(
+                state.nodes.get(&child_inode),
+                Some(SimulatedNode {
+                    kind: SimulatedNodeKind::Directory { .. },
+                    ..
+                })
+            );
+            let is_symlink = matches!(
+                state.nodes.get(&child_inode),
+                Some(SimulatedNode {
+                    kind: SimulatedNodeKind::SymbolicLink { .. },
+                    ..
+                })
+            );
+            if is_directory {
+                return Err(IoErrorKind::IsADirectory);
+            }
+            if is_symlink {
+                return Err(IoErrorKind::SymlinkLoop);
+            }
+            if flags.get_create().contains(CreateFlags::Truncate)
+                && let Some(SimulatedNode {
+                    kind: SimulatedNodeKind::File { contents },
+                    ..
+                }) = state.nodes.get_mut(&child_inode)
+            {
+                contents.clear();
+            }
+            *context = Context::new(Some(HandleState {
+                inode: child_inode,
+                position: 0,
+            }));
+            Ok(())
+        }
+
+        fn create_directory(&self, _path: &Path) -> file_system::Result<()> {
+            panic!("directory-entry backend must not receive path-based create_directory");
+        }
+
+        fn create_directory_entry(&self, parent: &Context, name: &str) -> file_system::Result<()> {
+            let parent_inode = Self::context_inode(parent)?;
+            let mut state = self.state();
+            Self::insert_node(
+                &mut state,
+                parent_inode,
+                name,
+                SimulatedNodeKind::Directory {
+                    entries: BTreeMap::new(),
+                },
+                Permissions::DIRECTORY_DEFAULT,
+            )?;
+            Ok(())
+        }
+
+        fn create_file(&self, _path: &Path) -> file_system::Result<()> {
+            panic!("directory-entry backend must not receive path-based create_file");
+        }
+
+        fn create_file_entry(&self, parent: &Context, name: &str) -> file_system::Result<()> {
+            let parent_inode = Self::context_inode(parent)?;
+            let mut state = self.state();
+            Self::insert_node(
+                &mut state,
+                parent_inode,
+                name,
+                SimulatedNodeKind::File {
+                    contents: Vec::new(),
+                },
+                Permissions::FILE_DEFAULT,
+            )?;
+            Ok(())
+        }
+
+        fn remove(&self, _path: &Path) -> file_system::Result<()> {
+            panic!("directory-entry backend must not receive path-based remove");
+        }
+
+        fn remove_entry(&self, parent: &Context, name: &str) -> file_system::Result<()> {
+            let parent_inode = Self::context_inode(parent)?;
+            let mut state = self.state();
+            let child_inode = Self::lookup_child_inode(&state, parent_inode, name)?;
+            if let Some(SimulatedNode {
+                kind: SimulatedNodeKind::Directory { entries },
+                ..
+            }) = state.nodes.get(&child_inode)
+                && !entries.is_empty()
+            {
+                return Err(IoErrorKind::DirectoryNotEmpty);
+            }
+            if let Some(SimulatedNode {
+                kind: SimulatedNodeKind::Directory { entries },
+                ..
+            }) = state.nodes.get_mut(&parent_inode)
+            {
+                entries.remove(name);
+            }
+            state.nodes.remove(&child_inode);
+            Ok(())
+        }
+
+        fn rename(&self, _old_path: &Path, _new_path: &Path) -> file_system::Result<()> {
+            panic!("directory-entry backend must not receive path-based rename");
+        }
+
+        fn rename_entry(
+            &self,
+            old_parent: &Context,
+            old_name: &str,
+            new_parent: &Context,
+            new_name: &str,
+        ) -> file_system::Result<()> {
+            let old_parent_inode = Self::context_inode(old_parent)?;
+            let new_parent_inode = Self::context_inode(new_parent)?;
+            let mut state = self.state();
+            let moved_inode = Self::lookup_child_inode(&state, old_parent_inode, old_name)?;
+            if let Some(SimulatedNode {
+                kind: SimulatedNodeKind::Directory { entries },
+                ..
+            }) = state.nodes.get_mut(&old_parent_inode)
+            {
+                entries.remove(old_name);
+            }
+            if let Some(SimulatedNode {
+                kind: SimulatedNodeKind::Directory { entries },
+                ..
+            }) = state.nodes.get_mut(&new_parent_inode)
+            {
+                entries.insert(String::from(new_name), moved_inode);
+            }
+            Ok(())
+        }
+
+        fn create_symlink(&self, _target: &Path, _link: &Path) -> file_system::Result<()> {
+            panic!("directory-entry backend must not receive path-based create_symlink");
+        }
+
+        fn create_symlink_entry(
+            &self,
+            target: &Path,
+            parent: &Context,
+            name: &str,
+        ) -> file_system::Result<()> {
+            let parent_inode = Self::context_inode(parent)?;
+            let mut state = self.state();
+            Self::insert_node(
+                &mut state,
+                parent_inode,
+                name,
+                SimulatedNodeKind::SymbolicLink {
+                    target: String::from(target.as_str()),
+                },
+                Permissions::ALL_FULL,
+            )?;
+            Ok(())
+        }
+
+        fn read_symlink(&self, _link: &Path, _buffer: &mut [u8]) -> file_system::Result<usize> {
+            panic!("directory-entry backend must not receive path-based read_symlink");
+        }
+
+        fn read_symlink_entry(
+            &self,
+            parent: &Context,
+            name: &str,
+            buffer: &mut [u8],
+        ) -> file_system::Result<usize> {
+            let parent_inode = Self::context_inode(parent)?;
+            let state = self.state();
+            let child_inode = Self::lookup_child_inode(&state, parent_inode, name)?;
+            let child = state
+                .nodes
+                .get(&child_inode)
+                .ok_or(IoErrorKind::StaleHandle)?;
+            let SimulatedNodeKind::SymbolicLink { target } = &child.kind else {
+                return Err(IoErrorKind::InvalidArgument);
+            };
+            let length = target.len().min(buffer.len());
+            buffer[..length].copy_from_slice(&target.as_bytes()[..length]);
+            Ok(length)
+        }
+
+        fn get_attributes(
+            &self,
+            _path: &Path,
+            _attributes: &mut Attributes,
+        ) -> file_system::Result<()> {
+            panic!("directory-entry backend must not receive path-based get_attributes");
+        }
+
+        fn get_entry_attributes(
+            &self,
+            parent: &Context,
+            name: &str,
+            attributes: &mut Attributes,
+        ) -> file_system::Result<()> {
+            let parent_inode = Self::context_inode(parent)?;
+            let mut state = self.state();
+            let pending_hook = state
+                .hook
+                .as_ref()
+                .is_some_and(|hook| hook.trigger_name == name)
+                .then(|| state.hook.take())
+                .flatten();
+            if let Some(hook) = pending_hook.as_ref()
+                && !hook.after_attribute_check
+            {
+                Self::apply_action(&mut state, hook.action.clone());
+            }
+            let child_inode = Self::lookup_child_inode(&state, parent_inode, name)?;
+            let child = state
+                .nodes
+                .get(&child_inode)
+                .ok_or(IoErrorKind::StaleHandle)?;
+            Self::read_node_attributes(child, attributes);
+            if let Some(hook) = pending_hook
+                && hook.after_attribute_check
+            {
+                Self::apply_action(&mut state, hook.action);
+            }
+            Ok(())
+        }
+
+        fn set_attributes(
+            &self,
+            _path: &Path,
+            _attributes: &Attributes,
+        ) -> file_system::Result<()> {
+            panic!("directory-entry backend must not receive path-based set_attributes");
+        }
+
+        fn set_entry_attributes(
+            &self,
+            parent: &Context,
+            name: &str,
+            attributes: &Attributes,
+        ) -> file_system::Result<()> {
+            let parent_inode = Self::context_inode(parent)?;
+            let mut state = self.state();
+            let child_inode = Self::lookup_child_inode(&state, parent_inode, name)?;
+            let child = state
+                .nodes
+                .get_mut(&child_inode)
+                .ok_or(IoErrorKind::StaleHandle)?;
+            Self::write_node_attributes(child, attributes);
+            Ok(())
+        }
+
+        fn writable_attributes(&self) -> AttributeFlags {
+            AttributeFlags::User
+                | AttributeFlags::Group
+                | AttributeFlags::Permissions
+                | AttributeFlags::CreationTime
+                | AttributeFlags::ModificationTime
+                | AttributeFlags::AccessTime
+                | AttributeFlags::StatusTime
+        }
+
+        fn persistent_attributes(&self) -> AttributeFlags {
+            self.writable_attributes()
+        }
+    }
+
+    fn new_little_file_system() -> little_fs::FileSystem {
+        let device = MemoryDevice::<512>::new_static(1024 * 512);
+        let options = little_fs::Options::new(256);
+        little_fs::FileSystem::format(device, options).unwrap();
+        little_fs::FileSystem::new(device, options).unwrap()
+    }
+
+    fn poll_uncontended<F: Future>(future: F) -> F::Output {
+        let mut future = pin!(future);
+        let waker = Waker::noop();
+        let mut task_context = TaskContext::from_waker(waker);
+        match future.as_mut().poll(&mut task_context) {
+            Poll::Ready(output) => output,
+            Poll::Pending => panic!("uncontended VFS test future should resolve without yielding"),
+        }
+    }
+
+    async fn write_new_file(
+        virtual_file_system: &VirtualFileSystem,
+        task: TaskIdentifier,
+        path: &str,
+        bytes: &[u8],
+    ) {
+        let mut file = File::open(
+            virtual_file_system,
+            task,
+            path,
+            Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None),
+        )
+        .await
+        .unwrap();
+        file.write(bytes).await.unwrap();
+    }
+
+    async fn read_to_vec(file: &mut File<'_>) -> Vec<u8> {
+        let mut buffer = [0u8; 64];
+        let mut out = Vec::new();
+        loop {
+            let read = file.read(&mut buffer).await.unwrap();
+            if read == 0 {
+                break;
+            }
+            out.extend_from_slice(&buffer[..read]);
+        }
+        out
+    }
+
+    #[cfg(target_os = "linux")]
+    #[task::test]
+    async fn resolve_directory_root_resolves_once_and_rejects_invalid_roots() {
+        let (task, virtual_file_system) = initialize().await;
+
+        virtual_file_system
+            .create_directory(task, &"/real_preopen")
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_directory(task, &"/real_preopen/nested")
+            .await
+            .unwrap();
+        write_new_file(
+            virtual_file_system,
+            task,
+            "/real_preopen/nested/data.txt",
+            b"preopen-ok",
+        )
+        .await;
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("/real_preopen"),
+                Path::from_str("/preopen_link"),
+            )
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("preopen_link/nested"),
+                Path::from_str("/nested_link"),
+            )
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("/does_not_exist"),
+                Path::from_str("/dangling_root"),
+            )
+            .await
+            .unwrap();
+
+        let resolved_root = virtual_file_system
+            .resolve_directory_root(task, &"/nested_link")
+            .await
+            .unwrap();
+        assert_eq!(resolved_root.as_str(), "/real_preopen/nested");
+
+        assert_eq!(
+            virtual_file_system
+                .open_beneath(
+                    &"data.txt",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                    &resolved_root,
+                )
+                .await
+                .map(|_| ()),
+            Ok(())
+        );
+        assert_eq!(
+            virtual_file_system
+                .open_beneath(
+                    &"data.txt",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                    Path::from_str("/nested_link"),
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::PathEscapesRoot
+        );
+        assert_eq!(
+            virtual_file_system
+                .resolve_directory_root(task, &"/real_preopen/nested/data.txt")
+                .await
+                .unwrap_err(),
+            IoErrorKind::NotADirectory
+        );
+        assert_eq!(
+            virtual_file_system
+                .resolve_directory_root(task, &"/dangling_root")
+                .await
+                .unwrap_err(),
+            IoErrorKind::NotFound
+        );
+
+        virtual_file_system
+            .create_directory(task, &"/unconfined_mount")
+            .await
+            .unwrap();
+        virtual_file_system
+            .mount_file_system(
+                SimulatedDirectoryEntryFileSystem::new_unconfined(),
+                &"/unconfined_mount",
+                task,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            virtual_file_system
+                .resolve_directory_root(task, &"/unconfined_mount")
+                .await
+                .unwrap_err(),
+            IoErrorKind::PathEscapesRoot
+        );
+        assert!(
+            virtual_file_system
+                .open_directory_beneath(task, &"nested//", Path::from_str("/real_preopen"))
+                .await
+                .is_ok()
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[task::test]
+    async fn confined_chained_links_and_parent_traversal_stay_inside_preopen() {
+        let (task, virtual_file_system) = initialize().await;
+
+        write_new_file(virtual_file_system, task, "/outside.txt", b"outside").await;
+        virtual_file_system
+            .create_directory(task, &"/sandbox")
+            .await
+            .unwrap();
+        write_new_file(virtual_file_system, task, "/sandbox/inside.txt", b"inside").await;
+        virtual_file_system
+            .create_directory(task, &"/sandbox/a")
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_directory(task, &"/sandbox/a/b")
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_directory(task, &"/sandbox/a/c")
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_directory(task, &"/sandbox/a/c/subdirectory")
+            .await
+            .unwrap();
+        write_new_file(
+            virtual_file_system,
+            task,
+            "/sandbox/a/c/subdirectory/target.txt",
+            b"chained-ok",
+        )
+        .await;
+
+        virtual_file_system
+            .create_directory(task, &"/sandbox/directory_1")
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_directory(task, &"/sandbox/directory_2")
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_directory(task, &"/sandbox/directory_2/nested")
+            .await
+            .unwrap();
+        write_new_file(
+            virtual_file_system,
+            task,
+            "/sandbox/directory_2/sibling.txt",
+            b"parent-after-link-ok",
+        )
+        .await;
+
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("../c/link2"),
+                Path::from_str("/sandbox/a/b/link1"),
+            )
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("subdirectory/target.txt"),
+                Path::from_str("/sandbox/a/c/link2"),
+            )
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("../directory_2/nested"),
+                Path::from_str("/sandbox/directory_1/to_directory_2"),
+            )
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str(".."),
+                Path::from_str("/sandbox/directory_1/to_root"),
+            )
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("/sandbox/inside.txt"),
+                Path::from_str("/sandbox/absolute_inside"),
+            )
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("/outside.txt"),
+                Path::from_str("/sandbox/absolute_outside"),
+            )
+            .await
+            .unwrap();
+
+        let root = virtual_file_system
+            .resolve_directory_root(task, &"/sandbox")
+            .await
+            .unwrap();
+
+        let mut chained = virtual_file_system
+            .open_beneath(&"a/b/link1", Flags::from(AccessFlags::Read), task, &root)
+            .await
+            .unwrap();
+        assert_eq!(read_to_vec(&mut chained).await, b"chained-ok");
+
+        let mut via_parent = virtual_file_system
+            .open_beneath(
+                &"directory_1/to_directory_2/../sibling.txt",
+                Flags::from(AccessFlags::Read),
+                task,
+                &root,
+            )
+            .await
+            .unwrap();
+        assert_eq!(read_to_vec(&mut via_parent).await, b"parent-after-link-ok");
+
+        assert!(
+            virtual_file_system
+                .open_directory_beneath(task, &"directory_1/to_directory_2/..", &root)
+                .await
+                .is_ok()
+        );
+        assert!(
+            virtual_file_system
+                .open_directory_beneath(task, &"directory_1/to_directory_2/../..", &root)
+                .await
+                .is_ok()
+        );
+
+        assert_eq!(
+            virtual_file_system
+                .open_beneath(
+                    &"directory_1/to_root/../outside.txt",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                    &root,
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::PathEscapesRoot
+        );
+        assert_eq!(
+            virtual_file_system
+                .open_beneath(
+                    &"directory_1/../..",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                    &root,
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::PathEscapesRoot
+        );
+
+        assert_eq!(
+            virtual_file_system
+                .open_beneath(
+                    &"absolute_inside",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                    &root
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::PathEscapesRoot
+        );
+        assert_eq!(
+            virtual_file_system
+                .open_beneath(
+                    &"absolute_outside",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                    &root
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::PathEscapesRoot
+        );
+
+        let mut unconfined = virtual_file_system
+            .open(
+                &"/sandbox/absolute_inside",
+                Flags::from(AccessFlags::Read),
+                task,
+            )
+            .await
+            .unwrap();
+        assert_eq!(read_to_vec(&mut unconfined).await, b"inside");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[task::test]
+    async fn confined_cross_mount_links_stay_confined_across_submounts() {
+        let (task, virtual_file_system) = initialize().await;
+
+        write_new_file(virtual_file_system, task, "/outside.txt", b"outside").await;
+        virtual_file_system
+            .create_directory(task, &"/outside_mount")
+            .await
+            .unwrap();
+        virtual_file_system
+            .mount_file_system(new_little_file_system(), &"/outside_mount", task)
+            .await
+            .unwrap();
+        write_new_file(
+            virtual_file_system,
+            task,
+            "/outside_mount/secret.txt",
+            b"secret",
+        )
+        .await;
+
+        virtual_file_system
+            .create_directory(task, &"/sandbox")
+            .await
+            .unwrap();
+        write_new_file(virtual_file_system, task, "/sandbox/inside.txt", b"inside").await;
+        virtual_file_system
+            .create_directory(task, &"/sandbox/mounted")
+            .await
+            .unwrap();
+        virtual_file_system
+            .mount_file_system(new_little_file_system(), &"/sandbox/mounted", task)
+            .await
+            .unwrap();
+        write_new_file(
+            virtual_file_system,
+            task,
+            "/sandbox/mounted/file.txt",
+            b"submount-ok",
+        )
+        .await;
+        virtual_file_system
+            .create_directory(task, &"/sandbox/mounted/deep")
+            .await
+            .unwrap();
+
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("mounted/file.txt"),
+                Path::from_str("/sandbox/to_submount"),
+            )
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("../../inside.txt"),
+                Path::from_str("/sandbox/mounted/deep/back"),
+            )
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("../../../outside.txt"),
+                Path::from_str("/sandbox/mounted/deep/escape"),
+            )
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("/outside_mount/secret.txt"),
+                Path::from_str("/sandbox/to_outside_mount"),
+            )
+            .await
+            .unwrap();
+
+        let root = virtual_file_system
+            .resolve_directory_root(task, &"/sandbox")
+            .await
+            .unwrap();
+
+        let mut into_mount = virtual_file_system
+            .open_beneath(&"to_submount", Flags::from(AccessFlags::Read), task, &root)
+            .await
+            .unwrap();
+        assert_eq!(read_to_vec(&mut into_mount).await, b"submount-ok");
+
+        let mut back_from_mount = virtual_file_system
+            .open_beneath(
+                &"mounted/deep/back",
+                Flags::from(AccessFlags::Read),
+                task,
+                &root,
+            )
+            .await
+            .unwrap();
+        assert_eq!(read_to_vec(&mut back_from_mount).await, b"inside");
+
+        assert_eq!(
+            virtual_file_system
+                .open_beneath(
+                    &"mounted/deep/escape",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                    &root,
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::PathEscapesRoot
+        );
+        assert_eq!(
+            virtual_file_system
+                .open_beneath(
+                    &"to_outside_mount",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                    &root,
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::PathEscapesRoot
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[task::test]
+    async fn confined_dangling_links_and_no_follow_final_component() {
+        let (task, virtual_file_system) = initialize().await;
+
+        virtual_file_system
+            .create_directory(task, &"/sandbox")
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_directory(task, &"/sandbox/real_directory")
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_directory(task, &"/sandbox/real_directory/subdirectory")
+            .await
+            .unwrap();
+        write_new_file(
+            virtual_file_system,
+            task,
+            "/sandbox/real_directory/target.txt",
+            b"hello",
+        )
+        .await;
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("real_directory"),
+                Path::from_str("/sandbox/directory_link"),
+            )
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("real_directory/target.txt"),
+                Path::from_str("/sandbox/file_link"),
+            )
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("missing.txt"),
+                Path::from_str("/sandbox/dangling"),
+            )
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("never_created.txt"),
+                Path::from_str("/sandbox/dangling_exclusive"),
+            )
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("../outside_created.txt"),
+                Path::from_str("/sandbox/dangling_escape"),
+            )
+            .await
+            .unwrap();
+
+        let root = virtual_file_system
+            .resolve_directory_root(task, &"/sandbox")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            virtual_file_system
+                .open_beneath_with_lookup(
+                    &"dangling",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                    &root,
+                    true,
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::NotFound
+        );
+        assert_eq!(
+            virtual_file_system
+                .open_beneath_with_lookup(
+                    &"dangling",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                    &root,
+                    false,
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::SymlinkLoop
+        );
+        assert_eq!(
+            virtual_file_system
+                .open_beneath_with_lookup(
+                    &"dangling",
+                    Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None),
+                    task,
+                    &root,
+                    false,
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::SymlinkLoop
+        );
+        assert_eq!(
+            virtual_file_system
+                .open(
+                    &"/sandbox/missing.txt",
+                    Flags::from(AccessFlags::Read),
+                    task
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::NotFound
+        );
+
+        {
+            let mut created = virtual_file_system
+                .open_beneath_with_lookup(
+                    &"dangling",
+                    Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None),
+                    task,
+                    &root,
+                    true,
+                )
+                .await
+                .unwrap();
+            created.write(b"created-through-dangling").await.unwrap();
+        }
+        let mut read_back = virtual_file_system
+            .open(
+                &"/sandbox/missing.txt",
+                Flags::from(AccessFlags::Read),
+                task,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            read_to_vec(&mut read_back).await,
+            b"created-through-dangling"
+        );
+
+        for follow in [false, true] {
+            assert_eq!(
+                virtual_file_system
+                    .open_beneath_with_lookup(
+                        &"dangling_exclusive",
+                        Flags::new(
+                            AccessFlags::READ_WRITE,
+                            Some(CreateFlags::CREATE_EXCLUSIVE),
+                            None,
+                        ),
+                        task,
+                        &root,
+                        follow,
+                    )
+                    .await
+                    .unwrap_err(),
+                IoErrorKind::AlreadyExists
+            );
+        }
+        assert_eq!(
+            virtual_file_system
+                .open(
+                    &"/sandbox/never_created.txt",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::NotFound
+        );
+
+        assert_eq!(
+            virtual_file_system
+                .open_beneath_with_lookup(
+                    &"dangling_escape",
+                    Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None),
+                    task,
+                    &root,
+                    true,
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::PathEscapesRoot
+        );
+        assert_eq!(
+            virtual_file_system
+                .open(
+                    &"/outside_created.txt",
+                    Flags::from(AccessFlags::Read),
+                    task
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::NotFound
+        );
+
+        assert_eq!(
+            virtual_file_system
+                .open_directory_beneath_with_lookup(task, &"directory_link", &root, false)
+                .await
+                .err()
+                .unwrap(),
+            IoErrorKind::SymlinkLoop
+        );
+        assert!(
+            virtual_file_system
+                .open_directory_beneath_with_lookup(task, &"directory_link", &root, true)
+                .await
+                .is_ok()
+        );
+        assert!(
+            virtual_file_system
+                .open_directory_beneath_with_lookup(
+                    task,
+                    &"directory_link/subdirectory",
+                    &root,
+                    false,
+                )
+                .await
+                .is_ok()
+        );
+        assert!(
+            virtual_file_system
+                .open_beneath_with_lookup(
+                    &"directory_link/target.txt",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                    &root,
+                    false,
+                )
+                .await
+                .is_ok()
+        );
+        assert_eq!(
+            virtual_file_system
+                .open_directory_with_lookup(task, &"/sandbox/directory_link", false)
+                .await
+                .err()
+                .unwrap(),
+            IoErrorKind::SymlinkLoop
+        );
+        assert_eq!(
+            virtual_file_system
+                .open_with_lookup(
+                    &"/sandbox/file_link",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                    false,
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::SymlinkLoop
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[task::test]
+    async fn symlink_loop_bound_at_40_links_and_constant_allocation() {
+        let (task, virtual_file_system) = initialize().await;
+
+        // Exercise LittleFS chained links up to the 40-link limit and past it.
+        virtual_file_system
+            .create_directory(task, &"/little_file_system_chain")
+            .await
+            .unwrap();
+        write_new_file(
+            virtual_file_system,
+            task,
+            "/little_file_system_chain/end",
+            b"at-bound",
+        )
+        .await;
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("end"),
+                Path::from_str("/little_file_system_chain/s01"),
+            )
+            .await
+            .unwrap();
+        for index in 2..=41 {
+            let link_name = alloc::format!("/little_file_system_chain/s{index:02}");
+            let previous_name = alloc::format!("s{:02}", index - 1);
+            virtual_file_system
+                .create_symlink(
+                    task,
+                    Path::from_str(&previous_name),
+                    Path::from_str(&link_name),
+                )
+                .await
+                .unwrap();
+        }
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("self_loop"),
+                Path::from_str("/little_file_system_chain/self_loop"),
+            )
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("loop_b"),
+                Path::from_str("/little_file_system_chain/loop_a"),
+            )
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("loop_a"),
+                Path::from_str("/little_file_system_chain/loop_b"),
+            )
+            .await
+            .unwrap();
+
+        let little_file_system_root = virtual_file_system
+            .resolve_directory_root(task, &"/little_file_system_chain")
+            .await
+            .unwrap();
+        let mut at_40 = virtual_file_system
+            .open_beneath(
+                &"s40",
+                Flags::from(AccessFlags::Read),
+                task,
+                &little_file_system_root,
+            )
+            .await
+            .unwrap();
+        assert_eq!(read_to_vec(&mut at_40).await, b"at-bound");
+
+        assert_eq!(
+            virtual_file_system
+                .open_beneath(
+                    &"s41",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                    &little_file_system_root,
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::SymlinkLoop
+        );
+        assert_eq!(
+            virtual_file_system
+                .open_beneath(
+                    &"self_loop",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                    &little_file_system_root,
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::SymlinkLoop
+        );
+        assert_eq!(
+            virtual_file_system
+                .open_beneath(
+                    &"loop_a",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                    &little_file_system_root,
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::SymlinkLoop
+        );
+
+        // Verify the iterative resolver executes zero allocations proportional
+        // to the number of followed symlinks (2 links vs 40 equal-length links).
+        let simulated = SimulatedDirectoryEntryFileSystem::new();
+        let sandbox_inode = simulated.populate_directory(1, "sandbox").unwrap();
+        simulated
+            .populate_file(sandbox_inode, "end", b"ok")
+            .unwrap();
+        simulated
+            .populate_symlink(sandbox_inode, "l01", "end")
+            .unwrap();
+        for index in 2..=41 {
+            let name = alloc::format!("l{index:02}");
+            let target = alloc::format!("l{:02}", index - 1);
+            simulated
+                .populate_symlink(sandbox_inode, &name, &target)
+                .unwrap();
+        }
+
+        virtual_file_system
+            .create_directory(task, &"/simulated")
+            .await
+            .unwrap();
+        virtual_file_system
+            .mount_file_system(simulated, &"/simulated", task)
+            .await
+            .unwrap();
+        let simulated_root = virtual_file_system
+            .resolve_directory_root(task, &"/simulated/sandbox")
+            .await
+            .unwrap();
+
+        let two_link_allocations = allocation::measure(|| {
+            let file = poll_uncontended(virtual_file_system.open_beneath_with_lookup(
+                &"l02",
+                Flags::from(AccessFlags::Read),
+                task,
+                &simulated_root,
+                true,
+            ))
+            .unwrap();
+            drop(file);
+        });
+        let forty_link_allocations = allocation::measure(|| {
+            let file = poll_uncontended(virtual_file_system.open_beneath_with_lookup(
+                &"l40",
+                Flags::from(AccessFlags::Read),
+                task,
+                &simulated_root,
+                true,
+            ))
+            .unwrap();
+            drop(file);
+        });
+        assert_eq!(forty_link_allocations, two_link_allocations);
+
+        assert_eq!(
+            virtual_file_system
+                .open_beneath_with_lookup(
+                    &"l41",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                    &simulated_root,
+                    true,
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::SymlinkLoop
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[task::test]
+    async fn directory_entry_backend_confines_across_renames_and_rejects_path_fallbacks() {
+        let (task, virtual_file_system) = initialize().await;
+
+        let simulated = SimulatedDirectoryEntryFileSystem::new();
+        simulated
+            .populate_file(1, "outside_secret.txt", b"escaped")
+            .unwrap();
+        let sandbox_inode = simulated.populate_directory(1, "sandbox").unwrap();
+        let active_inode = simulated
+            .populate_directory(sandbox_inode, "active")
+            .unwrap();
+        simulated
+            .populate_file(active_inode, "secret.txt", b"confined-secret")
+            .unwrap();
+        simulated
+            .populate_file(sandbox_inode, "victim.txt", b"original")
+            .unwrap();
+        simulated
+            .populate_directory(sandbox_inode, "victim_directory")
+            .unwrap();
+
+        virtual_file_system
+            .create_directory(task, &"/host")
+            .await
+            .unwrap();
+        virtual_file_system
+            .mount_file_system(simulated, &"/host", task)
+            .await
+            .unwrap();
+
+        let root = virtual_file_system
+            .resolve_directory_root(task, &"/host/sandbox")
+            .await
+            .unwrap();
+
+        // Exercise every namespace and directory operation through pinned entry
+        // handles, including opening `.` and `subdirectory/..` beneath root.
+        assert!(
+            virtual_file_system
+                .open_directory_beneath(task, &".", &root)
+                .await
+                .is_ok()
+        );
+        virtual_file_system
+            .create_directory_beneath(task, &"scratch", &root)
+            .await
+            .unwrap();
+        assert!(
+            virtual_file_system
+                .open_directory_beneath(task, &"scratch/..", &root)
+                .await
+                .is_ok()
+        );
+        virtual_file_system
+            .create_symlink_beneath(
+                task,
+                Path::from_str("secret.txt"),
+                Path::from_str("active/link_to_secret"),
+                &root,
+            )
+            .await
+            .unwrap();
+        let mut target_buffer = [0u8; 32];
+        let target_length = virtual_file_system
+            .read_symlink_beneath(
+                task,
+                Path::from_str("active/link_to_secret"),
+                &mut target_buffer,
+                &root,
+            )
+            .await
+            .unwrap();
+        assert_eq!(&target_buffer[..target_length], b"secret.txt");
+
+        let statistics = virtual_file_system
+            .get_statistics_beneath(task, &"active/link_to_secret", false, &root)
+            .await
+            .unwrap();
+        assert_eq!(statistics.kind, Kind::SymbolicLink);
+
+        virtual_file_system
+            .rename_beneath(
+                task,
+                &"active/link_to_secret",
+                &"scratch/moved_link",
+                &root,
+                &root,
+            )
+            .await
+            .unwrap();
+        virtual_file_system
+            .remove_beneath(task, &"scratch/moved_link", &root)
+            .await
+            .unwrap();
+        virtual_file_system
+            .remove_beneath(task, &"scratch", &root)
+            .await
+            .unwrap();
+
+        // Case 1: rename `active` and replace its slot with an escaping symlink
+        // between attribute check and lookup_file_entry. Pinned parent Context
+        // must open the original moved directory's file, not `/outside_secret.txt`.
+        simulated.schedule_hook_on_entry_check(
+            "secret.txt",
+            EntrySwapAction::RenameDirectoryAndReplaceWithSymlink {
+                parent_inode: sandbox_inode,
+                old_name: String::from("active"),
+                new_name: String::from("active_moved"),
+                symlink_target: String::from(".."),
+            },
+            true,
+        );
+        let mut confined_file = virtual_file_system
+            .open_beneath_with_lookup(
+                &"active/secret.txt",
+                Flags::from(AccessFlags::Read),
+                task,
+                &root,
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(read_to_vec(&mut confined_file).await, b"confined-secret");
+        drop(confined_file);
+
+        // Case 2: rename `active_moved` and replace its slot with an escaping
+        // symlink right before creating `created.txt`; the pinned parent Context
+        // confines file creation inside `active_second`, not outside `/host/sandbox`.
+        simulated.schedule_hook_on_entry_check(
+            "created.txt",
+            EntrySwapAction::RenameDirectoryAndReplaceWithSymlink {
+                parent_inode: sandbox_inode,
+                old_name: String::from("active_moved"),
+                new_name: String::from("active_second"),
+                symlink_target: String::from(".."),
+            },
+            false,
+        );
+        let mut created_file = virtual_file_system
+            .open_beneath_with_lookup(
+                &"active_moved/created.txt",
+                Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None),
+                task,
+                &root,
+                false,
+            )
+            .await
+            .unwrap();
+        created_file
+            .write(b"created-in-pinned-parent")
+            .await
+            .unwrap();
+        drop(created_file);
+        assert_eq!(
+            virtual_file_system
+                .open(&"/host/created.txt", Flags::from(AccessFlags::Read), task)
+                .await
+                .unwrap_err(),
+            IoErrorKind::NotFound
+        );
+        let mut verified_created = virtual_file_system
+            .open(
+                &"/host/sandbox/active_second/created.txt",
+                Flags::from(AccessFlags::Read),
+                task,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            read_to_vec(&mut verified_created).await,
+            b"created-in-pinned-parent"
+        );
+
+        // Case 3: swap the final file entry to a symlink between VFS attribute
+        // check and backend lookup_file_entry; no-follow lookup_file_entry rejects it.
+        simulated.schedule_hook_on_entry_check(
+            "victim.txt",
+            EntrySwapAction::ReplaceEntryWithSymlink {
+                parent_inode: sandbox_inode,
+                name: String::from("victim.txt"),
+                symlink_target: String::from("../outside_secret.txt"),
+            },
+            true,
+        );
+        assert_eq!(
+            virtual_file_system
+                .open_beneath_with_lookup(
+                    &"victim.txt",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                    &root,
+                    false,
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::SymlinkLoop
+        );
+
+        // Case 4: swap the final directory entry to a symlink between VFS
+        // attribute check and backend lookup_directory_entry.
+        simulated.schedule_hook_on_entry_check(
+            "victim_directory",
+            EntrySwapAction::ReplaceEntryWithSymlink {
+                parent_inode: sandbox_inode,
+                name: String::from("victim_directory"),
+                symlink_target: String::from(".."),
+            },
+            true,
+        );
+        assert_eq!(
+            virtual_file_system
+                .open_directory_beneath_with_lookup(task, &"victim_directory", &root, false)
+                .await
+                .err()
+                .unwrap(),
+            IoErrorKind::SymlinkLoop
+        );
+
+        // Cleanly close opened directories when traversing cross-mount into this backend.
+        virtual_file_system
+            .create_directory(task, &"/cross_sandbox")
+            .await
+            .unwrap();
+        write_new_file(
+            virtual_file_system,
+            task,
+            "/cross_sandbox/little_file_system_inside.txt",
+            b"from-little-file-system",
+        )
+        .await;
+        virtual_file_system
+            .create_symlink(
+                task,
+                Path::from_str("host_subdirectory/active_moved/secret.txt"),
+                Path::from_str("/cross_sandbox/into_host"),
+            )
+            .await
+            .unwrap();
+
+        let cross_simulated = SimulatedDirectoryEntryFileSystem::new();
+        let nested_sandbox = cross_simulated
+            .populate_directory(1, "active_moved")
+            .unwrap();
+        cross_simulated
+            .populate_file(nested_sandbox, "secret.txt", b"across-mounts")
+            .unwrap();
+        cross_simulated
+            .populate_symlink(
+                1,
+                "back_to_little_file_system",
+                "../little_file_system_inside.txt",
+            )
+            .unwrap();
+        virtual_file_system
+            .create_directory(task, &"/cross_sandbox/host_subdirectory")
+            .await
+            .unwrap();
+        virtual_file_system
+            .mount_file_system(cross_simulated, &"/cross_sandbox/host_subdirectory", task)
+            .await
+            .unwrap();
+
+        let cross_root = virtual_file_system
+            .resolve_directory_root(task, &"/cross_sandbox")
+            .await
+            .unwrap();
+        let mut cross_file = virtual_file_system
+            .open_beneath_with_lookup(
+                &"into_host",
+                Flags::from(AccessFlags::Read),
+                task,
+                &cross_root,
+                true,
+            )
+            .await
+            .unwrap();
+        assert_eq!(read_to_vec(&mut cross_file).await, b"across-mounts");
+
+        let mut back_file = virtual_file_system
+            .open_beneath_with_lookup(
+                &"host_subdirectory/back_to_little_file_system",
+                Flags::from(AccessFlags::Read),
+                task,
+                &cross_root,
+                true,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            read_to_vec(&mut back_file).await,
+            b"from-little-file-system"
+        );
+    }
 }
