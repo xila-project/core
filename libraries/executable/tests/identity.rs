@@ -20,6 +20,10 @@ const GROUP: GroupIdentifier = GroupIdentifier::new(1000);
 /// The identity each run of [`Identify`] saw, in order.
 static SEEN: Mutex<Vec<(UserIdentifier, GroupIdentifier)>> = Mutex::new(Vec::new());
 
+/// Whether each run of [`Identify`] and a task it spawned were marked as
+/// running with a granted identity, in order.
+static GRANTED: Mutex<Vec<(bool, bool)>> = Mutex::new(Vec::new());
+
 struct Identify;
 impl ExecutableTrait for Identify {
     fn main(standard: Standard<'static>, _: Vec<String>) -> MainFuture {
@@ -29,6 +33,15 @@ impl ExecutableTrait for Identify {
             let user = manager.get_user(task).await.unwrap();
             let group = manager.get_group(task).await.unwrap();
             SEEN.lock().unwrap().push((user, group));
+            let granted = manager.is_identity_granted(task).await.unwrap();
+            let (child, _) = manager
+                .spawn(task, "identify child", None, async move |child| {
+                    manager.is_identity_granted(child).await.unwrap()
+                })
+                .await
+                .unwrap();
+            let child_granted = child.join().await;
+            GRANTED.lock().unwrap().push((granted, child_granted));
             Ok(())
         })
     }
@@ -135,6 +148,10 @@ async fn launch_identity_applies_to_the_child_only_and_is_checked_for_execution(
         *SEEN.lock().unwrap(),
         [(USER, GROUP), (UserIdentifier::ROOT, GroupIdentifier::ROOT)]
     );
+    // Only a launch with an identity marks the program, and every task it
+    // starts, as running with a granted identity; the caller is never marked.
+    assert_eq!(*GRANTED.lock().unwrap(), [(false, false), (true, true)]);
+    assert!(!manager.is_identity_granted(task).await.unwrap());
 
     // The execute permission is checked for the identity the program runs as:
     // owner (root) may read and execute, others may only read.

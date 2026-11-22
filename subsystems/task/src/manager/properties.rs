@@ -31,6 +31,37 @@ impl Manager {
         Ok(())
     }
 
+    /// Give `task_identifier` the identity `user` and `group` on behalf of the
+    /// program that launched it, instead of the one it inherited.
+    ///
+    /// The task, and every task it spawns from then on, is marked as running
+    /// with a granted identity (see [`Self::is_identity_granted`]). The mark is
+    /// set together with the identity, under one lock, and nothing clears it:
+    /// neither a later identity change nor the exit of an ancestor, so a
+    /// descendant keeps it even once it has been reparented to the root task.
+    pub async fn grant_identity(
+        &self,
+        task_identifier: TaskIdentifier,
+        user: UserIdentifier,
+        group: GroupIdentifier,
+    ) -> Result<()> {
+        let mut inner = self.0.write().await;
+        let metadata = Self::get_task_mutable(&mut inner, task_identifier)?;
+        metadata.user = user;
+        metadata.group = group;
+        metadata.identity_granted = true;
+
+        Ok(())
+    }
+
+    /// Whether `task_identifier`, or one of its ancestors, was given its
+    /// identity by its launcher through [`Self::grant_identity`]. Runtimes for
+    /// untrusted code use it to refuse running with an identity that another
+    /// program granted.
+    pub async fn is_identity_granted(&self, task_identifier: TaskIdentifier) -> Result<bool> {
+        Self::get_task(&*self.0.read().await, task_identifier).map(|task| task.identity_granted)
+    }
+
     pub async fn set_environment_variable(
         &self,
         task_identifier: TaskIdentifier,
