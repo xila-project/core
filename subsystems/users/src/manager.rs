@@ -257,6 +257,18 @@ impl Manager {
             .0)
     }
 
+    pub async fn get_group_identifier(&self, name: &str) -> Result<GroupIdentifier> {
+        Ok(*self
+            .0
+            .read()
+            .await
+            .groups
+            .iter()
+            .find(|(_, group)| group.name == name)
+            .ok_or(Error::InvalidGroupIdentifier)?
+            .0)
+    }
+
     pub async fn get_group_users(
         &self,
         identifier: GroupIdentifier,
@@ -537,6 +549,28 @@ mod tests {
         manager.add_group(group_id, group_name, &[]).await.unwrap();
         manager.add_to_group(identifier, group_id).await.unwrap();
         assert!(manager.is_in_group(identifier, group_id).await);
+    }
+
+    #[test]
+    async fn get_group_identifier() {
+        let manager = Manager::new();
+        let group_id = GroupIdentifier::new(1000);
+        manager
+            .add_group(group_id, ADMINISTRATOR_GROUP_NAME, &[])
+            .await
+            .unwrap();
+        assert_eq!(
+            manager.get_group_identifier(ADMINISTRATOR_GROUP_NAME).await,
+            Ok(group_id)
+        );
+        assert_eq!(
+            manager.get_group_identifier("root").await,
+            Ok(GroupIdentifier::ROOT)
+        );
+        assert_eq!(
+            manager.get_group_identifier("missing").await,
+            Err(Error::InvalidGroupIdentifier)
+        );
     }
 
     #[test]

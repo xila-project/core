@@ -5,7 +5,7 @@ pub const SEED_PENDING_PATH: &str = "/system/accounts/.seed-pending";
 pub const SEED_PENDING_CONTENT: &[u8] = b"xila-seed-v1\n";
 use alloc::vec::Vec;
 use file_system::AccessFlags;
-use users::{GroupIdentifier, UserIdentifier};
+use users::{ADMINISTRATOR_GROUP_NAME, GroupIdentifier, UserIdentifier};
 use virtual_file_system::File;
 
 /// Load saved users and finish an explicitly pending seed installation.
@@ -48,15 +48,15 @@ pub async fn initialize_seeded(context: &Context<'_>) -> Result<()> {
     let user_id = UserIdentifier::new(1000);
     let mut buffer = Vec::new();
     if exists(context, "/system/accounts/groups/administrator").await? {
-        let group = crate::read_group_file(context, &mut buffer, "administrator").await?;
-        if group.get_identifier() != group_id || group.get_name() != "administrator" {
+        let group = crate::read_group_file(context, &mut buffer, ADMINISTRATOR_GROUP_NAME).await?;
+        if group.get_identifier() != group_id || group.get_name() != ADMINISTRATOR_GROUP_NAME {
             return Err(invalid());
         }
     } else {
         if context.users_manager.get_group_name(group_id).await.is_ok() {
             return Err(invalid());
         }
-        let group = crate::Group::new(1000, "administrator".into(), Vec::new());
+        let group = crate::Group::new(1000, ADMINISTRATOR_GROUP_NAME.into(), Vec::new());
         crate::atomic_write(
             context,
             "/system/accounts/.seed-group.tmp",
@@ -66,7 +66,7 @@ pub async fn initialize_seeded(context: &Context<'_>) -> Result<()> {
         .await?;
         context
             .users_manager
-            .add_group(group_id, "administrator", &[])
+            .add_group(group_id, ADMINISTRATOR_GROUP_NAME, &[])
             .await
             .map_err(Error::FailedToAddGroup)?;
     }
