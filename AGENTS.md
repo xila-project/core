@@ -42,3 +42,15 @@ Shared tasks are defined in `mise.toml`, developer-only tasks and tools in `mise
 - Make the smallest focused change that follows the existing crate structure and conventions.
 - Validate changes with the narrowest relevant checks, using CI's host/guest checks as the source of truth for those targets. Host and guest checks do not establish hardware-target correctness; report what was actually checked and any target/toolchain limitations.
 - Do not assume documentation in adjacent repositories is current; prefer this repository's source, manifests, and CI configuration as ground truth.
+
+## Releases
+
+Core, Platforms and Tools share the Xila operating system version. Core's
+`[workspace.package] version` drives `xila-version::RUNNING` and the native
+ABI. Before 1.0, a breaking change bumps the minor version and compatible
+changes bump the patch. Submit version bumps through review. The workspace
+release tags the pinned Core commit as `vX.Y.Z`; keep git dependencies on
+`main` and build with `--locked`. Core operating-system crates stay off
+crates.io. The standalone application SDK follows the Xila version.
+
+See [the Xila release policy](https://github.com/xila-project/core/issues/276).
