@@ -235,10 +235,15 @@ node = "{{ vars.node_version }}"
 [tasks."ci:abi"]
 description = "Run locked WASM ABI translation tests including doctests"
 depends = ["ci:packages-linker"]
-run = "cargo test --locked --manifest-path \"${XILA_APPLICATIONS_ROOT:-.application-src}/executables/wasm/tests/translation/Cargo.toml\" --no-default-features --features ${CI_ABI_MEMORY:-memory_32}"
+run = """
+set -eu
+cargo nextest run --locked --manifest-path "${XILA_APPLICATIONS_ROOT:-.application-src}/executables/wasm/tests/translation/Cargo.toml" --no-default-features --features ${CI_ABI_MEMORY:-memory_32}
+cargo test --locked --manifest-path "${XILA_APPLICATIONS_ROOT:-.application-src}/executables/wasm/tests/translation/Cargo.toml" --no-default-features --features ${CI_ABI_MEMORY:-memory_32} --doc
+"""
 
 [tasks."ci:abi".tools]
 rust = { version = "{{ vars.rust_version }}", profile = "minimal" }
+"github:nextest-rs/nextest" = "cargo-nextest-{{ vars.nextest_version }}"
 
 [tasks."ci:localization"]
 description = "Run strict host and guest localization checks for selected locales"
@@ -253,7 +258,8 @@ for locale in "${locales[@]}"; do
   export EMBEDDED_I18N_LOCALE="$locale"
   mise run localization:check
   if [[ "$locale" == zh-CN ]]; then
-    cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml
+    cargo nextest run --manifest-path subsystems/graphics/tests/font_link/Cargo.toml
+    cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml --doc
   fi
   echo "::endgroup::"
 done
@@ -267,6 +273,7 @@ rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = 
   "wasm32-wasip1",
 ] }
 node = "{{ vars.node_version }}"
+"github:nextest-rs/nextest" = "cargo-nextest-{{ vars.nextest_version }}"
 
 [tasks."ci:coverage"]
 extends = "ci:coverage"
@@ -335,10 +342,13 @@ run = "uv run --no-project --with pyyaml=={{ vars.pyyaml_version }} python -m un
 extends = "ci:rust-wasi"
 description = "Test the host workspace"
 depends = ["ci:packages-host-sdk"]
+tools."github:nextest-rs/nextest" = "cargo-nextest-{{ vars.nextest_version }}"
 run = """
 set -eu
-cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888,xila-graphics/headless_screen,xila-io-error/std
-cargo test --locked -p xila-abi-application --no-default-features
+cargo nextest run --locked --workspace --features xila/graphics_rendering_xrgb8888,xila-graphics/headless_screen,xila-io-error/std
+cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888,xila-graphics/headless_screen,xila-io-error/std --doc
+cargo nextest run --locked -p xila-abi-application --no-default-features
+cargo test --locked -p xila-abi-application --no-default-features --doc
 # The graphics feature also enables environment.
 cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888,xila-testing/graphics --no-run
 mise run test:native-loader
@@ -352,9 +362,15 @@ extends = "ci:rust-wasi"
 [tasks."ci:host-font-tests"]
 extends = "ci:rust-format"
 tools.node = "{{ vars.node_version }}"
+tools."github:nextest-rs/nextest" = "cargo-nextest-{{ vars.nextest_version }}"
 description = "Test the standalone font-link workspace"
 depends = ["ci:packages-linker"]
-run = "mise run test:fonts && cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml"
+run = """
+set -eu
+mise run test:fonts
+cargo nextest run --manifest-path subsystems/graphics/tests/font_link/Cargo.toml
+cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml --doc
+"""
 
 [tasks."ci:host-font-tests".env]
 # The verifier invokes Cargo directly. Use the same compiler environment throughout.
@@ -463,7 +479,8 @@ shell = "bash -c"
 depends = ["ci:packages-host"]
 run = """
 set -eu
-cargo test --locked -p xila-firmware-update --features native
+cargo nextest run --locked -p xila-firmware-update --features native
+cargo test --locked -p xila-firmware-update --features native --doc
 cargo clippy --locked -p xila-firmware-update --features native --all-targets -- -D warnings
 cargo check --locked -p xila-firmware-update --no-default-features --lib --target wasm32-unknown-unknown
 cargo check --locked -p xila-firmware-update --no-default-features --lib --target thumbv7em-none-eabi
@@ -475,6 +492,7 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", compone
   "wasm32-unknown-unknown",
   "thumbv7em-none-eabi",
 ] }
+tools."github:nextest-rs/nextest" = "cargo-nextest-{{ vars.nextest_version }}"
 
 [tasks."ci:bare-metal"]
 description = "Check the Cortex-M and hard-float RISC-V façades, bare-metal graphics and the 32-bit native ABI, with and without network"
@@ -595,11 +613,12 @@ extends = "ci:rust-lint"
 description = "Lint and test the task subsystem's profiling and metrics features"
 shell = "bash -c"
 depends = ["ci:packages-host"]
+tools."github:nextest-rs/nextest" = "cargo-nextest-{{ vars.nextest_version }}"
 run = """
 set -eu
 cargo clippy --locked -p xila-task --lib --tests --features test_harness,metrics,profiling -- -D warnings
-cargo test --locked -p xila-task --lib --features test_harness,profiling
-cargo test --locked -p xila-task --lib --features test_harness,metrics,profiling
+cargo nextest run --locked -p xila-task --lib --features test_harness,profiling
+cargo nextest run --locked -p xila-task --lib --features test_harness,metrics,profiling
 """
 
 [tasks."test:native-loader"]

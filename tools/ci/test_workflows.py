@@ -76,7 +76,8 @@ class WorkflowPolicy(unittest.TestCase):
                 self.assertEqual(task["tools"]["node"], "24.22.0")
         task = ci_config()["tasks"]["ci:host-font-tests"]
         self.assertIn("mise run test:fonts", task["run"])
-        self.assertIn("cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml", task["run"])
+        self.assertIn("cargo nextest run --manifest-path subsystems/graphics/tests/font_link/Cargo.toml", task["run"])
+        self.assertIn("cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml --doc", task["run"])
 
     def test_regular_ci_uses_headless_audio_instead_of_native_audio_specific_checks(self):
         host = job("ci.yml", "host")
@@ -88,7 +89,14 @@ class WorkflowPolicy(unittest.TestCase):
         self.assertIn("--workspace", lint)
         self.assertNotIn("--package xila-drivers-headless", lint)
         self.assertNotIn("drivers_native/audio", lint)
-        self.assertIn("cargo test --locked --workspace", tasks["ci:host-tests"]["run"])
+        self.assertIn(
+            "cargo nextest run --locked --workspace --features xila/graphics_rendering_xrgb8888,xila-graphics/headless_screen,xila-io-error/std",
+            tasks["ci:host-tests"]["run"],
+        )
+        self.assertIn(
+            "cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888,xila-graphics/headless_screen,xila-io-error/std --doc",
+            tasks["ci:host-tests"]["run"],
+        )
         # Guards #711: environment crates must not link the C glue symbols twice.
         self.assertIn(
             "--features xila/graphics_rendering_xrgb8888,xila-testing/graphics --no-run",
@@ -99,7 +107,11 @@ class WorkflowPolicy(unittest.TestCase):
     def test_native_abi_runs_without_network_and_checks_32_bit_layouts(self):
         tasks = ci_config()["tasks"]
         self.assertIn(
-            "cargo test --locked -p xila-abi-application --no-default-features",
+            "cargo nextest run --locked -p xila-abi-application --no-default-features",
+            tasks["ci:host-tests"]["run"],
+        )
+        self.assertIn(
+            "cargo test --locked -p xila-abi-application --no-default-features --doc",
             tasks["ci:host-tests"]["run"],
         )
         bare = tasks["ci:bare-metal"]
@@ -780,6 +792,38 @@ class WorkflowPolicy(unittest.TestCase):
                         and "xila-project/workspace/.github/actions/setup-rust@" not in line):
                     with self.subTest(workflow=workflow.name, line=line_number):
                         self.assertNotRegex(line, r"uses:\s+[^\s]+@[0-9a-f]{40}\b")
+
+    def test_host_test_suites_use_pinned_nextest_and_run_doctests(self):
+        pins = tomllib.loads((ROOT / "mise.toml").read_text())["vars"]
+        expected_nextest = f"cargo-nextest-{pins['nextest_version']}"
+        tasks = configured_tasks("ci")
+        for name, requires_doctests in [
+            ("ci:host-tests", True),
+            ("ci:firmware", True),
+            ("ci:profiling-task-tests", False),
+            ("ci:host-font-tests", True),
+            ("ci:abi", True),
+            ("ci:localization", True),
+            ("test:native-loader", True),
+            ("test:graphics-pool", True),
+            ("test:fonts", True),
+            ("test:workspace", True),
+        ]:
+            with self.subTest(task=name):
+                task = tasks[name]
+                self.assertEqual(task["tools"]["github:nextest-rs/nextest"], expected_nextest)
+                self.assertIn("cargo nextest run", task["run"])
+                if requires_doctests:
+                    self.assertRegex(task["run"], r"cargo test [^\n]*--doc")
+
+    def test_setup_rust_pins_current_workspace_revision_across_workflows(self):
+        expected_ref = "ab0393f7a1df988b8fcd13da38e013057e9c9de8"
+        refs = []
+        for workflow in ["ci.yml", "extended.yml", "pages.yml"]:
+            text = (ROOT / ".github/workflows" / workflow).read_text()
+            refs.extend(re.findall(r"xila-project/workspace/\.github/actions/setup-rust@([0-9a-f]{40})", text))
+        self.assertTrue(refs)
+        self.assertEqual(set(refs), {expected_ref})
 
 
 if __name__ == "__main__":

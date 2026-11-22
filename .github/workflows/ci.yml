@@ -100,7 +100,7 @@ jobs:
           path: .application-src
           persist-credentials: false
       - name: "Setup | Rust toolchain and build cache"
-        uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
+        uses: xila-project/workspace/.github/actions/setup-rust@ab0393f7a1df988b8fcd13da38e013057e9c9de8
         with:
           cache-mode: target
           cache-generation: v1-ci-host-line-tables
@@ -153,7 +153,7 @@ jobs:
           path: .application-src
           persist-credentials: false
       - name: "Setup | Rust toolchain and build cache"
-        uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
+        uses: xila-project/workspace/.github/actions/setup-rust@ab0393f7a1df988b8fcd13da38e013057e9c9de8
         with:
           cache-mode: objects
           cache-generation: v1-ci-bare-metal
@@ -210,7 +210,7 @@ jobs:
           path: .application-src
           persist-credentials: false
       - name: "Setup | Rust toolchain and build cache"
-        uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
+        uses: xila-project/workspace/.github/actions/setup-rust@ab0393f7a1df988b8fcd13da38e013057e9c9de8
         with:
           cache-mode: target
           cache-generation: v1-ci-wasm
@@ -251,7 +251,7 @@ jobs:
           path: .application-src
           persist-credentials: false
       - name: "Setup | Rust toolchain and build cache"
-        uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
+        uses: xila-project/workspace/.github/actions/setup-rust@ab0393f7a1df988b8fcd13da38e013057e9c9de8
         with:
           cache-mode: target
           cache-generation: v1-ci-abi-${{ matrix.memory }}
@@ -334,7 +334,7 @@ jobs:
             echo 'No localization-relevant files changed; checks are intentionally skipped.'
           fi
       - name: "Setup | Rust toolchain and build cache"
-        uses: xila-project/workspace/.github/actions/setup-rust@c06ecdc0c3742c65bcfd2f5e7faa9cfcb59a5f6b
+        uses: xila-project/workspace/.github/actions/setup-rust@ab0393f7a1df988b8fcd13da38e013057e9c9de8
         if: steps.locales.outputs.run-check == 'true'
         with:
           cache-mode: objects
