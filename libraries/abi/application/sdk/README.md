@@ -479,11 +479,36 @@ units in arrival order. `SEM_VALUE_MAX` is `INT_MAX`, and a post beyond it fails
 memory, so `sem_init` with a nonzero `pshared` fails with `ENOSYS`, and so do the named
 semaphore calls `sem_open`, `sem_close` and `sem_unlink`.
 
+### Processes: `posix_spawn` and `waitpid`
+
+`posix_spawn` and `posix_spawnp` start a child through `xila_process_spawn`, and the
+returned process identifier is the one the child reports with `getpid`
+(`xila_process_child_id`).
+
+- `posix_spawnp` searches `PATH` and has no default search path: without `PATH`, only a
+  name containing a slash runs. An empty entry is the current directory.
+- A child gets exactly three descriptors, its standard streams. File actions edit that
+  view in order: `addopen`, `addclose` and `adddup2` work on descriptors 0 to 2.
+  Closing a descriptor above 2 does nothing, because the child inherits none. Opening
+  onto or duplicating onto a descriptor above 2 fails with `ENOTSUP`. A child left
+  without one of the three streams fails with `EBADF`.
+- A null environment array makes the child inherit the parent's environment. A non-null
+  array, empty or not, is the child's whole environment.
+- `POSIX_SPAWN_RESETIDS`, `POSIX_SPAWN_SETSIGMASK` and `POSIX_SPAWN_SETSIGDEF` are
+  accepted and have no effect. `POSIX_SPAWN_SETPGROUP`, `POSIX_SPAWN_SETSCHEDULER` and
+  `POSIX_SPAWN_SETSCHEDPARAM` fail the spawn with `ENOTSUP`. The scheduling attribute
+  calls are not defined.
+- `waitpid` with a positive `pid` waits for that child. `-1`, `0` and `-getpid()` wait
+  for any child: with one child it waits for it directly, otherwise it polls with sleeps
+  from 1 to 16 ms. `WNOHANG` is supported, `WUNTRACED` and `WCONTINUED` are accepted, and
+  `wait` is `waitpid(-1, ...)`. A pid that is not an unreaped child gives `ECHILD`.
+- The status holds the low 8 bits of the exit status: use `WIFEXITED` and `WEXITSTATUS`.
+  There are no signals.
+
 The following stubs report `ENOSYS`:
 
 | Calls | Pending support |
 |---|---|
-| `posix_spawn`, `waitpid` | POSIX wrappers for the process ABI (core#762) |
 | `socket`, `connect`, `bind`, `listen`, `accept`, `send*`, `recv*`, `shutdown` | the network capability in the startup structure (core#717); DNS (`getaddrinfo`) is not declared |
 
 Never provided: `fork`, asynchronous signals, general `mmap`.

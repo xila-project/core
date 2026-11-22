@@ -403,6 +403,30 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
     assert_eq!(status, 0, "SDK descriptor probe failed: {stderr:?}");
     assert_eq!(stdout, b"descriptors: ok\n");
 
+    // posix_spawn, posix_spawnp, file actions, waitpid and wait, on the probe itself.
+    let (status, stdout, stderr) = launch(context, parent, "/probe", "spawn", &["spawn"]).await;
+    assert_eq!(
+        status,
+        0,
+        "SDK spawn probe failed: {}",
+        String::from_utf8_lossy(&stderr)
+    );
+    // The two children that were not redirected share the parent's standard output.
+    assert_eq!(
+        stdout,
+        b"child: argc=4 argv1=spawn-child argv2=5 inherited=from-parent explicit=(unset)\n\
+          child: argc=3 argv1=spawn-child argv2=6 inherited=from-parent explicit=(unset)\n\
+          spawn: ok\n"
+    );
+    assert_eq!(
+        read_all(vfs, parent, "/spawn-inherit.txt").await,
+        b"child: argc=3 argv1=spawn-child argv2=3 inherited=from-parent explicit=(unset)\n"
+    );
+    assert_eq!(
+        read_all(vfs, parent, "/spawn-explicit.txt").await,
+        b"child: argc=3 argv1=spawn-child argv2=4 inherited=(unset) explicit=from-array\n"
+    );
+
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../abi/application/sdk/test/threads");
     let threads = build_sdk_program(&source, "threads", "integer");
     install(vfs, parent, "/threads", &threads).await;
