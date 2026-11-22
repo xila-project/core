@@ -36,7 +36,7 @@ default = []
 building = []
 native-dev = ["dep:abi_application", "dep:native_loader", "dep:stackful"]
 graphics = ["dep:graphics", "abi_application?/graphics"]
-network = ["dep:network"]
+network = ["dep:network", "abi_application?/network"]
 
 [lib]
 name = "executable"

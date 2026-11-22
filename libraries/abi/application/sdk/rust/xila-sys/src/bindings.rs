@@ -552,6 +552,8 @@ pub struct XilaString {
 /// the process capability is null for an application that is not a process, such
 /// as a built-in one linked into the firmware, whose process calls fail with
 /// InvalidArgument. A null argument array has argument_count zero.
+/// Fields are only ever appended: check `size` before reading a field that a
+/// later Xila version added, such as `network`.
 /// Applications must not close, retain or transfer these objects; closing them is
 /// undefined behavior. Objects opened by the application must still be closed.
 #[repr(C)]
@@ -568,6 +570,11 @@ pub struct XilaStartup {
     pub process: *const Process,
     /// Executable's launch name. Empty for a linked entry without a process.
     pub program_name: XilaString,
+    /// Network authority granted to the process: connect, listen and resolve. Null when
+    /// the host has no network stack, the firmware was built without networking, or the
+    /// application is not a process. Appended after `program_name`, so images built
+    /// before it existed still start.
+    pub network: *const Network,
 }
 /// A native worker entry. Null is rejected.
 pub type ThreadEntry = Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>;

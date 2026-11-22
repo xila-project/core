@@ -139,6 +139,14 @@ unsafe fn write_buffer<'a>(p: *mut c_void, size: usize) -> Result<&'a mut [u8], 
         unsafe { slice::from_raw_parts_mut(p.cast(), size) }
     })
 }
+/// The local endpoint a listener or a UDP socket binds. The unspecified address of
+/// either family is the wildcard, as in POSIX: smoltcp matches only `None` against
+/// every local address, and would never accept on `0.0.0.0` or `::`.
+fn listen_endpoint(endpoint: IpEndpoint) -> IpListenEndpoint {
+    let address = (!endpoint.address.into_smoltcp().is_unspecified()).then_some(endpoint.address);
+    IpListenEndpoint::new(address, endpoint.port)
+}
+
 // Small fixed socket buffers; no ABI-side staging buffer on I/O paths.
 const BUFFER_SIZE: usize = 1024;
 
@@ -157,9 +165,7 @@ async fn listening_socket(network: &Network, address: NetworkAddress) -> Result<
     let endpoint = address.endpoint()?;
     let mut socket = new_tcp_socket(network).await?;
     let listening = socket
-        .with_mutable(|s| {
-            s.listen(IpListenEndpoint::new(Some(endpoint.address), endpoint.port).into_smoltcp())
-        })
+        .with_mutable(|s| s.listen(listen_endpoint(endpoint).into_smoltcp()))
         .await;
     if listening.is_err() {
         socket.close_forced().await;
@@ -304,9 +310,8 @@ pub unsafe extern "C" fn xila_tcp_accept(
     let result = (|| unsafe {
         let listener = object(listener)?;
         listener.network.require(XILA_NETWORK_LISTEN)?;
-        let endpoint = listener.address.endpoint()?;
-        suspend_on(listener.inner.accept(Some(endpoint.address), endpoint.port))
-            .map_err(Status::from)?;
+        let endpoint = listen_endpoint(listener.address.endpoint()?);
+        suspend_on(listener.inner.accept(endpoint.address, endpoint.port)).map_err(Status::from)?;
         if suspend_on(listener.inner.get_remote_endpoint())
             .map_err(Status::from)?
             .is_none()
@@ -533,11 +538,7 @@ pub unsafe extern "C" fn xila_udp_bind(
                 .await
                 .map_err(Status::from)?;
             let result = inner
-                .with_mutable(|s| {
-                    s.bind(
-                        IpListenEndpoint::new(Some(endpoint.address), endpoint.port).into_smoltcp(),
-                    )
-                })
+                .with_mutable(|s| s.bind(listen_endpoint(endpoint).into_smoltcp()))
                 .await;
             if result.is_err() {
                 inner.close().await;
@@ -864,6 +865,23 @@ mod tests {
             core::mem::size_of::<TcpListener>(),
             core::mem::size_of::<Udp>(),
             core::mem::size_of::<NetworkAddress>()
+        );
+    }
+    #[test]
+    fn unspecified_address_listens_everywhere() {
+        let port = Port::new(7000);
+        for unspecified in [
+            IpAddress::new_ipv4([0, 0, 0, 0]),
+            IpAddress::new_ipv6([0; 8]),
+        ] {
+            let endpoint = listen_endpoint(IpEndpoint::new(unspecified, port));
+            assert_eq!(endpoint.address, None);
+            assert_eq!(endpoint.port, port);
+        }
+        let loopback = IpAddress::new_ipv4([127, 0, 0, 1]);
+        assert_eq!(
+            listen_endpoint(IpEndpoint::new(loopback.clone(), port)).address,
+            Some(loopback)
         );
     }
     #[test]

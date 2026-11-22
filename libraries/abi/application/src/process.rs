@@ -77,6 +77,13 @@ pub trait ProcessHost: Sync {
     fn graphics_manager(&self) -> Option<&'static graphics::Manager> {
         None
     }
+    /// The network stack the process's sockets use, or `None` when the system has none.
+    /// A process gets a network capability with every right through
+    /// `XilaStartup.network` only when this returns a manager.
+    #[cfg(feature = "network")]
+    fn network_manager(&self) -> Option<&'static network::Manager> {
+        None
+    }
     /// Start the executable as a child task on the caller's executor. The child's
     /// coroutine must enter its program through [`ProcessLaunch::run`].
     fn spawn(&'static self, request: SpawnRequest) -> SpawnFuture;

@@ -796,3 +796,90 @@ async fn exit_from_a_worker_waits_for_the_graphics_lock(
     assert_eq!(manager.get_window_count().await.unwrap(), 0);
     assert_eq!(State::registered_state_count(manager), 0);
 }
+
+/// A context whose network manager has a loopback interface at 127.0.0.1 and ::1. The
+/// interface runner is spawned on the test's executor, which the probe's coroutine shares:
+/// every socket wait suspends the probe and lets the runner move the packets.
+#[cfg(feature = "network")]
+async fn setup_network() -> (&'static ExecutableContext, TaskIdentifier) {
+    let (context, parent) = setup().await;
+    let vfs = context.virtual_file_system;
+    let network: &'static network::Manager = Box::leak(Box::new(network::Manager::new(
+        context.task_manager,
+        vfs,
+        context.time_manager,
+        &testing_support::RandomDevice,
+    )));
+    vfs.create_directory(parent, &"/devices").await.unwrap();
+    vfs.create_directory(parent, &"/devices/network")
+        .await
+        .unwrap();
+    let (device, controller) = network::create_loopback_device();
+    network
+        .mount_interface(parent, "loopback0", device, controller, None)
+        .await
+        .unwrap();
+    let mut interface = File::open(
+        vfs,
+        parent,
+        "/devices/network/loopback0",
+        AccessFlags::Write.into(),
+    )
+    .await
+    .unwrap();
+    for address in [
+        network::IpCidr::new_ipv4([127, 0, 0, 1], 8),
+        network::IpCidr::new_ipv6([0, 0, 0, 0, 0, 0, 0, 1], 128),
+    ] {
+        interface
+            .control(network::ADD_IP_ADDRESS, &address)
+            .await
+            .unwrap();
+    }
+    interface.close(vfs).await.unwrap();
+
+    let mut with_network = ExecutableContext::new(
+        context.task_manager,
+        context.users_manager,
+        vfs,
+        context.time_manager,
+    );
+    with_network.formats = context.formats;
+    with_network.network_manager = Some(network);
+    (Box::leak(Box::new(with_network)), parent)
+}
+
+/// The SDK's sockets and getaddrinfo, over the network capability in `XilaStartup.network`,
+/// and the same program on a host that grants none.
+#[cfg(feature = "network")]
+#[task::test]
+async fn runs_sdk_network_probe() {
+    let (context, parent) = setup_network().await;
+    let vfs = context.virtual_file_system;
+    let create = Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None);
+    File::open(vfs, parent, "/input", create)
+        .await
+        .unwrap()
+        .close(vfs)
+        .await
+        .unwrap();
+    install(vfs, parent, "/network", &build_posix_probe("network")).await;
+    let (status, stdout, stderr) =
+        launch(context, parent, "/network", "sockets", &["sockets"]).await;
+    assert_eq!(status, 0, "{}", String::from_utf8_lossy(&stderr));
+    assert_eq!(stdout, b"sockets: ok\n");
+
+    // The same filesystem and program, from a context without a network manager.
+    let mut without = ExecutableContext::new(
+        context.task_manager,
+        context.users_manager,
+        vfs,
+        context.time_manager,
+    );
+    without.formats = context.formats;
+    let without = Box::leak(Box::new(without));
+    let (status, stdout, stderr) =
+        launch(without, parent, "/network", "no-network", &["no-network"]).await;
+    assert_eq!(status, 0, "{}", String::from_utf8_lossy(&stderr));
+    assert_eq!(stdout, b"no-network: ok\n");
+}

@@ -88,6 +88,8 @@ int poll(struct pollfd *fds, nfds_t count, int timeout) {
                         ? XILA_POLL_DIRECTORY : XILA_POLL_FILE,
             .events = native_events(fds[i].events),
         };
+        if (entry != NULL && entry->kind == XILA_FD_SOCKET)
+            xila_socket_poll_entry(entry->object, &entries[i]);
     }
     errno = saved_errno;
 

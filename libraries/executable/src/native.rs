@@ -44,6 +44,11 @@ impl ProcessHost for ExecutableContext {
         self.graphics_manager
     }
 
+    #[cfg(feature = "network")]
+    fn network_manager(&self) -> Option<&'static network::Manager> {
+        self.network_manager
+    }
+
     fn spawn(&'static self, request: SpawnRequest) -> SpawnFuture {
         Box::pin(async move {
             let SpawnRequest {

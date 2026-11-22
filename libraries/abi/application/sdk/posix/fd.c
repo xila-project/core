@@ -86,6 +86,8 @@ struct xila_fd *xila_fd_get(int fd) {
 static XilaStatus dispose(struct xila_fd entry) {
     if (entry.object == NULL || (entry.flags & XILA_FD_BORROWED))
         return XILA_STATUS_OK;
+    if (entry.kind == XILA_FD_SOCKET)
+        return xila_socket_release(entry.object);
     return entry.kind == XILA_FD_FILE ? xila_file_close(entry.object)
                                      : xila_directory_close(entry.object);
 }
@@ -102,6 +104,11 @@ int close(int fd) {
 
 static XilaStatus duplicate(struct xila_fd entry, uint8_t flags, struct xila_fd *copy) {
     *copy = (struct xila_fd){.kind = entry.kind, .flags = flags};
+    if (entry.kind == XILA_FD_SOCKET) {
+        xila_socket_retain(entry.object);
+        copy->object = entry.object;
+        return XILA_STATUS_OK;
+    }
     if (entry.kind == XILA_FD_FILE) {
         XilaFile *file = NULL;
         XilaStatus status = xila_file_duplicate(entry.object, &file);
@@ -161,6 +168,8 @@ int dup2(int fd, int target) {
 static int get_file_flags(const struct xila_fd *entry) {
     if (entry->kind == XILA_FD_DIRECTORY)
         return O_RDONLY;
+    if (entry->kind == XILA_FD_SOCKET)
+        return xila_socket_get_flags(entry->object);
     uint32_t flags = 0;
     XilaStatus status = xila_file_control(entry->object, XILA_CONTROL_GET_FILE_FLAGS,
                                           NULL, 0, &flags, sizeof(flags));
@@ -176,6 +185,10 @@ static int get_file_flags(const struct xila_fd *entry) {
 static int set_file_flags(const struct xila_fd *entry, int flags) {
     if (entry->kind == XILA_FD_DIRECTORY)
         return xila_fail_errno(EINVAL);
+    if (entry->kind == XILA_FD_SOCKET) {
+        xila_socket_set_flags(entry->object, flags);
+        return 0;
+    }
     uint32_t native = ((flags & O_NONBLOCK) ? XILA_OPEN_NON_BLOCKING : 0) |
                       ((flags & O_APPEND) ? XILA_OPEN_APPEND : 0);
     XilaStatus status = xila_file_control(entry->object, XILA_CONTROL_SET_FILE_FLAGS,

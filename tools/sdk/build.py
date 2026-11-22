@@ -93,7 +93,8 @@ COMMON_FLAGS = [
 ]
 
 POSIX_SOURCES = ["environ", "environment", "errno", "exit_flush", "fd", "file", "heap", "onexit", "path", "process", "stack_protector", "startup", "status", "stderr", "stdin", "stdout",
-                 "time", "poll", "unsupported", "thread", "thread_keys", "thread_sync", "libc_lock", "strtok", "random", "semaphore", "thread_rwlock"]
+                 "time", "poll", "unsupported", "thread", "thread_keys", "thread_sync", "libc_lock", "strtok", "random", "semaphore", "thread_rwlock",
+                 "socket", "inet", "netdb"]
 
 
 def pins():

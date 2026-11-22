@@ -476,6 +476,22 @@ array is null at count zero. `XilaStartup.program_name` carries the executable's
 launch name separately and is empty for a linked entry. `XilaStartup.process` is the process capability, null
 for an application that is not a process.
 
+`XilaStartup.network` is the last field. It is the process's `XilaNetwork`
+capability, with the connect, listen and resolve rights, which the socket and
+resolver calls take. The host grants it to every process when its
+`ProcessHost::network_manager` returns a network stack (Core's
+`ExecutableContext.network_manager`), so a spawned child gets it too. It is
+null for an application that is not a process, on a host without a network
+stack and in firmware built without the `network` feature. It is borrowed like
+the other startup capabilities: do not pass it to `xila_network_close`. The
+field was appended after `program_name`, so images built before it existed
+still start: crt0 only refuses a startup block smaller than the one it was
+built with. A per-child grant, for example a spawn flag that withholds the
+network, is a follow-up.
+
+A listener or a UDP socket bound to the unspecified address (`0.0.0.0` or
+`::`) listens on every local address, as in POSIX.
+
 The host lends the startup data, strings and initial capabilities for the call.
 The app may close its own file and directory objects. It must leave borrowed
 objects open and release access when the entry returns. The Rust helper drops
