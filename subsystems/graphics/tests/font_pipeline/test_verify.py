@@ -36,6 +36,21 @@ class VerifierTests(unittest.TestCase):
             self.assertEqual(set(verify.lvgl_outputs(messages)),
                              {current / "bindings.rs", current / "liblvgl.a"})
 
+    def test_graphics_evidence_ignores_checkout_path(self):
+        checkout = "path+file:///home/user/graphics/core"
+        graphics = Path("/target/debug/build/xila-graphics-current/out")
+        messages = [
+            {"reason": "build-script-executed",
+             "package_id": f"{checkout}/subsystems/graphics#xila-graphics@0.1.0",
+             "out_dir": str(graphics)},
+            {"reason": "build-script-executed",
+             "package_id": f"{checkout}/libraries/stackful#xila-stackful@0.1.0",
+             "out_dir": "/target/debug/build/xila-stackful-current/out"},
+            {"reason": "compiler-artifact",
+             "package_id": f"{checkout}/subsystems/graphics#xila-graphics@0.1.0"},
+        ]
+        self.assertEqual(verify.graphics_output(messages), graphics)
+
     def test_build_script_stdout_supports_new_and_legacy_layouts(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

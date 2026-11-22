@@ -32,6 +32,16 @@ def lvgl_outputs(messages):
     return [outputs[0] / "liblvgl.a", outputs[0] / "bindings.rs"]
 
 
+def graphics_output(messages):
+    # Match the package name, not the whole identifier: a path dependency's
+    # identifier also contains its checkout path, which may contain "graphics".
+    outputs = [Path(message["out_dir"]) for message in messages
+               if message.get("reason") == "build-script-executed"
+               and "#xila-graphics@" in message.get("package_id", "")]
+    assert len(outputs) == 1, f"Expected one current Graphics build, got {outputs}"
+    return outputs[0]
+
+
 def build_script_stdout(out_dir):
     # Cargo 1.100+ stores build script stdout at <unit>/run/stdout instead of <unit>/output.
     for candidate in (out_dir.parent / "run/stdout", out_dir.parent / "output"):
@@ -103,10 +113,7 @@ def verify():
         assert len(executables) == 1, executables
         executable = executables[0]
         command([executable, "--nocapture"], f"{name}-tests", env)
-        out_dirs = [Path(m["out_dir"]) for m in messages
-                    if m.get("reason") == "build-script-executed" and "graphics" in m.get("package_id", "")]
-        assert len(out_dirs) == 1, out_dirs
-        out = out_dirs[0]
+        out = graphics_output(messages)
         build_output = build_script_stdout(out)
         current_sources = [Path(line.removeprefix("cargo:rerun-if-changed="))
                            for line in build_output.splitlines()
