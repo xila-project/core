@@ -507,12 +507,13 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
     // device lock the host holds, when main calls exit(): exit stops the worker first,
     // which gives the namespace lock back, so closing and flushing the program's file, which
     // need it, finish while the host still holds the device lock.
-    let handle = start(
+    let handle = start_with(
         context,
         parent,
         "/threads",
         "exit-under-lock",
         &["exit-under-lock"],
+        NetworkRights::NONE,
     )
     .await;
     let mut join = core::pin::pin!(handle.join());
