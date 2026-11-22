@@ -1524,41 +1524,67 @@ async fn existing_files_remain_accessible_without_representable_utc() {
 #[cfg(target_os = "linux")]
 #[test]
 async fn confined_operations_reject_a_replaced_root_or_root_ancestor() {
-    let (task, vfs) = initialize().await;
+    let (task, virtual_file_system) = initialize().await;
     for path in ["/granted", "/granted/child", "/other", "/other/child"] {
-        vfs.create_directory(task, &path).await.unwrap();
+        virtual_file_system
+            .create_directory(task, &path)
+            .await
+            .unwrap();
     }
-    File::write_to_path(vfs, task, "/granted/child/value", b"granted")
-        .await
-        .unwrap();
-    File::write_to_path(vfs, task, "/other/child/value", b"other")
+    File::write_to_path(
+        virtual_file_system,
+        task,
+        "/granted/child/value",
+        b"granted",
+    )
+    .await
+    .unwrap();
+    File::write_to_path(virtual_file_system, task, "/other/child/value", b"other")
         .await
         .unwrap();
 
     let relative = Path::new("value");
     let root = Path::new("/granted/child");
     let flags = Flags::from(AccessFlags::Read);
-    assert!(vfs.open_beneath(&relative, flags, task, root).await.is_ok());
+    assert!(
+        virtual_file_system
+            .open_beneath(&relative, flags, task, root)
+            .await
+            .is_ok()
+    );
 
-    vfs.rename(task, &"/granted", &"/original").await.unwrap();
-    vfs.create_symlink(task, Path::new("/other"), Path::new("/granted"))
+    virtual_file_system
+        .rename(task, &"/granted", &"/original")
+        .await
+        .unwrap();
+    virtual_file_system
+        .create_symlink(task, Path::new("/other"), Path::new("/granted"))
         .await
         .unwrap();
     assert!(matches!(
-        vfs.open_beneath(&relative, flags, task, root).await,
+        virtual_file_system
+            .open_beneath(&relative, flags, task, root)
+            .await,
         Err(IoErrorKind::PathEscapesRoot)
     ));
 
-    vfs.remove(task, "/granted").await.unwrap();
-    vfs.rename(task, &"/original", &"/granted").await.unwrap();
-    vfs.rename(task, &"/granted/child", &"/granted/original")
+    virtual_file_system.remove(task, "/granted").await.unwrap();
+    virtual_file_system
+        .rename(task, &"/original", &"/granted")
         .await
         .unwrap();
-    vfs.create_symlink(task, Path::new("../other/child"), root)
+    virtual_file_system
+        .rename(task, &"/granted/child", &"/granted/original")
+        .await
+        .unwrap();
+    virtual_file_system
+        .create_symlink(task, Path::new("../other/child"), root)
         .await
         .unwrap();
     assert!(matches!(
-        vfs.open_beneath(&relative, flags, task, root).await,
+        virtual_file_system
+            .open_beneath(&relative, flags, task, root)
+            .await,
         Err(IoErrorKind::PathEscapesRoot)
     ));
 }
@@ -1566,22 +1592,31 @@ async fn confined_operations_reject_a_replaced_root_or_root_ancestor() {
 #[cfg(target_os = "linux")]
 #[test]
 async fn confined_operations_do_not_dispatch_to_backends_without_namespace_guarantees() {
-    let (task, vfs) = initialize().await;
+    let (task, virtual_file_system) = initialize().await;
     let path = Path::new("/sandbox/mounted");
-    vfs.create_directory(task, &"/sandbox").await.unwrap();
-    vfs.create_directory(task, &path).await.unwrap();
+    virtual_file_system
+        .create_directory(task, &"/sandbox")
+        .await
+        .unwrap();
+    virtual_file_system
+        .create_directory(task, &path)
+        .await
+        .unwrap();
     // The dummy backend panics on namespace operations, so this verifies
     // rejection before the VFS delegates any part of a confined lookup.
-    vfs.mount_file_system(file_system::DummyFileSystem, path, task)
+    virtual_file_system
+        .mount_file_system(file_system::DummyFileSystem, path, task)
         .await
         .unwrap();
     assert_eq!(
-        vfs.get_statistics_beneath(task, &Path::new("mounted"), true, Path::new("/sandbox"))
+        virtual_file_system
+            .get_statistics_beneath(task, &Path::new("mounted"), true, Path::new("/sandbox"))
             .await,
         Err(IoErrorKind::PathEscapesRoot)
     );
     assert_eq!(
-        vfs.get_statistics_beneath(task, &Path::new("."), true, path)
+        virtual_file_system
+            .get_statistics_beneath(task, &Path::new("."), true, path)
             .await,
         Err(IoErrorKind::PathEscapesRoot)
     );
@@ -1590,19 +1625,26 @@ async fn confined_operations_do_not_dispatch_to_backends_without_namespace_guara
 #[cfg(target_os = "linux")]
 #[test]
 async fn confined_namespace_changes_cannot_target_the_resolved_root() {
-    let (task, vfs) = initialize().await;
+    let (task, virtual_file_system) = initialize().await;
     let root = Path::new("/sandbox");
-    vfs.create_directory(task, &root).await.unwrap();
-    vfs.create_symlink(task, Path::new("."), Path::new("/sandbox/alias"))
+    virtual_file_system
+        .create_directory(task, &root)
+        .await
+        .unwrap();
+    virtual_file_system
+        .create_symlink(task, Path::new("."), Path::new("/sandbox/alias"))
         .await
         .unwrap();
     let root_alias = Path::new("alias/.");
     assert_eq!(
-        vfs.remove_beneath(task, root_alias, root).await,
+        virtual_file_system
+            .remove_beneath(task, root_alias, root)
+            .await,
         Err(IoErrorKind::ResourceBusy)
     );
     assert_eq!(
-        vfs.rename_beneath(task, &root_alias, &Path::new("moved"), root, Path::ROOT)
+        virtual_file_system
+            .rename_beneath(task, &root_alias, &Path::new("moved"), root, Path::ROOT)
             .await,
         Err(IoErrorKind::ResourceBusy)
     );
@@ -1611,16 +1653,28 @@ async fn confined_namespace_changes_cannot_target_the_resolved_root() {
 #[cfg(target_os = "linux")]
 #[test]
 async fn confined_open_can_decline_to_follow_the_final_link() {
-    let (task, vfs) = initialize().await;
+    let (task, virtual_file_system) = initialize().await;
     let root = Path::new("/sandbox");
-    vfs.create_directory(task, &root).await.unwrap();
-    vfs.create_directory(task, &"/sandbox/sub").await.unwrap();
-    File::write_to_path(vfs, task, "/sandbox/sub/value", b"data")
+    virtual_file_system
+        .create_directory(task, &root)
         .await
         .unwrap();
-    for (name, target) in [("alias", "sub"), ("dangling", "missing")] {
+    virtual_file_system
+        .create_directory(task, &"/sandbox/subdirectory")
+        .await
+        .unwrap();
+    File::write_to_path(
+        virtual_file_system,
+        task,
+        "/sandbox/subdirectory/value",
+        b"data",
+    )
+    .await
+    .unwrap();
+    for (name, target) in [("alias", "subdirectory"), ("dangling", "missing")] {
         let link = format!("/sandbox/{name}");
-        vfs.create_symlink(task, Path::new(target), Path::new(&link))
+        virtual_file_system
+            .create_symlink(task, Path::new(target), Path::new(&link))
             .await
             .unwrap();
     }
@@ -1628,53 +1682,61 @@ async fn confined_open_can_decline_to_follow_the_final_link() {
     let flags = Flags::from(AccessFlags::Read);
     let dangling = Path::new("dangling");
     assert!(matches!(
-        vfs.open_beneath_with_lookup(&dangling, flags, task, root, false)
+        virtual_file_system
+            .open_beneath_with_lookup(&dangling, flags, task, root, false)
             .await,
         Err(IoErrorKind::SymlinkLoop)
     ));
     assert!(matches!(
-        vfs.open_beneath_with_lookup(&dangling, flags, task, root, true)
+        virtual_file_system
+            .open_beneath_with_lookup(&dangling, flags, task, root, true)
             .await,
         Err(IoErrorKind::NotFound)
     ));
     let create = Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None);
     assert!(matches!(
-        vfs.open_beneath_with_lookup(&dangling, create, task, root, false)
+        virtual_file_system
+            .open_beneath_with_lookup(&dangling, create, task, root, false)
             .await,
         Err(IoErrorKind::SymlinkLoop)
     ));
     let exclusive = create.set_open(CreateFlags::CREATE_EXCLUSIVE);
     for follow in [false, true] {
         assert!(matches!(
-            vfs.open_beneath_with_lookup(&dangling, exclusive, task, root, follow)
+            virtual_file_system
+                .open_beneath_with_lookup(&dangling, exclusive, task, root, follow)
                 .await,
             Err(IoErrorKind::AlreadyExists)
         ));
     }
     let mut target = [0; 16];
-    let length = vfs
+    let length = virtual_file_system
         .read_symlink_beneath(task, dangling, &mut target, root)
         .await
         .unwrap();
     assert_eq!(&target[..length], b"missing");
     assert_eq!(
-        vfs.get_statistics_beneath(task, &Path::new("missing"), false, root)
+        virtual_file_system
+            .get_statistics_beneath(task, &Path::new("missing"), false, root)
             .await,
         Err(IoErrorKind::NotFound)
     );
 
     assert!(matches!(
-        vfs.open_directory_beneath_with_lookup(task, &Path::new("alias"), root, false)
+        virtual_file_system
+            .open_directory_beneath_with_lookup(task, &Path::new("alias"), root, false)
             .await,
         Err(IoErrorKind::SymlinkLoop)
     ));
     assert!(
-        vfs.open_directory_beneath_with_lookup(task, &Path::new("alias"), root, true)
+        virtual_file_system
+            .open_directory_beneath_with_lookup(task, &Path::new("alias"), root, true)
             .await
             .is_ok()
     );
     assert!(
-        vfs.open_beneath_with_lookup(&Path::new("alias/value"), flags, task, root, false)
+        virtual_file_system
+            .open_beneath_with_lookup(&Path::new("alias/value"), flags, task, root, false)
             .await
             .is_ok()
     );
@@ -3567,8 +3629,7 @@ mod symlink_confinement_regression_tests {
         fn lookup_directory(&self, context: &mut Context, path: &Path) -> file_system::Result<()> {
             assert!(
                 path.is_root(),
-                "directory-entry backend must never re-resolve non-root path: {:?}",
-                path
+                "directory-entry backend must never re-resolve a non-root path"
             );
             *context = Context::new(Some(HandleState {
                 inode: 1,
@@ -3606,13 +3667,10 @@ mod symlink_confinement_regression_tests {
         fn lookup_file(
             &self,
             _context: &mut Context,
-            path: &Path,
+            _path: &Path,
             _flags: Flags,
         ) -> file_system::Result<()> {
-            panic!(
-                "directory-entry backend received path-based lookup_file: {:?}",
-                path
-            );
+            panic!("directory-entry backend must not receive path-based lookup_file");
         }
 
         fn lookup_file_entry(
@@ -3660,11 +3718,8 @@ mod symlink_confinement_regression_tests {
             Ok(())
         }
 
-        fn create_directory(&self, path: &Path) -> file_system::Result<()> {
-            panic!(
-                "directory-entry backend received path-based create_directory: {:?}",
-                path
-            );
+        fn create_directory(&self, _path: &Path) -> file_system::Result<()> {
+            panic!("directory-entry backend must not receive path-based create_directory");
         }
 
         fn create_directory_entry(&self, parent: &Context, name: &str) -> file_system::Result<()> {
@@ -3682,11 +3737,8 @@ mod symlink_confinement_regression_tests {
             Ok(())
         }
 
-        fn create_file(&self, path: &Path) -> file_system::Result<()> {
-            panic!(
-                "directory-entry backend received path-based create_file: {:?}",
-                path
-            );
+        fn create_file(&self, _path: &Path) -> file_system::Result<()> {
+            panic!("directory-entry backend must not receive path-based create_file");
         }
 
         fn create_file_entry(&self, parent: &Context, name: &str) -> file_system::Result<()> {
@@ -3704,11 +3756,8 @@ mod symlink_confinement_regression_tests {
             Ok(())
         }
 
-        fn remove(&self, path: &Path) -> file_system::Result<()> {
-            panic!(
-                "directory-entry backend received path-based remove: {:?}",
-                path
-            );
+        fn remove(&self, _path: &Path) -> file_system::Result<()> {
+            panic!("directory-entry backend must not receive path-based remove");
         }
 
         fn remove_entry(&self, parent: &Context, name: &str) -> file_system::Result<()> {
@@ -3734,11 +3783,8 @@ mod symlink_confinement_regression_tests {
             Ok(())
         }
 
-        fn rename(&self, old_path: &Path, new_path: &Path) -> file_system::Result<()> {
-            panic!(
-                "directory-entry backend received path-based rename: {:?} -> {:?}",
-                old_path, new_path
-            );
+        fn rename(&self, _old_path: &Path, _new_path: &Path) -> file_system::Result<()> {
+            panic!("directory-entry backend must not receive path-based rename");
         }
 
         fn rename_entry(
@@ -3769,11 +3815,8 @@ mod symlink_confinement_regression_tests {
             Ok(())
         }
 
-        fn create_symlink(&self, _target: &Path, link: &Path) -> file_system::Result<()> {
-            panic!(
-                "directory-entry backend received path-based create_symlink: {:?}",
-                link
-            );
+        fn create_symlink(&self, _target: &Path, _link: &Path) -> file_system::Result<()> {
+            panic!("directory-entry backend must not receive path-based create_symlink");
         }
 
         fn create_symlink_entry(
@@ -3796,11 +3839,8 @@ mod symlink_confinement_regression_tests {
             Ok(())
         }
 
-        fn read_symlink(&self, link: &Path, _buffer: &mut [u8]) -> file_system::Result<usize> {
-            panic!(
-                "directory-entry backend received path-based read_symlink: {:?}",
-                link
-            );
+        fn read_symlink(&self, _link: &Path, _buffer: &mut [u8]) -> file_system::Result<usize> {
+            panic!("directory-entry backend must not receive path-based read_symlink");
         }
 
         fn read_symlink_entry(
@@ -3826,13 +3866,10 @@ mod symlink_confinement_regression_tests {
 
         fn get_attributes(
             &self,
-            path: &Path,
+            _path: &Path,
             _attributes: &mut Attributes,
         ) -> file_system::Result<()> {
-            panic!(
-                "directory-entry backend received path-based get_attributes: {:?}",
-                path
-            );
+            panic!("directory-entry backend must not receive path-based get_attributes");
         }
 
         fn get_entry_attributes(
@@ -3868,11 +3905,12 @@ mod symlink_confinement_regression_tests {
             Ok(())
         }
 
-        fn set_attributes(&self, path: &Path, _attributes: &Attributes) -> file_system::Result<()> {
-            panic!(
-                "directory-entry backend received path-based set_attributes: {:?}",
-                path
-            );
+        fn set_attributes(
+            &self,
+            _path: &Path,
+            _attributes: &Attributes,
+        ) -> file_system::Result<()> {
+            panic!("directory-entry backend must not receive path-based set_attributes");
         }
 
         fn set_entry_attributes(
@@ -4063,6 +4101,12 @@ mod symlink_confinement_regression_tests {
                 .unwrap_err(),
             IoErrorKind::PathEscapesRoot
         );
+        assert!(
+            virtual_file_system
+                .open_directory_beneath(task, &"nested//", Path::from_str("/real_preopen"))
+                .await
+                .is_ok()
+        );
     }
 
     #[cfg(target_os = "linux")]
@@ -4089,13 +4133,13 @@ mod symlink_confinement_regression_tests {
             .await
             .unwrap();
         virtual_file_system
-            .create_directory(task, &"/sandbox/a/c/sub")
+            .create_directory(task, &"/sandbox/a/c/subdirectory")
             .await
             .unwrap();
         write_new_file(
             virtual_file_system,
             task,
-            "/sandbox/a/c/sub/target.txt",
+            "/sandbox/a/c/subdirectory/target.txt",
             b"chained-ok",
         )
         .await;
@@ -4131,7 +4175,7 @@ mod symlink_confinement_regression_tests {
         virtual_file_system
             .create_symlink(
                 task,
-                Path::from_str("sub/target.txt"),
+                Path::from_str("subdirectory/target.txt"),
                 Path::from_str("/sandbox/a/c/link2"),
             )
             .await
@@ -4156,7 +4200,7 @@ mod symlink_confinement_regression_tests {
             .create_symlink(
                 task,
                 Path::from_str("/sandbox/inside.txt"),
-                Path::from_str("/sandbox/abs_inside"),
+                Path::from_str("/sandbox/absolute_inside"),
             )
             .await
             .unwrap();
@@ -4164,7 +4208,7 @@ mod symlink_confinement_regression_tests {
             .create_symlink(
                 task,
                 Path::from_str("/outside.txt"),
-                Path::from_str("/sandbox/abs_outside"),
+                Path::from_str("/sandbox/absolute_outside"),
             )
             .await
             .unwrap();
@@ -4231,21 +4275,35 @@ mod symlink_confinement_regression_tests {
 
         assert_eq!(
             virtual_file_system
-                .open_beneath(&"abs_inside", Flags::from(AccessFlags::Read), task, &root)
+                .open_beneath(
+                    &"absolute_inside",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                    &root
+                )
                 .await
                 .unwrap_err(),
             IoErrorKind::PathEscapesRoot
         );
         assert_eq!(
             virtual_file_system
-                .open_beneath(&"abs_outside", Flags::from(AccessFlags::Read), task, &root)
+                .open_beneath(
+                    &"absolute_outside",
+                    Flags::from(AccessFlags::Read),
+                    task,
+                    &root
+                )
                 .await
                 .unwrap_err(),
             IoErrorKind::PathEscapesRoot
         );
 
         let mut unconfined = virtual_file_system
-            .open(&"/sandbox/abs_inside", Flags::from(AccessFlags::Read), task)
+            .open(
+                &"/sandbox/absolute_inside",
+                Flags::from(AccessFlags::Read),
+                task,
+            )
             .await
             .unwrap();
         assert_eq!(read_to_vec(&mut unconfined).await, b"inside");
@@ -4890,7 +4948,7 @@ mod symlink_confinement_regression_tests {
             .await
             .unwrap();
         let mut target_buffer = [0u8; 32];
-        let target_len = virtual_file_system
+        let target_length = virtual_file_system
             .read_symlink_beneath(
                 task,
                 Path::from_str("active/link_to_secret"),
@@ -4899,7 +4957,7 @@ mod symlink_confinement_regression_tests {
             )
             .await
             .unwrap();
-        assert_eq!(&target_buffer[..target_len], b"secret.txt");
+        assert_eq!(&target_buffer[..target_length], b"secret.txt");
 
         let statistics = virtual_file_system
             .get_statistics_beneath(task, &"active/link_to_secret", false, &root)
@@ -5067,11 +5125,11 @@ mod symlink_confinement_regression_tests {
             .unwrap();
 
         let cross_simulated = SimulatedDirectoryEntryFileSystem::new();
-        let sub_sandbox = cross_simulated
+        let nested_sandbox = cross_simulated
             .populate_directory(1, "active_moved")
             .unwrap();
         cross_simulated
-            .populate_file(sub_sandbox, "secret.txt", b"across-mounts")
+            .populate_file(nested_sandbox, "secret.txt", b"across-mounts")
             .unwrap();
         cross_simulated
             .populate_symlink(

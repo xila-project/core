@@ -147,7 +147,7 @@ struct ResolutionOptions<'a> {
     root: Option<&'a Path>,
 }
 
-struct ConfinedRoot {
+pub(super) struct ConfinedRoot {
     path: PathOwned,
     mount_index: usize,
     directory: Option<OpenDirectoryHandle>,
@@ -354,7 +354,7 @@ impl VirtualFileSystem {
 
     /// Revalidate a pre-resolved confinement root without following any
     /// symbolic links, verifying mount namespace guarantees along the path.
-    async fn validate_confined_root(
+    pub(super) async fn validate_confined_root(
         &self,
         file_systems: &FileSystemsArray,
         root: &Path,
@@ -547,13 +547,18 @@ impl VirtualFileSystem {
             .validate_confined_root(file_systems, root, user, task)
             .await?;
 
-        let mut joined =
-            String::with_capacity(confined_root.path.get_length() + 1 + path.get_length());
-        joined.push_str(confined_root.path.as_str().trim_end_matches('/'));
-        joined.push('/');
-        joined.push_str(path.as_str());
-        let joined = PathOwned::new(joined).ok_or(IoErrorKind::InvalidPath)?;
         let require_directory = path.as_str().ends_with('/');
+        let trimmed_path = path.as_str().trim_end_matches('/');
+        let mut joined =
+            String::with_capacity(confined_root.path.get_length() + 1 + trimmed_path.len());
+        joined.push_str(confined_root.path.as_str().trim_end_matches('/'));
+        if !trimmed_path.is_empty() {
+            joined.push('/');
+            joined.push_str(trimmed_path);
+        } else if joined.is_empty() {
+            joined.push('/');
+        }
+        let joined = PathOwned::try_from(joined).map_err(|_| IoErrorKind::InvalidPath)?;
         let root_path = confined_root.path.clone();
         let target = self
             .resolve_path_inner(
@@ -1004,9 +1009,9 @@ impl VirtualFileSystem {
                 consumed += 1;
             }
             let has_remaining = consumed < state.pending.len();
-            let component_len = separator;
+            let component_length = separator;
 
-            if component_len == 0 || (component_len == 1 && &state.pending[..1] == ".") {
+            if component_length == 0 || (component_length == 1 && &state.pending[..1] == ".") {
                 state.pending.drain(..consumed.max(1));
                 continue;
             }
@@ -1021,7 +1026,7 @@ impl VirtualFileSystem {
             )
             .await?;
 
-            if component_len == 2 && &state.pending[..2] == ".." {
+            if component_length == 2 && &state.pending[..2] == ".." {
                 if options
                     .root
                     .is_some_and(|root| state.resolved.as_str() == root.as_str())
@@ -1040,7 +1045,7 @@ impl VirtualFileSystem {
                 continue;
             }
 
-            let component = &state.pending[..component_len];
+            let component = &state.pending[..component_length];
             state.candidate.clear();
             state.candidate.push_str(&state.resolved);
             if !state.resolved.ends_with('/') {
@@ -1170,11 +1175,11 @@ impl VirtualFileSystem {
                 }
 
                 let target_trimmed = target.trim_start_matches('/');
-                let remaining_len = state.pending.len() - consumed;
-                let needs_separator = !target_trimmed.is_empty() && remaining_len > 0;
-                let new_pending_len =
-                    target_trimmed.len() + usize::from(needs_separator) + remaining_len;
-                if state.resolved.len().saturating_add(new_pending_len) > MAX_PATH_LENGTH {
+                let remaining_length = state.pending.len() - consumed;
+                let needs_separator = !target_trimmed.is_empty() && remaining_length > 0;
+                let new_pending_length =
+                    target_trimmed.len() + usize::from(needs_separator) + remaining_length;
+                if state.resolved.len().saturating_add(new_pending_length) > MAX_PATH_LENGTH {
                     return Err(IoErrorKind::NameTooLong);
                 }
 

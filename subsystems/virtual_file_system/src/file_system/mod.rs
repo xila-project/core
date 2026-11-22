@@ -381,6 +381,8 @@ impl VirtualFileSystem {
         }
         self.check_attributes_permissions(&attributes, Permission::Execute, user)
             .await?;
+        self.validate_confined_root(&file_systems, &resolved.path, user, task)
+            .await?;
         Ok(resolved.path.as_ref().to_owned())
     }
 
