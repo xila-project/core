@@ -5179,3 +5179,101 @@ mod symlink_confinement_regression_tests {
         );
     }
 }
+
+/// Every value of a zero-sized device type has the same address, so two of
+/// them mounted side by side must still be told apart by their mount.
+mod zero_sized_device {
+    use file_system::{
+        BaseOperations, BlockDevice, CharacterDevice, Context, MountOperations, Result, Size,
+    };
+
+    pub struct Device;
+
+    impl BaseOperations for Device {
+        fn read(
+            &self,
+            _: &mut Context,
+            _: &mut core::task::Context<'_>,
+            _: &mut [u8],
+            _: Size,
+        ) -> core::task::Poll<Result<usize>> {
+            core::task::Poll::Ready(Ok(0))
+        }
+
+        fn write(
+            &self,
+            _: &mut Context,
+            _: &mut core::task::Context<'_>,
+            buffer: &[u8],
+            _: Size,
+        ) -> core::task::Poll<Result<usize>> {
+            core::task::Poll::Ready(Ok(buffer.len()))
+        }
+
+        fn clone_context(&self, _: &Context) -> Result<Context> {
+            Ok(Context::new_empty())
+        }
+    }
+
+    impl MountOperations for Device {
+        fn unmount(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    impl CharacterDevice for Device {}
+
+    impl BlockDevice for Device {}
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn zero_sized_devices_release_references_on_their_own_mount() {
+    let (task, virtual_file_system) = initialize().await;
+
+    virtual_file_system
+        .mount_character_device(task, "/character_a", zero_sized_device::Device)
+        .await
+        .unwrap();
+    virtual_file_system
+        .mount_character_device(task, "/character_b", zero_sized_device::Device)
+        .await
+        .unwrap();
+    virtual_file_system
+        .mount_block_device(task, "/block_a", zero_sized_device::Device)
+        .await
+        .unwrap();
+    virtual_file_system
+        .mount_block_device(task, "/block_b", zero_sized_device::Device)
+        .await
+        .unwrap();
+
+    for (path, other) in [("/character_b", "/character_a"), ("/block_b", "/block_a")] {
+        let first = File::open(virtual_file_system, task, path, AccessFlags::Read.into())
+            .await
+            .unwrap();
+        let second = first.duplicate().await.unwrap();
+
+        // Both references are on `path`, not on the other device of the same type.
+        assert_eq!(
+            virtual_file_system.unmount(other, false).await,
+            Ok(()),
+            "{other} is busy although only {path} is open"
+        );
+        assert_eq!(
+            virtual_file_system.unmount(path, false).await,
+            Err(IoErrorKind::ResourceBusy),
+            "{path} can be unmounted while it is open"
+        );
+
+        first.close(virtual_file_system).await.unwrap();
+        assert_eq!(
+            virtual_file_system.unmount(path, false).await,
+            Err(IoErrorKind::ResourceBusy),
+            "{path} can be unmounted while its duplicate is open"
+        );
+
+        second.close(virtual_file_system).await.unwrap();
+        virtual_file_system.unmount(path, false).await.unwrap();
+    }
+}

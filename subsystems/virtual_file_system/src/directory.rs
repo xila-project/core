@@ -69,6 +69,7 @@ impl<'a> Directory<'a> {
         let result = virtual_file_system
             .close(
                 &ItemStatic::Directory(self.0.directory),
+                None,
                 &mut self.0.context,
             )
             .await;
