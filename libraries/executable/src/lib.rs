@@ -63,7 +63,7 @@ pub use virtual_file_system as exported_virtual_file_system;
 
 use alloc::{string::String, vec::Vec};
 use file_system::{AccessFlags, Kind, Path, Permission, Position, Statistics};
-use task::{JoinHandle, SpawnerIdentifier, TaskIdentifier};
+use task::{JoinHandle, SpawnerIdentifier};
 use users::UserIdentifier;
 use virtual_file_system::File;
 
@@ -102,10 +102,9 @@ pub async fn is_execute_allowed(
             .contains(Permission::Execute)
 }
 
-async fn get_overridden_user(
-    context: &ExecutableContext,
+fn get_overridden_user(
     statistics: &Statistics,
-    task: TaskIdentifier,
+    current_user: UserIdentifier,
 ) -> Result<Option<UserIdentifier>> {
     if !statistics
         .permissions
@@ -114,8 +113,6 @@ async fn get_overridden_user(
     {
         return Ok(None);
     }
-
-    let current_user = context.task_manager.get_user(task).await?;
 
     let new_user = statistics.user;
 
@@ -172,14 +169,16 @@ async fn execute_inner(
     // Query by path: mounted executables do not implement attribute operations on their handles.
     let statistics = virtual_file_system.get_statistics(&path).await?;
 
+    // The program runs as the requested identity, if any, so it is the one that
+    // needs the execute permission.
+    let identity = launch.identity;
+    let user = match identity {
+        Some(identity) => identity.user,
+        None => task_instance.get_user(task).await?,
+    };
+
     // - Check the executable bit
-    if !is_execute_allowed(
-        context.users_manager,
-        &statistics,
-        task_instance.get_user(task).await?,
-    )
-    .await
-    {
+    if !is_execute_allowed(context.users_manager, &statistics, user).await {
         return Err(Error::PermissionDenied);
     }
 
@@ -212,6 +211,11 @@ async fn execute_inner(
                     .get_set_user_identifier(),
             )?
         {
+            // Format handlers do not apply identities (see `Launch`): refuse instead
+            // of running the program with the caller's identity.
+            if identity.is_some() {
+                return Err(Error::PermissionDenied);
+            }
             let mut standard = standard;
             standard.context = context;
             return handler
@@ -229,7 +233,7 @@ async fn execute_inner(
         }
     }
 
-    let new_user = get_overridden_user(context, &statistics, task).await?;
+    let new_user = get_overridden_user(&statistics, user)?;
 
     let main_function: MainFunction = file.control(GET_MAIN_FUNCTION, &()).await?;
 
@@ -237,6 +241,23 @@ async fn execute_inner(
 
     let (join_handle, _) = task_instance
         .spawn(task, file_name, spawner, async move |task| {
+            // The identity is set before the program starts, on its own task only.
+            // The task was registered a moment ago, so this cannot fail; if it ever
+            // did, the program must not run with an identity it was not given.
+            if let Some(identity) = identity
+                && (context
+                    .task_manager
+                    .set_user(task, identity.user)
+                    .await
+                    .is_err()
+                    || context
+                        .task_manager
+                        .set_group(task, identity.group)
+                        .await
+                        .is_err())
+            {
+                return -1;
+            }
             if let Some(new_user) = new_user {
                 context.task_manager.set_user(task, new_user).await.unwrap();
             }

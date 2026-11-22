@@ -6,6 +6,11 @@ pub const MAXIMUM_USER_NAME_LENGTH: usize = 32;
 /// Home of the built-in root account, which has no account record.
 pub const ROOT_HOME: &str = "/users/root";
 
+/// Name of the group whose members administer the device, for example by
+/// running a command as another user. Seeded images create it with the
+/// `administrator` account as its member.
+pub const ADMINISTRATOR_GROUP_NAME: &str = "administrator";
+
 /// Whether `name` may be given to a new or renamed account.
 ///
 /// A user name becomes the final component of its account record path and of
