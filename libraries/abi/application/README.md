@@ -624,15 +624,17 @@ see the [SDK README](sdk/README.md#graphics).
   it names, when the process ends through a return from the entry, `xila_process_exit` or a
   cancellation, after the handles the program opened and before its standard streams are
   closed. The state, with the task identity file pickers act with, is dropped then. If the
-  coroutine is cancelled while it waits to delete, the table stays in the host state for
-  the host to finish, as for every other resource.
+  coroutine is cancelled while it waits for the lock to delete them, the table and its
+  objects stay in the host state: the host's `HostState::release` deletes them after it
+  drops the coroutine, as for every other resource.
 * **The lock.** A call waits for the graphics lock with `Manager::lock().await` inside
   `suspend_on`, so a contended lock suspends the process, never the executor, and runs
   the call with `graphics::call::execute_locked` once it has the lock. It never awaits
   while holding it. Outside a coroutine the wait falls back to `block_on`, like every
   other bridge.
-* **Status.** Wrong handles, arguments and values are `InvalidArgument`, a string, buffer
-  or table over its limit is `OutOfMemory`, no graphics manager in the executable context
+* **Status.** Wrong handles, arguments and values are `InvalidArgument`, and so is a
+  string that is unterminated or over its limit. A buffer or table over its limit is
+  `OutOfMemory`, no graphics manager in the executable context
   (`ProcessHost::graphics_manager`) is `Unavailable`, and a build without the feature is
   `Unsupported`. A process without the capability (a linked entry) gets `InvalidArgument`.
 * **No raw LVGL.** `lv_*` functions are not part of the ABI. They would bypass the

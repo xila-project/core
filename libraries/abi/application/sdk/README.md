@@ -312,15 +312,22 @@ whether the program returned or called `exit`.
 
   The SDK never returns an array it built to the heap once `environ` has
   exposed it. An array that leaves the environment loses its strings, reads as
-  empty (`array[0]` is NULL) and joins a small pool that later tables reuse, so
-  memory is bounded by the peak number of tables in use, not by the number of
-  adoptions. Restoring a table saved before the most recent adoption is
-  therefore safe but not supported: the next accessor adopts whatever that array
-  holds, which is empty unless a later table reused it, in which case it is that
-  table's current contents. A mutation of the current table can invalidate
-  saved pointers to its strings, and can change its entries in place or move
-  them to another array. Removing the last entry leaves the current array in
-  place with a NULL first slot.
+  empty (`array[0]` is NULL) and joins a small pool that later tables reuse.
+  Pooled arrays are never freed, so memory does not grow with the number of
+  adoptions: it is bounded by the largest table, and at most three arrays per
+  size class (the current table, the retained one and the one being built).
+  Capacities are powers of two from four slots. On a 32-bit target, the three
+  128-slot arrays a 64-entry table needs cost about 1.5 KB at worst, and the
+  smaller size classes reached on the way add at most as much again. Restoring a table saved before
+  the most recent adoption is therefore safe but not supported: the next
+  accessor adopts whatever that array holds, which is empty unless a later table
+  reused it, in which case it is that table's current contents. A mutation of
+  the current table can invalidate saved pointers to its strings, and can change
+  its entries in place or move them to another array. When `setenv` adds a name
+  and the array has no spare slot, the entries move to a new array and the old
+  one reads as empty. Restoring a table saved before that `setenv` then adopts
+  that empty array: it empties the environment, the host's included. Removing the
+  last entry leaves the current array in place with a NULL first slot.
 
   Compile with `<stdlib.h>` from the SDK. Its `getenv` declaration carries an
   asm-label wrapper that stops the compiler from assuming `environ` is unchanged
