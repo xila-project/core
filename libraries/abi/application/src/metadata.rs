@@ -145,15 +145,15 @@ pub unsafe extern "C" fn xila_directory_get_statistics(
             validate_output(output)?;
         }
         let path = unsafe { directory.resolve(path, length, XILA_RIGHT_READ, false)? };
-        let value = if flags & XILA_STATISTICS_NO_FOLLOW != 0 {
-            crate::suspend_on(
-                directory
-                    .vfs
-                    .get_link_statistics_for_task(directory.task, &path),
-            )?
-        } else {
-            crate::suspend_on(directory.vfs.get_statistics_for_task(directory.task, &path))?
-        };
+        let (vfs, task) = (directory.vfs, directory.task);
+        // The future owns the path, so a cancellation drops it with the wait.
+        let value = crate::suspend_on_cancellable(async move {
+            if flags & XILA_STATISTICS_NO_FOLLOW != 0 {
+                vfs.get_link_statistics_for_task(task, &path).await
+            } else {
+                vfs.get_statistics_for_task(task, &path).await
+            }
+        })?;
         Statistics::try_from(value)
     })();
     match result {

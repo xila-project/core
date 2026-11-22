@@ -36,7 +36,8 @@ pub unsafe extern "C" fn xila_directory_iterator_open(
     let directory = unsafe { &*directory };
     let result = (|| {
         let path = unsafe { directory.resolve(path, length, XILA_RIGHT_READ, false)? };
-        let inner = SynchronousDirectory::open(directory.vfs, directory.task, &path)?;
+        // Passed by value: the open owns the path, so a cancellation drops it.
+        let inner = SynchronousDirectory::open(directory.vfs, directory.task, path)?;
         Ok::<_, Status>(DirectoryIterator {
             inner,
             pending: None,

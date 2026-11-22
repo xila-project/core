@@ -38,13 +38,15 @@ impl Directory {
         path: PathOwned,
         rights: u8,
     ) -> Result<Self, Status> {
-        // Open and close in one suspension: the listing exists only inside the future,
-        // which a cancellation drops in place, so it never sits in the program's frames.
-        crate::suspend_on_cancellable(async {
+        // Open and close in one suspension: the listing and the path exist only inside the
+        // future, which a cancellation drops in place, so neither sits in the program's
+        // frames. The future gives the path back once the directory is validated.
+        let path = crate::suspend_on_cancellable(async move {
             virtual_file_system::Directory::open(vfs, task, &path)
                 .await?
                 .close(vfs)
                 .await
+                .map(|()| path)
         })
         .map_err(Status::from)?;
         Ok(Self::granted(vfs, task, path, rights))
@@ -207,7 +209,8 @@ pub unsafe extern "C" fn xila_directory_create(
     let directory = unsafe { &*directory };
     let result = (|| {
         let path = unsafe { directory.resolve(path, length, XILA_RIGHT_WRITE, true)? };
-        crate::suspend_on(directory.vfs.create_directory(directory.task, &path))
+        let (vfs, task) = (directory.vfs, directory.task);
+        crate::suspend_on_cancellable(async move { vfs.create_directory(task, &path).await })
             .map_err(Status::from)
     })();
     result.map_or_else(|error| error, |()| Status::Ok)
@@ -232,19 +235,18 @@ pub unsafe extern "C" fn xila_directory_remove(
     let directory = unsafe { &*directory };
     let result = (|| {
         let path = unsafe { directory.resolve(path, length, XILA_RIGHT_WRITE, true)? };
-        // The VFS has a single remove primitive. A caller must explicitly permit directories.
-        if flags & XILA_REMOVE_DIRECTORY == 0
-            && crate::suspend_on(
-                directory
-                    .vfs
-                    .get_link_statistics_for_task(directory.task, &path),
-            )?
-            .kind
-                == file_system::Kind::Directory
-        {
-            return Err(Status::IsADirectory);
-        }
-        crate::suspend_on(directory.vfs.remove(directory.task, &path)).map_err(Status::from)
+        let (vfs, task) = (directory.vfs, directory.task);
+        crate::suspend_on_cancellable(async move {
+            // The VFS has a single remove primitive. A caller must explicitly permit
+            // directories.
+            if flags & XILA_REMOVE_DIRECTORY == 0
+                && vfs.get_link_statistics_for_task(task, &path).await?.kind
+                    == file_system::Kind::Directory
+            {
+                return Err(Status::IsADirectory);
+            }
+            vfs.remove(task, &path).await.map_err(Status::from)
+        })
     })();
     result.map_or_else(|error| error, |()| Status::Ok)
 }
@@ -272,7 +274,9 @@ pub unsafe extern "C" fn xila_directory_rename(
         if !core::ptr::eq(from.vfs, to.vfs) || from.task != to.task {
             return Err(Status::InvalidArgument);
         }
-        crate::suspend_on(from.vfs.rename(from.task, &from_path, &to_path)).map_err(Status::from)
+        let (vfs, task) = (from.vfs, from.task);
+        crate::suspend_on_cancellable(async move { vfs.rename(task, &from_path, &to_path).await })
+            .map_err(Status::from)
     })();
     result.map_or_else(|error| error, |()| Status::Ok)
 }

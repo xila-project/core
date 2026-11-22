@@ -527,7 +527,7 @@ pub unsafe extern "C" fn xila_udp_bind(
         network.require(XILA_NETWORK_LISTEN)?;
         // The socket exists only inside the future until it is bound, as for a connection.
         let bound = suspend_on_cancellable(async {
-            let inner = network
+            let mut inner = network
                 .manager
                 .new_udp_socket(BUFFER_SIZE, BUFFER_SIZE, 1, 1, None)
                 .await
@@ -569,8 +569,10 @@ pub unsafe extern "C" fn xila_udp_bind(
 pub unsafe extern "C" fn xila_udp_close(socket: *mut Udp) -> Status {
     status(unsafe {
         if !socket.is_null() {
-            let Udp { inner, .. } = Udp::from_raw(socket);
-            suspend_on(inner.close());
+            // Closed while still registered, as for TCP: a process cancelled in the middle
+            // of this call leaves the socket to the host, which closes it again.
+            suspend_on((*socket).inner.close());
+            drop(Udp::from_raw(socket));
         }
         Ok(())
     })

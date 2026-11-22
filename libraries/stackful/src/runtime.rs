@@ -219,6 +219,10 @@ impl Drop for Coroutine {
             if let Some(w) = self.control.waker.borrow_mut().take() {
                 w.wake();
             }
+            // The last suspension checked the guard on the way out, but an overflow in the
+            // frames that suspended can only be seen now: stop before running a destructor
+            // on a stack that may be damaged, as `resume` does.
+            self.control.check_guard();
             // Opted-in bridge futures can release their state on cancellation. This
             // runs first, while the stack they are pinned on is intact.
             if let Some(Pending {

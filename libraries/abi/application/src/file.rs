@@ -116,7 +116,8 @@ pub unsafe extern "C" fn xila_file_open(
             unsafe { path_input(path, path_length)? },
             true,
         )?;
-        SynchronousFile::open(directory.vfs, directory.task, &path, flags)
+        // Passed by value: the open owns the path, so a cancellation drops it.
+        SynchronousFile::open(directory.vfs, directory.task, path, flags)
             .map(File::new)
             .map_err(Status::from)
     })();

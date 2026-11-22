@@ -555,6 +555,7 @@ That works because **no frame owns a resource across a suspension**. Where each 
 | Files, directories, listings, children, sockets the program opened (`File`, `Directory`, `DirectoryIterator`, `Child`, `Tcp`, `TcpListener`, `Udp`) | the process's handle registry, in `HostState` | `HostState::release`, newest first |
 | Graphics objects and the identity file pickers act with (the task) | `Resources.graphics`, in `HostState` | `HostState::release`, then dropping the state |
 | A file the call itself opens (the entropy source), a socket being connected or bound, the duplicated streams and the request of a spawn, the handle a wait holds | the suspended future, passed to `suspend_on_cancellable` | stackful, which drops the future in place on cancellation |
+| The path of a path-based call (open, directory open and create, listing, remove, rename, statistics) and the VFS namespace lock it may hold | the same: the future owns the path | the same |
 | The coroutine stack | the coroutine's control block | stackful, which frees it on cancellation |
 | Worker threads' stacks | their coroutines, owned by the process's driver | the same: they are cancelled when the driver ends |
 
@@ -574,8 +575,7 @@ builds a `Directory` capability to grant. Closing goes through the same `xila_*_
 function as the program's own call, and each close runs while the object is still
 registered (a file, a listing and a socket are closed in place, then unlinked), so a
 cancellation that lands while a close waits for a lock leaves the object to the host,
-which closes it again. A UDP socket is the exception: its close consumes it, so a
-cancellation in the middle of it leaks that one socket.
+which closes it again.
 
 **Cost.** The registry is one pointer per process, and a link is three pointers in front
 of each handle: 12 bytes on a 32-bit target (16 for files and listings, whose contents
@@ -596,9 +596,26 @@ registration it made for a pending read or write: a clone of the dead task's wak
 harmless to wake. The VFS drops such a call's `cancel_operation` guard only with the future,
 and that guard touches the file the call borrowed; a stopped worker's pending read outlives
 the process's exit by one driver drop, by which time the exit has closed and freed the file,
-so those futures stay non-cancellable. A close that was waiting for the network stack when
-the process was cancelled loses that one UDP socket (above). No ABI call holds a lock guard
-across a suspension.
+so those futures stay non-cancellable. No ABI call holds a lock guard across a
+suspension in its own frame.
+
+Path-based VFS calls are the exception that matters: inside the VFS they hold the namespace
+lock across their own waits (for the task and user managers, a device's lock). Left in a
+frame that never resumes, that lock would stay held for good, and `HostState::release`,
+which needs it to close the streams, would wait for it forever inside the host's drop,
+stalling the executor. Every ABI call that reaches one therefore suspends on it with
+`suspend_on_cancellable` and moves its path into it, so a cancellation drops the lock and
+the path with the future. A call cut short this way may have done part of its work, as a
+power loss would: an open may have created the file, a rename may have finished on the file
+system. `SynchronousFile::open` and `SynchronousDirectory::open` and `create` are
+cancellable for the same reason.
+
+**Release order.** A cancelled process has its coroutines dropped first, then its state
+released. A process that returns or exits releases its state in its own coroutine (main's,
+or the exiting worker's), and only afterwards does the driver drop the stopped workers and
+their cancellable futures: the reverse order. That is sound because no cancellable future
+dereferences a registered handle when it is dropped (a poll wait keeps raw pointers to the
+handles it watches and drops them unread). A new cancellable suspension must keep it so.
 
 ## Optional graphics (`graphics`)
 
