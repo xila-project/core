@@ -390,9 +390,9 @@ whether the program returned or called `exit`.
   process capability falls back to `_exit(134)`. The host keeps the capability, the startup
   block and the stream behind descriptor 2 off the main thread's coroutine stack, so an
   overflow that stays inside that stack does not reach them. A worker thread's own state
-  (its thread identifier and the pointer to its process group) still sits on the worker's
-  coroutine stack, so an overflow there that reaches the top of that stack can still break
-  the exit (#778). An image
+  (its thread identifier and the pointer to its process group) lives in its record on the
+  host's heap, not on the worker's coroutine stack, so the same holds for an overflow in a
+  worker. An image
   that does not use the protector does not link the file. picolibc's own member seeds the
   guard from a constructor, so it is removed from `libc.a`.
 * **Directories.** Reading a directory stream gives `d_ino` a stable nonzero 64-bit

@@ -1,11 +1,12 @@
 use super::*;
 use crate::{Process, Status, registry::Registry, suspend_dynamic};
-use alloc::vec::Vec;
+use alloc::{alloc::alloc, boxed::Box, vec::Vec};
 use core::{
+    alloc::Layout,
     cell::{Cell, RefCell, UnsafeCell},
     future::poll_fn,
     pin::pin,
-    ptr,
+    ptr::{self, NonNull},
     task::{Poll, Waker},
 };
 use stackful::{Coroutine, Stack};
@@ -35,12 +36,33 @@ impl<'group> Local<'group> {
             values: [const { Cell::new((0, ptr::null_mut())) }; XILA_THREAD_KEYS_MAX],
         }
     }
+
+    /// Allocate a worker's `Local` on the heap, or fail with `OutOfMemory`.
+    fn try_boxed(group: &'group Group, id: usize) -> Result<Box<Self>, Status> {
+        let layout = Layout::new::<Self>();
+        // SAFETY: `Local` is not zero-sized.
+        let memory =
+            NonNull::new(unsafe { alloc(layout) }.cast::<Self>()).ok_or(Status::OutOfMemory)?;
+        // SAFETY: the global allocator returned this block for the layout of `Local`, which
+        // `Box` frees with the same layout.
+        unsafe {
+            memory.write(Self::new(group, id));
+            Ok(Box::from_raw(memory.as_ptr()))
+        }
+    }
 }
 
 struct Worker {
     id: usize,
     creator: usize,
     coroutine: Option<Coroutine>,
+    /// The worker's identifier, TLS values and libc storage, which its native context points
+    /// to. They live in this record, on the heap, and never on the worker's own coroutine
+    /// stack: an overflow there must not reach what `xila_process_exit` relies on (#778).
+    /// Boxed so that its address, which `xila_thread_libc` hands out, survives the
+    /// reallocation of the worker list. Declared after `coroutine`, so a suspended
+    /// coroutine is discarded before it.
+    local: Box<Local<'static>>,
     result: Option<*mut c_void>,
     detached: bool,
     joining: bool,
@@ -97,14 +119,21 @@ impl Group {
         for index in 0..count {
             // Release the borrow before resuming arbitrary C (which can spawn).
             let shutdown_thread = self.shutdown_thread.get();
-            let Some(mut coroutine) = self.workers.borrow_mut()[index]
+            let Some((mut coroutine, local)) = self.workers.borrow_mut()[index]
                 .as_mut()
                 .filter(|worker| shutdown_thread == 0 || shutdown_thread == worker.id)
-                .and_then(|worker| worker.coroutine.take())
+                .and_then(|worker| {
+                    let local = ptr::from_ref::<Local<'static>>(&worker.local);
+                    worker.coroutine.take().map(|coroutine| (coroutine, local))
+                })
             else {
                 continue;
             };
+            // The record, and so its boxed Local, stays in the list until the worker has
+            // stored its result, which is the last thing it does before it finishes.
+            unsafe { coroutine.set_native_context(local.cast()) };
             let result = coroutine.resume(&mut core::task::Context::from_waker(waker));
+            unsafe { coroutine.set_native_context(ptr::null()) };
             let mut workers = self.workers.borrow_mut();
             let slot = &mut workers[index];
             if let Some(worker) = slot {
@@ -148,9 +177,10 @@ impl Group {
 
 fn current() -> Result<(&'static Group, &'static Local<'static>), Status> {
     // The pinned driver owns the Group for the lifetime of every runnable
-    // coroutine. The driver installs main's Local around resume, and a worker
-    // installs its own Local until it returns or exits. The erased lifetime
-    // lets ABI calls suspend, but references must never escape this group.
+    // coroutine. The driver installs the Local of the coroutine it resumes around
+    // that resume: main's in the driver future, a worker's in its record. Neither
+    // is on a coroutine stack. The erased lifetime lets ABI calls suspend, but
+    // references must never escape this group.
     let local = unsafe { stackful::native_context().cast::<Local<'static>>().as_ref() }
         .ok_or(Status::Unsupported)?;
     Ok((local.group, local))
@@ -302,6 +332,7 @@ pub unsafe extern "C" fn xila_thread_spawn(
         let next = id.checked_add(1).ok_or(Status::Overflow)?;
         let stack = Stack::try_with_min_size(stack_size, XILA_THREAD_STACK_MIN)
             .ok_or(Status::OutOfMemory)?;
+        let worker_local = Local::try_boxed(group, id)?;
         let mut workers = group.workers.borrow_mut();
         let index = if let Some(index) = workers.iter().position(Option::is_none) {
             index
@@ -310,14 +341,16 @@ pub unsafe extern "C" fn xila_thread_spawn(
             workers.push(None);
             workers.len() - 1
         };
+        // The entry captures only what the program needs to start. The driver installs the
+        // worker's Local, from its record, around each resume.
         let coroutine = unsafe {
             Coroutine::new(stack, move || {
-                let local = Local::new(group, id);
-                stackful::set_native_context(ptr::from_ref(&local).cast());
                 let result = entry(argument);
-                stackful::set_native_context(ptr::null());
-                if let Some(worker) = &mut group.workers.borrow_mut()[index] {
-                    worker.result = Some(result);
+                if let Ok((group, local)) = current() {
+                    let _ = group.with_worker(local.id, |slot| {
+                        slot.as_mut().ok_or(Status::NoSuchTask)?.result = Some(result);
+                        Ok(())
+                    });
                 }
                 0
             })
@@ -326,6 +359,7 @@ pub unsafe extern "C" fn xila_thread_spawn(
             id,
             creator: local.id,
             coroutine: Some(coroutine),
+            local: worker_local,
             result: None,
             detached: false,
             joining: false,
@@ -689,6 +723,77 @@ mod tests {
             (1..=2).contains(&seen),
             "main acquired after {seen} iterations"
         );
+    }
+
+    /// Whether the calling worker's native context, and the libc storage it hands out, are
+    /// the `Local` its record owns, rather than something on its own coroutine stack.
+    fn context_in_record() -> bool {
+        let context = stackful::native_context();
+        let Ok((group, local)) = current() else {
+            return false;
+        };
+        let mut libc = ptr::null_mut();
+        if unsafe { xila_thread_libc(&mut libc) } != Status::Ok {
+            return false;
+        }
+        group
+            .with_worker(local.id, |slot| {
+                let worker = slot.as_ref().ok_or(Status::NoSuchTask)?;
+                let record = ptr::from_ref::<Local<'static>>(&worker.local);
+                Ok(ptr::eq(record.cast(), context)
+                    && ptr::eq(local, record)
+                    && ptr::eq(libc, local.libc.get()))
+            })
+            .unwrap_or(false)
+    }
+
+    unsafe extern "C" fn local_probe(_: *mut c_void) -> *mut c_void {
+        let mut libc = ptr::null_mut();
+        assert_eq!(unsafe { xila_thread_libc(&mut libc) }, Status::Ok);
+        let before = context_in_record();
+        // Main fills the worker list while this worker is suspended, which moves the
+        // records: the Local, and the libc storage handed out above, must not move.
+        assert_eq!(xila_thread_yield(), Status::Ok);
+        let mut moved = ptr::null_mut();
+        assert_eq!(unsafe { xila_thread_libc(&mut moved) }, Status::Ok);
+        let after = context_in_record() && ptr::eq(libc, moved);
+        ptr::without_provenance_mut(usize::from(before) | usize::from(after) << 1)
+    }
+
+    unsafe extern "C" fn idle(_: *mut c_void) -> *mut c_void {
+        ptr::null_mut()
+    }
+
+    /// A worker's Local lives in the record its group owns, not on the worker's coroutine
+    /// stack, so an overflow there cannot reach what `xila_process_exit` reads through the
+    /// native context (#778).
+    #[test]
+    fn worker_local_stays_off_the_worker_stack() {
+        let result = run_probe(|| unsafe {
+            let process = ptr::dangling::<Process>();
+            bind_process(process);
+            let mut probe = 0;
+            assert_eq!(
+                xila_thread_spawn(process, 0, Some(local_probe), ptr::null_mut(), &mut probe),
+                Status::Ok
+            );
+            // Let the probe run up to its yield.
+            assert_eq!(xila_thread_yield(), Status::Ok);
+            let mut fillers = [0; 8];
+            for id in &mut fillers {
+                assert_eq!(
+                    xila_thread_spawn(process, 0, Some(idle), ptr::null_mut(), id),
+                    Status::Ok
+                );
+            }
+            let mut checks = ptr::null_mut();
+            assert_eq!(xila_thread_join(probe, &mut checks), Status::Ok);
+            for id in fillers {
+                assert_eq!(xila_thread_join(id, ptr::null_mut()), Status::Ok);
+            }
+            checks.addr() as i32
+        });
+        assert_eq!(result, 3);
     }
 
     unsafe extern "C" fn stop_from_worker(argument: *mut c_void) -> *mut c_void {

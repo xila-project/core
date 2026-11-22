@@ -314,8 +314,11 @@ waits can monopolize the executor.
 A zero stack size selects 4 KiB on bare metal or 64 KiB on Linux. Explicit sizes
 are 2–64 KiB inclusive, rounded up to 16 bytes with a 64-byte guard. Size for the
 deepest ABI call, debug frames and any interrupts that share the stack. Stacks
-and worker records are allocated on demand. Stack allocation and worker-table
-growth can return OutOfMemory. Stackful control block allocation follows the
+and worker records are allocated on demand. A worker's own state (its ID, TLS
+values, libc storage and the pointer to its process group) lives in its record on
+the heap, never on its coroutine stack, so an overflow on that stack cannot reach
+what `xila_process_exit` relies on. Stack, record and worker-table allocation can
+return OutOfMemory. Stackful control block allocation follows the
 runtime allocator's failure policy.
 
 `xila_thread_current` reports a nonzero ID unique within that process lifetime.
