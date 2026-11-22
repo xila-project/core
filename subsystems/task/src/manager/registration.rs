@@ -25,29 +25,31 @@ impl Manager {
             return Err(Error::TooManyTasks);
         }
         // - Get parent task information if any (inheritance)
-        let (parent_task_identifier, parent_environment_variables, user, group) = if inner
-            .tasks
-            .is_empty()
-        {
-            if inner.root_established || parent != Self::ROOT_TASK_IDENTIFIER {
+        let (parent_task_identifier, parent_environment_variables, user, group, identity_granted) =
+            if inner.tasks.is_empty() {
+                if inner.root_established || parent != Self::ROOT_TASK_IDENTIFIER {
+                    return Err(Error::InvalidTaskIdentifier);
+                }
+                (
+                    Manager::ROOT_TASK_IDENTIFIER, // Root task is its own parent
+                    Vec::new(),
+                    UserIdentifier::ROOT,
+                    GroupIdentifier::ROOT,
+                    false,
+                )
+            } else if let Ok(metadata) =
+                inner.tasks.get(&parent).ok_or(Error::InvalidTaskIdentifier)
+            {
+                (
+                    parent,
+                    metadata.environment_variables.clone(),
+                    metadata.user,
+                    metadata.group,
+                    metadata.identity_granted,
+                )
+            } else {
                 return Err(Error::InvalidTaskIdentifier);
-            }
-            (
-                Manager::ROOT_TASK_IDENTIFIER, // Root task is its own parent
-                Vec::new(),
-                UserIdentifier::ROOT,
-                GroupIdentifier::ROOT,
-            )
-        } else if let Ok(metadata) = inner.tasks.get(&parent).ok_or(Error::InvalidTaskIdentifier) {
-            (
-                parent,
-                metadata.environment_variables.clone(),
-                metadata.user,
-                metadata.group,
-            )
-        } else {
-            return Err(Error::InvalidTaskIdentifier);
-        };
+            };
 
         let generation = inner
             .next_generation
@@ -61,6 +63,7 @@ impl Manager {
             parent: parent_task_identifier,
             user,
             group,
+            identity_granted,
             environment_variables: parent_environment_variables,
             signals: SignalAccumulator::new(),
             spawner_identifier: usize::MAX, // No spawner until enqueued

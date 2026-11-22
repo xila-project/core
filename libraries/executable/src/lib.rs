@@ -249,17 +249,14 @@ async fn execute_inner(
             // The identity is set before the program starts, on its own task only.
             // The task was registered a moment ago, so this cannot fail; if it ever
             // did, the program must not run with an identity it was not given.
+            // The task and its descendants are marked as running with a granted
+            // identity (`task::Manager::is_identity_granted`).
             if let Some(identity) = identity
-                && (context
+                && context
                     .task_manager
-                    .set_user(task, identity.user)
+                    .grant_identity(task, identity.user, identity.group)
                     .await
                     .is_err()
-                    || context
-                        .task_manager
-                        .set_group(task, identity.group)
-                        .await
-                        .is_err())
             {
                 return -1;
             }

@@ -76,6 +76,9 @@ impl Launch {
     ///
     /// The identity is set on the new task before the program starts, and only on
     /// that task (and the tasks it starts): the caller's own identity never changes.
+    /// The new task and all its descendants are marked as running with a granted
+    /// identity, which they cannot clear (`task::Manager::is_identity_granted`), so
+    /// runtimes for untrusted code can refuse to run under it.
     /// The execute permission is checked for `user`. The caller must have
     /// authorized the change itself, for example by authenticating an
     /// administrator, because this function grants it unconditionally.

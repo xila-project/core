@@ -1003,6 +1003,51 @@ async fn authority_tracks_user_and_rejects_reused_task_identifier() {
 }
 
 #[test(task_path = crate)]
+async fn granted_identity_is_inherited_and_never_cleared() {
+    let manager = Manager::new();
+    let root = manager.get_current_task_identifier().await;
+    let launcher = manager.register(root, "launcher").await.unwrap();
+    let launched = manager.register(launcher, "launched").await.unwrap();
+    let user = UserIdentifier::new(123);
+    let group = GroupIdentifier::new(456);
+
+    assert!(!manager.is_identity_granted(launched).await.unwrap());
+    manager.grant_identity(launched, user, group).await.unwrap();
+    assert_eq!(manager.get_user(launched).await.unwrap(), user);
+    assert_eq!(manager.get_group(launched).await.unwrap(), group);
+    assert!(manager.is_identity_granted(launched).await.unwrap());
+    // Only the launched task: its parent and the root are not marked.
+    assert!(!manager.is_identity_granted(launcher).await.unwrap());
+    assert!(!manager.is_identity_granted(root).await.unwrap());
+
+    // Every task it spawns afterwards inherits the mark, and keeps it once
+    // its ancestors have exited and it has been reparented to the root task.
+    let child = manager.register(launched, "child").await.unwrap();
+    manager.unregister(launched).await.unwrap();
+    let grandchild = manager.register(child, "grandchild").await.unwrap();
+    manager.unregister(child).await.unwrap();
+    assert_eq!(manager.get_parent(grandchild).await.unwrap(), root);
+    assert!(manager.is_identity_granted(grandchild).await.unwrap());
+
+    // Changing the identity again does not clear it.
+    manager
+        .set_user(grandchild, UserIdentifier::ROOT)
+        .await
+        .unwrap();
+    manager
+        .set_group(grandchild, GroupIdentifier::ROOT)
+        .await
+        .unwrap();
+    assert!(manager.is_identity_granted(grandchild).await.unwrap());
+
+    // A task spawned by an unmarked task is not marked, even when it reuses
+    // the numeric identifier of a marked task that exited.
+    let sibling = manager.register(launcher, "sibling").await.unwrap();
+    assert!([launched, child].contains(&sibling));
+    assert!(!manager.is_identity_granted(sibling).await.unwrap());
+}
+
+#[test(task_path = crate)]
 async fn task_count_tracks_registration_and_completion() {
     let manager = initialize();
     let parent = manager.get_current_task_identifier().await;

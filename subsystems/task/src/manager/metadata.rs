@@ -17,6 +17,10 @@ pub(crate) struct Metadata {
     pub(crate) user: UserIdentifier,
     /// The identifier of the group that owns the task.
     pub(crate) group: GroupIdentifier,
+    /// Whether the task, or one of its ancestors, was given its identity by
+    /// its launcher (see [`Manager::grant_identity`]). Copied into every task
+    /// it spawns afterwards and never cleared.
+    pub(crate) identity_granted: bool,
     /// Environment variables of the task.
     pub(crate) environment_variables: Vec<EnvironmentVariable>,
     /// Signals
