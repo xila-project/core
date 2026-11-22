@@ -459,7 +459,7 @@ number of bytes queued in a pipe to an `int`. Other ioctl requests fail with
 The SDK provides `pthread_create`, `pthread_join`, `pthread_detach`, `pthread_self`,
 `pthread_equal`, `pthread_once`, stack and detach attributes, TLS keys with up to
 four destructor passes, plain and recursive mutexes, condition variables including
-timed waits, and `sched_yield`. Threads use the process's single executor, and only
+timed waits, read-write locks, and `sched_yield`. Threads use the process's single executor, and only
 the creator can join a worker. Blocking calls let peers run. Mutexes hand ownership
 to queued lockers in arrival order.
 
@@ -468,7 +468,20 @@ The SDK defaults condition variables to `CLOCK_MONOTONIC`, including
 Set `CLOCK_REALTIME` explicitly with `pthread_condattr_setclock` for UTC deadlines.
 Workers can return a result or call `pthread_exit`, both of which run their TLS
 destructors. Main ends the process by returning or calling `exit`. Calling
-`pthread_exit` from main aborts. Worker cancellation is outside this subset.
+`pthread_exit` from main aborts at once, without running destructors. A `pthread_once`
+routine that leaves its thread through `pthread_exit` leaves the control as if it had
+never been called, so the next caller runs the routine. Worker cancellation is outside
+this subset.
+
+Read-write locks (`pthread_rwlock_*`): plain, try, timed (`CLOCK_REALTIME`) and clock
+(`CLOCK_MONOTONIC` or `CLOCK_REALTIME`) read and write locks, `PTHREAD_RWLOCK_INITIALIZER`
+and attributes. Readers are preferred, as in glibc and musl: a reader enters whenever no
+writer holds the lock, so a thread can take the read lock again while it holds it, and a
+steady stream of readers can keep a writer waiting. A thread that holds the write lock
+gets `EBUSY` from a try call and `EDEADLK` from a blocking call. A thread that only
+holds a read lock cannot upgrade it. A try write lock returns `EBUSY`, a timed write
+lock can time out, and an untimed blocking write lock waits indefinitely. Processes
+share no memory, so `PTHREAD_PROCESS_SHARED` fails with `ENOTSUP`.
 
 Unnamed semaphores (`<semaphore.h>`): `sem_init`, `sem_destroy`, `sem_post`, `sem_wait`,
 `sem_trywait`, `sem_timedwait` (a `CLOCK_REALTIME` deadline), `sem_clockwait`

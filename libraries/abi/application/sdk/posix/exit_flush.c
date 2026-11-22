@@ -35,9 +35,14 @@ void _bufio_exit_flush(void) {
 extern FILE *const stdout __attribute__((weak));
 extern FILE *const stderr __attribute__((weak));
 
+/* Only a descriptor-backed buffered stream names a descriptor: one whose functions take
+   a pointer (__BFPTR) holds a pointer in the same field. */
 static void keep_stream_descriptor(FILE *file) {
-    if (file->flags & __SBUF)
-        xila_fd_keep_for_exit_flush((int)(intptr_t)((struct __file_bufio *)file)->ptr);
+    if (!(file->flags & __SBUF))
+        return;
+    struct __file_bufio *buffered = (struct __file_bufio *)file;
+    if (!(buffered->bflags & __BFPTR))
+        xila_fd_keep_for_exit_flush((int)(intptr_t)buffered->ptr);
 }
 
 static void flush_available(FILE *file) {

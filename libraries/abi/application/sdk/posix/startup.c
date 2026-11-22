@@ -118,9 +118,9 @@ void exit(int status) {
 
 void _exit(int status) {
     (void)xila_thread_stop_others(xila_process.process);
-    size_t thread = 1;
+    size_t thread = XILA_MAIN_THREAD;
     (void)xila_thread_current(&thread);
-    if (thread != 1) {
+    if (thread != XILA_MAIN_THREAD) {
         /* The jump target belongs to main's stack. Finish cleanup here. */
         xila_posix_shutdown();
         (void)xila_process_exit(xila_process.process, status);

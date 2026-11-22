@@ -422,6 +422,17 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
     .await;
     assert_eq!(status, 0, "printing threads: {stderr:?}");
     assert_eq!(stdout, b"worker\nmain\n".repeat(4));
+    // pthread_exit is unsupported on main: it aborts before the TLS destructors run.
+    let (status, stdout, stderr) = launch(
+        context,
+        parent,
+        "/threads",
+        "main-pthread-exit",
+        &["main-pthread-exit"],
+    )
+    .await;
+    assert_eq!(status, 134, "main pthread_exit: {stderr:?}");
+    assert_eq!(stdout, b"", "main pthread_exit ran a destructor");
     vfs.create_named_pipe(&"/thread-pipe", 8, parent)
         .await
         .unwrap();

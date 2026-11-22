@@ -5,6 +5,7 @@
 #include "internal.h"
 
 extern void xila_run_key_destructors(void) __attribute__((weak));
+extern void xila_abandon_once_calls(void) __attribute__((weak));
 
 struct thread_start {
     void *(*entry)(void *);
@@ -85,6 +86,14 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*
 }
 
 void pthread_exit(void *result) {
+    /* Main is unsupported (see pthread.h): fail before anything runs on its behalf. */
+    size_t thread = XILA_MAIN_THREAD;
+    (void)xila_thread_current(&thread);
+    if (thread == XILA_MAIN_THREAD)
+        abort();
+    /* Give back the once controls whose routine this thread leaves unfinished. */
+    if (xila_abandon_once_calls != NULL)
+        xila_abandon_once_calls();
     if (xila_run_key_destructors != NULL)
         xila_run_key_destructors();
     (void)xila_thread_exit(result);
