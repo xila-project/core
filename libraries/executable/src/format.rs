@@ -35,6 +35,61 @@ pub struct Identity {
     pub group: GroupIdentifier,
 }
 
+/// The network rights a launch grants a native process: connecting (and sending
+/// datagrams), listening (and binding) and resolving names. A launch grants none by
+/// default.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NetworkRights(u8);
+
+impl NetworkRights {
+    /// No network: the default.
+    pub const NONE: Self = Self(0);
+    /// Open TCP connections and send UDP datagrams.
+    pub const CONNECT: Self = Self(1);
+    /// Listen for TCP connections and bind UDP sockets.
+    pub const LISTEN: Self = Self(2);
+    /// Resolve host names.
+    pub const RESOLVE: Self = Self(4);
+    /// Every right.
+    pub const ALL: Self = Self(7);
+
+    /// The rights in either set.
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    /// Whether every right of `other` is in this set.
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    /// The rights as the native ABI's `XILA_NETWORK_*` bits.
+    pub const fn bits(self) -> u8 {
+        self.0
+    }
+
+    /// The set from `XILA_NETWORK_*` bits, or `None` if an unknown bit is set.
+    pub const fn from_bits(bits: u8) -> Option<Self> {
+        if bits & !Self::ALL.0 == 0 {
+            Some(Self(bits))
+        } else {
+            None
+        }
+    }
+}
+
+impl core::ops::BitOr for NetworkRights {
+    type Output = Self;
+
+    fn bitor(self, other: Self) -> Self {
+        self.union(other)
+    }
+}
+
 /// Optional parameters of a launch beyond the program's arguments and streams.
 ///
 /// A handler applies the home capability only if its format supports one. It must
@@ -45,6 +100,11 @@ pub struct Identity {
 /// An `identity` is applied to mounted native executables only: the launch of any
 /// registered file format (WebAssembly, native images) with an identity is refused,
 /// so a format handler never has to apply one (fail closed).
+///
+/// `network` is denied by default: a program gets network authority only from an
+/// explicit [`Launch::with_network`], and only formats with a socket interface apply
+/// it (native executables, through `XilaStartup.network`). WebAssembly applications
+/// get no sockets, so a grant has no effect on them.
 #[derive(Default)]
 #[non_exhaustive]
 pub struct Launch {
@@ -57,6 +117,8 @@ pub struct Launch {
     /// parent. Deciding who may run a program as another user is the caller's job
     /// (see [`Launch::with_identity`]).
     pub identity: Option<Identity>,
+    /// The network rights of the program. None by default (see [`Launch::with_network`]).
+    pub network: NetworkRights,
 }
 
 impl Launch {
@@ -84,6 +146,16 @@ impl Launch {
     /// administrator, because this function grants it unconditionally.
     pub fn with_identity(mut self, user: UserIdentifier, group: GroupIdentifier) -> Self {
         self.identity = Some(Identity { user, group });
+        self
+    }
+
+    /// Grant the program these network rights. Without this call it has no network.
+    ///
+    /// A native process that spawns a child can pass it a subset of these rights and
+    /// never more. Deciding which programs may use the network is the caller's job:
+    /// this function grants the rights unconditionally.
+    pub fn with_network(mut self, rights: NetworkRights) -> Self {
+        self.network = rights;
         self
     }
 }

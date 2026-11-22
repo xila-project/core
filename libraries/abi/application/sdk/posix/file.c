@@ -100,18 +100,25 @@ int creat(const char *path, mode_t mode) { return open(path, O_WRONLY | O_CREAT 
 
 /* ---- data transfer ------------------------------------------------------------- */
 
-static XilaFile *file_of(int fd) {
+/* The file behind `fd`. A directory fails with EISDIR and a socket with `socket_error`. */
+static XilaFile *file_or(int fd, int socket_error) {
     struct xila_fd *entry = xila_fd_get(fd);
     if (entry == NULL)
         return NULL;
     if (entry->kind != XILA_FD_FILE) {
-        errno = EISDIR;
+        errno = entry->kind == XILA_FD_SOCKET ? socket_error : EISDIR;
         return NULL;
     }
     return entry->object;
 }
 
+static XilaFile *file_of(int fd) { return file_or(fd, EINVAL); }
+
 ssize_t read(int fd, void *buffer, size_t size) {
+    struct xila_fd *entry = xila_fd_get(fd);
+    if (entry != NULL && entry->kind == XILA_FD_SOCKET)
+        return size > SSIZE_MAX ? xila_fail_errno(EINVAL)
+                                : xila_socket_read(entry->object, buffer, size);
     XilaFile *file = file_of(fd);
     if (file == NULL)
         return -1;
@@ -123,6 +130,10 @@ ssize_t read(int fd, void *buffer, size_t size) {
 }
 
 ssize_t write(int fd, const void *buffer, size_t size) {
+    struct xila_fd *entry = xila_fd_get(fd);
+    if (entry != NULL && entry->kind == XILA_FD_SOCKET)
+        return size > SSIZE_MAX ? xila_fail_errno(EINVAL)
+                                : xila_socket_write(entry->object, buffer, size);
     XilaFile *file = file_of(fd);
     if (file == NULL)
         return -1;
@@ -134,7 +145,7 @@ ssize_t write(int fd, const void *buffer, size_t size) {
 }
 
 off_t lseek(int fd, off_t offset, int whence) {
-    XilaFile *file = file_of(fd);
+    XilaFile *file = file_or(fd, ESPIPE);
     if (file == NULL)
         return -1;
     uint32_t native;
@@ -161,7 +172,7 @@ off_t lseek(int fd, off_t offset, int whence) {
 }
 
 ssize_t pread(int fd, void *buffer, size_t size, off_t offset) {
-    XilaFile *file = file_of(fd);
+    XilaFile *file = file_or(fd, ESPIPE);
     if (file == NULL)
         return -1;
     if (offset < 0 || size > SSIZE_MAX)
@@ -172,7 +183,7 @@ ssize_t pread(int fd, void *buffer, size_t size, off_t offset) {
 }
 
 ssize_t pwrite(int fd, const void *buffer, size_t size, off_t offset) {
-    XilaFile *file = file_of(fd);
+    XilaFile *file = file_or(fd, ESPIPE);
     if (file == NULL)
         return -1;
     if (offset < 0 || size > SSIZE_MAX)
@@ -292,6 +303,12 @@ int fstat(int fd, struct stat *output) {
     struct xila_fd *entry = xila_fd_get(fd);
     if (entry == NULL)
         return -1;
+    if (entry->kind == XILA_FD_SOCKET) {
+        memset(output, 0, sizeof(*output));
+        output->st_mode = S_IFSOCK | 0600;
+        output->st_nlink = 1;
+        return 0;
+    }
     XilaStatistics native = {.size = sizeof(native)};
     XilaStatus status = entry->kind == XILA_FD_FILE
                             ? xila_file_get_statistics(entry->object, &native)

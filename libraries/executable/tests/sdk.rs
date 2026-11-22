@@ -18,7 +18,9 @@ use std::{
 
 use common::{FixtureEntropy, MAPPINGS, Mmap};
 use core::sync::atomic::Ordering;
-use executable::{ExecutableContext, Home, Launch, NativeFormat, Standard, execute, execute_with};
+use executable::{
+    ExecutableContext, Home, Launch, NativeFormat, NetworkRights, Standard, execute, execute_with,
+};
 use file_system::{AccessFlags, CreateFlags, Flags, PathOwned, Permissions};
 use task::TaskIdentifier;
 use virtual_file_system::{File, VirtualFileSystem};
@@ -155,13 +157,15 @@ async fn install(
         .unwrap();
 }
 
-/// Start the program at `path` with `arguments`; stdout and stderr go to their own files.
-async fn start(
+/// Start the program at `path` with `arguments` and these network rights; stdout and stderr
+/// go to their own files.
+async fn start_with(
     context: &'static ExecutableContext,
     parent: TaskIdentifier,
     path: &str,
     label: &str,
     arguments: &[&str],
+    network: NetworkRights,
 ) -> task::JoinHandle<isize> {
     let vfs = context.virtual_file_system;
     let create = Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None);
@@ -174,10 +178,12 @@ async fn start(
         .await
         .unwrap();
     // Every launch carries its own home: the root of the filesystem, read and write.
-    let launch = Launch::default().with_home(Home {
-        path: PathOwned::new("/".into()).unwrap(),
-        rights: XILA_RIGHT_READ | XILA_RIGHT_WRITE,
-    });
+    let launch = Launch::default()
+        .with_home(Home {
+            path: PathOwned::new("/".into()).unwrap(),
+            rights: XILA_RIGHT_READ | XILA_RIGHT_WRITE,
+        })
+        .with_network(network);
     execute_with(
         context,
         path,
@@ -202,8 +208,20 @@ async fn launch(
     label: &str,
     arguments: &[&str],
 ) -> (isize, Vec<u8>, Vec<u8>) {
+    launch_with(context, parent, path, label, arguments, NetworkRights::NONE).await
+}
+
+/// [`launch`], with these network rights granted to the program.
+async fn launch_with(
+    context: &'static ExecutableContext,
+    parent: TaskIdentifier,
+    path: &str,
+    label: &str,
+    arguments: &[&str],
+    network: NetworkRights,
+) -> (isize, Vec<u8>, Vec<u8>) {
     let vfs = context.virtual_file_system;
-    let handle = start(context, parent, path, label, arguments).await;
+    let handle = start_with(context, parent, path, label, arguments, network).await;
     let status = handle.join().await;
     assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
     (
@@ -716,7 +734,15 @@ async fn graphics_calls_reach_the_executor_and_a_process_leaves_no_objects() {
     let before = children();
     for (mode, status) in [("return", 0), ("exit", 7)] {
         let label = format!("graphics-{mode}");
-        let handle = start(context, parent, "/graphics", &label, &[mode]).await;
+        let handle = start_with(
+            context,
+            parent,
+            "/graphics",
+            &label,
+            &[mode],
+            NetworkRights::NONE,
+        )
+        .await;
 
         // The program creates /graphics-ready once its objects exist, then waits for a click.
         let mut waited = 0;
@@ -797,7 +823,15 @@ async fn exit_from_a_worker_waits_for_the_graphics_lock(
     )
     .await;
 
-    let handle = start(context, parent, "/exit-suspended", "exit-suspended", &[]).await;
+    let handle = start_with(
+        context,
+        parent,
+        "/exit-suspended",
+        "exit-suspended",
+        &[],
+        NetworkRights::NONE,
+    )
+    .await;
     let mut waited = 0;
     while vfs.get_statistics(&"/exit-ready").await.is_err() {
         assert!(
@@ -828,4 +862,128 @@ async fn exit_from_a_worker_waits_for_the_graphics_lock(
     assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
     assert_eq!(manager.get_window_count().await.unwrap(), 0);
     assert_eq!(State::registered_state_count(manager), 0);
+}
+
+/// A context whose network manager has a loopback interface at 127.0.0.1 and ::1. The
+/// interface runner is spawned on the test's executor, which the probe's coroutine shares:
+/// every socket wait suspends the probe and lets the runner move the packets.
+#[cfg(feature = "network")]
+async fn setup_network() -> (&'static ExecutableContext, TaskIdentifier) {
+    let (context, parent) = setup().await;
+    let vfs = context.virtual_file_system;
+    let network: &'static network::Manager = Box::leak(Box::new(network::Manager::new(
+        context.task_manager,
+        vfs,
+        context.time_manager,
+        &testing_support::RandomDevice,
+    )));
+    vfs.create_directory(parent, &"/devices").await.unwrap();
+    vfs.create_directory(parent, &"/devices/network")
+        .await
+        .unwrap();
+    let (device, controller) = network::create_loopback_device();
+    network
+        .mount_interface(parent, "loopback0", device, controller, None)
+        .await
+        .unwrap();
+    let mut interface = File::open(
+        vfs,
+        parent,
+        "/devices/network/loopback0",
+        AccessFlags::Write.into(),
+    )
+    .await
+    .unwrap();
+    for address in [
+        network::IpCidr::new_ipv4([127, 0, 0, 1], 8),
+        network::IpCidr::new_ipv6([0, 0, 0, 0, 0, 0, 0, 1], 128),
+    ] {
+        interface
+            .control(network::ADD_IP_ADDRESS, &address)
+            .await
+            .unwrap();
+    }
+    interface.close(vfs).await.unwrap();
+
+    let mut with_network = ExecutableContext::new(
+        context.task_manager,
+        context.users_manager,
+        vfs,
+        context.time_manager,
+    );
+    with_network.formats = context.formats;
+    with_network.network_manager = Some(network);
+    (Box::leak(Box::new(with_network)), parent)
+}
+
+/// The SDK's sockets and getaddrinfo, over the network capability in `XilaStartup.network`.
+/// A launch grants no network unless it says so, a child gets at most its parent's rights,
+/// and a wildcard bind keeps its address family.
+#[cfg(feature = "network")]
+#[task::test]
+async fn runs_sdk_network_probe() {
+    let (context, parent) = setup_network().await;
+    let vfs = context.virtual_file_system;
+    let create = Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None);
+    File::open(vfs, parent, "/input", create)
+        .await
+        .unwrap()
+        .close(vfs)
+        .await
+        .unwrap();
+    install(vfs, parent, "/network", &build_posix_probe("network")).await;
+    for scenario in ["sockets", "family"] {
+        let (status, stdout, stderr) = launch_with(
+            context,
+            parent,
+            "/network",
+            scenario,
+            &[scenario],
+            NetworkRights::ALL,
+        )
+        .await;
+        assert_eq!(status, 0, "{}", String::from_utf8_lossy(&stderr));
+        assert_eq!(stdout, format!("{scenario}: ok\n").as_bytes());
+    }
+
+    // No grant: the host has a network stack, but the program gets no capability.
+    let (status, stdout, stderr) =
+        launch(context, parent, "/network", "ungranted", &["no-network"]).await;
+    assert_eq!(status, 0, "{}", String::from_utf8_lossy(&stderr));
+    assert_eq!(stdout, b"no-network: ok\n");
+
+    // A grant on a host without a network stack gives nothing either.
+    let mut without = ExecutableContext::new(
+        context.task_manager,
+        context.users_manager,
+        vfs,
+        context.time_manager,
+    );
+    without.formats = context.formats;
+    let without = Box::leak(Box::new(without));
+    let (status, stdout, stderr) = launch_with(
+        without,
+        parent,
+        "/network",
+        "no-stack",
+        &["no-network"],
+        NetworkRights::ALL,
+    )
+    .await;
+    assert_eq!(status, 0, "{}", String::from_utf8_lossy(&stderr));
+    assert_eq!(stdout, b"no-network: ok\n");
+
+    // A parent with connect and resolve can give a child connect, or nothing, but
+    // never listen.
+    let (status, stdout, stderr) = launch_with(
+        context,
+        parent,
+        "/network",
+        "spawn",
+        &["spawn"],
+        NetworkRights::CONNECT | NetworkRights::RESOLVE,
+    )
+    .await;
+    assert_eq!(status, 0, "{}", String::from_utf8_lossy(&stderr));
+    assert_eq!(stdout, b"no-network: ok\nspawn: ok\n");
 }

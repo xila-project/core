@@ -334,8 +334,13 @@ int32_t process_parent_main(const XilaStartup *startup) {
     XilaSpawn bad = spawn;
     bad.size = sizeof(bad) - 1;
     CHECK(api->process_spawn(me, startup->home, "exit", 4, &bad, &child) == XILA_STATUS_INVALID_ARGUMENT);
+    /* A parent with no network rights cannot give a child any, and unknown bits are invalid. */
     bad = spawn;
-    bad.flags = 1;
+    bad.flags = XILA_SPAWN_NETWORK_CONNECT;
+    CHECK(api->process_spawn(me, startup->home, "exit", 4, &bad, &child) == XILA_STATUS_PERMISSION_DENIED);
+    bad.flags = XILA_SPAWN_NETWORK_LISTEN | XILA_SPAWN_NETWORK_RESOLVE;
+    CHECK(api->process_spawn(me, startup->home, "exit", 4, &bad, &child) == XILA_STATUS_PERMISSION_DENIED);
+    bad.flags = 8;
     CHECK(api->process_spawn(me, startup->home, "exit", 4, &bad, &child) == XILA_STATUS_INVALID_ARGUMENT);
     bad = spawn;
     bad.standard_error = NULL;

@@ -29,6 +29,7 @@ xila-sdk-0.1-<target>/
   COPYING.picolibc          picolibc's licence (BSD); LICENSE-xila.md is Core's (Apache-2.0)
   include/                  picolibc headers, xila/application.h, xila/stubs.h,
                             xila/graphics.h, xila/posix.h, sys/random.h, sys/socket.h,
+                            netinet/in.h, netinet/tcp.h, arpa/inet.h, netdb.h,
                             pthread.h, semaphore.h
     posix/stdlib.h          wrapper for the SDK's getenv declaration
   lib/
@@ -522,13 +523,76 @@ returned process identifier is the one the child reports with `getpid`
 - The status holds the low 8 bits of the exit status: use `WIFEXITED` and `WEXITSTATUS`.
   There are no signals.
 
-The following stubs report `ENOSYS`:
+No POSIX call is left as a pending `ENOSYS` stub. Never provided: `fork` (it fails with
+`ENOSYS`), asynchronous signals, general `mmap`.
 
-| Calls | Pending support |
-|---|---|
-| `socket`, `connect`, `bind`, `listen`, `accept`, `send*`, `recv*`, `shutdown` | the network capability in the startup structure (core#717); DNS (`getaddrinfo`) is not declared |
+### Sockets and name resolution
 
-Never provided: `fork`, asynchronous signals, general `mmap`.
+`<sys/socket.h>`, `<netinet/in.h>`, `<netinet/tcp.h>`, `<arpa/inet.h>` and `<netdb.h>`
+provide `socket`, `bind`, `listen`, `accept`, `connect`, `send`, `recv`, `sendto`,
+`recvfrom`, `shutdown`, `getsockname`, `getpeername`, `setsockopt`, `getsockopt`,
+`getaddrinfo`, `freeaddrinfo`, `gai_strerror`, `inet_pton`, `inet_ntop` and
+`inet_addr`. `read`, `write`, `close`, `dup`, `dup2`, `fcntl`, `poll` and `fstat`
+(`S_IFSOCK`) work on socket descriptors. The calls use the network capability in
+`XilaStartup.network` (see the ABI README). **A program has no network unless its
+launch grants it**, with separate connect, listen and resolve rights. Without a
+grant, `socket` fails with `EACCES`, and `getaddrinfo` can only answer numeric
+hosts and `localhost`: a lookup returns `EAI_SYSTEM` with `errno` set to `EACCES`.
+With some rights only, the call that needs a missing one fails with `EACCES`:
+`listen`, or `bind` of a datagram socket, without listen; `connect` or a send
+without connect; a lookup without resolve. A child gets at most its parent's
+rights (`XilaSpawn.flags`).
+
+A socket is an `AF_INET` or `AF_INET6` stream (TCP) or datagram (UDP) socket.
+`socket` accepts `SOCK_NONBLOCK` and `SOCK_CLOEXEC` in its type. Each socket is a
+record of 64 bytes (72 on 64-bit targets) on the process heap, shared by its duplicates: closing the
+last descriptor closes the native object, and `O_NONBLOCK` set through `fcntl`
+applies to every duplicate. An image that never creates a socket does not link the
+socket code.
+
+How the subset maps onto Core's network stack:
+
+* **Ports.** Core assigns no port to a bind or a listener, so `bind` with port zero
+  fails with `EADDRNOTAVAIL` and `listen` on an unbound socket with `EDESTADDRREQ`.
+  An outgoing connection gets its local port from Core. An unbound datagram socket
+  is bound, on its first send, to the unspecified address and a random port from
+  49152 to 65535. Core does not report a port that another socket already uses.
+* **Stream sockets.** Core binds and listens in one step, so `bind` records the
+  address and `listen` checks it: an address that is not local fails there. A
+  listener holds one pending connection and `accept` replaces it, so the backlog
+  is ignored (`SOMAXCONN` is 1). `connect` ignores an address given to `bind`.
+  `connect` always blocks, even on a nonblocking socket. `shutdown(SHUT_WR)` sends
+  the end of the stream. A later `send` fails with `EPIPE`. There are no signals,
+  so `SIGPIPE` is never raised. `shutdown(SHUT_RD)` makes `recv` return zero.
+  Sends can be partial. Core's buffers are 1024 bytes in each direction.
+* **Datagram sockets.** `connect` sets or, with `AF_UNSPEC`, clears the default
+  destination, and the socket then receives only from that peer. A datagram larger
+  than the buffer is truncated and its remainder dropped, as in POSIX. Core keeps
+  one datagram queued in each direction.
+* **Blocking.** Blocking calls suspend the calling thread and let peers run.
+  `MSG_DONTWAIT` and `O_NONBLOCK` make `accept`, `send` and `recv` fail with
+  `EAGAIN` when the socket is not ready. Only `MSG_DONTWAIT` and `MSG_NOSIGNAL`
+  are accepted as flags. Others, `MSG_PEEK` included, fail with `EOPNOTSUPP`.
+  `poll` reports a socket that is neither bound nor connected as never ready.
+* **Addresses.** A socket keeps its family, as with `IPV6_V6ONLY`: an `AF_INET6`
+  socket neither reaches nor hears IPv4 peers, and a connect to an IPv4-mapped
+  address (`::ffff:a.b.c.d`) fails with `ENETUNREACH`. The unspecified address
+  listens on every local address of the socket's family. A send to the other
+  family fails with `EAFNOSUPPORT`. Peer addresses are always reported in the
+  socket's family. An IPv4 and an IPv6 wildcard bind of the same port do not
+  coexist (see the ABI README). IPv6 scopes are not supported.
+* **Options.** `SO_REUSEADDR`, `SO_KEEPALIVE` and `TCP_NODELAY` are accepted and
+  have no effect. `getsockopt` also reports `SO_TYPE`, and `SO_ERROR` is always
+  zero. Other options fail with `ENOPROTOOPT`.
+* **Names.** `getaddrinfo` takes a decimal port as its service: there is no
+  services database, so a name fails with `EAI_SERVICE`. There is no hosts file
+  either. `localhost` and a null node are answered locally, and numeric hosts are
+  parsed. Other names go to Core's resolver, IPv4 first for `AF_UNSPEC`. The
+  canonical name is the node as given. `AI_V4MAPPED`, `AI_ALL` and
+  `AI_ADDRCONFIG` have no effect: sockets keep their family, so an IPv4-mapped
+  result would be unreachable. Without a socket type, each address gets a
+  stream and a datagram result. `inet_pton` and `inet_addr` take only the
+  dotted-decimal form with four parts and no leading zeros.
 
 ## Licences
 

@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 #include "stubs.h"
 
@@ -13,7 +14,7 @@
 #define XILA_PATH_MAX 256
 
 /* Descriptor kinds. A free slot has object == NULL. */
-enum { XILA_FD_FILE = 1, XILA_FD_DIRECTORY = 2 };
+enum { XILA_FD_FILE = 1, XILA_FD_DIRECTORY = 2, XILA_FD_SOCKET = 3 };
 
 /* The three startup streams are borrowed from the host: close() detaches without
    releasing them. */
@@ -23,7 +24,7 @@ enum { XILA_FD_FILE = 1, XILA_FD_DIRECTORY = 2 };
 #define XILA_OPEN_MAX 256
 
 struct xila_fd {
-    void *object; /* XilaFile * or XilaDirectory * */
+    void *object; /* XilaFile *, XilaDirectory * or struct xila_socket * */
     uint8_t kind;
     uint8_t flags;
 };
@@ -66,6 +67,30 @@ void xila_fd_keep_for_exit_flush(int fd);
 void xila_fd_close_before_exit_flush(void);
 void xila_fd_close_all(void);
 int xila_fd_initialize(const XilaStartup *startup);
+
+/* Sockets (socket.c). The rest of the layer reaches them through weak references, so an
+   image that never creates a socket does not link socket.c: only a socket descriptor,
+   which socket.c created, leads to these calls. */
+#ifdef XILA_SOCKET_DEFINITIONS
+#define XILA_SOCKET_LINKAGE
+#else
+#define XILA_SOCKET_LINKAGE __attribute__((weak))
+#endif
+struct xila_socket;
+/* Drop one descriptor's reference; the last one closes the native object. */
+XILA_SOCKET_LINKAGE XilaStatus xila_socket_release(struct xila_socket *socket);
+/* Add a descriptor's reference: duplicates share one socket. */
+XILA_SOCKET_LINKAGE void xila_socket_retain(struct xila_socket *socket);
+XILA_SOCKET_LINKAGE ssize_t xila_socket_read(struct xila_socket *socket, void *buffer,
+                                             size_t size);
+XILA_SOCKET_LINKAGE ssize_t xila_socket_write(struct xila_socket *socket, const void *buffer,
+                                              size_t size);
+/* Set the entry's kind and handle; a socket with no native object yet is ignored. */
+XILA_SOCKET_LINKAGE void xila_socket_poll_entry(const struct xila_socket *socket,
+                                                XilaPollEntry *entry);
+/* O_RDWR and O_NONBLOCK, as fcntl(F_GETFL) reports and F_SETFL changes them. */
+XILA_SOCKET_LINKAGE int xila_socket_get_flags(const struct xila_socket *socket);
+XILA_SOCKET_LINKAGE void xila_socket_set_flags(struct xila_socket *socket, int flags);
 
 /* Path resolution: normalize `path` against the current directory (AT_FDCWD) or a
    directory descriptor and produce the capability plus a relative path inside `buffer`. */

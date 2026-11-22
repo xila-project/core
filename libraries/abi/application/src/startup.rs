@@ -1,5 +1,7 @@
 //! Startup capabilities borrowed by a linked native C application.
-use crate::{Directory, File, Heap, Process, ProcessHost, XILA_API, XilaApi, registry::Registry};
+use crate::{
+    Directory, File, Heap, Network, Process, ProcessHost, XILA_API, XilaApi, registry::Registry,
+};
 use alloc::{string::String, vec::Vec};
 use core::{ffi::c_char, ptr, ptr::NonNull};
 use task::TaskIdentifier;
@@ -16,6 +18,8 @@ pub struct XilaString {
 /// the process capability is null for an application that is not a process, such
 /// as a built-in one linked into the firmware, whose process calls fail with
 /// InvalidArgument. A null argument array has argument_count zero.
+/// Fields are only ever appended: check `size` before reading a field that a
+/// later Xila version added, such as `network`.
 /// Applications must not close, retain or transfer these objects; closing them is
 /// undefined behavior. Objects opened by the application must still be closed.
 #[repr(C)]
@@ -32,6 +36,12 @@ pub struct XilaStartup {
     pub process: *const Process,
     /// Executable's launch name. Empty for a linked entry without a process.
     pub program_name: XilaString,
+    /// Network authority granted to the process, with only the rights its launch
+    /// granted explicitly (connect, listen, resolve). Null unless the launch granted at
+    /// least one right and the host has a network stack, so a process has no network by
+    /// default. Appended after `program_name`, so images built before it existed still
+    /// start.
+    pub network: *const Network,
 }
 
 /// What the entry call borrows and the process owner releases when it ends. Kept in
@@ -50,6 +60,10 @@ pub(crate) struct Resources {
     pub(crate) standard_output: Option<File>,
     pub(crate) standard_error: Option<File>,
     pub(crate) home: Option<Directory>,
+    /// The network capability behind `XilaStartup::network`. It owns no socket: the
+    /// sockets the program opened are in `handles`.
+    #[cfg(feature = "network")]
+    pub(crate) network: Option<Network>,
     /// The process's graphics objects, allocated by its first graphics call.
     #[cfg(feature = "graphics")]
     pub(crate) graphics: Option<alloc::boxed::Box<graphics::call::State>>,
@@ -111,6 +125,8 @@ impl HostState {
             standard_output,
             standard_error,
             home: None,
+            #[cfg(feature = "network")]
+            network: None,
             #[cfg(feature = "graphics")]
             graphics: None,
         })
@@ -134,6 +150,7 @@ impl HostState {
                     data: ptr::null(),
                     length: 0,
                 },
+                network: ptr::null(),
             },
             process: None,
             resources,
@@ -199,6 +216,10 @@ impl Resources {
                 drop(stream.take());
             }
             drop((*resources).home.take());
+            #[cfg(feature = "network")]
+            {
+                (*resources).network = None;
+            }
             (*resources).arguments = Vec::new();
             (*resources)._owned = Vec::new();
             (*resources).program_name = String::new();
@@ -267,10 +288,28 @@ pub unsafe fn run_main(
         standard_output,
         standard_error,
         home,
+        #[cfg(feature = "network")]
+        network: None,
         #[cfg(feature = "graphics")]
         graphics: None,
     });
     unsafe { enter(NonNull::from(&mut state), entry, NonNull::from(heap), None) }
+}
+
+/// The startup's borrowed network capability, or null without one.
+fn network_pointer(resources: &Resources) -> *const Network {
+    #[cfg(feature = "network")]
+    {
+        resources
+            .network
+            .as_ref()
+            .map_or(ptr::null(), ptr::from_ref)
+    }
+    #[cfg(not(feature = "network"))]
+    {
+        let _ = resources;
+        ptr::null()
+    }
 }
 
 /// Build the startup data in `state`, call the entry and release the resources
@@ -336,6 +375,7 @@ pub(crate) unsafe fn enter(
                 data: resources.program_name.as_ptr().cast(),
                 length: resources.program_name.len(),
             },
+            network: network_pointer(resources),
         };
         &raw const (*state).startup
     };

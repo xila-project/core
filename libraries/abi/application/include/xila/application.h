@@ -108,6 +108,24 @@
  */
 #define XILA_WAIT_NO_HANG 1
 
+/**
+ * `XilaSpawn.flags`: give the child the right to connect (and to send datagrams).
+ * The value is `XILA_NETWORK_CONNECT`'s.
+ */
+#define XILA_SPAWN_NETWORK_CONNECT 1
+
+/**
+ * `XilaSpawn.flags`: give the child the right to listen and bind. The value is
+ * `XILA_NETWORK_LISTEN`'s.
+ */
+#define XILA_SPAWN_NETWORK_LISTEN 2
+
+/**
+ * `XilaSpawn.flags`: give the child the right to resolve names. The value is
+ * `XILA_NETWORK_RESOLVE`'s.
+ */
+#define XILA_SPAWN_NETWORK_RESOLVE 4
+
 #define XILA_THREAD_STACK_MIN 2048
 
 #define XILA_THREAD_STACK_MAX (64 * 1024)
@@ -349,7 +367,9 @@ typedef struct XilaNetworkAddress {
 typedef struct XilaSpawn {
   uint32_t size;
   /**
-   * Reserved, must be zero.
+   * The network rights the child gets (`XILA_SPAWN_NETWORK_*`). Zero gives it no
+   * network. Each right must be one the parent holds: a child never gets more than
+   * its parent. Other bits are reserved and must be zero.
    */
   uint32_t flags;
   /**
@@ -740,6 +760,8 @@ typedef struct XilaApi {
  * the process capability is null for an application that is not a process, such
  * as a built-in one linked into the firmware, whose process calls fail with
  * InvalidArgument. A null argument array has argument_count zero.
+ * Fields are only ever appended: check `size` before reading a field that a
+ * later Xila version added, such as `network`.
  * Applications must not close, retain or transfer these objects; closing them is
  * undefined behavior. Objects opened by the application must still be closed.
  */
@@ -758,6 +780,14 @@ typedef struct XilaStartup {
    * Executable's launch name. Empty for a linked entry without a process.
    */
   struct XilaString program_name;
+  /**
+   * Network authority granted to the process, with only the rights its launch
+   * granted explicitly (connect, listen, resolve). Null unless the launch granted at
+   * least one right and the host has a network stack, so a process has no network by
+   * default. Appended after `program_name`, so images built before it existed still
+   * start.
+   */
+  const struct XilaNetwork *network;
 } XilaStartup;
 
 #endif  /* XILA_APPLICATION_H */

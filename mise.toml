@@ -193,6 +193,6 @@ depends = ["sdk:build"]
 tools."github:nextest-rs/nextest" = "cargo-nextest-{{ vars.nextest_version }}"
 run = """
 set -eu
-cargo nextest run --locked -p xila-executable --features native-dev,graphics
-cargo test --locked -p xila-executable --features native-dev,graphics --doc
+cargo nextest run --locked -p xila-executable --features native-dev,graphics,network
+cargo test --locked -p xila-executable --features native-dev,graphics,network --doc
 """
