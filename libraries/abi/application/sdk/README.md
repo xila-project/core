@@ -29,7 +29,7 @@ xila-sdk-0.1-<target>/
   COPYING.picolibc          picolibc's licence (BSD); LICENSE-xila.md is Core's (Apache-2.0)
   include/                  picolibc headers, xila/application.h, xila/stubs.h,
                             xila/graphics.h, xila/posix.h, sys/random.h, sys/socket.h,
-                            pthread.h
+                            pthread.h, semaphore.h
     posix/stdlib.h          wrapper for the SDK's getenv declaration
   lib/
     crt0.o                  _xila_start: checks the startup, installs the API table
@@ -462,6 +462,15 @@ Set `CLOCK_REALTIME` explicitly with `pthread_condattr_setclock` for UTC deadlin
 Workers can return a result or call `pthread_exit`, both of which run their TLS
 destructors. Main ends the process by returning or calling `exit`. Calling
 `pthread_exit` from main aborts. Worker cancellation is outside this subset.
+
+Unnamed semaphores (`<semaphore.h>`): `sem_init`, `sem_destroy`, `sem_post`, `sem_wait`,
+`sem_trywait`, `sem_timedwait` (a `CLOCK_REALTIME` deadline), `sem_clockwait`
+(`CLOCK_MONOTONIC` or `CLOCK_REALTIME`) and `sem_getvalue`. A semaphore is an ABI mutex
+and condition variable around its count, so blocked waiters let peers run and get their
+units in arrival order. `SEM_VALUE_MAX` is `INT_MAX`, and a post beyond it fails with
+`EOVERFLOW`. A deadline is checked only when the call would block. Processes share no
+memory, so `sem_init` with a nonzero `pshared` fails with `ENOSYS`, and so do the named
+semaphore calls `sem_open`, `sem_close` and `sem_unlink`.
 
 The following stubs report `ENOSYS`:
 

@@ -84,15 +84,22 @@ int pthread_cond_wait(pthread_cond_t *condition, pthread_mutex_t *mutex) {
                                                      condition->clock, NULL));
 }
 
-int pthread_cond_timedwait(pthread_cond_t *condition, pthread_mutex_t *mutex,
-                           const struct timespec *deadline) {
+int xila_deadline_nanoseconds(const struct timespec *deadline, int64_t *nanoseconds) {
     const int64_t nanoseconds_per_second = 1000000000;
-    int64_t nanoseconds;
     if (deadline == NULL || deadline->tv_nsec < 0 || deadline->tv_nsec >= nanoseconds_per_second)
         return EINVAL;
-    if (__builtin_mul_overflow(deadline->tv_sec, nanoseconds_per_second, &nanoseconds) ||
-        __builtin_add_overflow(nanoseconds, deadline->tv_nsec, &nanoseconds))
+    if (__builtin_mul_overflow(deadline->tv_sec, nanoseconds_per_second, nanoseconds) ||
+        __builtin_add_overflow(*nanoseconds, deadline->tv_nsec, nanoseconds))
         return EOVERFLOW;
+    return 0;
+}
+
+int pthread_cond_timedwait(pthread_cond_t *condition, pthread_mutex_t *mutex,
+                           const struct timespec *deadline) {
+    int64_t nanoseconds;
+    int error = xila_deadline_nanoseconds(deadline, &nanoseconds);
+    if (error != 0)
+        return error;
     return xila_errno_from_status(xila_condition_wait(&condition->condition, mutex,
                                                      condition->clock, &nanoseconds));
 }
