@@ -27,8 +27,8 @@ The benchmark and cache-benchmark workflows have been removed.
 
 Validation and Pages build jobs use the pinned shared `xila-project/workspace/.github/actions/setup-rust` composite action, which calls `jdx/mr-boxington-action@v1`. It reuses mbx
 from `PATH`, installing it only on runners where it is absent; there is no
-second project-managed mbx installation. The mise Cargo wrapper enables mbx
-when `XILA_MBX=1`, including nested mise tasks and explicit nightly selections.
+second project-managed mbx installation for caching. Build tasks declare
+`mr_boxington = true` on their Rust tool, so mise routes Cargo through mbx, including nested mise tasks and nightly selections.
 Quality checks do not opt in. No workflow retains sccache or `Swatinem/rust-cache`.
 
 WASM and profiling use the action's `target` payload, including Cargo downloads.

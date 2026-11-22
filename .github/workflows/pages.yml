@@ -28,7 +28,6 @@ jobs:
     env:
       MISE_ENV: ci
       CARGO_TERM_COLOR: always
-      XILA_MBX: "1"
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - name: "Setup | Checkout sources"

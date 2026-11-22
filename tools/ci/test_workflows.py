@@ -166,7 +166,7 @@ class WorkflowPolicy(unittest.TestCase):
                         self.assertEqual(task["tools"]["rust"]["components"], ["rustfmt"])
                         self.assertFalse(task["tools"]["rust"].get("targets"))
         tasks = configured_tasks("ci")
-        self.assertEqual(tasks["ci:abi"]["tools"]["rust"], {"version": "1.97.0", "profile": "minimal"})
+        self.assertEqual(tasks["ci:abi"]["tools"]["rust"], {"version": "1.97.0", "profile": "minimal", "mr_boxington": True})
         self.assertNotIn("tools", tomllib.loads((ROOT / "mise.development.toml").read_text()))
 
     def test_validation_jobs_call_the_same_ordered_leaf_tasks_as_local_wrappers(self):
@@ -240,16 +240,31 @@ class WorkflowPolicy(unittest.TestCase):
             for callee in re.findall(r"mise run ([\w:-]+)", workflow.read_text()):
                 self.assertIn(callee, shared | ci, (workflow.name, callee))
 
-    def test_ci_cargo_wrapper_reuses_existing_mbx_only_when_enabled(self):
+    def test_ci_cargo_calls_use_mbx_through_mise_rust_option(self):
         ci = ci_config()
-        self.assertIn("cargo", ci.get("wrappers", {}))
-        wrapper = ci["wrappers"]["cargo"]
-        self.assertEqual(wrapper["command"], "env")
-        self.assertIn("XILA_MBX", wrapper["args"][0])
-        self.assertIn("mbx", wrapper["args"][0])
-        self.assertEqual(wrapper["env"]["MBX_CARGO_SHIM_MODE"], "1")
-        for task in ci["tasks"].values():
-            self.assertNotIn("mr-boxington", task.get("tools", {}))
+        self.assertNotIn("wrappers", ci)
+        self.assertEqual(
+            tomllib.loads((ROOT / "mise.toml").read_text())["vars"]["mr_boxington_version"],
+            tomllib.loads((ROOT / "mise.development.toml").read_text())["task_templates"]["dev:rust"]["tools"]["mr-boxington"].replace(
+                "{{ vars.mr_boxington_version }}", tomllib.loads((ROOT / "mise.toml").read_text())["vars"]["mr_boxington_version"]
+            ),
+        )
+        # Formatting, toolchain preparation and the font-link verifier use plain Cargo.
+        plain = {"ci:format-rust", "ci:toolchain", "ci:toolchain-nightly", "test:fonts", "ci:host-font-tests"}
+        for name, task in ci["tasks"].items():
+            rust = task.get("tools", {}).get("rust")
+            if rust is None:
+                continue
+            with self.subTest(task=name):
+                if name in plain:
+                    self.assertFalse(rust.get("mr_boxington", False))
+                else:
+                    self.assertTrue(rust["mr_boxington"])
+                    self.assertIn("mr-boxington", task["tools"])
+
+    def test_workflows_and_tasks_do_not_use_xila_mbx(self):
+        for path in [*(ROOT / ".github/workflows").glob("*.yml"), ROOT / "mise.ci.toml", ROOT / "mise.toml"]:
+            self.assertNotIn("XILA_MBX", path.read_text(), path.name)
 
     def test_build_cache_payloads_cover_all_cargo_target_layouts(self):
         builds = {
@@ -263,7 +278,6 @@ class WorkflowPolicy(unittest.TestCase):
                     text = job(workflow, name)
                     self.assertEqual(text.count("xila-project/workspace/.github/actions/setup-rust@"), 1)
                     self.assertIn(f"cache-mode: {mode}", text)
-                    self.assertIn('XILA_MBX: "1"', text)
                     self.assertIn("cache-generation: v1-", text)
                     self.assertNotIn("cache-key-suffix:", text)
                     self.assertNotIn("sccache", text.lower())

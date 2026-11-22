@@ -9,21 +9,24 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", compone
 tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
   "clippy",
   "rustfmt",
-] }
+], mr_boxington = true }
+tools."mr-boxington" = "{{ vars.mr_boxington_version }}"
 
 [task_templates."ci:rust-wasi"]
 tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
   "rustfmt",
 ], targets = [
   "wasm32-wasip1",
-] }
+], mr_boxington = true }
+tools."mr-boxington" = "{{ vars.mr_boxington_version }}"
 
 [task_templates."ci:rust-browser"]
 tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
   "rustfmt",
 ], targets = [
   "wasm32-unknown-unknown",
-] }
+], mr_boxington = true }
+tools."mr-boxington" = "{{ vars.mr_boxington_version }}"
 
 [task_templates."ci:rust-browser-lint"]
 tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
@@ -31,7 +34,8 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", compone
   "rustfmt",
 ], targets = [
   "wasm32-unknown-unknown",
-] }
+], mr_boxington = true }
+tools."mr-boxington" = "{{ vars.mr_boxington_version }}"
 
 [task_templates."ci:rust-wasi-lint"]
 tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
@@ -39,7 +43,8 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", compone
   "rustfmt",
 ], targets = [
   "wasm32-wasip1",
-] }
+], mr_boxington = true }
+tools."mr-boxington" = "{{ vars.mr_boxington_version }}"
 
 [task_templates."ci:node"]
 tools.node = "{{ vars.node_version }}"
@@ -48,22 +53,16 @@ tools.node = "{{ vars.node_version }}"
 tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
   "llvm-tools-preview",
   "rustfmt",
-] }
+], mr_boxington = true }
+tools."mr-boxington" = "{{ vars.mr_boxington_version }}"
 tools."aqua:taiki-e/cargo-llvm-cov" = "{{ vars.llvm_cov_version }}"
 
 [task_templates."ci:miri"]
 tools.rust = { version = "{{ vars.nightly_version }}", profile = "minimal", components = [
   "miri",
   "rust-src",
-] }
-
-[wrappers.cargo]
-# Build jobs opt in; quality checks use real Cargo.
-command = "env"
-args = [
-  "{% if env.XILA_MBX | default(value='0') == '1' %}mbx{% else %}cargo{% endif %}",
-]
-env = { MBX_CARGO_SHIM_MODE = "1" }
+], mr_boxington = true }
+tools."mr-boxington" = "{{ vars.mr_boxington_version }}"
 
 [bootstrap.packages]
 "apt:clang" = { env = "ci" }
@@ -229,7 +228,8 @@ rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = 
 ], targets = [
   "wasm32-unknown-unknown",
   "wasm32-wasip1",
-] }
+], mr_boxington = true }
+"mr-boxington" = "{{ vars.mr_boxington_version }}"
 node = "{{ vars.node_version }}"
 
 [tasks."ci:abi"]
@@ -242,7 +242,8 @@ cargo test --locked --manifest-path "${XILA_APPLICATIONS_ROOT:-.application-src}
 """
 
 [tasks."ci:abi".tools]
-rust = { version = "{{ vars.rust_version }}", profile = "minimal" }
+rust = { version = "{{ vars.rust_version }}", profile = "minimal", mr_boxington = true }
+"mr-boxington" = "{{ vars.mr_boxington_version }}"
 "github:nextest-rs/nextest" = "cargo-nextest-{{ vars.nextest_version }}"
 
 [tasks."ci:localization"]
@@ -271,7 +272,8 @@ rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = 
 ], targets = [
   "wasm32-unknown-unknown",
   "wasm32-wasip1",
-] }
+], mr_boxington = true }
+"mr-boxington" = "{{ vars.mr_boxington_version }}"
 node = "{{ vars.node_version }}"
 "github:nextest-rs/nextest" = "cargo-nextest-{{ vars.nextest_version }}"
 
@@ -300,7 +302,8 @@ rust = { version = "{{ vars.nightly_version }}", profile = "minimal", components
 ], targets = [
   "i686-unknown-linux-gnu",
   "powerpc-unknown-linux-gnu",
-] }
+], mr_boxington = true }
+"mr-boxington" = "{{ vars.mr_boxington_version }}"
 "aqua:taiki-e/cargo-llvm-cov" = "{{ vars.llvm_cov_version }}"
 
 [tasks."ci:host-clippy"]
@@ -331,7 +334,8 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", compone
   "wasm32-unknown-unknown",
   "wasm32-wasip1",
   "thumbv7em-none-eabi",
-] }
+], mr_boxington = true }
+tools."mr-boxington" = "{{ vars.mr_boxington_version }}"
 
 [tasks."ci:policy-tests"]
 description = "Test CI workflow and task policies"
@@ -373,14 +377,18 @@ cargo test --manifest-path subsystems/graphics/tests/font_link/Cargo.toml --doc
 """
 
 [tasks."ci:host-font-tests".env]
-# The verifier invokes Cargo directly. Use the same compiler environment throughout.
-XILA_MBX = "0"
+# The verifier invokes Cargo directly. These tasks use plain Cargo (no mr_boxington) so the compiler environment is the same throughout.
 # Match Cargo's build dependency debug level so Clippy and the linked tests can share native outputs.
 CARGO_PROFILE_DEV_DEBUG = "0"
 CARGO_PROFILE_TEST_DEBUG = "0"
 
 [tasks."test:fonts"]
 extends = "ci:rust-lint"
+# Plain Cargo, like the rest of the font-link verifier.
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
+  "clippy",
+  "rustfmt",
+] }
 tools.node = "{{ vars.node_version }}"
 
 [tasks."ci:wasm-clippy"]
@@ -419,7 +427,8 @@ description = "Enforce ABI translation coverage thresholds"
 depends = ["ci:packages-linker"]
 tools.rust = { version = "{{ vars.nightly_version }}", profile = "minimal", components = [
   "llvm-tools-preview",
-] }
+], mr_boxington = true }
+tools."mr-boxington" = "{{ vars.mr_boxington_version }}"
 tools."aqua:taiki-e/cargo-llvm-cov" = "{{ vars.llvm_cov_version }}"
 run = "cargo-llvm-cov llvm-cov --locked --manifest-path \"${XILA_APPLICATIONS_ROOT:-.application-src}/executables/wasm/tests/translation/Cargo.toml\" --no-default-features --features ${CI_ABI_MEMORY:-memory_32} --ignore-filename-regex '(tests\\.rs|tests/translation/src/lib\\.rs)$' --fail-under-lines {{ vars.abi_coverage_minimum }} --fail-under-functions {{ vars.abi_coverage_minimum }}"
 
@@ -439,7 +448,8 @@ tools.rust = { version = "{{ vars.nightly_version }}", profile = "minimal", comp
 ], targets = [
   "i686-unknown-linux-gnu",
   "powerpc-unknown-linux-gnu",
-] }
+], mr_boxington = true }
+tools."mr-boxington" = "{{ vars.mr_boxington_version }}"
 run = """
 set -euo pipefail
 memory="${CI_ABI_MEMORY:-memory_32}"
@@ -468,7 +478,8 @@ rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = 
   "rustfmt",
 ], targets = [
   "x86_64-unknown-linux-gnu",
-] }
+], mr_boxington = true }
+"mr-boxington" = "{{ vars.mr_boxington_version }}"
 
 [tasks."docs:guest"]
 extends = "ci:rust-wasi"
@@ -492,7 +503,8 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", compone
 ], targets = [
   "wasm32-unknown-unknown",
   "thumbv7em-none-eabi",
-] }
+], mr_boxington = true }
+tools."mr-boxington" = "{{ vars.mr_boxington_version }}"
 tools."github:nextest-rs/nextest" = "cargo-nextest-{{ vars.nextest_version }}"
 
 [tasks."ci:bare-metal"]
@@ -565,7 +577,8 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", compone
   "thumbv8m.main-none-eabihf",
   "riscv32imac-unknown-none-elf",
   "riscv32imafc-unknown-none-elf",
-] }
+], mr_boxington = true }
+tools."mr-boxington" = "{{ vars.mr_boxington_version }}"
 # The graphics build script generates fonts with the pinned Node converter.
 tools.node = "{{ vars.node_version }}"
 
@@ -607,7 +620,8 @@ cargo check --locked -p xila-audio --target riscv32imc-unknown-none-elf
 """
 tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", targets = [
   "riscv32imc-unknown-none-elf",
-] }
+], mr_boxington = true }
+tools."mr-boxington" = "{{ vars.mr_boxington_version }}"
 
 [tasks."ci:profiling-task-tests"]
 extends = "ci:rust-lint"
@@ -659,4 +673,5 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", compone
   "thumbv7em-none-eabihf",
   "riscv32imac-unknown-none-elf",
   "riscv32imafc-unknown-none-elf",
-] }
+], mr_boxington = true }
+tools."mr-boxington" = "{{ vars.mr_boxington_version }}"
