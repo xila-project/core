@@ -161,7 +161,8 @@ run = "uv run --no-project --with meson=={{ vars.meson_version }} --with ninja==
 [tasks."sdk:verify"]
 description = "Verify the packaged Rust crate, build the C examples, check the ELF contract and report sizes"
 tools.uv = "{{ vars.uv_version }}"
-tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal" }
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", mr_boxington = true }
+tools."mr-boxington" = "{{ vars.mr_boxington_version }}"
 run = "uv run --no-project --with meson=={{ vars.meson_version }} --with ninja=={{ vars.ninja_version }} python tools/sdk/build.py verify --target \"${XILA_SDK_TARGET:-x86_64-unknown-linux-gnu}\""
 
 [tasks."sdk:test"]
@@ -172,7 +173,8 @@ run = "uv run --no-project python -m unittest discover -s tools/sdk -v"
 [tasks."sdk:rust-example"]
 description = "Build and verify Rust native ELFs (all targets or XILA_SDK_TARGET), running the Linux image through execute"
 tools.uv = "{{ vars.uv_version }}"
-tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal" }
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", mr_boxington = true }
+tools."mr-boxington" = "{{ vars.mr_boxington_version }}"
 run = """
 set -eu
 rustup toolchain install {{ vars.nightly_version }} --profile minimal --component rust-src
