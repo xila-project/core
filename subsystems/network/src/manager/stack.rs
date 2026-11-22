@@ -14,9 +14,22 @@ use smoltcp::{
     iface::{self, SocketHandle, SocketSet},
     phy::{Device, Medium},
     socket::{AnySocket, Socket, dhcpv4, dns},
-    wire::{self, DnsQueryType, EthernetAddress},
+    wire::{self, DnsQueryType, EthernetAddress, Ipv4Address, Ipv4Cidr},
 };
 use synchronization::{Arc, blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+
+/// What a DHCP lease added to the stack, so that exactly that can be removed
+/// again. Entries that were already present, such as static ones, are never
+/// recorded and are never touched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DhcpLease {
+    address: Ipv4Cidr,
+    router: Option<Ipv4Address>,
+    dns_servers: Vec<Ipv4Address>,
+    added_address: bool,
+    added_route: bool,
+    added_dns_servers: Vec<Ipv4Address>,
+}
 
 pub struct StackInner {
     pub name: String,
@@ -28,6 +41,7 @@ pub struct StackInner {
     pub dhcp_socket: Option<smoltcp::iface::SocketHandle>,
     pub dns_socket: Option<SocketHandle>,
     pub dns_servers: Vec<smoltcp::wire::IpAddress>,
+    dhcp_lease: Option<DhcpLease>,
     pub maximum_transmission_unit: usize,
     pub maximum_burst_size: Option<usize>,
     pub next_local_port: Port,
@@ -174,6 +188,7 @@ impl StackInner {
             dhcp_socket: None,
             dns_socket: None,
             dns_servers: Vec::with_capacity(DNS_MAX_SERVER_COUNT),
+            dhcp_lease: None,
             maximum_transmission_unit: capabilities.max_transmission_unit,
             maximum_burst_size: capabilities.max_burst_size,
             next_local_port: Port::from_inner(next_local_port),
@@ -282,12 +297,168 @@ impl StackInner {
 
     pub fn set_dhcp_state(&mut self, enabled: bool) {
         if enabled {
-            let dhcp_socket = dhcpv4::Socket::new();
-            let handle = self.sockets.add(dhcp_socket);
-            self.dhcp_socket = Some(handle);
-        } else {
-            self.dhcp_socket.take();
+            if self.dhcp_socket.is_none() {
+                let handle = self.sockets.add(dhcpv4::Socket::new());
+                self.dhcp_socket = Some(handle);
+            }
+        } else if let Some(handle) = self.dhcp_socket.take() {
+            self.sockets.remove(handle);
+            self.remove_dhcp_lease();
         }
+    }
+
+    /// Apply a configured DHCP lease, replacing the previous one if it differs.
+    ///
+    /// The address is added with its prefix, the default route goes through the
+    /// router and the DNS servers join the list the DNS socket resolves with.
+    /// Anything the stack already holds (for example a static address) is kept
+    /// as it is and is not recorded as part of the lease.
+    fn apply_dhcp_lease(
+        &mut self,
+        address: Ipv4Cidr,
+        router: Option<Ipv4Address>,
+        dns_servers: Vec<Ipv4Address>,
+    ) {
+        if let Some(lease) = &self.dhcp_lease
+            && lease.address == address
+            && lease.router == router
+            && lease.dns_servers == dns_servers
+        {
+            return;
+        }
+
+        self.remove_dhcp_lease();
+
+        let mut lease = DhcpLease {
+            address,
+            router,
+            dns_servers,
+            added_address: false,
+            added_route: false,
+            added_dns_servers: Vec::new(),
+        };
+
+        let wire_address = wire::IpCidr::Ipv4(address);
+        if self.interface.ip_addrs().contains(&wire_address) {
+            // Already configured statically: keep it and do not claim it.
+        } else if self.get_ip_addresses_count() >= IFACE_MAX_ADDR_COUNT {
+            log::warning!("DHCP address not applied, the address table is full");
+        } else {
+            self.interface.update_ip_addrs(|addresses| {
+                lease.added_address = addresses.push(wire_address).is_ok();
+            });
+        }
+
+        if let Some(router) = router
+            && self.interface.routes().get_default_ipv4_route().is_none()
+        {
+            let route = smoltcp::iface::Route::new_ipv4_gateway(router);
+            self.interface.routes_mut().update(|routes| {
+                lease.added_route = routes.push(route).is_ok();
+            });
+            if !lease.added_route {
+                log::warning!("DHCP default route not applied, the route table is full");
+            }
+        }
+
+        for server in lease.dns_servers.clone() {
+            let server = wire::IpAddress::Ipv4(server);
+            if self.dns_servers.contains(&server) {
+                continue;
+            }
+            if self.dns_servers.len() >= DNS_MAX_SERVER_COUNT {
+                log::warning!("DHCP DNS server not applied, the DNS server list is full");
+                break;
+            }
+            self.dns_servers.push(server);
+            if let wire::IpAddress::Ipv4(server) = server {
+                lease.added_dns_servers.push(server);
+            }
+        }
+        self.update_socket_dns_servers();
+
+        log::information!(
+            "DHCP lease acquired, address {}, prefix {}, router {}, DNS servers {}",
+            address.address(),
+            address.prefix_len(),
+            router.map_or_else(|| String::from("none"), |router| alloc::format!("{router}")),
+            lease.dns_servers.len()
+        );
+
+        self.dhcp_lease = Some(lease);
+    }
+
+    /// Remove exactly what the current DHCP lease added.
+    fn remove_dhcp_lease(&mut self) {
+        let Some(lease) = self.dhcp_lease.take() else {
+            return;
+        };
+
+        if lease.added_address {
+            let wire_address = wire::IpCidr::Ipv4(lease.address);
+            self.interface.update_ip_addrs(|addresses| {
+                if let Some(index) = addresses.iter().position(|a| *a == wire_address) {
+                    addresses.remove(index);
+                }
+            });
+        }
+
+        if lease.added_route
+            && let Some(router) = lease.router
+        {
+            let route = smoltcp::iface::Route::new_ipv4_gateway(router);
+            self.interface.routes_mut().update(|routes| {
+                if let Some(index) = routes
+                    .iter()
+                    .position(|r| r.cidr == route.cidr && r.via_router == route.via_router)
+                {
+                    routes.remove(index);
+                }
+            });
+        }
+
+        if !lease.added_dns_servers.is_empty() {
+            self.dns_servers.retain(|server| match server {
+                wire::IpAddress::Ipv4(server) => !lease.added_dns_servers.contains(server),
+                #[allow(unreachable_patterns)]
+                _ => true,
+            });
+            self.update_socket_dns_servers();
+        }
+
+        log::information!("DHCP lease released, address {}", lease.address.address());
+    }
+
+    /// Read the DHCP socket's events and apply them. Returns whether the lease
+    /// changed.
+    fn poll_dhcp(&mut self) -> bool {
+        enum Change {
+            Configured(Ipv4Cidr, Option<Ipv4Address>, Vec<Ipv4Address>),
+            Deconfigured,
+        }
+
+        let Some(handle) = self.dhcp_socket else {
+            return false;
+        };
+
+        let change = match self.sockets.get_mut::<dhcpv4::Socket>(handle).poll() {
+            None => return false,
+            Some(dhcpv4::Event::Configured(config)) => Change::Configured(
+                config.address,
+                config.router,
+                config.dns_servers.iter().copied().collect(),
+            ),
+            Some(dhcpv4::Event::Deconfigured) => Change::Deconfigured,
+        };
+
+        match change {
+            Change::Configured(address, router, dns_servers) => {
+                self.apply_dhcp_lease(address, router, dns_servers);
+            }
+            Change::Deconfigured => self.remove_dhcp_lease(),
+        }
+
+        true
     }
 
     pub fn get_dhcp_state(&self) -> bool {
@@ -411,8 +582,9 @@ impl StackInner {
     pub fn poll(&mut self, device: &mut impl Device) -> (Option<Duration>, bool) {
         let now = crate::get_smoltcp_time(self.time_manager);
 
-        let changed = self.interface.poll(now, device, &mut self.sockets)
+        let mut changed = self.interface.poll(now, device, &mut self.sockets)
             == iface::PollResult::SocketStateChanged;
+        changed |= self.poll_dhcp();
         self.reap_retired_sockets();
 
         let poll_at = self.interface.poll_at(now, &self.sockets);
@@ -523,6 +695,9 @@ fn controller_link_state(controller: &dyn DirectCharacterDevice, fallback: bool)
         Err(_) => false,
     }
 }
+
+#[cfg(test)]
+mod dhcp_tests;
 
 #[cfg(test)]
 mod link_tests {
