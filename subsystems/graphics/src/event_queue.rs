@@ -1671,6 +1671,12 @@ mod tests {
                 .push(tier(code) == Tier::Lifecycle && outcome != PushOutcome::Dropped);
         }
 
+        /// Whether the queue still follows a press of the input device
+        /// `source`, and so may hold slots for it.
+        fn follows_press_of(&self, source: usize) -> bool {
+            self.queue.press_index(device(source)).is_some()
+        }
+
         /// The widget `target` is deleted: the window forgets it in one of
         /// the three ways it can.
         fn delete(&mut self, target: usize, way: usize) {
@@ -1699,8 +1705,8 @@ mod tests {
     /// devices. The consumer never receives the end of a press whose
     /// `Pressed` was dropped, events keep their order, value changes stay
     /// inside their press, an accepted press arrives whole unless its widget
-    /// was deleted, every queued lifecycle event arrives, and every push
-    /// reports what it did.
+    /// was deleted, every queued lifecycle event arrives, every push reports
+    /// what it did, and no reset or released device keeps its press.
     #[test]
     fn random_bursts_keep_presses_whole_and_in_order() {
         let mut random = Random(0x9E37_79B9_7F4A_7C15);
@@ -1770,6 +1776,10 @@ mod tests {
                                 // LVGL forgets the pressed widget: the press
                                 // never ends.
                                 stream.push(EventKind::InputDeviceReset, target, 0, source);
+                                assert!(
+                                    !stream.follows_press_of(source),
+                                    "a reset device keeps its press"
+                                );
                                 device.press = None;
                                 device.abandoned = true;
                             }
@@ -1868,6 +1878,13 @@ mod tests {
                                     device.press.is_some() && source == device_of(device)
                                 })
                             });
+                            for device in &devices {
+                                assert!(
+                                    device.press.is_some()
+                                        || !stream.follows_press_of(device.identifier),
+                                    "a released device keeps its press"
+                                );
+                            }
                         }
                         delivered.extend(stream.queue.pop_front());
                     }

@@ -552,18 +552,20 @@ fn a_press_whose_device_is_deleted_or_reset_gives_its_reservation_back() {
                     .map(|event| event.code)
                     .collect();
                 assert!(queued.contains(&EventKind::InputDeviceReset), "{queued:?}");
+                assert_eq!(
+                    rejected_clicks(window, widget, WINDOW_EVENT_QUEUE_CAPACITY),
+                    0
+                );
+                while window.pop_event().is_some() {}
+                pointer.read(Point::new(20, 20), State::Released, Key::Character(0));
+                pointer.delete();
             } else {
                 pointer.delete();
                 while window.pop_event().is_some() {}
-            }
-            assert_eq!(
-                rejected_clicks(window, widget, WINDOW_EVENT_QUEUE_CAPACITY),
-                0
-            );
-            while window.pop_event().is_some() {}
-            if reset {
-                pointer.read(Point::new(20, 20), State::Released, Key::Character(0));
-                pointer.delete();
+                assert_eq!(
+                    rejected_clicks(window, widget, WINDOW_EVENT_QUEUE_CAPACITY),
+                    0
+                );
             }
             while window.pop_event().is_some() {}
         }
