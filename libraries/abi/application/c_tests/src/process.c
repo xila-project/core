@@ -115,6 +115,13 @@ static int32_t child_steal(const XilaStartup *startup) {
     return 0;
 }
 
+/* Returns its own process identifier, which the parent compares with the child's. */
+static int32_t child_identify(const XilaStartup *startup) {
+    uint32_t id = 0;
+    CHECK(startup->api->process_id(startup->process, &id) == XILA_STATUS_OK && id != 0);
+    return (int32_t)id;
+}
+
 static int32_t child_returns_negative(const XilaStartup *startup) {
     (void)startup;
     return -3;
@@ -132,6 +139,7 @@ Entry process_test_entry(const char *name, size_t length) {
         {"slow", child_slow},
         {"steal", child_steal},
         {"negative", child_returns_negative},
+        {"identify", child_identify},
     };
     for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++)
         if (strlen(table[i].name) == length && memcmp(table[i].name, name, length) == 0)
@@ -263,6 +271,22 @@ int32_t process_parent_main(const XilaStartup *startup) {
     CHECK(api->process_child_close(child) == XILA_STATUS_OK);
     CHECK(api->process_child_close(NULL) == XILA_STATUS_OK);
     CHECK(check_env(startup, "CHILD_ONLY", NULL));
+
+    /* A child's identifier is the one it reports itself, and it stays readable after the
+     * wait until the handle is closed. */
+    XilaSpawn identify_spawn = spawn_of(startup);
+    uint32_t child_id = 0;
+    CHECK(api->process_spawn(me, startup->home, "identify", 8, &identify_spawn, &child) ==
+          XILA_STATUS_OK);
+    CHECK(api->process_child_id(child, &child_id) == XILA_STATUS_OK);
+    CHECK(child_id != 0 && child_id != id);
+    CHECK(api->process_wait(me, child, 0, &status) == XILA_STATUS_OK);
+    CHECK((uint32_t)status == child_id);
+    child_id = 0;
+    CHECK(api->process_child_id(child, &child_id) == XILA_STATUS_OK && (uint32_t)status == child_id);
+    CHECK(api->process_child_id(child, NULL) == XILA_STATUS_INVALID_ARGUMENT);
+    CHECK(api->process_child_id(NULL, &child_id) == XILA_STATUS_INVALID_ARGUMENT);
+    CHECK(api->process_child_close(child) == XILA_STATUS_OK);
 
     /* Explicit environments replace the copy: later entries win. */
     XilaString environment[3] = {TEXT("ONLY=1"), TEXT("DUP=a"), TEXT("DUP=b")};

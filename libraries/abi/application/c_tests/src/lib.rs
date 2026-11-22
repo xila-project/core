@@ -116,7 +116,7 @@ mod tests {
                 let (state, heap) = run_state(arguments, input, output, error);
                 // SAFETY: the bounded C children fit the stack and never unwind; the closure
                 // moves every owned value into `run`, as the exit contract requires.
-                let (handle, _) = unsafe {
+                let spawned = unsafe {
                     stackful::spawn_with_result(
                         self.tasks,
                         parent,
@@ -130,7 +130,7 @@ mod tests {
                 .map_err(|error| {
                     Status::from(file_system::IntoIoErrorKind::into_io_error_kind(error))
                 })?;
-                Ok(handle)
+                Ok(spawned)
             })
         }
     }

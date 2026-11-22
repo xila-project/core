@@ -330,6 +330,8 @@ pub struct XilaApi {
         argument_count: usize,
         result: *mut c_void,
     ) -> Status,
+    /// Read a child's process identifier, the value its `process_id` reports.
+    pub process_child_id: unsafe extern "C" fn(child: *const Child, id: *mut u32) -> Status,
 }
 
 include!(concat!(env!("OUT_DIR"), "/api_layout.rs"));
@@ -427,4 +429,5 @@ pub static XILA_API: XilaApi = XilaApi {
     file_is_terminal: xila_file_is_terminal,
     pipe_create: xila_pipe_create,
     graphics_call: xila_graphics_call,
+    process_child_id: xila_process_child_id,
 };

@@ -64,7 +64,7 @@ OutOfMemory.
 - `xila_random_fill`: bytes from the host-granted entropy source.
 - `xila_heap_allocate`, `xila_heap_reallocate`, `xila_heap_free`: process-owned allocation.
 - `xila_process_id`, `xila_process_parent_id`, `xila_process_exit`: identity and termination.
-- `xila_process_spawn`, `xila_process_wait`, `xila_process_child_close`: children.
+- `xila_process_spawn`, `xila_process_wait`, `xila_process_child_close`, `xila_process_child_id`: children.
 - `xila_env_get`, `xila_env_set`, `xila_env_remove`, `xila_env_entry`: the process's environment.
 - `xila_graphics_call`: one graphics call (see [Optional graphics](#optional-graphics-graphics)).
 
@@ -262,6 +262,11 @@ coroutine and so cannot suspend, makes a running child return WouldBlock. Unknow
 bits are InvalidArgument. The status is the child's `int32_t` return or exit value; a
 non-native child's wider status is truncated. The status output is optional and only
 written on success.
+
+`xila_process_child_id(child, &id)` returns the identifier that the child's own
+`xila_process_id` reports. It is the last slot (81), appended so that existing images keep
+working, and it stays readable after the wait until the handle is closed. A null handle
+or output is InvalidArgument.
 
 A child that has exited and was not waited for is a zombie in the only sense Core
 has: its task is gone (Core unregisters it before it signals), and its status waits in

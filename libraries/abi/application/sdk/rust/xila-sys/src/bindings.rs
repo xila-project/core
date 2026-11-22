@@ -369,6 +369,11 @@ pub struct XilaApi {
         argument_count: usize,
         result: *mut c_void,
     ) -> Status,
+    /// Read a child's process identifier, the value its `process_id` reports.
+    pub process_child_id: unsafe extern "C" fn(
+        child: *const Child,
+        id: *mut u32,
+    ) -> Status,
 }
 pub const XILA_RIGHT_READ: u32 = 1;
 pub const XILA_RIGHT_WRITE: u32 = 2;

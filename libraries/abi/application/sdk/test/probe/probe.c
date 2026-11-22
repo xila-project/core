@@ -7,6 +7,8 @@
  *   flush-then-exit  fflush(NULL), more writes, an atexit handler, then exit: all of it
  *   environment      POSIX access and raw ABI interoperation
  *   root             open of the root and "." , readdir inodes, errno values
+ *   spawn            posix_spawn, posix_spawnp, file actions, waitpid and wait on children
+ *   spawn-child      the program that the spawn scenario starts (not run on its own)
  */
 #include <dirent.h>
 #include <errno.h>
@@ -19,7 +21,9 @@
 #include <string.h>
 #include <sys/random.h>
 #include <sys/ioctl.h>
+#include <spawn.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 #include <xila/posix.h>
@@ -683,6 +687,140 @@ static int environment(const char *program) {
     return 0;
 }
 
+/* The program the spawn scenario starts: report the arguments and two environment
+   variables on stdout, optionally sleep, and exit with the status in argv[2]. */
+static int spawn_child(int argc, char **argv) {
+    const char *inherited = getenv("SDK_SPAWN_INHERITED");
+    const char *explicit_value = getenv("SDK_SPAWN_EXPLICIT");
+    printf("child: argc=%d argv1=%s argv2=%s inherited=%s explicit=%s\n", argc, argv[1], argv[2],
+           inherited != NULL ? inherited : "(unset)",
+           explicit_value != NULL ? explicit_value : "(unset)");
+    fflush(stdout);
+    if (argc > 3 && strcmp(argv[3], "sleep") == 0) {
+        struct timespec pause = {.tv_sec = 0, .tv_nsec = 300 * 1000000};
+        nanosleep(&pause, NULL);
+    }
+    return atoi(argv[2]);
+}
+
+/* Spawn the probe's own child scenario with `exit_status` and `extra` as arguments. */
+static int start_child(pid_t *pid, int use_path, const posix_spawn_file_actions_t *actions,
+                       char *const environment[], const char *exit_status, const char *extra) {
+    char *arguments[] = {(char *)(use_path ? "probe" : "/probe"), (char *)"spawn-child",
+                         (char *)exit_status, (char *)extra, NULL};
+    if (extra == NULL)
+        arguments[3] = NULL;
+    return use_path ? posix_spawnp(pid, "probe", actions, NULL, arguments, environment)
+                    : posix_spawn(pid, "/probe", actions, NULL, arguments, environment);
+}
+
+/* Read a whole small file into `buffer`. */
+static int read_file(const char *path, char *buffer, size_t size) {
+    int fd = open(path, O_RDONLY);
+    if (fd < 0)
+        return -1;
+    ssize_t length = read(fd, buffer, size - 1);
+    close(fd);
+    if (length < 0)
+        return -1;
+    buffer[length] = '\0';
+    return 0;
+}
+
+static int spawn_children(void) {
+    char text[256];
+    int status = 0;
+    pid_t pid = 0;
+    posix_spawn_file_actions_t actions;
+
+    /* The child inherits this environment when no array is given, and its standard output
+       is redirected into a file with addopen. */
+    CHECK("set inherited", setenv("SDK_SPAWN_INHERITED", "from-parent", 1) == 0);
+    CHECK("init actions", posix_spawn_file_actions_init(&actions) == 0);
+    CHECK("addopen", posix_spawn_file_actions_addopen(&actions, 1, "/spawn-inherit.txt",
+                                                      O_WRONLY | O_CREAT | O_TRUNC, 0644) == 0);
+    CHECK("spawn inheriting", start_child(&pid, 0, &actions, NULL, "3", NULL) == 0);
+    CHECK("spawn pid", pid > 0 && pid != getpid());
+    CHECK("wait by pid", waitpid(pid, &status, 0) == pid);
+    CHECK("exit status", WIFEXITED(status) && WEXITSTATUS(status) == 3);
+    CHECK("reaped child is gone", waitpid(pid, &status, 0) == -1 && errno == ECHILD);
+    CHECK("read inherit output", read_file("/spawn-inherit.txt", text, sizeof(text)) == 0);
+    CHECK("inherited output",
+          strcmp(text, "child: argc=3 argv1=spawn-child argv2=3 inherited=from-parent "
+                       "explicit=(unset)\n") == 0);
+    CHECK("destroy actions", posix_spawn_file_actions_destroy(&actions) == 0);
+
+    /* A file action that replaces a stream opened by an earlier one leaves the parent no
+       descriptor behind, whether the spawn succeeds or fails. */
+    int free_descriptor = open("/spawn-inherit.txt", O_RDONLY);
+    CHECK("free descriptor", free_descriptor >= 3 && close(free_descriptor) == 0);
+    CHECK("init replacing actions", posix_spawn_file_actions_init(&actions) == 0);
+    CHECK("addopen first", posix_spawn_file_actions_addopen(&actions, 1, "/spawn-first.txt",
+                                                            O_WRONLY | O_CREAT | O_TRUNC,
+                                                            0644) == 0);
+    CHECK("addopen second", posix_spawn_file_actions_addopen(&actions, 1, "/spawn-second.txt",
+                                                             O_WRONLY | O_CREAT | O_TRUNC,
+                                                             0644) == 0);
+    CHECK("spawn replacing", start_child(&pid, 0, &actions, NULL, "7", NULL) == 0);
+    CHECK("wait replacing", waitpid(pid, &status, 0) == pid && WEXITSTATUS(status) == 7);
+    CHECK("replaced output", read_file("/spawn-second.txt", text, sizeof(text)) == 0 &&
+                                 strcmp(text, "child: argc=3 argv1=spawn-child argv2=7 "
+                                              "inherited=from-parent explicit=(unset)\n") == 0);
+    CHECK("addclose opened", posix_spawn_file_actions_addclose(&actions, 1) == 0);
+    CHECK("spawn closing opened", start_child(&pid, 0, &actions, NULL, "0", NULL) == EBADF);
+    posix_spawn_file_actions_destroy(&actions);
+    int reused = open("/spawn-inherit.txt", O_RDONLY);
+    CHECK("no descriptor left", reused == free_descriptor && close(reused) == 0);
+    CHECK("replaced stream unused",
+          read_file("/spawn-first.txt", text, sizeof(text)) == 0 && text[0] == '\0');
+
+    /* An explicit array is the child's whole environment; adddup2 hands it an open file. */
+    int target = open("/spawn-explicit.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    CHECK("open target", target >= 0);
+    CHECK("init actions again", posix_spawn_file_actions_init(&actions) == 0);
+    CHECK("adddup2", posix_spawn_file_actions_adddup2(&actions, target, 1) == 0);
+    char *explicit_environment[] = {(char *)"SDK_SPAWN_EXPLICIT=from-array", NULL};
+    CHECK("spawn explicit",
+          start_child(&pid, 0, &actions, explicit_environment, "4", NULL) == 0);
+    CHECK("wait explicit", waitpid(pid, &status, 0) == pid && WEXITSTATUS(status) == 4);
+    close(target);
+    CHECK("read explicit output", read_file("/spawn-explicit.txt", text, sizeof(text)) == 0);
+    CHECK("explicit output",
+          strcmp(text, "child: argc=3 argv1=spawn-child argv2=4 inherited=(unset) "
+                       "explicit=from-array\n") == 0);
+    posix_spawn_file_actions_destroy(&actions);
+
+    /* WNOHANG reports a running child, then a blocking wait collects it. */
+    CHECK("spawn sleeper", start_child(&pid, 0, NULL, NULL, "5", "sleep") == 0);
+    CHECK("no hang while running", waitpid(pid, &status, WNOHANG) == 0);
+    CHECK("collect sleeper", waitpid(pid, &status, 0) == pid && WEXITSTATUS(status) == 5);
+
+    /* wait collects any child; posix_spawnp searches PATH, skipping a missing entry. */
+    CHECK("set path", setenv("PATH", "/missing::/", 1) == 0);
+    CHECK("spawn through path", start_child(&pid, 1, NULL, NULL, "6", NULL) == 0);
+    pid_t waited = wait(&status);
+    CHECK("wait any", waited == pid && WEXITSTATUS(status) == 6);
+    CHECK("wait without children", wait(&status) == -1 && errno == ECHILD);
+    CHECK("wait for a stranger", waitpid(pid + 1000, &status, 0) == -1 && errno == ECHILD);
+    CHECK("spawnp without a match",
+          posix_spawnp(&pid, "nothing-here", NULL, NULL, explicit_environment, NULL) == ENOENT);
+
+    /* Closing the standard error leaves the child short of a stream. */
+    CHECK("init actions third", posix_spawn_file_actions_init(&actions) == 0);
+    CHECK("addclose", posix_spawn_file_actions_addclose(&actions, 2) == 0);
+    CHECK("spawn without stderr", start_child(&pid, 0, &actions, NULL, "0", NULL) == EBADF);
+    posix_spawn_file_actions_destroy(&actions);
+
+    /* A descriptor above 2 cannot be handed to a child. */
+    CHECK("init actions fourth", posix_spawn_file_actions_init(&actions) == 0);
+    CHECK("adddup2 high", posix_spawn_file_actions_adddup2(&actions, 1, 5) == 0);
+    CHECK("spawn onto high", start_child(&pid, 0, &actions, NULL, "0", NULL) == ENOTSUP);
+    posix_spawn_file_actions_destroy(&actions);
+
+    puts("spawn: ok");
+    return 0;
+}
+
 int main(int argc, char **argv) {
     const char *mode = argc > 1 ? argv[1] : "";
     if (strcmp(mode, "underscore-exit") == 0)
@@ -695,6 +833,10 @@ int main(int argc, char **argv) {
         return environment(argv[0]);
     if (strcmp(mode, "descriptors") == 0)
         return descriptors();
+    if (strcmp(mode, "spawn") == 0)
+        return spawn_children();
+    if (strcmp(mode, "spawn-child") == 0 && argc >= 3)
+        return spawn_child(argc, argv);
     fprintf(stderr, "probe: unknown scenario \"%s\"\n", mode);
     return 2;
 }

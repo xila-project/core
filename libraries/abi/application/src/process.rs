@@ -61,8 +61,10 @@ pub struct SpawnRequest {
     pub home: Option<HomeGrant>,
 }
 
-/// The result of starting a child: its join handle, which carries its exit status.
-pub type SpawnFuture = Pin<Box<dyn Future<Output = Result<JoinHandle<isize>, Status>>>>;
+/// The result of starting a child: its join handle, which carries its exit status, and
+/// its task identifier, which is the child's process identifier.
+pub type SpawnFuture =
+    Pin<Box<dyn Future<Output = Result<(JoinHandle<isize>, TaskIdentifier), Status>>>>;
 
 /// The host services behind a process capability. Core implements them for its
 /// executable context, so a spawned child goes through `executable::execute`.
@@ -183,6 +185,8 @@ pub struct Process {
 /// releases it, waited for or not.
 pub struct Child {
     owner: TaskIdentifier,
+    /// The child's process identifier, known once it started.
+    id: u32,
     handle: Option<JoinHandle<isize>>,
 }
 
@@ -618,6 +622,7 @@ pub unsafe extern "C" fn xila_process_spawn(
         // leaves the handle to the registry, and a started child is never left unowned.
         let owned = registry::register(Child {
             owner: parent,
+            id: 0,
             handle: None,
         });
         // The future owns the duplicated streams and the request, which a cancellation
@@ -650,9 +655,12 @@ pub unsafe extern "C" fn xila_process_spawn(
             .await
         });
         match started {
-            Ok(handle) => {
+            Ok((handle, task)) => {
                 // SAFETY: the handle was just allocated and is not shared yet.
-                unsafe { (*owned).handle = Some(handle) };
+                unsafe {
+                    (*owned).id = identifier(task);
+                    (*owned).handle = Some(handle);
+                }
                 Ok(owned)
             }
             Err(error) => {
@@ -718,6 +726,20 @@ pub unsafe extern "C" fn xila_process_wait(
         }
         Err(error) => error,
     }
+}
+
+/// Read the process identifier of a child: the value its own `xila_process_id`
+/// reports. It stays readable after the child exits or is waited for, until the
+/// handle is closed. Core may reuse the identifier once the child's task is gone.
+/// # Safety
+/// The child must be a live handle and the output aligned and writable.
+pub unsafe extern "C" fn xila_process_child_id(child: *const Child, id: *mut u32) -> Status {
+    if child.is_null() || id.is_null() {
+        return Status::InvalidArgument;
+    }
+    // SAFETY: checked non-null above; the caller guarantees both are live and aligned.
+    unsafe { id.write((*child).id) };
+    Status::Ok
 }
 
 /// Release a child handle, waited for or not. A running child keeps running and its
