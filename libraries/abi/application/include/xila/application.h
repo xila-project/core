@@ -728,6 +728,10 @@ typedef struct XilaApi {
                               const size_t *arguments,
                               size_t argument_count,
                               void *result);
+  /**
+   * Read a child's process identifier, the value its `process_id` reports.
+   */
+  XilaStatus (*process_child_id)(const struct XilaChild *child, uint32_t *id);
 } XilaApi;
 
 /**

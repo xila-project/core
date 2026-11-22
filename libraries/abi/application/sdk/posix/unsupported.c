@@ -1,30 +1,10 @@
 /* ENOSYS stubs for POSIX calls whose implementations are pending. */
 #include <sys/types.h>
-#include <spawn.h>
 #include <sys/socket.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 #include "internal.h"
 
-/* ---- Process wrappers: core#762 ---- */
-int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *actions,
-                const posix_spawnattr_t *attributes, char *const arguments[],
-                char *const environment[]) {
-    (void)pid;
-    (void)path;
-    (void)actions;
-    (void)attributes;
-    (void)arguments;
-    (void)environment;
-    return ENOSYS;
-}
-pid_t waitpid(pid_t pid, int *status, int options) {
-    (void)pid;
-    (void)status;
-    (void)options;
-    return xila_fail_errno(ENOSYS);
-}
 pid_t fork(void) { return xila_fail_errno(ENOSYS); } /* never provided: no MMU */
 
 /* ---- sockets: core#717 grants the network capability ---- */

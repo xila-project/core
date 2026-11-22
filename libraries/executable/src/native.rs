@@ -7,7 +7,7 @@ use virtual_file_system::VirtualFileSystem;
 
 use crate::{
     Error, ExecutableContext, ExecutableFormat, FormatHandler, FormatLaunch, FormatRequest, Home,
-    Launch, Result, Standard, execute_with,
+    Launch, Result, Standard, execute_inner,
 };
 
 /// The status a failed spawn reports to the native caller.
@@ -66,7 +66,7 @@ impl ProcessHost for ExecutableContext {
                 identity: None,
             };
             // The child's coroutine must stay on the spawner's executor.
-            execute_with(self, &path, arguments, standard, None, launch)
+            execute_inner(self, &path, arguments, standard, None, launch)
                 .await
                 .map_err(status)
         })
@@ -185,8 +185,7 @@ impl FormatHandler for NativeFormat {
                     |status| status as isize,
                 )
             };
-            let (handle, _) = spawned.map_err(Error::Native)?.await?;
-            Ok(handle)
+            Ok(spawned.map_err(Error::Native)?.await?)
         })
     }
 }

@@ -146,9 +146,12 @@ pub async fn execute_with(
     spawner: Option<SpawnerIdentifier>,
     launch: Launch,
 ) -> Result<JoinHandle<isize>> {
-    execute_inner(context, path.as_ref(), inputs, standard, spawner, launch).await
+    let (handle, _) =
+        execute_inner(context, path.as_ref(), inputs, standard, spawner, launch).await?;
+    Ok(handle)
 }
 
+/// Like [`execute_with`], also returning the new task's identifier.
 async fn execute_inner(
     context: &'static ExecutableContext,
     path: &Path,
@@ -156,7 +159,7 @@ async fn execute_inner(
     standard: Standard<'static>,
     spawner: Option<SpawnerIdentifier>,
     launch: Launch,
-) -> Result<JoinHandle<isize>> {
+) -> Result<(JoinHandle<isize>, TaskIdentifier)> {
     // Admission barrier: once a lifecycle request is accepted, no new
     // executable may start and race the shutdown pipeline.
     if !lifecycle::SYSTEM.is_running() {
@@ -241,7 +244,7 @@ async fn execute_inner(
 
     let main = main_function.ok_or(Error::FailedToGetMainFunction)?;
 
-    let (join_handle, _) = task_instance
+    let spawned = task_instance
         .spawn(task, file_name, spawner, async move |task| {
             // The identity is set before the program starts, on its own task only.
             // The task was registered a moment ago, so this cannot fail; if it ever
@@ -278,7 +281,7 @@ async fn execute_inner(
         })
         .await?;
 
-    Ok(join_handle)
+    Ok(spawned)
 }
 
 #[cfg(test)]

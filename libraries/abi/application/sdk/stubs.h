@@ -95,6 +95,7 @@ XilaStatus xila_file_control(XilaFile * file, uint32_t command, void const * inp
 XilaStatus xila_file_is_terminal(XilaFile * file, bool * terminal);
 XilaStatus xila_pipe_create(XilaProcess const * process, uint32_t flags, XilaFile * * reader, XilaFile * * writer);
 XilaStatus xila_graphics_call(XilaProcess const * process, uint32_t function, size_t const * arguments, size_t argument_count, void * result);
+XilaStatus xila_process_child_id(XilaChild const * child, uint32_t * id);
 
 #ifdef __cplusplus
 }

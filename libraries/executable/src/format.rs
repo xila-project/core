@@ -98,12 +98,13 @@ pub struct FormatRequest {
     pub launch: Launch,
 }
 
-/// Start a registered file format and return the child's exit-status handle.
+/// Start a registered file format and return the child's exit-status handle and task.
 pub trait FormatHandler: Sync {
     fn launch(&self, request: FormatRequest) -> FormatLaunch<'_>;
 }
 
-pub type FormatLaunch<'a> = Pin<Box<dyn Future<Output = Result<JoinHandle<isize>>> + 'a>>;
+pub type FormatLaunch<'a> =
+    Pin<Box<dyn Future<Output = Result<(JoinHandle<isize>, TaskIdentifier)>> + 'a>>;
 
 pub(crate) fn find_format(
     formats: &[ExecutableFormat],
