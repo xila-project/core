@@ -10,11 +10,13 @@ use core::{
     sync::atomic::{AtomicPtr, Ordering},
 };
 
+use xila_version::Version;
+
 use crate::{Status, XILA_HEAP_ALIGNMENT, XILA_VERSION_MAJOR, XILA_VERSION_MINOR};
 use crate::{XilaApi, XilaStartup};
 
 /// The Xila version this crate was generated for, packed as `(major << 16) | minor`.
-const VERSION: u32 = (XILA_VERSION_MAJOR << 16) | XILA_VERSION_MINOR;
+const VERSION: u32 = Version::new(XILA_VERSION_MAJOR as u16, XILA_VERSION_MINOR as u16).packed();
 static STARTUP: AtomicPtr<XilaStartup> = AtomicPtr::new(ptr::null_mut());
 
 /// ABI note consumed by the native ELF loader: an ELF note named `XILA` of type 1
@@ -91,20 +93,12 @@ pub unsafe fn start(
     result
 }
 
-/// Whether a host running the packed Xila version `running` can run an
-/// executable built for the packed version `declared`. Before 1.0 the minor
-/// versions must be equal; from 1.0 the majors must be equal and the running
-/// minor at least the declared one. This mirrors `xila_version::compatible` in
-/// Core and `xila_package_manifest::compatible` in package_manager.
+/// Apply Core's compatibility rule to the versions stored in the ABI.
 const fn compatible(declared: u32, running: u32) -> bool {
-    let (major, minor) = (declared >> 16, declared & 0xffff);
-    let (running_major, running_minor) = (running >> 16, running & 0xffff);
-    major == running_major
-        && if major == 0 {
-            minor == running_minor
-        } else {
-            minor <= running_minor
-        }
+    xila_version::compatible(
+        Version::from_packed(declared),
+        Version::from_packed(running),
+    )
 }
 
 /// Return the host's startup data during entry.

@@ -2,6 +2,9 @@
 
 extern crate alloc;
 
+#[cfg(feature = "headless_screen")]
+extern crate std;
+
 embedded_i18n::i18n!("locales");
 
 mod area;
@@ -11,6 +14,8 @@ mod draw_buffer;
 mod error;
 mod event;
 mod event_queue;
+#[cfg(feature = "headless_screen")]
+pub mod headless_screen;
 mod icon_text;
 mod input;
 mod inspection;

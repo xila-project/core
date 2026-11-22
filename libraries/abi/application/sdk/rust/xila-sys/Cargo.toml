@@ -8,6 +8,9 @@ description = "Raw bindings for Xila native applications"
 
 [workspace]
 
+[dependencies]
+xila-version = { path = "../../../../../version", optional = true }
+
 [features]
-runtime = []
+runtime = ["dep:xila-version"]
 link = ["runtime"]

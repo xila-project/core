@@ -135,6 +135,7 @@ run = "uv run --no-project --with meson=={{ vars.meson_version }} --with ninja==
 [tasks."sdk:verify"]
 description = "Verify the packaged Rust crate, build the C examples, check the ELF contract and report sizes"
 tools.uv = "{{ vars.uv_version }}"
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal" }
 run = "uv run --no-project --with meson=={{ vars.meson_version }} --with ninja=={{ vars.ninja_version }} python tools/sdk/build.py verify --target \"${XILA_SDK_TARGET:-x86_64-unknown-linux-gnu}\""
 
 [tasks."sdk:test"]

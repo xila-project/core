@@ -6,6 +6,9 @@
 //! result. See the crate README for the ID bands and the rules for choosing a kind.
 #![no_std]
 
+#[cfg(feature = "std")]
+extern crate std;
+
 use core::fmt;
 use embedded_io::ErrorKind;
 
@@ -14,9 +17,13 @@ embedded_i18n::i18n!("locales");
 mod display;
 mod posix;
 mod resolve;
+#[cfg(feature = "std")]
+mod std_error;
 
 pub use posix::PosixErrno;
 pub use resolve::{GetAddrInfoError, ResolveError};
+#[cfg(feature = "std")]
+pub use std_error::map_std_error;
 
 macro_rules! define_kinds {
     ($($kind:ident = $id:literal => $errno:ident, $embedded:ident;)*) => {

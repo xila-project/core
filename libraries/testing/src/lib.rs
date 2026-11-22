@@ -11,13 +11,11 @@
 extern crate alloc;
 extern crate std;
 
-#[cfg(feature = "graphics")]
-mod screen;
 /// Deterministic Wi-Fi control-plane mock (`drivers_core::wifi`); it never changes the host's Wi-Fi.
 #[cfg(feature = "environment")]
 pub use drivers_core::wifi;
 #[cfg(feature = "graphics")]
-pub use screen::{HeadlessError, HeadlessScreenDevice};
+pub use graphics::headless_screen::{HeadlessError, HeadlessScreenDevice};
 pub use testing_support::*;
 
 #[cfg(feature = "environment")]

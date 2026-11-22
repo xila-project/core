@@ -39,6 +39,7 @@ xila-sdk-0.1-<target>/
     libc.a, libm.a          picolibc (libm.a is empty: the math library is inside libc.a)
     xila-static-pie.ld      the loader's linker script
   rust/xila-sys/             standalone Rust crate
+  rust/xila-version/         bundled Xila version crate
     Cargo.toml, Cargo.lock
     src/                    raw bindings, optional entry runtime and graphics module
     build.rs                supplies the guest linker arguments with the link feature

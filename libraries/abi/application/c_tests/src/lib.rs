@@ -31,6 +31,7 @@ mod tests {
         fn application_c_round_trip(api: *const XilaApi, directory: *const Directory) -> i32;
         fn application_c_file_system(api: *const XilaApi, directory: *const Directory) -> i32;
         fn startup_test_main(startup: *const XilaStartup) -> i32;
+        fn sdk_test_versions();
         fn sdk_test_startup(startup: *const XilaStartup) -> i32;
         fn startup_heap_main(startup: *const XilaStartup) -> i32;
         fn startup_empty_main(startup: *const XilaStartup) -> i32;
@@ -45,6 +46,11 @@ mod tests {
             listen_only: *const Network,
             cooperative: bool,
         ) -> i32;
+    }
+
+    #[test]
+    fn sdk_checks_compatibility_at_major_and_minor_boundaries() {
+        unsafe { sdk_test_versions() };
     }
 
     type ChildEntry = unsafe extern "C" fn(*const XilaStartup) -> i32;

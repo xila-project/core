@@ -5,3 +5,10 @@ version = 4
 [[package]]
 name = "xila-sys"
 version = "0.1.0"
+dependencies = [
+ "xila-version",
+]
+
+[[package]]
+name = "xila-version"
+version = "0.1.0"

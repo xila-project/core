@@ -21,7 +21,6 @@ users = { workspace = true, optional = true }
 virtual_file_system = { workspace = true, optional = true }
 # `graphics`: headless screen.
 graphics = { workspace = true, optional = true }
-shared = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -47,7 +46,7 @@ environment = [
 graphics = [
   "environment",
   "dep:graphics",
-  "dep:shared",
+  "graphics/headless_screen",
   "graphics/rendering_xrgb8888",
   "executable/graphics",
 ]

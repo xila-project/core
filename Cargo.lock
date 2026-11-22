@@ -2408,7 +2408,6 @@ dependencies = [
  "xila-little-fs",
  "xila-log",
  "xila-network",
- "xila-shared",
  "xila-task",
  "xila-testing-support",
  "xila-time",

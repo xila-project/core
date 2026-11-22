@@ -1,12 +1,14 @@
+//! A screen device that validates flushes without presenting pixels.
+
 use core::fmt;
 
+use crate::{
+    Area, GET_RESOLUTION, Point, RenderingColor, SCREEN_SNAPSHOT_MAX_PIXELS, SET_DRAWING_AREA,
+    WAS_RESIZED,
+};
 use file_system::{
     ControlCommand, ControlCommandIdentifier, DirectBaseOperations, DirectCharacterDevice,
     MountOperations, Size,
-};
-use graphics::{
-    Area, GET_RESOLUTION, Point, RenderingColor, SCREEN_SNAPSHOT_MAX_PIXELS, SET_DRAWING_AREA,
-    WAS_RESIZED,
 };
 use shared::{AnyByLayout, align_slice_to};
 use std::sync::Mutex;

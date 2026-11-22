@@ -48,6 +48,7 @@ sha2 = "0.11"
 
 [features]
 default = []
+headless_screen = []
 rendering_rgb565 = ["lvgl_rust_sys/color_depth_16"]
 rendering_xrgb8888 = ["lvgl_rust_sys/color_depth_32"]
 

@@ -337,7 +337,7 @@ description = "Test the host workspace"
 depends = ["ci:packages-host-sdk"]
 run = """
 set -eu
-cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888
+cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888,xila-graphics/headless_screen,xila-io-error/std
 cargo test --locked -p xila-abi-application --no-default-features
 # The graphics feature also enables environment.
 cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888,xila-testing/graphics --no-run

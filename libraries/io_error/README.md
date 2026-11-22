@@ -5,6 +5,7 @@ The shared failure vocabulary of file systems, the VFS, device files and network
 - `Kind`: one fieldless, `#[repr(u16)]` kind (2 bytes) with a stable, explicitly assigned ID. File system, VFS and network operations all return it, so a failure keeps its meaning from the producer to the caller. `file_system::IoErrorKind`, `virtual_file_system::IoErrorKind` and `network::IoErrorKind` re-export it.
 - `ResolveError`: the compact typed DNS result. It separates a malformed name, an unavailable network and a confirmed negative answer from an unknown failure. Each variant has the ID of the `Kind` it projects to.
 - Boundary translations, each done once: `embedded_io::Error` (`Kind` implements it), `Kind::posix_errno()` (a pure projection to a symbolic errno for the WASI mapper and the future libc shim), the native ABI `Status` (generated from the catalog) and `ResolveError::getaddrinfo()`.
+- The optional `std` feature exposes `map_std_error` for generic host I/O failures. Apply any more precise raw operating system error mappings at the producer.
 - Localized `Display` in the nine shipped locales. `Debug` prints the ID only, so firmware that formats an error does not retain a table of variant names.
 
 ## IDs
