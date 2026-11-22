@@ -31,7 +31,7 @@ class VerifierTests(unittest.TestCase):
             (current / "liblvgl.a").write_text("current archive")
             (historical / "bindings.rs").write_text("other configuration")
             messages = [{"reason": "build-script-executed",
-                         "package_id": "git+https://github.com/AlixANNERAUD/lvgl_rust?branch=feat%2Fxila-integration#lvgl-rust-sys@0.1.2+lvgl.9.6.0",
+                         "package_id": "registry+https://github.com/rust-lang/crates.io-index#lvgl-rust-sys@0.3.1+lvgl.9.6.0",
                          "out_dir": str(current)}]
             self.assertEqual(set(verify.lvgl_outputs(messages)),
                              {current / "bindings.rs", current / "liblvgl.a"})
