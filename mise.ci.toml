@@ -659,18 +659,30 @@ for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf riscv32imafc-un
     --target-dir target/sdk/rust-bindings --target "$target" -- -D warnings
 done
 # The guest nightly lints `link`, including the generated link.rs.
-guest_targets="x86_64-unknown-linux-gnu thumbv7em-none-eabihf riscv32imac-unknown-none-elf riscv32imafc-unknown-none-elf"
-rustup toolchain install {{ vars.nightly_version }} --profile minimal --component clippy \
-  $(for target in $guest_targets; do printf -- '--target %s ' "$target"; done)
-for target in $guest_targets; do
-  rustup run {{ vars.nightly_version }} cargo clippy --locked --manifest-path "$xila_sys" \
-    --features link --target-dir target/sdk/rust-bindings-nightly --target "$target" -- -D warnings
-done
+mise run ci:native-loader-link-lint
 """
 tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", components = [
   "clippy",
 ], targets = [
   "aarch64-unknown-linux-gnu",
+  "thumbv7em-none-eabihf",
+  "riscv32imac-unknown-none-elf",
+  "riscv32imafc-unknown-none-elf",
+] }
+
+[tasks."ci:native-loader-link-lint"]
+description = "Lint xila-sys with its link feature on the guest nightly"
+run = """
+set -eu
+xila_sys=libraries/abi/application/sdk/rust/xila-sys/Cargo.toml
+for target in x86_64-unknown-linux-gnu thumbv7em-none-eabihf riscv32imac-unknown-none-elf riscv32imafc-unknown-none-elf; do
+  cargo clippy --locked --manifest-path "$xila_sys" \
+    --features link --target-dir target/sdk/rust-bindings-nightly --target "$target" -- -D warnings
+done
+"""
+tools.rust = { version = "{{ vars.nightly_version }}", profile = "minimal", components = [
+  "clippy",
+], targets = [
   "thumbv7em-none-eabihf",
   "riscv32imac-unknown-none-elf",
   "riscv32imafc-unknown-none-elf",
