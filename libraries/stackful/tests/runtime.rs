@@ -162,6 +162,53 @@ fn cancellation_drops_an_opted_in_future_once() {
     assert_eq!(drops.get(), 1);
 }
 
+/// Stopping releases what the pending operation holds at once, keeps the stack, and leaves
+/// the coroutine pending for good; dropping it later releases nothing twice.
+#[test]
+fn stop_drops_the_pending_operation_and_keeps_the_coroutine_pending() {
+    struct DropCount(Rc<Cell<usize>>);
+
+    impl Drop for DropCount {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+
+    let drops = Rc::new(Cell::new(0));
+    let resource = DropCount(drops.clone());
+    let frame = Rc::new(Cell::new(0));
+    let in_frame = frame.clone();
+    let mut driver = coroutine(move || {
+        let resource = resource;
+        stackful::suspend_on_cancellable(async move {
+            let _resource = resource;
+            core::future::pending::<()>().await;
+        });
+        in_frame.set(1);
+        0
+    });
+    let join = driver.join_handle();
+    let mut cx = Context::from_waker(Waker::noop());
+    assert_eq!(driver.resume(&mut cx), Poll::Pending);
+    assert_eq!(drops.get(), 0);
+    driver.stop();
+    assert_eq!(
+        drops.get(),
+        1,
+        "the pending operation is dropped when stopped"
+    );
+    assert_eq!(driver.resume(&mut cx), Poll::Pending);
+    assert_eq!(frame.get(), 0, "a stopped coroutine never runs again");
+    assert_eq!(embassy_futures::block_on(join), Err(stackful::Cancelled));
+    driver.stop();
+    drop(driver);
+    assert_eq!(
+        drops.get(),
+        1,
+        "stopping again or dropping releases nothing twice"
+    );
+}
+
 #[test]
 fn footprint_and_switch_timing() {
     const N: usize = 100_000;

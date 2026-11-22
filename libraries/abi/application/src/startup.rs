@@ -350,10 +350,9 @@ pub(crate) unsafe fn enter(
     if managed {
         crate::threads::stop_workers();
     }
-    // Released here, in the coroutine, before the driver drops the stopped workers and
-    // their cancellable futures: the reverse of a cancellation, which drops the coroutines
-    // first. Sound while no cancellable future dereferences a registered handle when it is
-    // dropped (see "Release order" in the README); `xila_process_exit` does the same.
+    // Released here, in the coroutine. Stopping the workers above dropped their cancellable
+    // waits, and whatever those held (the VFS namespace lock, say), so the closes below
+    // cannot wait for a thread that never runs again. `xila_process_exit` does the same.
     unsafe { Resources::release(resources) };
     status
 }

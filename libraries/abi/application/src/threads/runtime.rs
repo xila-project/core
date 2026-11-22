@@ -73,6 +73,9 @@ struct Group {
     /// The handles the process opened: the host state's registry.
     registry: Cell<*const Registry>,
     workers: RefCell<Vec<Option<Worker>>>,
+    /// Main's coroutine, out of here while it runs. Declared after `workers`, so a
+    /// cancellation drops the workers first, as `shut_down` stops them first.
+    main: RefCell<Option<Coroutine>>,
     next_thread: Cell<usize>,
     keys: [Cell<usize>; XILA_THREAD_KEYS_MAX],
     next_key: Cell<usize>,
@@ -86,6 +89,7 @@ impl Group {
             process: Cell::new(ptr::null()),
             registry: Cell::new(ptr::null()),
             workers: RefCell::new(Vec::new()),
+            main: RefCell::new(None),
             next_thread: Cell::new(MAIN_THREAD + 1),
             keys: [const { Cell::new(0) }; XILA_THREAD_KEYS_MAX],
             next_key: Cell::new(XILA_THREAD_KEYS_MAX),
@@ -166,6 +170,36 @@ impl Group {
         Poll::Pending
     }
 
+    /// Begin terminal cleanup on behalf of `caller`: from now on only it runs, and every
+    /// other thread, main included, is stopped (see [`Coroutine::stop`]). A stopped thread's
+    /// cancellable wait is dropped here, so whatever it held, such as the VFS namespace
+    /// lock a path call holds while it waits, is free before the caller's cleanup needs
+    /// it. The stacks stay until the driver drops the coroutines, because the caller may
+    /// still read them (a stream buffer on main's stack, say).
+    fn shut_down(&self, caller: usize) {
+        self.shutdown_thread.set(caller);
+        let count = self.workers.borrow().len();
+        for index in 0..count {
+            // Taken out, so that a destructor that suspends does not find the list
+            // borrowed, then put back for the driver to drop.
+            let taken = self.workers.borrow_mut()[index]
+                .as_mut()
+                .and_then(|worker| worker.coroutine.take());
+            if let Some(mut coroutine) = taken {
+                coroutine.stop();
+                if let Some(worker) = self.workers.borrow_mut()[index].as_mut() {
+                    worker.coroutine = Some(coroutine);
+                }
+            }
+        }
+        // Main's coroutine is out of the group while main runs, so main never stops itself.
+        let main = self.main.borrow_mut().take();
+        if let Some(mut main) = main {
+            main.stop();
+            *self.main.borrow_mut() = Some(main);
+        }
+    }
+
     fn key(&self, key: usize) -> Result<&Cell<usize>, Status> {
         let slot = &self.keys[key % XILA_THREAD_KEYS_MAX];
         if key == 0 || slot.get() != key {
@@ -211,12 +245,16 @@ pub(crate) unsafe fn registry<'a>() -> Option<&'a Registry> {
 
 pub(crate) fn stop_workers() {
     if let Ok((group, local)) = current() {
-        group.shutdown_thread.set(local.id);
+        group.shut_down(local.id);
     }
 }
 
 /// Begin terminal process cleanup. Only the calling thread may run after
 /// this call, even if cleanup suspends. Spawning new workers is disabled.
+///
+/// The other threads are stopped at once: a cancellable wait one of them is suspended
+/// in (a path call holding the VFS namespace lock, a socket being connected) is dropped
+/// now, so cleanup never waits for what it held. Their stacks stay until the process ends.
 ///
 /// A stopped thread that was waiting on a mutex or a condition variable stays in its
 /// queue. Terminal cleanup must therefore only try-lock (`XILA_MUTEX_TRY`): an unlock that
@@ -231,7 +269,7 @@ pub unsafe extern "C" fn xila_thread_stop_others(process: *const Process) -> Sta
         if process.is_null() || group.process.get() != process {
             return Err(Status::InvalidArgument);
         }
-        group.shutdown_thread.set(local.id);
+        group.shut_down(local.id);
         Ok(())
     })())
 }
@@ -260,7 +298,7 @@ pub(crate) fn prepare_exit(process: *const Process) -> Result<(), Status> {
         if group.process.get() != process {
             return Err(Status::InvalidArgument);
         }
-        group.shutdown_thread.set(local.id);
+        group.shut_down(local.id);
     }
     Ok(())
 }
@@ -269,20 +307,26 @@ pub(crate) fn prepare_exit(process: *const Process) -> Result<(), Status> {
 /// The group and its workers are dropped before this future returns. A suspended
 /// coroutine, main or worker, is cancelled: its frames are discarded and its stack freed.
 /// What the process owns lives in the host state, which the caller releases afterwards.
-pub async fn drive_process(mut main: Coroutine) -> i32 {
+pub async fn drive_process(main: Coroutine) -> i32 {
     let group = Group::new();
+    *group.main.borrow_mut() = Some(main);
     let local = Local::new(&group, MAIN_THREAD);
     poll_fn(|cx| {
         group.repoll.set(false);
 
         match group.shutdown_thread.get() {
             0 | MAIN_THREAD => {
-                // Both locals are borrowed by this pinned future.
-                unsafe { main.set_native_context(ptr::from_ref(&local).cast()) };
-                let result = main.resume(cx);
-                unsafe { main.set_native_context(ptr::null()) };
-                if result.is_ready() {
-                    return result;
+                // Taken out while it runs, like a worker's, and put back if it suspends.
+                let main = group.main.borrow_mut().take();
+                if let Some(mut main) = main {
+                    // Both locals are borrowed by this pinned future.
+                    unsafe { main.set_native_context(ptr::from_ref(&local).cast()) };
+                    let result = main.resume(cx);
+                    unsafe { main.set_native_context(ptr::null()) };
+                    if result.is_ready() {
+                        return result;
+                    }
+                    *group.main.borrow_mut() = Some(main);
                 }
             }
             _ => {}

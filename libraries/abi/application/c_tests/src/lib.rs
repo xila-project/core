@@ -1891,6 +1891,138 @@ mod tests {
             }
         }
 
+        std::thread_local! {
+            /// The file system whose namespace lock the lock holders below take.
+            static HELD: core::cell::Cell<Option<&'static VirtualFileSystem>> =
+                const { core::cell::Cell::new(None) };
+        }
+
+        /// Suspend with the VFS namespace lock held, as a path call does while it waits for
+        /// the task or user managers, until the thread is stopped.
+        fn hold_namespace_lock() {
+            let vfs = HELD.get().expect("set by the test");
+            stackful::suspend_on_cancellable(
+                vfs.hold_namespace_lock(core::future::pending::<()>()),
+            );
+        }
+
+        unsafe extern "C" fn worker_holds_lock(
+            _: *mut core::ffi::c_void,
+        ) -> *mut core::ffi::c_void {
+            hold_namespace_lock();
+            ptr::dangling_mut() // The hold never ends.
+        }
+
+        /// Opens its handles, starts a worker that takes the namespace lock and lets it
+        /// run, so that the lock is held when main ends.
+        unsafe fn open_then_let_a_worker_hold_the_lock(startup: *const XilaStartup) -> i32 {
+            let failed = unsafe { open_handles(startup) };
+            if failed != 0 {
+                return failed;
+            }
+            let mut worker = 0;
+            unsafe {
+                check!(
+                    xila_thread_spawn(
+                        (*startup).process,
+                        0,
+                        Some(worker_holds_lock),
+                        ptr::null_mut(),
+                        &mut worker,
+                    ) == Status::Ok
+                );
+                check!(xila_thread_yield() == Status::Ok);
+            }
+            0
+        }
+
+        unsafe extern "C" fn return_while_a_worker_holds_the_lock(
+            startup: *const XilaStartup,
+        ) -> i32 {
+            unsafe { open_then_let_a_worker_hold_the_lock(startup) }
+        }
+
+        unsafe extern "C" fn exit_while_a_worker_holds_the_lock(
+            startup: *const XilaStartup,
+        ) -> i32 {
+            let failed = unsafe { open_then_let_a_worker_hold_the_lock(startup) };
+            if failed != 0 {
+                return failed;
+            }
+            let _ = unsafe { xila_process_exit((*startup).process, 5) };
+            1 // Exit returned.
+        }
+
+        unsafe extern "C" fn worker_exits(
+            startup: *mut core::ffi::c_void,
+        ) -> *mut core::ffi::c_void {
+            let startup = startup.cast::<XilaStartup>();
+            let _ = unsafe { xila_process_exit((*startup).process, 7) };
+            ptr::dangling_mut() // Exit returned.
+        }
+
+        /// Opens its handles, starts a worker that exits the process, and takes the
+        /// namespace lock itself before the worker runs.
+        unsafe extern "C" fn worker_exits_while_main_holds_the_lock(
+            startup: *const XilaStartup,
+        ) -> i32 {
+            let failed = unsafe { open_handles(startup) };
+            if failed != 0 {
+                return failed;
+            }
+            let mut worker = 0;
+            unsafe {
+                check!(
+                    xila_thread_spawn(
+                        (*startup).process,
+                        0,
+                        Some(worker_exits),
+                        startup.cast_mut().cast(),
+                        &mut worker,
+                    ) == Status::Ok
+                );
+            }
+            hold_namespace_lock();
+            1 // The hold never ends.
+        }
+
+        /// A process that ends while another of its threads is suspended with the VFS
+        /// namespace lock held stops that thread, which gives the lock back, before it
+        /// closes what it holds: closing its listing and directory needs that lock.
+        #[task::test]
+        async fn ending_does_not_wait_for_a_lock_a_stopped_thread_held() {
+            for (entry, expected, how) in [
+                (
+                    return_while_a_worker_holds_the_lock as Entry,
+                    0,
+                    "main returns",
+                ),
+                (exit_while_a_worker_holds_the_lock as Entry, 5, "main exits"),
+                (
+                    worker_exits_while_main_holds_the_lock as Entry,
+                    7,
+                    "a worker exits",
+                ),
+            ] {
+                let world = world().await;
+                let World { vfs, .. } = world;
+                HELD.set(Some(vfs));
+                let mut run = Run::new(world.host, entry, None, home());
+                let mut ended = Poll::Pending;
+                for _ in 0..100 {
+                    ended = run.poll().await;
+                    if ended.is_ready() {
+                        break;
+                    }
+                }
+                assert_eq!(ended, Poll::Ready(expected), "{how}: the process must end");
+                assert_eq!(run.open_handles(), 0, "{how}");
+                // The lock is free and the process's handles are closed.
+                unmounts(vfs, "/mnt", how).await;
+                drop(run);
+            }
+        }
+
         /// Every way a process can end, cancellation included, gives back every byte it took:
         /// its stack, its state, its handles and its streams.
         #[task::test]

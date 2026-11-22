@@ -610,12 +610,16 @@ power loss would: an open may have created the file, a rename may have finished 
 system. `SynchronousFile::open` and `SynchronousDirectory::open` and `create` are
 cancellable for the same reason.
 
-**Release order.** A cancelled process has its coroutines dropped first, then its state
-released. A process that returns or exits releases its state in its own coroutine (main's,
-or the exiting worker's), and only afterwards does the driver drop the stopped workers and
-their cancellable futures: the reverse order. That is sound because no cancellable future
-dereferences a registered handle when it is dropped (a poll wait keeps raw pointers to the
-handles it watches and drops them unread). A new cancellable suspension must keep it so.
+**Release order.** On every path the coroutines' cancellable waits are dropped before the
+state is released. A cancelled process has its coroutines dropped first. A process that
+returns or exits stops its other threads when its terminal cleanup begins (the SDK's `exit`
+through `xila_thread_stop_others`, `xila_process_exit`, or the entry returning): each
+stopped thread's cancellable wait is dropped then, in place, with whatever it held, and its
+stack stays until the driver drops the coroutine at the end of the process, because the
+thread that cleans up may still read it. Then the state is released in the cleaning
+thread's coroutine. A path call that a worker was suspended in when main returned therefore
+gives the VFS namespace lock back before the release closes the process's files, which need
+that lock.
 
 ## Optional graphics (`graphics`)
 

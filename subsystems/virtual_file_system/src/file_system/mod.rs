@@ -150,6 +150,15 @@ impl VirtualFileSystem {
         }
     }
 
+    /// Hold the namespace lock, the one path-based calls take, until `release` completes,
+    /// and return its output. Tests use it to suspend a task with the lock held, as an open
+    /// does while it waits for the task or user managers.
+    #[cfg(feature = "test_harness")]
+    pub async fn hold_namespace_lock<F: core::future::Future>(&self, release: F) -> F::Output {
+        let _file_systems = self.file_systems.write().await;
+        release.await
+    }
+
     pub async fn uninitialize(&self) {
         let mut file_systems = self.file_systems.write().await;
 

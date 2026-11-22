@@ -166,11 +166,14 @@ impl Coroutine {
         }
     }
     /// Poll the suspended operation with the executor's real waker, then resume native code.
+    /// A coroutine that was [stopped](Self::stop) stays pending for good.
     pub fn resume(&mut self, cx: &mut Context<'_>) -> Poll<i32> {
         let c = Rc::as_ptr(&self.control);
         loop {
-            if let Some(Ok(result)) = self.control.result.get() {
-                return Poll::Ready(result);
+            match self.control.result.get() {
+                Some(Ok(result)) => return Poll::Ready(result),
+                Some(Err(Cancelled)) => return Poll::Pending,
+                None => {}
             }
             if let Some(Pending { future, .. }) = self.control.pending.get() {
                 // SAFETY: the future remains pinned on the suspended native stack. No
@@ -211,29 +214,50 @@ impl Future for Coroutine {
         self.resume(cx)
     }
 }
+impl Coroutine {
+    /// Cancel a suspended coroutine for good, but keep its stack until it is dropped.
+    ///
+    /// This does what dropping it would do to its pending operation: an operation passed to
+    /// [`suspend_on_cancellable`] is dropped in place, so it gives back what it holds (a
+    /// lock, a file), and the join observer sees [`Cancelled`]. The frames stay where they
+    /// are and are never resumed: [`Self::resume`] stays pending from now on. A host that
+    /// must let other code run before it can drop the coroutine (another coroutine of the
+    /// same program that still reads its stack, say) stops it first.
+    ///
+    /// Stopping a coroutine that has not started, has finished or is already stopped does
+    /// nothing. Call it from outside the coroutine: from the executor or from another
+    /// coroutine, whose own suspension a destructor that waits then suspends.
+    pub fn stop(&mut self) {
+        if !self.control.started.get() || self.control.result.get().is_some() {
+            return;
+        }
+        self.control.result.set(Some(Err(Cancelled)));
+        if let Some(w) = self.control.waker.borrow_mut().take() {
+            w.wake();
+        }
+        // The last suspension checked the guard on the way out, but an overflow in the
+        // frames that suspended can only be seen now: stop before running a destructor on
+        // a stack that may be damaged, as `resume` does.
+        self.control.check_guard();
+        // Opted-in bridge futures can release their state on cancellation, while the stack
+        // they are pinned on is intact.
+        if let Some(Pending {
+            future,
+            cancel: true,
+        }) = self.control.pending.take()
+        {
+            // SAFETY: the wrapper is initialized and pinned on the suspended stack. The
+            // coroutine will never resume, so it cannot drop the wrapper again.
+            unsafe { core::ptr::drop_in_place(future) };
+        }
+    }
+}
 impl Drop for Coroutine {
     fn drop(&mut self) {
         self.control.native_context.set(core::ptr::null());
-        if self.control.started.get() && self.control.result.get().is_none() {
-            self.control.result.set(Some(Err(Cancelled)));
-            if let Some(w) = self.control.waker.borrow_mut().take() {
-                w.wake();
-            }
-            // The last suspension checked the guard on the way out, but an overflow in the
-            // frames that suspended can only be seen now: stop before running a destructor
-            // on a stack that may be damaged, as `resume` does.
-            self.control.check_guard();
-            // Opted-in bridge futures can release their state on cancellation. This
-            // runs first, while the stack they are pinned on is intact.
-            if let Some(Pending {
-                future,
-                cancel: true,
-            }) = self.control.pending.take()
-            {
-                // SAFETY: the wrapper is initialized and pinned on the suspended stack.
-                // The coroutine will never resume, so it cannot drop the wrapper again.
-                unsafe { core::ptr::drop_in_place(future) };
-            }
+        if self.control.started.get() && !matches!(self.control.result.get(), Some(Ok(_))) {
+            // Cancels it now, or did when it was stopped.
+            self.stop();
             // SAFETY: the driver is the only user of `native`, and it is being dropped,
             // so nothing resumes the coroutine again. The frames are discarded, never
             // unwound: `Coroutine::new` makes the caller keep every owner of a resource
