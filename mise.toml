@@ -19,7 +19,7 @@ picolibc_version = "1.8.12"
 picolibc_sha256 = "64e8c412e1c40fa6eb1a72d2b5cdbcbfe6ceca4cbea454edbad54557ffc747fa"
 meson_version = "1.9.1"
 ninja_version = "1.13.0"
-# Must match the `wasm-bindgen` crate version in Cargo.lock.
+# Must match the `wasm-bindgen` crate version in Cargo.lock (checked by `tools/ci/test_workflows.py`).
 wasm_bindgen_version = "0.2.129"
 
 [tasks."deps:npm"]
@@ -92,7 +92,8 @@ fi
 cargo test --locked -p xila-task --target wasm32-unknown-unknown \
   --test browser_yield \
   --test browser_yield_without_message_channel \
-  --test browser_yield_without_timers
+  --test browser_yield_without_timers \
+  --test browser_timers
 """
 
 [tasks."test:workspace"]

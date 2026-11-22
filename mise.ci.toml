@@ -404,7 +404,8 @@ fi
 cargo test --locked -p xila-task --target wasm32-unknown-unknown \\
   --test browser_yield \\
   --test browser_yield_without_message_channel \\
-  --test browser_yield_without_timers
+  --test browser_yield_without_timers \\
+  --test browser_timers
 """
 
 [tasks."ci:wasm-audio-check"]
