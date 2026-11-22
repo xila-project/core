@@ -50,7 +50,8 @@ pub fn blocking_operation<O>(_flags: Flags, operation: impl FnOnce() -> Result<O
             target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm",
-            target_arch = "riscv32"
+            target_arch = "riscv32",
+            target_arch = "xtensa"
         ),
         target_os = "none"
     )
@@ -67,7 +68,8 @@ use stackful::suspend_on;
             target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm",
-            target_arch = "riscv32"
+            target_arch = "riscv32",
+            target_arch = "xtensa"
         ),
         target_os = "none"
     )

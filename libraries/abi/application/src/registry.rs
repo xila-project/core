@@ -136,7 +136,8 @@ impl Registry {
             target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm",
-            target_arch = "riscv32"
+            target_arch = "riscv32",
+            target_arch = "xtensa"
         ),
         target_os = "none"
     )
@@ -158,7 +159,8 @@ unsafe fn current<'a>() -> Option<&'a Registry> {
             target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm",
-            target_arch = "riscv32"
+            target_arch = "riscv32",
+            target_arch = "xtensa"
         ),
         target_os = "none"
     )

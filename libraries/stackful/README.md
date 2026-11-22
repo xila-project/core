@@ -220,9 +220,13 @@ stays correct. Under Espressif's QEMU the Xtensa round trip is 534 (ESP32) and 5
 ## ABI integration status and remaining decisions
 
 Synchronous VFS calls that bridge async operations and the native application
-ABI use `suspend_on` on supported targets. On Xtensa, `xila-stackful` builds
-and runs, but the application ABI, the native loader and the VFS do not enable
-it yet, so ESP32 targets keep the busy-polling fallback. The synchronous VFS polling
+ABI use `suspend_on` on supported targets, Xtensa (ESP32, ESP32-S2, ESP32-S3)
+included: the VFS, the application ABI and the native loader enable it there too,
+and CI builds them for the three chips. On the ESP32-S2 these consumers need the
+same `--cfg portable_atomic_unsafe_assume_single_core` as `xila-task`; the firmware
+sets it in its `RUSTFLAGS`, as for the RISC-V chips without CAS. Running them on
+hardware, including switches under interrupt load, is still to do
+([#795](https://github.com/xila-project/core/issues/795)). The synchronous VFS polling
 adapters still return resource-busy on pending device I/O. The application ABI
 waits cooperatively for blocking file I/O when called from a coroutine.
 

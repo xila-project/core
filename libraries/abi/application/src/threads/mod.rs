@@ -51,7 +51,8 @@ include!(concat!(env!("OUT_DIR"), "/rust_layout.rs"));
             target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm",
-            target_arch = "riscv32"
+            target_arch = "riscv32",
+            target_arch = "xtensa"
         ),
         target_os = "none"
     )
@@ -67,7 +68,8 @@ mod runtime;
             target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm",
-            target_arch = "riscv32"
+            target_arch = "riscv32",
+            target_arch = "xtensa"
         ),
         target_os = "none"
     )
@@ -84,7 +86,8 @@ pub use runtime::*;
             target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm",
-            target_arch = "riscv32"
+            target_arch = "riscv32",
+            target_arch = "xtensa"
         ),
         target_os = "none"
     )
@@ -111,7 +114,8 @@ mod unsupported {
             target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm",
-            target_arch = "riscv32"
+            target_arch = "riscv32",
+            target_arch = "xtensa"
         ),
         target_os = "none"
     )
