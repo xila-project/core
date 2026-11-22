@@ -241,6 +241,19 @@ static void close_owned(struct stream_view view[3]) {
     }
 }
 
+/* Give a slot a new stream, closing a descriptor opened by an earlier file action once no
+   slot uses it any more. */
+static void replace_slot(struct stream_view view[3], int slot, struct stream_view next) {
+    int owned = view[slot].owned;
+    view[slot] = next;
+    if (owned < 0)
+        return;
+    for (int other = 0; other < 3; ++other)
+        if (view[other].owned == owned)
+            return;
+    (void)close(owned);
+}
+
 static int parent_file(int fd, XilaFile **file) {
     struct xila_fd *entry = xila_fd_get(fd);
     if (entry == NULL || entry->kind != XILA_FD_FILE)
@@ -265,7 +278,7 @@ static int stream_views(const posix_spawn_file_actions_t *actions, struct stream
         if (action->kind == ACTION_CLOSE) {
             /* The child inherits no descriptor above 2, so closing one there is done. */
             if (action->fd < 3)
-                view[action->fd] = (struct stream_view){NULL, -1};
+                replace_slot(view, action->fd, (struct stream_view){NULL, -1});
             continue;
         }
         /* A child cannot receive a descriptor above 2. */
@@ -282,7 +295,7 @@ static int stream_views(const posix_spawn_file_actions_t *actions, struct stream
             }
             if (source.file == NULL)
                 return EBADF;
-            view[action->fd] = source;
+            replace_slot(view, action->fd, source);
             continue;
         }
         int fd = open(action->path, action->flags, 0);
@@ -294,7 +307,7 @@ static int stream_views(const posix_spawn_file_actions_t *actions, struct stream
             (void)close(fd);
             return EISDIR;
         }
-        view[action->fd] = (struct stream_view){file, fd};
+        replace_slot(view, action->fd, (struct stream_view){file, fd});
     }
     return 0;
 }
@@ -463,25 +476,20 @@ pid_t waitpid(pid_t pid, int *status, int options) {
     int any = pid == -1 || pid == 0 || (pid < -1 && -pid == getpid());
     if (pid < -1 && !any)
         return xila_fail_errno(ECHILD);
-    if (!any) {
-        for (size_t index = 0; index < child_count; ++index) {
-            if (children[index].pid != pid)
-                continue;
-            if (children[index].waiting)
-                return xila_fail_errno(ECHILD); /* Another thread is collecting it. */
-            int reaped = collect(index, (options & WNOHANG) ? XILA_WAIT_NO_HANG : 0, status);
-            return reaped < 0 ? -1 : reaped == 0 ? 0 : pid;
-        }
-        return xila_fail_errno(ECHILD);
-    }
-    /* Any child: the ABI waits for one handle, so poll them all, sleeping between rounds
-       from 1 ms up to 16 ms. A single child is waited for directly. */
+    /* The ABI waits for one handle: a single candidate is waited for directly, and several
+       are polled, sleeping between rounds from 1 ms up to 16 ms. A blocking wait the host
+       cannot suspend (outside a coroutine) is polled too, never reported as done. */
     uint64_t pause = 1000000;
     for (;;) {
         size_t candidates = 0, last = 0;
         for (size_t index = 0; index < child_count; ++index) {
-            if (children[index].waiting)
+            if (!any && children[index].pid != pid)
                 continue;
+            if (children[index].waiting) {
+                if (!any)
+                    return xila_fail_errno(ECHILD); /* Another thread is collecting it. */
+                continue;
+            }
             ++candidates;
             last = index;
         }
@@ -490,18 +498,20 @@ pid_t waitpid(pid_t pid, int *status, int options) {
         if (candidates == 1 && !(options & WNOHANG)) {
             pid_t found = children[last].pid;
             int reaped = collect(last, 0, status);
-            return reaped < 0 ? -1 : found;
-        }
-        for (size_t index = 0; index < child_count; ++index) {
-            if (children[index].waiting)
-                continue;
-            pid_t found = children[index].pid;
-            int reaped = collect(index, XILA_WAIT_NO_HANG, status);
             if (reaped != 0)
                 return reaped < 0 ? -1 : found;
+        } else {
+            for (size_t index = 0; index < child_count; ++index) {
+                if ((!any && children[index].pid != pid) || children[index].waiting)
+                    continue;
+                pid_t found = children[index].pid;
+                int reaped = collect(index, XILA_WAIT_NO_HANG, status);
+                if (reaped != 0)
+                    return reaped < 0 ? -1 : found;
+            }
+            if (options & WNOHANG)
+                return 0;
         }
-        if (options & WNOHANG)
-            return 0;
         XilaStatus slept = xila_time_sleep(pause);
         if (slept != XILA_STATUS_OK)
             return xila_fail(slept);

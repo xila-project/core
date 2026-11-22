@@ -750,6 +750,30 @@ static int spawn_children(void) {
                        "explicit=(unset)\n") == 0);
     CHECK("destroy actions", posix_spawn_file_actions_destroy(&actions) == 0);
 
+    /* A file action that replaces a stream opened by an earlier one leaves the parent no
+       descriptor behind, whether the spawn succeeds or fails. */
+    int free_descriptor = open("/spawn-inherit.txt", O_RDONLY);
+    CHECK("free descriptor", free_descriptor >= 3 && close(free_descriptor) == 0);
+    CHECK("init replacing actions", posix_spawn_file_actions_init(&actions) == 0);
+    CHECK("addopen first", posix_spawn_file_actions_addopen(&actions, 1, "/spawn-first.txt",
+                                                            O_WRONLY | O_CREAT | O_TRUNC,
+                                                            0644) == 0);
+    CHECK("addopen second", posix_spawn_file_actions_addopen(&actions, 1, "/spawn-second.txt",
+                                                             O_WRONLY | O_CREAT | O_TRUNC,
+                                                             0644) == 0);
+    CHECK("spawn replacing", start_child(&pid, 0, &actions, NULL, "7", NULL) == 0);
+    CHECK("wait replacing", waitpid(pid, &status, 0) == pid && WEXITSTATUS(status) == 7);
+    CHECK("replaced output", read_file("/spawn-second.txt", text, sizeof(text)) == 0 &&
+                                 strcmp(text, "child: argc=3 argv1=spawn-child argv2=7 "
+                                              "inherited=from-parent explicit=(unset)\n") == 0);
+    CHECK("addclose opened", posix_spawn_file_actions_addclose(&actions, 1) == 0);
+    CHECK("spawn closing opened", start_child(&pid, 0, &actions, NULL, "0", NULL) == EBADF);
+    posix_spawn_file_actions_destroy(&actions);
+    int reused = open("/spawn-inherit.txt", O_RDONLY);
+    CHECK("no descriptor left", reused == free_descriptor && close(reused) == 0);
+    CHECK("replaced stream unused",
+          read_file("/spawn-first.txt", text, sizeof(text)) == 0 && text[0] == '\0');
+
     /* An explicit array is the child's whole environment; adddup2 hands it an open file. */
     int target = open("/spawn-explicit.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
     CHECK("open target", target >= 0);
