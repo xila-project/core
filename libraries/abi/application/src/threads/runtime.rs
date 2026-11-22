@@ -217,6 +217,11 @@ pub(crate) fn stop_workers() {
 
 /// Begin terminal process cleanup. Only the calling thread may run after
 /// this call, even if cleanup suspends. Spawning new workers is disabled.
+///
+/// A stopped thread that was waiting on a mutex or a condition variable stays in its
+/// queue. Terminal cleanup must therefore only try-lock (`XILA_MUTEX_TRY`): an unlock that
+/// finds a queued waiter hands the mutex to a thread that never runs again, and a blocking
+/// lock behind a stopped owner or waiter never returns, so exit would hang.
 /// # Safety
 /// The caller must complete process exit without waiting for stopped peers.
 /// Stopped coroutines and their pending operations are never resumed.

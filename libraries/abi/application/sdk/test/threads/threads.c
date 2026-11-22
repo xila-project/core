@@ -261,6 +261,147 @@ static int check_semaphores(void) {
     return 0;
 }
 
+static pthread_once_t exit_once = PTHREAD_ONCE_INIT;
+static int exit_once_runs;
+
+/* The first run yields, so a second caller queues on the control, and then leaves its
+   thread through pthread_exit. */
+static void initialize_then_exit(void) {
+    if (++exit_once_runs == 1) {
+        if (sched_yield() != 0)
+            _exit(102);
+        pthread_exit(&exit_once_runs);
+    }
+}
+
+static void *call_exit_once(void *argument) {
+    (void)pthread_once(&exit_once, initialize_then_exit);
+    return argument;
+}
+
+/* A routine that leaves through pthread_exit leaves the control as if never called: the
+   caller queued on it runs the routine again instead of waiting forever. */
+static int check_once_exit(void) {
+    pthread_t thread;
+    OK(pthread_create(&thread, NULL, call_exit_once, NULL));
+    OK(sched_yield());
+    CHECK(exit_once_runs == 1);
+    OK(pthread_once(&exit_once, initialize_then_exit));
+    CHECK(exit_once_runs == 2);
+    void *result = NULL;
+    OK(pthread_join(thread, &result));
+    CHECK(result == &exit_once_runs);
+    OK(pthread_once(&exit_once, initialize_then_exit));
+    CHECK(exit_once_runs == 2);
+    return 0;
+}
+
+static pthread_rwlock_t rwlock = PTHREAD_RWLOCK_INITIALIZER;
+static int readers_inside;
+static int most_readers_inside;
+static int writer_entered;
+
+/* Holds the read lock across a yield, so other threads run while it is inside. */
+static void *read_shared(void *argument) {
+    if (pthread_rwlock_rdlock(&rwlock) != 0)
+        return NULL;
+    if (++readers_inside > most_readers_inside)
+        most_readers_inside = readers_inside;
+    int yielded = sched_yield();
+    --readers_inside;
+    if (pthread_rwlock_unlock(&rwlock) != 0 || yielded != 0)
+        return NULL;
+    return argument;
+}
+
+static void *write_exclusive(void *argument) {
+    if (pthread_rwlock_wrlock(&rwlock) != 0)
+        return NULL;
+    int alone = readers_inside == 0;
+    writer_entered = 1;
+    if (pthread_rwlock_unlock(&rwlock) != 0 || !alone)
+        return NULL;
+    return argument;
+}
+
+/* Runs while main holds the write lock. */
+static void *time_out_on_rwlock(void *argument) {
+    struct timespec deadline = {0, -1};
+    if (pthread_rwlock_tryrdlock(&rwlock) != EBUSY ||
+        pthread_rwlock_trywrlock(&rwlock) != EBUSY ||
+        pthread_rwlock_timedwrlock(&rwlock, &deadline) != EINVAL ||
+        add_milliseconds(CLOCK_REALTIME, &deadline, 2) != 0 ||
+        pthread_rwlock_timedrdlock(&rwlock, &deadline) != ETIMEDOUT ||
+        add_milliseconds(CLOCK_MONOTONIC, &deadline, 2) != 0 ||
+        pthread_rwlock_clockwrlock(&rwlock, CLOCK_MONOTONIC, &deadline) != ETIMEDOUT ||
+        pthread_rwlock_clockrdlock(&rwlock, (clockid_t)-1, &deadline) != EINVAL)
+        return NULL;
+    return argument;
+}
+
+static int check_rwlocks(void) {
+    /* Read locks are shared and recursive; a malformed deadline is ignored when the lock
+       is free. */
+    struct timespec malformed = {0, -1};
+    OK(pthread_rwlock_rdlock(&rwlock));
+    OK(pthread_rwlock_rdlock(&rwlock));
+    OK(pthread_rwlock_tryrdlock(&rwlock));
+    OK(pthread_rwlock_timedrdlock(&rwlock, &malformed));
+    CHECK(pthread_rwlock_trywrlock(&rwlock) == EBUSY);
+    CHECK(pthread_rwlock_destroy(&rwlock) == EBUSY);
+    for (int i = 0; i < 4; ++i)
+        OK(pthread_rwlock_unlock(&rwlock));
+    CHECK(pthread_rwlock_unlock(&rwlock) == EPERM);
+
+    /* The write lock is exclusive, even against its holder. */
+    OK(pthread_rwlock_wrlock(&rwlock));
+    CHECK(pthread_rwlock_rdlock(&rwlock) == EDEADLK);
+    CHECK(pthread_rwlock_wrlock(&rwlock) == EDEADLK);
+    CHECK(pthread_rwlock_tryrdlock(&rwlock) == EBUSY);
+    pthread_t timer;
+    int timer_name = 0;
+    void *result = NULL;
+    OK(pthread_create(&timer, NULL, time_out_on_rwlock, &timer_name));
+    OK(pthread_join(timer, &result));
+    CHECK(result == &timer_name);
+
+    /* Two readers and a writer queue behind main's write lock. Once it is released both
+       readers are inside together, and the writer enters only after they leave. */
+    pthread_t workers[3];
+    int names[3] = {1, 2, 3};
+    OK(pthread_create(&workers[0], NULL, read_shared, &names[0]));
+    OK(pthread_create(&workers[1], NULL, read_shared, &names[1]));
+    OK(pthread_create(&workers[2], NULL, write_exclusive, &names[2]));
+    OK(sched_yield());
+    CHECK(most_readers_inside == 0 && !writer_entered);
+    OK(pthread_rwlock_unlock(&rwlock));
+    for (int i = 0; i < 3; ++i) {
+        OK(pthread_join(workers[i], &result));
+        CHECK(result == &names[i]);
+    }
+    CHECK(most_readers_inside == 2 && writer_entered);
+
+    pthread_rwlockattr_t attributes;
+    int shared = -1;
+    OK(pthread_rwlockattr_init(&attributes));
+    OK(pthread_rwlockattr_getpshared(&attributes, &shared));
+    CHECK(shared == PTHREAD_PROCESS_PRIVATE);
+    CHECK(pthread_rwlockattr_setpshared(&attributes, PTHREAD_PROCESS_SHARED) == ENOTSUP);
+    pthread_rwlock_t initialized;
+    OK(pthread_rwlock_init(&initialized, &attributes));
+    OK(pthread_rwlockattr_destroy(&attributes));
+    OK(pthread_rwlock_wrlock(&initialized));
+    OK(pthread_rwlock_unlock(&initialized));
+    OK(pthread_rwlock_destroy(&initialized));
+    OK(pthread_rwlock_destroy(&rwlock));
+    return 0;
+}
+
+static void announce_destructor(void *value) {
+    (void)value;
+    (void)write(STDOUT_FILENO, "destructor\n", 11);
+}
+
 int main(int argc, char **argv) {
     pthread_t thread;
     if (argc > 1 && strcmp(argv[1], "print-contention") == 0) {
@@ -277,6 +418,12 @@ int main(int argc, char **argv) {
         OK(pthread_create(&thread, NULL, exit_worker, flush));
         (void)pthread_join(thread, NULL);
         return 98;
+    }
+    if (argc > 1 && strcmp(argv[1], "main-pthread-exit") == 0) {
+        /* Unsupported on main: it aborts before running any destructor. */
+        OK(pthread_key_create(&key, announce_destructor));
+        OK(pthread_setspecific(key, &key));
+        pthread_exit(NULL);
     }
     if (argc > 1 && (strcmp(argv[1], "main-return") == 0 ||
                      strcmp(argv[1], "locked-stdout") == 0)) {
@@ -342,6 +489,12 @@ int main(int argc, char **argv) {
     int semaphore_status = check_semaphores();
     if (semaphore_status != 0)
         return semaphore_status;
+    int once_exit_status = check_once_exit();
+    if (once_exit_status != 0)
+        return once_exit_status;
+    int rwlock_status = check_rwlocks();
+    if (rwlock_status != 0)
+        return rwlock_status;
 
     pthread_mutexattr_t attributes;
     pthread_mutex_t recursive;

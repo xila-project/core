@@ -41,6 +41,9 @@ struct xila_process {
 
 extern struct xila_process xila_process;
 
+/* The identifier of a process's main thread. Workers get larger ones. */
+#define XILA_MAIN_THREAD 1
+
 /* Convert a native status to errno. Returns -1 so callers can `return xila_fail(status)`. */
 int xila_fail(XilaStatus status);
 int xila_errno_from_status(XilaStatus status);

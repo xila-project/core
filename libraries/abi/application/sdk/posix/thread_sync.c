@@ -112,6 +112,42 @@ int pthread_cond_broadcast(pthread_cond_t *condition) {
     return xila_errno_from_status(xila_condition_notify(&condition->condition, true));
 }
 
+/* A pthread_once call whose routine is running, recorded on its caller's stack. The
+   threads of a process take turns on one executor and none suspends while it edits the
+   list, so it needs no lock. */
+struct once_call {
+    pthread_once_t *once;
+    pthread_t thread;
+    struct once_call *next;
+};
+
+static struct once_call *running_once_calls;
+
+static void forget_once_call(struct once_call *call) {
+    for (struct once_call **link = &running_once_calls; *link != NULL; link = &(*link)->next) {
+        if (*link == call) {
+            *link = call->next;
+            return;
+        }
+    }
+}
+
+/* Called by pthread_exit: the routines the calling thread is running never finish, so
+   their once controls go back to their state before the call, as POSIX specifies for a
+   cancelled routine. The next caller, or a queued one, runs the routine again. */
+void xila_abandon_once_calls(void) {
+    pthread_t self = pthread_self();
+    for (struct once_call **link = &running_once_calls; *link != NULL;) {
+        struct once_call *call = *link;
+        if (call->thread == self) {
+            *link = call->next;
+            (void)xila_mutex_unlock(&call->once->mutex);
+        } else {
+            link = &call->next;
+        }
+    }
+}
+
 int pthread_once(pthread_once_t *once, void (*initialize)(void)) {
     XilaStatus status = xila_mutex_lock(&once->mutex, 0);
     /* An entry run without a process driver has no concurrent callers. */
@@ -119,7 +155,11 @@ int pthread_once(pthread_once_t *once, void (*initialize)(void)) {
         status != XILA_STATUS_UNAVAILABLE)
         return xila_errno_from_status(status);
     if (!once->done) {
+        struct once_call call = {once, pthread_self(), running_once_calls};
+        if (status == XILA_STATUS_OK)
+            running_once_calls = &call;
         initialize();
+        forget_once_call(&call);
         once->done = true;
     }
     if (status == XILA_STATUS_OK)
