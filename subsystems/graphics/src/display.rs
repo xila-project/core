@@ -3,6 +3,7 @@ use file_system::{ControlCommand, DirectCharacterDevice};
 use shared::AnyByLayout;
 
 use core::{ffi::c_void, ptr::null_mut, slice};
+use portable_atomic::{AtomicBool, Ordering};
 
 use crate::{
     Area, Error, GET_RESOLUTION, Point, RenderingColor, Result, SET_DRAWING_AREA, WAS_RESIZED,
@@ -49,20 +50,27 @@ unsafe extern "C" fn binding_callback_function(
 
     let device = &user_data.device;
 
-    device
+    // A failed flush drops the frame: LVGL must still learn that the flush is
+    // over, or rendering stops, and a panic here would stop the whole system.
+    let result = device
         .control_sync(
             SET_DRAWING_AREA::IDENTIFIER,
             AnyByLayout::from_mutable(&mut area),
             AnyByLayout::NONE,
         )
-        .expect("Error setting drawing area");
-
-    device
-        .write_sync(buffer, 0)
-        .expect("Error writing to display");
+        .and_then(|()| device.write_sync(buffer, 0));
+    if let Err(error) = result
+        && !FLUSH_ERROR_REPORTED.swap(true, Ordering::Relaxed)
+    {
+        log::error!("Display flush failed, frames are dropped: {error}");
+    }
 
     unsafe { lvgl::lv_display_flush_ready(display) };
 }
+
+/// Whether a flush error was logged: only the first one is, so that a failing
+/// screen does not flood the log at the frame rate.
+static FLUSH_ERROR_REPORTED: AtomicBool = AtomicBool::new(false);
 
 impl Drop for Display {
     fn drop(&mut self) {
@@ -98,21 +106,22 @@ impl Display {
         };
 
         // Set the buffer(s) and the render mode.
-        let buffer_1 = Buffer::new(buffer_size);
+        let mut buffer_1 = Buffer::new(buffer_size);
 
-        let buffer_2 = if double_buffered {
+        let mut buffer_2 = if double_buffered {
             Some(Buffer::new(buffer_size))
         } else {
             None
         };
+        debug_assert_eq!(buffer_1.size_in_bytes(), buffer_size_bytes as usize);
 
         unsafe {
             lvgl::lv_display_set_buffers(
                 lvgl_display,
-                buffer_1.as_ref().as_ptr() as *mut c_void,
+                buffer_1.as_mut_ptr() as *mut c_void,
                 buffer_2
-                    .as_ref()
-                    .map_or(null_mut(), |buffer| buffer.as_ref().as_ptr() as *mut c_void),
+                    .as_mut()
+                    .map_or(null_mut(), |buffer| buffer.as_mut_ptr() as *mut c_void),
                 buffer_size_bytes,
                 lvgl::lv_display_render_mode_t_LV_DISPLAY_RENDER_MODE_PARTIAL,
             )
