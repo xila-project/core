@@ -3,8 +3,10 @@
 
 testing_support::instantiate_global_allocator!();
 
-use graphics::{EventKind, WINDOW_EVENT_QUEUE_CAPACITY, Window, lvgl};
-use std::sync::Mutex;
+use graphics::{
+    EventKind, InputData, Key, Point, State, WINDOW_EVENT_QUEUE_CAPACITY, Window, lvgl,
+};
+use std::{ptr, sync::Mutex};
 
 /// LVGL is not thread safe and the tests share its global state.
 static LVGL: Mutex<()> = Mutex::new(());
@@ -248,8 +250,16 @@ fn a_press_survives_a_burst_bubbled_from_child_widgets() {
     let send = |target, code| unsafe {
         lvgl::lv_obj_send_event(target, code, core::ptr::null_mut());
     };
-    // LVGL passes the input device with every press event.
-    let pointer = unsafe { lvgl::lv_indev_create() };
+    // LVGL passes the input device with every press event. The pointer is
+    // held: the window forgets the press of a released device.
+    let held = unsafe {
+        HeldDevice::new(
+            lvgl::lv_indev_type_t_LV_INDEV_TYPE_POINTER,
+            lvgl::lv_display_get_default(),
+        )
+    };
+    unsafe { held.read(Point::new(1, 1), State::Pressed, Key::Character(0)) };
+    let pointer = held.device;
     let press = |target, code| unsafe {
         lvgl::lv_obj_send_event(target, code, pointer.cast());
     };
@@ -317,7 +327,7 @@ fn a_press_survives_a_burst_bubbled_from_child_widgets() {
         "the end of a rejected press is dropped"
     );
 
-    unsafe { lvgl::lv_indev_delete(pointer) };
+    unsafe { held.delete() };
     unsafe { lvgl::lv_obj_delete(window.as_object_mutable()) };
 }
 
@@ -438,4 +448,185 @@ fn a_scroll_burst_keeps_the_window_resize() {
     assert_eq!(resizes, 1, "the latest resize reaches the consumer");
 
     unsafe { lvgl::lv_obj_delete(window.as_object_mutable()) };
+}
+
+/// An LVGL input device that reports `held` on every read.
+struct HeldDevice {
+    device: *mut lvgl::lv_indev_t,
+    held: Box<std::cell::Cell<InputData>>,
+}
+
+impl HeldDevice {
+    unsafe fn new(kind: lvgl::lv_indev_type_t, display: *mut lvgl::lv_display_t) -> Self {
+        unsafe extern "C" fn read(device: *mut lvgl::lv_indev_t, data: *mut lvgl::lv_indev_data_t) {
+            unsafe {
+                let held =
+                    &*lvgl::lv_indev_get_user_data(device).cast::<std::cell::Cell<InputData>>();
+                *data = held.get().into();
+            }
+        }
+        let held = Box::new(std::cell::Cell::new(InputData::default()));
+        let device = unsafe {
+            let device = lvgl::lv_indev_create();
+            lvgl::lv_indev_set_type(device, kind);
+            lvgl::lv_indev_set_display(device, display);
+            lvgl::lv_indev_set_read_cb(device, Some(read));
+            lvgl::lv_indev_set_user_data(device, ptr::from_ref(&*held).cast_mut().cast());
+            device
+        };
+        Self { device, held }
+    }
+
+    /// Report `state` at `point` with `key`, and let LVGL read it now.
+    unsafe fn read(&self, point: Point, state: State, key: Key) {
+        self.held.set(InputData::new(point, state, key, false));
+        unsafe { lvgl::lv_indev_read(self.device) };
+    }
+
+    unsafe fn delete(self) {
+        unsafe { lvgl::lv_indev_delete(self.device) };
+    }
+}
+
+/// A window on the active screen with one widget at (10, 10), 40 by 40.
+unsafe fn window_with_widget(
+    display: *mut lvgl::lv_display_t,
+) -> (*mut Window, *mut lvgl::lv_obj_t) {
+    unsafe {
+        let screen = lvgl::lv_display_get_screen_active(display);
+        let window = Window::new(screen).unwrap().as_ptr();
+        let widget = lvgl::lv_obj_create((*window).as_object_mutable());
+        lvgl::lv_obj_set_pos(widget, 10, 10);
+        lvgl::lv_obj_set_size(widget, 40, 40);
+        lvgl::lv_obj_update_layout(screen);
+        while (*window).pop_event().is_some() {}
+        (window, widget)
+    }
+}
+
+/// Send `count` clicks by code to `target`, and return how many the window
+/// rejected.
+unsafe fn rejected_clicks(window: &Window, target: *mut lvgl::lv_obj_t, count: usize) -> u32 {
+    let before = window.dropped_event_count();
+    for _ in 0..count {
+        unsafe {
+            lvgl::lv_obj_send_event(
+                target,
+                lvgl::lv_event_code_t_LV_EVENT_CLICKED,
+                ptr::null_mut(),
+            )
+        };
+    }
+    window.dropped_event_count() - before
+}
+
+/// LVGL never ends a press whose input device is deleted, or reset, while it
+/// is held: the window gives its reservation back.
+#[test]
+fn a_press_whose_device_is_deleted_or_reset_gives_its_reservation_back() {
+    let _lvgl = LVGL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    unsafe {
+        lvgl::lv_init();
+        let display = lvgl::lv_display_create(320, 240);
+        let (window, widget) = window_with_widget(display);
+        let window = &mut *window;
+
+        for reset in [false, true] {
+            let pointer = HeldDevice::new(lvgl::lv_indev_type_t_LV_INDEV_TYPE_POINTER, display);
+            pointer.read(Point::new(20, 20), State::Pressed, Key::Character(0));
+            let queued: Vec<_> = core::iter::from_fn(|| window.pop_event())
+                .map(|event| event.code)
+                .collect();
+            assert_eq!(queued.first(), Some(&EventKind::Pressed), "{queued:?}");
+            assert_eq!(
+                rejected_clicks(window, widget, WINDOW_EVENT_QUEUE_CAPACITY),
+                4,
+                "the held press keeps four slots"
+            );
+            while window.pop_event().is_some() {}
+
+            if reset {
+                // LVGL forgets the pressed widget, and never ends the press.
+                lvgl::lv_indev_reset(pointer.device, ptr::null_mut());
+                let queued: Vec<_> = core::iter::from_fn(|| window.pop_event())
+                    .map(|event| event.code)
+                    .collect();
+                assert!(queued.contains(&EventKind::InputDeviceReset), "{queued:?}");
+            } else {
+                pointer.delete();
+                while window.pop_event().is_some() {}
+            }
+            assert_eq!(
+                rejected_clicks(window, widget, WINDOW_EVENT_QUEUE_CAPACITY),
+                0
+            );
+            while window.pop_event().is_some() {}
+            if reset {
+                pointer.read(Point::new(20, 20), State::Released, Key::Character(0));
+                pointer.delete();
+            }
+            while window.pop_event().is_some() {}
+        }
+
+        lvgl::lv_obj_delete(window.as_object_mutable());
+        lvgl::lv_display_delete(display);
+    }
+}
+
+/// A keypad ends its press on the widget focused at release. When the focus
+/// moves to another window during the press, this window never gets the end:
+/// it gives the reservation back once the keypad is released.
+#[test]
+fn a_keypad_press_ended_in_another_window_gives_its_reservation_back() {
+    let _lvgl = LVGL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    unsafe {
+        lvgl::lv_init();
+        let display = lvgl::lv_display_create(320, 240);
+        let (window, inside) = window_with_widget(display);
+        let window = &mut *window;
+        let (other_window, outside) = window_with_widget(display);
+        let other_window = &mut *other_window;
+        let group = lvgl::lv_group_create();
+        lvgl::lv_group_add_obj(group, inside);
+        lvgl::lv_group_add_obj(group, outside);
+        lvgl::lv_group_focus_obj(inside);
+        let keypad = HeldDevice::new(lvgl::lv_indev_type_t_LV_INDEV_TYPE_KEYPAD, display);
+        lvgl::lv_indev_set_group(keypad.device, group);
+        while window.pop_event().is_some() {}
+        while other_window.pop_event().is_some() {}
+
+        keypad.read(Point::default(), State::Pressed, Key::Enter);
+        lvgl::lv_group_focus_obj(outside);
+        keypad.read(Point::default(), State::Released, Key::Enter);
+
+        let codes = |window: &mut Window| -> Vec<_> {
+            core::iter::from_fn(|| window.pop_event())
+                .filter(|event| {
+                    !matches!(
+                        event.code,
+                        EventKind::Focused
+                            | EventKind::Defocused
+                            | EventKind::Key
+                            | EventKind::StyleChanged
+                    )
+                })
+                .map(|event| event.code)
+                .collect()
+        };
+        assert_eq!(codes(window), [EventKind::Pressed]);
+        let ended = codes(other_window);
+        assert_eq!(ended.first(), Some(&EventKind::Released), "{ended:?}");
+        assert_eq!(ended.last(), Some(&EventKind::Clicked), "{ended:?}");
+        assert_eq!(
+            rejected_clicks(window, inside, WINDOW_EVENT_QUEUE_CAPACITY),
+            0,
+            "the released keypad holds no reservation"
+        );
+
+        keypad.delete();
+        lvgl::lv_group_delete(group);
+        lvgl::lv_obj_delete(other_window.as_object_mutable());
+        lvgl::lv_obj_delete(window.as_object_mutable());
+        lvgl::lv_display_delete(display);
+    }
 }
