@@ -56,7 +56,7 @@ pub fn blocking_operation<O>(_flags: Flags, operation: impl FnOnce() -> Result<O
         target_os = "none"
     )
 ))]
-use stackful::suspend_on;
+use stackful::{suspend_on, suspend_on_cancellable};
 
 #[cfg(not(any(
     all(
@@ -74,4 +74,4 @@ use stackful::suspend_on;
         target_os = "none"
     )
 )))]
-use task::block_on as suspend_on;
+use task::{block_on as suspend_on, block_on as suspend_on_cancellable};

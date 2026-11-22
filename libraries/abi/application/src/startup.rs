@@ -241,6 +241,10 @@ impl HostState {
 /// The entry gets no process capability and cannot exit early; the host state sits
 /// in this frame. A loader that starts native processes keeps the state off the
 /// stack: see [`HostState`] and [`crate::ProcessLaunch::run`].
+///
+/// It is meant for tests and cannot be cancelled cleanly: the host state, and with it the
+/// head of the handle registry, live in this frame, so a coroutine dropped while the entry
+/// is suspended discards them with its stack and nothing can release what they hold.
 /// # Safety
 /// Entry must obey the startup lifetime and ownership rules, serialize object
 /// access, and never unwind. The heap must remain live until native execution
@@ -346,6 +350,9 @@ pub(crate) unsafe fn enter(
     if managed {
         crate::threads::stop_workers();
     }
+    // Released here, in the coroutine. Stopping the workers above dropped their cancellable
+    // waits, and whatever those held (the VFS namespace lock, say), so the closes below
+    // cannot wait for a thread that never runs again. `xila_process_exit` does the same.
     unsafe { Resources::release(resources) };
     status
 }

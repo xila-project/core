@@ -1,6 +1,8 @@
 use core::fmt::Debug;
 
-use crate::{IoErrorKind, ItemStatic, Result, VirtualFileSystem, suspend_on};
+use crate::{
+    IoErrorKind, ItemStatic, Result, VirtualFileSystem, suspend_on, suspend_on_cancellable,
+};
 use alloc::{vec, vec::Vec};
 use exported_file_system::StateFlags;
 use exported_file_system::{ControlCommand, ControlCommandIdentifier, Permissions};
@@ -58,13 +60,19 @@ impl<'a> SynchronousFile<'a> {
         }
     }
 
+    /// Open a file. In a stackful coroutine the call suspends, and a cancellation drops it
+    /// in place: the wait owns the path and the namespace lock it may hold, so neither is
+    /// left behind in the abandoned frames. An open the cancellation interrupts may have
+    /// created the file already.
     pub fn open(
         virtual_file_system: &'a VirtualFileSystem,
         task: TaskIdentifier,
         path: impl AsRef<Path>,
         flags: Flags,
     ) -> Result<Self> {
-        let file_identifier = suspend_on(virtual_file_system.open(&path.as_ref(), flags, task))?;
+        let file_identifier = suspend_on_cancellable(async move {
+            virtual_file_system.open(&path.as_ref(), flags, task).await
+        })?;
 
         Ok(file_identifier.into_synchronous_file())
     }
@@ -539,10 +547,19 @@ impl<'a> SynchronousFile<'a> {
 }
 
 impl Drop for SynchronousFile<'_> {
+    /// Closes a file that was not closed, without waiting: a drop must never suspend, or a
+    /// cancellation could abandon it halfway (see
+    /// [`VirtualFileSystem::close_without_waiting`]). Errors are only logged.
     fn drop(&mut self) {
-        // Note: We cannot use async in Drop, so we just ignore errors here.
-        let _ = self.close_internal(self.virtual_file_system).map_err(|e| {
-            log::warning!("Failed to close SynchronousFile in Drop: {e}");
-        });
+        if self.closed {
+            return;
+        }
+        self.closed = true;
+        let _ = self
+            .virtual_file_system
+            .close_without_waiting(&self.item, self.device_inode, &mut self.context)
+            .map_err(|e| {
+                log::warning!("Failed to close SynchronousFile in Drop: {e}");
+            });
     }
 }

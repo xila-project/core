@@ -5,7 +5,10 @@ use exported_file_system::{
 use file_system::{Context, DirectoryOperations, Entry, Flags, Path, Size};
 use task::TaskIdentifier;
 
-use crate::{IoErrorKind, ItemStatic, Result, VirtualFileSystem, blocking_operation, suspend_on};
+use crate::{
+    IoErrorKind, ItemStatic, Result, VirtualFileSystem, blocking_operation, suspend_on,
+    suspend_on_cancellable,
+};
 
 pub struct SynchronousDirectory<'a> {
     closed: bool,
@@ -43,16 +46,26 @@ impl<'a> SynchronousDirectory<'a> {
         task: TaskIdentifier,
         path: impl AsRef<Path>,
     ) -> Result<()> {
-        suspend_on(virtual_file_system.create_directory(task, &path.as_ref()))
+        suspend_on_cancellable(async move {
+            virtual_file_system
+                .create_directory(task, &path.as_ref())
+                .await
+        })
     }
 
+    /// Open a directory. As for [`crate::SynchronousFile::open`], a cancellation in a
+    /// stackful coroutine drops the wait, the path it owns and the lock it may hold.
     pub fn open(
         virtual_file_system: &'a VirtualFileSystem,
         task: TaskIdentifier,
         path: impl AsRef<Path>,
     ) -> Result<Self> {
-        let mut directory = suspend_on(virtual_file_system.open_directory(task, &path.as_ref()))?
-            .into_synchronous_directory();
+        let mut directory = suspend_on_cancellable(async move {
+            virtual_file_system
+                .open_directory(task, &path.as_ref())
+                .await
+        })?
+        .into_synchronous_directory();
 
         directory.flags = directory.flags.set_status(StateFlags::empty());
 
@@ -146,10 +159,22 @@ impl<'a> SynchronousDirectory<'a> {
 }
 
 impl Drop for SynchronousDirectory<'_> {
+    /// Closes a listing that was not closed, without waiting, as a file's drop does.
     fn drop(&mut self) {
-        let _ = self.close_internal(self.virtual_file_system).map_err(|e| {
-            log::error!("Error closing directory: {}", e);
-        });
+        if self.closed {
+            return;
+        }
+        self.closed = true;
+        let _ = self
+            .virtual_file_system
+            .close_without_waiting(
+                &ItemStatic::Directory(self.directory),
+                None,
+                &mut self.context,
+            )
+            .map_err(|e| {
+                log::error!("Error closing directory: {}", e);
+            });
     }
 }
 

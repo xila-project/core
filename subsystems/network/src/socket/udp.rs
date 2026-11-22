@@ -168,7 +168,10 @@ impl UdpSocket {
         })
     }
 
-    pub async fn close(mut self) {
+    /// Close the socket in place. The owner drops it afterwards, so one that holds it in a
+    /// registry can close it while it is still registered, and close it again if a
+    /// cancellation interrupts this call.
+    pub async fn close(&mut self) {
         self.context.closed = true;
         self.with_mutable(|s| {
             log::information!("Closing UDP socket : {:?}", s.endpoint());
@@ -345,7 +348,7 @@ mod tests {
         let rx_meta = 15;
         let tx_meta = 20;
 
-        let socket = network_manager
+        let mut socket = network_manager
             .new_udp_socket(tx_buffer, rx_buffer, rx_meta, tx_meta, None)
             .await
             .expect("Failed to create UDP socket");
