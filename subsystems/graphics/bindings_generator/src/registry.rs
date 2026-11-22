@@ -210,9 +210,18 @@ impl<'a> GraphicsRegistry<'a> {
                     ObjectOperation::SetText { .. } => call
                         .validate_signature(&["*mut lv_obj_t", "*const core::ffi::c_char"], None)
                         .is_ok(),
-                    // An enumeration argument is a scalar whatever its alias.
-                    ObjectOperation::SetEnum { .. } | ObjectOperation::SetEnumByKind { .. } => {
-                        call.signature.variadic.is_none()
+                    // An enumeration argument is an integer, whatever its alias.
+                    ObjectOperation::SetEnum { .. } => {
+                        call.argument_is_object(0) && call.argument_is_integer(1, catalog)
+                    }
+                    // The helper takes a `u32`; each native's argument is cast
+                    // from it, so it must be an integer too.
+                    ObjectOperation::SetEnumByKind { table, .. } => {
+                        call.validate_signature(&["*mut lv_obj_t", "u32"], None)
+                            .is_ok()
+                            && table
+                                .iter()
+                                .all(|(_, native)| catalog.native_sets_integer(native))
                     }
                     _ => call.generic_safe(),
                 };
@@ -298,6 +307,10 @@ impl<'a> GraphicsRegistry<'a> {
                 Some(AdapterPolicy::Custom(handler)) => {
                     (true, "custom", handler, "null", "handwritten")
                 }
+                Some(AdapterPolicy::Object {
+                    operation: ObjectOperation::SetText { .. },
+                    ..
+                }) => (true, "object", "null", "null", "copied_string_no_retention"),
                 Some(AdapterPolicy::Object { .. }) => {
                     (true, "object", "null", "null", "scalar_no_retention")
                 }

@@ -1,6 +1,6 @@
 use graphics_bindgen::{
     CallCatalog,
-    registry::{AdapterPolicy, AdapterRule, AutoObjectScalar, GraphicsRegistry},
+    registry::{AdapterPolicy, AdapterRule, AutoObjectScalar, GraphicsRegistry, ObjectOperation},
 };
 
 const SIGNATURES: &str = r#"
@@ -65,6 +65,38 @@ fn registry_never_authorizes_retained_pointer_calls_as_automatic() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn enumeration_setters_need_an_integer_argument() {
+    const ENUMERATIONS: &str = r#"
+pub type lv_chart_type_t = core::ffi::c_uint;
+pub type lv_slider_mode_t = lv_chart_type_t;
+unsafe extern "C" {
+    fn lv_chart_set_type(obj: *mut lv_obj_t, type_: lv_chart_type_t);
+    fn lv_chart_set_name(obj: *mut lv_obj_t, name: *const u8);
+    fn lv_slider_set_mode(obj: *mut lv_obj_t, mode: lv_slider_mode_t);
+    fn lv_slider_set_color(obj: *mut lv_obj_t, color: lv_color_t);
+}
+"#;
+    let catalog = CallCatalog::parse(ENUMERATIONS).unwrap();
+    let set_enum = |name| {
+        GraphicsRegistry::new(
+            &catalog,
+            &[name],
+            &[AdapterRule::object(
+                name,
+                None,
+                ObjectOperation::SetEnum { max: "LIMIT" },
+                None,
+            )],
+        )
+        .is_ok()
+    };
+    assert!(set_enum("chart_set_type"));
+    assert!(set_enum("slider_set_mode"));
+    assert!(!set_enum("chart_set_name"));
+    assert!(!set_enum("slider_set_color"));
 }
 
 #[test]
