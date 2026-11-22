@@ -66,14 +66,17 @@ pub fn get_window_class() -> &'static lvgl::lv_obj_class_t {
 /// The queue is a fixed ring of [`crate::WINDOW_EVENT_QUEUE_CAPACITY`]
 /// events inside the window: it never allocates. A newer `Pressing`,
 /// `LongPressedRepeat`, `ValueChanged`, `SizeChanged` or `StyleChanged`
-/// replaces the queued one for the same target. When the queue is full, an
-/// arrival evicts the oldest scroll or other notification, then the oldest
-/// `Pressing` or `LongPressedRepeat`, then the oldest value, size or style
-/// change, but never an event more important than itself. Other events
-/// (presses, releases, clicks, keys, focus changes, `Ready`, `Cancel`,
-/// `Delete`, `CloseRequested`...) are never evicted or reordered; one that
-/// finds no room is rejected. A press is only queued with room for the rest
-/// of it, reserved per input device, and the rest of a rejected press is
+/// replaces the queued one for the same target, whichever input device sent
+/// them. When the queue is full, an arrival evicts the oldest scroll or other
+/// notification, then the oldest `Pressing` or `LongPressedRepeat`, then the
+/// oldest value, size or style change, but never an event more important than
+/// itself. Other events (presses, releases, clicks, keys, focus changes,
+/// `Ready`, `Cancel`, `Delete`, `CloseRequested`...) are never evicted or
+/// reordered; one that finds no room is rejected. A newer event never
+/// replaces a queued one across such an event of the same target: a value
+/// change queued before a `Released` or a `Key` of its widget stays, and the
+/// newer one is queued after it. A press is only queued with room for the
+/// rest of it, reserved per input device, and the rest of a rejected press is
 /// dropped: the queue never drops a `Pressed` event while keeping the end of
 /// its press. LVGL itself may end a press on a widget that never got
 /// `Pressed`: after a drag onto another widget without press lock, or when a
@@ -133,8 +136,9 @@ unsafe fn is_in_tree(root: *mut lvgl::lv_obj_t, target: *mut lvgl::lv_obj_t) -> 
 }
 
 /// Null the target of every queued event whose widget is no longer below the
-/// window. Costs nothing per object and allocates nothing; the walk runs only
-/// when a descendant goes away and an event is queued.
+/// window, and forget the presses of such widgets. Costs nothing per object
+/// and allocates nothing; the walk runs only when a descendant goes away while
+/// an event is queued or a press is followed.
 unsafe fn forget_dead_targets(window: *mut Window) {
     unsafe {
         let queue = &mut (*window).event_queue;
@@ -143,6 +147,41 @@ unsafe fn forget_dead_targets(window: *mut Window) {
         }
         let root = window as *mut lvgl::lv_obj_t;
         queue.clear_dead_targets(|target| is_in_tree(root, target));
+    }
+}
+
+/// Whether LVGL may still send events for the current press of `device`: it
+/// is being read right now, or it still exists and is pressed. Compares
+/// addresses with live devices only: `device` itself is never dereferenced,
+/// since it may have been deleted.
+///
+/// LVGL reads one input device at a time and sends every event of a read
+/// before it returns, so a device that is released and not being read has
+/// sent the end of its press, if any. Its press is over.
+unsafe fn may_continue_press(device: event_queue::InputDevice) -> bool {
+    unsafe {
+        if ptr::eq(lvgl::lv_indev_active(), device) {
+            return true;
+        }
+        let mut input = lvgl::lv_indev_get_next(ptr::null_mut());
+        while !input.is_null() {
+            if ptr::eq(input, device) {
+                return lvgl::lv_indev_get_state(input)
+                    == lvgl::lv_indev_state_t_LV_INDEV_STATE_PRESSED;
+            }
+            input = lvgl::lv_indev_get_next(input);
+        }
+        false
+    }
+}
+
+/// Forget the presses LVGL will not end, to give their reservations back: a
+/// device released while the press belonged to another window (a keypad
+/// whose focus moved away), or deleted mid-press. Call it only with the
+/// graphics lock held.
+fn forget_ended_presses(queue: &mut EventQueue) {
+    if queue.follows_presses() {
+        queue.forget_ended_presses(|device| unsafe { may_continue_press(device) });
     }
 }
 
@@ -258,12 +297,17 @@ unsafe extern "C" fn window_event_callback(
                 ]);
             }
         }
-        // LVGL passes the input device as the parameter of every press event.
-        let device = if event_queue::is_press_event(kind) {
+        // LVGL passes the input device as the parameter of every press event
+        // and of a device reset.
+        let device = if event_queue::carries_input_device(kind) {
             lvgl::lv_event_get_param(event) as event_queue::InputDevice
         } else {
             ptr::null()
         };
+        if kind == EventKind::Pressed {
+            // A new press needs room: take back what ended presses hold.
+            forget_ended_presses(&mut (*window).event_queue);
+        }
         if (*window).event_queue.push(queued, device).lost_an_event() {
             report_losses(&mut (*window).event_queue);
         }
@@ -311,10 +355,14 @@ impl Window {
     /// `ValueChanged`, `SizeChanged`, `StyleChanged`) replaces the queued one
     /// for the same target and takes its place at the back; see
     /// [`Window`] for what is dropped when the queue is full.
+    ///
+    /// Call it with the graphics lock held: it also forgets the presses of
+    /// input devices that LVGL reports as released or deleted.
     pub fn pop_event(&mut self) -> Option<Event> {
         if self.event_queue.has_unreported_losses() {
             report_losses(&mut self.event_queue);
         }
+        forget_ended_presses(&mut self.event_queue);
         self.event_queue.pop_front()
     }
 
@@ -325,6 +373,9 @@ impl Window {
 
     /// Forget queued targets before their LVGL storage can be reused. This only
     /// compares addresses; it never dereferences the potentially deleted target.
+    /// Press events of the target, except moves and repeats, are kept with a
+    /// null target, so that the end of a press never arrives without its
+    /// `Pressed` event.
     ///
     /// Not needed for widgets below the window that LVGL deletes or moves
     /// away: the window clears those targets itself when LVGL reports the
