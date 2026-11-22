@@ -3,6 +3,132 @@ use crate::{
 };
 
 pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOperations {
+    /// Return whether this backend enforces confined, non-following namespace
+    /// semantics for operations beneath a directory root.
+    ///
+    /// In-process storage backends with no native symlink traversal and
+    /// backends that implement [`Self::supports_directory_entry_operations`]
+    /// satisfy this contract. Backends using the default (`false`) are rejected
+    /// before dispatch during confined lookups.
+    fn supports_confined_namespace(&self) -> bool {
+        self.supports_directory_entry_operations()
+    }
+
+    /// Return whether this backend operates on single normal entry names
+    /// relative to an already-opened directory [`Context`].
+    ///
+    /// When `true`, the virtual file system traverses components using opened
+    /// directory handles and never asks the backend to re-resolve multi-component
+    /// parent paths after checks.
+    fn supports_directory_entry_operations(&self) -> bool {
+        false
+    }
+
+    /// Open a child directory entry `name` inside the opened `parent`
+    /// directory into `context`, without following symbolic links.
+    ///
+    /// `name` must be a single normal entry name without separators or dot
+    /// segments.
+    fn lookup_directory_entry(
+        &self,
+        _parent: &Context,
+        _name: &str,
+        _context: &mut Context,
+    ) -> Result<()> {
+        Err(crate::IoErrorKind::Unsupported)
+    }
+
+    /// Open a child regular file `name` inside the opened `parent` directory
+    /// into `context`, without following symbolic links.
+    fn lookup_file_entry(
+        &self,
+        _parent: &Context,
+        _name: &str,
+        _context: &mut Context,
+        _flags: Flags,
+    ) -> Result<()> {
+        Err(crate::IoErrorKind::Unsupported)
+    }
+
+    /// Create a child directory `name` inside the opened `parent` directory.
+    fn create_directory_entry(&self, _parent: &Context, _name: &str) -> Result<()> {
+        Err(crate::IoErrorKind::Unsupported)
+    }
+
+    /// Create a child regular file `name` inside the opened `parent` directory.
+    fn create_file_entry(&self, _parent: &Context, _name: &str) -> Result<()> {
+        Err(crate::IoErrorKind::Unsupported)
+    }
+
+    /// Remove a child entry `name` inside the opened `parent` directory
+    /// without following symbolic links.
+    fn remove_entry(&self, _parent: &Context, _name: &str) -> Result<()> {
+        Err(crate::IoErrorKind::Unsupported)
+    }
+
+    /// Rename `source_name` inside `source_parent` to `destination_name` inside
+    /// `destination_parent` without following symbolic links.
+    fn rename_entry(
+        &self,
+        _source_parent: &Context,
+        _source_name: &str,
+        _destination_parent: &Context,
+        _destination_name: &str,
+    ) -> Result<()> {
+        Err(crate::IoErrorKind::Unsupported)
+    }
+
+    /// Create `new_name` inside `new_parent` as a hard link to `existing_name`
+    /// inside `existing_parent` without following symbolic links.
+    fn link_entry(
+        &self,
+        _existing_parent: &Context,
+        _existing_name: &str,
+        _new_parent: &Context,
+        _new_name: &str,
+    ) -> Result<()> {
+        Err(crate::IoErrorKind::Unsupported)
+    }
+
+    /// Create a symbolic link named `name` inside the opened `parent`
+    /// directory pointing to `target`.
+    fn create_symlink_entry(&self, _target: &Path, _parent: &Context, _name: &str) -> Result<()> {
+        Err(crate::IoErrorKind::Unsupported)
+    }
+
+    /// Read the target of symbolic link `name` inside the opened `parent`
+    /// directory into `buffer` without following it.
+    fn read_symlink_entry(
+        &self,
+        _parent: &Context,
+        _name: &str,
+        _buffer: &mut [u8],
+    ) -> Result<usize> {
+        Err(crate::IoErrorKind::Unsupported)
+    }
+
+    /// Populate `attributes` for child entry `name` inside the opened `parent`
+    /// directory without following symbolic links.
+    fn get_entry_attributes(
+        &self,
+        _parent: &Context,
+        _name: &str,
+        _attributes: &mut Attributes,
+    ) -> Result<()> {
+        Err(crate::IoErrorKind::Unsupported)
+    }
+
+    /// Update `attributes` for child entry `name` inside the opened `parent`
+    /// directory without following symbolic links.
+    fn set_entry_attributes(
+        &self,
+        _parent: &Context,
+        _name: &str,
+        _attributes: &Attributes,
+    ) -> Result<()> {
+        Err(crate::IoErrorKind::Unsupported)
+    }
+
     /// Create a symbolic link without resolving its target. Backends that do not
     /// support native links or a durable Xila link representation may keep the
     /// default implementation.
