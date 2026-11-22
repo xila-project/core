@@ -470,9 +470,11 @@ Read-write locks (`pthread_rwlock_*`): plain, try, timed (`CLOCK_REALTIME`) and 
 (`CLOCK_MONOTONIC` or `CLOCK_REALTIME`) read and write locks, `PTHREAD_RWLOCK_INITIALIZER`
 and attributes. Readers are preferred, as in glibc and musl: a reader enters whenever no
 writer holds the lock, so a thread can take the read lock again while it holds it, and a
-steady stream of readers can keep a writer waiting. Taking the lock again while holding
-the write lock fails with `EDEADLK`; taking the write lock while holding a read lock waits
-forever. Processes share no memory, so `PTHREAD_PROCESS_SHARED` fails with `ENOTSUP`.
+steady stream of readers can keep a writer waiting. A thread that holds the write lock
+gets `EBUSY` from a try call and `EDEADLK` from a blocking call. A thread that only
+holds a read lock cannot upgrade it. A try write lock returns `EBUSY`, a timed write
+lock can time out, and an untimed blocking write lock waits indefinitely. Processes
+share no memory, so `PTHREAD_PROCESS_SHARED` fails with `ENOTSUP`.
 
 Unnamed semaphores (`<semaphore.h>`): `sem_init`, `sem_destroy`, `sem_post`, `sem_wait`,
 `sem_trywait`, `sem_timedwait` (a `CLOCK_REALTIME` deadline), `sem_clockwait`
