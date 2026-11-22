@@ -39,6 +39,10 @@ impl Manager {
     /// set together with the identity, under one lock, and nothing clears it:
     /// neither a later identity change nor the exit of an ancestor, so a
     /// descendant keeps it even once it has been reparented to the root task.
+    ///
+    /// The mark holds against untrusted code, which cannot spawn tasks. Trusted
+    /// native code can still spawn a task with an unmarked parent of its choice,
+    /// just as it can change any task's identity.
     pub async fn grant_identity(
         &self,
         task_identifier: TaskIdentifier,
