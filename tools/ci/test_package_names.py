@@ -44,6 +44,7 @@ EXPECTED_PACKAGE_NAMES = {
     "libraries/testing/support/Cargo.toml": "xila-testing-support",
     "subsystems/graphics/Cargo.toml": "xila-graphics",
     "subsystems/graphics/bindings_generator/Cargo.toml": "xila-graphics-bindgen",
+    "subsystems/graphics/tests/call_transport/Cargo.toml": "xila-graphics-call-transport-test",
     "subsystems/graphics/tests/font_link/Cargo.toml": "xila-graphics-font-link-test",
     "subsystems/graphics/tests/font_pipeline/Cargo.toml": "xila-graphics-font-pipeline-test",
     "subsystems/log/Cargo.toml": "xila-log",
