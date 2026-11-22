@@ -97,18 +97,32 @@ cargo test --locked -p xila-task --target wasm32-unknown-unknown \
 
 [tasks."test:workspace"]
 description = "Test the Cargo workspace"
-run = "cargo test --workspace"
+tools."github:nextest-rs/nextest" = "cargo-nextest-{{ vars.nextest_version }}"
+run = """
+set -eu
+cargo nextest run --workspace
+cargo test --workspace --doc
+"""
 
 [tasks."test:graphics-pool"]
 description = "Test graphics against LVGL's fixed memory pool instead of the system allocator"
+tools."github:nextest-rs/nextest" = "cargo-nextest-{{ vars.nextest_version }}"
 # The pool is forced on for the host and enlarged to fit the full-screen capture test; it needs its own target directory because it changes the LVGL build.
-run = "LVGL_CFLAGS=XILA_LVGL_MEM_POOL=1,XILA_LVGL_MEM_SIZE=4194304 CARGO_TARGET_DIR=\"${CARGO_TARGET_DIR:-target}/lvgl-pool\" cargo test --locked -p xila-graphics --features rendering_xrgb8888"
+run = """
+set -eu
+export LVGL_CFLAGS=XILA_LVGL_MEM_POOL=1,XILA_LVGL_MEM_SIZE=4194304
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/lvgl-pool"
+cargo nextest run --locked -p xila-graphics --features rendering_xrgb8888
+cargo test --locked -p xila-graphics --features rendering_xrgb8888 --doc
+"""
 
 [tasks."test:fonts"]
 description = "Test font caching, compile-time selection, and linked archive exclusion"
+tools."github:nextest-rs/nextest" = "cargo-nextest-{{ vars.nextest_version }}"
 run = """
 set -eu
-cargo test --manifest-path subsystems/graphics/tests/font_pipeline/Cargo.toml
+cargo nextest run --manifest-path subsystems/graphics/tests/font_pipeline/Cargo.toml
+cargo test --manifest-path subsystems/graphics/tests/font_pipeline/Cargo.toml --doc
 cargo clippy --manifest-path subsystems/graphics/tests/font_pipeline/Cargo.toml --all-targets -- -D warnings
 cargo clippy --manifest-path subsystems/graphics/tests/font_link/Cargo.toml --all-targets -- -D warnings
 python3 -m unittest discover -s subsystems/graphics/tests/font_pipeline -p 'test_*.py' -v
@@ -121,11 +135,21 @@ run = "cargo build"
 
 [tasks."firmware:test"]
 description = "Test bounded firmware transactions"
-run = "cargo test --locked -p xila-firmware-update"
+tools."github:nextest-rs/nextest" = "cargo-nextest-{{ vars.nextest_version }}"
+run = """
+set -eu
+cargo nextest run --locked -p xila-firmware-update
+cargo test --locked -p xila-firmware-update --doc
+"""
 
 [tasks."firmware:integration"]
 description = "Test firmware VFS permissions"
-run = "cargo test --locked -p xila-firmware-update --features native"
+tools."github:nextest-rs/nextest" = "cargo-nextest-{{ vars.nextest_version }}"
+run = """
+set -eu
+cargo nextest run --locked -p xila-firmware-update --features native
+cargo test --locked -p xila-firmware-update --features native --doc
+"""
 
 [tasks."sdk:build"]
 description = "Build the native SDK archive (XILA_SDK_TARGET, default x86_64-unknown-linux-gnu) under target/sdk"
@@ -163,7 +187,9 @@ esac
 [tasks."test:native-loader"]
 description = "Test ELF validation, executable dispatch, native C startup and the SDK's C library on Linux x86-64"
 depends = ["sdk:build"]
+tools."github:nextest-rs/nextest" = "cargo-nextest-{{ vars.nextest_version }}"
 run = """
 set -eu
-cargo test --locked -p xila-executable --features native-dev,graphics
+cargo nextest run --locked -p xila-executable --features native-dev,graphics
+cargo test --locked -p xila-executable --features native-dev,graphics --doc
 """

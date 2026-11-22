@@ -160,11 +160,9 @@ extends = "dev:rust"
 
 [tasks."firmware:test"]
 extends = "dev:rust"
-run = "cargo test --locked -p xila-firmware-update"
 
 [tasks."firmware:integration"]
 extends = "dev:rust"
-run = "cargo test --locked -p xila-firmware-update --features native"
 
 [tasks."test:native-loader"]
 extends = "dev:rust"
