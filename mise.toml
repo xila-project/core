@@ -1,6 +1,7 @@
 [vars]
 # Version pins only: these declarations never install or activate a tool.
 rust_version = "1.97.0"
+mr_boxington_version = "1.30.0"
 espup_version = "0.19.0"
 esp_gcc_version = "16.1.0_20260609"
 nightly_version = "nightly-2026-10-12"
@@ -160,7 +161,8 @@ run = "uv run --no-project --with meson=={{ vars.meson_version }} --with ninja==
 [tasks."sdk:verify"]
 description = "Verify the packaged Rust crate, build the C examples, check the ELF contract and report sizes"
 tools.uv = "{{ vars.uv_version }}"
-tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal" }
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", mr_boxington = true }
+tools."mr-boxington" = "{{ vars.mr_boxington_version }}"
 run = "uv run --no-project --with meson=={{ vars.meson_version }} --with ninja=={{ vars.ninja_version }} python tools/sdk/build.py verify --target \"${XILA_SDK_TARGET:-x86_64-unknown-linux-gnu}\""
 
 [tasks."sdk:test"]
@@ -171,7 +173,8 @@ run = "uv run --no-project python -m unittest discover -s tools/sdk -v"
 [tasks."sdk:rust-example"]
 description = "Build and verify Rust native ELFs (all targets or XILA_SDK_TARGET), running the Linux image through execute"
 tools.uv = "{{ vars.uv_version }}"
-tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal" }
+tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", mr_boxington = true }
+tools."mr-boxington" = "{{ vars.mr_boxington_version }}"
 run = """
 set -eu
 rustup toolchain install {{ vars.nightly_version }} --profile minimal --component rust-src

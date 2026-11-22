@@ -84,7 +84,6 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: line-tables-only
       # Keep standalone test crates in the target tree cached by the action.
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      XILA_MBX: "1"
       XILA_APPLICATIONS_MANIFEST: ${{ github.workspace }}/.application-src/Cargo.toml
       XILA_FONT_CATALOG_ROOTS: ${{ github.workspace }}/.application-src
     steps:
@@ -196,7 +195,6 @@ jobs:
     env:
       MISE_ENV: ci
       CARGO_TERM_COLOR: always
-      XILA_MBX: "1"
     steps:
       - name: "Setup | Checkout sources"
         uses: actions/checkout@v7
@@ -237,7 +235,6 @@ jobs:
     env:
       MISE_ENV: ci
       CI_ABI_MEMORY: ${{ matrix.memory }}
-      XILA_MBX: "1"
     steps:
       - name: "Setup | Checkout sources"
         uses: actions/checkout@v7
@@ -271,7 +268,6 @@ jobs:
     env:
       MISE_ENV: ci
       CARGO_TERM_COLOR: always
-      XILA_MBX: "1"
       XILA_FONT_CATALOG_ROOTS: ${{ github.workspace }}/.application-src
     steps:
       - name: "Setup | Checkout sources"

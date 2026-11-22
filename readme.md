@@ -71,8 +71,8 @@ packages are provisioned from the selected environment with
 Developer Cargo build tasks are wrapped by mbx through Mise's native Rust
 integration. Tools are not activated globally: use `mise run build:cargo -- ...`
 or `mise run run:cargo -- ...` for ad-hoc Cargo commands with this setup.
-CI uses the mbx GitHub Action and its wrapper instead, avoiding a second mbx
-installation in CI. Formatting tasks select only rustfmt, Taplo or Node, with
+CI tasks declare the same Rust tool option; the mbx GitHub Action supplies the cache and
+environment. Formatting tasks select only rustfmt, Taplo or Node, with
 no build targets, Clippy, mbx, coverage tools or native-package bootstrap.
 
 Other checks:

@@ -31,7 +31,6 @@ jobs:
     env:
       MISE_ENV: ci
       CARGO_LLVM_COV_TARGET_DIR: ${{ github.workspace }}/target/llvm-cov-target
-      XILA_MBX: "1"
       XILA_APPLICATIONS_MANIFEST: ${{ github.workspace }}/.application-src/Cargo.toml
       XILA_FONT_CATALOG_ROOTS: ${{ github.workspace }}/.application-src
     steps:
@@ -77,7 +76,6 @@ jobs:
     env:
       MISE_ENV: ci
       CI_ABI_MEMORY: ${{ matrix.memory }}
-      XILA_MBX: "1"
     steps:
       - name: "Setup | Checkout Core"
         uses: actions/checkout@v7
