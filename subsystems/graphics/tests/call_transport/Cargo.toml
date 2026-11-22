@@ -1,0 +1,12 @@
+[package]
+name = "xila-graphics-call-transport-test"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+description = "Runs the graphics call executor's transport and guest memory adapter tests without LVGL, so Miri can check them"
+
+[lib]
+path = "src/lib.rs"
+
+[workspace]

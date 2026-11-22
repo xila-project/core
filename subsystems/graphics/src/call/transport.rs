@@ -206,3 +206,86 @@ impl Transport for LinearMemory<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linear_memory_allows_null_only_for_empty_ranges_and_bounds_every_range() {
+        let mut bytes = [0; 8];
+        let memory = LinearMemory::new(&mut bytes, 32);
+        assert_eq!(memory.bytes(0, 0), Ok(&[][..]));
+        assert_eq!(memory.bytes(0, 1), Err(Error::InvalidMemory));
+        assert_eq!(memory.bytes(8, 0), Ok(&[][..]));
+        assert_eq!(memory.bytes(9, 0), Err(Error::InvalidMemory));
+        assert_eq!(memory.bytes(7, 2), Err(Error::InvalidMemory));
+        assert_eq!(memory.bytes(Word::MAX, 2), Err(Error::InvalidMemory));
+        assert_eq!(memory.c_string(0, 4), Err(Error::InvalidMemory));
+        assert_eq!(memory.c_string(8, 4), Err(Error::InvalidMemory));
+    }
+
+    #[test]
+    fn scalars_and_words_are_little_endian_at_unaligned_offsets() {
+        let mut bytes = [0; 24];
+        let mut memory = LinearMemory::new(&mut bytes, 32);
+        let transport: &mut dyn Transport = &mut memory;
+        transport.write(1, 0x1234_5678_u32).unwrap();
+        transport.write(5, -2_i32).unwrap();
+        transport.write(9, 0xabcd_u16).unwrap();
+        transport.put_word(11, 0x0102_0304);
+        assert_eq!(transport.read::<u32>(1), Ok(0x1234_5678));
+        assert_eq!(transport.read::<i32>(5), Ok(-2));
+        assert_eq!(transport.read_at::<u16>(9, 0), Ok(0xabcd));
+        assert_eq!(transport.read_word(11), Ok(0x0102_0304));
+        assert_eq!(transport.write(23, 0_u16), Err(Error::InvalidMemory));
+        assert_eq!(
+            transport.read_at::<u32>(1, usize::MAX / 4),
+            Err(Error::InvalidMemory)
+        );
+        assert_eq!(
+            &bytes[1..15],
+            &[
+                0x78, 0x56, 0x34, 0x12, 0xfe, 0xff, 0xff, 0xff, 0xcd, 0xab, 0x04, 0x03, 0x02, 0x01
+            ]
+        );
+    }
+
+    #[test]
+    fn values_decode_lazily_and_reject_overflowing_counts() {
+        let mut bytes = [0, 1, 0, 2, 0, 3, 0];
+        let memory = LinearMemory::new(&mut bytes, 32);
+        let transport: &dyn Transport = &memory;
+        let values = transport.values::<u16>(1, 3).unwrap();
+        assert_eq!(values.len(), 3);
+        assert!(values.eq([1, 2, 3]));
+        assert!(transport.values::<u16>(1, 4).is_err());
+        assert!(transport.values::<u32>(1, usize::MAX).is_err());
+        assert_eq!(transport.values::<u32>(0, 0).unwrap().count(), 0);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn sixty_four_bit_words_use_the_full_host_word() {
+        let mut bytes = [0; 12];
+        let mut memory = LinearMemory::new(&mut bytes, 64);
+        let transport: &mut dyn Transport = &mut memory;
+        transport.put_word(3, 0x0102_0304_0506_0708);
+        assert_eq!(transport.read_word(3), Ok(0x0102_0304_0506_0708));
+        assert_eq!(transport.read_word(5), Err(Error::InvalidMemory));
+    }
+
+    #[test]
+    fn c_strings_borrow_guest_memory_in_place_up_to_the_end_of_memory() {
+        let mut bytes = *b"\0abc\0de";
+        let base = bytes.as_ptr() as usize;
+        let memory = LinearMemory::new(&mut bytes, 32);
+        let text = memory.c_string(1, 4).unwrap();
+        assert_eq!(text.to_bytes(), b"abc");
+        assert_eq!(text.as_ptr() as usize, base + 1);
+        assert_eq!(memory.c_string(1, 3), Err(Error::ResourceLimit));
+        // Runs off memory before the limit: invalid, not too long.
+        assert_eq!(memory.c_string(5, 8), Err(Error::InvalidMemory));
+        assert_eq!(memory.c_string(5, 2), Err(Error::ResourceLimit));
+    }
+}

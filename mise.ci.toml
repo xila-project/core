@@ -425,12 +425,16 @@ run = "cargo-llvm-cov llvm-cov --locked --manifest-path \"${XILA_APPLICATIONS_RO
 
 [tasks."ci:abi-miri"]
 extends = "ci:miri"
-description = "Test ABI translation with host Miri"
+description = "Test ABI translation and the graphics call transport with host Miri"
 depends = ["ci:packages-linker"]
-run = "cargo miri test --locked --manifest-path \"${XILA_APPLICATIONS_ROOT:-.application-src}/executables/wasm/tests/translation/Cargo.toml\" --no-default-features --features ${CI_ABI_MEMORY:-memory_32}"
+run = """
+set -eu
+cargo miri test --locked --manifest-path \"${XILA_APPLICATIONS_ROOT:-.application-src}/executables/wasm/tests/translation/Cargo.toml\" --no-default-features --features ${CI_ABI_MEMORY:-memory_32}
+cargo miri test --locked --manifest-path subsystems/graphics/tests/call_transport/Cargo.toml
+"""
 
 [tasks."ci:abi-miri-cross"]
-description = "Test ABI translation with cross-architecture Miri"
+description = "Test ABI translation and the graphics call transport with cross-architecture Miri"
 shell = "bash -c"
 depends = ["ci:packages-linker"]
 tools.rust = { version = "{{ vars.nightly_version }}", profile = "minimal", components = [
@@ -446,9 +450,11 @@ memory="${CI_ABI_MEMORY:-memory_32}"
 case "$memory" in
   memory_32)
     cargo miri test --locked --manifest-path \"${XILA_APPLICATIONS_ROOT:-.application-src}/executables/wasm/tests/translation/Cargo.toml\" --no-default-features --features memory_32 --target powerpc-unknown-linux-gnu
+    cargo miri test --locked --manifest-path subsystems/graphics/tests/call_transport/Cargo.toml --target powerpc-unknown-linux-gnu
     ;;
   memory_64)
     cargo miri test --locked --manifest-path \"${XILA_APPLICATIONS_ROOT:-.application-src}/executables/wasm/tests/translation/Cargo.toml\" --no-default-features --features memory_64 --target i686-unknown-linux-gnu
+    cargo miri test --locked --manifest-path subsystems/graphics/tests/call_transport/Cargo.toml --target i686-unknown-linux-gnu
     ;;
   *)
     echo "Unsupported ABI memory mode: $memory" >&2
