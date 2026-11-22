@@ -570,7 +570,7 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal", compone
 tools.node = "{{ vars.node_version }}"
 
 [tasks."ci:xtensa"]
-description = "Build LittleFS and RGB565 graphics for bare-metal ESP32-S3, and the stackful switch for ESP32, ESP32-S2 and ESP32-S3"
+description = "Build LittleFS and RGB565 graphics for bare-metal ESP32-S3, and the stackful switch and its consumers (VFS, application ABI, native loader) for ESP32, ESP32-S2 and ESP32-S3"
 extends = "ci:node"
 # Locally, run ci:toolchain-xtensa and source target/espup/export-esp.sh to put
 # Xtensa GCC on PATH and point LIBCLANG_PATH at Espressif's libclang.
@@ -578,14 +578,14 @@ extends = "ci:node"
 # integer types for LVGL bindgen instead of deferring to later include paths.
 env = { CC_xtensa_esp32s3_none_elf = "xtensa-esp32s3-elf-gcc", BINDGEN_EXTRA_CLANG_ARGS_xtensa_esp32s3_none_elf = "-ffreestanding" }
 # Run Cargo directly with the esp toolchain, which supplies Xtensa Rust and rust-src.
-# The stackful switch (corosensei's Xtensa backend) needs no C toolchain, so the
-# other chips only build that crate. The ESP32-S2 has no atomic CAS: like esp-hal
-# for these chips, select portable-atomic's single-core backend.
+# The stackful switch (corosensei's Xtensa backend) and its consumers need no C
+# toolchain, so the other chips only build those crates. The ESP32-S2 has no atomic
+# CAS: like esp-hal for these chips, select portable-atomic's single-core backend.
 run = """
 set -eu
-rustup run esp cargo build --locked -Zbuild-std=core,alloc --target xtensa-esp32s3-none-elf -p xila-little-fs -p xila-graphics -p xila-stackful --features xila-graphics/rendering_rgb565
-rustup run esp cargo build --locked -Zbuild-std=core,alloc --target xtensa-esp32-none-elf -p xila-stackful
-RUSTFLAGS="--cfg portable_atomic_unsafe_assume_single_core" rustup run esp cargo build --locked -Zbuild-std=core,alloc --target xtensa-esp32s2-none-elf -p xila-stackful
+rustup run esp cargo build --locked -Zbuild-std=core,alloc --target xtensa-esp32s3-none-elf -p xila-little-fs -p xila-graphics -p xila-stackful -p xila-virtual-file-system -p xila-native-loader -p xila-abi-application -p xila-executable --features xila-graphics/rendering_rgb565,xila-abi-application/network,xila-abi-application/graphics,xila-executable/native-dev,xila-executable/graphics
+rustup run esp cargo build --locked -Zbuild-std=core,alloc --target xtensa-esp32-none-elf -p xila-stackful -p xila-virtual-file-system -p xila-native-loader -p xila-abi-application
+RUSTFLAGS="--cfg portable_atomic_unsafe_assume_single_core" rustup run esp cargo build --locked -Zbuild-std=core,alloc --target xtensa-esp32s2-none-elf -p xila-stackful -p xila-virtual-file-system -p xila-native-loader -p xila-abi-application
 """
 
 [tasks."ci:bare-metal-no-cas"]

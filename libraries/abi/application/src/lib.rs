@@ -74,7 +74,8 @@ pub use heap::*;
             target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm",
-            target_arch = "riscv32"
+            target_arch = "riscv32",
+            target_arch = "xtensa"
         ),
         target_os = "none"
     )
@@ -93,7 +94,8 @@ use stackful::{is_in_coroutine, suspend_on, suspend_on_cancellable};
             target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm",
-            target_arch = "riscv32"
+            target_arch = "riscv32",
+            target_arch = "xtensa"
         ),
         target_os = "none"
     )
@@ -113,7 +115,8 @@ fn exit_coroutine(status: i32) -> ! {
             target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm",
-            target_arch = "riscv32"
+            target_arch = "riscv32",
+            target_arch = "xtensa"
         ),
         target_os = "none"
     )
@@ -130,7 +133,8 @@ use task::block_on as suspend_on;
             target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm",
-            target_arch = "riscv32"
+            target_arch = "riscv32",
+            target_arch = "xtensa"
         ),
         target_os = "none"
     )
@@ -147,7 +151,8 @@ use task::block_on as suspend_on_cancellable;
             target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm",
-            target_arch = "riscv32"
+            target_arch = "riscv32",
+            target_arch = "xtensa"
         ),
         target_os = "none"
     )
@@ -167,7 +172,8 @@ const fn is_in_coroutine() -> bool {
             target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm",
-            target_arch = "riscv32"
+            target_arch = "riscv32",
+            target_arch = "xtensa"
         ),
         target_os = "none"
     )

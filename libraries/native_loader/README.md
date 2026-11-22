@@ -112,9 +112,9 @@ The platform implements `ExecutableMemory`, including cache synchronization
 and executable permissions appropriate to its hardware
 ([Platforms #115](https://github.com/xila-project/platforms/issues/115)).
 The current trait requires one contiguous address range for both instruction
-fetches and data access. The loader recognizes Xtensa ELF images, and running
-them on the coroutine backend is tracked in
-[Core #648](https://github.com/xila-project/core/issues/648).
+fetches and data access. The loader recognizes Xtensa ELF images and builds its
+coroutine backend for Xtensa; running them on hardware is tracked in
+[Core #795](https://github.com/xila-project/core/issues/795).
 
 The loader does not log. Read the allocation base with `LoadedImage::base()`
 and pass it to GDB as `add-symbol-file <elf> -o <base>`: the provided linker

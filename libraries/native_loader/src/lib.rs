@@ -159,7 +159,8 @@ impl Drop for LoadedImage {
             target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm",
-            target_arch = "riscv32"
+            target_arch = "riscv32",
+            target_arch = "xtensa"
         ),
         target_os = "none"
     )
@@ -175,7 +176,8 @@ mod run;
             target_arch = "x86_64",
             target_arch = "aarch64",
             target_arch = "arm",
-            target_arch = "riscv32"
+            target_arch = "riscv32",
+            target_arch = "xtensa"
         ),
         target_os = "none"
     )
