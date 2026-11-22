@@ -65,7 +65,7 @@ pub use virtual_file_system as exported_virtual_file_system;
 
 use alloc::{string::String, vec::Vec};
 use file_system::{AccessFlags, Kind, Path, Permission, Position, Statistics};
-use task::{JoinHandle, SpawnerIdentifier};
+use task::{JoinHandle, SpawnerIdentifier, TaskIdentifier};
 use users::UserIdentifier;
 use virtual_file_system::File;
 
