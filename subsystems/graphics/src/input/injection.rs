@@ -29,7 +29,10 @@ impl InjectedEvent {
 
 pub(crate) struct InputQueue {
     events: Mutex<CriticalSectionRawMutex, RefCell<VecDeque<InjectedEvent>>>,
+    /// Latest queued pointer state, which new pointer events build on.
     pointer: Mutex<CriticalSectionRawMutex, Cell<(Point, State)>>,
+    /// Latest pointer state handed to LVGL, reported while other events are ahead.
+    delivered_pointer: Mutex<CriticalSectionRawMutex, Cell<(Point, State)>>,
 }
 
 impl InputQueue {
@@ -41,6 +44,7 @@ impl InputQueue {
         Ok(Arc::new(Self {
             events: Mutex::new(RefCell::new(events)),
             pointer: Mutex::new(Cell::new((Point::default(), State::Released))),
+            delivered_pointer: Mutex::new(Cell::new((Point::default(), State::Released))),
         }))
     }
 
@@ -202,6 +206,8 @@ impl InputQueue {
             let continue_reading = events.front().is_some_and(|next| next.kind() == kind);
             match event {
                 InjectedEvent::Pointer { point, state } => {
+                    self.delivered_pointer
+                        .lock(|delivered| delivered.set((point, state)));
                     Some(InputData::new(point, state, Key::Character(0), continue_reading).into())
                 }
                 InjectedEvent::Key { key, state } => Some(lvgl::lv_indev_data_t {
@@ -214,8 +220,12 @@ impl InputQueue {
         })
     }
 
+    /// The last pointer state delivered to LVGL.
+    ///
+    /// Pointer events still queued behind other events are not reported yet, so a
+    /// queued press cannot overtake the keys injected before it.
     pub(crate) fn current_pointer(&self) -> InputData {
-        self.pointer.lock(|pointer| {
+        self.delivered_pointer.lock(|pointer| {
             let (point, state) = pointer.get();
             InputData::new(point, state, Key::Character(0), false)
         })
@@ -306,13 +316,19 @@ mod tests {
         if std::env::var_os("XILA_INPUT_LVGL_TEST_CHILD").is_some() {
             return true;
         }
-        let status = std::process::Command::new(std::env::current_exe().unwrap())
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
             .arg("--exact")
             .arg(alloc::format!("input::injection::tests::{name}"))
             .env("XILA_INPUT_LVGL_TEST_CHILD", "1")
-            .status()
+            .output()
             .unwrap();
-        assert!(status.success());
+        let stdout = alloc::string::String::from_utf8_lossy(&output.stdout);
+        // An unknown name filters out every test and still exits successfully.
+        assert!(
+            output.status.success() && stdout.contains(" 1 passed;"),
+            "child test `{name}` did not run exactly once:\n{stdout}\n{}",
+            alloc::string::String::from_utf8_lossy(&output.stderr),
+        );
         false
     }
 
@@ -392,6 +408,29 @@ mod tests {
             lvgl::lv_display_delete(display);
             lvgl::lv_deinit();
         }
+    }
+
+    #[test]
+    fn pointer_fallback_does_not_overtake_queued_keys() {
+        let queue = InputQueue::new().unwrap();
+        queue.key_press(Key::Enter).unwrap();
+        queue.pointer_move(Point::new(5, 6)).unwrap();
+        queue.pointer_button(State::Pressed).unwrap();
+
+        // A key is ahead, so the pointer keeps reporting what LVGL already saw.
+        assert!(queue.pop_for(InputKind::Pointer).is_none());
+        let pointer = queue.current_pointer();
+        assert_eq!(pointer.get_point(), &Point::default());
+        assert_eq!(pointer.get_touch(), &State::Released);
+
+        queue.pop_for(InputKind::Keypad).unwrap();
+        queue.pop_for(InputKind::Keypad).unwrap();
+        queue.pop_for(InputKind::Pointer).unwrap();
+        let pressed = queue.pop_for(InputKind::Pointer).unwrap();
+        assert_eq!(pressed.state, State::Pressed.into());
+        let pointer = queue.current_pointer();
+        assert_eq!(pointer.get_point(), &Point::new(5, 6));
+        assert_eq!(pointer.get_touch(), &State::Pressed);
     }
 
     #[test]

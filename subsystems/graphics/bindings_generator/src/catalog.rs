@@ -1,6 +1,9 @@
 use crate::{MAX_ARGUMENTS, context::LvglContext, function::get_function_identifier};
 use quote::ToTokens;
-use std::{collections::BTreeSet, fmt};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+};
 use syn::{FnArg, Pat, ReturnType, Signature, Type};
 
 // Append-only IDs for new Xila helpers. Inserting these into the legacy
@@ -131,6 +134,42 @@ impl Call {
         Ok(())
     }
 
+    /// The type of the guest argument at `index`, skipping context-only helpers.
+    fn guest_argument(&self, index: usize) -> Option<&Type> {
+        self.signature
+            .inputs
+            .iter()
+            .filter(|argument| match argument {
+                FnArg::Typed(argument) => !matches!(
+                    &*argument.pat,
+                    Pat::Ident(name) if name.ident.to_string().starts_with("__")
+                ),
+                FnArg::Receiver(_) => true,
+            })
+            .nth(index)
+            .and_then(|argument| match argument {
+                FnArg::Typed(argument) => Some(&*argument.ty),
+                FnArg::Receiver(_) => None,
+            })
+    }
+
+    /// Whether the guest argument at `index` is an LVGL object pointer.
+    pub fn argument_is_object(&self, index: usize) -> bool {
+        matches!(
+            self.guest_argument(index),
+            Some(Type::Ptr(pointer)) if pointer.elem.to_token_stream().to_string() == "lv_obj_t"
+        )
+    }
+
+    /// Whether the guest argument at `index` is a non-pointer integer: a
+    /// primitive or C integer type, or one of the catalog's integer aliases.
+    pub fn argument_is_integer(&self, index: usize, catalog: &CallCatalog) -> bool {
+        self.signature.variadic.is_none()
+            && self
+                .guest_argument(index)
+                .is_some_and(|argument| catalog.is_integer(argument))
+    }
+
     /// Conservative policy: pointer lifetimes cannot be inferred from a C signature.
     /// Strings, arrays, native structures and unions need explicit adapters.
     pub fn generic_safe(&self) -> bool {
@@ -177,16 +216,86 @@ impl Call {
     }
 }
 
+/// The last path segment of a plain, non-generic type such as `c_uint`.
+fn plain_type_name(ty: &Type) -> Option<String> {
+    let Type::Path(path) = ty else { return None };
+    let last = path.path.segments.last()?;
+    (path.qself.is_none() && last.arguments.is_none()).then(|| last.ident.to_string())
+}
+
+fn is_integer_name(name: &str) -> bool {
+    matches!(
+        name,
+        "u8" | "u16"
+            | "u32"
+            | "u64"
+            | "usize"
+            | "i8"
+            | "i16"
+            | "i32"
+            | "i64"
+            | "isize"
+            | "c_char"
+            | "c_schar"
+            | "c_uchar"
+            | "c_short"
+            | "c_ushort"
+            | "c_int"
+            | "c_uint"
+            | "c_long"
+            | "c_ulong"
+            | "c_longlong"
+            | "c_ulonglong"
+    )
+}
+
 #[derive(Debug)]
 pub struct CallCatalog {
     calls: Vec<Call>,
+    /// Type aliases that resolve to an integer, such as LVGL's enumerations.
+    integer_aliases: BTreeSet<String>,
+    /// Every LVGL function, by name, including those guests cannot call.
+    natives: BTreeMap<String, Signature>,
 }
 
 impl CallCatalog {
     pub fn parse(source: &str) -> Result<Self, GeneratorError> {
         let context =
             LvglContext::parse(source).map_err(|error| GeneratorError(error.to_string()))?;
-        Self::from_signatures(context.get_signatures())
+        let mut catalog = Self::from_signatures(context.get_signatures())?;
+        catalog.integer_aliases = integer_aliases(&context.get_aliases());
+        catalog.natives = context.get_natives();
+        Ok(catalog)
+    }
+
+    /// Whether the LVGL function `name` takes `(object, integer)`, so a
+    /// generated `v as _` cast from a guest word is an integer conversion.
+    pub fn native_sets_integer(&self, name: &str) -> bool {
+        let Some(signature) = self.natives.get(name) else {
+            return false;
+        };
+        let arguments: Vec<_> = signature
+            .inputs
+            .iter()
+            .filter_map(|argument| match argument {
+                FnArg::Typed(argument) => Some(&*argument.ty),
+                FnArg::Receiver(_) => None,
+            })
+            .collect();
+        signature.variadic.is_none()
+            && signature.inputs.len() == 2
+            && matches!(
+                arguments[..],
+                [Type::Ptr(object), value]
+                    if object.elem.to_token_stream().to_string() == "lv_obj_t"
+                        && self.is_integer(value)
+            )
+    }
+
+    /// Whether `ty` is a non-pointer integer, directly or through an alias.
+    pub fn is_integer(&self, ty: &Type) -> bool {
+        plain_type_name(ty)
+            .is_some_and(|name| is_integer_name(&name) || self.integer_aliases.contains(&name))
     }
 
     pub fn from_signatures(mut signatures: Vec<Signature>) -> Result<Self, GeneratorError> {
@@ -243,7 +352,11 @@ impl CallCatalog {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self { calls })
+        Ok(Self {
+            calls,
+            integer_aliases: BTreeSet::new(),
+            natives: BTreeMap::new(),
+        })
     }
 
     pub fn calls(&self) -> &[Call] {
@@ -275,5 +388,23 @@ impl CallCatalog {
             .iter()
             .map(|call| call.signature.clone())
             .collect()
+    }
+}
+
+/// The aliases that resolve, possibly through other aliases, to an integer.
+fn integer_aliases(aliases: &BTreeMap<String, Type>) -> BTreeSet<String> {
+    let mut integers = BTreeSet::new();
+    loop {
+        let before = integers.len();
+        for (alias, target) in aliases {
+            if let Some(name) = plain_type_name(target)
+                && (is_integer_name(&name) || integers.contains(&name))
+            {
+                integers.insert(alias.clone());
+            }
+        }
+        if integers.len() == before {
+            return integers;
+        }
     }
 }

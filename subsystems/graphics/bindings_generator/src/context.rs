@@ -1,10 +1,15 @@
 use quote::ToTokens;
-use syn::{ForeignItemFn, ItemFn, Signature, visit::Visit};
+use std::collections::BTreeMap;
+use syn::{ForeignItemFn, ItemFn, ItemType, Signature, Type, visit::Visit};
 
 #[derive(Default)]
 pub struct LvglContext {
     signatures: Vec<Signature>,
     definitions: Vec<ItemFn>,
+    /// Plain type aliases, such as bindgen's `pub type lv_arc_mode_t = c_uint;`.
+    aliases: BTreeMap<String, Type>,
+    /// Every foreign function, including those the filter keeps from guests.
+    natives: BTreeMap<String, Signature>,
     function_filtering: Option<fn(&Signature) -> bool>,
 }
 
@@ -28,6 +33,14 @@ impl LvglContext {
 
     pub fn get_definitions(&self) -> Vec<ItemFn> {
         self.definitions.clone()
+    }
+
+    pub fn get_aliases(&self) -> BTreeMap<String, Type> {
+        self.aliases.clone()
+    }
+
+    pub fn get_natives(&self) -> BTreeMap<String, Signature> {
+        self.natives.clone()
     }
 
     fn contains_excluded_type(signature: &Signature) -> bool {
@@ -167,6 +180,10 @@ impl LvglContext {
 
 impl Visit<'_> for LvglContext {
     fn visit_foreign_item_fn(&mut self, foreign_item_function: &ForeignItemFn) {
+        self.natives.insert(
+            foreign_item_function.sig.ident.to_string(),
+            foreign_item_function.sig.clone(),
+        );
         if let Some(filter_function) = self.function_filtering
             && !filter_function(&foreign_item_function.sig)
         {
@@ -174,6 +191,13 @@ impl Visit<'_> for LvglContext {
         }
 
         self.signatures.push(foreign_item_function.sig.clone());
+    }
+
+    fn visit_item_type(&mut self, item: &ItemType) {
+        if item.generics.params.is_empty() {
+            self.aliases
+                .insert(item.ident.to_string(), (*item.ty).clone());
+        }
     }
 
     fn visit_item_fn(&mut self, i: &'_ syn::ItemFn) {
