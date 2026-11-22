@@ -2480,6 +2480,7 @@ dependencies = [
  "xila-testing-support",
  "xila-time",
  "xila-users",
+ "xila-virtual-file-system",
 ]
 
 [[package]]

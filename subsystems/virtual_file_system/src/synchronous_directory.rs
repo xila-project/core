@@ -159,10 +159,22 @@ impl<'a> SynchronousDirectory<'a> {
 }
 
 impl Drop for SynchronousDirectory<'_> {
+    /// Closes a listing that was not closed, without waiting, as a file's drop does.
     fn drop(&mut self) {
-        let _ = self.close_internal(self.virtual_file_system).map_err(|e| {
-            log::error!("Error closing directory: {}", e);
-        });
+        if self.closed {
+            return;
+        }
+        self.closed = true;
+        let _ = self
+            .virtual_file_system
+            .close_without_waiting(
+                &ItemStatic::Directory(self.directory),
+                None,
+                &mut self.context,
+            )
+            .map_err(|e| {
+                log::error!("Error closing directory: {}", e);
+            });
     }
 }
 

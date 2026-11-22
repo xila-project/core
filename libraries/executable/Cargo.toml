@@ -30,6 +30,7 @@ drivers_core = { workspace = true }
 # xila-executable is in the dependency tree of the testing environment, so it
 # must use the support crate: see xila-testing.
 testing_support = { workspace = true }
+virtual_file_system = { workspace = true, features = ["test_harness"] }
 
 [features]
 default = []

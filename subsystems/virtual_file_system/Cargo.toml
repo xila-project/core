@@ -20,7 +20,8 @@ embedded-io-async = { workspace = true }
 stackful = { workspace = true }
 
 [features]
-# Hooks for tests in other crates: `VirtualFileSystem::hold_namespace_lock`.
+# Hooks for tests in other crates: `VirtualFileSystem::hold_namespace_lock` and
+# `hold_character_device_lock`.
 test_harness = []
 
 [dev-dependencies]
@@ -30,6 +31,8 @@ executable = { workspace = true }
 little_fs = { workspace = true }
 memory_file_system = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }
+# Enables this crate's own test hooks for its integration tests.
+virtual_file_system = { workspace = true, features = ["test_harness"] }
 
 [[test]]
 name = "integration"

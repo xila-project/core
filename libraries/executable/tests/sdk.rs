@@ -461,6 +461,39 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
         b"buffered file"
     );
 
+    // A worker suspended in an open, holding the VFS namespace lock while it waits for the
+    // device lock the host holds, when main calls exit(): exit stops the worker first,
+    // which gives the namespace lock back, so closing and flushing the program's file, which
+    // need it, finish while the host still holds the device lock.
+    let handle = start(
+        context,
+        parent,
+        "/threads",
+        "exit-under-lock",
+        &["exit-under-lock"],
+    )
+    .await;
+    let mut join = core::pin::pin!(handle.join());
+    let mut deadline = core::pin::pin!(task::sleep(core::time::Duration::from_secs(30)));
+    let status = vfs
+        .hold_character_device_lock(core::future::poll_fn(|cx| {
+            if let core::task::Poll::Ready(status) = join.as_mut().poll(cx) {
+                return core::task::Poll::Ready(Some(status));
+            }
+            deadline.as_mut().poll(cx).map(|()| None)
+        }))
+        .await;
+    assert_eq!(
+        status,
+        Some(33),
+        "exit under a held lock must end the process"
+    );
+    assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        read_all(vfs, parent, "/thread-locked.txt").await,
+        b"flushed"
+    );
+
     // A program built with -fstack-protector-strong links against the SDK, and the guard
     // is seeded from the entropy device before main runs.
     install(vfs, parent, "/ssp", &build_ssp()).await;

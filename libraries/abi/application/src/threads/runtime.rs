@@ -176,27 +176,25 @@ impl Group {
     /// lock a path call holds while it waits, is free before the caller's cleanup needs
     /// it. The stacks stay until the driver drops the coroutines, because the caller may
     /// still read them (a stream buffer on main's stack, say).
+    ///
+    /// Each coroutine is stopped where it is, in the group: stopping never suspends, so
+    /// nothing runs, and no cancellation can land, while the group is borrowed, and a
+    /// stopped thread stays reachable for the driver, and for a host that drops it, the
+    /// whole time.
     fn shut_down(&self, caller: usize) {
         self.shutdown_thread.set(caller);
-        let count = self.workers.borrow().len();
-        for index in 0..count {
-            // Taken out, so that a destructor that suspends does not find the list
-            // borrowed, then put back for the driver to drop.
-            let taken = self.workers.borrow_mut()[index]
-                .as_mut()
-                .and_then(|worker| worker.coroutine.take());
-            if let Some(mut coroutine) = taken {
-                coroutine.stop();
-                if let Some(worker) = self.workers.borrow_mut()[index].as_mut() {
-                    worker.coroutine = Some(coroutine);
-                }
-            }
+        for coroutine in self
+            .workers
+            .borrow_mut()
+            .iter_mut()
+            .flatten()
+            .filter_map(|worker| worker.coroutine.as_mut())
+        {
+            coroutine.stop();
         }
         // Main's coroutine is out of the group while main runs, so main never stops itself.
-        let main = self.main.borrow_mut().take();
-        if let Some(mut main) = main {
+        if let Some(main) = self.main.borrow_mut().as_mut() {
             main.stop();
-            *self.main.borrow_mut() = Some(main);
         }
     }
 

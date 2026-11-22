@@ -5227,6 +5227,46 @@ mod zero_sized_device {
 }
 
 #[cfg(target_os = "linux")]
+/// A file dropped while its device lock is held owes its reference, and the next holder
+/// of that lock gives it back to the entry the file was opened on.
+#[test]
+async fn device_reference_owed_by_a_drop_is_given_back_to_its_own_mount() {
+    let (task, virtual_file_system) = initialize().await;
+
+    for path in ["/owed_a", "/owed_b"] {
+        virtual_file_system
+            .mount_character_device(task, path, zero_sized_device::Device)
+            .await
+            .unwrap();
+    }
+
+    let first = File::open(
+        virtual_file_system,
+        task,
+        "/owed_b",
+        AccessFlags::Read.into(),
+    )
+    .await
+    .unwrap();
+    let second = first.duplicate().await.unwrap();
+
+    // The lock is held, so the drop cannot give the reference back and owes it.
+    virtual_file_system
+        .hold_character_device_lock(async move { drop(first) })
+        .await;
+
+    // Settling the owed reference must not land on the other device of the same type.
+    assert_eq!(virtual_file_system.unmount("/owed_a", false).await, Ok(()));
+    assert_eq!(
+        virtual_file_system.unmount("/owed_b", false).await,
+        Err(IoErrorKind::ResourceBusy),
+        "/owed_b can be unmounted while its duplicate is open"
+    );
+
+    second.close(virtual_file_system).await.unwrap();
+    virtual_file_system.unmount("/owed_b", false).await.unwrap();
+}
+
 #[test]
 async fn zero_sized_devices_release_references_on_their_own_mount() {
     let (task, virtual_file_system) = initialize().await;

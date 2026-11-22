@@ -547,10 +547,19 @@ impl<'a> SynchronousFile<'a> {
 }
 
 impl Drop for SynchronousFile<'_> {
+    /// Closes a file that was not closed, without waiting: a drop must never suspend, or a
+    /// cancellation could abandon it halfway (see
+    /// [`VirtualFileSystem::close_without_waiting`]). Errors are only logged.
     fn drop(&mut self) {
-        // Note: We cannot use async in Drop, so we just ignore errors here.
-        let _ = self.close_internal(self.virtual_file_system).map_err(|e| {
-            log::warning!("Failed to close SynchronousFile in Drop: {e}");
-        });
+        if self.closed {
+            return;
+        }
+        self.closed = true;
+        let _ = self
+            .virtual_file_system
+            .close_without_waiting(&self.item, self.device_inode, &mut self.context)
+            .map_err(|e| {
+                log::warning!("Failed to close SynchronousFile in Drop: {e}");
+            });
     }
 }

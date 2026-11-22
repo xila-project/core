@@ -617,7 +617,17 @@ through `xila_thread_stop_others`, `xila_process_exit`, or the entry returning):
 stopped thread's cancellable wait is dropped then, in place, with whatever it held, and its
 stack stays until the driver drops the coroutine at the end of the process, because the
 thread that cleans up may still read it. Then the state is released in the cleaning
-thread's coroutine. A path call that a worker was suspended in when main returned therefore
+thread's coroutine.
+
+Stopping never suspends, so no cancellation can land in the middle of it, and each stopped
+coroutine stays in the process's group, where the driver or a host that cancels the process
+still reaches it. That holds because a dropped wait never waits: a VFS file or directory
+dropped without being closed closes with `VirtualFileSystem::close_without_waiting`. That
+closes its context at once and gives its reference back at once if the lock it is counted
+under is free, and otherwise leaves the reference owed, to be given back by whoever takes
+that lock next to look at the counts (a close, an unmount, the storage shutdown). While a
+stopped wait is dropped, `stackful` also runs it as if no coroutine were running, so any
+other wait in a destructor blocks instead of suspending. A path call that a worker was suspended in when main returned therefore
 gives the VFS namespace lock back before the release closes the process's files, which need
 that lock.
 

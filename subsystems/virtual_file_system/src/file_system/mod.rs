@@ -5,13 +5,17 @@ use crate::{Directory, File, IoErrorKind, ItemStatic, Result, ResultExt, poll};
 use alloc::borrow::ToOwned;
 use alloc::vec;
 use alloc::{boxed::Box, collections::BTreeMap};
+use core::cell::RefCell;
 use core::ptr;
 use exported_file_system::{BlockDevice, CharacterDevice, CreateFlags, Permission, Permissions};
 use file_system::{
     AccessFlags, AttributeFlags, Attributes, BaseOperations, Context, FileSystemOperations, Flags,
     Inode, Kind, Path, PathOwned, StateFlags, Statistics,
 };
-use synchronization::{blocking_mutex::raw::CriticalSectionRawMutex, rwlock::RwLock};
+use synchronization::{
+    blocking_mutex::{Mutex as BlockingMutex, raw::CriticalSectionRawMutex},
+    rwlock::RwLock,
+};
 use task::TaskIdentifier;
 use users::{GroupIdentifier, UserIdentifier};
 use utilities::*;
@@ -97,6 +101,65 @@ pub struct VirtualFileSystem {
     pipes: RwLock<CriticalSectionRawMutex, PipeMap>,
     /// Set by [`Self::shutdown_storage`]; never cleared.
     writes_frozen: portable_atomic::AtomicBool,
+    /// References that closes which could not wait for their lock still owe (see
+    /// [`Self::close_without_waiting`]). Given back by whoever takes that lock next to
+    /// look at the counts. The mutex is never held across a wait.
+    owed: BlockingMutex<CriticalSectionRawMutex, RefCell<alloc::vec::Vec<Owed>>>,
+}
+
+/// One reference a close gave back without its lock: a file system by address, as
+/// `ptr::eq` on the registered object compares it, or a device by the inode of the entry
+/// its opening took the reference on (two mounted devices may share a pointer).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Owed {
+    FileSystem(usize),
+    BlockDevice(Inode),
+    CharacterDevice(Inode),
+}
+
+impl Owed {
+    /// What closing `item` gives back, if anything (a pipe owes nothing). A device needs
+    /// the inode its opening took the reference on.
+    fn of(item: &ItemStatic, device_inode: Option<Inode>) -> Result<Option<Self>> {
+        Ok(match item {
+            ItemStatic::File(file_system) | ItemStatic::Directory(file_system) => Some(
+                Self::FileSystem(ptr::from_ref(*file_system).cast::<()>().addr()),
+            ),
+            ItemStatic::BlockDevice(_) => Some(Self::BlockDevice(
+                device_inode.ok_or(IoErrorKind::BadDescriptor)?,
+            )),
+            ItemStatic::CharacterDevice(_) => Some(Self::CharacterDevice(
+                device_inode.ok_or(IoErrorKind::BadDescriptor)?,
+            )),
+            ItemStatic::Pipe(_) => None,
+            ItemStatic::FileSystem(_) => return Err(IoErrorKind::BadDescriptor),
+        })
+    }
+}
+
+/// Give back one reference to the file system at `address`. False if it is not mounted.
+fn release_file_system(file_systems: &mut FileSystemsArray, address: usize) -> bool {
+    file_systems
+        .iter_mut()
+        .find(|file_system| ptr::from_ref(file_system.file_system).cast::<()>().addr() == address)
+        .map(|file_system| {
+            file_system.reference_count = file_system.reference_count.saturating_sub(1)
+        })
+        .is_some()
+}
+
+fn release_block_device(devices: &mut BlockDevicesMap, inode: Inode) -> bool {
+    devices
+        .get_mut(&inode)
+        .map(|device| device.reference_count = device.reference_count.saturating_sub(1))
+        .is_some()
+}
+
+fn release_character_device(devices: &mut CharacterDevicesMap, inode: Inode) -> bool {
+    devices
+        .get_mut(&inode)
+        .map(|device| device.reference_count = device.reference_count.saturating_sub(1))
+        .is_some()
 }
 
 impl VirtualFileSystem {
@@ -147,7 +210,45 @@ impl VirtualFileSystem {
             block_device: RwLock::new(BTreeMap::new()),
             pipes: RwLock::new(BTreeMap::new()),
             writes_frozen: portable_atomic::AtomicBool::new(false),
+            owed: BlockingMutex::new(RefCell::new(alloc::vec::Vec::new())),
         }
+    }
+
+    fn settle_file_systems(&self, file_systems: &mut FileSystemsArray) {
+        self.settle_kind(|entry| match entry {
+            Owed::FileSystem(address) => Some(release_file_system(file_systems, address)),
+            _ => None,
+        });
+    }
+
+    fn settle_block_devices(&self, devices: &mut BlockDevicesMap) {
+        self.settle_kind(|entry| match entry {
+            Owed::BlockDevice(address) => Some(release_block_device(devices, address)),
+            _ => None,
+        });
+    }
+
+    fn settle_character_devices(&self, devices: &mut CharacterDevicesMap) {
+        self.settle_kind(|entry| match entry {
+            Owed::CharacterDevice(address) => Some(release_character_device(devices, address)),
+            _ => None,
+        });
+    }
+
+    /// Give back the owed references `release` handles (it returns `Some` for those), keep
+    /// the others, and free the queue once it is empty.
+    fn settle_kind(&self, mut release: impl FnMut(Owed) -> Option<bool>) {
+        self.owed.lock(|owed| {
+            let mut owed = owed.borrow_mut();
+            if owed.is_empty() {
+                return;
+            }
+            // A reference whose object was unmounted meanwhile has nothing left to give.
+            owed.retain(|entry| release(*entry).is_none());
+            if owed.is_empty() {
+                *owed = alloc::vec::Vec::new();
+            }
+        });
     }
 
     /// Hold the namespace lock, the one path-based calls take, until `release` completes,
@@ -156,6 +257,18 @@ impl VirtualFileSystem {
     #[cfg(feature = "test_harness")]
     pub async fn hold_namespace_lock<F: core::future::Future>(&self, release: F) -> F::Output {
         let _file_systems = self.file_systems.write().await;
+        release.await
+    }
+
+    /// Hold the character device lock until `release` completes, and return its output.
+    /// An open of a character device takes it while it holds the namespace lock, so tests
+    /// use it to suspend a real open with the namespace lock held.
+    #[cfg(feature = "test_harness")]
+    pub async fn hold_character_device_lock<F: core::future::Future>(
+        &self,
+        release: F,
+    ) -> F::Output {
+        let _character_devices = self.character_device.write().await;
         release.await
     }
 
@@ -179,6 +292,7 @@ impl VirtualFileSystem {
     /// static references keep valid memory.
     pub async fn shutdown_storage(&self) -> Result<()> {
         let mut file_systems = self.file_systems.write().await;
+        self.settle_file_systems(&mut file_systems);
         if file_systems
             .iter()
             .any(|file_system| file_system.reference_count > 1)
@@ -246,6 +360,7 @@ impl VirtualFileSystem {
         }
 
         let mut file_systems = self.file_systems.write().await;
+        self.settle_file_systems(&mut file_systems);
 
         if Self::protects_mount(&file_systems, path, false) {
             return Err(IoErrorKind::ResourceBusy);
@@ -293,6 +408,7 @@ impl VirtualFileSystem {
             }
             Kind::BlockDevice => {
                 let mut block_devices = self.block_device.write().await;
+                self.settle_block_devices(&mut block_devices);
                 let device = block_devices
                     .get_mut(&inode)
                     .ok_or(IoErrorKind::StaleHandle)?;
@@ -306,6 +422,7 @@ impl VirtualFileSystem {
             }
             Kind::CharacterDevice => {
                 let mut character_devices = self.character_device.write().await;
+                self.settle_character_devices(&mut character_devices);
                 let device = character_devices
                     .get_mut(&inode)
                     .ok_or(IoErrorKind::StaleHandle)?;
@@ -2037,54 +2154,88 @@ impl VirtualFileSystem {
         device_inode: Option<Inode>,
         context: &mut Context,
     ) -> Result<()> {
-        match item {
-            ItemStatic::File(file_system) | ItemStatic::Directory(file_system) => {
-                self.file_systems
-                    .write()
-                    .await
-                    .iter_mut()
-                    .find_map(|fs| {
-                        if ptr::eq(fs.file_system, *file_system) {
-                            if fs.reference_count > 0 {
-                                fs.reference_count -= 1;
-                            }
-                            Some(())
-                        } else {
-                            None
-                        }
-                    })
-                    .ok_or(IoErrorKind::BadDescriptor)?;
+        let released = match Owed::of(item, device_inode)? {
+            None => true,
+            Some(Owed::FileSystem(address)) => {
+                let mut file_systems = self.file_systems.write().await;
+                self.settle_file_systems(&mut file_systems);
+                release_file_system(&mut file_systems, address)
             }
-            ItemStatic::Pipe(_) => {}
-            ItemStatic::BlockDevice(_) => {
-                let inode = device_inode.ok_or(IoErrorKind::BadDescriptor)?;
+            Some(Owed::BlockDevice(inode)) => {
                 let mut devices = self.block_device.write().await;
-                let device = devices.get_mut(&inode).ok_or(IoErrorKind::BadDescriptor)?;
-                device.reference_count = device.reference_count.saturating_sub(1);
+                self.settle_block_devices(&mut devices);
+                release_block_device(&mut devices, inode)
             }
-            ItemStatic::CharacterDevice(_) => {
-                let inode = device_inode.ok_or(IoErrorKind::BadDescriptor)?;
+            Some(Owed::CharacterDevice(inode)) => {
                 let mut devices = self.character_device.write().await;
-                let device = devices.get_mut(&inode).ok_or(IoErrorKind::BadDescriptor)?;
-                device.reference_count = device.reference_count.saturating_sub(1);
+                self.settle_character_devices(&mut devices);
+                release_character_device(&mut devices, inode)
             }
-            _ => {
-                return Err(IoErrorKind::BadDescriptor);
+        };
+        if !released {
+            return Err(IoErrorKind::BadDescriptor);
+        }
+        Self::close_context(item, context)
+    }
+
+    /// Close like [`Self::close`], but without ever waiting, for a destructor: closing in a
+    /// drop must not suspend, or a cancellation could abandon it halfway. The item's own
+    /// context is closed at once. Its reference is given back at once if the lock it is
+    /// counted under is free, and otherwise owed: whoever takes that lock next to look at
+    /// the counts (a close, an unmount, the storage shutdown) gives it back first.
+    pub fn close_without_waiting(
+        &self,
+        item: &ItemStatic,
+        device_inode: Option<Inode>,
+        context: &mut Context,
+    ) -> Result<()> {
+        if let Some(entry) = Owed::of(item, device_inode)? {
+            let released = match entry {
+                Owed::FileSystem(address) => self.file_systems.try_write().map(|mut locked| {
+                    self.settle_file_systems(&mut locked);
+                    release_file_system(&mut locked, address)
+                }),
+                Owed::BlockDevice(inode) => self.block_device.try_write().map(|mut locked| {
+                    self.settle_block_devices(&mut locked);
+                    release_block_device(&mut locked, inode)
+                }),
+                Owed::CharacterDevice(inode) => {
+                    self.character_device.try_write().map(|mut locked| {
+                        self.settle_character_devices(&mut locked);
+                        release_character_device(&mut locked, inode)
+                    })
+                }
+            };
+            match released {
+                Ok(true) => {}
+                Ok(false) => return Err(IoErrorKind::BadDescriptor),
+                Err(_) => {
+                    let queued = self.owed.lock(|owed| {
+                        let mut owed = owed.borrow_mut();
+                        let reserved = owed.try_reserve(1).is_ok();
+                        if reserved {
+                            owed.push(entry);
+                        }
+                        reserved
+                    });
+                    if !queued {
+                        log::warning!("Out of memory: a closed item stays counted as open");
+                    }
+                }
             }
         }
+        Self::close_context(item, context)
+    }
 
+    /// Close the item's own context: the part of a close that never waits.
+    fn close_context(item: &ItemStatic, context: &mut Context) -> Result<()> {
         if let Some(operations) = item.as_directory_operations() {
-            poll(|| operations.close(context)).await?;
+            operations.close(context)
         } else {
-            poll(|| {
-                item.as_base_operations()
-                    .ok_or(IoErrorKind::Unsupported)?
-                    .close(context)
-            })
-            .await?;
+            item.as_base_operations()
+                .ok_or(IoErrorKind::Unsupported)?
+                .close(context)
         }
-
-        Ok(())
     }
 
     /// Single-attempt metadata adapter: never block an executor waiting for a

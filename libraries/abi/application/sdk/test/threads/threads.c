@@ -80,6 +80,14 @@ static void *exit_worker(void *argument) {
     _exit(31);
 }
 
+/* Opens the entropy device while the host holds the device lock: the open suspends with the
+   VFS namespace lock held, until exit stops this thread. */
+static void *open_locked_device(void *argument) {
+    (void)argument;
+    (void)open("/devices/random/source", O_RDONLY);
+    return NULL;
+}
+
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static int initialized;
 
@@ -404,6 +412,15 @@ static void announce_destructor(void *value) {
 
 int main(int argc, char **argv) {
     pthread_t thread;
+    if (argc > 1 && strcmp(argv[1], "exit-under-lock") == 0) {
+        /* exit() stops the worker, which gives the namespace lock back, before it closes
+           and flushes the file, which need that lock. */
+        FILE *file = fopen("/thread-locked.txt", "w");
+        CHECK(file != NULL && fputs("flushed", file) >= 0);
+        OK(pthread_create(&thread, NULL, open_locked_device, NULL));
+        OK(sched_yield());
+        exit(33);
+    }
     if (argc > 1 && strcmp(argv[1], "print-contention") == 0) {
         OK(pthread_create(&thread, NULL, print_lines, "worker"));
         OK(sched_yield());

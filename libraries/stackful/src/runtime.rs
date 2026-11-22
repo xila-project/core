@@ -224,9 +224,14 @@ impl Coroutine {
     /// must let other code run before it can drop the coroutine (another coroutine of the
     /// same program that still reads its stack, say) stops it first.
     ///
+    /// Stopping never suspends, even when called from another coroutine: the operation's
+    /// destructor runs as if no coroutine were running, so a wait inside it (closing a file
+    /// it opened, say) blocks the caller as [`task::block_on`] does, and runs to its end.
+    /// Nothing can therefore cancel the caller halfway through a destructor and leave what
+    /// the operation held, or this coroutine, behind.
+    ///
     /// Stopping a coroutine that has not started, has finished or is already stopped does
-    /// nothing. Call it from outside the coroutine: from the executor or from another
-    /// coroutine, whose own suspension a destructor that waits then suspends.
+    /// nothing. Do not call it from the coroutine itself.
     pub fn stop(&mut self) {
         if !self.control.started.get() || self.control.result.get().is_some() {
             return;
@@ -246,6 +251,15 @@ impl Coroutine {
             cancel: true,
         }) = self.control.pending.take()
         {
+            /// Restores the running coroutine, if any, once the destructor has run.
+            struct Restore(*const Control);
+            impl Drop for Restore {
+                fn drop(&mut self) {
+                    set_current(self.0);
+                }
+            }
+            let _restore = Restore(current());
+            set_current(core::ptr::null());
             // SAFETY: the wrapper is initialized and pinned on the suspended stack. The
             // coroutine will never resume, so it cannot drop the wrapper again.
             unsafe { core::ptr::drop_in_place(future) };
