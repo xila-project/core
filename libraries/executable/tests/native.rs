@@ -522,6 +522,7 @@ async fn blocked_startup(
             host: context,
             environment: None,
             home: None,
+            network: 0,
         }),
         ..Default::default()
     }

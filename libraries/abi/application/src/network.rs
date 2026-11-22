@@ -141,10 +141,40 @@ unsafe fn write_buffer<'a>(p: *mut c_void, size: usize) -> Result<&'a mut [u8], 
 }
 /// The local endpoint a listener or a UDP socket binds. The unspecified address of
 /// either family is the wildcard, as in POSIX: smoltcp matches only `None` against
-/// every local address, and would never accept on `0.0.0.0` or `::`.
+/// every local address, and would never accept on `0.0.0.0` or `::`. `None` matches
+/// both families, so the listener and the UDP calls drop traffic of the other family
+/// themselves (see [`same_family`]): a wildcard bind keeps its family.
 fn listen_endpoint(endpoint: IpEndpoint) -> IpListenEndpoint {
     let address = (!endpoint.address.into_smoltcp().is_unspecified()).then_some(endpoint.address);
     IpListenEndpoint::new(address, endpoint.port)
+}
+
+/// Whether smoltcp's address is of the ABI family `family`.
+fn same_family(family: u32, address: &smoltcp::wire::IpAddress) -> bool {
+    let theirs = match address {
+        smoltcp::wire::IpAddress::Ipv4(_) => XILA_ADDRESS_IPV4,
+        smoltcp::wire::IpAddress::Ipv6(_) => XILA_ADDRESS_IPV6,
+    };
+    theirs == family
+}
+
+/// A listener that has a connection from the other family than it was bound with
+/// aborts it and listens again, so a wildcard listener keeps its family. Returns
+/// whether it did.
+fn refuse_other_family(socket: &mut smoltcp::socket::tcp::Socket, address: NetworkAddress) -> bool {
+    use smoltcp::socket::tcp::State;
+    let foreign = matches!(socket.state(), State::Established | State::CloseWait)
+        && socket
+            .remote_endpoint()
+            .is_some_and(|remote| !same_family(address.family, &remote.addr));
+    if foreign {
+        socket.abort();
+        if let Ok(endpoint) = address.endpoint() {
+            // The socket is closed after `abort`, so listening cannot fail on its state.
+            let _ = socket.listen(listen_endpoint(endpoint).into_smoltcp());
+        }
+    }
+    foreign
 }
 
 // Small fixed socket buffers; no ABI-side staging buffer on I/O paths.
@@ -311,7 +341,23 @@ pub unsafe extern "C" fn xila_tcp_accept(
         let listener = object(listener)?;
         listener.network.require(XILA_NETWORK_LISTEN)?;
         let endpoint = listen_endpoint(listener.address.endpoint()?);
-        suspend_on(listener.inner.accept(endpoint.address, endpoint.port)).map_err(Status::from)?;
+        let address = listener.address;
+        loop {
+            suspend_on(
+                listener
+                    .inner
+                    .accept(endpoint.address.clone(), endpoint.port),
+            )
+            .map_err(Status::from)?;
+            // A wildcard listener takes connections of its own family only.
+            if !suspend_on(
+                listener
+                    .inner
+                    .with_mutable(|socket| refuse_other_family(socket, address)),
+            ) {
+                break;
+            }
+        }
         if suspend_on(listener.inner.get_remote_endpoint())
             .map_err(Status::from)?
             .is_none()
@@ -528,7 +574,9 @@ pub unsafe extern "C" fn xila_udp_bind(
     }
     let result = (|| unsafe {
         let network = input(network)?;
-        let endpoint = input(address)?.endpoint()?;
+        let address = input(address)?;
+        let address_family = address.family;
+        let endpoint = address.endpoint()?;
         network.require(XILA_NETWORK_LISTEN)?;
         // The socket exists only inside the future until it is bound, as for a connection.
         let bound = suspend_on_cancellable(async {
@@ -549,6 +597,7 @@ pub unsafe extern "C" fn xila_udp_bind(
         Ok(Udp {
             inner: bound?,
             rights: network.rights,
+            family: address_family,
         }
         .into_raw())
     })();
@@ -595,10 +644,14 @@ pub unsafe extern "C" fn xila_udp_send_to(
     }
     let result = (|| unsafe {
         let socket = object(socket)?;
-        let endpoint = input(address)?.endpoint()?;
+        let destination = input(address)?;
+        let endpoint = destination.endpoint()?;
         let buffer = read_buffer(buffer, size)?;
         if u32::from(socket.rights) & XILA_NETWORK_CONNECT == 0 {
             return Err(Status::PermissionDenied);
+        }
+        if destination.family != socket.family {
+            return Err(Status::AddressFamilyUnsupported);
         }
         suspend_on(socket.inner.with_mutable(|s| {
             if size > s.payload_send_capacity() {
@@ -642,7 +695,9 @@ pub unsafe extern "C" fn xila_udp_receive_from(
         unsafe {
             let socket = object(socket)?;
             let buffer = write_buffer(buffer, size)?;
+            let family = socket.family;
             let (n, endpoint) = suspend_on(socket.inner.with_mutable(|s| {
+                drop_other_family(s, family);
                 // Peek first so overflow preserves the datagram and caller buffer.
                 let (data, _) = s.peek().map_err(|_| Status::WouldBlock)?;
                 if data.len() > size {
@@ -739,15 +794,34 @@ pub unsafe extern "C" fn xila_network_resolve(
     }
 }
 
+/// Drop the queued datagrams of the other family than the socket was bound with.
+fn drop_other_family(socket: &mut smoltcp::socket::udp::Socket, family: u32) {
+    while let Ok((_, metadata)) = socket.peek() {
+        if same_family(family, &metadata.endpoint.addr) {
+            break;
+        }
+        let _ = socket.recv();
+    }
+}
+
 pub(crate) fn tcp_readiness(
     connection: &TcpSocket,
     cx: &mut core::task::Context<'_>,
-    listener: bool,
+    listener: Option<NetworkAddress>,
     events: u16,
 ) -> u16 {
     use crate::{XILA_POLL_ERR, XILA_POLL_HUP, XILA_POLL_IN, XILA_POLL_OUT};
     use core::task::Poll;
     use smoltcp::socket::tcp::State;
+
+    // A listener refuses a connection of the other family before it reports one, so
+    // `poll` and a nonblocking accept never see it.
+    if let Some(address) = listener {
+        let _ = connection.poll_with_mutable(cx, |socket, _| {
+            Poll::Ready(refuse_other_family(socket, address))
+        });
+    }
+    let listener = listener.is_some();
 
     let result = connection.poll_with(cx, |socket, _| {
         let state = socket.state();
@@ -803,7 +877,9 @@ pub(crate) fn udp_readiness(socket: &Udp, cx: &mut core::task::Context<'_>, even
     use crate::{XILA_POLL_ERR, XILA_POLL_IN, XILA_POLL_OUT};
     use core::task::Poll;
 
-    let result = socket.inner.poll_with(cx, |inner, _| {
+    let family = socket.family;
+    let result = socket.inner.poll_with_mutable(cx, |inner, _| {
+        drop_other_family(inner, family);
         if !inner.is_open() {
             return Poll::Ready(XILA_POLL_ERR);
         }
@@ -883,6 +959,15 @@ mod tests {
             listen_endpoint(IpEndpoint::new(loopback.clone(), port)).address,
             Some(loopback)
         );
+    }
+    #[test]
+    fn wildcard_binds_keep_their_family() {
+        let v4 = IpAddress::new_ipv4([127, 0, 0, 1]).into_smoltcp();
+        let v6 = IpAddress::new_ipv6([0, 0, 0, 0, 0, 0, 0, 1]).into_smoltcp();
+        assert!(same_family(XILA_ADDRESS_IPV4, &v4));
+        assert!(!same_family(XILA_ADDRESS_IPV4, &v6));
+        assert!(same_family(XILA_ADDRESS_IPV6, &v6));
+        assert!(!same_family(XILA_ADDRESS_IPV6, &v4));
     }
     #[test]
     fn null_outputs() {

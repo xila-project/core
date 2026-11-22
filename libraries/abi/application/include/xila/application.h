@@ -108,6 +108,24 @@
  */
 #define XILA_WAIT_NO_HANG 1
 
+/**
+ * `XilaSpawn.flags`: give the child the right to connect (and to send datagrams).
+ * The value is `XILA_NETWORK_CONNECT`'s.
+ */
+#define XILA_SPAWN_NETWORK_CONNECT 1
+
+/**
+ * `XilaSpawn.flags`: give the child the right to listen and bind. The value is
+ * `XILA_NETWORK_LISTEN`'s.
+ */
+#define XILA_SPAWN_NETWORK_LISTEN 2
+
+/**
+ * `XilaSpawn.flags`: give the child the right to resolve names. The value is
+ * `XILA_NETWORK_RESOLVE`'s.
+ */
+#define XILA_SPAWN_NETWORK_RESOLVE 4
+
 #define XILA_THREAD_STACK_MIN 2048
 
 #define XILA_THREAD_STACK_MAX (64 * 1024)
@@ -349,7 +367,9 @@ typedef struct XilaNetworkAddress {
 typedef struct XilaSpawn {
   uint32_t size;
   /**
-   * Reserved, must be zero.
+   * The network rights the child gets (`XILA_SPAWN_NETWORK_*`). Zero gives it no
+   * network. Each right must be one the parent holds: a child never gets more than
+   * its parent. Other bits are reserved and must be zero.
    */
   uint32_t flags;
   /**
@@ -761,10 +781,11 @@ typedef struct XilaStartup {
    */
   struct XilaString program_name;
   /**
-   * Network authority granted to the process: connect, listen and resolve. Null when
-   * the host has no network stack, the firmware was built without networking, or the
-   * application is not a process. Appended after `program_name`, so images built
-   * before it existed still start.
+   * Network authority granted to the process, with only the rights its launch
+   * granted explicitly (connect, listen, resolve). Null unless the launch granted at
+   * least one right and the host has a network stack, so a process has no network by
+   * default. Appended after `program_name`, so images built before it existed still
+   * start.
    */
   const struct XilaNetwork *network;
 } XilaStartup;

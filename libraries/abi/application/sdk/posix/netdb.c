@@ -146,7 +146,7 @@ static int lookup(const char *node, int family, int flags, struct list *list) {
         return append(list, addresses, count);
     }
     if (inet_pton(AF_INET, node, bytes) == 1) {
-        if (!want_v4 && !(flags & AI_V4MAPPED))
+        if (!want_v4)
             return EAI_NONAME;
         XilaNetworkAddress address = address_of(XILA_ADDRESS_IPV4, bytes);
         return append(list, &address, 1);
@@ -160,15 +160,12 @@ static int lookup(const char *node, int family, int flags, struct list *list) {
     if (flags & AI_NUMERICHOST)
         return EAI_NONAME;
 
+    /* Sockets keep their family, so IPv4-mapped results would be unreachable:
+       AI_V4MAPPED and AI_ALL have no effect. */
     int v6_error = 0, v4_error = 0;
     if (want_v6)
         v6_error = resolve(node, XILA_ADDRESS_IPV6, list);
-    size_t v6_count = list->count;
-    /* An AF_INET6 lookup gets IPv4 results, mapped, with AI_V4MAPPED when there is no
-       IPv6 address, or always with AI_ALL. */
-    int mapped = family == AF_INET6 && (flags & AI_V4MAPPED) &&
-                 (v6_count == 0 || (flags & AI_ALL));
-    if (want_v4 || mapped)
+    if (want_v4)
         v4_error = resolve(node, XILA_ADDRESS_IPV4, list);
     if (list->count != 0)
         return 0;
@@ -179,15 +176,14 @@ static int lookup(const char *node, int family, int flags, struct list *list) {
 }
 
 /* Build one result. Returns NULL when memory runs out. */
-static struct addrinfo *build(const XilaNetworkAddress *native, int family, int socktype,
+static struct addrinfo *build(const XilaNetworkAddress *native, int socktype,
                               uint16_t port, const char *canonical) {
     size_t name_length = canonical != NULL ? strlen(canonical) + 1 : 0;
     struct entry *entry = xila_heap_alloc(sizeof(*entry) + name_length);
     if (entry == NULL)
         return NULL;
     memset(entry, 0, sizeof(*entry));
-    /* An IPv4 address in an AF_INET6 result is IPv4-mapped. */
-    int result_family = family == AF_INET6 || native->family == XILA_ADDRESS_IPV6 ? AF_INET6 : AF_INET;
+    int result_family = native->family == XILA_ADDRESS_IPV6 ? AF_INET6 : AF_INET;
     if (result_family == AF_INET) {
         entry->address.in.sin_family = AF_INET;
         entry->address.in.sin_port = htons(port);
@@ -196,13 +192,7 @@ static struct addrinfo *build(const XilaNetworkAddress *native, int family, int 
     } else {
         entry->address.in6.sin6_family = AF_INET6;
         entry->address.in6.sin6_port = htons(port);
-        if (native->family == XILA_ADDRESS_IPV4) {
-            entry->address.in6.sin6_addr.s6_addr[10] = 0xff;
-            entry->address.in6.sin6_addr.s6_addr[11] = 0xff;
-            memcpy(entry->address.in6.sin6_addr.s6_addr + 12, native->bytes, 4);
-        } else {
-            memcpy(entry->address.in6.sin6_addr.s6_addr, native->bytes, 16);
-        }
+        memcpy(entry->address.in6.sin6_addr.s6_addr, native->bytes, 16);
         entry->information.ai_addrlen = sizeof(entry->address.in6);
     }
     entry->information.ai_family = result_family;
@@ -258,7 +248,7 @@ int getaddrinfo(const char *restrict node, const char *restrict service,
     for (size_t index = 0; error == 0 && index < list.count; ++index) {
         for (size_t type = 0; type < type_count; ++type) {
             const char *canonical = head == NULL && (flags & AI_CANONNAME) ? node : NULL;
-            struct addrinfo *built = build(&list.addresses[index], family, types[type], port,
+            struct addrinfo *built = build(&list.addresses[index], types[type], port,
                                            canonical);
             if (built == NULL) {
                 error = EAI_MEMORY;

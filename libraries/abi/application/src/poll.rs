@@ -42,7 +42,7 @@ enum Source<'a> {
     File(FileReadiness),
     Directory,
     #[cfg(feature = "network")]
-    Tcp(&'a ::network::TcpSocket, bool),
+    Tcp(&'a ::network::TcpSocket, Option<crate::NetworkAddress>),
     #[cfg(feature = "network")]
     Udp(&'a crate::Udp),
     // Keep the same shape in network-off builds without retaining socket data.
@@ -65,15 +65,14 @@ impl<'a> Source<'a> {
             }
             XILA_POLL_DIRECTORY => Self::Directory,
             #[cfg(feature = "network")]
-            XILA_POLL_TCP => Self::Tcp(
-                unsafe { &(*entry.handle.cast::<crate::Tcp>()).inner },
-                false,
-            ),
+            XILA_POLL_TCP => {
+                Self::Tcp(unsafe { &(*entry.handle.cast::<crate::Tcp>()).inner }, None)
+            }
             #[cfg(feature = "network")]
-            XILA_POLL_TCP_LISTENER => Self::Tcp(
-                unsafe { &(*entry.handle.cast::<crate::TcpListener>()).inner },
-                true,
-            ),
+            XILA_POLL_TCP_LISTENER => {
+                let listener = unsafe { &*entry.handle.cast::<crate::TcpListener>() };
+                Self::Tcp(&listener.inner, Some(listener.address))
+            }
             #[cfg(feature = "network")]
             XILA_POLL_UDP => Self::Udp(unsafe { &*entry.handle.cast() }),
             #[cfg(not(feature = "network"))]

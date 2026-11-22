@@ -7,7 +7,7 @@ use virtual_file_system::VirtualFileSystem;
 
 use crate::{
     Error, ExecutableContext, ExecutableFormat, FormatHandler, FormatLaunch, FormatRequest, Home,
-    Launch, Result, Standard, execute_inner,
+    Launch, NetworkRights, Result, Standard, execute_inner,
 };
 
 /// The status a failed spawn reports to the native caller.
@@ -59,6 +59,7 @@ impl ProcessHost for ExecutableContext {
                 standard_output,
                 standard_error,
                 home,
+                network,
                 ..
             } = request;
             let standard = Standard::new(self, standard_input, standard_output, standard_error);
@@ -69,6 +70,11 @@ impl ProcessHost for ExecutableContext {
                     rights: grant.rights,
                 }),
                 identity: None,
+                // Checked against the parent's rights by `xila_process_spawn`.
+                network: u8::try_from(network)
+                    .ok()
+                    .and_then(NetworkRights::from_bits)
+                    .ok_or(Status::InvalidArgument)?,
             };
             // The child's coroutine must stay on the spawner's executor.
             execute_inner(self, &path, arguments, standard, None, launch)
@@ -178,6 +184,7 @@ impl FormatHandler for NativeFormat {
                         path: home.path,
                         rights: home.rights,
                     }),
+                    network: u32::from(launch.network.bits()),
                 }),
             };
             let spawned = unsafe {

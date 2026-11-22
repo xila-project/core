@@ -36,10 +36,11 @@ pub struct XilaStartup {
     pub process: *const Process,
     /// Executable's launch name. Empty for a linked entry without a process.
     pub program_name: XilaString,
-    /// Network authority granted to the process: connect, listen and resolve. Null when
-    /// the host has no network stack, the firmware was built without networking, or the
-    /// application is not a process. Appended after `program_name`, so images built
-    /// before it existed still start.
+    /// Network authority granted to the process, with only the rights its launch
+    /// granted explicitly (connect, listen, resolve). Null unless the launch granted at
+    /// least one right and the host has a network stack, so a process has no network by
+    /// default. Appended after `program_name`, so images built before it existed still
+    /// start.
     pub network: *const Network,
 }
 
@@ -339,19 +340,6 @@ pub(crate) unsafe fn enter(
             resources,
         });
         let resources = &mut *resources;
-        // A process gets the network authority of its host; nothing else does.
-        #[cfg(feature = "network")]
-        if let Some((host, _)) = process
-            && let Some(manager) = host.network_manager()
-        {
-            resources.network = Network::new(
-                manager,
-                crate::XILA_NETWORK_CONNECT
-                    | crate::XILA_NETWORK_LISTEN
-                    | crate::XILA_NETWORK_RESOLVE,
-            )
-            .ok();
-        }
         (*state).startup = XilaStartup {
             size: core::mem::size_of::<XilaStartup>() as u32,
             api: &XILA_API,

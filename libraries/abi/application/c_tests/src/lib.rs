@@ -96,12 +96,14 @@ mod tests {
                     standard_output,
                     standard_error,
                     home,
+                    network,
                     ..
                 } = request;
                 let launch = ProcessLaunch {
                     host: self,
                     environment,
                     home,
+                    network,
                 };
                 // The spawn future runs on the spawner's task, which is the child's parent.
                 let parent = self.tasks.get_current_task_identifier().await;
@@ -1009,6 +1011,7 @@ mod tests {
             host,
             environment: None,
             home: None,
+            network: 0,
         };
         let (state, heap) = run_state(Vec::new(), None, None, None);
         // The bounded probe fits the stack and leaves the pipe endpoints owned
@@ -1171,6 +1174,7 @@ mod tests {
                 path: PathOwned::new("/".into()).unwrap(),
                 rights: 3,
             }),
+            network: 0,
         };
         let (input, output, error) = (open(), open(), open());
         let (state, heap) = run_state(Vec::new(), Some(input), Some(output), Some(error));
@@ -1194,6 +1198,7 @@ mod tests {
             host,
             environment: None,
             home: None,
+            network: 0,
         };
         let (state, heap) = run_state(Vec::new(), None, None, None);
         let (thread_test, _) = unsafe {
@@ -1334,6 +1339,7 @@ mod tests {
                 host,
                 environment: None,
                 home: None,
+                network: 0,
             };
             // SAFETY: the bounded entries fit the stack and never unwind, and the closure
             // holds only pointers to the state and heap, which are leaked.
@@ -1469,6 +1475,7 @@ mod tests {
                     host,
                     environment: None,
                     home,
+                    network: 0,
                 };
                 // SAFETY: the bounded entries fit the stack and never unwind, and the closure
                 // holds only pointers to the state and heap, which `Run` frees last.

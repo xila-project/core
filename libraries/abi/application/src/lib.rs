@@ -942,6 +942,7 @@ mod tests {
                     task::EnvironmentVariable::new("B", "2"),
                 ]),
                 home: None,
+                network: 0,
             };
             // SAFETY: the bounded entries fit the stack and never unwind, and the closure
             // moves everything it owns into `run`.
@@ -1088,6 +1089,7 @@ mod tests {
                 host,
                 environment: None,
                 home: None,
+                network: 0,
             };
             // SAFETY: the bounded entries fit the stack and never unwind, and the closure
             // holds only pointers to the state and heap, which outlive the run.

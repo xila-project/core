@@ -502,6 +502,15 @@ pub struct PollEntry {
 }
 /// `xila_process_wait` flag: return `WouldBlock` instead of waiting for a running child.
 pub const XILA_WAIT_NO_HANG: u32 = 1;
+/// `XilaSpawn.flags`: give the child the right to connect (and to send datagrams).
+/// The value is `XILA_NETWORK_CONNECT`'s.
+pub const XILA_SPAWN_NETWORK_CONNECT: u32 = 1;
+/// `XilaSpawn.flags`: give the child the right to listen and bind. The value is
+/// `XILA_NETWORK_LISTEN`'s.
+pub const XILA_SPAWN_NETWORK_LISTEN: u32 = 2;
+/// `XilaSpawn.flags`: give the child the right to resolve names. The value is
+/// `XILA_NETWORK_RESOLVE`'s.
+pub const XILA_SPAWN_NETWORK_RESOLVE: u32 = 4;
 /// Opaque capability of the running process: its identity, environment, children and
 /// exit. The host grants it through `XilaStartup.process`; the pointer is borrowed for
 /// the entry call and a process must not pass it to another process.
@@ -524,7 +533,9 @@ pub struct Child {
 #[repr(C)]
 pub struct Spawn {
     pub size: u32,
-    /// Reserved, must be zero.
+    /// The network rights the child gets (`XILA_SPAWN_NETWORK_*`). Zero gives it no
+    /// network. Each right must be one the parent holds: a child never gets more than
+    /// its parent. Other bits are reserved and must be zero.
     pub flags: u32,
     /// Arguments of the child, with no implicit program name. A null array has count zero.
     pub arguments: *const XilaString,
@@ -570,10 +581,11 @@ pub struct XilaStartup {
     pub process: *const Process,
     /// Executable's launch name. Empty for a linked entry without a process.
     pub program_name: XilaString,
-    /// Network authority granted to the process: connect, listen and resolve. Null when
-    /// the host has no network stack, the firmware was built without networking, or the
-    /// application is not a process. Appended after `program_name`, so images built
-    /// before it existed still start.
+    /// Network authority granted to the process, with only the rights its launch
+    /// granted explicitly (connect, listen, resolve). Null unless the launch granted at
+    /// least one right and the host has a network stack, so a process has no network by
+    /// default. Appended after `program_name`, so images built before it existed still
+    /// start.
     pub network: *const Network,
 }
 /// A native worker entry. Null is rejected.

@@ -55,4 +55,8 @@ pub struct Udp {
     pub(crate) inner: UdpSocket,
     #[cfg(feature = "network")]
     pub(crate) rights: u8,
+    /// `XILA_ADDRESS_IPV4` or `XILA_ADDRESS_IPV6`: the family it was bound with, the
+    /// only one it sends to and receives from.
+    #[cfg(feature = "network")]
+    pub(crate) family: u32,
 }

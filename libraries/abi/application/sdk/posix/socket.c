@@ -108,9 +108,9 @@ static sa_family_t family_of(const struct sockaddr *address) {
     return family;
 }
 
-/* Convert a POSIX address of the socket's family. An IPv4-mapped IPv6 address becomes
-   the IPv4 address it maps, so an AF_INET6 socket reaches IPv4 peers. Returns 0 or an
-   errno value. */
+/* Convert a POSIX address of the socket's family. A socket keeps its family, as with
+   IPV6_V6ONLY: an AF_INET6 socket does not reach IPv4 peers, so an IPv4-mapped address
+   is unreachable. Returns 0 or an errno value. */
 static int native_address(const struct xila_socket *socket, const struct sockaddr *address,
                           socklen_t length, XilaNetworkAddress *native) {
     if (address == NULL)
@@ -135,19 +135,17 @@ static int native_address(const struct xila_socket *socket, const struct sockadd
         return EINVAL;
     memcpy(&value, address, sizeof(value));
     native->port = ntohs(value.sin6_port);
-    if (memcmp(value.sin6_addr.s6_addr, v4_mapped_prefix, sizeof(v4_mapped_prefix)) == 0) {
-        native->family = XILA_ADDRESS_IPV4;
-        memcpy(native->bytes, value.sin6_addr.s6_addr + 12, 4);
-        return 0;
-    }
+    if (memcmp(value.sin6_addr.s6_addr, v4_mapped_prefix, sizeof(v4_mapped_prefix)) == 0)
+        return ENETUNREACH;
     native->family = XILA_ADDRESS_IPV6;
     memcpy(native->bytes, value.sin6_addr.s6_addr, 16);
     native->scope_id = value.sin6_scope_id; /* Core refuses a nonzero scope */
     return 0;
 }
 
-/* Store `native` in the caller's buffer as an address of the socket's family, truncated
-   to `*length`, and set `*length` to the full size. */
+/* Store `native` in the caller's buffer, truncated to `*length`, and set `*length` to
+   the full size. Core reports only addresses of the socket's own family: a wildcard
+   bind keeps its family. */
 static void posix_address(const struct xila_socket *socket, const XilaNetworkAddress *native,
                           struct sockaddr *address, socklen_t *length) {
     union {
@@ -164,12 +162,7 @@ static void posix_address(const struct xila_socket *socket, const XilaNetworkAdd
     } else {
         value.in6.sin6_family = AF_INET6;
         value.in6.sin6_port = htons(native->port);
-        if (native->family == XILA_ADDRESS_IPV4) {
-            memcpy(value.in6.sin6_addr.s6_addr, v4_mapped_prefix, sizeof(v4_mapped_prefix));
-            memcpy(value.in6.sin6_addr.s6_addr + 12, native->bytes, 4);
-        } else {
-            memcpy(value.in6.sin6_addr.s6_addr, native->bytes, 16);
-        }
+        memcpy(value.in6.sin6_addr.s6_addr, native->bytes, 16);
         size = sizeof(value.in6);
     }
     memcpy(address, &value, *length < size ? *length : size);
@@ -217,7 +210,7 @@ int socket(int domain, int type, int protocol) {
     if (protocol != 0 && protocol != (type == SOCK_STREAM ? IPPROTO_TCP : IPPROTO_UDP))
         return xila_fail_errno(EPROTONOSUPPORT);
     if (network() == NULL)
-        return xila_fail_errno(EACCES); /* the host granted no network capability */
+        return xila_fail_errno(EACCES); /* the launch granted no network rights */
 
     struct xila_socket *created = xila_heap_alloc(sizeof(*created));
     if (created == NULL)

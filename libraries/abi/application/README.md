@@ -232,7 +232,7 @@ check and the setuid refusal apply as for any other launch, and the child is an
 ordinary Core task: a child of the caller's task, on the caller's executor, running as
 the **same user and group**. Setuid files are refused for native images.
 
-`XilaSpawn` carries `size` (set it to `sizeof(XilaSpawn)`) and reserved `flags` (zero),
+`XilaSpawn` carries `size` (set it to `sizeof(XilaSpawn)`), `flags` (the child's network rights, a subset of the parent's, zero for none; see [Linked application startup](#linked-application-startup)),
 the child's arguments (no implicit program name), an optional explicit environment,
 the three standard streams and an optional home directory. The streams are required,
 because Core's `Standard` has no absent stream; pass a platform null device to give a
@@ -477,20 +477,47 @@ launch name separately and is empty for a linked entry. `XilaStartup.process` is
 for an application that is not a process.
 
 `XilaStartup.network` is the last field. It is the process's `XilaNetwork`
-capability, with the connect, listen and resolve rights, which the socket and
-resolver calls take. The host grants it to every process when its
-`ProcessHost::network_manager` returns a network stack (Core's
-`ExecutableContext.network_manager`), so a spawned child gets it too. It is
-null for an application that is not a process, on a host without a network
-stack and in firmware built without the `network` feature. It is borrowed like
-the other startup capabilities: do not pass it to `xila_network_close`. The
-field was appended after `program_name`, so images built before it existed
-still start: crt0 only refuses a startup block smaller than the one it was
-built with. A per-child grant, for example a spawn flag that withholds the
-network, is a follow-up.
+capability, which the socket and resolver calls take. The field was appended
+after `program_name`, so images built before it existed still start: crt0 only
+refuses a startup block smaller than the one it was built with. It is borrowed
+like the other startup capabilities: do not pass it to `xila_network_close`.
 
-A listener or a UDP socket bound to the unspecified address (`0.0.0.0` or
-`::`) listens on every local address, as in POSIX.
+**Network access is denied by default.** No process gets network rights
+implicitly, and none are inherited:
+
+* The host grants rights per launch, explicitly: `ProcessLaunch.network`, which
+  Core fills from `executable::Launch::with_network`. There are three rights.
+  `XILA_NETWORK_CONNECT` opens connections and sends datagrams.
+  `XILA_NETWORK_LISTEN` listens and binds. `XILA_NETWORK_RESOLVE` resolves
+  names. `XilaStartup.network` stays null unless the launch granted at least
+  one right and the host has a network stack (`ProcessHost::network_manager`).
+  It is also null for an application that is not a process and in firmware
+  built without the `network` feature.
+* A child gets only the rights its parent names in `XilaSpawn.flags`
+  (`XILA_SPAWN_NETWORK_CONNECT`, `_LISTEN`, `_RESOLVE`), and only if the parent
+  holds each of them. A right the parent lacks fails the spawn with
+  PermissionDenied, so a child can never widen its parent's rights. Zero, as
+  every image built before these flags existed passes, gives the child no
+  network.
+* This matches WebAssembly applications, which get no sockets. Deciding which
+  programs get the network is the launcher's job. Tying grants to the
+  capabilities a package manifest requests is a follow-up.
+
+A listener or a UDP socket bound to the unspecified address (`0.0.0.0` or `::`)
+listens on every local address of **its own family**, like a POSIX socket with
+`IPV6_V6ONLY`. smoltcp's wildcard matches both families, so the ABI filters the
+traffic itself:
+
+* A listener refuses a connection of the other family. It aborts the
+  connection and listens again, before `xila_poll_wait` or `xila_tcp_accept`
+  would report it.
+* A UDP socket drops datagrams of the other family and refuses to send to it
+  (AddressFamilyUnsupported).
+* Peer addresses are therefore always of the socket's family.
+
+smoltcp gives a packet to the first socket that matches it, so an IPv4 and an
+IPv6 wildcard bind on the same port do not coexist. Traffic for the second goes
+to the first, which drops it.
 
 The host lends the startup data, strings and initial capabilities for the call.
 The app may close its own file and directory objects. It must leave borrowed

@@ -24,6 +24,17 @@ use virtual_file_system::{File as VfsFile, VirtualFileSystem};
 
 /// `xila_process_wait` flag: return `WouldBlock` instead of waiting for a running child.
 pub const XILA_WAIT_NO_HANG: u32 = 1;
+/// `XilaSpawn.flags`: give the child the right to connect (and to send datagrams).
+/// The value is `XILA_NETWORK_CONNECT`'s.
+pub const XILA_SPAWN_NETWORK_CONNECT: u32 = 1;
+/// `XilaSpawn.flags`: give the child the right to listen and bind. The value is
+/// `XILA_NETWORK_LISTEN`'s.
+pub const XILA_SPAWN_NETWORK_LISTEN: u32 = 2;
+/// `XilaSpawn.flags`: give the child the right to resolve names. The value is
+/// `XILA_NETWORK_RESOLVE`'s.
+pub const XILA_SPAWN_NETWORK_RESOLVE: u32 = 4;
+const SPAWN_NETWORK: u32 =
+    XILA_SPAWN_NETWORK_CONNECT | XILA_SPAWN_NETWORK_LISTEN | XILA_SPAWN_NETWORK_RESOLVE;
 
 /// The exit status of a child that could not start its entry.
 ///
@@ -59,6 +70,9 @@ pub struct SpawnRequest {
     pub standard_output: VfsFile<'static>,
     pub standard_error: VfsFile<'static>,
     pub home: Option<HomeGrant>,
+    /// The child's network rights, already checked to be a subset of the parent's.
+    /// Zero grants no network.
+    pub network: u32,
 }
 
 /// The result of starting a child: its join handle, which carries its exit status, and
@@ -78,8 +92,8 @@ pub trait ProcessHost: Sync {
         None
     }
     /// The network stack the process's sockets use, or `None` when the system has none.
-    /// A process gets a network capability with every right through
-    /// `XilaStartup.network` only when this returns a manager.
+    /// A process gets `XilaStartup.network` only when its launch granted network rights
+    /// ([`ProcessLaunch::network`]) and this returns a manager.
     #[cfg(feature = "network")]
     fn network_manager(&self) -> Option<&'static network::Manager> {
         None
@@ -97,6 +111,10 @@ pub struct ProcessLaunch {
     pub environment: Option<Vec<EnvironmentVariable>>,
     /// Becomes the child's home directory capability, bound to the child's task.
     pub home: Option<HomeGrant>,
+    /// The network rights the process gets (`XILA_NETWORK_CONNECT`, `_LISTEN`,
+    /// `_RESOLVE`). Zero, the default for every launch, grants no network: nothing is
+    /// inherited, and a parent can only pass a subset of its own rights to a child.
+    pub network: u32,
 }
 
 impl ProcessLaunch {
@@ -131,6 +149,7 @@ impl ProcessLaunch {
             host,
             environment,
             home,
+            network,
         } = self;
         let manager = host.task_manager();
         let resources = unsafe { &raw mut (*state.as_ptr()).resources };
@@ -172,6 +191,15 @@ impl ProcessLaunch {
             if let Some(home) = (*resources).home.as_mut() {
                 home.task = task;
             }
+            // Only an explicit grant gives the process network authority.
+            #[cfg(feature = "network")]
+            if network != 0
+                && let Some(manager) = host.network_manager()
+            {
+                (*resources).network = crate::Network::new(manager, network).ok();
+            }
+            #[cfg(not(feature = "network"))]
+            let _ = network;
             enter(state, entry, heap, Some((host, task)))
         }
     }
@@ -184,6 +212,22 @@ pub struct Process {
     pub(crate) host: &'static dyn ProcessHost,
     pub(crate) task: TaskIdentifier,
     pub(crate) resources: *mut Resources,
+}
+
+impl Process {
+    /// The network rights this process was granted, zero without a network capability.
+    fn network_rights(&self) -> u32 {
+        #[cfg(feature = "network")]
+        {
+            // SAFETY: the resources live as long as the process capability.
+            unsafe { (*self.resources).network.as_ref() }
+                .map_or(0, |network| u32::from(network.rights))
+        }
+        #[cfg(not(feature = "network"))]
+        {
+            0
+        }
+    }
 }
 
 /// A spawned child, owned by the process that spawned it. It holds the child's
@@ -209,7 +253,9 @@ impl Handle for Child {
 #[repr(C)]
 pub struct Spawn {
     pub size: u32,
-    /// Reserved, must be zero.
+    /// The network rights the child gets (`XILA_SPAWN_NETWORK_*`). Zero gives it no
+    /// network. Each right must be one the parent holds: a child never gets more than
+    /// its parent. Other bits are reserved and must be zero.
     pub flags: u32,
     /// Arguments of the child, with no implicit program name. A null array has count zero.
     pub arguments: *const XilaString,
@@ -589,7 +635,7 @@ pub unsafe extern "C" fn xila_process_spawn(
         // SAFETY: checked non-null above; the caller guarantees the objects are live.
         let (directory, spawn) = unsafe { (&*directory, &*spawn) };
         if (spawn.size as usize) < size_of::<Spawn>()
-            || spawn.flags != 0
+            || spawn.flags & !SPAWN_NETWORK != 0
             || spawn.standard_input.is_null()
             || spawn.standard_output.is_null()
             || spawn.standard_error.is_null()
@@ -598,6 +644,11 @@ pub unsafe extern "C" fn xila_process_spawn(
             return Err(Status::InvalidArgument);
         }
         if u32::from(directory.rights) & XILA_RIGHT_READ == 0 {
+            return Err(Status::PermissionDenied);
+        }
+        // A parent can pass on only network rights it holds itself.
+        let network = spawn.flags & SPAWN_NETWORK;
+        if network & !process.network_rights() != 0 {
             return Err(Status::PermissionDenied);
         }
         let path = canonical(
@@ -658,6 +709,7 @@ pub unsafe extern "C" fn xila_process_spawn(
                 standard_output,
                 standard_error,
                 home,
+                network,
             })
             .await
         });

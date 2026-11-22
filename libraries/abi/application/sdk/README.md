@@ -529,10 +529,15 @@ provide `socket`, `bind`, `listen`, `accept`, `connect`, `send`, `recv`, `sendto
 `recvfrom`, `shutdown`, `getsockname`, `getpeername`, `setsockopt`, `getsockopt`,
 `getaddrinfo`, `freeaddrinfo`, `gai_strerror`, `inet_pton`, `inet_ntop` and
 `inet_addr`. `read`, `write`, `close`, `dup`, `dup2`, `fcntl`, `poll` and `fstat`
-(`S_IFSOCK`) work on socket descriptors. The calls use the network capability the
-host grants in `XilaStartup.network` (see the ABI README). Without it, `socket`
-fails with `EACCES` and `getaddrinfo` can only answer numeric hosts and `localhost`:
-a lookup returns `EAI_SYSTEM` with `errno` set to `EACCES`.
+(`S_IFSOCK`) work on socket descriptors. The calls use the network capability in
+`XilaStartup.network` (see the ABI README). **A program has no network unless its
+launch grants it**, with separate connect, listen and resolve rights. Without a
+grant, `socket` fails with `EACCES`, and `getaddrinfo` can only answer numeric
+hosts and `localhost`: a lookup returns `EAI_SYSTEM` with `errno` set to `EACCES`.
+With some rights only, the call that needs a missing one fails with `EACCES`:
+`listen`, or `bind` of a datagram socket, without listen; `connect` or a send
+without connect; a lookup without resolve. A child gets at most its parent's
+rights (`XilaSpawn.flags`).
 
 A socket is an `AF_INET` or `AF_INET6` stream (TCP) or datagram (UDP) socket.
 `socket` accepts `SOCK_NONBLOCK` and `SOCK_CLOEXEC` in its type. Each socket is a
@@ -565,9 +570,13 @@ How the subset maps onto Core's network stack:
   `EAGAIN` when the socket is not ready. Only `MSG_DONTWAIT` and `MSG_NOSIGNAL`
   are accepted as flags. Others, `MSG_PEEK` included, fail with `EOPNOTSUPP`.
   `poll` reports a socket that is neither bound nor connected as never ready.
-* **Addresses.** An `AF_INET6` socket reaches IPv4 peers through IPv4-mapped
-  addresses (`::ffff:a.b.c.d`) and reports IPv4 peers that way. IPv6 scopes are
-  not supported. The unspecified address listens on every local address.
+* **Addresses.** A socket keeps its family, as with `IPV6_V6ONLY`: an `AF_INET6`
+  socket neither reaches nor hears IPv4 peers, and a connect to an IPv4-mapped
+  address (`::ffff:a.b.c.d`) fails with `ENETUNREACH`. The unspecified address
+  listens on every local address of the socket's family. A send to the other
+  family fails with `EAFNOSUPPORT`. Peer addresses are always reported in the
+  socket's family. An IPv4 and an IPv6 wildcard bind of the same port do not
+  coexist (see the ABI README). IPv6 scopes are not supported.
 * **Options.** `SO_REUSEADDR`, `SO_KEEPALIVE` and `TCP_NODELAY` are accepted and
   have no effect. `getsockopt` also reports `SO_TYPE`, and `SO_ERROR` is always
   zero. Other options fail with `ENOPROTOOPT`.
@@ -575,8 +584,9 @@ How the subset maps onto Core's network stack:
   services database, so a name fails with `EAI_SERVICE`. There is no hosts file
   either. `localhost` and a null node are answered locally, and numeric hosts are
   parsed. Other names go to Core's resolver, IPv4 first for `AF_UNSPEC`. The
-  canonical name is the node as given. `AI_V4MAPPED` and `AI_ALL` are honored.
-  `AI_ADDRCONFIG` has no effect. Without a socket type, each address gets a
+  canonical name is the node as given. `AI_V4MAPPED`, `AI_ALL` and
+  `AI_ADDRCONFIG` have no effect: sockets keep their family, so an IPv4-mapped
+  result would be unreachable. Without a socket type, each address gets a
   stream and a datagram result. `inet_pton` and `inet_addr` take only the
   dotted-decimal form with four parts and no leading zeros.
 

@@ -13,3 +13,5 @@ add_executable(no-environ no-environ.c)
 
 # Sockets and name resolution over the host's loopback interface.
 add_executable(network network.c)
+# The spawn scenario reaches the startup block for the raw process calls.
+target_link_options(network PRIVATE --wrap=xila_main)

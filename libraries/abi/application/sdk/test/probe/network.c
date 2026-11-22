@@ -1,9 +1,12 @@
 /* Probe for the SDK's sockets and name resolution, over the host's loopback interface.
  * The first argument selects the scenario; the host test (executable's tests/sdk.rs)
- * launches it with a network stack and without one.
+ * launches it with and without a network grant.
  *
  *   sockets     address text, getaddrinfo, a TCP exchange, UDP datagrams and errno values
- *   no-network  what a process gets when the host grants no network capability
+ *   family      wildcard binds keep their address family
+ *   no-network  what a process gets without network rights
+ *   spawn       a parent granted connect and resolve passes on a subset, never more
+ *   child       run by spawn: a child with connect only
  */
 #include <arpa/inet.h>
 #include <errno.h>
@@ -17,6 +20,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <xila/stubs.h>
 
 #define CHECK(step, condition)                                                           \
     do {                                                                                 \
@@ -97,13 +101,10 @@ static int resolution(void) {
                                 any.sin6_port == htons(53));
     freeaddrinfo(list);
 
+    /* Sockets keep their family, so an IPv4 address is no AF_INET6 result. */
     hints = (struct addrinfo){.ai_family = AF_INET6, .ai_flags = AI_V4MAPPED,
                               .ai_socktype = SOCK_STREAM};
-    CHECK("mapped getaddrinfo", getaddrinfo("192.0.2.7", "1", &hints, &list) == 0);
-    memcpy(&any, list->ai_addr, sizeof(any));
-    CHECK("mapped result", list->ai_family == AF_INET6 && any.sin6_addr.s6_addr[10] == 0xff &&
-                               any.sin6_addr.s6_addr[15] == 7);
-    freeaddrinfo(list);
+    CHECK("no mapped result", getaddrinfo("192.0.2.7", "1", &hints, &list) == EAI_NONAME);
 
     /* The resolver also takes the address in text. */
     hints = (struct addrinfo){.ai_family = AF_INET, .ai_socktype = SOCK_STREAM};
@@ -273,6 +274,95 @@ static int errors(void) {
     return 0;
 }
 
+#define FAMILY_TCP_PORT 7111
+#define FAMILY_UDP_PORT 7112
+
+/* A wildcard bind keeps its address family. The probe sends IPv4 traffic only, which
+   the test's loopback interface carries: an IPv6 wildcard bind must not get it, while an
+   IPv4 one gets it and reports IPv4 peers. The other direction runs the same check
+   (`same_family` in the ABI, which has a unit test for both). */
+static int family(void) {
+    struct sockaddr_in6 any6 = {.sin6_family = AF_INET6, .sin6_port = htons(FAMILY_TCP_PORT),
+                                .sin6_addr = IN6ADDR_ANY_INIT};
+    int server6 = socket(AF_INET6, SOCK_STREAM | SOCK_NONBLOCK, 0);
+    CHECK("IPv6 server", server6 >= 0 &&
+                             bind(server6, (struct sockaddr *)&any6, sizeof(any6)) == 0 &&
+                             listen(server6, 1) == 0);
+    /* The IPv4 connection completes its handshake with the listening socket, which
+       then refuses it: it is never reported or accepted. */
+    int other = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in to4 = {.sin_family = AF_INET, .sin_port = htons(FAMILY_TCP_PORT),
+                              .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
+    CHECK("IPv4 handshake", connect(other, (struct sockaddr *)&to4, sizeof(to4)) == 0);
+    struct pollfd wait = {.fd = server6, .events = POLLIN};
+    CHECK("poll refuses IPv4", poll(&wait, 1, 100) == 0);
+    CHECK("accept refuses IPv4", accept(server6, NULL, NULL) == -1 && errno == EAGAIN);
+    CHECK("close IPv6 server", close(other) == 0 && close(server6) == 0);
+
+    struct sockaddr_in any = {.sin_family = AF_INET, .sin_port = htons(FAMILY_TCP_PORT + 2),
+                              .sin_addr.s_addr = htonl(INADDR_ANY)};
+    int server = socket(AF_INET, SOCK_STREAM, 0);
+    CHECK("IPv4 server", server >= 0 && bind(server, (struct sockaddr *)&any, sizeof(any)) == 0 &&
+                             listen(server, 1) == 0);
+    int client = socket(AF_INET, SOCK_STREAM, 0);
+    to4.sin_port = htons(FAMILY_TCP_PORT + 2);
+    CHECK("IPv4 connect", connect(client, (struct sockaddr *)&to4, sizeof(to4)) == 0);
+    struct sockaddr_storage peer;
+    socklen_t length = sizeof(peer);
+    int accepted = accept(server, (struct sockaddr *)&peer, &length);
+    CHECK("accept IPv4", accepted >= 0 && peer.ss_family == AF_INET &&
+                             length == sizeof(struct sockaddr_in));
+    CHECK("close TCP", close(accepted) == 0 && close(client) == 0 && close(server) == 0);
+
+    /* UDP: an IPv6 wildcard socket drops IPv4 datagrams. */
+    any6.sin6_port = htons(FAMILY_UDP_PORT);
+    int receiver6 = socket(AF_INET6, SOCK_DGRAM, 0);
+    CHECK("IPv6 receiver", receiver6 >= 0 &&
+                               bind(receiver6, (struct sockaddr *)&any6, sizeof(any6)) == 0);
+    int sender = socket(AF_INET, SOCK_DGRAM, 0);
+    to4.sin_port = htons(FAMILY_UDP_PORT);
+    CHECK("send to IPv6 wildcard", sendto(sender, "four", 4, 0, (struct sockaddr *)&to4,
+                                          sizeof(to4)) == 4);
+    char buffer[8];
+    wait = (struct pollfd){.fd = receiver6, .events = POLLIN};
+    CHECK("poll drops IPv4", poll(&wait, 1, 100) == 0);
+    CHECK("receive drops IPv4", recv(receiver6, buffer, sizeof(buffer), MSG_DONTWAIT) == -1 &&
+                                    errno == EAGAIN);
+    struct sockaddr_in6 to6 = {.sin6_family = AF_INET6, .sin6_port = htons(FAMILY_UDP_PORT),
+                               .sin6_addr = IN6ADDR_LOOPBACK_INIT};
+    CHECK("other family destination",
+          sendto(sender, "x", 1, 0, (struct sockaddr *)&to6, sizeof(to6)) == -1 &&
+              errno == EAFNOSUPPORT);
+    CHECK("close IPv6 receiver", close(receiver6) == 0);
+
+    /* An IPv4 wildcard socket gets them, from an IPv4 source. */
+    any.sin_port = htons(FAMILY_UDP_PORT + 2);
+    int receiver = socket(AF_INET, SOCK_DGRAM, 0);
+    CHECK("IPv4 receiver", receiver >= 0 &&
+                               bind(receiver, (struct sockaddr *)&any, sizeof(any)) == 0);
+    to4.sin_port = htons(FAMILY_UDP_PORT + 2);
+    CHECK("send to IPv4 wildcard", sendto(sender, "four", 4, 0, (struct sockaddr *)&to4,
+                                          sizeof(to4)) == 4);
+    length = sizeof(peer);
+    CHECK("receive IPv4",
+          recvfrom(receiver, buffer, sizeof(buffer), 0, (struct sockaddr *)&peer, &length) == 4 &&
+              memcmp(buffer, "four", 4) == 0 && peer.ss_family == AF_INET &&
+              length == sizeof(struct sockaddr_in));
+
+    /* An AF_INET6 socket does not reach IPv4 through a mapped address. */
+    struct sockaddr_in6 mapped = {.sin6_family = AF_INET6, .sin6_port = htons(FAMILY_TCP_PORT)};
+    mapped.sin6_addr.s6_addr[10] = 0xff;
+    mapped.sin6_addr.s6_addr[11] = 0xff;
+    mapped.sin6_addr.s6_addr[12] = 127;
+    mapped.sin6_addr.s6_addr[15] = 1;
+    int six = socket(AF_INET6, SOCK_STREAM, 0);
+    CHECK("mapped address", connect(six, (struct sockaddr *)&mapped, sizeof(mapped)) == -1 &&
+                                errno == ENETUNREACH);
+    CHECK("close UDP", close(six) == 0 && close(sender) == 0 && close(receiver) == 0);
+    puts("family: ok");
+    return 0;
+}
+
 static int sockets(void) {
     if (address_text() || resolution() || tcp() || udp() || errors())
         return 1;
@@ -292,12 +382,86 @@ static int no_network(void) {
     return 0;
 }
 
+/* The startup block, kept by the xila_main wrapper for the raw spawn calls. */
+static const XilaStartup *startup;
+
+int32_t __real_xila_main(const XilaStartup *start);
+int32_t __wrap_xila_main(const XilaStartup *start) {
+    startup = start;
+    return __real_xila_main(start);
+}
+
+/* Spawn this program as `mode` with the network rights in `flags`. Returns the status of
+   xila_process_spawn and, when it succeeded, the child's exit status in `status`. */
+static XilaStatus spawn_child(const char *mode, uint32_t flags, int32_t *status) {
+    XilaString arguments[] = {{.data = mode, .length = strlen(mode)}};
+    XilaSpawn request = {
+        .size = sizeof(request),
+        .flags = flags,
+        .arguments = arguments,
+        .argument_count = 1,
+        .standard_input = startup->standard_input,
+        .standard_output = startup->standard_output,
+        .standard_error = startup->standard_error,
+    };
+    XilaChild *child = NULL;
+    XilaStatus result =
+        xila_process_spawn(startup->process, startup->home, "network", 7, &request, &child);
+    if (result != XILA_STATUS_OK)
+        return result;
+    result = xila_process_wait(startup->process, child, 0, status);
+    (void)xila_process_child_close(child);
+    return result;
+}
+
+/* Launched with connect and resolve only. */
+static int spawn(void) {
+    CHECK("granted", startup->network != NULL);
+    int32_t status = -1;
+    CHECK("widen to listen", spawn_child("child", XILA_SPAWN_NETWORK_LISTEN, &status) ==
+                                 XILA_STATUS_PERMISSION_DENIED);
+    CHECK("widen with a subset",
+          spawn_child("child", XILA_SPAWN_NETWORK_CONNECT | XILA_SPAWN_NETWORK_LISTEN, &status) ==
+              XILA_STATUS_PERMISSION_DENIED);
+    CHECK("unknown flag", spawn_child("child", 8, &status) == XILA_STATUS_INVALID_ARGUMENT);
+    CHECK("narrow to connect",
+          spawn_child("child", XILA_SPAWN_NETWORK_CONNECT, &status) == XILA_STATUS_OK &&
+              status == 0);
+    CHECK("inherit nothing",
+          spawn_child("no-network", 0, &status) == XILA_STATUS_OK && status == 0);
+    puts("spawn: ok");
+    return 0;
+}
+
+/* Spawned with connect only: it can create sockets but neither listen nor resolve. */
+static int child(void) {
+    CHECK("child granted", startup->network != NULL);
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    CHECK("child socket", fd >= 0);
+    struct sockaddr_in address = {.sin_family = AF_INET, .sin_port = htons(7121),
+                                  .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
+    CHECK("child bind", bind(fd, (struct sockaddr *)&address, sizeof(address)) == 0);
+    CHECK("child listen", listen(fd, 1) == -1 && errno == EACCES);
+    struct addrinfo hints = {.ai_family = AF_INET, .ai_socktype = SOCK_STREAM};
+    struct addrinfo *list = NULL;
+    CHECK("child resolve", getaddrinfo("example.invalid", "1", &hints, &list) == EAI_SYSTEM &&
+                               errno == EACCES);
+    CHECK("child close", close(fd) == 0);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     const char *mode = argc > 1 ? argv[1] : "";
     if (strcmp(mode, "sockets") == 0)
         return sockets();
+    if (strcmp(mode, "family") == 0)
+        return family();
     if (strcmp(mode, "no-network") == 0)
         return no_network();
+    if (strcmp(mode, "spawn") == 0)
+        return spawn();
+    if (strcmp(mode, "child") == 0)
+        return child();
     fprintf(stderr, "network: unknown scenario \"%s\"\n", mode);
     return 2;
 }
