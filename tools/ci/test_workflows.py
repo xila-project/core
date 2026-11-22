@@ -330,6 +330,13 @@ class WorkflowPolicy(unittest.TestCase):
                 components = rust.get("components", []) if isinstance(rust, dict) else []
                 self.assertIn("rustfmt", components, "wasm build scripts execute rustfmt on generated bindings")
 
+    def test_wasm_bindgen_test_runner_matches_the_locked_wasm_bindgen_crate(self):
+        """`wasm-bindgen-test-runner` must be the same version as the `wasm-bindgen` crate."""
+        pinned = tomllib.loads((ROOT / "mise.toml").read_text())["vars"]["wasm_bindgen_version"]
+        packages = tomllib.loads((ROOT / "Cargo.lock").read_text())["package"]
+        locked = {package["version"] for package in packages if package["name"] == "wasm-bindgen"}
+        self.assertEqual(locked, {pinned}, "update `wasm_bindgen_version` in mise.toml with Cargo.lock")
+
     def test_graphics_inttypes_shim_yields_to_a_c_library(self):
         """Hosted bare-metal toolchains (ESP-IDF, NuttX, Zephyr) ship <inttypes.h>.
 

@@ -30,6 +30,8 @@ mod macrotask;
 mod manager;
 mod signal;
 mod task;
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+mod time_driver;
 
 use core::{future::poll_fn, task::Poll, time::Duration};
 use embassy_time::{Instant, Timer};
@@ -95,7 +97,11 @@ const THROTTLED_YIELD: Duration = Duration::from_millis(10);
 /// per call, which throttles anything that yields often (the Wasm runtime
 /// yields once per fuel quantum, so a timer made audio rendering choppy).
 /// Where the browser exposes no `MessageChannel`, it falls back to a zero-delay
-/// timer. On `wasm32-wasip1` it sleeps 10 ms: there is no host event loop to
+/// timer, and where there is no timer either (an `AudioWorkletGlobalScope`) to
+/// a microtask. The microtask fallback does not let the host run: a loop that
+/// only yields starves everything else in its scope, so such a scope must wait
+/// on something other than `yield_now` (and cannot use [`sleep`], which needs a
+/// timer). On `wasm32-wasip1` it sleeps 10 ms: there is no host event loop to
 /// give control to.
 pub async fn yield_now() {
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]

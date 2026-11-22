@@ -2373,6 +2373,8 @@ dependencies = [
  "embassy-executor",
  "embassy-futures",
  "embassy-time",
+ "embassy-time-driver",
+ "embassy-time-queue-utils",
  "embedded-i18n",
  "js-sys",
  "libc",

@@ -23,12 +23,16 @@ embassy-time = { workspace = true, features = ["std"] }
 # Bare-metal targets: the platform supplies the embassy-time driver.
 embassy-time = { workspace = true }
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[target.'cfg(all(target_arch = "wasm32", not(target_os = "unknown")))'.dependencies]
 embassy-time = { workspace = true, features = ["wasm"] }
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
-# `yield_now` is a macrotask (`MessageChannel`); the driver feature above already
-# links all three crates through `embassy-time/wasm`.
+# The browser time driver (`time_driver.rs`) replaces the one behind
+# `embassy-time/wasm`: that feature must stay off here, or both define the driver.
+embassy-time = { workspace = true, features = ["tick-hz-1_000_000"] }
+embassy-time-driver = "0.2"
+embassy-time-queue-utils = { version = "0.3", features = ["generic-queue-64"] }
+# `yield_now` is a macrotask (`MessageChannel`).
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 wasm-bindgen-futures = "0.4"

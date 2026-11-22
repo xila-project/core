@@ -643,7 +643,7 @@ async fn test_get_parent_invalid_task() {
     let manager = initialize();
 
     // Test with an invalid task identifier
-    let invalid_task = TaskIdentifier::new(99999);
+    let invalid_task = TaskIdentifier::new(TaskIdentifier::MAXIMUM);
     let result = manager.get_parent(invalid_task).await;
 
     assert!(result.is_err());
@@ -654,7 +654,7 @@ async fn test_get_children_invalid_task() {
     let manager = initialize();
 
     // Test with an invalid task identifier
-    let invalid_task = TaskIdentifier::new(99999);
+    let invalid_task = TaskIdentifier::new(TaskIdentifier::MAXIMUM);
     let result = manager.get_children(invalid_task).await;
 
     // get_children should return an empty vector for invalid task
@@ -883,7 +883,7 @@ async fn test_get_spawner_invalid_task() {
     let manager = initialize();
 
     // Test with an invalid task identifier
-    let invalid_task = TaskIdentifier::new(99999);
+    let invalid_task = TaskIdentifier::new(TaskIdentifier::MAXIMUM);
     let result = manager.get_spawner(invalid_task).await;
 
     assert!(result.is_err());

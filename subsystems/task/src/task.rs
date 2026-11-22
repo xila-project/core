@@ -200,7 +200,7 @@ mod tests {
         // This test verifies the conditional compilation works correctly
         #[cfg(target_pointer_width = "32")]
         {
-            assert_eq!(std::mem::size_of::<Task_identifier_inner_type>(), 2); // u16
+            assert_eq!(std::mem::size_of::<TaskIdentifierInner>(), 2); // u16
         }
 
         #[cfg(target_pointer_width = "64")]
