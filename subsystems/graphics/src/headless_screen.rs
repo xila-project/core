@@ -13,8 +13,11 @@ use file_system::{
 use shared::{AnyByLayout, align_slice_to};
 use std::sync::Mutex;
 
+/// Error returned when creating a [`HeadlessScreenDevice`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HeadlessError {
+    /// The requested width or height is non-positive, or the total pixel count
+    /// exceeds the supported snapshot limit.
     InvalidResolution,
 }
 
@@ -26,12 +29,17 @@ impl fmt::Display for HeadlessError {
     }
 }
 
+/// Character device implementing a headless display for host drivers and tests.
+///
+/// Tracks the active drawing area and validates flush buffer alignment and
+/// byte counts against the configured resolution without presenting pixels.
 pub struct HeadlessScreenDevice {
     resolution: Point,
     drawing_area: Mutex<Area>,
 }
 
 impl HeadlessScreenDevice {
+    /// Create a headless screen device for the given pixel `resolution`.
     pub fn new(resolution: Point) -> Result<Self, HeadlessError> {
         validate_resolution(resolution).map_err(|_| HeadlessError::InvalidResolution)?;
         Ok(Self {
@@ -44,7 +52,7 @@ impl HeadlessScreenDevice {
 impl DirectBaseOperations for HeadlessScreenDevice {
     fn read(
         &self,
-        _cx: &mut core::task::Context<'_>,
+        _context: &mut core::task::Context<'_>,
         _: &mut [u8],
         _: Size,
     ) -> core::task::Poll<file_system::Result<usize>> {
@@ -53,7 +61,7 @@ impl DirectBaseOperations for HeadlessScreenDevice {
 
     fn write(
         &self,
-        _cx: &mut core::task::Context<'_>,
+        _context: &mut core::task::Context<'_>,
         buffer: &[u8],
         _: Size,
     ) -> core::task::Poll<file_system::Result<usize>> {
@@ -79,7 +87,7 @@ impl DirectBaseOperations for HeadlessScreenDevice {
 
     fn control(
         &self,
-        _cx: &mut core::task::Context<'_>,
+        _context: &mut core::task::Context<'_>,
         command: ControlCommandIdentifier,
         input: &AnyByLayout,
         output: &mut AnyByLayout,
