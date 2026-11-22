@@ -113,9 +113,11 @@ impl<'a> SynchronousDirectory<'a> {
         if self.closed {
             return Ok(());
         }
-        let result = suspend_on(
-            virtual_file_system.close(&ItemStatic::Directory(self.directory), &mut self.context),
-        );
+        let result = suspend_on(virtual_file_system.close(
+            &ItemStatic::Directory(self.directory),
+            None,
+            &mut self.context,
+        ));
         // Marked only once the close has run, as for a file: a close that is cancelled
         // while it waits is closed again by the next owner, not skipped.
         self.closed = true;

@@ -9,7 +9,7 @@ use core::ptr;
 use exported_file_system::{BlockDevice, CharacterDevice, CreateFlags, Permission, Permissions};
 use file_system::{
     AccessFlags, AttributeFlags, Attributes, BaseOperations, Context, FileSystemOperations, Flags,
-    Kind, Path, PathOwned, StateFlags, Statistics,
+    Inode, Kind, Path, PathOwned, StateFlags, Statistics,
 };
 use synchronization::{blocking_mutex::raw::CriticalSectionRawMutex, rwlock::RwLock};
 use task::TaskIdentifier;
@@ -762,6 +762,7 @@ impl VirtualFileSystem {
                     flags,
                     context,
                 )
+                .with_device_inode(inode)
             }
             Kind::BlockDevice => {
                 let mut devices = self.block_device.write().await;
@@ -772,6 +773,7 @@ impl VirtualFileSystem {
                 device.reference_count += 1;
 
                 File::new(self, ItemStatic::BlockDevice(device.device), flags, context)
+                    .with_device_inode(inode)
             }
             Kind::Pipe => {
                 let mut pipes = self.pipes.write().await;
@@ -1964,7 +1966,15 @@ impl VirtualFileSystem {
         Statistics::from_attributes(&attributes).ok_or(IoErrorKind::InputOutput)
     }
 
-    pub(crate) async fn retain(&self, item: &ItemStatic) -> Result<()> {
+    /// Take one more reference on the entry `item` was opened on.
+    ///
+    /// `device_inode` is the inode a device opening took its reference on; it
+    /// is required for devices, because two mounted devices may share a pointer.
+    pub(crate) async fn retain(
+        &self,
+        item: &ItemStatic,
+        device_inode: Option<Inode>,
+    ) -> Result<()> {
         match item {
             ItemStatic::File(file_system) | ItemStatic::Directory(file_system) => {
                 self.file_systems
@@ -1982,35 +1992,23 @@ impl VirtualFileSystem {
                     .ok_or(IoErrorKind::BadDescriptor)?;
             }
             ItemStatic::Pipe(_) => {}
-            ItemStatic::BlockDevice(device) => {
+            ItemStatic::BlockDevice(_) => {
+                let inode = device_inode.ok_or(IoErrorKind::BadDescriptor)?;
                 self.block_device
                     .write()
                     .await
-                    .iter_mut()
-                    .find_map(|(_, d)| {
-                        if ptr::eq(d.device, *device) {
-                            d.reference_count += 1;
-                            Some(())
-                        } else {
-                            None
-                        }
-                    })
-                    .ok_or(IoErrorKind::BadDescriptor)?;
+                    .get_mut(&inode)
+                    .ok_or(IoErrorKind::BadDescriptor)?
+                    .reference_count += 1;
             }
-            ItemStatic::CharacterDevice(device) => {
+            ItemStatic::CharacterDevice(_) => {
+                let inode = device_inode.ok_or(IoErrorKind::BadDescriptor)?;
                 self.character_device
                     .write()
                     .await
-                    .iter_mut()
-                    .find_map(|(_, d)| {
-                        if ptr::eq(d.device, *device) {
-                            d.reference_count += 1;
-                            Some(())
-                        } else {
-                            None
-                        }
-                    })
-                    .ok_or(IoErrorKind::BadDescriptor)?;
+                    .get_mut(&inode)
+                    .ok_or(IoErrorKind::BadDescriptor)?
+                    .reference_count += 1;
             }
             _ => {
                 return Err(IoErrorKind::BadDescriptor);
@@ -2020,7 +2018,16 @@ impl VirtualFileSystem {
         Ok(())
     }
 
-    pub async fn close(&self, item: &ItemStatic, context: &mut Context) -> Result<()> {
+    /// Release the reference `item` took when it was opened, then close it.
+    ///
+    /// `device_inode` is the inode a device opening took its reference on; it
+    /// is required for devices, because two mounted devices may share a pointer.
+    pub async fn close(
+        &self,
+        item: &ItemStatic,
+        device_inode: Option<Inode>,
+        context: &mut Context,
+    ) -> Result<()> {
         match item {
             ItemStatic::File(file_system) | ItemStatic::Directory(file_system) => {
                 self.file_systems
@@ -2040,39 +2047,17 @@ impl VirtualFileSystem {
                     .ok_or(IoErrorKind::BadDescriptor)?;
             }
             ItemStatic::Pipe(_) => {}
-            ItemStatic::BlockDevice(device) => {
-                self.block_device
-                    .write()
-                    .await
-                    .iter_mut()
-                    .find_map(|(_, d)| {
-                        if ptr::eq(d.device, *device) {
-                            if d.reference_count > 0 {
-                                d.reference_count -= 1;
-                            }
-                            Some(())
-                        } else {
-                            None
-                        }
-                    })
-                    .ok_or(IoErrorKind::BadDescriptor)?;
+            ItemStatic::BlockDevice(_) => {
+                let inode = device_inode.ok_or(IoErrorKind::BadDescriptor)?;
+                let mut devices = self.block_device.write().await;
+                let device = devices.get_mut(&inode).ok_or(IoErrorKind::BadDescriptor)?;
+                device.reference_count = device.reference_count.saturating_sub(1);
             }
-            ItemStatic::CharacterDevice(device) => {
-                self.character_device
-                    .write()
-                    .await
-                    .iter_mut()
-                    .find_map(|(_, d)| {
-                        if ptr::eq(d.device, *device) {
-                            if d.reference_count > 0 {
-                                d.reference_count -= 1;
-                            }
-                            Some(())
-                        } else {
-                            None
-                        }
-                    })
-                    .ok_or(IoErrorKind::BadDescriptor)?;
+            ItemStatic::CharacterDevice(_) => {
+                let inode = device_inode.ok_or(IoErrorKind::BadDescriptor)?;
+                let mut devices = self.character_device.write().await;
+                let device = devices.get_mut(&inode).ok_or(IoErrorKind::BadDescriptor)?;
+                device.reference_count = device.reference_count.saturating_sub(1);
             }
             _ => {
                 return Err(IoErrorKind::BadDescriptor);

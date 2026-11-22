@@ -5,7 +5,8 @@ use alloc::{vec, vec::Vec};
 use exported_file_system::StateFlags;
 use exported_file_system::{ControlCommand, ControlCommandIdentifier, Permissions};
 use file_system::{
-    AccessFlags, AttributeFlags, Attributes, Context, Flags, Path, Position, Size, Statistics,
+    AccessFlags, AttributeFlags, Attributes, Context, Flags, Inode, Path, Position, Size,
+    Statistics,
 };
 use shared::AnyByLayout;
 use task::TaskIdentifier;
@@ -18,6 +19,10 @@ pub struct SynchronousFile<'a> {
     pub(crate) authority: Option<task::TaskAuthority<'static>>,
     virtual_file_system: &'a VirtualFileSystem,
     pub(crate) item: ItemStatic,
+    /// Inode of the device entry the opening took its reference on. Two
+    /// mounted devices can share a pointer (every value of a zero-sized type
+    /// does), so references are released by inode, not by pointer.
+    pub(crate) device_inode: Option<Inode>,
     cursor: crate::cursor::Cursor,
     pub(crate) flags: Flags,
     pub(crate) context: Context,
@@ -46,6 +51,7 @@ impl<'a> SynchronousFile<'a> {
             authority: None,
             virtual_file_system,
             item,
+            device_inode: None,
             cursor: crate::cursor::Cursor::new(position, flags.get_state()),
             flags: flags.set_status(StateFlags::empty()),
             context,
@@ -311,13 +317,17 @@ impl<'a> SynchronousFile<'a> {
             .as_base_operations()
             .ok_or(IoErrorKind::Unsupported)?
             .clone_context(&self.context)?;
-        suspend_on(self.virtual_file_system.retain(&self.item))?;
+        suspend_on(
+            self.virtual_file_system
+                .retain(&self.item, self.device_inode),
+        )?;
 
         Ok(Self {
             closed: false,
             authority: self.authority,
             virtual_file_system: self.virtual_file_system,
             item: self.item.clone(),
+            device_inode: self.device_inode,
             cursor: self.cursor.duplicate(),
             flags: self.flags,
             context,
@@ -502,7 +512,8 @@ impl<'a> SynchronousFile<'a> {
         if self.closed {
             return Ok(());
         }
-        let result = suspend_on(virtual_file_system.close(&self.item, &mut self.context));
+        let result =
+            suspend_on(virtual_file_system.close(&self.item, self.device_inode, &mut self.context));
         // Marked only once the close has run. A coroutine cancelled while the close waits
         // for the file system never gets here, and whoever owns the file next, which is the
         // native host closing what a cancelled process held, closes it instead of skipping it.

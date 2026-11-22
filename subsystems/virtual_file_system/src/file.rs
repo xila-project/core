@@ -3,7 +3,7 @@ use crate::{IoErrorKind, ItemStatic, Result, SynchronousFile, poll, suspend_on};
 use alloc::{vec, vec::Vec};
 use embedded_io_async::ErrorType;
 use exported_file_system::{AccessFlags, ControlCommand, CreateFlags, Permissions};
-use file_system::{Context, Flags, Path, Position, Size, StateFlags, Statistics};
+use file_system::{Context, Flags, Inode, Path, Position, Size, StateFlags, Statistics};
 use task::TaskIdentifier;
 use users::{GroupIdentifier, UserIdentifier};
 
@@ -67,6 +67,11 @@ impl<'a> File<'a> {
             flags,
             context,
         ))
+    }
+
+    pub(crate) const fn with_device_inode(mut self, inode: Inode) -> Self {
+        self.0.device_inode = Some(inode);
+        self
     }
 
     pub(crate) fn with_authority(mut self, authority: task::TaskAuthority<'static>) -> Self {
