@@ -46,7 +46,7 @@ unsafe extern "C" fn binding_callback_function(
 
     let buffer = unsafe { slice::from_raw_parts(data as *const u8, buffer_size) };
 
-    let user_data = unsafe { &mut *(lvgl::lv_display_get_user_data(display) as *mut UserData) };
+    let user_data = unsafe { &*(lvgl::lv_display_get_user_data(display) as *const UserData) };
 
     let device = &user_data.device;
 
@@ -118,13 +118,25 @@ impl Display {
         unsafe {
             lvgl::lv_display_set_buffers(
                 lvgl_display,
-                buffer_1.as_mut_ptr() as *mut c_void,
-                buffer_2
-                    .as_mut()
-                    .map_or(null_mut(), |buffer| buffer.as_mut_ptr() as *mut c_void),
+                buffer_1.as_mutable_pointer() as *mut c_void,
+                buffer_2.as_mut().map_or(null_mut(), |buffer| {
+                    buffer.as_mutable_pointer() as *mut c_void
+                }),
                 buffer_size_bytes,
                 lvgl::lv_display_render_mode_t_LV_DISPLAY_RENDER_MODE_PARTIAL,
             )
+        }
+
+        // LVGL checks the buffers, for example their alignment, and returns
+        // without registering them when a check fails: make sure it took
+        // them, rather than return a display that cannot render.
+        let registered = unsafe {
+            let active = lvgl::lv_display_get_buf_active(lvgl_display);
+            !active.is_null() && (*active).data == buffer_1.as_mutable_pointer() as *mut u8
+        };
+        if !registered {
+            unsafe { lvgl::lv_display_delete(lvgl_display) };
+            return Err(Error::FailedToRegister);
         }
 
         // Set the user data.
@@ -146,7 +158,7 @@ impl Display {
 
     pub fn check_for_resizing(&self) {
         let user_data =
-            unsafe { &mut *(lvgl::lv_display_get_user_data(self.display) as *mut UserData) };
+            unsafe { &*(lvgl::lv_display_get_user_data(self.display) as *const UserData) };
 
         let mut was_resize = false;
 
