@@ -69,6 +69,9 @@ impl Device for Wire {
 const SERVER: Ipv4Address = Ipv4Address::new(10, 0, 0, 1);
 const LEASED: Ipv4Address = Ipv4Address::new(10, 0, 0, 42);
 const DOMAIN_NAME_SERVER: Ipv4Address = Ipv4Address::new(10, 0, 0, 53);
+const RENEWED: Ipv4Address = Ipv4Address::new(10, 0, 0, 77);
+const RENEWED_ROUTER: Ipv4Address = Ipv4Address::new(10, 0, 0, 2);
+const RENEWED_DOMAIN_NAME_SERVER: Ipv4Address = Ipv4Address::new(10, 0, 0, 54);
 
 struct Scenario {
     clock: &'static time::Manager<'static>,
@@ -78,7 +81,10 @@ struct Scenario {
     server_device: Wire,
     server_sockets: SocketSet<'static>,
     server_handle: SocketHandle,
+    /// What the scripted server offers; change them before running the scenario.
+    offered_address: Ipv4Address,
     router: Option<Ipv4Address>,
+    dns_server: Ipv4Address,
 }
 
 impl Scenario {
@@ -129,7 +135,9 @@ impl Scenario {
             server_device,
             server_sockets,
             server_handle,
+            offered_address: LEASED,
             router: Some(SERVER),
+            dns_server: DOMAIN_NAME_SERVER,
         }
     }
 
@@ -155,7 +163,7 @@ impl Scenario {
                 secs: 0,
                 client_hardware_address: request.client_hardware_address,
                 client_ip: Ipv4Address::UNSPECIFIED,
-                your_ip: LEASED,
+                your_ip: self.offered_address,
                 server_ip: SERVER,
                 router: self.router,
                 subnet_mask: Some(Ipv4Address::new(255, 255, 255, 0)),
@@ -165,7 +173,7 @@ impl Scenario {
                 client_identifier: None,
                 server_identifier: Some(SERVER),
                 parameter_request_list: None,
-                dns_servers: Some([DOMAIN_NAME_SERVER].iter().copied().collect()),
+                dns_servers: Some([self.dns_server].iter().copied().collect()),
                 max_size: None,
                 lease_duration: Some(3600),
                 renew_duration: None,
@@ -199,6 +207,20 @@ impl Scenario {
 
     fn addresses(&self) -> Vec<IpCidr> {
         self.stack.interface.ip_addrs().to_vec()
+    }
+
+    /// Hand the stack a lease the way a configured DHCP event does, as when the
+    /// client renews with different parameters without being deconfigured.
+    fn apply_lease(&mut self, address: Ipv4Address, router: Option<Ipv4Address>, dns: Ipv4Address) {
+        self.stack
+            .apply_dhcp_lease(Ipv4Cidr::new(address, 24), router, vec![dns]);
+    }
+
+    /// The servers the DNS socket holds, read from its debug output because
+    /// smoltcp offers no getter.
+    fn dns_socket_servers(&mut self) -> String {
+        let handle = self.stack.dns_socket.unwrap();
+        std::format!("{:?}", self.stack.sockets.get::<dns::Socket>(handle))
     }
 
     fn default_routes(&self) -> Vec<smoltcp::iface::Route> {
@@ -345,4 +367,135 @@ fn enabling_dhcp_twice_keeps_one_socket() {
     scenario.stack.set_dhcp_state(false);
     assert!(!scenario.stack.get_dhcp_state());
     assert_eq!(scenario.stack.sockets.iter().count(), 0);
+}
+
+fn other_static_cidr() -> IpCidr {
+    IpCidr::new(IpAddress::Ipv4(Ipv4Address::new(172, 16, 0, 5)), 24)
+}
+
+fn add_static(scenario: &mut Scenario, cidr: IpCidr) {
+    scenario
+        .stack
+        .add_ip_address(crate::IpCidr::from_smoltcp(&cidr))
+        .unwrap();
+}
+
+#[test]
+fn a_renewed_lease_replaces_the_previous_one_without_accumulating() {
+    let mut scenario = Scenario::new();
+    add_static(&mut scenario, static_cidr());
+    scenario.stack.set_dhcp_state(true);
+    scenario.run();
+    assert_eq!(scenario.addresses(), vec![static_cidr(), leased_cidr()]);
+
+    // A different address, router and DNS server without a deconfiguration
+    // in between, while the static address takes one of the two slots.
+    scenario.apply_lease(RENEWED, Some(RENEWED_ROUTER), RENEWED_DOMAIN_NAME_SERVER);
+
+    assert_eq!(
+        scenario.addresses(),
+        vec![static_cidr(), IpCidr::new(IpAddress::Ipv4(RENEWED), 24)]
+    );
+    let routes = scenario.default_routes();
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].via_router, IpAddress::Ipv4(RENEWED_ROUTER));
+    assert_eq!(
+        scenario.stack.get_dns_servers(),
+        [IpAddress::Ipv4(RENEWED_DOMAIN_NAME_SERVER)]
+    );
+
+    scenario.stack.set_dhcp_state(false);
+    assert_eq!(scenario.addresses(), vec![static_cidr()]);
+    assert!(scenario.default_routes().is_empty());
+    assert!(scenario.stack.get_dns_servers().is_empty());
+}
+
+#[test]
+fn an_identical_renewal_changes_nothing() {
+    let mut scenario = Scenario::new();
+    scenario.stack.set_dhcp_state(true);
+    scenario.run();
+
+    scenario.apply_lease(LEASED, Some(SERVER), DOMAIN_NAME_SERVER);
+
+    assert_eq!(scenario.addresses(), vec![leased_cidr()]);
+    assert_eq!(scenario.default_routes().len(), 1);
+    assert_eq!(
+        scenario.stack.get_dns_servers(),
+        [IpAddress::Ipv4(DOMAIN_NAME_SERVER)]
+    );
+}
+
+#[test]
+fn a_lease_arriving_with_a_full_address_table_applies_nothing() {
+    let mut scenario = Scenario::new();
+    let statics = [static_cidr(), other_static_cidr()];
+    assert_eq!(statics.len(), IFACE_MAX_ADDR_COUNT);
+    for cidr in statics {
+        add_static(&mut scenario, cidr);
+    }
+
+    scenario.stack.set_dhcp_state(true);
+    scenario.run();
+
+    assert_eq!(scenario.addresses(), statics.to_vec());
+    assert!(scenario.default_routes().is_empty());
+    assert!(scenario.stack.get_dns_servers().is_empty());
+    assert!(scenario.stack.dhcp_lease.is_none());
+
+    // The same lease is applied once an address slot is free again.
+    scenario.stack.remove_ip_address(1);
+    scenario.apply_lease(LEASED, Some(SERVER), DOMAIN_NAME_SERVER);
+
+    assert_eq!(scenario.addresses(), vec![static_cidr(), leased_cidr()]);
+    assert_eq!(scenario.default_routes().len(), 1);
+    assert_eq!(
+        scenario.stack.get_dns_servers(),
+        [IpAddress::Ipv4(DOMAIN_NAME_SERVER)]
+    );
+    assert!(scenario.stack.dhcp_lease.is_some());
+}
+
+#[test]
+fn a_static_address_identical_to_the_leased_one_is_kept_and_not_claimed() {
+    let mut scenario = Scenario::new();
+    add_static(&mut scenario, static_cidr());
+    scenario.offered_address = Ipv4Address::new(192, 168, 50, 5);
+    scenario.stack.set_dhcp_state(true);
+    scenario.run();
+
+    // No duplicate address, but the route and DNS server still apply.
+    assert_eq!(scenario.addresses(), vec![static_cidr()]);
+    assert_eq!(scenario.default_routes().len(), 1);
+    assert_eq!(
+        scenario.stack.get_dns_servers(),
+        [IpAddress::Ipv4(DOMAIN_NAME_SERVER)]
+    );
+
+    scenario.stack.set_dhcp_state(false);
+
+    assert_eq!(scenario.addresses(), vec![static_cidr()]);
+    assert!(scenario.default_routes().is_empty());
+    assert!(scenario.stack.get_dns_servers().is_empty());
+}
+
+#[test]
+fn an_existing_dns_socket_follows_the_lease() {
+    let mut scenario = Scenario::new();
+    scenario.stack.get_dns_socket_handle();
+    assert!(!scenario.dns_socket_servers().contains("10.0.0.53"));
+
+    scenario.stack.set_dhcp_state(true);
+    scenario.run();
+    assert!(scenario.dns_socket_servers().contains("10.0.0.53"));
+
+    scenario.apply_lease(RENEWED, Some(RENEWED_ROUTER), RENEWED_DOMAIN_NAME_SERVER);
+    let servers = scenario.dns_socket_servers();
+    assert!(servers.contains("10.0.0.54"));
+    assert!(!servers.contains("10.0.0.53"));
+
+    scenario.stack.set_dhcp_state(false);
+    let servers = scenario.dns_socket_servers();
+    assert!(!servers.contains("10.0.0.54"));
+    assert!(!servers.contains("10.0.0.53"));
 }

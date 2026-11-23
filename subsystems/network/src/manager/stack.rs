@@ -341,12 +341,21 @@ impl StackInner {
         let wire_address = wire::IpCidr::Ipv4(address);
         if self.interface.ip_addrs().contains(&wire_address) {
             // Already configured statically: keep it and do not claim it.
-        } else if self.get_ip_addresses_count() >= IFACE_MAX_ADDR_COUNT {
-            log::warning!("DHCP address not applied, the address table is full");
         } else {
             self.interface.update_ip_addrs(|addresses| {
                 lease.added_address = addresses.push(wire_address).is_ok();
             });
+            if !lease.added_address {
+                // Without its address the lease is useless, and a route or DNS
+                // server of another subnet would only misroute traffic. The
+                // lease is not recorded, so an identical lease is applied again
+                // once an address slot is free.
+                log::warning!(
+                    "DHCP lease not applied, the address table is full, address {}",
+                    address.address()
+                );
+                return;
+            }
         }
 
         if let Some(router) = router
@@ -382,7 +391,7 @@ impl StackInner {
             address.address(),
             address.prefix_len(),
             router.map_or_else(|| String::from("none"), |router| alloc::format!("{router}")),
-            lease.dns_servers.len()
+            lease.added_dns_servers.len()
         );
 
         self.dhcp_lease = Some(lease);
@@ -418,11 +427,12 @@ impl StackInner {
         }
 
         if !lease.added_dns_servers.is_empty() {
-            self.dns_servers.retain(|server| match server {
-                wire::IpAddress::Ipv4(server) => !lease.added_dns_servers.contains(server),
-                #[allow(unreachable_patterns)]
-                _ => true,
-            });
+            for server in &lease.added_dns_servers {
+                let server = wire::IpAddress::Ipv4(*server);
+                if let Some(index) = self.dns_servers.iter().position(|s| *s == server) {
+                    self.dns_servers.remove(index);
+                }
+            }
             self.update_socket_dns_servers();
         }
 
