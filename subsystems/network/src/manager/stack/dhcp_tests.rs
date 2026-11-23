@@ -72,6 +72,7 @@ const DOMAIN_NAME_SERVER: Ipv4Address = Ipv4Address::new(10, 0, 0, 53);
 const RENEWED: Ipv4Address = Ipv4Address::new(10, 0, 0, 77);
 const RENEWED_ROUTER: Ipv4Address = Ipv4Address::new(10, 0, 0, 2);
 const RENEWED_DOMAIN_NAME_SERVER: Ipv4Address = Ipv4Address::new(10, 0, 0, 54);
+const DOMAIN_NAME_PORT: u16 = 53;
 
 struct Scenario {
     clock: &'static time::Manager<'static>,
@@ -81,6 +82,11 @@ struct Scenario {
     server_device: Wire,
     server_sockets: SocketSet<'static>,
     server_handle: SocketHandle,
+    /// Receives the queries the stack sends to the DNS servers it learned.
+    query_handle: SocketHandle,
+    /// The last request the client sent, so the server can repeat an
+    /// acknowledgement the way a renewal does.
+    last_request: Option<(u32, EthernetAddress)>,
     /// What the scripted server offers; change them before running the scenario.
     offered_address: Ipv4Address,
     router: Option<Ipv4Address>,
@@ -115,9 +121,11 @@ impl Scenario {
             now,
         );
         server.update_ip_addrs(|addresses| {
-            addresses
-                .push(IpCidr::new(IpAddress::Ipv4(SERVER), 24))
-                .unwrap();
+            for address in [SERVER, RENEWED_DOMAIN_NAME_SERVER] {
+                addresses
+                    .push(IpCidr::new(IpAddress::Ipv4(address), 24))
+                    .unwrap();
+            }
         });
         let mut server_sockets = SocketSet::new(vec![]);
         let mut socket = udp::Socket::new(
@@ -126,6 +134,12 @@ impl Scenario {
         );
         socket.bind(67).unwrap();
         let server_handle = server_sockets.add(socket);
+        let mut query_socket = udp::Socket::new(
+            udp::PacketBuffer::new(vec![PacketMetadata::EMPTY; 4], vec![0; 2048]),
+            udp::PacketBuffer::new(vec![PacketMetadata::EMPTY; 4], vec![0; 2048]),
+        );
+        query_socket.bind(DOMAIN_NAME_PORT).unwrap();
+        let query_handle = server_sockets.add(query_socket);
 
         Self {
             clock,
@@ -135,62 +149,95 @@ impl Scenario {
             server_device,
             server_sockets,
             server_handle,
+            query_handle,
+            last_request: None,
             offered_address: LEASED,
             router: Some(SERVER),
             dns_server: DOMAIN_NAME_SERVER,
         }
     }
 
+    fn reply(
+        &self,
+        message_type: DhcpMessageType,
+        transaction_id: u32,
+        hardware_address: EthernetAddress,
+    ) -> Vec<u8> {
+        let reply = DhcpRepr {
+            message_type,
+            transaction_id,
+            secs: 0,
+            client_hardware_address: hardware_address,
+            client_ip: Ipv4Address::UNSPECIFIED,
+            your_ip: self.offered_address,
+            server_ip: SERVER,
+            router: self.router,
+            subnet_mask: Some(Ipv4Address::new(255, 255, 255, 0)),
+            relay_agent_ip: Ipv4Address::UNSPECIFIED,
+            broadcast: false,
+            requested_ip: None,
+            client_identifier: None,
+            server_identifier: Some(SERVER),
+            parameter_request_list: None,
+            dns_servers: Some([self.dns_server].iter().copied().collect()),
+            max_size: None,
+            lease_duration: Some(3600),
+            renew_duration: None,
+            rebind_duration: None,
+            additional_options: &[],
+        };
+        let mut buffer = vec![0; reply.buffer_len()];
+        reply
+            .emit(&mut DhcpPacket::new_unchecked(&mut buffer[..]))
+            .unwrap();
+        buffer
+    }
+
+    fn send_reply(&mut self, buffer: &[u8]) {
+        let mut metadata =
+            udp::UdpMetadata::from(IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::BROADCAST), 68));
+        metadata.local_address = Some(IpAddress::Ipv4(SERVER));
+        self.server_sockets
+            .get_mut::<udp::Socket>(self.server_handle)
+            .send_slice(buffer, metadata)
+            .unwrap();
+    }
+
     /// Answer every DISCOVER with an OFFER and every REQUEST with an ACK.
     fn serve(&mut self) {
         loop {
-            let socket = self
-                .server_sockets
-                .get_mut::<udp::Socket>(self.server_handle);
-            let Ok((payload, _)) = socket.recv() else {
-                return;
+            let (message_type, transaction_id, hardware_address) = {
+                let socket = self
+                    .server_sockets
+                    .get_mut::<udp::Socket>(self.server_handle);
+                let Ok((payload, _)) = socket.recv() else {
+                    return;
+                };
+                let packet = DhcpPacket::new_checked(payload).unwrap();
+                let request = DhcpRepr::parse(&packet).unwrap();
+                let message_type = match request.message_type {
+                    DhcpMessageType::Discover => DhcpMessageType::Offer,
+                    DhcpMessageType::Request => DhcpMessageType::Ack,
+                    _ => continue,
+                };
+                (
+                    message_type,
+                    request.transaction_id,
+                    request.client_hardware_address,
+                )
             };
-            let packet = DhcpPacket::new_checked(payload).unwrap();
-            let request = DhcpRepr::parse(&packet).unwrap();
-            let message_type = match request.message_type {
-                DhcpMessageType::Discover => DhcpMessageType::Offer,
-                DhcpMessageType::Request => DhcpMessageType::Ack,
-                _ => continue,
-            };
-            let reply = DhcpRepr {
-                message_type,
-                transaction_id: request.transaction_id,
-                secs: 0,
-                client_hardware_address: request.client_hardware_address,
-                client_ip: Ipv4Address::UNSPECIFIED,
-                your_ip: self.offered_address,
-                server_ip: SERVER,
-                router: self.router,
-                subnet_mask: Some(Ipv4Address::new(255, 255, 255, 0)),
-                relay_agent_ip: Ipv4Address::UNSPECIFIED,
-                broadcast: false,
-                requested_ip: None,
-                client_identifier: None,
-                server_identifier: Some(SERVER),
-                parameter_request_list: None,
-                dns_servers: Some([self.dns_server].iter().copied().collect()),
-                max_size: None,
-                lease_duration: Some(3600),
-                renew_duration: None,
-                rebind_duration: None,
-                additional_options: &[],
-            };
-            let mut buffer = vec![0; reply.buffer_len()];
-            reply
-                .emit(&mut DhcpPacket::new_unchecked(&mut buffer[..]))
-                .unwrap();
-            let mut metadata = udp::UdpMetadata::from(IpEndpoint::new(
-                IpAddress::Ipv4(Ipv4Address::BROADCAST),
-                68,
-            ));
-            metadata.local_address = Some(IpAddress::Ipv4(SERVER));
-            socket.send_slice(&buffer, metadata).unwrap();
+            self.last_request = Some((transaction_id, hardware_address));
+            let buffer = self.reply(message_type, transaction_id, hardware_address);
+            self.send_reply(&buffer);
         }
+    }
+
+    /// Acknowledge the client's last request again with the offered values as
+    /// they are now, which is what a renewal looks like to the client.
+    fn renew(&mut self) {
+        let (transaction_id, hardware_address) = self.last_request.unwrap();
+        let buffer = self.reply(DhcpMessageType::Ack, transaction_id, hardware_address);
+        self.send_reply(&buffer);
     }
 
     fn run(&mut self) {
@@ -216,11 +263,16 @@ impl Scenario {
             .apply_dhcp_lease(Ipv4Cidr::new(address, 24), router, vec![dns]);
     }
 
-    /// The servers the DNS socket holds, read from its debug output because
-    /// smoltcp offers no getter.
-    fn dns_socket_servers(&mut self) -> String {
-        let handle = self.stack.dns_socket.unwrap();
-        std::format!("{:?}", self.stack.sockets.get::<dns::Socket>(handle))
+    /// The destinations of the queries the server received since the last call.
+    fn received_query_destinations(&mut self) -> Vec<IpAddress> {
+        let socket = self
+            .server_sockets
+            .get_mut::<udp::Socket>(self.query_handle);
+        let mut destinations = Vec::new();
+        while let Ok((_, metadata)) = socket.recv() {
+            destinations.push(metadata.local_address.unwrap());
+        }
+        destinations
     }
 
     fn default_routes(&self) -> Vec<smoltcp::iface::Route> {
@@ -441,11 +493,17 @@ fn a_lease_arriving_with_a_full_address_table_applies_nothing() {
     assert_eq!(scenario.addresses(), statics.to_vec());
     assert!(scenario.default_routes().is_empty());
     assert!(scenario.stack.get_dns_servers().is_empty());
-    assert!(scenario.stack.dhcp_lease.is_none());
+    assert!(scenario.stack.dhcp_lease.as_ref().unwrap().pending);
 
-    // The same lease is applied once an address slot is free again.
+    // Polling again with no free slot changes nothing.
+    scenario.run();
+    assert_eq!(scenario.addresses(), statics.to_vec());
+    assert!(scenario.default_routes().is_empty());
+
+    // Once a slot is free the lease is installed by the next poll. The DHCP
+    // client sends no event for it, as it reports a lease only when it changes.
     scenario.stack.remove_ip_address(1);
-    scenario.apply_lease(LEASED, Some(SERVER), DOMAIN_NAME_SERVER);
+    scenario.run();
 
     assert_eq!(scenario.addresses(), vec![static_cidr(), leased_cidr()]);
     assert_eq!(scenario.default_routes().len(), 1);
@@ -453,7 +511,165 @@ fn a_lease_arriving_with_a_full_address_table_applies_nothing() {
         scenario.stack.get_dns_servers(),
         [IpAddress::Ipv4(DOMAIN_NAME_SERVER)]
     );
-    assert!(scenario.stack.dhcp_lease.is_some());
+    assert!(!scenario.stack.dhcp_lease.as_ref().unwrap().pending);
+}
+
+#[test]
+fn a_pending_lease_is_dropped_when_dhcp_is_disabled() {
+    let mut scenario = Scenario::new();
+    add_static(&mut scenario, static_cidr());
+    add_static(&mut scenario, other_static_cidr());
+    scenario.stack.set_dhcp_state(true);
+    scenario.run();
+    assert!(scenario.stack.dhcp_lease.as_ref().unwrap().pending);
+
+    scenario.stack.set_dhcp_state(false);
+    scenario.stack.remove_ip_address(1);
+    scenario.run();
+
+    assert!(scenario.stack.dhcp_lease.is_none());
+    assert_eq!(scenario.addresses(), vec![static_cidr()]);
+}
+
+#[test]
+fn a_renewal_with_new_parameters_is_applied_through_the_dhcp_socket() {
+    let mut scenario = Scenario::new();
+    add_static(&mut scenario, static_cidr());
+    scenario.stack.set_dhcp_state(true);
+    scenario.run();
+    assert_eq!(scenario.addresses(), vec![static_cidr(), leased_cidr()]);
+
+    scenario.offered_address = RENEWED;
+    scenario.router = Some(RENEWED_ROUTER);
+    scenario.dns_server = RENEWED_DOMAIN_NAME_SERVER;
+    scenario.renew();
+    scenario.run();
+
+    assert_eq!(
+        scenario.addresses(),
+        vec![static_cidr(), IpCidr::new(IpAddress::Ipv4(RENEWED), 24)]
+    );
+    let routes = scenario.default_routes();
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].via_router, IpAddress::Ipv4(RENEWED_ROUTER));
+    assert_eq!(
+        scenario.stack.get_dns_servers(),
+        [IpAddress::Ipv4(RENEWED_DOMAIN_NAME_SERVER)]
+    );
+}
+
+#[test]
+fn an_identical_renewal_through_the_dhcp_socket_changes_nothing() {
+    let mut scenario = Scenario::new();
+    scenario.stack.set_dhcp_state(true);
+    scenario.run();
+
+    scenario.renew();
+    scenario.run();
+
+    assert_eq!(scenario.addresses(), vec![leased_cidr()]);
+    assert_eq!(scenario.default_routes().len(), 1);
+    assert_eq!(
+        scenario.stack.get_dns_servers(),
+        [IpAddress::Ipv4(DOMAIN_NAME_SERVER)]
+    );
+}
+
+#[test]
+fn removing_a_lease_entry_by_index_ends_the_lease_ownership_of_it() {
+    let mut scenario = Scenario::new();
+    scenario.stack.set_dhcp_state(true);
+    scenario.run();
+
+    // The caller removes each entry the lease added and adds the same one
+    // statically; disabling DHCP must keep those.
+    scenario.stack.remove_dns_server(0).unwrap();
+    scenario
+        .stack
+        .add_dns_server(crate::IpAddress::from_smoltcp(&IpAddress::Ipv4(
+            DOMAIN_NAME_SERVER,
+        )))
+        .unwrap();
+    scenario.stack.remove_route(0).unwrap();
+    scenario
+        .stack
+        .add_route(crate::Route::new_default_ipv4(SERVER.octets()))
+        .unwrap();
+    scenario.stack.remove_ip_address(0).unwrap();
+    add_static(&mut scenario, leased_cidr());
+
+    scenario.stack.set_dhcp_state(false);
+
+    assert_eq!(scenario.addresses(), vec![leased_cidr()]);
+    let routes = scenario.default_routes();
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].via_router, IpAddress::Ipv4(SERVER));
+    assert_eq!(
+        scenario.stack.get_dns_servers(),
+        [IpAddress::Ipv4(DOMAIN_NAME_SERVER)]
+    );
+}
+
+#[test]
+fn a_removed_lease_entry_is_not_removed_again_when_the_lease_ends() {
+    let mut scenario = Scenario::new();
+    scenario.stack.set_dhcp_state(true);
+    scenario.run();
+    scenario.stack.remove_dns_server(0).unwrap();
+    scenario.stack.remove_ip_address(0).unwrap();
+
+    // The same values arrive from elsewhere without going through the stack
+    // methods; the lease no longer owns them, so it must not remove them.
+    scenario
+        .stack
+        .interface
+        .update_ip_addrs(|addresses| addresses.push(leased_cidr()).unwrap());
+    scenario
+        .stack
+        .dns_servers
+        .push(IpAddress::Ipv4(DOMAIN_NAME_SERVER));
+
+    scenario.stack.set_dhcp_state(false);
+
+    assert_eq!(scenario.addresses(), vec![leased_cidr()]);
+    assert_eq!(
+        scenario.stack.get_dns_servers(),
+        [IpAddress::Ipv4(DOMAIN_NAME_SERVER)]
+    );
+    assert!(scenario.default_routes().is_empty());
+}
+
+#[test]
+fn adding_a_static_entry_equal_to_a_lease_entry_takes_it_over() {
+    let mut scenario = Scenario::new();
+    scenario.stack.set_dhcp_state(true);
+    scenario.run();
+
+    add_static(&mut scenario, leased_cidr());
+    scenario
+        .stack
+        .add_dns_server(crate::IpAddress::from_smoltcp(&IpAddress::Ipv4(
+            DOMAIN_NAME_SERVER,
+        )))
+        .unwrap();
+    scenario
+        .stack
+        .add_route(crate::Route::new_default_ipv4(SERVER.octets()))
+        .unwrap();
+
+    // No duplicates are added.
+    assert_eq!(scenario.addresses(), vec![leased_cidr()]);
+    assert_eq!(scenario.stack.get_dns_servers().len(), 1);
+    assert_eq!(scenario.default_routes().len(), 1);
+
+    scenario.stack.set_dhcp_state(false);
+
+    assert_eq!(scenario.addresses(), vec![leased_cidr()]);
+    assert_eq!(scenario.default_routes().len(), 1);
+    assert_eq!(
+        scenario.stack.get_dns_servers(),
+        [IpAddress::Ipv4(DOMAIN_NAME_SERVER)]
+    );
 }
 
 #[test]
@@ -480,22 +696,53 @@ fn a_static_address_identical_to_the_leased_one_is_kept_and_not_claimed() {
 }
 
 #[test]
-fn an_existing_dns_socket_follows_the_lease() {
+fn an_existing_dns_socket_sends_queries_to_the_leased_server() {
     let mut scenario = Scenario::new();
+    scenario.dns_server = SERVER;
     scenario.stack.get_dns_socket_handle();
-    assert!(!scenario.dns_socket_servers().contains("10.0.0.53"));
 
     scenario.stack.set_dhcp_state(true);
     scenario.run();
-    assert!(scenario.dns_socket_servers().contains("10.0.0.53"));
+    scenario
+        .stack
+        .start_dns_query("example.org", DnsQueryKind::A)
+        .unwrap();
+    scenario.run();
 
-    scenario.apply_lease(RENEWED, Some(RENEWED_ROUTER), RENEWED_DOMAIN_NAME_SERVER);
-    let servers = scenario.dns_socket_servers();
-    assert!(servers.contains("10.0.0.54"));
-    assert!(!servers.contains("10.0.0.53"));
+    assert_eq!(
+        scenario.received_query_destinations(),
+        vec![IpAddress::Ipv4(SERVER)]
+    );
+}
 
+#[test]
+fn queries_follow_a_renewed_lease_and_stop_after_it_is_removed() {
+    let mut scenario = Scenario::new();
+    scenario.dns_server = SERVER;
+    scenario.stack.get_dns_socket_handle();
+    scenario.stack.set_dhcp_state(true);
+    scenario.run();
+
+    // The renewal arrives through the DHCP socket and replaces the server.
+    scenario.offered_address = RENEWED;
+    scenario.dns_server = RENEWED_DOMAIN_NAME_SERVER;
+    scenario.renew();
+    scenario.run();
+    scenario
+        .stack
+        .start_dns_query("example.org", DnsQueryKind::A)
+        .unwrap();
+    scenario.run();
+
+    let destinations = scenario.received_query_destinations();
+    assert!(!destinations.is_empty());
+    assert!(
+        destinations
+            .iter()
+            .all(|destination| *destination == IpAddress::Ipv4(RENEWED_DOMAIN_NAME_SERVER))
+    );
+
+    // Without the lease the resolver has no server left to ask.
     scenario.stack.set_dhcp_state(false);
-    let servers = scenario.dns_socket_servers();
-    assert!(!servers.contains("10.0.0.54"));
-    assert!(!servers.contains("10.0.0.53"));
+    assert!(scenario.stack.get_dns_servers().is_empty());
 }
