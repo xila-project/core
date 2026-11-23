@@ -2,9 +2,11 @@
 //!
 //! Code logs through the `log` crate's front end, re-exported here as
 //! [`error!`], [`warning!`], [`information!`], [`debug!`] and [`trace!`]; one
-//! [`LoggerTrait`] installed with [`initialize`] receives every message,
-//! including those of third-party crates that use `log` directly. Outside
-//! Core, use the re-export `xila::log`.
+//! [`LoggerTrait`] installed with [`initialize`] receives every message whose
+//! level its [`LoggerTrait::enabled`] accepts, including those of third-party
+//! crates that use `log` directly. The macros evaluate their arguments before
+//! that check, so keep expensive work out of messages that are often filtered
+//! out. Outside Core, use the re-export `xila::log`.
 //!
 //! # Levels
 //!
@@ -79,10 +81,16 @@ pub enum Level {
 #[allow(non_upper_case_globals)]
 impl Level {
     /// Former name of [`Level::Warning`], kept for one release.
+    ///
+    /// It works in expressions and patterns, but as an associated constant it
+    /// cannot be imported: `use log::Level::Warn` no longer compiles.
     #[deprecated(note = "use `Level::Warning`")]
     pub const Warn: Level = Level::Warning;
 
     /// Former name of [`Level::Information`], kept for one release.
+    ///
+    /// It works in expressions and patterns, but as an associated constant it
+    /// cannot be imported: `use log::Level::Info` no longer compiles.
     #[deprecated(note = "use `Level::Information`")]
     pub const Info: Level = Level::Information;
 }
