@@ -34,13 +34,13 @@ impl Route {
 
     pub const fn from_smoltcp(route: smoltcp::iface::Route) -> Self {
         let preferred_until = if let Some(dur) = route.preferred_until {
-            Some(Duration::from_micros(dur.micros() as u64))
+            Some(Duration::from_micros(dur.total_micros() as u64))
         } else {
             None
         };
 
         let expires_at = if let Some(dur) = route.expires_at {
-            Some(Duration::from_micros(dur.micros() as u64))
+            Some(Duration::from_micros(dur.total_micros() as u64))
         } else {
             None
         };
@@ -68,5 +68,20 @@ impl Route {
             preferred_until,
             expires_at,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Route;
+    use core::time::Duration;
+
+    #[test]
+    fn smoltcp_conversion_keeps_whole_seconds() {
+        let mut route = Route::new_default_ipv4([192, 0, 2, 1]);
+        route.preferred_until = Some(Duration::from_millis(30_500));
+        route.expires_at = Some(Duration::from_secs(60));
+
+        assert!(Route::from_smoltcp(route.into_smoltcp()) == route);
     }
 }
