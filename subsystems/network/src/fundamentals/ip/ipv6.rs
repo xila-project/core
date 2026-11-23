@@ -59,27 +59,16 @@ impl TryFrom<&str> for Ipv6 {
 }
 
 impl Display for Ipv6 {
+    /// Writes the eight 16-bit groups in hexadecimal, without `::`
+    /// compression, so that [`Ipv6::try_from`] reads the text back.
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(
-            f,
-            "{:x}{:x}:{:x}{:x}:{:x}{:x}:{:x}{:x}:{:x}{:x}:{:x}{:x}:{:x}{:x}:{:x}{:x}",
-            self.0[0],
-            self.0[1],
-            self.0[2],
-            self.0[3],
-            self.0[4],
-            self.0[5],
-            self.0[6],
-            self.0[7],
-            self.0[8],
-            self.0[9],
-            self.0[10],
-            self.0[11],
-            self.0[12],
-            self.0[13],
-            self.0[14],
-            self.0[15]
-        )
+        for (index, group) in self.0.chunks_exact(2).enumerate() {
+            if index > 0 {
+                f.write_str(":")?;
+            }
+            write!(f, "{:x}", u16::from_be_bytes([group[0], group[1]]))?;
+        }
+        Ok(())
     }
 }
 
@@ -93,7 +82,15 @@ mod tests {
     fn test_ipv6_display() {
         let ip = Ipv6::new([0; 8]);
 
-        assert_eq!(ip.to_string(), "00:00:00:00:00:00:00:00");
+        assert_eq!(ip.to_string(), "0:0:0:0:0:0:0:0");
+    }
+
+    #[test]
+    fn display_keeps_the_zeros_inside_each_group() {
+        let ip = Ipv6::new([0x2606, 0x4700, 0x10, 0, 0, 0, 0x6814, 0x179a]);
+
+        assert_eq!(ip.to_string(), "2606:4700:10:0:0:0:6814:179a");
+        assert_eq!(Ipv6::try_from(ip.to_string().as_str()).unwrap(), ip);
     }
 
     #[test]
