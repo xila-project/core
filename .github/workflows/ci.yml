@@ -41,7 +41,7 @@ jobs:
           path: .application-src
           persist-credentials: false
       - name: "Setup | Activate mise"
-        uses: jdx/mise-action@v5.2.8
+        uses: jdx/mise-action@v5.2.10
       - name: "Setup | Locked npm dependencies"
         run: mise run deps:npm
       - name: "Lint | Rust formatting"
@@ -65,7 +65,7 @@ jobs:
       - name: "Setup | Checkout sources"
         uses: actions/checkout@v7
       - name: "Setup | Activate mise"
-        uses: jdx/mise-action@v5.2.8
+        uses: jdx/mise-action@v5.2.10
       - name: "Setup | Native packages"
         timeout-minutes: 15
         run: mise run ci:packages-linker
@@ -181,7 +181,7 @@ jobs:
         with:
           persist-credentials: false
       - name: "Setup | Activate mise"
-        uses: jdx/mise-action@v5.2.8
+        uses: jdx/mise-action@v5.2.10
       - name: "Setup | Xtensa Rust, GCC and libclang"
         run: mise run ci:toolchain-xtensa
       - name: "Setup | Locked npm dependencies"
@@ -376,7 +376,7 @@ jobs:
         with:
           persist-credentials: false
       - name: "Setup | Activate mise"
-        uses: jdx/mise-action@v5.2.8
+        uses: jdx/mise-action@v5.2.10
       - name: "Setup | SDK build packages"
         # The Arm SDK runs the bounded package helper twice (common, then Arm
         # packages), so leave room for both retry budgets before the job timeout.
