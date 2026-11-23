@@ -178,10 +178,13 @@ and `free-observer`, without `heap`.
 
 ### Updating consumers
 
-Consumers with a direct sys dependency must use `package = "lvgl-rust-sys"`
-with the same git source and revision as Core's `lvgl_rust_sys` dependency.
-The old package `lvgl_rust_sys` cannot coexist with the new one: both link
-LVGL. Keep the dependency key to preserve `use lvgl_rust_sys` statements.
+Consumers with a direct sys dependency must take it from crates.io, as Core does:
+`lvgl_rust_sys = { package = "lvgl-rust-sys", version = "0.3.1" }` from
+crates.io. Cargo allows only one package with `links = "lvgl_rust_sys"` in a
+graph, so a consumer cannot keep a Git copy of the bindings once it uses a Core
+that takes them from crates.io. Switch the direct dependency in the same change
+that relocks Core. Keep the dependency key to preserve `use lvgl_rust_sys`
+statements.
 Their own `lv_conf.h` must enable `LV_USE_OBJ_ID=1`, `LV_OBJ_ID_AUTO_ASSIGN=1`, and
 `LV_USE_OBJ_ID_BUILTIN=0`,
 or builds must set `DEP_LV_CONFIG_PATH` to Core's `include` directory. There
