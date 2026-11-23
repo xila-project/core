@@ -51,7 +51,7 @@ impl Duration {
     }
 
     pub const fn from_smoltcp(value: smoltcp::time::Duration) -> Self {
-        Self::from_microseconds(value.micros())
+        Self::from_microseconds(value.total_micros())
     }
 }
 
@@ -76,5 +76,18 @@ impl From<core::time::Duration> for Duration {
 impl From<Duration> for core::time::Duration {
     fn from(value: Duration) -> Self {
         core::time::Duration::from_micros(value.as_microseconds())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Duration;
+
+    #[test]
+    fn smoltcp_conversion_keeps_whole_seconds() {
+        let value = smoltcp::time::Duration::from_micros(90_250_000);
+
+        assert_eq!(Duration::from_smoltcp(value).as_microseconds(), 90_250_000);
+        assert_eq!(Duration::from_smoltcp(value).into_smoltcp(), value);
     }
 }

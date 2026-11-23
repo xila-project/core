@@ -251,8 +251,16 @@ impl StackInner {
                 owned.cidr == route.cidr && owned.via_router == route.via_router
             })
         {
-            // The route is already installed: it now belongs to the caller.
+            // The route is already installed: it now belongs to the caller,
+            // with the caller's lifetimes replacing the lease's.
             lease.owns_route = false;
+            self.interface.routes_mut().update(|v| {
+                if let Some(installed) = v.iter_mut().find(|installed| {
+                    installed.cidr == route.cidr && installed.via_router == route.via_router
+                }) {
+                    *installed = route;
+                }
+            });
             return Ok(());
         }
 

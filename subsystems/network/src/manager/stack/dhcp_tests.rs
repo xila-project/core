@@ -673,6 +673,21 @@ fn adding_a_static_entry_equal_to_a_lease_entry_takes_it_over() {
 }
 
 #[test]
+fn taking_over_the_lease_route_keeps_the_callers_lifetimes() {
+    let mut scenario = Scenario::new();
+    scenario.stack.set_dhcp_state(true);
+    scenario.run();
+
+    let mut route = crate::Route::new_default_ipv4(SERVER.octets());
+    route.preferred_until = Some(core::time::Duration::from_secs(30));
+    route.expires_at = Some(core::time::Duration::from_secs(60));
+    scenario.stack.add_route(route.clone()).unwrap();
+
+    assert_eq!(scenario.stack.get_route_count(), 1);
+    assert!(scenario.stack.get_route(0) == Some(route));
+}
+
+#[test]
 fn a_static_address_identical_to_the_leased_one_is_kept_and_not_claimed() {
     let mut scenario = Scenario::new();
     add_static(&mut scenario, static_cidr());
