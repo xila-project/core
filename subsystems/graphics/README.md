@@ -77,7 +77,7 @@ Xila uses the shadcn theme that `lvgl-rust-sys` ships, and changes two things on
 - Its state transition is also added for the pressed state. On an object that has no pressed look, such as a window, a card or a text area, every press and release then redraws the object. Xila removes that copy; the transition for the default state already covers both directions.
 - Its style for pressed keys redraws the whole on-screen keyboard twice for each key. Xila removes it and colors the pressed key while it is drawn.
 
-`Manager::set_rendering_mode(RenderingMode::Light)` further reduces what the theme costs on a slow display bus or processor. It is off by default; a platform selects it once, before it creates the interface. In light mode:
+`Manager::set_rendering_mode(RenderingMode::Light)` further reduces what the theme costs on a slow display bus or processor. It is off by default; a platform selects it once, before it creates the interface. Selecting `RenderingMode::Default` again gives every object the theme's look back. In light mode:
 
 - State changes show in one frame instead of a 150 ms transition.
 - The scrolls that LVGL animates take one frame: scrolling to a position or an object, settling on a snap point, returning from an overscroll. Scrolling under the finger stays, and its momentum covers the same distance in half the frames on a display that renders slower than LVGL's animation timer runs.

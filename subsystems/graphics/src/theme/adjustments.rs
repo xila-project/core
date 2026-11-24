@@ -200,13 +200,12 @@ fn kind_of(class: *const lvgl::lv_obj_class_t) -> Option<Kind> {
         .map(|(_, kind)| *kind)
 }
 
-/// Adjusts `object` as an instance of `class`. Returns whether the class is one
-/// the theme styles.
+/// Adjusts `object` as an instance of `class`.
 ///
 /// Safe to repeat on an object: styles and callbacks are added once.
-unsafe fn adjust(object: *mut lvgl::lv_obj_t, class: *const lvgl::lv_obj_class_t) -> bool {
+unsafe fn adjust(object: *mut lvgl::lv_obj_t, class: *const lvgl::lv_obj_class_t) {
     let Some(kind) = kind_of(class) else {
-        return false;
+        return;
     };
     let light = LIGHT.load(Ordering::Relaxed);
 
@@ -234,7 +233,7 @@ unsafe fn adjust(object: *mut lvgl::lv_obj_t, class: *const lvgl::lv_obj_class_t
         }
 
         if !light {
-            return true;
+            return;
         }
 
         match kind {
@@ -257,21 +256,81 @@ unsafe fn adjust(object: *mut lvgl::lv_obj_t, class: *const lvgl::lv_obj_class_t
             adjust_scrolling(object);
         }
     }
-    true
 }
 
 /// Light rendering for an object that may scroll.
 unsafe fn adjust_scrolling(object: *mut lvgl::lv_obj_t) {
+    if unsafe { find_event_callback(object, finish_scroll_at_once) }.is_some() {
+        return;
+    }
     unsafe {
         // The theme makes the scrollbar more opaque during a scroll. LVGL
         // redraws the whole object when a style for a state comes or goes, so
         // that costs a full redraw of the scrolled object when the scroll ends.
-        lvgl::lv_obj_remove_theme(object, SCROLLBAR | SCROLLED);
-        add_event_callback(
+        // The callback keeps the theme's style, which `restore_existing` gives
+        // back.
+        let style = find_theme_style(object, SCROLLBAR | SCROLLED);
+        if !style.is_null() {
+            lvgl::lv_obj_remove_style(object, style, SCROLLBAR | SCROLLED);
+        }
+        lvgl::lv_obj_add_event_cb(
             object,
-            finish_scroll_at_once,
+            Some(finish_scroll_at_once),
             lvgl::lv_event_code_t_LV_EVENT_SCROLL_BEGIN,
+            style.cast_mut().cast(),
         );
+    }
+}
+
+/// The style that the theme gave `object` for `selector`, or null.
+unsafe fn find_theme_style(
+    object: *mut lvgl::lv_obj_t,
+    selector: lvgl::lv_style_selector_t,
+) -> *const lvgl::lv_style_t {
+    unsafe {
+        let count = (*object).style_cnt() as usize;
+        if count == 0 {
+            return ptr::null();
+        }
+        core::slice::from_raw_parts((*object).styles, count)
+            .iter()
+            .find(|style| style.is_theme() != 0 && style.selector() == selector)
+            .map_or(ptr::null(), |style| style.style)
+    }
+}
+
+/// Adds back a style that [`find_theme_style`] found, as the theme's own.
+unsafe fn restore_theme_style(
+    object: *mut lvgl::lv_obj_t,
+    style: *const lvgl::lv_style_t,
+    selector: lvgl::lv_style_selector_t,
+) {
+    unsafe {
+        lvgl::lv_obj_add_style(object, style, selector);
+        // As LVGL marks the styles that a theme adds, so that removing the
+        // theme's styles, as `adjust_scrolling` does again, finds it.
+        let count = (*object).style_cnt() as usize;
+        if let Some(entry) = core::slice::from_raw_parts_mut((*object).styles, count)
+            .iter_mut()
+            .find(|entry| ptr::eq(entry.style, style) && entry.selector() == selector)
+        {
+            entry.set_is_theme(1);
+        }
+    }
+}
+
+/// The descriptor of `callback` on `object`, if it was added.
+unsafe fn find_event_callback(
+    object: *mut lvgl::lv_obj_t,
+    callback: unsafe extern "C" fn(*mut lvgl::lv_event_t),
+) -> Option<*mut lvgl::lv_event_dsc_t> {
+    unsafe {
+        (0..lvgl::lv_obj_get_event_count(object))
+            .map(|index| lvgl::lv_obj_get_event_dsc(object, index))
+            .find(|descriptor| {
+                lvgl::lv_event_dsc_get_cb(*descriptor)
+                    .is_some_and(|added| ptr::fn_addr_eq(added, callback))
+            })
     }
 }
 
@@ -402,10 +461,17 @@ unsafe extern "C" fn adjust_existing(
     _: *mut c_void,
 ) -> lvgl::lv_obj_tree_walk_res_t {
     unsafe {
-        // Outside the theme's own pass, try the object's class and then the
-        // classes it derives from, as the theme did when it styled it.
+        // Outside the theme's own pass, adjust the object for the classes LVGL
+        // applied the theme for: its own and, as long as a class lets the
+        // classes derived from it inherit its theme, the one it derives from.
         let mut class = lvgl::lv_obj_get_class(object);
-        while !class.is_null() && !adjust(object, class) {
+        while !class.is_null() {
+            adjust(object, class);
+            if (*class).theme_inheritable()
+                != lvgl::lv_obj_class_theme_inheritable_t_LV_OBJ_CLASS_THEME_INHERITABLE_TRUE
+            {
+                break;
+            }
             class = (*class).base_class;
         }
     }
@@ -420,7 +486,18 @@ unsafe extern "C" fn restore_existing(
         for style in [INSTANT.get(), UNBLENDED.get(), UNCLIPPED.get()] {
             lvgl::lv_obj_remove_style(object, style, ANY);
         }
-        lvgl::lv_obj_remove_event_cb(object, Some(finish_scroll_at_once));
+        if let Some(descriptor) = find_event_callback(object, finish_scroll_at_once) {
+            // The style the theme gave the scrollbar during a scroll, which
+            // `adjust_scrolling` kept. The theme's styles live as long as the
+            // display, and Xila never deinitializes the theme.
+            let style = lvgl::lv_event_dsc_get_user_data(descriptor)
+                .cast::<lvgl::lv_style_t>()
+                .cast_const();
+            lvgl::lv_obj_remove_event_cb(object, Some(finish_scroll_at_once));
+            if !style.is_null() {
+                restore_theme_style(object, style, SCROLLBAR | SCROLLED);
+            }
+        }
     }
     lvgl::lv_obj_tree_walk_res_t_LV_OBJ_TREE_WALK_NEXT
 }
@@ -428,8 +505,8 @@ unsafe extern "C" fn restore_existing(
 /// Select the rendering mode of the theme on `display`.
 ///
 /// The mode is shared by every display. Objects created from now on follow it,
-/// and so do the objects that `display` already shows, with one exception:
-/// those created in light mode keep their scrollbar unchanged during a scroll.
+/// and so do the objects that `display` already shows: leaving light mode gives
+/// them back the theme's look.
 ///
 /// # Safety
 /// `display` must be live and the caller must hold the LVGL lock.

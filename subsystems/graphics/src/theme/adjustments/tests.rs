@@ -546,3 +546,45 @@ fn light_mode_overrides_theme_styles_and_can_be_left() {
         set_display_rendering_mode(scene.display, RenderingMode::Default).unwrap();
     }
 }
+
+#[test]
+fn leaving_light_mode_restores_the_theme_exactly() {
+    unsafe {
+        let scene = Scene::new(Theme::Mode(RenderingMode::Default));
+        let scrolled = lvgl::lv_state_t_LV_STATE_SCROLLED as lvgl::lv_state_t;
+        // The scrollbar's opacity while the object scrolls.
+        let scrolled_opacity = |object| {
+            lvgl::lv_obj_add_state(object, scrolled);
+            let opacity = lvgl::lv_obj_get_style_bg_opa(object, SCROLLBAR);
+            lvgl::lv_obj_remove_state(object, scrolled);
+            opacity
+        };
+        let transition = |object| lvgl::lv_obj_get_style_transition(object, MAIN);
+
+        let list = scene.list();
+        let card = scene.window();
+        // A class the theme does not style, derived from the plain object.
+        let image = lvgl::lv_image_create(scene.screen);
+        let themed = [list, card].map(scrolled_opacity);
+        let shown = scrolled_opacity(scene.screen);
+
+        for _ in 0..2 {
+            set_display_rendering_mode(scene.display, RenderingMode::Light).unwrap();
+            for object in [list, card] {
+                assert_ne!(scrolled_opacity(object), themed[0]);
+            }
+            assert!(transition(image).is_null());
+            set_display_rendering_mode(scene.display, RenderingMode::Default).unwrap();
+            assert_eq!([list, card].map(scrolled_opacity), themed);
+            assert_eq!(scrolled_opacity(scene.screen), shown);
+            assert!(transition(image).is_null());
+        }
+
+        // Objects created in light mode get the theme's look as well.
+        set_display_rendering_mode(scene.display, RenderingMode::Light).unwrap();
+        let late = scene.list();
+        assert_ne!(scrolled_opacity(late), themed[0]);
+        set_display_rendering_mode(scene.display, RenderingMode::Default).unwrap();
+        assert_eq!(scrolled_opacity(late), themed[0]);
+    }
+}
