@@ -11,7 +11,9 @@
     "not_available": "Niedostępny",
     "not_initialized": "Nie zainicjalizowano",
     "not_registered": "Nie zarejestrowano",
-    "out_of_memory": "Wyczerpano pamięć"
+    "out_of_memory": "Wyczerpano pamięć",
+    "device_failure": "Błąd urządzenia",
+    "unsupported": "Nieobsługiwane"
   },
   "file_picker": {
     "parent": "Folder nadrzędny",

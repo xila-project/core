@@ -11,7 +11,9 @@
     "not_available": "不可用",
     "not_initialized": "未初始化",
     "not_registered": "未注册",
-    "out_of_memory": "内存不足"
+    "out_of_memory": "内存不足",
+    "device_failure": "设备故障",
+    "unsupported": "不支持"
   },
   "file_picker": {
     "parent": "上级目录",

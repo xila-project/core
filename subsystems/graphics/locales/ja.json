@@ -11,7 +11,9 @@
     "not_available": "利用できません",
     "not_initialized": "初期化されていません",
     "not_registered": "登録されていません",
-    "out_of_memory": "メモリが不足しています"
+    "out_of_memory": "メモリが不足しています",
+    "device_failure": "デバイスエラー",
+    "unsupported": "サポートされていません"
   },
   "file_picker": {
     "parent": "親フォルダー",

@@ -11,7 +11,9 @@
     "not_available": "No disponible",
     "not_initialized": "No inicializado",
     "not_registered": "No registrado",
-    "out_of_memory": "Memoria agotada"
+    "out_of_memory": "Memoria agotada",
+    "device_failure": "Error del dispositivo",
+    "unsupported": "No compatible"
   },
   "file_picker": {
     "parent": "Carpeta superior",

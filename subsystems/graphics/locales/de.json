@@ -11,7 +11,9 @@
     "not_available": "Nicht verfügbar",
     "not_initialized": "Nicht initialisiert",
     "not_registered": "Nicht registriert",
-    "out_of_memory": "Arbeitsspeicher erschöpft"
+    "out_of_memory": "Arbeitsspeicher erschöpft",
+    "device_failure": "Gerätefehler",
+    "unsupported": "Nicht unterstützt"
   },
   "file_picker": {
     "parent": "Übergeordnet",

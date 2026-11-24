@@ -1,13 +1,20 @@
-//! Per-user appearance preferences. Record size and preset IDs are stable on disk.
+//! Per-user appearance preferences: theme and screen brightness. Record
+//! layouts and preset IDs are stable on disk; version 1 records, which have no
+//! brightness, still load at full brightness.
 use crate as graphics;
-use crate::{Color, lvgl};
+use crate::{BRIGHTNESS_FULL, Color, Error, lvgl};
 use file_system::{AccessFlags, CreateFlags, Flags, Permissions};
 use task::TaskIdentifier;
 use virtual_file_system::ResultExt as _;
 use virtual_file_system::{self, File, VirtualFileSystem};
 
-const RECORD_SIZE: usize = 11;
+const RECORD_1_SIZE: usize = 11;
+const RECORD_SIZE: usize = 12;
 pub const PRESET_COUNT: u8 = 6;
+
+/// Lowest brightness a saved appearance can hold, about 10 %, so that a
+/// preference can never leave the screen dark at start-up or login.
+pub const MINIMUM_BRIGHTNESS: u8 = 26;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Appearance {
@@ -15,6 +22,9 @@ pub struct Appearance {
     /// Zero selects the zinc palette's mode-dependent color.
     pub primary: u8,
     pub secondary: u8,
+    /// Screen backlight level, from [`MINIMUM_BRIGHTNESS`] to
+    /// [`BRIGHTNESS_FULL`]. Ignored on screens without brightness control.
+    pub brightness: u8,
 }
 
 impl Default for Appearance {
@@ -23,6 +33,7 @@ impl Default for Appearance {
             is_dark: true,
             primary: 0,
             secondary: 0,
+            brightness: BRIGHTNESS_FULL,
         }
     }
 }
@@ -52,32 +63,54 @@ impl Appearance {
         )
     }
 
-    /// The caller holds the graphics manager's LVGL lock.
+    /// Apply the theme and the screen brightness. Screens without brightness
+    /// control keep their level. The caller holds the graphics manager's LVGL
+    /// lock.
     pub async fn apply(self, manager: &graphics::Manager) -> graphics::Result<()> {
         let (primary, secondary) = self.colors();
         manager
             .update_theme_locked(primary, secondary, self.is_dark)
+            .await?;
+        self.apply_brightness(manager).await
+    }
+
+    /// Apply only the screen brightness, raised to [`MINIMUM_BRIGHTNESS`].
+    /// Screens without brightness control keep their level. The LVGL lock may
+    /// be held or not.
+    pub async fn apply_brightness(self, manager: &graphics::Manager) -> graphics::Result<()> {
+        match manager
+            .set_brightness(self.brightness.max(MINIMUM_BRIGHTNESS))
             .await
+        {
+            Err(Error::Unsupported | Error::NotAvailable) => Ok(()),
+            result => result,
+        }
     }
 
     fn encode(self) -> [u8; RECORD_SIZE] {
         let mut bytes = [0; RECORD_SIZE];
-        bytes[..4].copy_from_slice(b"XAP1");
+        bytes[..4].copy_from_slice(b"XAP2");
         bytes[4] = u8::from(self.is_dark);
         bytes[5] = self.primary;
         bytes[6] = self.secondary;
-        let checksum = checksum(&bytes[..7]);
-        bytes[7..].copy_from_slice(&checksum.to_le_bytes());
+        bytes[7] = self.brightness;
+        let checksum = checksum(&bytes[..8]);
+        bytes[8..].copy_from_slice(&checksum.to_le_bytes());
         bytes
     }
 
     fn decode(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() != RECORD_SIZE
-            || &bytes[..4] != b"XAP1"
-            || bytes[4] > 1
+        // Version 1 records end before the brightness byte.
+        let (brightness, body) = match (bytes.len(), bytes.get(..4)?) {
+            (RECORD_1_SIZE, b"XAP1") => (BRIGHTNESS_FULL, 7),
+            (RECORD_SIZE, b"XAP2") => (bytes[7], 8),
+            _ => return None,
+        };
+        if bytes[4] > 1
             || bytes[5] >= PRESET_COUNT
             || bytes[6] >= PRESET_COUNT
-            || checksum(&bytes[..7]) != u32::from_le_bytes(bytes[7..].try_into().ok()?)
+            || brightness < MINIMUM_BRIGHTNESS
+            || checksum(&bytes[..body]) != u32::from_le_bytes(bytes[body..].try_into().ok()?)
         {
             return None;
         }
@@ -85,6 +118,7 @@ impl Appearance {
             is_dark: bytes[4] != 0,
             primary: bytes[5],
             secondary: bytes[6],
+            brightness,
         })
     }
 
@@ -205,12 +239,15 @@ mod tests {
         for is_dark in [false, true] {
             for primary in 0..PRESET_COUNT {
                 for secondary in 0..PRESET_COUNT {
-                    let appearance = Appearance {
-                        is_dark,
-                        primary,
-                        secondary,
-                    };
-                    assert_eq!(Appearance::decode(&appearance.encode()), Some(appearance));
+                    for brightness in [MINIMUM_BRIGHTNESS, 128, BRIGHTNESS_FULL] {
+                        let appearance = Appearance {
+                            is_dark,
+                            primary,
+                            secondary,
+                            brightness,
+                        };
+                        assert_eq!(Appearance::decode(&appearance.encode()), Some(appearance));
+                    }
                 }
             }
         }
@@ -233,9 +270,41 @@ mod tests {
                 secondary: PRESET_COUNT,
                 ..Appearance::default()
             },
+            Appearance {
+                brightness: MINIMUM_BRIGHTNESS - 1,
+                ..Appearance::default()
+            },
+            Appearance {
+                brightness: 0,
+                ..Appearance::default()
+            },
         ] {
             assert_eq!(Appearance::decode(&invalid.encode()), None);
         }
+    }
+
+    #[test]
+    fn version_1_records_load_at_full_brightness() {
+        let mut bytes = [0; RECORD_1_SIZE];
+        bytes[..4].copy_from_slice(b"XAP1");
+        bytes[4..7].copy_from_slice(&[0, 3, 5]);
+        let checksum = checksum(&bytes[..7]);
+        bytes[7..].copy_from_slice(&checksum.to_le_bytes());
+        assert_eq!(
+            Appearance::decode(&bytes),
+            Some(Appearance {
+                is_dark: false,
+                primary: 3,
+                secondary: 5,
+                brightness: BRIGHTNESS_FULL,
+            })
+        );
+        // A version 1 tag on a version 2 length, and the reverse, are damaged.
+        let mut current = Appearance::default().encode();
+        current[..4].copy_from_slice(b"XAP1");
+        assert_eq!(Appearance::decode(&current), None);
+        bytes[..4].copy_from_slice(b"XAP2");
+        assert_eq!(Appearance::decode(&bytes), None);
     }
 
     #[test]
