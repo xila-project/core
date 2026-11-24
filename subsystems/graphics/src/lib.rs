@@ -22,6 +22,7 @@ mod inspection;
 mod logo;
 pub mod macros;
 mod manager;
+mod on_screen_keyboard;
 pub use inspection::*;
 mod point;
 mod screen;

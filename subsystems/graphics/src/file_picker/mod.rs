@@ -192,6 +192,15 @@ unsafe fn button(
         object
     }
 }
+unsafe fn hide_private_keyboard(keyboard: *mut lvgl::lv_obj_t) {
+    if !keyboard.is_null() {
+        unsafe {
+            lvgl::lv_keyboard_set_textarea(keyboard, ptr::null_mut());
+            lvgl::lv_obj_add_flag(keyboard, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
 impl FilePicker {
     /// Create a picker under `parent`; deleting its LVGL parent also drops all Rust state.
     ///
@@ -256,15 +265,20 @@ impl FilePicker {
                 *row = button(list, "", picker.as_ptr());
                 lvgl::lv_obj_set_width(*row, lvgl::lv_pct(100));
             }
-            let keyboard = lvgl::lv_keyboard_create(object);
-            lvgl::lv_obj_set_size(keyboard, lvgl::lv_pct(100), 160);
-            lvgl::lv_obj_add_flag(keyboard, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_HIDDEN);
-            lvgl::lv_obj_add_event_cb(
-                keyboard,
-                Some(callback),
-                lvgl::lv_event_code_t_LV_EVENT_ALL,
-                picker.as_ptr().cast(),
-            );
+            let keyboard = if crate::on_screen_keyboard::enabled_for(object) {
+                ptr::null_mut()
+            } else {
+                let keyboard = lvgl::lv_keyboard_create(object);
+                lvgl::lv_obj_set_size(keyboard, lvgl::lv_pct(100), 160);
+                lvgl::lv_obj_add_flag(keyboard, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_HIDDEN);
+                lvgl::lv_obj_add_event_cb(
+                    keyboard,
+                    Some(callback),
+                    lvgl::lv_event_code_t_LV_EVENT_ALL,
+                    picker.as_ptr().cast(),
+                );
+                keyboard
+            };
             lvgl::lv_obj_add_event_cb(
                 object,
                 Some(callback),
@@ -274,6 +288,7 @@ impl FilePicker {
             for control in [path, up, previous, next, confirm, cancel, keyboard]
                 .into_iter()
                 .chain(rows.iter().copied())
+                .filter(|control| !control.is_null())
             {
                 lvgl::lv_group_add_obj(modal.group, control);
             }
@@ -319,6 +334,7 @@ impl FilePicker {
                 ]
                 .into_iter()
                 .chain(state.rows.iter().copied())
+                .filter(|control| !control.is_null())
                 {
                     lvgl::lv_group_add_obj(modal.group, control);
                 }
@@ -340,8 +356,7 @@ impl FilePicker {
             );
             state._modal.activate();
             let path = state.path;
-            lvgl::lv_keyboard_set_textarea(state.keyboard, ptr::null_mut());
-            lvgl::lv_obj_add_flag(state.keyboard, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_HIDDEN);
+            hide_private_keyboard(state.keyboard);
             self.refresh();
             lvgl::lv_textarea_set_text(path, CString::new(initial).unwrap().as_ptr());
             self.show_result(result);
@@ -365,8 +380,7 @@ impl FilePicker {
         unsafe {
             if let Some(state) = &mut self.state {
                 state._modal.release();
-                lvgl::lv_keyboard_set_textarea(state.keyboard, ptr::null_mut());
-                lvgl::lv_obj_add_flag(state.keyboard, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_HIDDEN);
+                hide_private_keyboard(state.keyboard);
             }
             lvgl::lv_obj_add_flag(&mut self.object, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_HIDDEN);
         }
@@ -458,7 +472,10 @@ unsafe extern "C" fn callback(event: *mut lvgl::lv_event_t) {
             picker.finish();
             return;
         }
-        if target == state.path && code == lvgl::lv_event_code_t_LV_EVENT_FOCUSED {
+        if !state.keyboard.is_null()
+            && target == state.path
+            && code == lvgl::lv_event_code_t_LV_EVENT_FOCUSED
+        {
             lvgl::lv_keyboard_set_textarea(state.keyboard, state.path);
             lvgl::lv_obj_remove_flag(state.keyboard, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_HIDDEN);
             return;
