@@ -53,6 +53,7 @@ pub use logo::*;
 pub mod appearance;
 pub mod call;
 pub mod fonts;
+pub mod invalidation;
 pub mod theme;
 
 mod file_picker;
