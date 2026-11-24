@@ -11,7 +11,9 @@
     "not_available": "Indisponível",
     "not_initialized": "Não inicializado",
     "not_registered": "Não registrado",
-    "out_of_memory": "Memória esgotada"
+    "out_of_memory": "Memória esgotada",
+    "device_failure": "Falha do dispositivo",
+    "unsupported": "Não suportado"
   },
   "file_picker": {
     "parent": "Pasta superior",

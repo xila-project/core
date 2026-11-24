@@ -6,8 +6,8 @@ use core::{ffi::c_void, ptr::null_mut, slice};
 use portable_atomic::{AtomicBool, Ordering};
 
 use crate::{
-    Area, Error, GET_RESOLUTION, Point, RenderingColor, Result, SET_DRAWING_AREA, WAS_RESIZED,
-    draw_buffer::Buffer,
+    Area, Error, GET_BRIGHTNESS, GET_RESOLUTION, Point, RenderingColor, Result, SET_BRIGHTNESS,
+    SET_DRAWING_AREA, WAS_RESIZED, draw_buffer::Buffer,
 };
 
 use super::lvgl;
@@ -66,6 +66,14 @@ unsafe extern "C" fn binding_callback_function(
     }
 
     unsafe { lvgl::lv_display_flush_ready(display) };
+}
+
+fn brightness_error(error: file_system::IoErrorKind) -> Error {
+    match error {
+        file_system::IoErrorKind::Unsupported => Error::Unsupported,
+        file_system::IoErrorKind::InvalidArgument => Error::InvalidParameter,
+        _ => Error::DeviceFailure,
+    }
 }
 
 /// Whether a flush error was logged: only the first one is, so that a failing
@@ -193,6 +201,43 @@ impl Display {
                 resolution.get_y() as i32,
             );
         }
+    }
+
+    fn device(&self) -> &'static dyn DirectCharacterDevice {
+        let user_data =
+            unsafe { &*(lvgl::lv_display_get_user_data(self.display) as *const UserData) };
+        user_data.device
+    }
+
+    /// Read the screen's backlight brightness, from
+    /// [`BRIGHTNESS_OFF`](crate::BRIGHTNESS_OFF) to
+    /// [`BRIGHTNESS_FULL`](crate::BRIGHTNESS_FULL).
+    ///
+    /// Returns [`Error::Unsupported`] when the screen has no brightness
+    /// control. This only talks to the screen device, not to LVGL, so it does
+    /// not need the LVGL lock.
+    pub fn get_brightness(&self) -> Result<u8> {
+        let mut level = 0u8;
+        self.device()
+            .control_sync(
+                GET_BRIGHTNESS::IDENTIFIER,
+                AnyByLayout::NONE,
+                AnyByLayout::from_mutable(&mut level),
+            )
+            .map_err(brightness_error)?;
+        Ok(level)
+    }
+
+    /// Set the screen's backlight brightness; see [`Display::get_brightness`].
+    pub fn set_brightness(&self, level: u8) -> Result<()> {
+        let mut level = level;
+        self.device()
+            .control_sync(
+                SET_BRIGHTNESS::IDENTIFIER,
+                AnyByLayout::from_mutable(&mut level),
+                AnyByLayout::NONE,
+            )
+            .map_err(brightness_error)
     }
 
     pub fn get_lvgl_display(&self) -> *mut lvgl::lv_display_t {

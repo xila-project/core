@@ -11,7 +11,9 @@
     "not_available": "Non disponible",
     "not_initialized": "Non initialisé",
     "not_registered": "Non enregistré",
-    "out_of_memory": "Pas assez de mémoire"
+    "out_of_memory": "Pas assez de mémoire",
+    "device_failure": "Erreur du périphérique",
+    "unsupported": "Non pris en charge"
   },
   "file_picker": {
     "parent": "Dossier parent",

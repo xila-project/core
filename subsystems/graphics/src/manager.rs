@@ -335,6 +335,34 @@ impl Manager {
             .ok_or(Error::NotAvailable)
     }
 
+    /// Read the backlight brightness of the main screen, from
+    /// [`BRIGHTNESS_OFF`](crate::BRIGHTNESS_OFF) to
+    /// [`BRIGHTNESS_FULL`](crate::BRIGHTNESS_FULL).
+    ///
+    /// Returns [`Error::Unsupported`] when the screen has no brightness
+    /// control. Brightness does not touch LVGL: callers may hold the LVGL lock
+    /// or not.
+    pub async fn get_brightness(&self) -> Result<u8> {
+        let inner = self.inner.read().await;
+        inner
+            .displays
+            .first()
+            .ok_or(Error::NotAvailable)?
+            .get_brightness()
+    }
+
+    /// Set the backlight brightness of the main screen; see
+    /// [`Manager::get_brightness`]. Level [`BRIGHTNESS_OFF`](crate::BRIGHTNESS_OFF)
+    /// turns the backlight off.
+    pub async fn set_brightness(&self, level: u8) -> Result<()> {
+        let inner = self.inner.read().await;
+        inner
+            .displays
+            .first()
+            .ok_or(Error::NotAvailable)?
+            .set_brightness(level)
+    }
+
     /// Queue a pointer move for the graphics-owned LVGL pointer input.
     pub async fn inject_pointer_move(&self, point: crate::Point) -> Result<()> {
         let _lock = self.global_lock.lock().await;

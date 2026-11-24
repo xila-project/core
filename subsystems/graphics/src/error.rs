@@ -18,6 +18,10 @@ pub enum Error {
     FailedToCreateObject,
     InvalidWindowIdentifier,
     InvalidParameter,
+    /// The device does not provide the requested feature.
+    Unsupported,
+    /// The device failed to carry out a request it supports.
+    DeviceFailure,
 }
 
 impl From<lvgl_rust::Error> for Error {
@@ -48,6 +52,8 @@ impl Display for Error {
             Error::FailedToCreateObject => t!("errors.failed_to_create_object"),
             Error::InvalidWindowIdentifier => t!("errors.invalid_window_identifier"),
             Error::InvalidParameter => t!("errors.invalid_parameter"),
+            Error::Unsupported => t!("errors.unsupported"),
+            Error::DeviceFailure => t!("errors.device_failure"),
         };
 
         write!(formatter, "{string}")

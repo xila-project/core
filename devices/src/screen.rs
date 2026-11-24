@@ -1,8 +1,21 @@
 //! Screen device control contract (`device::kind::SCREEN`).
 //!
 //! Screen devices expose resolution queries, resize notifications, drawing-area
-//! selection before pixel writes, and optional screenshot capture via
-//! `File::control`.
+//! selection before pixel writes, optional screenshot capture and optional
+//! backlight brightness control via `File::control`.
+//!
+//! # Brightness
+//!
+//! [`GET_BRIGHTNESS`] and [`SET_BRIGHTNESS`] read and set the backlight level,
+//! from [`BRIGHTNESS_OFF`] (backlight off) to [`BRIGHTNESS_FULL`]. The level is
+//! proportional to the backlight drive. A screen without brightness control
+//! answers both commands with `Unsupported`; a screen that has fewer steps
+//! rounds to the nearest one it can show and [`GET_BRIGHTNESS`] reports the
+//! level that was asked for. Screens start at [`BRIGHTNESS_FULL`].
+//!
+//! The contract allows turning the backlight off; user interfaces that let
+//! people pick a level should keep a visible minimum so that the screen
+//! cannot go dark by accident.
 
 use file_system::{ControlCommand, define_command};
 
@@ -167,3 +180,15 @@ define_command!(
     ScreenshotRequest,
     ScreenshotDimensions
 );
+
+/// Brightness level that turns the backlight off.
+pub const BRIGHTNESS_OFF: u8 = 0;
+
+/// Full backlight brightness, the level of every screen at start-up.
+pub const BRIGHTNESS_FULL: u8 = u8::MAX;
+
+// Read the backlight brightness level, or `Unsupported`.
+define_command!(GET_BRIGHTNESS, Read, kind::SCREEN, 0x05, (), u8);
+
+// Set the backlight brightness level, or `Unsupported`.
+define_command!(SET_BRIGHTNESS, Write, kind::SCREEN, 0x06, u8, ());

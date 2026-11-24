@@ -11,7 +11,9 @@
     "not_available": "Not available",
     "not_initialized": "Not initialized",
     "not_registered": "Not registered",
-    "out_of_memory": "Out of memory"
+    "out_of_memory": "Out of memory",
+    "device_failure": "Device failure",
+    "unsupported": "Unsupported"
   },
   "file_picker": {
     "parent": "Parent",
