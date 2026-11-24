@@ -53,7 +53,9 @@ pub use logo::*;
 pub mod appearance;
 pub mod call;
 pub mod fonts;
+pub mod invalidation;
 pub mod theme;
+pub use theme::RenderingMode;
 
 mod file_picker;
 pub use file_picker::*;

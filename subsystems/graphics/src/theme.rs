@@ -5,6 +5,10 @@
 
 use crate::{Color, Display, Error, Result, fonts, lvgl};
 
+mod adjustments;
+
+pub use adjustments::{RenderingMode, get_rendering_mode, set_display_rendering_mode};
+
 pub(crate) fn initialize(display: &Display) -> Result<()> {
     unsafe { initialize_display(display.get_lvgl_display()) }
 }
@@ -23,7 +27,7 @@ unsafe fn initialize_display(display: *mut lvgl::lv_display_t) -> Result<()> {
         medium: core::ptr::null(),
     };
     // The theme copies the palette/fonts and releases its state when the display
-    // is deleted. No Rust-owned callback, parent theme or leaked Box is needed.
+    // is deleted.
     let theme = unsafe {
         lvgl::lv_theme_shadcn_init(
             display,
@@ -35,7 +39,11 @@ unsafe fn initialize_display(display: *mut lvgl::lv_display_t) -> Result<()> {
     if theme.is_null() {
         return Err(Error::OutOfMemory);
     }
-    Ok(())
+    unsafe { adjustments::install(display, theme) }
+}
+
+pub(crate) fn set_rendering_mode(display: &Display, mode: RenderingMode) -> Result<()> {
+    unsafe { set_display_rendering_mode(display.get_lvgl_display(), mode) }
 }
 
 pub(crate) fn update(

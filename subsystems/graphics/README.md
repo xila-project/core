@@ -70,6 +70,25 @@ Testing the pool on a host: `mise run test:graphics-pool` runs this crate's test
 
 LVGL releases the strings it duplicates (`lv_strdup`, `lv_strndup`) with `lv_free()`, so with the pool they are copied into the pool, not into the system heap. Memory handed to LVGL by the system allocator must never be released with `lv_free()`, and the reverse.
 
+## Theme adjustments and light rendering
+
+Xila uses the shadcn theme that `lvgl-rust-sys` ships, and changes two things on top of it ([`src/theme/adjustments.rs`](src/theme/adjustments.rs)). LVGL redraws a whole object when a style for one of its states comes or goes, even if nothing looks different, so two of the theme's styles cost far more than they show:
+
+- Its state transition is also added for the pressed state. On an object that has no pressed look, such as a window, a card or a text area, every press and release then redraws the object. Xila removes that copy; the transition for the default state already covers both directions.
+- Its style for pressed keys redraws the whole on-screen keyboard twice for each key. Xila removes it and colors the pressed key while it is drawn.
+
+`Manager::set_rendering_mode(RenderingMode::Light)` further reduces what the theme costs on a slow display bus or processor. It is off by default; a platform selects it once, before it creates the interface. Selecting `RenderingMode::Default` again gives every object the theme's look back. In light mode:
+
+- State changes show in one frame instead of a 150 ms transition.
+- The scrolls that LVGL animates take one frame: scrolling to a position or an object, settling on a snap point, returning from an overscroll. Scrolling under the finger stays, and its momentum covers the same distance in half the frames on a display that renders slower than LVGL's animation timer runs.
+- The end of a scroll does not redraw the scrolled object: the scrollbar keeps one opacity.
+- A modal backdrop does not dim what is behind it.
+- Lists and tables do not clip their children to their rounded corners, which takes two intermediate ARGB8888 buffers for each redraw.
+
+The theme has no shadows or gradients, and the mode keeps its rounded corners and the half-transparent look of disabled controls, which LVGL draws without an intermediate layer. `src/theme/adjustments/tests.rs` renders fixed pointer scenarios on a 480×320 display and prints what each of them redraws with the theme alone, with the fixes and in light mode: run it with `--nocapture`, in a release build to compare render times.
+
+`invalidation::get_invalidated_class_name` names the class of the object behind an invalidated area, for rendering telemetry.
+
 ## Window events
 
 Each window queues the events of its widgets in a fixed ring of `WINDOW_EVENT_QUEUE_CAPACITY` (16) events that lives inside the window object: no allocation, and it never grows. The window handles widget creation and deletion internally and never queues hover, drawing, hit test, invalidation or layout notifications. The rest falls in four tiers, from the least to the most important:
