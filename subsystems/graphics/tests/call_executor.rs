@@ -161,6 +161,23 @@ fn executor_runs_calls_for_independent_processes() {
     pointer_arguments_follow_the_transport(manager);
     events_come_from_the_process_window(manager);
     a_process_that_exits_leaves_nothing(manager);
+    system_keyboard_enable_is_idempotent(manager);
+}
+
+fn system_keyboard_enable_is_idempotent(manager: &Manager) {
+    let screen = manager.get_current_screen().unwrap();
+    let observer_count = || {
+        manager
+            .lock_function_sync(|| {
+                Ok(unsafe { lvgl::lv_display_get_event_count(lvgl::lv_obj_get_display(screen)) })
+            })
+            .unwrap()
+    };
+    let before = observer_count();
+    task::block_on(manager.enable_on_screen_keyboard());
+    assert_eq!(observer_count(), before + 1);
+    task::block_on(manager.enable_on_screen_keyboard());
+    assert_eq!(observer_count(), before + 1);
 }
 
 fn call_table_keeps_catalog_ids() {

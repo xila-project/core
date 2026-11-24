@@ -1,4 +1,5 @@
 use alloc::{
+    boxed::Box,
     string::{String, ToString},
     vec,
     vec::Vec,
@@ -17,6 +18,7 @@ use core::time::Duration;
 use super::lvgl;
 
 use crate::input::InputQueue;
+use crate::on_screen_keyboard::OnScreenKeyboard;
 use crate::window::Window;
 use crate::{Color, theme};
 use crate::{Display, OwnedWindow};
@@ -91,6 +93,8 @@ struct Inner {
     _inputs: Vec<Input>,
     displays: Vec<Display>,
     window_parent: *mut lvgl::lv_obj_t,
+    // Drop displays first because LVGL callbacks borrow the keyboard state.
+    on_screen_keyboard: Option<Box<OnScreenKeyboard>>,
 }
 
 pub struct Manager {
@@ -573,10 +577,26 @@ impl Manager {
                 _inputs: inputs,
                 displays: vec![display],
                 window_parent: screen,
+                on_screen_keyboard: None,
             }),
             global_lock,
             injected_inputs,
         })
+    }
+
+    /// Enable the system on-screen keyboard on the first display.
+    ///
+    /// Call during platform setup on touch-only devices, before creating any
+    /// file pickers. A picker chooses its keyboard when it is created.
+    /// Tapping a text area on the active screen opens the keyboard.
+    pub async fn enable_on_screen_keyboard(&self) {
+        let _guard = self.lock_lvgl().await;
+        let mut inner = self.inner.write().await;
+        if inner.on_screen_keyboard.is_none() {
+            let keyboard = Box::new(OnScreenKeyboard::new());
+            unsafe { keyboard.observe(inner.displays[0].get_lvgl_display()) };
+            inner.on_screen_keyboard = Some(keyboard);
+        }
     }
 
     pub async fn r#loop<F>(&self, sleep: impl Fn(Duration) -> F + Send + 'static) -> Result<()>
@@ -596,6 +616,9 @@ impl Manager {
                 // Draining a large paste therefore holds `global_lock` longer than an
                 // ordinary frame; how long has not been measured on ESP32.
                 let time_until_next = guard.session()?.timer_handler();
+                if let Some(keyboard) = &inner.on_screen_keyboard {
+                    unsafe { keyboard.update(inner.displays[0].get_lvgl_display()) };
+                }
 
                 if call_count >= 30 {
                     for display in &inner.displays {
