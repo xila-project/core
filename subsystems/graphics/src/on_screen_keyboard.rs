@@ -234,7 +234,8 @@ unsafe extern "C" fn textarea_event(event: *mut lv_event_t) {
             return;
         }
         match lv_event_get_code(event) {
-            // The default group can focus its first field before any user input.
+            // Only a tap opens the keyboard: the default group can focus a field
+            // programmatically before any user input.
             lvgl::lv_event_code_t_LV_EVENT_CLICKED => {
                 state.target.set(target);
             }
