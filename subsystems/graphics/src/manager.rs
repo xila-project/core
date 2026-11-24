@@ -894,4 +894,21 @@ impl Manager {
 
         Ok(())
     }
+
+    /// Select how much the theme may spend on rendering, on every display.
+    ///
+    /// The mode is [`theme::RenderingMode::Default`] until a platform selects
+    /// another one for a slow display, ideally before it creates the interface.
+    pub async fn set_rendering_mode(&self, mode: theme::RenderingMode) -> Result<()> {
+        let _lock = self.global_lock.lock().await;
+        for display in &self.inner.read().await.displays {
+            theme::set_rendering_mode(display, mode)?;
+        }
+        Ok(())
+    }
+
+    /// The rendering mode in use.
+    pub fn get_rendering_mode(&self) -> theme::RenderingMode {
+        theme::get_rendering_mode()
+    }
 }
