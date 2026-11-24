@@ -93,6 +93,7 @@ struct Inner {
     _inputs: Vec<Input>,
     displays: Vec<Display>,
     window_parent: *mut lvgl::lv_obj_t,
+    // Drop displays first because LVGL callbacks borrow the keyboard state.
     on_screen_keyboard: Option<Box<OnScreenKeyboard>>,
 }
 
@@ -583,8 +584,11 @@ impl Manager {
         })
     }
 
-    /// Enable the system on-screen keyboard. Call during platform setup on
-    /// devices that are primarily operated with a touchscreen.
+    /// Enable the system on-screen keyboard on the first display.
+    ///
+    /// Call during platform setup on touch-only devices, before creating any
+    /// file pickers. A picker chooses its keyboard when it is created.
+    /// Tapping a text area on the active screen opens the keyboard.
     pub async fn enable_on_screen_keyboard(&self) {
         let _guard = self.lock_lvgl().await;
         let mut inner = self.inner.write().await;

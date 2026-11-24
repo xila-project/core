@@ -31,8 +31,6 @@ impl OnScreenKeyboard {
                 data,
             );
             self.observe_root(lv_display_get_screen_active(display));
-            self.observe_root(lv_display_get_layer_top(display));
-            self.observe_root(lv_display_get_layer_sys(display));
         }
     }
 
@@ -40,7 +38,12 @@ impl OnScreenKeyboard {
         unsafe {
             let data = ptr::from_ref(self).cast_mut().cast();
             lv_obj_remove_event_cb_with_user_data(root, Some(root_event), data);
-            lv_obj_add_event_cb(root, Some(root_event), lv_event_code_t_LV_EVENT_ALL, data);
+            for code in [
+                lv_event_code_t_LV_EVENT_CHILD_CREATED,
+                lv_event_code_t_LV_EVENT_DELETE,
+            ] {
+                lv_obj_add_event_cb(root, Some(root_event), code, data);
+            }
             self.observe_subtree(root);
         }
     }
@@ -60,15 +63,15 @@ impl OnScreenKeyboard {
         unsafe {
             let data = ptr::from_ref(self).cast_mut().cast();
             lv_obj_remove_event_cb_with_user_data(object, Some(textarea_event), data);
-            lv_obj_add_event_cb(
-                object,
-                Some(textarea_event),
-                lv_event_code_t_LV_EVENT_ALL,
-                data,
-            );
-            // The default group can focus its first object during construction.
-            if lv_obj_has_state(object, lv_state_t_LV_STATE_FOCUSED) {
-                self.target.set(object);
+            for code in [
+                lv_event_code_t_LV_EVENT_CLICKED,
+                lv_event_code_t_LV_EVENT_DEFOCUSED,
+                lv_event_code_t_LV_EVENT_LEAVE,
+                lv_event_code_t_LV_EVENT_READY,
+                lv_event_code_t_LV_EVENT_CANCEL,
+                lv_event_code_t_LV_EVENT_DELETE,
+            ] {
+                lv_obj_add_event_cb(object, Some(textarea_event), code, data);
             }
         }
     }
@@ -93,16 +96,13 @@ impl OnScreenKeyboard {
             let screen = lv_display_get_screen_active(display);
             if !target.is_null() {
                 let root = lv_obj_get_screen(target);
-                let on_active_layer = root == screen
-                    || root == lv_display_get_layer_top(display)
-                    || root == lv_display_get_layer_sys(display);
                 let mut ancestor = target;
                 while !ancestor.is_null()
                     && !lv_obj_has_flag(ancestor, lv_obj_flag_t_LV_OBJ_FLAG_HIDDEN)
                 {
                     ancestor = lv_obj_get_parent(ancestor);
                 }
-                if !on_active_layer || !ancestor.is_null() {
+                if root != screen || !ancestor.is_null() {
                     self.dismiss(target);
                 }
             }
@@ -124,7 +124,6 @@ impl OnScreenKeyboard {
                     return;
                 }
                 self.keyboard.set(keyboard);
-                lv_obj_set_size(keyboard, lv_pct(100), lv_pct(42));
                 lv_obj_align(keyboard, lv_align_t_LV_ALIGN_BOTTOM_MID, 0, 0);
                 lv_obj_remove_flag(keyboard, lv_obj_flag_t_LV_OBJ_FLAG_CLICK_FOCUSABLE);
                 lv_obj_add_event_cb(
@@ -137,6 +136,8 @@ impl OnScreenKeyboard {
             } else {
                 keyboard
             };
+            let height = lv_display_get_horizontal_resolution(display) / 3;
+            lv_obj_set_size(keyboard, lv_pct(100), height);
             lv_keyboard_set_textarea(keyboard, target);
             lv_obj_remove_flag(keyboard, lv_obj_flag_t_LV_OBJ_FLAG_HIDDEN);
             lv_obj_move_foreground(keyboard);
@@ -233,7 +234,8 @@ unsafe extern "C" fn textarea_event(event: *mut lv_event_t) {
             return;
         }
         match lv_event_get_code(event) {
-            lvgl::lv_event_code_t_LV_EVENT_FOCUSED | lvgl::lv_event_code_t_LV_EVENT_CLICKED => {
+            // The default group can focus its first field before any user input.
+            lvgl::lv_event_code_t_LV_EVENT_CLICKED => {
                 state.target.set(target);
             }
             lvgl::lv_event_code_t_LV_EVENT_DEFOCUSED

@@ -8,7 +8,7 @@ mod on_screen_keyboard;
 use graphics::lvgl;
 
 #[test]
-fn keyboard_lazily_follows_focus_and_detaches_before_deletion() {
+fn keyboard_opens_on_click_and_detaches_before_deletion() {
     use lvgl::*;
     use on_screen_keyboard::OnScreenKeyboard;
     use std::ptr;
@@ -24,19 +24,23 @@ fn keyboard_lazily_follows_focus_and_detaches_before_deletion() {
         let top = lv_display_get_layer_top(display);
         let child_count = lv_obj_get_child_count(top);
 
+        let group = lv_group_create();
+        lv_group_set_default(group);
         let window = lv_obj_create(screen);
         lv_obj_set_size(window, lv_pct(100), lv_pct(100));
         let first = lv_textarea_create(window);
         lv_obj_align(first, lv_align_t_LV_ALIGN_BOTTOM_MID, 0, 0);
+        assert_eq!(lv_group_get_focused(group), first);
         let second = lv_textarea_create(window);
         keyboard_state.update(display);
         assert_eq!(lv_obj_get_child_count(top), child_count);
 
-        lv_obj_send_event(first, lv_event_code_t_LV_EVENT_FOCUSED, ptr::null_mut());
+        lv_obj_send_event(first, lv_event_code_t_LV_EVENT_CLICKED, ptr::null_mut());
         keyboard_state.update(display);
         let keyboard = lv_obj_get_child(top, -1);
         assert_eq!(lv_obj_get_child_count(top), child_count + 1);
         assert_eq!(lv_keyboard_get_textarea(keyboard), first);
+        assert_eq!(lv_obj_get_height(keyboard), 160);
         let mut field_bounds = lv_area_t::default();
         let mut keyboard_bounds = lv_area_t::default();
         lv_obj_get_coords(first, &mut field_bounds);
@@ -52,7 +56,7 @@ fn keyboard_lazily_follows_focus_and_detaches_before_deletion() {
         keyboard_state.update(display);
         assert_eq!(lv_keyboard_get_textarea(keyboard), first);
         lv_obj_send_event(first, lv_event_code_t_LV_EVENT_DEFOCUSED, ptr::null_mut());
-        lv_obj_send_event(second, lv_event_code_t_LV_EVENT_FOCUSED, ptr::null_mut());
+        lv_obj_send_event(second, lv_event_code_t_LV_EVENT_CLICKED, ptr::null_mut());
         keyboard_state.update(display);
         assert_eq!(lv_keyboard_get_textarea(keyboard), second);
 
@@ -60,6 +64,18 @@ fn keyboard_lazily_follows_focus_and_detaches_before_deletion() {
         assert!(lv_keyboard_get_textarea(keyboard).is_null());
         assert!(lv_obj_has_flag(keyboard, lv_obj_flag_t_LV_OBJ_FLAG_HIDDEN));
         keyboard_state.update(display);
+        let replacement = lv_obj_create(ptr::null_mut());
+        lv_screen_load(replacement);
+        let field = lv_textarea_create(replacement);
+        lv_obj_send_event(field, lv_event_code_t_LV_EVENT_CLICKED, ptr::null_mut());
+        keyboard_state.update(display);
+        assert_eq!(lv_keyboard_get_textarea(keyboard), field);
+        lv_screen_load(screen);
+        lv_obj_delete(replacement);
+        assert!(lv_keyboard_get_textarea(keyboard).is_null());
+        assert!(lv_obj_has_flag(keyboard, lv_obj_flag_t_LV_OBJ_FLAG_HIDDEN));
+        keyboard_state.update(display);
+
         lv_deinit();
     }
 }
