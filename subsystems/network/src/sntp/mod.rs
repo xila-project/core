@@ -3,11 +3,12 @@
 //! [`time::ClockSource::Network`].
 //!
 //! The client lives in the network subsystem because it is a network service
-//! owned by that runtime: it uses [`Manager::resolve`] and
-//! [`Manager::new_udp_socket`] against the same stacks, and needs the task
+//! owned by that runtime: it uses [`Manager::resolve`](crate::Manager::resolve)
+//! and [`Manager::new_udp_socket`](crate::Manager::new_udp_socket) against the
+//! same stacks, and needs the task
 //! spawner, the virtual file system (for `/configuration/system/sntp.json`)
 //! and the time manager, which are already its dependencies. The packet rules
-//! in [`packet`] are pure and host-testable; one exchange allocates nothing
+//! in `packet` are pure and host-testable; one exchange allocates nothing
 //! beyond its UDP socket and uses one 48-byte buffer.
 //!
 //! [`Service::start`] spawns the synchronization task: it waits until an
