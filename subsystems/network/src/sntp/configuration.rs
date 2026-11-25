@@ -1,16 +1,33 @@
 //! The SNTP service configuration: `/configuration/system/sntp.json`, with the
 //! defaults used when the file is absent.
+//!
+//! The file is a JSON object with two optional keys:
+//!
+//! ```json
+//! {
+//!   "servers": ["time.example.com", "192.0.2.1"],
+//!   "resync_interval_seconds": 3600
+//! }
+//! ```
+//!
+//! `servers` is a list of at most [`MAXIMUM_SERVERS`] host names or addresses,
+//! each at most [`MAXIMUM_SERVER_NAME_LENGTH`] bytes (the DNS limit); the
+//! default is `["pool.ntp.org"]`, a placeholder only (see [`DEFAULT_SERVER`]).
+//! `resync_interval_seconds` is clamped to [`MINIMUM_RESYNC_INTERVAL`] up to
+//! [`MAXIMUM_RESYNC_INTERVAL`]; the default is one hour. Unknown keys, such as
+//! `$schema`, are ignored.
 
 use core::time::Duration;
 
-use alloc::{string::String, string::ToString, vec::Vec};
-use file_system::{AccessFlags, IoErrorKind, Kind};
+use alloc::{string::String, string::ToString, vec, vec::Vec};
+use file_system::{AccessFlags, IoErrorKind, Kind, Permission, Statistics};
 use miniserde::Deserialize;
 use task::TaskIdentifier;
+use users::{GroupIdentifier, UserIdentifier};
 use virtual_file_system::{File, VirtualFileSystem};
 
-/// The configuration file of the SNTP service. Only root may write it, like the
-/// other files of `/configuration/system`.
+/// The configuration file of the SNTP service. Only root may have written it,
+/// like the other files of `/configuration/system`.
 pub const CONFIGURATION_PATH: &str = "/configuration/system/sntp.json";
 
 /// The largest configuration file read, in bytes.
@@ -36,6 +53,12 @@ pub const DEFAULT_SERVER: &str = "pool.ntp.org";
 /// file says nothing.
 pub const DEFAULT_RESYNC_INTERVAL: Duration = Duration::from_secs(3600);
 
+/// The smallest accepted resynchronization interval.
+pub const MINIMUM_RESYNC_INTERVAL: Duration = Duration::from_secs(60);
+
+/// The largest accepted resynchronization interval: 7 days.
+pub const MAXIMUM_RESYNC_INTERVAL: Duration = Duration::from_secs(7 * 24 * 3600);
+
 /// The parsed SNTP configuration. The server names are heap allocated once at
 /// startup, so the struct itself stays small.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,7 +72,7 @@ pub struct Configuration {
 impl Default for Configuration {
     fn default() -> Self {
         Self {
-            servers: alloc::vec![DEFAULT_SERVER.to_string()],
+            servers: vec![DEFAULT_SERVER.to_string()],
             resync_interval: DEFAULT_RESYNC_INTERVAL,
         }
     }
@@ -73,8 +96,6 @@ pub enum ConfigurationError {
     TooManyServers,
     /// A server name longer than the DNS limit, or empty.
     InvalidServerName,
-    /// A zero resynchronization interval.
-    InvalidInterval,
 }
 
 /// Parse a configuration file body.
@@ -99,8 +120,9 @@ pub fn parse(text: &str) -> Result<Configuration, ConfigurationError> {
     };
 
     let resync_interval = match file.resync_interval_seconds {
-        Some(0) => return Err(ConfigurationError::InvalidInterval),
-        Some(seconds) => Duration::from_secs(seconds),
+        Some(seconds) => {
+            Duration::from_secs(seconds).clamp(MINIMUM_RESYNC_INTERVAL, MAXIMUM_RESYNC_INTERVAL)
+        }
         None => DEFAULT_RESYNC_INTERVAL,
     };
 
@@ -108,6 +130,21 @@ pub fn parse(text: &str) -> Result<Configuration, ConfigurationError> {
         servers,
         resync_interval,
     })
+}
+
+/// Whether only root can have written a file: it belongs to root, others may
+/// not write it, and its group may only if it is root's group.
+fn is_written_by_root_only(statistics: &Statistics) -> bool {
+    statistics.user == UserIdentifier::ROOT
+        && !statistics
+            .permissions
+            .get_others()
+            .contains(Permission::Write)
+        && (statistics.group == GroupIdentifier::ROOT
+            || !statistics
+                .permissions
+                .get_group()
+                .contains(Permission::Write))
 }
 
 /// Load the configuration, falling back to the defaults when the file is
@@ -131,14 +168,11 @@ pub async fn load(virtual_file_system: &VirtualFileSystem, task: TaskIdentifier)
 
     let result = async {
         let statistics = file.get_statistics().await?;
-        if statistics.kind != Kind::File
-            || statistics.user.as_u16() != 0
-            || !statistics.permissions.get_group().is_empty()
-            || !statistics.permissions.get_others().is_empty()
-        {
+        if statistics.kind != Kind::File || !is_written_by_root_only(&statistics) {
             return Err(IoErrorKind::PermissionDenied);
         }
-        let mut contents = [0u8; MAXIMUM_CONFIGURATION_SIZE + 1];
+        // The buffer is allocated once, on the heap, outside the task stack.
+        let mut contents = vec![0u8; MAXIMUM_CONFIGURATION_SIZE + 1];
         let mut length = 0;
         while length < contents.len() {
             let received = file.read(&mut contents[length..]).await?;
@@ -191,14 +225,42 @@ mod tests {
     #[test]
     fn servers_and_interval_are_read() {
         let configuration = parse(
-            r#"{"servers": ["time.example.com", "192.0.2.1"], "resync_interval_seconds": 60}"#,
+            r#"{"servers": ["time.example.com", "192.0.2.1"], "resync_interval_seconds": 600}"#,
         )
         .unwrap();
         assert_eq!(
             configuration.servers,
             ["time.example.com".to_string(), "192.0.2.1".to_string()]
         );
-        assert_eq!(configuration.resync_interval, Duration::from_secs(60));
+        assert_eq!(configuration.resync_interval, Duration::from_secs(600));
+    }
+
+    #[test]
+    fn the_interval_is_clamped_to_the_bounds() {
+        assert_eq!(
+            parse(r#"{"resync_interval_seconds": 0}"#)
+                .unwrap()
+                .resync_interval,
+            MINIMUM_RESYNC_INTERVAL
+        );
+        assert_eq!(
+            parse(r#"{"resync_interval_seconds": 1}"#)
+                .unwrap()
+                .resync_interval,
+            MINIMUM_RESYNC_INTERVAL
+        );
+        assert_eq!(
+            parse(r#"{"resync_interval_seconds": 999999999}"#)
+                .unwrap()
+                .resync_interval,
+            MAXIMUM_RESYNC_INTERVAL
+        );
+        assert_eq!(
+            parse(r#"{"resync_interval_seconds": 604800}"#)
+                .unwrap()
+                .resync_interval,
+            MAXIMUM_RESYNC_INTERVAL
+        );
     }
 
     #[test]
@@ -222,10 +284,6 @@ mod tests {
                 "a".repeat(MAXIMUM_SERVER_NAME_LENGTH + 1)
             )),
             Err(ConfigurationError::InvalidServerName)
-        );
-        assert_eq!(
-            parse(r#"{"resync_interval_seconds": 0}"#),
-            Err(ConfigurationError::InvalidInterval)
         );
         assert_eq!(
             parse(r#"{"servers": "pool.ntp.org"}"#),

@@ -1,8 +1,9 @@
-//! The SNTP client: the `sntpc` crate does the protocol (RFC 4330/5905 packet
-//! handling, validation, era reconstruction and the four-timestamp offset), and
-//! this module adapts it to Xila: a [`sntpc::NtpUdpSocket`] over the network
-//! subsystem's [`UdpSocket`], a [`sntpc::NtpTimestampGenerator`] over the time
-//! manager, and the application of the result to the system UTC clock.
+//! The SNTP client: the `sntpc` crate does the protocol (RFC 4330 and RFC 5905
+//! packet handling, validation, era reconstruction and the four-timestamp
+//! offset); this module adapts it to Xila: a [`sntpc::NtpUdpSocket`] over the
+//! network subsystem's [`UdpSocket`], a [`sntpc::NtpTimestampGenerator`] over
+//! the time manager, and the application of the result to the system UTC
+//! clock.
 
 use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use core::time::Duration;
@@ -20,15 +21,28 @@ use crate::{
 /// UDP port of the NTP servers.
 pub const SERVER_PORT: u16 = 123;
 
-/// Size of an SNTP packet, in bytes: the socket buffers of one exchange.
+/// Size of an SNTP packet, in bytes.
 pub const PACKET_LENGTH: usize = 48;
 
-/// How long to wait for a server answer before giving up on the exchange.
+/// How many datagrams the socket buffers during one exchange, so that a stray
+/// answer cannot overflow the buffer before the real answer is read.
+pub const RECEIVE_PACKETS: usize = 4;
+
+/// How long one exchange waits for the server answer in total.
 pub const RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Answers whose measured round trip exceeds this bound are rejected: the
-/// clock cannot be trusted from an answer that old.
-pub const MAXIMUM_ROUND_TRIP: Duration = Duration::from_secs(10);
+/// clock cannot be trusted from an answer that old. With the 5 s response
+/// timeout this catches answers that arrived almost too late.
+pub const MAXIMUM_ROUND_TRIP: Duration = Duration::from_secs(2);
+
+/// After the first network synchronization, a clock step larger than this is
+/// only applied when a second answer agrees within
+/// [`STEP_CONFIRMATION_TOLERANCE`].
+pub const MAXIMUM_CLOCK_STEP: Duration = Duration::from_secs(1000);
+
+/// How close two answers must be to confirm a large clock step.
+pub const STEP_CONFIRMATION_TOLERANCE: Duration = Duration::from_secs(5);
 
 const NANOS_PER_SECOND: i128 = 1_000_000_000;
 
@@ -36,7 +50,8 @@ const NANOS_PER_SECOND: i128 = 1_000_000_000;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Failure {
     /// The `sntpc` protocol layer rejected the exchange or the answer, for
-    /// example a kiss-of-death packet.
+    /// example a kiss-of-death packet, or an answer before the platform's
+    /// minimum timestamp.
     Protocol(sntpc::Error),
     /// The network or socket layer failed.
     Io(IoErrorKind),
@@ -73,15 +88,19 @@ pub struct Applied {
 /// behind an asynchronous mutex; `sntpc` calls `send_to` and `recv_from`
 /// sequentially, never concurrently. Errors map to [`sntpc::Error`]: a
 /// truncated datagram is an incorrect payload, everything else is a network
-/// error. The response source address is checked by `sntpc` itself.
+/// error, and the original [`IoErrorKind`] is kept in `last_io_error` because
+/// `sntpc` reports every I/O failure as `Error::Network`. The response source
+/// address is checked by `sntpc` itself.
 pub struct SntpUdpSocket {
     socket: Mutex<CriticalSectionRawMutex, UdpSocket>,
+    last_io_error: Mutex<CriticalSectionRawMutex, Option<IoErrorKind>>,
 }
 
 impl SntpUdpSocket {
     pub fn new(socket: UdpSocket) -> Self {
         Self {
             socket: Mutex::new(socket),
+            last_io_error: Mutex::new(None),
         }
     }
 
@@ -95,40 +114,56 @@ impl SntpUdpSocket {
             let _ = socket.read_from(&mut stale).await;
         }
     }
+
+    /// Bind a fresh ephemeral source port, so that every exchange sends from a
+    /// new port. This also drops queued datagrams.
+    pub async fn rebind_ephemeral(&self) -> Result<Port> {
+        self.socket.lock().await.rebind_ephemeral().await
+    }
+
+    /// The kind of the last socket error, if any.
+    pub async fn last_io_error(&self) -> Option<IoErrorKind> {
+        *self.last_io_error.lock().await
+    }
+
+    /// Record a socket error and map it to the `sntpc` error.
+    async fn record_io_error(&self, kind: IoErrorKind) -> sntpc::Error {
+        *self.last_io_error.lock().await = Some(kind);
+        if kind == IoErrorKind::DatagramTruncated {
+            sntpc::Error::IncorrectPayload
+        } else {
+            sntpc::Error::Network
+        }
+    }
 }
 
 impl sntpc::NtpUdpSocket for SntpUdpSocket {
-    async fn send_to(&self, buf: &[u8], addr: SocketAddr) -> sntpc::Result<usize> {
+    async fn send_to(&self, packet: &[u8], destination: SocketAddr) -> sntpc::Result<usize> {
         let mut socket = self.socket.lock().await;
         let metadata = UdpMetadata::new(
-            from_core_ip(addr.ip()),
-            Port::from_inner(addr.port()),
+            from_core_ip(destination.ip()),
+            Port::from_inner(destination.port()),
             None,
             PacketMeta::default(),
         );
-        socket
-            .write_to(buf, &metadata)
-            .await
-            .map_err(|_| sntpc::Error::Network)?;
-        Ok(buf.len())
+        match socket.write_to(packet, &metadata).await {
+            Ok(()) => Ok(packet.len()),
+            Err(kind) => Err(self.record_io_error(kind).await),
+        }
     }
 
-    async fn recv_from(&self, buf: &mut [u8]) -> sntpc::Result<(usize, SocketAddr)> {
+    async fn recv_from(&self, packet: &mut [u8]) -> sntpc::Result<(usize, SocketAddr)> {
         let socket = self.socket.lock().await;
-        let (size, remote) = socket.read_from(buf).await.map_err(|error| {
-            if error == IoErrorKind::DatagramTruncated {
-                sntpc::Error::IncorrectPayload
-            } else {
-                sntpc::Error::Network
-            }
-        })?;
-        Ok((
-            size,
-            SocketAddr::new(
-                to_core_ip(remote.remote_address),
-                remote.remote_port.into_inner(),
-            ),
-        ))
+        match socket.read_from(packet).await {
+            Ok((size, remote)) => Ok((
+                size,
+                SocketAddr::new(
+                    to_core_ip(remote.remote_address),
+                    remote.remote_port.into_inner(),
+                ),
+            )),
+            Err(kind) => Err(self.record_io_error(kind).await),
+        }
     }
 }
 
@@ -188,15 +223,26 @@ impl sntpc::NtpTimestampGenerator for ManagerTimestampGenerator<'_> {
 pub struct Client<'a> {
     network: &'a Manager,
     time: &'a time::Manager<'a>,
+    minimum_timestamp: Option<Timestamp>,
 }
 
 impl<'a> Client<'a> {
-    pub fn new(network: &'a Manager, time: &'a time::Manager<'a>) -> Self {
-        Self { network, time }
+    /// `minimum_timestamp` is the platform's floor for UTC, for example the
+    /// build date: answers before it are rejected.
+    pub fn new(
+        network: &'a Manager,
+        time: &'a time::Manager<'a>,
+        minimum_timestamp: Option<Timestamp>,
+    ) -> Self {
+        Self {
+            network,
+            time,
+            minimum_timestamp,
+        }
     }
 
     /// Return the shared socket, creating and binding it on first use. The
-    /// socket buffers are the only allocation of an exchange.
+    /// socket buffers are the only per-exchange structure.
     pub async fn ensure_socket<'b>(
         &self,
         socket: &'b mut Option<SntpUdpSocket>,
@@ -204,7 +250,13 @@ impl<'a> Client<'a> {
         if socket.is_none() {
             let mut created = self
                 .network
-                .new_udp_socket(PACKET_LENGTH, PACKET_LENGTH, 4, 4, None)
+                .new_udp_socket(
+                    PACKET_LENGTH,
+                    PACKET_LENGTH * RECEIVE_PACKETS,
+                    RECEIVE_PACKETS,
+                    4,
+                    None,
+                )
                 .await?;
             created.bind_ephemeral().await?;
             *socket = Some(SntpUdpSocket::new(created));
@@ -212,9 +264,8 @@ impl<'a> Client<'a> {
         Ok(socket.as_mut().expect("socket was just created"))
     }
 
-    /// Query one server by name or address with `sntpc::get_time`: resolve the
-    /// name, send one request to UDP port 123 and wait up to
-    /// [`RESPONSE_TIMEOUT`] for the answer.
+    /// Query one server by name or address: resolve the name, then exchange
+    /// with each address in turn.
     pub async fn exchange(
         &self,
         server: &str,
@@ -225,31 +276,131 @@ impl<'a> Client<'a> {
             .resolve(server, DnsQueryKind::A | DnsQueryKind::Aaaa, true, None)
             .await
             .map_err(|error| Failure::Io(error.kind()))?;
+        self.exchange_addresses(&addresses, socket).await
+    }
 
+    /// Exchange with each address in turn until one answers.
+    pub async fn exchange_addresses(
+        &self,
+        addresses: &[IpAddress],
+        socket: &SntpUdpSocket,
+    ) -> core::result::Result<Exchange, Failure> {
         let mut last_error = Failure::Protocol(sntpc::Error::Network);
-        for address in &addresses {
+        for address in addresses {
             let destination = SocketAddr::new(to_core_ip(address.clone()), SERVER_PORT);
-            socket.discard_pending().await;
+            match self.exchange_one(destination, socket).await {
+                Ok(exchange) => return Ok(exchange),
+                Err(error) => last_error = error,
+            }
+        }
+        Err(last_error)
+    }
+
+    /// One request/response with one server address. Stray datagrams (a wrong
+    /// source address or a wrong originate timestamp) are skipped until the
+    /// deadline, so that one stray packet does not abort the exchange.
+    async fn exchange_one(
+        &self,
+        destination: SocketAddr,
+        socket: &SntpUdpSocket,
+    ) -> core::result::Result<Exchange, Failure> {
+        socket.discard_pending().await;
+        // A fresh source port per exchange, when the stack allows it.
+        if let Err(error) = socket.rebind_ephemeral().await {
+            log::debug!(
+                "SNTP: cannot rebind a fresh source port ({error}); keeping the current one"
+            );
+        }
+        let deadline = self.time.monotonic_now() + RESPONSE_TIMEOUT;
+        let now = self.time.monotonic_now();
+        if now >= deadline {
+            return Err(Failure::TimedOut);
+        }
+        let context = sntpc::NtpContext::new(ManagerTimestampGenerator::new(self.time));
+        let request = sntpc::sntp_send_request(destination, socket, context);
+        let sent = match select(request, task::sleep(deadline - now)).await {
+            Either::First(Ok(sent)) => sent,
+            Either::First(Err(error)) => return Err(self.translate(socket, error).await),
+            Either::Second(()) => return Err(Failure::TimedOut),
+        };
+        loop {
+            let now = self.time.monotonic_now();
+            if now >= deadline {
+                return Err(Failure::TimedOut);
+            }
             let context = sntpc::NtpContext::new(ManagerTimestampGenerator::new(self.time));
-            let request = sntpc::get_time(destination, socket, context);
-            match select(request, task::sleep(RESPONSE_TIMEOUT)).await {
+            let answer = sntpc::sntp_process_response(destination, socket, context, sent);
+            match select(answer, task::sleep(deadline - now)).await {
                 Either::First(Ok(result)) => {
                     return Ok(Exchange {
                         result,
                         received_monotonic: self.time.monotonic_now(),
                     });
                 }
-                Either::First(Err(error)) => last_error = Failure::Protocol(error),
-                Either::Second(()) => last_error = Failure::TimedOut,
+                Either::First(Err(error)) => {
+                    if matches!(
+                        error,
+                        sntpc::Error::ResponseAddressMismatch
+                            | sntpc::Error::IncorrectOriginTimestamp
+                    ) {
+                        // A stray datagram: read the next one.
+                        continue;
+                    }
+                    return Err(self.translate(socket, error).await);
+                }
+                Either::Second(()) => return Err(Failure::TimedOut),
             }
         }
-        Err(last_error)
+    }
+
+    /// Map a `sntpc` error to a [`Failure`], restoring the socket error kind
+    /// that `sntpc` flattened into `Error::Network`.
+    async fn translate(&self, socket: &SntpUdpSocket, error: sntpc::Error) -> Failure {
+        if error == sntpc::Error::Network
+            && let Some(kind) = socket.last_io_error().await
+        {
+            return Failure::Io(kind);
+        }
+        Failure::Protocol(error)
+    }
+
+    /// The UTC value an exchange would set, without setting the clock.
+    pub fn candidate(&self, exchange: &Exchange) -> core::result::Result<Timestamp, Failure> {
+        candidate(self.time, exchange, self.minimum_timestamp)
     }
 
     /// Apply a successful exchange to the system UTC clock. See [`apply`].
     pub fn apply(&self, exchange: &Exchange) -> core::result::Result<Applied, Failure> {
-        apply(self.time, exchange)
+        apply(self.time, exchange, self.minimum_timestamp)
     }
+}
+
+/// The UTC value of an exchange: the server transmit time plus half the round
+/// trip, carried over to now. The answer is rejected when the round trip is
+/// too long or the value is before the platform's minimum timestamp.
+pub fn candidate(
+    time: &time::Manager<'_>,
+    exchange: &Exchange,
+    minimum_timestamp: Option<Timestamp>,
+) -> core::result::Result<Timestamp, Failure> {
+    let result = &exchange.result;
+    let round_trip = Duration::from_micros(result.roundtrip);
+    if round_trip > MAXIMUM_ROUND_TRIP {
+        return Err(Failure::Io(IoErrorKind::TimedOut));
+    }
+    let server_nanos = result.seconds as i128 * NANOS_PER_SECOND
+        + i128::from(sntpc::fraction_to_nanoseconds(result.seconds_fraction));
+    // The sample is anchored when `set_realtime` runs, a little after the
+    // answer was processed: carry the elapsed time over.
+    let since_receive = (time.monotonic_now() - exchange.received_monotonic).as_nanos() as i128;
+    let timestamp =
+        Timestamp::from_nanos(server_nanos + round_trip.as_nanos() as i128 / 2 + since_receive);
+    if let Some(minimum) = minimum_timestamp
+        && timestamp < minimum
+    {
+        return Err(Failure::Protocol(sntpc::Error::InvalidTimestamp));
+    }
+    Ok(timestamp)
 }
 
 /// Set UTC from a `sntpc` result: the server transmit time plus half the round
@@ -259,21 +410,11 @@ impl<'a> Client<'a> {
 pub fn apply(
     time: &time::Manager<'_>,
     exchange: &Exchange,
+    minimum_timestamp: Option<Timestamp>,
 ) -> core::result::Result<Applied, Failure> {
-    let result = &exchange.result;
-    let round_trip = Duration::from_micros(result.roundtrip);
-    if round_trip > MAXIMUM_ROUND_TRIP {
-        return Err(Failure::Io(IoErrorKind::TimedOut));
-    }
+    let timestamp = candidate(time, exchange, minimum_timestamp)?;
     let resolution = time.monotonic_resolution();
-    let accuracy = accuracy(result, resolution);
-    let server_nanos = result.seconds as i128 * NANOS_PER_SECOND
-        + i128::from(sntpc::fraction_to_nanoseconds(result.seconds_fraction));
-    // The sample is anchored when `set_realtime` runs, a little after the
-    // answer was processed: carry the elapsed time over.
-    let since_receive = (time.monotonic_now() - exchange.received_monotonic).as_nanos() as i128;
-    let timestamp =
-        Timestamp::from_nanos(server_nanos + round_trip.as_nanos() as i128 / 2 + since_receive);
+    let accuracy = accuracy(&exchange.result, resolution);
     let offset_nanos = time
         .realtime_now()
         .ok()
@@ -287,8 +428,8 @@ pub fn apply(
     .map_err(|error| Failure::Io(error.into_io_error_kind()))?;
     Ok(Applied {
         offset_nanos,
-        server_offset_micros: result.offset,
-        round_trip,
+        server_offset_micros: exchange.result.offset,
+        round_trip: Duration::from_micros(exchange.result.roundtrip),
         accuracy,
     })
 }
@@ -426,7 +567,7 @@ mod tests {
             result: result(20_000, 3_600_000_000),
             received_monotonic: received,
         };
-        let applied = apply(&time_manager, &exchange).unwrap();
+        let applied = apply(&time_manager, &exchange, None).unwrap();
         let synchronization = time_manager.status().synchronization.expect("synchronized");
         assert_eq!(synchronization.source, ClockSource::Network);
         assert_eq!(applied.round_trip, Duration::from_millis(20));
@@ -455,7 +596,7 @@ mod tests {
             result: result(0, 0),
             received_monotonic: time_manager.monotonic_now(),
         };
-        let applied = apply(&time_manager, &exchange).unwrap();
+        let applied = apply(&time_manager, &exchange, None).unwrap();
         let offset = applied.offset_nanos.expect("clock was set before");
         let expected =
             UNIX_2026 as i128 * NANOS_PER_SECOND + 500_000_000 - 1_700_000_000_000_000_000;
@@ -473,13 +614,28 @@ mod tests {
             received_monotonic: time_manager.monotonic_now(),
         };
         assert_eq!(
-            apply(&time_manager, &exchange),
+            apply(&time_manager, &exchange, None),
             Err(Failure::Io(IoErrorKind::TimedOut))
         );
         assert!(
             time_manager.realtime_now().is_err(),
             "clock stays unsynchronized"
         );
+    }
+
+    #[test]
+    fn apply_rejects_an_answer_before_the_minimum_timestamp() {
+        let time_manager = time::Manager::unsynchronized();
+        let minimum = Timestamp::from_nanos((UNIX_2026 as i128 + 3600) * NANOS_PER_SECOND);
+        let exchange = Exchange {
+            result: result(1_000, 0),
+            received_monotonic: time_manager.monotonic_now(),
+        };
+        assert_eq!(
+            apply(&time_manager, &exchange, Some(minimum)),
+            Err(Failure::Protocol(sntpc::Error::InvalidTimestamp))
+        );
+        assert!(time_manager.realtime_now().is_err());
     }
 
     #[test]

@@ -1,20 +1,32 @@
 //! SNTP client for Xila: sets the system UTC clock from the network.
 //!
-//! The protocol is not reimplemented here: the [`sntpc`] crate (RFC 4330/5905,
-//! SNTP version 4 over UDP port 123) builds and validates the packets,
-//! reconstructs the NTP era and computes the offset from all four timestamps.
-//! This module adapts it to Xila (see [`Client`]): a [`sntpc::NtpUdpSocket`] over
-//! the network subsystem's UDP socket and a [`sntpc::NtpTimestampGenerator`]
-//! over the time manager, then applies the result through
-//! `time::Manager::set_realtime` with `ClockSource::Network`.
+//! The protocol is not reimplemented here. The [`sntpc`] crate (RFC 4330 and
+//! RFC 5905, SNTP version 4 over UDP port 123) builds and validates the
+//! packets, reconstructs the NTP era and computes the offset from all four
+//! timestamps. This module only adapts it to Xila (see [`Client`]): a
+//! [`sntpc::NtpUdpSocket`] over the network subsystem's UDP socket, a
+//! [`sntpc::NtpTimestampGenerator`] over the time manager, and the application
+//! of the result through `time::Manager::set_realtime` with
+//! `ClockSource::Network`.
 //!
 //! The client lives in the network subsystem because it is a network service
-//! owned by that runtime: it resolves server names with
+//! owned by that runtime. It resolves server names with
 //! [`Manager::resolve`](crate::Manager::resolve) and opens its socket with
-//! [`Manager::new_udp_socket`](crate::Manager::new_udp_socket) against the same
-//! stacks, and needs the task spawner, the virtual file system (for the
-//! configuration file) and the time manager, which are already its
-//! dependencies. One exchange allocates nothing beyond its UDP socket.
+//! [`Manager::new_udp_socket`](crate::Manager::new_udp_socket), and it needs
+//! the task spawner, the virtual file system (for the configuration file) and
+//! the time manager, which are already its dependencies. The UDP socket is
+//! created once and reused; DNS resolution returns a heap `Vec`, and the
+//! kiss-of-death log line is formatted only when it is printed.
+//!
+//! # Safety bounds
+//!
+//! Answers before the platform's minimum timestamp (the build date on devices
+//! without a battery clock) are rejected. After the first network
+//! synchronization, a clock step larger than 1000 s is applied only when a
+//! second answer agrees within 5 s. Unauthenticated SNTP cannot stop an
+//! on-path attacker, and `sntpc` 0.11 does not randomize the low bits of the
+//! transmit timestamp as RFC 5905 section 8 asks; a fresh source port per
+//! exchange is used instead.
 //!
 //! # Configuration and the NTP Pool
 //!
@@ -27,31 +39,31 @@
 //! `xila.pool.ntp.org` instead. See <https://www.ntppool.org/vendors.html>.
 //!
 //! [`Service::start`] spawns the synchronization task: it waits until an
-//! interface has an address, queries the configured servers, then
-//! resynchronizes periodically with a bounded exponential backoff on failure.
-//! Kiss-of-death answers ban or slow down a server per RFC 5905 section 7.4.
+//! interface has an address, queries the configured servers at random times,
+//! then resynchronizes periodically with a bounded exponential backoff on
+//! failure. Kiss-of-death answers ban or slow down a server per RFC 5905
+//! section 7.4.
 
 mod client;
 mod configuration;
 mod service;
 
 pub use client::{
-    Applied, Client, Exchange, Failure, MAXIMUM_ROUND_TRIP, ManagerTimestampGenerator,
-    PACKET_LENGTH, RESPONSE_TIMEOUT, SERVER_PORT, SntpUdpSocket, apply, invalidates_socket,
+    Applied, Client, Exchange, Failure, MAXIMUM_CLOCK_STEP, MAXIMUM_ROUND_TRIP,
+    ManagerTimestampGenerator, PACKET_LENGTH, RECEIVE_PACKETS, RESPONSE_TIMEOUT, SERVER_PORT,
+    STEP_CONFIRMATION_TOLERANCE, SntpUdpSocket, apply, candidate, invalidates_socket,
 };
 pub use configuration::{
     CONFIGURATION_PATH, Configuration, ConfigurationError, DEFAULT_RESYNC_INTERVAL, DEFAULT_SERVER,
-    MAXIMUM_CONFIGURATION_SIZE, MAXIMUM_SERVER_NAME_LENGTH, MAXIMUM_SERVERS, load, parse,
+    MAXIMUM_CONFIGURATION_SIZE, MAXIMUM_RESYNC_INTERVAL, MAXIMUM_SERVER_NAME_LENGTH,
+    MAXIMUM_SERVERS, MINIMUM_RESYNC_INTERVAL, load, parse,
 };
-pub use service::{
-    FAILURE_LOG_STRIDE, INITIAL_RETRY_DELAY, MAXIMUM_RATE_MULTIPLIER, MAXIMUM_RETRY_DELAY,
-    NETWORK_POLL_INTERVAL, REPEATED_FAILURE_LOG_THRESHOLD, ServerState, Service,
-    handle_kiss_of_death, retry_delay,
-};
+pub use service::Service;
 
 #[cfg(test)]
 mod tests {
     use alloc::boxed::Box;
+    use alloc::vec::Vec;
     use core::time::Duration;
 
     use smoltcp::phy::PacketMeta;
@@ -61,7 +73,7 @@ mod tests {
 
     use super::client::{Client, Failure, SERVER_PORT};
     use crate::tests::{initialize, task_manager};
-    use crate::{IoErrorKind, Port, UdpMetadata};
+    use crate::{Port, UdpMetadata};
 
     static TEST_MUTEX: Mutex<CriticalSectionRawMutex, ()> = Mutex::new(());
 
@@ -83,10 +95,10 @@ mod tests {
     }
 
     /// Spawn a scripted server on 127.0.0.1:123 that reads one request and
-    /// answers it. `answer` builds the 48-byte response from the request's
-    /// transmit timestamp (bytes 40 to 48).
+    /// sends back the answers `answer` builds from the request's transmit
+    /// timestamp (bytes 40 to 48), in order.
     async fn spawn_scripted_server(
-        answer: impl Fn([u8; 48]) -> [u8; 48] + Send + 'static,
+        answer: impl Fn([u8; 48]) -> Vec<[u8; 48]> + Send + 'static,
     ) -> (
         Arc<Signal<CriticalSectionRawMutex, ()>>,
         task::JoinHandle<()>,
@@ -119,19 +131,20 @@ mod tests {
                     assert_eq!(buffer[0], 0x23, "leap 0, version 4, mode 3");
                     let mut request = [0u8; 48];
                     request.copy_from_slice(&buffer[..48]);
-                    let response = answer(request);
                     let metadata = UdpMetadata::new(
                         remote.remote_address,
                         remote.remote_port,
                         None,
                         PacketMeta::default(),
                     );
-                    server_socket
-                        .write_to(&response, &metadata)
-                        .await
-                        .expect("answer sent");
+                    for response in answer(request) {
+                        server_socket
+                            .write_to(&response, &metadata)
+                            .await
+                            .expect("answer sent");
+                    }
                     // `close` drops a queued packet, and `flush` only checks
-                    // capacity: give the runner time to transmit the answer.
+                    // capacity: give the runner time to transmit the answers.
                     task::sleep(Duration::from_millis(100)).await;
                     server_socket.close().await;
                 },
@@ -167,12 +180,14 @@ mod tests {
         let _lock = TEST_MUTEX.lock().await;
         let network_manager = initialize().await;
         let time_manager = host_time_manager();
-        let client = Client::new(network_manager, time_manager);
+        let client = Client::new(network_manager, time_manager, None);
 
         let server_transmit_unix_nanos =
             time_manager.realtime_now().unwrap().as_nanos() + 3_600_000_000_000;
-        let (ready, server_task) =
-            spawn_scripted_server(valid_answer(server_transmit_unix_nanos)).await;
+        let (ready, server_task) = spawn_scripted_server(move |request| {
+            alloc::vec![valid_answer(server_transmit_unix_nanos)(request)]
+        })
+        .await;
         ready.wait().await;
 
         let mut adapter = None;
@@ -205,6 +220,43 @@ mod tests {
         assert!(exchange.result.roundtrip > 0);
     }
 
+    /// A stray datagram before the real answer (wrong originate timestamp) is
+    /// skipped, and the real answer still synchronizes the clock.
+    #[task::test]
+    async fn a_stray_datagram_before_the_real_answer_is_skipped() {
+        let _lock = TEST_MUTEX.lock().await;
+        let network_manager = initialize().await;
+        let time_manager = host_time_manager();
+        let client = Client::new(network_manager, time_manager, None);
+
+        let server_transmit_unix_nanos =
+            time_manager.realtime_now().unwrap().as_nanos() + 3_600_000_000_000;
+        let (ready, server_task) = spawn_scripted_server(move |request| {
+            let mut forged = valid_answer(server_transmit_unix_nanos)(request);
+            // A forged originate timestamp: not what the client sent.
+            forged[24..32].copy_from_slice(&ntp_wire(2_000_000_000_000_000_000).to_be_bytes());
+            alloc::vec![forged, valid_answer(server_transmit_unix_nanos)(request)]
+        })
+        .await;
+        ready.wait().await;
+
+        let mut adapter = None;
+        let socket = client.ensure_socket(&mut adapter).await.unwrap();
+        let exchange = client
+            .exchange("127.0.0.1", socket)
+            .await
+            .expect("the real answer is used after the stray one");
+        let applied = client.apply(&exchange).expect("answer applies");
+        server_task.join().await;
+
+        assert_eq!(exchange.result.stratum, 2);
+        assert!(applied.offset_nanos.unwrap() > 3_500_000_000_000);
+        assert_eq!(
+            time_manager.status().synchronization.map(|s| s.source),
+            Some(time::ClockSource::Network)
+        );
+    }
+
     /// An answer that does not echo the request transmit timestamp is rejected
     /// by `sntpc`, and the clock is left alone.
     #[task::test]
@@ -212,39 +264,32 @@ mod tests {
         let _lock = TEST_MUTEX.lock().await;
         let network_manager = initialize().await;
         let time_manager = host_time_manager();
-        let before = time_manager.realtime_now().unwrap().as_nanos();
-        let client = Client::new(network_manager, time_manager);
+        let client = Client::new(network_manager, time_manager, None);
 
         let forged = |request: [u8; 48]| {
             let mut response = valid_answer(2_000_000_000_000_000_000)(request);
             // A forged originate timestamp: not what the client sent.
             response[24..32].copy_from_slice(&ntp_wire(2_000_000_000_000_000_000).to_be_bytes());
-            response
+            alloc::vec![response]
         };
         let (ready, server_task) = spawn_scripted_server(forged).await;
         ready.wait().await;
 
         let mut adapter = None;
         let socket = client.ensure_socket(&mut adapter).await.unwrap();
+        // The forged answer is skipped like a stray datagram; with no other
+        // answer, the exchange ends on the deadline.
         let result = client.exchange("127.0.0.1", socket).await;
         assert!(
-            matches!(
-                result,
-                Err(Failure::Protocol(sntpc::Error::IncorrectOriginTimestamp))
-            ),
+            matches!(result, Err(Failure::TimedOut)),
             "forged answer rejected: {result:?}"
         );
         server_task.join().await;
 
-        let after = time_manager.realtime_now().unwrap().as_nanos();
-        assert!(
-            (after - before).abs() < Duration::from_secs(1).as_nanos() as i128,
-            "the clock did not move"
-        );
         assert_eq!(
             time_manager.status().synchronization.map(|s| s.source),
             Some(time::ClockSource::Host),
-            "the source stays the host clock"
+            "the forged answer did not set the clock: the source stays the host clock"
         );
     }
 
@@ -255,7 +300,7 @@ mod tests {
         let _lock = TEST_MUTEX.lock().await;
         let network_manager = initialize().await;
         let time_manager = host_time_manager();
-        let client = Client::new(network_manager, time_manager);
+        let client = Client::new(network_manager, time_manager, None);
 
         let kod = |request: [u8; 48]| {
             let mut response = [0u8; 48];
@@ -264,7 +309,7 @@ mod tests {
             response[12..16].copy_from_slice(b"RATE"); // reference id is the code
             response[24..32].copy_from_slice(&request[40..48]);
             response[40..48].copy_from_slice(&request[40..48]);
-            response
+            alloc::vec![response]
         };
         let (ready, server_task) = spawn_scripted_server(kod).await;
         ready.wait().await;
@@ -286,6 +331,5 @@ mod tests {
             time_manager.realtime_now().is_ok(),
             "host clock still there"
         );
-        let _ = IoErrorKind::TimedOut;
     }
 }

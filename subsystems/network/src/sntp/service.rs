@@ -4,8 +4,15 @@
 //!
 //! Kiss-of-death answers (RFC 5905 section 7.4) get a per-server policy:
 //! `DENY` and `RSTR` ban the server until the next configuration change or
-//! reboot, and `RATE` doubles that server's resynchronization interval,
-//! bounded. Each event is logged once per server.
+//! reboot, and `RATE` sets a monotonic `not_before` deadline for that server
+//! (now plus the doubled interval): servers whose deadline has not passed are
+//! skipped, and the service sleeps until the earliest deadline. Each event is
+//! logged once per server.
+//!
+//! Query times carry a random jitter, as the NTP Pool vendor guidance asks:
+//! 0 to 2 s before the first query, and 0 to 12 percent added to every
+//! resynchronization interval and retry delay. Resolved server names are
+//! cached for one hour.
 
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -14,45 +21,79 @@ use core::time::Duration;
 
 use sntpc::{Error as SntpError, KissOfDeathCode};
 use task::{Manager as TaskManager, TaskIdentifier};
+use time::Timestamp;
 
 use crate::{
-    IntoIoErrorKind, Manager, Result,
+    DnsQueryKind, IntoIoErrorKind, IpAddress, Manager, Result,
     sntp::{
-        client::{self, Applied, Client, Failure},
-        configuration::{self, Configuration},
+        client::{self, Applied, Client, Failure, MAXIMUM_CLOCK_STEP, STEP_CONFIRMATION_TOLERANCE},
+        configuration::{self, Configuration, MAXIMUM_RESYNC_INTERVAL},
     },
 };
 
 /// How often to check that an interface has an address while waiting for the
 /// network to come up.
-pub const NETWORK_POLL_INTERVAL: Duration = Duration::from_secs(5);
+pub(crate) const NETWORK_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 /// The delay before the first retry after a failure.
-pub const INITIAL_RETRY_DELAY: Duration = Duration::from_secs(30);
+pub(crate) const INITIAL_RETRY_DELAY: Duration = Duration::from_secs(60);
 
 /// The largest delay between two attempts after failures.
-pub const MAXIMUM_RETRY_DELAY: Duration = Duration::from_secs(1800);
+pub(crate) const MAXIMUM_RETRY_DELAY: Duration = Duration::from_secs(1800);
 
 /// After this many consecutive failures, and then again every
 /// `FAILURE_LOG_STRIDE`-th failure, a warning is logged.
-pub const REPEATED_FAILURE_LOG_THRESHOLD: u32 = 3;
+pub(crate) const REPEATED_FAILURE_LOG_THRESHOLD: u32 = 3;
 
 /// The stride between two failure warnings once the threshold is reached.
-pub const FAILURE_LOG_STRIDE: u32 = 10;
+pub(crate) const FAILURE_LOG_STRIDE: u32 = 10;
 
 /// The largest multiplier a `RATE` kiss of death applies to one server's
 /// resynchronization interval.
-pub const MAXIMUM_RATE_MULTIPLIER: u32 = 64;
+pub(crate) const MAXIMUM_RATE_MULTIPLIER: u32 = 64;
+
+/// How long a resolved server name is reused before resolving it again.
+pub(crate) const DNS_CACHE_LIFETIME: Duration = Duration::from_secs(3600);
+
+/// Random delay before the first query, from zero up to this bound.
+pub(crate) const FIRST_QUERY_JITTER: Duration = Duration::from_secs(2);
+
+/// Random percentage added to every interval and retry delay, from 0 up to
+/// this value.
+pub(crate) const JITTER_PERCENT: u64 = 12;
 
 /// The delay before retrying after `failures` consecutive failures: the
 /// initial delay doubled per failure, capped at the maximum.
-pub fn retry_delay(failures: u32) -> Duration {
+pub(crate) fn retry_delay(failures: u32) -> Duration {
     let shift = failures.saturating_sub(1).min(16);
     let factor = 1u64.checked_shl(shift).unwrap_or(u64::MAX);
     let millis = (INITIAL_RETRY_DELAY.as_millis() as u64)
         .saturating_mul(factor)
         .min(MAXIMUM_RETRY_DELAY.as_millis() as u64);
     Duration::from_millis(millis)
+}
+
+/// A random duration from zero up to `span`, from the network manager's random
+/// device; zero when the device cannot be read.
+fn jitter(network: &Manager, span: Duration) -> Duration {
+    match network.random_u32() {
+        Some(value) => {
+            let nanos =
+                (u128::from(value) * span.as_nanos() / u128::from(u32::MAX)).min(u64::MAX as u128);
+            Duration::from_nanos(nanos as u64)
+        }
+        None => Duration::ZERO,
+    }
+}
+
+/// `base` plus a random 0 to `JITTER_PERCENT` percent.
+fn add_jitter(network: &Manager, base: Duration) -> Duration {
+    let percent = network
+        .random_u32()
+        .map(|value| u64::from(value) % (JITTER_PERCENT + 1))
+        .unwrap_or(0);
+    let nanos = base.as_nanos().saturating_mul(u128::from(100 + percent)) / 100;
+    Duration::from_nanos(nanos.min(u64::MAX as u128) as u64)
 }
 
 /// The per-server state the kiss-of-death policy keeps. It lives in memory
@@ -65,26 +106,58 @@ pub struct ServerState {
     rate_multiplier: u32,
     /// Whether the kiss of death was already logged for this server.
     kiss_logged: bool,
+    /// Monotonic instant before which a `RATE` kiss of death says the server
+    /// must not be queried.
+    not_before: Option<Duration>,
 }
 
 impl ServerState {
     /// The resynchronization interval of this server: the configured interval
-    /// times the rate multiplier.
+    /// times the rate multiplier, saturated.
     fn interval(&self, base: Duration) -> Duration {
-        base * self.rate_multiplier.max(1)
+        base.checked_mul(self.rate_multiplier.max(1))
+            .unwrap_or(MAXIMUM_RESYNC_INTERVAL)
+    }
+
+    /// Whether the server may not be queried at the monotonic instant `now`.
+    fn blocked(&self, now: Duration) -> bool {
+        self.banned || self.not_before.is_some_and(|deadline| now < deadline)
     }
 }
 
-/// Apply a kiss-of-death answer to one server's state. Returns the log line to
-/// print when the event was not logged yet, `None` otherwise.
-pub fn handle_kiss_of_death(state: &mut ServerState, code: KissOfDeathCode) -> Option<String> {
-    let message = match code {
+/// The earliest monotonic deadline among the rate-limited servers that are not
+/// yet due, if any.
+fn earliest_deadline(states: &[ServerState], now: Duration) -> Option<Duration> {
+    states
+        .iter()
+        .filter(|state| !state.banned)
+        .filter_map(|state| state.not_before)
+        .filter(|deadline| now < *deadline)
+        .min()
+}
+
+/// Apply a kiss-of-death answer to one server's state and log it once. Returns
+/// whether this call logged it. `now` is the monotonic instant and `base` the
+/// configured resynchronization interval.
+pub(crate) fn handle_kiss_of_death(
+    state: &mut ServerState,
+    code: KissOfDeathCode,
+    server: &str,
+    now: Duration,
+    base: Duration,
+) -> bool {
+    match code {
         KissOfDeathCode::Deny | KissOfDeathCode::Rstr => {
             state.banned = true;
-            Some(alloc::format!(
-                "denied access ({}); not used again until the next configuration change or reboot",
+            if state.kiss_logged {
+                return false;
+            }
+            state.kiss_logged = true;
+            log::warning!(
+                "SNTP: server {server} denied access ({}); not used again until the next configuration change or reboot",
                 code.as_str()
-            ))
+            );
+            true
         }
         KissOfDeathCode::Rate => {
             state.rate_multiplier = state
@@ -92,25 +165,28 @@ pub fn handle_kiss_of_death(state: &mut ServerState, code: KissOfDeathCode) -> O
                 .max(1)
                 .saturating_mul(2)
                 .min(MAXIMUM_RATE_MULTIPLIER);
-            Some(alloc::format!(
-                "asked to slow down ({}); its resynchronization interval is now doubled",
-                code.as_str()
-            ))
+            let interval = state.interval(base);
+            state.not_before = Some(now.checked_add(interval).unwrap_or(Duration::MAX));
+            if state.kiss_logged {
+                return false;
+            }
+            state.kiss_logged = true;
+            log::warning!(
+                "SNTP: server {server} asked to slow down ({}); next query in {} s",
+                code.as_str(),
+                interval.as_secs()
+            );
+            true
         }
-        _ => return None,
-    };
-    if state.kiss_logged {
-        return None;
+        _ => false,
     }
-    state.kiss_logged = true;
-    message
 }
 
 /// One successful synchronization.
 #[derive(Clone, Debug)]
 pub struct Outcome {
     /// The server that answered.
-    pub server: String,
+    pub server: &'static str,
     /// What applying the answer changed.
     pub applied: Applied,
     /// How long to wait before resynchronizing with this server.
@@ -125,6 +201,49 @@ enum Attempt {
     /// Every configured server denied access: nothing is queried until the
     /// next configuration change or reboot.
     AllBanned,
+    /// Every usable server is rate-limited: wait until this monotonic deadline.
+    Deferred(Duration),
+    /// A clock step larger than the bound was seen but no second answer
+    /// confirmed it yet.
+    Unconfirmed,
+}
+
+/// A cached name resolution.
+struct DnsEntry {
+    name: String,
+    addresses: Vec<IpAddress>,
+    resolved_at: Duration,
+}
+
+/// Resolve `name`, reusing the cached addresses while they are younger than
+/// [`DNS_CACHE_LIFETIME`].
+async fn resolve_cached(
+    network: &Manager,
+    cache: &mut Vec<DnsEntry>,
+    name: &str,
+    now: Duration,
+) -> core::result::Result<Vec<IpAddress>, Failure> {
+    if let Some(entry) = cache.iter().find(|entry| entry.name == name)
+        && now.saturating_sub(entry.resolved_at) < DNS_CACHE_LIFETIME
+    {
+        return Ok(entry.addresses.clone());
+    }
+    let addresses = network
+        .resolve(name, DnsQueryKind::A | DnsQueryKind::Aaaa, true, None)
+        .await
+        .map_err(|error| Failure::Io(error.kind()))?;
+    match cache.iter_mut().find(|entry| entry.name == name) {
+        Some(entry) => {
+            entry.addresses = addresses.clone();
+            entry.resolved_at = now;
+        }
+        None => cache.push(DnsEntry {
+            name: String::from(name),
+            addresses: addresses.clone(),
+            resolved_at: now,
+        }),
+    }
+    Ok(addresses)
 }
 
 /// The SNTP service, assembled from the runtime subsystems it needs.
@@ -133,20 +252,26 @@ pub struct Service {
     network: &'static Manager,
     time: &'static time::Manager<'static>,
     virtual_file_system: &'static virtual_file_system::VirtualFileSystem,
+    minimum_timestamp: Timestamp,
 }
 
 impl Service {
+    /// `minimum_timestamp` is the platform's floor for UTC, for example the
+    /// build date on devices without a battery clock: answers before it are
+    /// rejected.
     pub fn new(
         task_manager: &'static TaskManager,
         network: &'static Manager,
         time: &'static time::Manager<'static>,
         virtual_file_system: &'static virtual_file_system::VirtualFileSystem,
+        minimum_timestamp: Timestamp,
     ) -> Self {
         Self {
             task_manager,
             network,
             time,
             virtual_file_system,
+            minimum_timestamp,
         }
     }
 
@@ -159,9 +284,10 @@ impl Service {
         ));
         let network = self.network;
         let time = self.time;
+        let minimum_timestamp = self.minimum_timestamp;
         self.task_manager
             .spawn(task, "SNTP synchronization", None, move |_| async move {
-                run(network, time, configuration).await;
+                run(network, time, configuration, minimum_timestamp).await;
             })
             .await
             .map(|(_, identifier)| identifier)
@@ -175,36 +301,69 @@ async fn run(
     network: &'static Manager,
     time: &'static time::Manager<'static>,
     configuration: &'static Configuration,
+    minimum_timestamp: Timestamp,
 ) {
-    let client = Client::new(network, time);
+    let client = Client::new(network, time, Some(minimum_timestamp));
     let mut adapter: Option<client::SntpUdpSocket> = None;
     let mut states: Vec<ServerState> = configuration
         .servers
         .iter()
         .map(|_| ServerState::default())
         .collect();
+    let mut dns_cache: Vec<DnsEntry> = Vec::new();
+    let mut pending_step: Option<Timestamp> = None;
     let mut failures: u32 = 0;
     let mut synchronized_once = false;
+    let mut first_query = true;
 
     loop {
         // Start when an interface has an address.
         while !network.has_ip_address(None).await {
             task::sleep(NETWORK_POLL_INTERVAL).await;
         }
+        if first_query {
+            first_query = false;
+            task::sleep(jitter(network, FIRST_QUERY_JITTER)).await;
+        }
 
-        match attempt(&client, configuration, &mut states, &mut adapter).await {
+        match attempt(
+            &client,
+            network,
+            time,
+            configuration,
+            &mut states,
+            &mut adapter,
+            &mut dns_cache,
+            &mut pending_step,
+        )
+        .await
+        {
             Attempt::Synchronized(outcome) => {
                 if !synchronized_once {
                     synchronized_once = true;
                     log_success(&outcome);
                 }
                 failures = 0;
-                task::sleep(outcome.interval).await;
+                task::sleep(add_jitter(network, outcome.interval)).await;
             }
             Attempt::AllBanned => {
                 // Nothing is queried until the next configuration change or
                 // reboot; the kiss-of-death was already logged once.
-                task::sleep(configuration.resync_interval).await;
+                task::sleep(add_jitter(network, configuration.resync_interval)).await;
+            }
+            Attempt::Deferred(deadline) => {
+                // Every usable server is rate-limited: wait for the earliest
+                // deadline.
+                let wait = deadline.saturating_sub(time.monotonic_now());
+                task::sleep(wait).await;
+            }
+            Attempt::Unconfirmed => {
+                failures = failures.saturating_add(1);
+                log::warning!(
+                    "SNTP: a clock step larger than {} s is waiting for a confirming second answer",
+                    MAXIMUM_CLOCK_STEP.as_secs()
+                );
+                task::sleep(add_jitter(network, retry_delay(failures))).await;
             }
             Attempt::Failed(error) => {
                 failures = failures.saturating_add(1);
@@ -222,53 +381,106 @@ async fn run(
                         "SNTP: synchronization still failing after {failures} attempts (last error {error:?})"
                     );
                 }
-                task::sleep(retry_delay(failures)).await;
+                task::sleep(add_jitter(network, retry_delay(failures))).await;
             }
         }
     }
 }
 
 /// Query the configured servers in order and apply the first valid answer.
+/// Servers that are banned or rate-limited are skipped.
+#[allow(clippy::too_many_arguments)]
 async fn attempt(
     client: &Client<'_>,
-    configuration: &Configuration,
+    network: &Manager,
+    time: &time::Manager<'_>,
+    configuration: &'static Configuration,
     states: &mut [ServerState],
     adapter: &mut Option<client::SntpUdpSocket>,
+    dns_cache: &mut Vec<DnsEntry>,
+    pending_step: &mut Option<Timestamp>,
 ) -> Attempt {
+    let now = time.monotonic_now();
     let mut last_error = Failure::Protocol(SntpError::Network);
-    let mut any_usable = false;
+    let mut queried = false;
+    let mut unconfirmed = false;
     for (index, server) in configuration.servers.iter().enumerate() {
-        if states[index].banned {
+        if states[index].blocked(now) {
             continue;
         }
-        any_usable = true;
+        queried = true;
         let result = async {
+            let addresses = resolve_cached(network, dns_cache, server, now).await?;
             let socket = client.ensure_socket(adapter).await.map_err(Failure::Io)?;
-            client.exchange(server, socket).await
+            client.exchange_addresses(&addresses, socket).await
         }
         .await;
         match result {
-            Ok(exchange) => match client.apply(&exchange) {
-                Ok(applied) => {
-                    return Attempt::Synchronized(Outcome {
-                        server: server.clone(),
-                        applied,
-                        interval: states[index].interval(configuration.resync_interval),
-                    });
+            Ok(exchange) => {
+                let candidate = match client.candidate(&exchange) {
+                    Ok(candidate) => candidate,
+                    Err(error) => {
+                        last_error = error;
+                        continue;
+                    }
+                };
+                // After the first network synchronization, a step larger than
+                // the bound is applied only when a second answer agrees.
+                let already_network = time
+                    .status()
+                    .synchronization
+                    .is_some_and(|s| s.source == time::ClockSource::Network);
+                let step = time
+                    .realtime_now()
+                    .ok()
+                    .map(|current| (candidate.as_nanos() - current.as_nanos()).abs());
+                if already_network
+                    && matches!(step, Some(step) if step > MAXIMUM_CLOCK_STEP.as_nanos() as i128)
+                {
+                    if pending_step.is_some_and(|pending| {
+                        (candidate.as_nanos() - pending.as_nanos()).abs()
+                            <= STEP_CONFIRMATION_TOLERANCE.as_nanos() as i128
+                    }) {
+                        *pending_step = None;
+                    } else {
+                        *pending_step = Some(candidate);
+                        unconfirmed = true;
+                        last_error = Failure::Protocol(SntpError::InvalidTimestamp);
+                        continue;
+                    }
+                } else {
+                    *pending_step = None;
                 }
-                Err(error) => last_error = error,
-            },
+                match client.apply(&exchange) {
+                    Ok(applied) => {
+                        return Attempt::Synchronized(Outcome {
+                            server: &configuration.servers[index],
+                            applied,
+                            interval: states[index].interval(configuration.resync_interval),
+                        });
+                    }
+                    Err(error) => last_error = error,
+                }
+            }
             Err(Failure::Protocol(SntpError::KissOfDeath(code))) => {
-                if let Some(message) = handle_kiss_of_death(&mut states[index], code) {
-                    log::warning!("SNTP: server {server} {message}");
-                }
+                handle_kiss_of_death(
+                    &mut states[index],
+                    code,
+                    server,
+                    time.monotonic_now(),
+                    configuration.resync_interval,
+                );
                 last_error = Failure::Protocol(SntpError::KissOfDeath(code));
             }
             Err(error) => last_error = error,
         }
     }
-    if any_usable {
+    if unconfirmed {
+        Attempt::Unconfirmed
+    } else if queried {
         Attempt::Failed(last_error)
+    } else if let Some(deadline) = earliest_deadline(states, now) {
+        Attempt::Deferred(deadline)
     } else {
         Attempt::AllBanned
     }
@@ -313,52 +525,102 @@ mod tests {
 
     #[test]
     fn deny_and_rstr_ban_the_server_and_log_once() {
+        let base = Duration::from_secs(3600);
         for code in [KissOfDeathCode::Deny, KissOfDeathCode::Rstr] {
             let mut state = ServerState::default();
-            let first = handle_kiss_of_death(&mut state, code);
-            assert!(first.is_some(), "the first kiss of death is logged");
+            assert!(handle_kiss_of_death(
+                &mut state,
+                code,
+                "a",
+                Duration::ZERO,
+                base
+            ));
             assert!(state.banned);
-            assert_eq!(
-                state.interval(Duration::from_secs(3600)),
-                Duration::from_secs(3600)
-            );
-            assert_eq!(handle_kiss_of_death(&mut state, code), None, "logged once");
+            assert_eq!(state.interval(base), base);
+            assert!(state.blocked(Duration::ZERO));
+            assert!(!handle_kiss_of_death(
+                &mut state,
+                code,
+                "a",
+                Duration::ZERO,
+                base
+            ));
         }
     }
 
     #[test]
-    fn rate_doubles_the_interval_bounded_and_logs_once() {
+    fn rate_sets_a_monotonic_deadline_and_doubles_the_interval_bounded() {
+        let base = Duration::from_secs(3600);
+        let now = Duration::from_secs(1000);
         let mut state = ServerState::default();
-        assert!(handle_kiss_of_death(&mut state, KissOfDeathCode::Rate).is_some());
-        assert_eq!(
-            state.interval(Duration::from_secs(3600)),
-            Duration::from_secs(7200)
-        );
-        assert_eq!(
-            handle_kiss_of_death(&mut state, KissOfDeathCode::Rate),
-            None
-        );
-        assert_eq!(
-            state.interval(Duration::from_secs(3600)),
-            Duration::from_secs(14400)
-        );
+        assert!(handle_kiss_of_death(
+            &mut state,
+            KissOfDeathCode::Rate,
+            "a",
+            now,
+            base
+        ));
+        // The next query is not before now plus the doubled interval.
+        assert_eq!(state.not_before, Some(now + base * 2));
+        assert_eq!(state.interval(base), base * 2);
+        assert!(state.blocked(now + base * 2 - Duration::from_secs(1)));
+        assert!(!state.blocked(now + base * 2));
+        // A second RATE moves the deadline again but is not logged again.
+        assert!(!handle_kiss_of_death(
+            &mut state,
+            KissOfDeathCode::Rate,
+            "a",
+            now,
+            base
+        ));
+        assert_eq!(state.not_before, Some(now + base * 4));
+        assert_eq!(state.interval(base), base * 4);
         for _ in 0..10 {
-            handle_kiss_of_death(&mut state, KissOfDeathCode::Rate);
+            handle_kiss_of_death(&mut state, KissOfDeathCode::Rate, "a", now, base);
         }
-        assert_eq!(
-            state.interval(Duration::from_secs(3600)),
-            Duration::from_secs(3600 * MAXIMUM_RATE_MULTIPLIER as u64)
-        );
+        assert_eq!(state.interval(base), base * MAXIMUM_RATE_MULTIPLIER);
+        assert_eq!(state.not_before, Some(now + base * MAXIMUM_RATE_MULTIPLIER));
         assert!(!state.banned);
+    }
+
+    #[test]
+    fn with_two_servers_only_the_rate_limited_one_is_skipped() {
+        let base = Duration::from_secs(3600);
+        let now = Duration::from_secs(1000);
+        let mut states = vec![ServerState::default(), ServerState::default()];
+        assert!(handle_kiss_of_death(
+            &mut states[0],
+            KissOfDeathCode::Rate,
+            "a",
+            now,
+            base
+        ));
+        assert!(states[0].blocked(now), "server 0 waits for its deadline");
+        assert!(!states[1].blocked(now), "server 1 is still queried");
+        assert_eq!(earliest_deadline(&states, now), Some(now + base * 2));
+        // Once both are limited, the earliest deadline wins.
+        let later = now + base * 2;
+        assert!(handle_kiss_of_death(
+            &mut states[1],
+            KissOfDeathCode::Rate,
+            "b",
+            later,
+            base
+        ));
+        assert_eq!(earliest_deadline(&states, later), Some(later + base * 2));
+        assert_eq!(earliest_deadline(&states, later + base * 2), None);
     }
 
     #[test]
     fn other_kiss_codes_change_nothing() {
         let mut state = ServerState::default();
-        assert_eq!(
-            handle_kiss_of_death(&mut state, KissOfDeathCode::Init),
-            None
-        );
+        assert!(!handle_kiss_of_death(
+            &mut state,
+            KissOfDeathCode::Init,
+            "a",
+            Duration::ZERO,
+            Duration::from_secs(3600)
+        ));
         assert_eq!(state, ServerState::default());
     }
 }

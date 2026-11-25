@@ -57,6 +57,13 @@ impl UdpSocket {
         Ok(port)
     }
 
+    /// Close the current binding and bind a fresh ephemeral port, dropping
+    /// any queued datagrams: each exchange then sends from a new source port.
+    pub async fn rebind_ephemeral(&mut self) -> Result<Port> {
+        self.with_mutable(|socket| socket.close()).await;
+        self.bind_ephemeral().await
+    }
+
     pub async fn bind(&mut self, port: Port) -> Result<()> {
         let port = port.into_inner();
 

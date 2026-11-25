@@ -94,6 +94,16 @@ impl Manager {
         Ok(u64::from_le_bytes(buffer))
     }
 
+    /// A random 32-bit value from the random device, or `None` when the device
+    /// cannot be read. Used for query jitter.
+    pub(crate) fn random_u32(&self) -> Option<u32> {
+        let mut buffer = [0u8; 4];
+        self.random_device
+            .read_sync(&mut buffer, 0)
+            .ok()
+            .map(|_| u32::from_le_bytes(buffer))
+    }
+
     pub(crate) async fn find_first_available_stack(stacks: &StackList) -> Option<Stack> {
         for stack in stacks {
             let available = stack.with(|s| s.is_available()).await;
