@@ -102,9 +102,9 @@ impl BaseOperations for HashDevice {
                     Ok(())
                 }
                 hash::SET_ALGORITHM::IDENTIFIER => {
-                    let algorithm = SET_ALGORITHM::cast_input(input)?;
+                    let algorithm = HashAlgorithm::try_from(*SET_ALGORITHM::cast_input(input)?)?;
 
-                    *hash_context = HashDeviceContext::new(*algorithm)?;
+                    *hash_context = HashDeviceContext::new(algorithm)?;
                     Ok(())
                 }
                 _ => Err(file_system::IoErrorKind::Unsupported),
@@ -124,3 +124,43 @@ impl BaseOperations for HashDevice {
 impl MountOperations for HashDevice {}
 
 impl CharacterDevice for HashDevice {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::task::{Poll, Waker};
+    use file_system::{BaseOperations, ControlCommand};
+    use shared::AnyByLayout;
+
+    #[test]
+    fn set_algorithm_rejects_an_invalid_payload_byte() {
+        let device = HashDevice;
+        let mut context = Context::new_empty();
+        device.open(&mut context).unwrap();
+        let mut cx = core::task::Context::from_waker(Waker::noop());
+
+        let invalid = 200u8;
+        assert_eq!(
+            device.control(
+                &mut context,
+                &mut cx,
+                SET_ALGORITHM::IDENTIFIER,
+                AnyByLayout::from(&invalid),
+                AnyByLayout::NONE,
+            ),
+            Poll::Ready(Err(IoErrorKind::InvalidArgument))
+        );
+
+        let valid = HashAlgorithm::Sha384 as u8;
+        assert_eq!(
+            device.control(
+                &mut context,
+                &mut cx,
+                SET_ALGORITHM::IDENTIFIER,
+                AnyByLayout::from(&valid),
+                AnyByLayout::NONE,
+            ),
+            Poll::Ready(Ok(()))
+        );
+    }
+}

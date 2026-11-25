@@ -21,43 +21,51 @@ pub const ABI_VERSION: u16 = 1;
 /// Largest value accepted by [`SET_DUTY_PERMILLE`].
 pub const PERMILLE_FULL_SCALE: u16 = 1_000;
 
-/// Carries only the ABI version and a reserved field. Input of [`GET_INFO`].
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct PwmVersionAbi {
-    pub version: u16,
-    pub reserved: u16,
+file_system::plain_data! {
+    #[repr(C)]
+    /// Carries only the ABI version and a reserved field. Input of [`GET_INFO`].
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct PwmVersionAbi {
+        pub version: u16,
+        pub reserved: u16,
+    }
 }
 
-/// Channel description returned by every PWM command.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct PwmInfoAbi {
-    pub version: u16,
-    /// Number of channels on the controller.
-    pub channel_count: u16,
-    /// Duty value that means 100 percent on this channel.
-    pub max_duty_cycle: u16,
-    pub reserved: u16,
-    /// Current period of this channel in hertz.
-    pub frequency_hz: u32,
+file_system::plain_data! {
+    #[repr(C)]
+    /// Channel description returned by every PWM command.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct PwmInfoAbi {
+        pub version: u16,
+        /// Number of channels on the controller.
+        pub channel_count: u16,
+        /// Duty value that means 100 percent on this channel.
+        pub max_duty_cycle: u16,
+        pub reserved: u16,
+        /// Current period of this channel in hertz.
+        pub frequency_hz: u32,
+    }
 }
 
-/// Input of [`SET_FREQUENCY`].
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct PwmFrequencyAbi {
-    pub version: u16,
-    pub reserved: u16,
-    pub frequency_hz: u32,
+file_system::plain_data! {
+    #[repr(C)]
+    /// Input of [`SET_FREQUENCY`].
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct PwmFrequencyAbi {
+        pub version: u16,
+        pub reserved: u16,
+        pub frequency_hz: u32,
+    }
 }
 
-/// Input of [`SET_DUTY_PERMILLE`]. `permille` is 0..=[`PERMILLE_FULL_SCALE`].
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct PwmDutyPermilleAbi {
-    pub version: u16,
-    pub permille: u16,
+file_system::plain_data! {
+    #[repr(C)]
+    /// Input of [`SET_DUTY_PERMILLE`]. `permille` is 0..=[`PERMILLE_FULL_SCALE`].
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct PwmDutyPermilleAbi {
+        pub version: u16,
+        pub permille: u16,
+    }
 }
 
 define_command!(

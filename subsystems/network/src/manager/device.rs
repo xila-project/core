@@ -2,8 +2,9 @@ use crate::{
     ADD_DNS_SERVER, ADD_IP_ADDRESS, ADD_ROUTE, GET_DHCP_STATE, GET_DNS_SERVER,
     GET_DNS_SERVER_COUNT, GET_HARDWARE_ADDRESS, GET_IP_ADDRESS, GET_IP_ADDRESS_COUNT,
     GET_MAXIMUM_BURST_SIZE, GET_MAXIMUM_TRANSMISSION_UNIT, GET_ROUTE, GET_ROUTE_COUNT, GET_STATE,
-    IS_LINK_UP, IpAddress, IpCidr, MacAddress, REMOVE_DNS_SERVER, REMOVE_IP_ADDRESS, REMOVE_ROUTE,
-    Route, SET_DHCP_STATE, SET_HARDWARE_ADDRESS, SET_STATE,
+    IS_LINK_UP, IpAddress, IpAddressAbi, IpCidr, IpCidrAbi, MacAddress, OptionalUsizeAbi,
+    REMOVE_DNS_SERVER, REMOVE_IP_ADDRESS, REMOVE_ROUTE, Route, RouteAbi, SET_DHCP_STATE,
+    SET_HARDWARE_ADDRESS, SET_STATE,
     manager::stack::{Stack, StackInner},
 };
 use file_system::{
@@ -66,16 +67,17 @@ impl DirectBaseOperations for NetworkDevice {
         file_system::ready(|| {
             match command {
                 SET_STATE::IDENTIFIER => {
-                    let state: &bool = SET_STATE::cast_input(input)?;
-                    self.with_mut(|s| s.set_state(*state))?;
+                    let state = SET_STATE::cast_input(input)?;
+                    let state = bool::try_from(*state).map_err(|_| IoErrorKind::InvalidArgument)?;
+                    self.with_mut(|s| s.set_state(state))?;
                 }
                 GET_STATE::IDENTIFIER => {
-                    let state: &mut bool = GET_STATE::cast_output(output)?;
-                    *state = self.with(|s| s.get_state())?;
+                    let state: &mut u8 = GET_STATE::cast_output(output)?;
+                    *state = self.with(|s| s.get_state())? as u8;
                 }
                 IS_LINK_UP::IDENTIFIER => {
-                    let is_up: &mut bool = IS_LINK_UP::cast_output(output)?;
-                    *is_up = self.with(|s| s.is_link_up())?;
+                    let is_up: &mut u8 = IS_LINK_UP::cast_output(output)?;
+                    *is_up = self.with(|s| s.is_link_up())? as u8;
                 }
                 GET_HARDWARE_ADDRESS::IDENTIFIER => {
                     let hardware_address: &mut MacAddress =
@@ -92,9 +94,10 @@ impl DirectBaseOperations for NetworkDevice {
                     *mtu = self.with(|s| s.get_maximum_transmission_unit())?;
                 }
                 GET_MAXIMUM_BURST_SIZE::IDENTIFIER => {
-                    let maximum_burst_size: &mut Option<usize> =
+                    let maximum_burst_size: &mut OptionalUsizeAbi =
                         GET_MAXIMUM_BURST_SIZE::cast_output(output)?;
-                    *maximum_burst_size = self.with(|s| s.get_maximum_burst_size())?;
+                    *maximum_burst_size =
+                        OptionalUsizeAbi::from(self.with(|s| s.get_maximum_burst_size())?);
                 }
                 GET_IP_ADDRESS_COUNT::IDENTIFIER => {
                     let ip_address_count: &mut usize = GET_IP_ADDRESS_COUNT::cast_output(output)?;
@@ -102,13 +105,14 @@ impl DirectBaseOperations for NetworkDevice {
                 }
                 GET_IP_ADDRESS::IDENTIFIER => {
                     let (input, output) = GET_IP_ADDRESS::cast(input, output)?;
-                    *output = self
-                        .with(|s| s.get_ip_address(*input))?
-                        .ok_or(IoErrorKind::InvalidArgument)?;
+                    *output = IpCidrAbi::from(
+                        self.with(|s| s.get_ip_address(*input))?
+                            .ok_or(IoErrorKind::InvalidArgument)?,
+                    );
                 }
                 ADD_IP_ADDRESS::IDENTIFIER => {
-                    let indexed: &IpCidr = ADD_IP_ADDRESS::cast_input(input)?;
-                    self.with_mut(|s| s.add_ip_address(indexed.clone()))?
+                    let indexed = IpCidr::try_from(*ADD_IP_ADDRESS::cast_input(input)?)?;
+                    self.with_mut(|s| s.add_ip_address(indexed))?
                         .map_err(|_| IoErrorKind::InputOutput)?;
                 }
                 REMOVE_IP_ADDRESS::IDENTIFIER => {
@@ -121,13 +125,14 @@ impl DirectBaseOperations for NetworkDevice {
                 }
                 GET_ROUTE::IDENTIFIER => {
                     let (input, output) = GET_ROUTE::cast(input, output)?;
-                    *output = self
-                        .with_mut(|s| s.get_route(*input))?
-                        .ok_or(IoErrorKind::InvalidArgument)?;
+                    *output = RouteAbi::from(
+                        self.with_mut(|s| s.get_route(*input))?
+                            .ok_or(IoErrorKind::InvalidArgument)?,
+                    );
                 }
                 ADD_ROUTE::IDENTIFIER => {
-                    let route_index: &Route = ADD_ROUTE::cast_input(input)?;
-                    self.with_mut(|s| s.add_route(route_index.clone()))?
+                    let route = Route::try_from(*ADD_ROUTE::cast_input(input)?)?;
+                    self.with_mut(|s| s.add_route(route))?
                         .map_err(|_| IoErrorKind::InputOutput)?;
                 }
                 REMOVE_ROUTE::IDENTIFIER => {
@@ -141,13 +146,14 @@ impl DirectBaseOperations for NetworkDevice {
                 GET_DNS_SERVER::IDENTIFIER => {
                     let (input, output) = GET_DNS_SERVER::cast(input, output)?;
 
-                    *output = self
-                        .with_mut(|s| s.get_dns_server(*input))?
-                        .ok_or(IoErrorKind::InvalidArgument)?;
+                    *output = IpAddressAbi::from(
+                        self.with_mut(|s| s.get_dns_server(*input))?
+                            .ok_or(IoErrorKind::InvalidArgument)?,
+                    );
                 }
                 ADD_DNS_SERVER::IDENTIFIER => {
-                    let dns_server: &IpAddress = ADD_DNS_SERVER::cast_input(input)?;
-                    self.with_mut(|s| s.add_dns_server(dns_server.clone()))?
+                    let dns_server = IpAddress::try_from(*ADD_DNS_SERVER::cast_input(input)?)?;
+                    self.with_mut(|s| s.add_dns_server(dns_server))?
                         .map_err(|_| IoErrorKind::InputOutput)?;
                 }
                 REMOVE_DNS_SERVER::IDENTIFIER => {
@@ -155,12 +161,14 @@ impl DirectBaseOperations for NetworkDevice {
                     self.with_mut(|s| s.remove_dns_server(*index))?;
                 }
                 SET_DHCP_STATE::IDENTIFIER => {
-                    let dhcp_enabled: &bool = SET_DHCP_STATE::cast_input(input)?;
-                    self.with_mut(|s| s.set_dhcp_state(*dhcp_enabled))?;
+                    let dhcp_enabled = SET_DHCP_STATE::cast_input(input)?;
+                    let dhcp_enabled =
+                        bool::try_from(*dhcp_enabled).map_err(|_| IoErrorKind::InvalidArgument)?;
+                    self.with_mut(|s| s.set_dhcp_state(dhcp_enabled))?;
                 }
                 GET_DHCP_STATE::IDENTIFIER => {
-                    let dhcp_enabled: &mut bool = GET_DHCP_STATE::cast_output(output)?;
-                    *dhcp_enabled = self.with(|s| s.get_dhcp_state())?;
+                    let dhcp_enabled: &mut u8 = GET_DHCP_STATE::cast_output(output)?;
+                    *dhcp_enabled = self.with(|s| s.get_dhcp_state())? as u8;
                 }
                 command => {
                     self.with(|s| s.controller.control_sync(command, input, output))??;
@@ -175,3 +183,221 @@ impl DirectBaseOperations for NetworkDevice {
 impl MountOperations for NetworkDevice {}
 
 impl DirectCharacterDevice for NetworkDevice {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::create_loopback_device;
+    use alloc::boxed::Box;
+    use file_system::DirectBaseOperations;
+    use synchronization::{Arc, blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
+
+    fn test_network_device() -> NetworkDevice {
+        let clock = Box::leak(Box::new(
+            time::Manager::new(&testing_support::TimeDevice).unwrap(),
+        ));
+        let (mut packets, controller) = create_loopback_device();
+        let inner = StackInner::new(
+            "test0",
+            &mut packets,
+            controller,
+            1,
+            smoltcp::time::Instant::from_millis(0),
+            clock,
+        );
+        let wake_signal: Arc<Signal<CriticalSectionRawMutex, ()>> = Arc::new(Signal::new());
+        NetworkDevice::new(Stack::new(inner, wake_signal))
+    }
+
+    fn control(
+        device: &NetworkDevice,
+        command: ControlCommandIdentifier,
+        input: &AnyByLayout,
+        output: &mut AnyByLayout,
+    ) -> Result<()> {
+        device.control_sync(command, input, output)
+    }
+
+    #[test]
+    fn set_state_rejects_an_invalid_flag_byte() {
+        let device = test_network_device();
+        let invalid = 2u8;
+        assert_eq!(
+            control(
+                &device,
+                SET_STATE::IDENTIFIER,
+                AnyByLayout::from(&invalid),
+                AnyByLayout::NONE
+            ),
+            Err(IoErrorKind::InvalidArgument)
+        );
+        let valid = 1u8;
+        assert!(
+            control(
+                &device,
+                SET_STATE::IDENTIFIER,
+                AnyByLayout::from(&valid),
+                AnyByLayout::NONE
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn set_dhcp_state_rejects_an_invalid_flag_byte() {
+        let device = test_network_device();
+        let invalid = 7u8;
+        assert_eq!(
+            control(
+                &device,
+                SET_DHCP_STATE::IDENTIFIER,
+                AnyByLayout::from(&invalid),
+                AnyByLayout::NONE
+            ),
+            Err(IoErrorKind::InvalidArgument)
+        );
+    }
+
+    #[test]
+    fn state_outputs_are_valid_flag_bytes() {
+        let device = test_network_device();
+        for command in [
+            GET_STATE::IDENTIFIER,
+            IS_LINK_UP::IDENTIFIER,
+            GET_DHCP_STATE::IDENTIFIER,
+        ] {
+            let mut output = 2u8;
+            control(
+                &device,
+                command,
+                AnyByLayout::from(&()),
+                AnyByLayout::from_mutable(&mut output),
+            )
+            .unwrap();
+            assert!(bool::try_from(output).is_ok(), "invalid flag byte {output}");
+        }
+    }
+
+    #[test]
+    fn maximum_burst_size_output_converts_back() {
+        let device = test_network_device();
+        let mut output = OptionalUsizeAbi::default();
+        control(
+            &device,
+            GET_MAXIMUM_BURST_SIZE::IDENTIFIER,
+            AnyByLayout::from(&()),
+            AnyByLayout::from_mutable(&mut output),
+        )
+        .unwrap();
+        let _: Option<usize> = output.try_into().unwrap();
+    }
+
+    #[test]
+    fn add_route_rejects_an_unknown_address_family() {
+        let device = test_network_device();
+        let mut route = RouteAbi::default();
+        route.via_router.family = 7;
+        assert_eq!(
+            control(
+                &device,
+                ADD_ROUTE::IDENTIFIER,
+                AnyByLayout::from(&route),
+                AnyByLayout::NONE
+            ),
+            Err(IoErrorKind::InvalidArgument)
+        );
+    }
+
+    #[test]
+    fn add_dns_server_rejects_an_unknown_address_family() {
+        let device = test_network_device();
+        let dns_server = IpAddressAbi {
+            family: 9,
+            address: [0; 16],
+        };
+        assert_eq!(
+            control(
+                &device,
+                ADD_DNS_SERVER::IDENTIFIER,
+                AnyByLayout::from(&dns_server),
+                AnyByLayout::NONE
+            ),
+            Err(IoErrorKind::InvalidArgument)
+        );
+    }
+
+    #[test]
+    fn add_ip_address_rejects_an_invalid_cidr() {
+        let device = test_network_device();
+        // Unknown family.
+        let unknown_family = IpCidrAbi {
+            family: 3,
+            address: [0; 16],
+            prefix_length: 24,
+            reserved: [0; 3],
+        };
+        assert_eq!(
+            control(
+                &device,
+                ADD_IP_ADDRESS::IDENTIFIER,
+                AnyByLayout::from(&unknown_family),
+                AnyByLayout::NONE
+            ),
+            Err(IoErrorKind::InvalidArgument)
+        );
+        // IPv4 prefix longer than 32 bits.
+        let too_long = IpCidrAbi {
+            family: 0,
+            prefix_length: 200,
+            ..IpCidrAbi::default()
+        };
+        assert_eq!(
+            control(
+                &device,
+                ADD_IP_ADDRESS::IDENTIFIER,
+                AnyByLayout::from(&too_long),
+                AnyByLayout::NONE
+            ),
+            Err(IoErrorKind::InvalidArgument)
+        );
+    }
+
+    #[test]
+    fn route_and_address_outputs_convert_back() {
+        let device = test_network_device();
+        let index = 0usize;
+        let mut output = RouteAbi::default();
+        if control(
+            &device,
+            GET_ROUTE::IDENTIFIER,
+            AnyByLayout::from(&index),
+            AnyByLayout::from_mutable(&mut output),
+        )
+        .is_ok()
+        {
+            let _: Route = output.try_into().unwrap();
+        }
+        let mut address_output = IpAddressAbi::default();
+        if control(
+            &device,
+            GET_DNS_SERVER::IDENTIFIER,
+            AnyByLayout::from(&index),
+            AnyByLayout::from_mutable(&mut address_output),
+        )
+        .is_ok()
+        {
+            let _: IpAddress = address_output.try_into().unwrap();
+        }
+        let mut cidr_output = IpCidrAbi::default();
+        if control(
+            &device,
+            GET_IP_ADDRESS::IDENTIFIER,
+            AnyByLayout::from(&index),
+            AnyByLayout::from_mutable(&mut cidr_output),
+        )
+        .is_ok()
+        {
+            let _: IpCidr = cidr_output.try_into().unwrap();
+        }
+    }
+}

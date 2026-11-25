@@ -47,9 +47,7 @@ impl DirectBaseOperations for Screen {
         Poll::Ready(match command {
             GET_RESOLUTION::IDENTIFIER => GET_RESOLUTION::cast_output(output)
                 .map(|resolution| *resolution = Point::new(320, 240)),
-            WAS_RESIZED::IDENTIFIER => {
-                WAS_RESIZED::cast_output(output).map(|resized| *resized = false)
-            }
+            WAS_RESIZED::IDENTIFIER => WAS_RESIZED::cast_output(output).map(|resized| *resized = 0),
             SET_DRAWING_AREA::IDENTIFIER => Ok(()),
             GET_BRIGHTNESS::IDENTIFIER if supported => GET_BRIGHTNESS::cast_output(output)
                 .map(|level| *level = self.level.load(Ordering::Relaxed)),

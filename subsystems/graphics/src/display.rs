@@ -168,7 +168,7 @@ impl Display {
         let user_data =
             unsafe { &*(lvgl::lv_display_get_user_data(self.display) as *const UserData) };
 
-        let mut was_resize = false;
+        let mut was_resize = 0u8;
 
         user_data
             .device
@@ -179,7 +179,8 @@ impl Display {
             )
             .expect("Error checking if display was resized");
 
-        if !was_resize {
+        // The payload is a flag byte; an unknown byte is not a valid flag.
+        if !bool::try_from(was_resize).expect("Invalid WAS_RESIZED payload") {
             return;
         }
 

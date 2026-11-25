@@ -302,7 +302,7 @@ mod tests {
         interface
             .control(
                 network::ADD_IP_ADDRESS,
-                &network::IpCidr::new_ipv4([127, 0, 0, 1], 8),
+                &network::IpCidrAbi::from(network::IpCidr::new_ipv4([127, 0, 0, 1], 8)),
             )
             .await
             .unwrap();
@@ -627,7 +627,7 @@ mod tests {
                     cx.waker().wake_by_ref();
                     return Poll::Pending;
                 }
-                *IS_A_TERMINAL::cast_output(output).unwrap() = true;
+                *IS_A_TERMINAL::cast_output(output).unwrap() = 1;
                 Poll::Ready(Ok(()))
             }
 

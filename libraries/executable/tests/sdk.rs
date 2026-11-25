@@ -640,7 +640,7 @@ mod screen {
                 GET_RESOLUTION::IDENTIFIER => GET_RESOLUTION::cast_output(output)
                     .map(|resolution| *resolution = Point::new(320, 240)),
                 WAS_RESIZED::IDENTIFIER => {
-                    WAS_RESIZED::cast_output(output).map(|resized| *resized = false)
+                    WAS_RESIZED::cast_output(output).map(|resized| *resized = 0)
                 }
                 SET_DRAWING_AREA::IDENTIFIER => Ok(()),
                 _ => Err(file_system::IoErrorKind::Unsupported),
@@ -900,7 +900,10 @@ async fn setup_network() -> (&'static ExecutableContext, TaskIdentifier) {
         network::IpCidr::new_ipv6([0, 0, 0, 0, 0, 0, 0, 1], 128),
     ] {
         interface
-            .control(network::ADD_IP_ADDRESS, &address)
+            .control(
+                network::ADD_IP_ADDRESS,
+                &network::IpCidrAbi::from(address.clone()),
+            )
             .await
             .unwrap();
     }

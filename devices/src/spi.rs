@@ -30,37 +30,43 @@ pub const SPI_SEGMENT_READ: u8 = 1;
 /// [`SpiSegmentAbi::kind`] value for a full-duplex segment.
 pub const SPI_SEGMENT_TRANSFER: u8 = 2;
 
-/// Device settings. Mode is 0..=3, bit order is 0 (MSB first) or 1 (LSB first).
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SpiConfigurationAbi {
-    pub version: u16,
-    pub mode: u8,
-    pub bit_order: u8,
-    pub frequency_hz: u32,
-    /// Must be 1..=32.
-    pub bits_per_word: u8,
-    /// Must be zero.
-    pub reserved: [u8; 3],
+file_system::plain_data! {
+    #[repr(C)]
+    /// Device settings. Mode is 0..=3, bit order is 0 (MSB first) or 1 (LSB first).
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct SpiConfigurationAbi {
+        pub version: u16,
+        pub mode: u8,
+        pub bit_order: u8,
+        pub frequency_hz: u32,
+        /// Must be 1..=32.
+        pub bits_per_word: u8,
+        /// Must be zero.
+        pub reserved: [u8; 3],
+    }
 }
 
-/// Input of [`SPI_TRANSFER`]: `length` bytes of `tx` are sent while the same
-/// number of bytes is received into [`SpiTransferOutputAbi::rx`].
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SpiTransferInputAbi {
-    pub version: u16,
-    pub length: u16,
-    pub tx: [u8; SPI_MAX_TRANSFER_BYTES],
+file_system::plain_data! {
+    #[repr(C)]
+    /// Input of [`SPI_TRANSFER`]: `length` bytes of `tx` are sent while the same
+    /// number of bytes is received into [`SpiTransferOutputAbi::rx`].
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct SpiTransferInputAbi {
+        pub version: u16,
+        pub length: u16,
+        pub tx: [u8; SPI_MAX_TRANSFER_BYTES],
+    }
 }
 
-/// Output of [`SPI_TRANSFER`].
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SpiTransferOutputAbi {
-    pub version: u16,
-    pub length: u16,
-    pub rx: [u8; SPI_MAX_TRANSFER_BYTES],
+file_system::plain_data! {
+    #[repr(C)]
+    /// Output of [`SPI_TRANSFER`].
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct SpiTransferOutputAbi {
+        pub version: u16,
+        pub length: u16,
+        pub rx: [u8; SPI_MAX_TRANSFER_BYTES],
+    }
 }
 
 impl Default for SpiTransferOutputAbi {
@@ -73,36 +79,42 @@ impl Default for SpiTransferOutputAbi {
     }
 }
 
-/// One segment of [`SPI_TRANSACTION`]. `kind` is one of the `SPI_SEGMENT_*`
-/// values and `cs_change` is 0 or 1.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SpiSegmentAbi {
-    pub kind: u8,
-    pub cs_change: u8,
-    pub length: u16,
+file_system::plain_data! {
+    #[repr(C)]
+    /// One segment of [`SPI_TRANSACTION`]. `kind` is one of the `SPI_SEGMENT_*`
+    /// values and `cs_change` is 0 or 1.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct SpiSegmentAbi {
+        pub kind: u8,
+        pub cs_change: u8,
+        pub length: u16,
+    }
 }
 
-/// Input of [`SPI_TRANSACTION`]. Only the first `segment_count` segments are
-/// read. `reserved` must be zero.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SpiTransactionInputAbi {
-    pub version: u16,
-    pub segment_count: u8,
-    pub reserved: u8,
-    pub segments: [SpiSegmentAbi; SPI_MAX_SEGMENTS],
-    pub data: [u8; SPI_MAX_TRANSACTION_BYTES],
+file_system::plain_data! {
+    #[repr(C)]
+    /// Input of [`SPI_TRANSACTION`]. Only the first `segment_count` segments are
+    /// read. `reserved` must be zero.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct SpiTransactionInputAbi {
+        pub version: u16,
+        pub segment_count: u8,
+        pub reserved: u8,
+        pub segments: [SpiSegmentAbi; SPI_MAX_SEGMENTS],
+        pub data: [u8; SPI_MAX_TRANSACTION_BYTES],
+    }
 }
 
-/// Output of [`SPI_TRANSACTION`]. `length` is the total data length. Bytes of
-/// write-only segments are zero.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SpiTransactionOutputAbi {
-    pub version: u16,
-    pub length: u16,
-    pub data: [u8; SPI_MAX_TRANSACTION_BYTES],
+file_system::plain_data! {
+    #[repr(C)]
+    /// Output of [`SPI_TRANSACTION`]. `length` is the total data length. Bytes of
+    /// write-only segments are zero.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct SpiTransactionOutputAbi {
+        pub version: u16,
+        pub length: u16,
+        pub data: [u8; SPI_MAX_TRANSACTION_BYTES],
+    }
 }
 
 impl Default for SpiTransactionOutputAbi {

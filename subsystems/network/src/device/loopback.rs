@@ -38,7 +38,7 @@ impl DirectBaseOperations for LoopbackControllerDevice {
         file_system::ready(|| match command {
             GET_KIND::IDENTIFIER => {
                 let kind = GET_KIND::cast_output(output)?;
-                *kind = InterfaceKind::Ethernet;
+                *kind = InterfaceKind::Ethernet as u8;
                 Ok(())
             }
             _ => Err(IoErrorKind::Unsupported),

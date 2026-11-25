@@ -5,9 +5,13 @@ use file_system::{IoErrorKind, Result};
 
 macro_rules! byte_value {
     ($name:ident { $($constant:ident = $value:expr),* $(,)? }) => {
-        #[repr(transparent)]
-        #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-        pub struct $name(pub u8);
+        // A transparent wrapper over a `u8` accepts every bit pattern, so it
+        // is plain data and can be a control payload as-is.
+        file_system::plain_data! {
+            #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+            pub struct $name(pub u8);
+        }
         impl $name { $(pub const $constant: Self = Self($value);)* }
     };
 }
@@ -17,11 +21,13 @@ byte_value!(WifiScanPhase { IDLE = 0, SCANNING = 1, COMPLETED = 2, FAILED = 3 })
 byte_value!(WifiConnectionState { DISCONNECTED = 0, CONNECTING = 1, CONNECTED = 2, DISCONNECTING = 3 });
 byte_value!(WifiConnectionErrorKind { NONE = 0, AUTHENTICATION = 1, ACCESS_POINT_NOT_FOUND = 2, ASSOCIATION = 3, TIMEOUT = 4, UNSUPPORTED_CONFIGURATION = 5, RADIO = 6, DRIVER = 7 });
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct WifiSsid {
-    pub bytes: [u8; 32],
-    pub length: u8,
+file_system::plain_data! {
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+    pub struct WifiSsid {
+        pub bytes: [u8; 32],
+        pub length: u8,
+    }
 }
 impl WifiSsid {
     pub fn new(bytes: &[u8]) -> Result<Self> {
@@ -41,12 +47,14 @@ impl WifiSsid {
     }
 }
 
-/// Never printed or returned by status commands. Clear caller-owned copies too.
-#[repr(C)]
-#[derive(Clone, Eq, PartialEq)]
-pub struct WifiPassword {
-    pub bytes: [u8; 64],
-    pub length: u8,
+file_system::plain_data! {
+    #[repr(C)]
+    /// Never printed or returned by status commands. Clear caller-owned copies too.
+    #[derive(Clone, Eq, PartialEq)]
+    pub struct WifiPassword {
+        pub bytes: [u8; 64],
+        pub length: u8,
+    }
 }
 impl Default for WifiPassword {
     fn default() -> Self {
@@ -92,17 +100,19 @@ impl Drop for WifiPassword {
     }
 }
 
-#[repr(C)]
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct WifiClientConfiguration {
-    pub ssid: WifiSsid,
-    pub credential: WifiPassword,
-    pub authentication: WifiAuthentication,
-    pub bssid: [u8; 6],
-    /// Zero means unspecified.
-    pub channel: u8,
-    /// 0 or 1. Kept as a byte for raw control payload validity.
-    pub use_bssid: u8,
+file_system::plain_data! {
+    #[repr(C)]
+    #[derive(Clone, Debug, Default, Eq, PartialEq)]
+    pub struct WifiClientConfiguration {
+        pub ssid: WifiSsid,
+        pub credential: WifiPassword,
+        pub authentication: WifiAuthentication,
+        pub bssid: [u8; 6],
+        /// Zero means unspecified.
+        pub channel: u8,
+        /// 0 or 1. Kept as a byte for raw control payload validity.
+        pub use_bssid: u8,
+    }
 }
 impl WifiClientConfiguration {
     pub fn new(ssid: &[u8], authentication: WifiAuthentication, secret: &[u8]) -> Result<Self> {
@@ -142,42 +152,48 @@ impl WifiClientConfiguration {
     }
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct WifiAccessPoint {
-    pub ssid: WifiSsid,
-    /// All zero when unavailable.
-    pub bssid: [u8; 6],
-    /// Zero when unavailable.
-    pub channel: u8,
-    /// dBm; i8::MIN means unavailable.
-    pub rssi: i8,
-    pub authentication: WifiAuthentication,
+file_system::plain_data! {
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+    pub struct WifiAccessPoint {
+        pub ssid: WifiSsid,
+        /// All zero when unavailable.
+        pub bssid: [u8; 6],
+        /// Zero when unavailable.
+        pub channel: u8,
+        /// dBm; i8::MIN means unavailable.
+        pub rssi: i8,
+        pub authentication: WifiAuthentication,
+    }
 }
 /// Connection metadata never contains credentials.
 pub type WifiConnectionInfo = WifiAccessPoint;
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct WifiCapabilities {
-    pub station: u8,
-    pub access_point: u8,
-    /// Bit n advertises WifiAuthentication(n); extended methods are not advertised.
-    pub authentication_mask: u8,
-    pub maximum_scan_results: u8,
+file_system::plain_data! {
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+    pub struct WifiCapabilities {
+        pub station: u8,
+        pub access_point: u8,
+        /// Bit n advertises WifiAuthentication(n); extended methods are not advertised.
+        pub authentication_mask: u8,
+        pub maximum_scan_results: u8,
+    }
 }
 impl WifiCapabilities {
     pub fn supports(&self, authentication: WifiAuthentication) -> bool {
         authentication.0 < 8 && self.authentication_mask & (1 << authentication.0) != 0
     }
 }
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct WifiScanConfiguration {
-    /// Zero means all channels.
-    pub channel: u8,
-    pub passive: u8,
-    pub result_limit: u16,
+file_system::plain_data! {
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub struct WifiScanConfiguration {
+        /// Zero means all channels.
+        pub channel: u8,
+        pub passive: u8,
+        pub result_limit: u16,
+    }
 }
 impl Default for WifiScanConfiguration {
     fn default() -> Self {
@@ -197,25 +213,31 @@ impl WifiScanConfiguration {
         }
     }
 }
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct WifiScanState {
-    /// Generation of the latest completed scan; unchanged while scanning.
-    pub generation: u32,
-    pub phase: WifiScanPhase,
-    pub reserved: [u8; 3],
+file_system::plain_data! {
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+    pub struct WifiScanState {
+        /// Generation of the latest completed scan; unchanged while scanning.
+        pub generation: u32,
+        pub phase: WifiScanPhase,
+        pub reserved: [u8; 3],
+    }
 }
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct WifiScanResultCount {
-    pub generation: u32,
-    pub count: u16,
-    pub reserved: [u8; 2],
+file_system::plain_data! {
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+    pub struct WifiScanResultCount {
+        pub generation: u32,
+        pub count: u16,
+        pub reserved: [u8; 2],
+    }
 }
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct WifiScanResultRequest {
-    pub generation: u32,
-    pub index: u16,
-    pub reserved: [u8; 2],
+file_system::plain_data! {
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+    pub struct WifiScanResultRequest {
+        pub generation: u32,
+        pub index: u16,
+        pub reserved: [u8; 2],
+    }
 }

@@ -47,17 +47,19 @@ impl TryFrom<u8> for SampleFormat {
     }
 }
 
-/// Fixed-width device payload. Frames contain one sample per interleaved channel.
-///
-/// The format is stored as a byte so malformed command data cannot create an
-/// invalid Rust enum. Reserved bytes must be zero; there is no implicit padding.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Configuration {
-    pub sample_rate: u32,
-    pub channels: u8,
-    format: u8,
-    reserved: [u8; 2],
+file_system::plain_data! {
+    #[repr(C)]
+    /// Fixed-width device payload. Frames contain one sample per interleaved channel.
+    ///
+    /// The format is stored as a byte so malformed command data cannot create an
+    /// invalid Rust enum. Reserved bytes must be zero; there is no implicit padding.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Configuration {
+        pub sample_rate: u32,
+        pub channels: u8,
+        format: u8,
+        reserved: [u8; 2],
+    }
 }
 
 impl Configuration {

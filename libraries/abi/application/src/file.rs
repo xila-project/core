@@ -454,8 +454,13 @@ pub unsafe extern "C" fn xila_file_is_terminal(file: *mut File, terminal: *mut b
     };
     let value = match result {
         Ok(value) => value,
-        Err(file_system::IoErrorKind::Unsupported) => false,
+        Err(file_system::IoErrorKind::Unsupported) => 0,
         Err(error) => return error.into(),
+    };
+    // The payload is a byte (`0` or `1`); an unknown byte is invalid.
+    let value = match bool::try_from(value) {
+        Ok(value) => value,
+        Err(_) => return Status::InvalidArgument,
     };
     unsafe { terminal.write(value) };
     Status::Ok

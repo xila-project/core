@@ -21,11 +21,14 @@ use file_system::{ControlCommand, define_command};
 
 use crate::kind;
 
-/// A 2D coordinate or resolution (`x`, `y`) in screen pixels.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub struct Point {
-    pub x: i16,
-    pub y: i16,
+file_system::plain_data! {
+    #[repr(C)]
+    /// A 2D coordinate or resolution (`x`, `y`) in screen pixels.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+    pub struct Point {
+        pub x: i16,
+        pub y: i16,
+    }
 }
 
 impl Point {
@@ -82,9 +85,12 @@ impl From<Point> for (i16, i16) {
     }
 }
 
-/// Inclusive rectangular drawing area defined by two corner [`Point`]s.
-#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
-pub struct Area(Point, Point);
+file_system::plain_data! {
+    #[repr(C)]
+    /// Inclusive rectangular drawing area defined by two corner [`Point`]s.
+    #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+    pub struct Area(Point, Point);
+}
 
 impl Area {
     pub fn new(point_1: Point, point_2: Point) -> Self {
@@ -134,22 +140,28 @@ impl AsRef<Area> for [u8; core::mem::size_of::<Area>()] {
 
 define_command!(SET_DRAWING_AREA, Write, kind::SCREEN, 0x01, Area, ());
 define_command!(GET_RESOLUTION, Read, kind::SCREEN, 0x02, (), Point);
-define_command!(WAS_RESIZED, Read, kind::SCREEN, 0x03, (), bool);
+// The output is a byte (`0` or `1`), not a `bool`: a payload byte pattern such
+// as `2` must not be read as a `bool`. Readers convert with `TryFrom`.
+define_command!(WAS_RESIZED, Read, kind::SCREEN, 0x03, (), u8);
 
 pub const SCREENSHOT_PATH_MAX_BYTES: usize = 512;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[repr(C)]
-pub struct ScreenshotDimensions {
-    pub width: u32,
-    pub height: u32,
+file_system::plain_data! {
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct ScreenshotDimensions {
+        pub width: u32,
+        pub height: u32,
+    }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(C)]
-pub struct ScreenshotRequest {
-    path: [u8; SCREENSHOT_PATH_MAX_BYTES],
-    length: u16,
+file_system::plain_data! {
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct ScreenshotRequest {
+        path: [u8; SCREENSHOT_PATH_MAX_BYTES],
+        length: u16,
+    }
 }
 
 impl ScreenshotRequest {
@@ -192,3 +204,19 @@ define_command!(GET_BRIGHTNESS, Read, kind::SCREEN, 0x05, (), u8);
 
 // Set the backlight brightness level, or `Unsupported`.
 define_command!(SET_BRIGHTNESS, Write, kind::SCREEN, 0x06, u8, ());
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use file_system::ControlCommand;
+
+    #[test]
+    fn was_resized_payload_is_a_flag_byte_not_a_bool() {
+        // The payload is one byte; readers convert it with `TryFrom`, so an
+        // unknown byte such as `2` is rejected instead of being read as a `bool`.
+        assert_eq!(WAS_RESIZED::IDENTIFIER.get_size(), 1);
+        assert!(bool::try_from(0u8).is_ok());
+        assert!(bool::try_from(1u8).is_ok());
+        assert!(bool::try_from(2u8).is_err());
+    }
+}

@@ -105,7 +105,7 @@ impl DirectBaseOperations for HeadlessScreenDevice {
                     *GET_RESOLUTION::cast_output(output)? = self.resolution;
                 }
                 WAS_RESIZED::IDENTIFIER => {
-                    *WAS_RESIZED::cast_output(output)? = false;
+                    *WAS_RESIZED::cast_output(output)? = 0;
                 }
                 _ => return Err(file_system::IoErrorKind::Unsupported),
             }

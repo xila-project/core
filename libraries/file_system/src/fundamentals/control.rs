@@ -1,5 +1,5 @@
 use bitflags::bitflags;
-use shared::AnyByLayout;
+use shared::{AnyByLayout, PlainData};
 
 use crate::{IoErrorKind, Result};
 
@@ -18,8 +18,12 @@ struct ControlCommandInputOutput<I, O> {
 }
 
 pub trait ControlCommand: Clone + Copy {
-    type Input;
-    type Output;
+    /// Command payload sent to the device. Must be plain data: a payload byte
+    /// pattern can never be an invalid value of the payload type.
+    type Input: PlainData;
+    /// Command payload returned by the device. Must be plain data for the same
+    /// reason.
+    type Output: PlainData;
 
     const IDENTIFIER: ControlCommandIdentifier;
 
@@ -39,6 +43,21 @@ pub trait ControlCommand: Clone + Copy {
     }
 }
 
+/// Defines a control command: a unit struct implementing [`ControlCommand`].
+///
+/// The input and output types are the command payload types. They must be
+/// plain data ([`PlainData`]): every payload byte pattern is then a valid
+/// value of the payload type, so a guest can never send an invalid value such
+/// as `2` for a `bool`. A `bool` or enum cannot be a payload type because not
+/// every byte pattern is one of its values; store such values as integers in
+/// the payload and convert them with `TryFrom` where the value is read.
+///
+/// ```compile_fail,E0277
+/// use file_system::{ControlCommand, define_command};
+///
+/// // `bool` is not plain data: the payload byte `2` would be an invalid `bool`.
+/// define_command!(EXAMPLE, Read, b'x', 0, bool, ());
+/// ```
 #[macro_export]
 macro_rules! define_command {
     ($name:ident, Read, $kind:expr, $number:expr, $I:ty, $O:ty) => {
@@ -65,6 +84,15 @@ macro_rules! define_command {
         #[derive(Clone, Copy, Debug)]
         #[allow(non_camel_case_types)]
         pub struct $name;
+
+        const _: () = {
+            // A payload crosses the host/guest boundary as raw bytes: both
+            // payload types must accept every bit pattern.
+            #[allow(dead_code)]
+            fn require_plain_data<T: $crate::PlainData>() {}
+            let _: fn() = require_plain_data::<$I>;
+            let _: fn() = require_plain_data::<$O>;
+        };
 
         impl ControlCommand for $name {
             type Input = $I;

@@ -4,7 +4,7 @@
 //!
 //! | Number | Command                   | Direction | Input                  | Output                 | Effect                                         |
 //! |--------|---------------------------|-----------|------------------------|------------------------|------------------------------------------------|
-//! | `0x00` | `IS_A_TERMINAL`           | Read      | `()`                   | `bool`                 | Whether the device is an interactive terminal. |
+//! | `0x00` | `IS_A_TERMINAL`           | Read      | `()`                   | `u8`                   | Whether the device is an interactive terminal (`0` or `1`). |
 //! | `0x01` | `GET_TERMINAL_ATTRIBUTES` | Read      | `()`                   | [`TerminalAttributes`] | Returns the current line discipline settings.  |
 //! | `0x02` | `SET_TERMINAL_ATTRIBUTES` | Read      | [`TerminalAttributes`] | `()`                   | Applies new line discipline settings.          |
 //!
@@ -25,7 +25,9 @@ use crate::{
 use bitflags::bitflags;
 
 // Kind byte `b'T'` is registered as `device::kind::TERMINAL` (kept as a literal here because `device` depends on `file_system`).
-define_command!(IS_A_TERMINAL, Read, b'T', 0, (), bool);
+// The output is a byte (`0` or `1`), not a `bool`: a payload byte pattern such
+// as `2` must not be read as a `bool`. Readers convert with `TryFrom`.
+define_command!(IS_A_TERMINAL, Read, b'T', 0, (), u8);
 define_command!(
     GET_TERMINAL_ATTRIBUTES,
     Read,
@@ -64,15 +66,26 @@ bitflags! {
     }
 }
 
-/// Terminal line discipline settings, exchanged by
-/// [`GET_TERMINAL_ATTRIBUTES`] and [`SET_TERMINAL_ATTRIBUTES`].
-///
-/// To change one setting, read the current attributes, update them and
-/// write them back, as with `tcgetattr` and `tcsetattr`.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TerminalAttributes {
-    pub flags: TerminalFlags,
+// SAFETY: `TerminalFlags` is `#[repr(transparent)]` over a `u32` (see the
+// `bitflags!` invocation above), so every bit pattern is a valid value.
+unsafe impl crate::PlainData for TerminalFlags {}
+
+const _: () = assert!(
+    core::mem::size_of::<TerminalFlags>() == 4,
+    "TerminalFlags must stay a transparent u32"
+);
+
+crate::plain_data! {
+    #[repr(C)]
+    /// Terminal line discipline settings, exchanged by
+    /// [`GET_TERMINAL_ATTRIBUTES`] and [`SET_TERMINAL_ATTRIBUTES`].
+    ///
+    /// To change one setting, read the current attributes, update them and
+    /// write them back, as with `tcgetattr` and `tcsetattr`.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct TerminalAttributes {
+        pub flags: TerminalFlags,
+    }
 }
 
 impl TerminalAttributes {
@@ -168,6 +181,16 @@ impl<T: DirectCharacterDevice> CharacterDevice for T {
 mod tests {
     use super::*;
     use crate::ControlDirectionFlags;
+
+    #[test]
+    fn is_a_terminal_payload_is_a_flag_byte_not_a_bool() {
+        // The payload is one byte; readers convert it with `TryFrom`, so an
+        // unknown byte such as `2` is rejected instead of being read as a `bool`.
+        assert_eq!(IS_A_TERMINAL::IDENTIFIER.get_size(), 1);
+        assert!(bool::try_from(0u8).is_ok());
+        assert!(bool::try_from(1u8).is_ok());
+        assert!(bool::try_from(2u8).is_err());
+    }
 
     #[test]
     fn terminal_identifiers_are_distinct_and_share_the_terminal_kind() {

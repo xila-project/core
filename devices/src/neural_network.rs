@@ -112,49 +112,60 @@ define_command!(
 /// Maximum rank in the version-one VFS tensor metadata layout.
 pub const MAX_TENSOR_RANK: usize = 6;
 
-/// Metadata returned by `GET_INPUT_INFO` and `GET_OUTPUT_INFO`.
-///
-/// `data_type` uses the TensorFlow Lite tensor type value. `dimensions` contains
-/// the first `rank` dimensions; `rank` cannot exceed `MAX_TENSOR_RANK`.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct TensorInfo {
-    pub data_type: u32,
-    pub rank: u32,
-    pub dimensions: [i32; MAX_TENSOR_RANK],
-    pub byte_len: u32,
-    /// `-1` when the tensor is not quantized.
-    pub quantization_axis: i32,
-    /// Number of quantization entries, zero when not quantized.
-    pub quantization_count: u32,
+file_system::plain_data! {
+    #[repr(C)]
+    /// Metadata returned by `GET_INPUT_INFO` and `GET_OUTPUT_INFO`.
+    ///
+    /// `data_type` uses the TensorFlow Lite tensor type value. `dimensions` contains
+    /// the first `rank` dimensions; `rank` cannot exceed `MAX_TENSOR_RANK`.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct TensorInfo {
+        pub data_type: u32,
+        pub rank: u32,
+        pub dimensions: [i32; MAX_TENSOR_RANK],
+        pub byte_len: u32,
+        /// `-1` when the tensor is not quantized.
+        pub quantization_axis: i32,
+        /// Number of quantization entries, zero when not quantized.
+        pub quantization_count: u32,
+    }
 }
 
-/// Selects a quantization entry for an input or output tensor.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct QuantizationRequest {
-    pub tensor_index: u32,
-    pub quantization_index: u32,
+file_system::plain_data! {
+    #[repr(C)]
+    /// Selects a quantization entry for an input or output tensor.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct QuantizationRequest {
+        pub tensor_index: u32,
+        pub quantization_index: u32,
+    }
 }
 
-/// One scale/zero-point pair for a tensor quantization axis.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct QuantizationEntry {
-    pub scale: f32,
-    pub zero_point: i64,
+file_system::plain_data! {
+    #[repr(C)]
+    /// One scale/zero-point pair for a tensor quantization axis. Layout:
+    /// `scale` at offset 0, `reserved` at offset 4 (must be zero when read
+    /// back), `zero_point` at offset 8; 16 bytes, no padding.
+    #[derive(Clone, Copy, Debug, Default, PartialEq)]
+    pub struct QuantizationEntry {
+        pub scale: f32,
+        pub reserved: u32,
+        pub zero_point: i64,
+    }
 }
 
-/// Request payload for the [`LOAD`] control command.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LoadRequest {
-    /// Protocol version, must be [`LoadRequest::VERSION`] (`1`).
-    pub version: u32,
-    /// Model format encoding (`0` for TensorFlow Lite).
-    pub encoding: u32,
-    /// Reserved for future expansion; must be set to `[0, 0]`.
-    pub reserved: [u32; 2],
+file_system::plain_data! {
+    #[repr(C)]
+    /// Request payload for the [`LOAD`] control command.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct LoadRequest {
+        /// Protocol version, must be [`LoadRequest::VERSION`] (`1`).
+        pub version: u32,
+        /// Model format encoding (`0` for TensorFlow Lite).
+        pub encoding: u32,
+        /// Reserved for future expansion; must be set to `[0, 0]`.
+        pub reserved: [u32; 2],
+    }
 }
 
 impl LoadRequest {
@@ -181,5 +192,20 @@ impl LoadRequest {
 impl Default for LoadRequest {
     fn default() -> Self {
         Self::tensorflow_lite()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quantization_entry_is_padding_free() {
+        assert_eq!(
+            core::mem::size_of::<QuantizationEntry>(),
+            core::mem::size_of::<f32>() + core::mem::size_of::<u32>() + core::mem::size_of::<i64>()
+        );
+        assert_eq!(core::mem::size_of::<QuantizationEntry>(), 16);
+        assert_eq!(core::mem::align_of::<QuantizationEntry>(), 8);
     }
 }

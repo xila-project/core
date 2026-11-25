@@ -806,13 +806,14 @@ impl StackInner {
 fn controller_link_state(controller: &dyn DirectCharacterDevice, fallback: bool) -> bool {
     use file_system::ControlCommand;
     use shared::AnyByLayout;
-    let mut up = false;
+    let mut up = 0u8;
     match controller.control_sync(
         crate::IS_LINK_UP::IDENTIFIER,
         AnyByLayout::from(&()),
         AnyByLayout::from_mutable(&mut up),
     ) {
-        Ok(()) => up,
+        // The controller wrote the payload; an unknown byte is not a valid flag.
+        Ok(()) => bool::try_from(up).unwrap_or(false),
         Err(file_system::IoErrorKind::Unsupported) => fallback,
         Err(_) => false,
     }
@@ -855,7 +856,7 @@ mod link_tests {
         ) -> Poll<file_system::Result<()>> {
             Poll::Ready(match self.0 {
                 Some(Ok(value)) => {
-                    *output.cast_mutable::<bool>().unwrap() = value;
+                    *output.cast_mutable::<u8>().unwrap() = value as u8;
                     Ok(())
                 }
                 Some(Err(error)) => Err(error),

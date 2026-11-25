@@ -1,17 +1,19 @@
 use core::mem::align_of;
 use core::slice;
 
+use crate::PlainData;
+
 #[repr(transparent)]
 #[derive(Debug, PartialEq, Eq)]
 pub struct AnyByLayout([u8]);
 
-impl<'a, T> From<&'a mut T> for &'a mut AnyByLayout {
+impl<'a, T: PlainData> From<&'a mut T> for &'a mut AnyByLayout {
     fn from(argument: &'a mut T) -> Self {
         AnyByLayout::from_mutable(argument)
     }
 }
 
-impl<'a, T> From<&'a T> for &'a AnyByLayout {
+impl<'a, T: PlainData> From<&'a T> for &'a AnyByLayout {
     fn from(argument: &'a T) -> Self {
         AnyByLayout::from(argument)
     }
@@ -34,14 +36,22 @@ impl AnyByLayout {
         }
     }
 
-    pub const fn from_mutable<T>(argument: &mut T) -> &mut Self {
+    /// Views a plain-data value as raw bytes.
+    ///
+    /// `T` must be [`PlainData`], so the bytes can always be read back as a
+    /// valid `T` (for example through [`AnyByLayout::cast`]); with a `bool` or
+    /// enum `T`, safe code could write an invalid value such as `2` for a
+    /// `bool` through [`AnyByLayout::as_mutable_bytes`].
+    pub const fn from_mutable<T: PlainData>(argument: &mut T) -> &mut Self {
         unsafe {
             let slice = slice::from_raw_parts_mut(argument as *mut T as *mut u8, size_of::<T>());
             &mut *(slice as *mut [u8] as *mut Self)
         }
     }
 
-    pub fn from<T>(argument: &T) -> &Self {
+    /// Views a plain-data value as raw bytes; see [`AnyByLayout::from_mutable`]
+    /// for the `T: PlainData` requirement.
+    pub fn from<T: PlainData>(argument: &T) -> &Self {
         unsafe {
             let slice = slice::from_raw_parts(argument as *const T as *const u8, size_of::<T>());
             &*(slice as *const [u8] as *const Self)
@@ -50,29 +60,32 @@ impl AnyByLayout {
 
     /// Returns the payload as a `T` only when it is an exact fit: the payload
     /// length equals `size_of::<T>()` and its address is aligned for `T`.
-    pub fn cast_mutable<T>(&mut self) -> Option<&mut T> {
+    ///
+    /// `T` must be [`PlainData`], so every payload byte pattern is a valid `T`;
+    /// a `bool` or enum payload can never hold an invalid value this way.
+    pub fn cast_mutable<T: PlainData>(&mut self) -> Option<&mut T> {
         if !self.is_exact_fit::<T>() {
             return None;
         }
         // SAFETY: `is_exact_fit` proved that the payload is exactly
-        // `size_of::<T>()` bytes long and aligned for `T`. Size and alignment do
-        // not prove that the bytes are a valid `T`: control command payload types
-        // must accept every bit pattern (plain integers and byte arrays, not
-        // `bool` or enums). The exclusive borrow of `self` gives unique access.
+        // `size_of::<T>()` bytes long and aligned for `T`, and `T: PlainData`
+        // proves that every bit pattern of that size is a valid `T`. The
+        // exclusive borrow of `self` gives unique access.
         Some(unsafe { &mut *self.0.as_mut_ptr().cast::<T>() })
     }
 
     /// Returns the payload as a `T` only when it is an exact fit: the payload
     /// length equals `size_of::<T>()` and its address is aligned for `T`.
-    pub fn cast<T>(&self) -> Option<&T> {
+    ///
+    /// `T` must be [`PlainData`], so every payload byte pattern is a valid `T`;
+    /// a `bool` or enum payload can never hold an invalid value this way.
+    pub fn cast<T: PlainData>(&self) -> Option<&T> {
         if !self.is_exact_fit::<T>() {
             return None;
         }
         // SAFETY: `is_exact_fit` proved that the payload is exactly
-        // `size_of::<T>()` bytes long and aligned for `T`. Size and alignment do
-        // not prove that the bytes are a valid `T`: control command payload types
-        // must accept every bit pattern (plain integers and byte arrays, not
-        // `bool` or enums).
+        // `size_of::<T>()` bytes long and aligned for `T`, and `T: PlainData`
+        // proves that every bit pattern of that size is a valid `T`.
         Some(unsafe { &*self.0.as_ptr().cast::<T>() })
     }
 
@@ -263,17 +276,22 @@ mod tests {
 
     #[test]
     fn test_struct_conversion() {
-        #[derive(Debug, PartialEq, Clone)]
-        struct TestStruct {
-            a: u32,
-            b: u16,
-            c: u8,
+        crate::plain_data! {
+            #[repr(C)]
+            #[derive(Debug, PartialEq, Clone)]
+            struct TestStruct {
+                a: u32,
+                b: u16,
+                c: u8,
+                reserved: u8,
+            }
         }
 
         let mut original = TestStruct {
             a: 100,
             b: 200,
             c: 50,
+            reserved: 0,
         };
         let expected = original.clone();
         let any = AnyByLayout::from_mutable(&mut original);

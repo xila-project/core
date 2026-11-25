@@ -1,6 +1,8 @@
 use core::time::Duration;
 
-use crate::{IpAddress, IpCidr};
+use file_system::IoErrorKind;
+
+use crate::{IpAddress, IpAddressAbi, IpCidr, IpCidrAbi};
 
 #[repr(C)]
 #[derive(Default, Clone, PartialEq, Eq)]
@@ -11,6 +13,102 @@ pub struct Route {
     pub preferred_until: Option<Duration>,
     /// Absolute monotonic time in the time manager source's epoch, not UTC.
     pub expires_at: Option<Duration>,
+}
+
+file_system::plain_data! {
+    #[repr(C)]
+    /// Plain-data payload mirror of an optional [`Duration`]: same size (16
+    /// bytes) and alignment (8) as `Option<Duration>`, but every byte pattern
+    /// is a valid value. Layout: `seconds` at offset 0, `nanoseconds` at
+    /// offset 8, `present` at offset 12, `reserved` at offset 13 (3 bytes,
+    /// must be zero). `present` is `0` or `1`; any other value is rejected with
+    /// `InvalidArgument`.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct OptionalDurationAbi {
+        pub seconds: u64,
+        pub nanoseconds: u32,
+        pub present: u8,
+        pub reserved: [u8; 3],
+    }
+}
+
+impl From<Option<Duration>> for OptionalDurationAbi {
+    fn from(value: Option<Duration>) -> Self {
+        match value {
+            Some(duration) => Self {
+                seconds: duration.as_secs(),
+                nanoseconds: duration.subsec_nanos(),
+                present: 1,
+                reserved: [0; 3],
+            },
+            None => Self::default(),
+        }
+    }
+}
+
+impl TryFrom<OptionalDurationAbi> for Option<Duration> {
+    type Error = IoErrorKind;
+
+    fn try_from(value: OptionalDurationAbi) -> file_system::Result<Self> {
+        match value.present {
+            0 if value.seconds == 0 && value.nanoseconds == 0 && value.reserved == [0; 3] => {
+                Ok(None)
+            }
+            1 => {
+                if value.nanoseconds >= 1_000_000_000 || value.reserved != [0; 3] {
+                    return Err(IoErrorKind::InvalidArgument);
+                }
+                Ok(Some(Duration::new(value.seconds, value.nanoseconds)))
+            }
+            _ => Err(IoErrorKind::InvalidArgument),
+        }
+    }
+}
+
+file_system::plain_data! {
+    #[repr(C)]
+    /// Plain-data payload mirror of [`Route`]: same size (80 bytes) and
+    /// alignment (8), but every byte pattern is a valid value. Layout:
+    /// `cidr` at offset 0, `via_router` at offset 24, `reserved` at offset 44
+    /// (4 bytes, must be zero), `preferred_until` at offset 48, `expires_at` at
+    /// offset 64. Unknown families and invalid optional durations are rejected
+    /// with `InvalidArgument` when converting back.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct RouteAbi {
+        pub cidr: IpCidrAbi,
+        pub via_router: IpAddressAbi,
+        pub reserved: [u8; 4],
+        pub preferred_until: OptionalDurationAbi,
+        pub expires_at: OptionalDurationAbi,
+    }
+}
+
+impl From<Route> for RouteAbi {
+    fn from(value: Route) -> Self {
+        Self {
+            cidr: value.cidr.into(),
+            via_router: value.via_router.into(),
+            reserved: [0; 4],
+            preferred_until: value.preferred_until.into(),
+            expires_at: value.expires_at.into(),
+        }
+    }
+}
+
+impl TryFrom<RouteAbi> for Route {
+    type Error = IoErrorKind;
+
+    fn try_from(value: RouteAbi) -> file_system::Result<Self> {
+        if value.reserved != [0; 4] {
+            return Err(IoErrorKind::InvalidArgument);
+        }
+        Ok(Self {
+            cidr: value.cidr.try_into()?,
+            via_router: value.via_router.try_into()?,
+            preferred_until: value.preferred_until.try_into()?,
+            expires_at: value.expires_at.try_into()?,
+        })
+    }
 }
 
 impl Route {
@@ -83,5 +181,96 @@ mod tests {
         route.expires_at = Some(Duration::from_secs(60));
 
         assert!(Route::from_smoltcp(route.into_smoltcp()) == route);
+    }
+}
+
+#[cfg(test)]
+mod abi_tests {
+    use super::*;
+
+    #[test]
+    fn route_abi_round_trips_and_keeps_the_size_and_alignment() {
+        assert_eq!(
+            core::mem::size_of::<RouteAbi>(),
+            core::mem::size_of::<Route>()
+        );
+        assert_eq!(
+            core::mem::align_of::<RouteAbi>(),
+            core::mem::align_of::<Route>()
+        );
+        assert_eq!(
+            core::mem::size_of::<RouteAbi>(),
+            core::mem::size_of::<IpCidrAbi>()
+                + core::mem::size_of::<IpAddressAbi>()
+                + core::mem::size_of::<[u8; 4]>()
+                + 2 * core::mem::size_of::<OptionalDurationAbi>(),
+            "RouteAbi must be padding-free"
+        );
+        let route = Route {
+            cidr: IpCidr::new_ipv4([192, 168, 0, 0], 24),
+            via_router: IpAddress::new_ipv4([192, 168, 0, 1]),
+            preferred_until: Some(Duration::from_millis(1500)),
+            expires_at: None,
+        };
+        assert!(Route::try_from(RouteAbi::from(route.clone())).unwrap() == route);
+    }
+
+    #[test]
+    fn optional_duration_abi_rejects_unknown_values() {
+        assert_eq!(
+            Option::<Duration>::try_from(OptionalDurationAbi {
+                seconds: 1,
+                nanoseconds: 0,
+                present: 2,
+                reserved: [0; 3],
+            }),
+            Err(IoErrorKind::InvalidArgument)
+        );
+        assert_eq!(
+            Option::<Duration>::try_from(OptionalDurationAbi {
+                seconds: 1,
+                nanoseconds: 1_000_000_000,
+                present: 1,
+                reserved: [0; 3],
+            }),
+            Err(IoErrorKind::InvalidArgument)
+        );
+        assert_eq!(
+            Option::<Duration>::try_from(OptionalDurationAbi {
+                seconds: 3,
+                nanoseconds: 4,
+                present: 0,
+                reserved: [0; 3],
+            }),
+            Err(IoErrorKind::InvalidArgument)
+        );
+        assert_eq!(
+            Option::<Duration>::try_from(OptionalDurationAbi {
+                seconds: 3,
+                nanoseconds: 4,
+                present: 1,
+                reserved: [0; 3],
+            })
+            .unwrap(),
+            Some(Duration::new(3, 4))
+        );
+    }
+
+    #[test]
+    fn route_abi_rejects_an_invalid_nested_value() {
+        let mut route = RouteAbi::default();
+        route.cidr.family = 8;
+        assert_eq!(
+            Route::try_from(route).err(),
+            Some(IoErrorKind::InvalidArgument)
+        );
+        let route = RouteAbi {
+            reserved: [1, 0, 0, 0],
+            ..RouteAbi::default()
+        };
+        assert_eq!(
+            Route::try_from(route).err(),
+            Some(IoErrorKind::InvalidArgument)
+        );
     }
 }
