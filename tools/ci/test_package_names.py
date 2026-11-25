@@ -26,6 +26,7 @@ EXPECTED_PACKAGE_NAMES = {
     "libraries/audio/Cargo.toml": "xila-audio",
     "libraries/authentication/Cargo.toml": "xila-authentication",
     "libraries/bootsplash/Cargo.toml": "xila-bootsplash",
+    "libraries/time_zone/Cargo.toml": "xila-time-zone",
     "libraries/debug_protocol/Cargo.toml": "xila-debug-protocol",
     "libraries/executable/Cargo.toml": "xila-executable",
     "libraries/file_system/Cargo.toml": "xila-file-system",
@@ -96,6 +97,7 @@ EXPECTED_LIBRARY_TARGETS = {
     "drivers/peripherals/Cargo.toml": "drivers_peripherals",
     "libraries/peripherals/Cargo.toml": "peripherals",
     "libraries/bootsplash/Cargo.toml": "bootsplash",
+    "libraries/time_zone/Cargo.toml": "time_zone",
     "subsystems/graphics/bindings_generator/Cargo.toml": "graphics_bindgen",
 }
 

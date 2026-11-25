@@ -48,6 +48,7 @@ network = { package = "xila-network", path = "subsystems/network" }
 debug_protocol = { package = "xila-debug-protocol", path = "libraries/debug_protocol" }
 peripherals = { package = "xila-peripherals", path = "libraries/peripherals" }
 bootsplash = { package = "xila-bootsplash", path = "libraries/bootsplash" }
+time_zone = { package = "xila-time-zone", path = "libraries/time_zone" }
 embedded-i18n = { version = "=0.2.0", default-features = false, features = [
   "backend-json",
 ] }
@@ -141,6 +142,7 @@ members = [
   "subsystems/log",
   "subsystems/lifecycle",
   "libraries/bootsplash",
+  "libraries/time_zone",
   "drivers/core",
 
   "devices",
