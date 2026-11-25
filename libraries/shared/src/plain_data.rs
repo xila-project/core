@@ -63,10 +63,10 @@ unsafe impl<T: PlainData, const N: usize> PlainData for [T; N] {}
 ///   when it has a single field.
 ///
 /// Other attributes (doc comments, `#[derive(..)]`, ...) may appear before or
-/// after the representation attribute. `#[repr(packed)]` is rejected: it does
-/// not match any form, and combined with the `#[repr(C)]` the macro adds it is
-/// a conflicting-representation error (a packed structure could also expose
-/// misaligned field references).
+/// after the representation attribute. `#[repr(packed)]` on its own matches no
+/// form; combined with the `#[repr(C)]` the macro adds, rustc accepts the pair,
+/// so the macro rejects packing with a compile-time alignment check instead (a
+/// packed structure would expose misaligned field references).
 ///
 /// # Safety contract
 ///
@@ -142,6 +142,22 @@ unsafe impl<T: PlainData, const N: usize> PlainData for [T; N] {}
 ///     }
 /// }
 /// ```
+///
+/// A packed structure does not compile (rustc accepts `#[repr(C)]` combined
+/// with `#[repr(packed)]`, so the macro rejects it with an alignment check):
+///
+/// ```compile_fail,E0080
+/// use shared::plain_data;
+///
+/// plain_data! {
+///     #[repr(C)]
+///     #[repr(packed)]
+///     pub struct Packed {
+///         pub a: u8,
+///         pub b: u32,
+///     }
+/// }
+/// ```
 #[macro_export]
 macro_rules! plain_data {
     // Named-field structure; `#[repr(C)]` is mandatory. Attributes before it
@@ -180,6 +196,18 @@ macro_rules! plain_data {
                 core::mem::size_of::<$name>()
                     == 0 $(+ core::mem::size_of::<$field_ty>())*,
                 "plain_data! structure has padding bytes"
+            );
+            // Compile-time check: not packed. A packed structure has alignment
+            // 1, so its fields could be referenced misaligned.
+            let mut required_alignment = 1usize;
+            $(
+                if core::mem::align_of::<$field_ty>() > required_alignment {
+                    required_alignment = core::mem::align_of::<$field_ty>();
+                }
+            )*
+            assert!(
+                core::mem::align_of::<$name>() == required_alignment,
+                "plain_data! structure must not be packed"
             );
         };
 
@@ -224,6 +252,17 @@ macro_rules! plain_data {
                     == 0 $(+ core::mem::size_of::<$field_ty>())+,
                 "plain_data! structure has padding bytes"
             );
+            // Compile-time check: not packed (see the named-field arm).
+            let mut required_alignment = 1usize;
+            $(
+                if core::mem::align_of::<$field_ty>() > required_alignment {
+                    required_alignment = core::mem::align_of::<$field_ty>();
+                }
+            )+
+            assert!(
+                core::mem::align_of::<$name>() == required_alignment,
+                "plain_data! structure must not be packed"
+            );
         };
 
         // SAFETY: the structure is `#[repr(C)]`, every field type implements
@@ -259,6 +298,10 @@ macro_rules! plain_data {
                 core::mem::size_of::<$name>() == core::mem::size_of::<$field_ty>(),
                 "plain_data! structure has padding bytes"
             );
+            assert!(
+                core::mem::align_of::<$name>() == core::mem::align_of::<$field_ty>(),
+                "plain_data! structure must not be packed"
+            );
         };
 
         // SAFETY: the structure is `#[repr(transparent)]` over a type that
@@ -280,7 +323,7 @@ macro_rules! plain_data {
         @munch [$($acc:tt)*]
         $($rest:tt)*
     ) => {
-        compile_error!("plain_data! requires #[repr(C)] or #[repr(transparent)]")
+        compile_error!("plain_data! requires #[repr(C)] or #[repr(transparent)]");
     };
     ($($tokens:tt)*) => {
         $crate::plain_data!(@munch [] $($tokens)*);
