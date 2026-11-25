@@ -17,10 +17,12 @@ pub enum IpAddress {
 
 file_system::plain_data! {
     #[repr(C)]
-    /// Plain-data payload mirror of [`IpAddress`]: same size and layout as the
-    /// `#[repr(C)]` enum (a `u32` tag followed by the address bytes), but every
-    /// byte pattern is a valid value. `family` is `0` for IPv4 and `1` for
-    /// IPv6; any other value is rejected with `InvalidArgument`.
+    /// Plain-data payload mirror of [`IpAddress`]: same size (20 bytes) and
+    /// alignment (4) as the `#[repr(C)]` enum, but every byte pattern is a
+    /// valid value. Layout: `family` at offset 0 (a `u32` tag), `address` at
+    /// offset 4 (16 bytes). `family` is `0` for IPv4 and `1` for IPv6; any other
+    /// value is rejected with `InvalidArgument`, as are non-zero bytes in the
+    /// trailing 12 address bytes of an IPv4 address.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
     pub struct IpAddressAbi {
         pub family: u32,
@@ -52,11 +54,18 @@ impl TryFrom<IpAddressAbi> for IpAddress {
 
     fn try_from(value: IpAddressAbi) -> file_system::Result<Self> {
         match value.family {
-            0 => Ok(IpAddress::IPv4(Ipv4::from_inner(
-                value.address[..4]
-                    .try_into()
-                    .map_err(|_| IoErrorKind::InvalidArgument)?,
-            ))),
+            0 => {
+                // An IPv4 address uses only the first 4 address bytes; the
+                // trailing 12 must be zero.
+                if value.address[4..].iter().any(|byte| *byte != 0) {
+                    return Err(IoErrorKind::InvalidArgument);
+                }
+                Ok(IpAddress::IPv4(Ipv4::from_inner(
+                    value.address[..4]
+                        .try_into()
+                        .map_err(|_| IoErrorKind::InvalidArgument)?,
+                )))
+            }
             1 => Ok(IpAddress::IPv6(Ipv6::from_inner(value.address))),
             _ => Err(IoErrorKind::InvalidArgument),
         }
@@ -199,6 +208,18 @@ mod abi_tests {
             family: 2,
             address: [0; 16],
         };
+        assert_eq!(IpAddress::try_from(abi), Err(IoErrorKind::InvalidArgument));
+    }
+
+    #[test]
+    fn ip_address_abi_rejects_non_zero_ipv4_trailing_bytes() {
+        let mut abi = IpAddressAbi::from(IpAddress::new_ipv4([192, 168, 0, 1]));
+        assert_eq!(
+            core::mem::size_of::<IpAddressAbi>(),
+            core::mem::size_of::<u32>() + core::mem::size_of::<[u8; 16]>(),
+            "IpAddressAbi must be padding-free"
+        );
+        abi.address[15] = 1;
         assert_eq!(IpAddress::try_from(abi), Err(IoErrorKind::InvalidArgument));
     }
 }

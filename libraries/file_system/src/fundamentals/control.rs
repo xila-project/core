@@ -48,11 +48,11 @@ pub trait ControlCommand: Clone + Copy {
 /// The input and output types are the command payload types. They must be
 /// plain data ([`PlainData`]): every payload byte pattern is then a valid
 /// value of the payload type, so a guest can never send an invalid value such
-/// as `2` for a `bool`. Values that not every byte can represent (`bool`,
-/// enums) are stored in the payload as integers and converted with
-/// `TryFrom` where the value is read.
+/// as `2` for a `bool`. A `bool` or enum cannot be a payload type because not
+/// every byte pattern is one of its values; store such values as integers in
+/// the payload and convert them with `TryFrom` where the value is read.
 ///
-/// ```compile_fail
+/// ```compile_fail,E0277
 /// use file_system::{ControlCommand, define_command};
 ///
 /// // `bool` is not plain data: the payload byte `2` would be an invalid `bool`.

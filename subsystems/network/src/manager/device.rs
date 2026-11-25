@@ -334,6 +334,7 @@ mod tests {
             family: 3,
             address: [0; 16],
             prefix_length: 24,
+            reserved: [0; 3],
         };
         assert_eq!(
             control(

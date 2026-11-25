@@ -106,16 +106,20 @@ impl Display for IpCidr {
 
 file_system::plain_data! {
     #[repr(C)]
-    /// Plain-data payload mirror of [`IpCidr`]: same size and layout as the
-    /// `#[repr(C)]` enum (a `u32` tag, the address bytes, then the prefix
-    /// length), but every byte pattern is a valid value. `family` is `0` for
-    /// IPv4 and `1` for IPv6; any other value is rejected with
-    /// `InvalidArgument`.
+    /// Plain-data payload mirror of [`IpCidr`]: same size (24 bytes) and
+    /// alignment (4) as the `#[repr(C)]` enum, but every byte pattern is a
+    /// valid value. Layout: `family` at offset 0 (a `u32` tag), `address` at
+    /// offset 4 (16 bytes), `prefix_length` at offset 20, `reserved` at offset
+    /// 21 (3 bytes, must be zero). `family` is `0` for IPv4 and `1` for IPv6;
+    /// any other value, a non-zero `reserved`, a prefix length above 32 (IPv4)
+    /// or 128 (IPv6), or non-zero bytes in the trailing 12 address bytes of an
+    /// IPv4 address is rejected with `InvalidArgument`.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct IpCidrAbi {
         pub family: u32,
         pub address: [u8; 16],
         pub prefix_length: u8,
+        pub reserved: [u8; 3],
     }
 }
 
@@ -133,6 +137,7 @@ impl From<IpCidr> for IpCidrAbi {
             family,
             address,
             prefix_length,
+            reserved: [0; 3],
         }
     }
 }
@@ -141,9 +146,12 @@ impl TryFrom<IpCidrAbi> for IpCidr {
     type Error = IoErrorKind;
 
     fn try_from(value: IpCidrAbi) -> file_system::Result<Self> {
+        if value.reserved != [0; 3] {
+            return Err(IoErrorKind::InvalidArgument);
+        }
         match value.family {
             0 => {
-                if value.prefix_length > 32 {
+                if value.prefix_length > 32 || value.address[4..].iter().any(|byte| *byte != 0) {
                     return Err(IoErrorKind::InvalidArgument);
                 }
                 let mut address = [0; 4];
@@ -172,7 +180,7 @@ mod abi_tests {
     use super::*;
 
     #[test]
-    fn ip_cidr_abi_round_trips_and_keeps_the_enum_layout() {
+    fn ip_cidr_abi_round_trips_and_keeps_the_enum_size_and_alignment() {
         assert_eq!(
             core::mem::size_of::<IpCidrAbi>(),
             core::mem::size_of::<IpCidr>()
@@ -180,6 +188,14 @@ mod abi_tests {
         assert_eq!(
             core::mem::align_of::<IpCidrAbi>(),
             core::mem::align_of::<IpCidr>()
+        );
+        assert_eq!(
+            core::mem::size_of::<IpCidrAbi>(),
+            core::mem::size_of::<u32>()
+                + core::mem::size_of::<[u8; 16]>()
+                + core::mem::size_of::<u8>()
+                + core::mem::size_of::<[u8; 3]>(),
+            "IpCidrAbi must be padding-free"
         );
         for cidr in [
             IpCidr::new_ipv4([10, 0, 0, 1], 24),
@@ -198,6 +214,7 @@ mod abi_tests {
             family: 5,
             address: [0; 16],
             prefix_length: 24,
+            reserved: [0; 3],
         };
         assert_eq!(
             IpCidr::try_from(unknown_family),
@@ -207,6 +224,7 @@ mod abi_tests {
             family: 0,
             address: [0; 16],
             prefix_length: 33,
+            reserved: [0; 3],
         };
         assert_eq!(
             IpCidr::try_from(ipv4_too_long),
@@ -216,9 +234,26 @@ mod abi_tests {
             family: 1,
             address: [0; 16],
             prefix_length: 129,
+            reserved: [0; 3],
         };
         assert_eq!(
             IpCidr::try_from(ipv6_too_long),
+            Err(IoErrorKind::InvalidArgument)
+        );
+    }
+
+    #[test]
+    fn ip_cidr_abi_rejects_non_zero_reserved_and_ipv4_trailing_bytes() {
+        let mut reserved = IpCidrAbi::from(IpCidr::new_ipv4([10, 0, 0, 1], 24));
+        reserved.reserved = [1, 0, 0];
+        assert_eq!(
+            IpCidr::try_from(reserved),
+            Err(IoErrorKind::InvalidArgument)
+        );
+        let mut trailing = IpCidrAbi::from(IpCidr::new_ipv4([10, 0, 0, 1], 24));
+        trailing.address[15] = 1;
+        assert_eq!(
+            IpCidr::try_from(trailing),
             Err(IoErrorKind::InvalidArgument)
         );
     }

@@ -17,10 +17,14 @@ file_system::plain_data! {
     /// [`MainFunction`] fat pointer, so the payload size and layout are
     /// unchanged. A function pointer is not plain data, so the payload type
     /// is this mirror; the host converts it back where the value is read.
-    #[derive(Clone, Copy, Debug, Default)]
+    ///
+    /// The value carries the owning `Box<dyn Fn>` pointer, so it is not
+    /// `Clone`/`Copy`: convert it with [`MainFunctionAbi::into_main_function`]
+    /// at most once, or the box would be freed twice.
+    #[derive(Debug, Default)]
     pub struct MainFunctionAbi {
         pub data: usize,
-        pub vtable: usize,
+        pub virtual_table: usize,
     }
 }
 
@@ -41,6 +45,9 @@ impl From<MainFunction> for MainFunctionAbi {
 impl MainFunctionAbi {
     /// Reinterprets a payload written by the host device as the function
     /// pointer it carries.
+    ///
+    /// The payload holds an owning `Box<dyn Fn>`, so it must be converted at
+    /// most once: converting a copy twice would free the box twice.
     ///
     /// # Safety
     ///

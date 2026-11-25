@@ -4,8 +4,11 @@ use file_system::{ControlCommand, IoErrorKind, define_command};
 file_system::plain_data! {
     #[repr(C)]
     /// Plain-data payload mirror of `Option<usize>`: same size and alignment
-    /// on every target, but every byte pattern is a valid value. `present` is
-    /// `0` or `1`; any other value is rejected with `InvalidArgument`.
+    /// on every target, but every byte pattern is a valid value. Layout:
+    /// `present` at offset 0, `reserved` at offsets 1..`size_of::<usize>()`
+    /// (must be zero), `value` at offset `size_of::<usize>()`. `present` is
+    /// `0` or `1`; any other value, or a non-zero `reserved`, is rejected with
+    /// `InvalidArgument`.
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
     pub struct OptionalUsizeAbi {
         pub present: u8,
@@ -31,9 +34,10 @@ impl TryFrom<OptionalUsizeAbi> for Option<usize> {
     type Error = IoErrorKind;
 
     fn try_from(value: OptionalUsizeAbi) -> file_system::Result<Self> {
+        const RESERVED_SIZE: usize = core::mem::size_of::<usize>() - 1;
         match value.present {
-            0 if value.value == 0 => Ok(None),
-            1 => Ok(Some(value.value)),
+            0 if value.value == 0 && value.reserved == [0; RESERVED_SIZE] => Ok(None),
+            1 if value.reserved == [0; RESERVED_SIZE] => Ok(Some(value.value)),
             _ => Err(IoErrorKind::InvalidArgument),
         }
     }
@@ -280,6 +284,31 @@ mod tests {
         let abi = OptionalUsizeAbi {
             present: 2,
             reserved: [0; core::mem::size_of::<usize>() - 1],
+            value: 0,
+        };
+        assert_eq!(
+            Option::<usize>::try_from(abi),
+            Err(IoErrorKind::InvalidArgument)
+        );
+    }
+
+    #[test]
+    fn optional_usize_abi_rejects_a_non_zero_reserved_field() {
+        const RESERVED_SIZE: usize = core::mem::size_of::<usize>() - 1;
+        let mut reserved = [0; RESERVED_SIZE];
+        reserved[0] = 1;
+        let abi = OptionalUsizeAbi {
+            present: 1,
+            reserved,
+            value: 7,
+        };
+        assert_eq!(
+            Option::<usize>::try_from(abi),
+            Err(IoErrorKind::InvalidArgument)
+        );
+        let abi = OptionalUsizeAbi {
+            present: 0,
+            reserved,
             value: 0,
         };
         assert_eq!(

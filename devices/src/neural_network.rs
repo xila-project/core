@@ -143,10 +143,13 @@ file_system::plain_data! {
 
 file_system::plain_data! {
     #[repr(C)]
-    /// One scale/zero-point pair for a tensor quantization axis.
+    /// One scale/zero-point pair for a tensor quantization axis. Layout:
+    /// `scale` at offset 0, `reserved` at offset 4 (must be zero when read
+    /// back), `zero_point` at offset 8; 16 bytes, no padding.
     #[derive(Clone, Copy, Debug, Default, PartialEq)]
     pub struct QuantizationEntry {
         pub scale: f32,
+        pub reserved: u32,
         pub zero_point: i64,
     }
 }
@@ -189,5 +192,20 @@ impl LoadRequest {
 impl Default for LoadRequest {
     fn default() -> Self {
         Self::tensorflow_lite()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quantization_entry_is_padding_free() {
+        assert_eq!(
+            core::mem::size_of::<QuantizationEntry>(),
+            core::mem::size_of::<f32>() + core::mem::size_of::<u32>() + core::mem::size_of::<i64>()
+        );
+        assert_eq!(core::mem::size_of::<QuantizationEntry>(), 16);
+        assert_eq!(core::mem::align_of::<QuantizationEntry>(), 8);
     }
 }

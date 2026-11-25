@@ -70,6 +70,11 @@ bitflags! {
 // `bitflags!` invocation above), so every bit pattern is a valid value.
 unsafe impl crate::PlainData for TerminalFlags {}
 
+const _: () = assert!(
+    core::mem::size_of::<TerminalFlags>() == 4,
+    "TerminalFlags must stay a transparent u32"
+);
+
 crate::plain_data! {
     #[repr(C)]
     /// Terminal line discipline settings, exchanged by
