@@ -509,8 +509,8 @@ listens on every local address of **its own family**, like a POSIX socket with
 traffic itself:
 
 * A listener refuses a connection of the other family. It aborts the
-  connection and listens again, before `xila_poll_wait` or `xila_tcp_accept`
-  would report it.
+  connection, sends a reset so the peer sees the refusal at once, and listens
+  again, before `xila_poll_wait` or `xila_tcp_accept` would report it.
 * A UDP socket drops datagrams of the other family and refuses to send to it
   (AddressFamilyUnsupported).
 * Peer addresses are therefore always of the socket's family.
