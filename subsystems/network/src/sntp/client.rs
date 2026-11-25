@@ -104,6 +104,13 @@ impl<'a> Client<'a> {
         let mut request = [0u8; PACKET_LENGTH];
         build_request(transmit, &mut request);
 
+        // Drop answers that arrived too late for a previous exchange: the
+        // originate check would reject them anyway.
+        while socket.with(|s| s.can_recv()).await {
+            let mut stale = [0u8; PACKET_LENGTH];
+            let _ = socket.read_from(&mut stale).await;
+        }
+
         let sent_monotonic = self.time.monotonic_now();
         let metadata = UdpMetadata::new(
             address.clone(),
