@@ -1,8 +1,22 @@
 //! Tests for the generated IANA zone name table.
 //!
-//! Run with a table feature, for example:
+//! Run with table features, for example:
 //! `cargo test -p xila-time-zone --features iana-all`.
-#![cfg(any(feature = "iana-all", feature = "iana-europe"))]
+#![cfg(any(
+    feature = "iana-africa",
+    feature = "iana-america",
+    feature = "iana-antarctica",
+    feature = "iana-arctic",
+    feature = "iana-asia",
+    feature = "iana-atlantic",
+    feature = "iana-australia",
+    feature = "iana-etc",
+    feature = "iana-europe",
+    feature = "iana-indian",
+    feature = "iana-pacific"
+))]
+
+extern crate std;
 
 use time_zone::{TimeZone, iana};
 
@@ -16,20 +30,43 @@ fn version_is_recorded() {
 }
 
 #[test]
-fn names_are_sorted_unique_and_looked_up() {
+fn names_are_unique_and_looked_up() {
     let count = iana::zone_count();
-    assert!(count > 0);
-    for index in 1..count {
-        let previous = iana::zone_name(index - 1).unwrap();
-        let current = iana::zone_name(index).unwrap();
-        assert!(previous < current, "{previous} !< {current}");
-        assert!(iana::contains(previous));
-        assert!(!iana::time_zone_string(previous).unwrap().is_empty());
+    let mut names = std::collections::BTreeSet::new();
+    for index in 0..count {
+        let name = iana::zone_name(index).unwrap();
+        assert!(names.insert(name), "{name} is listed twice");
+        assert!(iana::contains(name), "{name}");
+        assert!(!iana::time_zone_string(name).unwrap().is_empty());
     }
     assert!(iana::zone_name(count).is_none());
     assert!(!iana::contains("Not/AZone"));
+    assert!(!iana::contains(""));
     assert_eq!(iana::time_zone_string("Not/AZone"), None);
     assert!(TimeZone::from_iana_name("Not/AZone").is_none());
+}
+
+/// Each region holds the names with its prefix only.
+#[test]
+fn regions_follow_the_prefix() {
+    let regions = [
+        (cfg!(feature = "iana-africa"), "Africa/Abidjan"),
+        (cfg!(feature = "iana-america"), "America/New_York"),
+        (cfg!(feature = "iana-america"), "EST5EDT"),
+        (cfg!(feature = "iana-antarctica"), "Antarctica/Troll"),
+        (cfg!(feature = "iana-asia"), "Asia/Kolkata"),
+        (cfg!(feature = "iana-atlantic"), "Atlantic/Madeira"),
+        (cfg!(feature = "iana-australia"), "Australia/Sydney"),
+        (cfg!(feature = "iana-etc"), "Etc/GMT+5"),
+        (cfg!(feature = "iana-etc"), "GMT"),
+        (cfg!(feature = "iana-europe"), "Europe/Paris"),
+        (cfg!(feature = "iana-indian"), "Indian/Maldives"),
+        (cfg!(feature = "iana-pacific"), "Pacific/Auckland"),
+    ];
+    for (enabled, name) in regions {
+        assert_eq!(iana::contains(name), enabled, "{name}");
+    }
+    assert!(!iana::contains("Factory"));
 }
 
 #[test]
@@ -47,6 +84,7 @@ fn every_table_string_parses() {
     }
 }
 
+#[cfg(feature = "iana-europe")]
 #[test]
 fn known_zones_convert() {
     let paris = TimeZone::from_iana_name("Europe/Paris").unwrap();
@@ -64,41 +102,99 @@ fn known_zones_convert() {
     assert_eq!(dublin.daylight_saving_offset_seconds(), Some(0));
 }
 
+/// Legacy aliases: names that tzdata 2026f defines only as a `Link` of its
+/// `backward` file, with the region feature that holds each one.
+const LEGACY_ALIASES: &[(bool, &str)] = &[
+    (cfg!(feature = "iana-america"), "US/Eastern"),
+    (cfg!(feature = "iana-america"), "Canada/Pacific"),
+    (cfg!(feature = "iana-arctic"), "Arctic/Longyearbyen"),
+    (cfg!(feature = "iana-asia"), "Asia/Calcutta"),
+    (cfg!(feature = "iana-asia"), "Japan"),
+    (cfg!(feature = "iana-atlantic"), "Atlantic/Reykjavik"),
+    (cfg!(feature = "iana-europe"), "Europe/Amsterdam"),
+    (cfg!(feature = "iana-europe"), "Europe/Kiev"),
+    (cfg!(feature = "iana-europe"), "GB"),
+    (cfg!(feature = "iana-europe"), "Portugal"),
+    (cfg!(feature = "iana-etc"), "Etc/UCT"),
+];
+
+#[test]
+fn legacy_aliases_only_with_the_feature() {
+    let aliases = cfg!(feature = "iana-legacy-aliases");
+    for (region, name) in LEGACY_ALIASES {
+        assert_eq!(iana::contains(name), aliases && *region, "{name}");
+        assert_eq!(
+            TimeZone::from_iana_name(name).is_some(),
+            aliases && *region,
+            "{name}"
+        );
+    }
+}
+
+#[cfg(all(feature = "iana-legacy-aliases", feature = "iana-all"))]
+#[test]
+fn an_alias_resolves_to_its_target() {
+    assert_eq!(
+        iana::time_zone_string("Asia/Calcutta"),
+        iana::time_zone_string("Asia/Kolkata")
+    );
+    assert_eq!(
+        iana::time_zone_string("US/Eastern"),
+        iana::time_zone_string("America/New_York")
+    );
+}
+
 #[cfg(feature = "iana-all")]
 #[test]
 fn all_zones_table() {
-    assert!(iana::zone_count() > 500, "{}", iana::zone_count());
+    let expected = if cfg!(feature = "iana-legacy-aliases") {
+        597
+    } else {
+        345
+    };
+    assert_eq!(iana::zone_count(), expected);
     assert_eq!(iana::time_zone_string("Asia/Kolkata"), Some("IST-5:30"));
-    assert_eq!(
-        iana::time_zone_string("Europe/Paris"),
-        Some("CET-1CEST,M3.5.0,M10.5.0/3")
-    );
-    assert!(iana::contains("US/Pacific"));
-    assert!(iana::contains("Asia/Calcutta")); // a backward link
-    assert!(iana::contains("Etc/UTC"));
+    assert_eq!(iana::time_zone_string("Etc/GMT+5"), Some("<-05>5"));
     let kolkata = TimeZone::from_iana_name("Asia/Kolkata").unwrap();
     assert_eq!(kolkata.standard_offset_seconds(), 19_800);
     assert!(!kolkata.has_daylight_saving());
 }
 
-#[cfg(all(feature = "iana-europe", not(feature = "iana-all")))]
+#[cfg(feature = "iana-europe")]
 #[test]
-fn europe_subset_table() {
-    // The subset holds the Europe/ zones plus the European zones outside that
-    // prefix and the backward links to them.
-    assert!(iana::zone_count() > 50, "{}", iana::zone_count());
-    assert!(iana::zone_count() < 200, "{}", iana::zone_count());
+fn europe_region() {
     assert!(iana::contains("Europe/Paris"));
     assert!(iana::contains("Europe/Dublin"));
-    assert!(iana::contains("Atlantic/Canary"));
-    assert!(iana::contains("Atlantic/Madeira"));
-    assert!(iana::contains("Atlantic/Reykjavik"));
-    assert!(iana::contains("Arctic/Longyearbyen"));
-    assert!(iana::contains("Asia/Nicosia"));
-    assert!(iana::contains("Iceland")); // a backward link
-    assert!(iana::contains("Portugal"));
-    assert!(iana::contains("Poland"));
-    assert!(iana::contains("GB"));
+    assert!(iana::contains("Europe/Kyiv"));
+    assert_eq!(
+        iana::time_zone_string("Europe/Paris"),
+        Some("CET-1CEST,M3.5.0,M10.5.0/3")
+    );
+}
+
+#[cfg(all(
+    feature = "iana-europe",
+    not(any(
+        feature = "iana-africa",
+        feature = "iana-america",
+        feature = "iana-antarctica",
+        feature = "iana-arctic",
+        feature = "iana-asia",
+        feature = "iana-atlantic",
+        feature = "iana-australia",
+        feature = "iana-etc",
+        feature = "iana-indian",
+        feature = "iana-pacific"
+    ))
+))]
+#[test]
+fn europe_region_alone() {
+    let expected = if cfg!(feature = "iana-legacy-aliases") {
+        75
+    } else {
+        38
+    };
+    assert_eq!(iana::zone_count(), expected);
+    assert!(!iana::contains("Atlantic/Madeira"));
     assert!(!iana::contains("America/New_York"));
-    assert!(!iana::contains("Asia/Kolkata"));
 }

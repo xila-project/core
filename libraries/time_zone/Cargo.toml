@@ -10,10 +10,38 @@ name = "time_zone"
 
 [features]
 default = []
-# Compile the full IANA zone name table (name to POSIX TZ string).
-iana-all = []
-# Compile the Europe subset of the IANA zone name table.
+# IANA zone name tables, one per region (the names with that prefix). They
+# combine. See the `iana` module for the names in each region.
+iana-africa = []
+iana-america = []
+iana-antarctica = []
+iana-arctic = []
+iana-asia = []
+iana-atlantic = []
+iana-australia = []
 iana-europe = []
+iana-indian = []
+iana-pacific = []
+# The fixed offset zones `Etc/...` and `GMT`.
+iana-etc = []
+# Every region.
+iana-all = [
+  "iana-africa",
+  "iana-america",
+  "iana-antarctica",
+  "iana-arctic",
+  "iana-asia",
+  "iana-atlantic",
+  "iana-australia",
+  "iana-etc",
+  "iana-europe",
+  "iana-indian",
+  "iana-pacific",
+]
+# Add the legacy aliases (the `Link` names of the tzdata `backward` file, for
+# example `US/Eastern`) to each enabled region. Without a region, it has no
+# effect.
+iana-legacy-aliases = []
 
 [dev-dependencies]
 chrono = { version = "0.4", default-features = false, features = ["alloc"] }

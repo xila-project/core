@@ -11,8 +11,8 @@
 //!   [`shared`], and [`synchronization`].
 //! - **Optional capabilities**: [`audio`] (`audio`), [`neural_network`] and
 //!   [`drivers_neural_network`] (`neural_network`), [`bootsplash`] (`bootsplash`), and
-//!   [`time_zone`] and [`local_time`] (`time_zone`, with `time_zone_iana_all` or
-//!   `time_zone_iana_europe` for the IANA zone name table).
+//!   [`time_zone`] and [`local_time`] (`time_zone`; the IANA zone name tables are
+//!   features of `xila-time-zone` itself, such as `iana-europe` or `iana-all`).
 
 #![no_std]
 
@@ -49,8 +49,9 @@ pub use virtual_file_system;
 pub use bootsplash;
 
 /// Time zone and daylight saving conversion with POSIX TZ rule strings
-/// (`xila-time-zone`). With `time_zone_iana_all` or `time_zone_iana_europe`,
-/// the `time_zone::iana` module maps IANA zone names to their POSIX TZ strings.
+/// (`xila-time-zone`). With the region features of `xila-time-zone`, such as
+/// `iana-europe` or `iana-all`, the `time_zone::iana` module maps IANA zone
+/// names to their POSIX TZ strings.
 #[cfg(feature = "time_zone")]
 pub use time_zone;
 
