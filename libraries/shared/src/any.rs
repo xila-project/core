@@ -1,3 +1,4 @@
+use core::mem::align_of;
 use core::slice;
 
 #[repr(transparent)]
@@ -47,24 +48,37 @@ impl AnyByLayout {
         }
     }
 
+    /// Returns the payload as a `T` only when it is an exact fit: the payload
+    /// length equals `size_of::<T>()` and its address is aligned for `T`.
     pub fn cast_mutable<T>(&mut self) -> Option<&mut T> {
-        let (prefix, value, suffix) = unsafe { self.0.align_to_mut::<T>() };
-
-        if !prefix.is_empty() && !suffix.is_empty() && value.len() != 1 {
+        if !self.is_exact_fit::<T>() {
             return None;
         }
-
-        value.get_mut(0)
+        // SAFETY: `is_exact_fit` proved that the payload is exactly
+        // `size_of::<T>()` bytes long and aligned for `T`. Size and alignment do
+        // not prove that the bytes are a valid `T`: control command payload types
+        // must accept every bit pattern (plain integers and byte arrays, not
+        // `bool` or enums). The exclusive borrow of `self` gives unique access.
+        Some(unsafe { &mut *self.0.as_mut_ptr().cast::<T>() })
     }
 
+    /// Returns the payload as a `T` only when it is an exact fit: the payload
+    /// length equals `size_of::<T>()` and its address is aligned for `T`.
     pub fn cast<T>(&self) -> Option<&T> {
-        let (prefix, value, suffix) = unsafe { self.0.align_to::<T>() };
-
-        if !prefix.is_empty() && !suffix.is_empty() && value.len() != 1 {
+        if !self.is_exact_fit::<T>() {
             return None;
         }
+        // SAFETY: `is_exact_fit` proved that the payload is exactly
+        // `size_of::<T>()` bytes long and aligned for `T`. Size and alignment do
+        // not prove that the bytes are a valid `T`: control command payload types
+        // must accept every bit pattern (plain integers and byte arrays, not
+        // `bool` or enums).
+        Some(unsafe { &*self.0.as_ptr().cast::<T>() })
+    }
 
-        value.first()
+    fn is_exact_fit<T>(&self) -> bool {
+        let address = self.0.as_ptr() as usize;
+        self.0.len() == size_of::<T>() && address.is_multiple_of(align_of::<T>())
     }
 
     pub fn get_size(&self) -> usize {
@@ -153,6 +167,71 @@ mod tests {
         // Try to cast u32 (4 bytes) as u64 (8 bytes)
         let cast_result = any.cast::<u64>();
         assert!(cast_result.is_none());
+    }
+
+    #[test]
+    fn test_cast_accepts_only_an_exact_fit() {
+        let value: u32 = 0xAABBCCDD;
+        let any = AnyByLayout::from(&value);
+        assert_eq!(any.cast::<u32>().copied(), Some(0xAABBCCDD));
+
+        // Too short.
+        let short: u16 = 0x1234;
+        assert!(AnyByLayout::from(&short).cast::<u32>().is_none());
+
+        // Too long.
+        let long: u64 = 0x1122334455667788;
+        assert!(AnyByLayout::from(&long).cast::<u32>().is_none());
+        assert!(any.cast::<u64>().is_none());
+    }
+
+    #[test]
+    fn test_cast_mutable_accepts_only_an_exact_fit() {
+        let mut value: u32 = 7;
+        let any = AnyByLayout::from_mutable(&mut value);
+        *any.cast_mutable::<u32>().unwrap() = 8;
+        assert_eq!(value, 8);
+
+        let mut long: u64 = 1;
+        assert!(
+            AnyByLayout::from_mutable(&mut long)
+                .cast_mutable::<u32>()
+                .is_none()
+        );
+        let mut short: u16 = 1;
+        assert!(
+            AnyByLayout::from_mutable(&mut short)
+                .cast_mutable::<u32>()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_cast_rejects_a_misaligned_payload() {
+        #[repr(align(8))]
+        struct Aligned([u8; 8]);
+
+        let mut bytes = Aligned([0; 8]);
+        let misaligned = unsafe { AnyByLayout::from_raw_parts(bytes.0.as_mut_ptr().add(1), 4) };
+        assert!(misaligned.cast::<u32>().is_none());
+        assert!(misaligned.cast_mutable::<u32>().is_none());
+
+        // A longer misaligned payload holds one aligned `u32` after a prefix: the
+        // old check accepted it and read the value at the wrong offset.
+        let misaligned_longer =
+            unsafe { AnyByLayout::from_raw_parts(bytes.0.as_mut_ptr().add(1), 7) };
+        assert!(misaligned_longer.cast::<u32>().is_none());
+        assert!(misaligned_longer.cast_mutable::<u32>().is_none());
+
+        let aligned = unsafe { AnyByLayout::from_raw_parts(bytes.0.as_mut_ptr(), 4) };
+        assert!(aligned.cast::<u32>().is_some());
+        assert!(aligned.cast_mutable::<u32>().is_some());
+    }
+
+    #[test]
+    fn test_cast_zero_sized_type_needs_an_empty_payload() {
+        assert!(AnyByLayout::from(&()).cast::<()>().is_some());
+        assert!(AnyByLayout::from(&1u8).cast::<()>().is_none());
     }
 
     #[test]

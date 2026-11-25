@@ -6,7 +6,7 @@ use shared::AnyByLayout;
 
 // Kind byte `b'B'` is registered as `device::kind::BLOCK_DEVICE` (kept as a literal here because `device` depends on `file_system`).
 define_command!(GET_BLOCK_SIZE, Read, b'B', 0, (), u32);
-define_command!(GET_BLOCK_COUNT, Read, b'B', 1, (), u32);
+define_command!(GET_BLOCK_COUNT, Read, b'B', 1, (), Size);
 define_command!(ERASE, Write, b'B', 2, EraseRange, ());
 
 /// Byte range of a block device, relative to its start.
@@ -217,7 +217,7 @@ pub mod tests {
 
         assert!(block_count > 0);
 
-        let mut block_size: usize = 0;
+        let mut block_size: u32 = 0;
         device
             .control_sync(
                 &mut context,

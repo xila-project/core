@@ -203,7 +203,7 @@ impl<const BLOCK_SIZE: u32> DirectBaseOperations for MemoryDevice<BLOCK_SIZE> {
                         .try_read()
                         .map_err(|_| crate::IoErrorKind::WouldBlock)?
                         .len()
-                        / BLOCK_SIZE as usize) as u32;
+                        / BLOCK_SIZE as usize) as Size;
                 }
                 _ => return Err(IoErrorKind::Unsupported),
             }
