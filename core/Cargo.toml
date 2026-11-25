@@ -35,6 +35,7 @@ synchronization = { workspace = true }
 bootsplash = { workspace = true, optional = true }
 network = { workspace = true, optional = true }
 time_zone = { workspace = true, optional = true }
+local_time = { workspace = true, optional = true }
 
 [features]
 default = ["network"]
@@ -45,7 +46,7 @@ audio = ["dep:audio"]
 neural_network = ["dep:neural_network", "dep:drivers_neural_network"]
 network = ["dep:network", "executable/network"]
 bootsplash = ["dep:bootsplash"]
-time_zone = ["dep:time_zone"]
+time_zone = ["dep:time_zone", "dep:local_time"]
 time_zone_iana_all = ["time_zone", "time_zone/iana-all"]
 time_zone_iana_europe = ["time_zone", "time_zone/iana-europe"]
 graphics = ["dep:graphics", "executable/graphics"]

@@ -55,6 +55,7 @@ testing = { package = "xila-testing", path = "libraries/testing" }
 testing_support = { package = "xila-testing-support", path = "libraries/testing/support" }
 device = { package = "xila-device", path = "devices" }
 time_zone = { package = "xila-time-zone", path = "libraries/time_zone" }
+local_time = { package = "xila-local-time", path = "subsystems/local_time" }
 
 # - Drivers
 drivers_core = { package = "xila-drivers-core", path = "drivers/core" }
@@ -146,6 +147,7 @@ members = [
   "subsystems/lifecycle",
   "libraries/bootsplash",
   "libraries/time_zone",
+  "subsystems/local_time",
   "drivers/core",
 
   "devices",

@@ -11,8 +11,8 @@
 //!   [`shared`], and [`synchronization`].
 //! - **Optional capabilities**: [`audio`] (`audio`), [`neural_network`] and
 //!   [`drivers_neural_network`] (`neural_network`), [`bootsplash`] (`bootsplash`), and
-//!   [`time_zone`] (`time_zone`, with `time_zone_iana_all` or `time_zone_iana_europe`
-//!   for the IANA zone name table).
+//!   [`time_zone`] and [`local_time`] (`time_zone`, with `time_zone_iana_all` or
+//!   `time_zone_iana_europe` for the IANA zone name table).
 
 #![no_std]
 
@@ -53,6 +53,12 @@ pub use bootsplash;
 /// the `time_zone::iana` module maps IANA zone names to their POSIX TZ strings.
 #[cfg(feature = "time_zone")]
 pub use time_zone;
+
+/// The system time zone setting (`xila-local-time`): its storage in
+/// `/configuration/system/time_zone.json`, its loading at start-up and its
+/// publication to every task as the POSIX `TZ` environment variable.
+#[cfg(feature = "time_zone")]
+pub use local_time;
 
 #[cfg(feature = "graphics")]
 pub use graphics;

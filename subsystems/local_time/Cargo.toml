@@ -1,0 +1,28 @@
+[package]
+name = "xila-local-time"
+version.workspace = true
+edition = "2024"
+rust-version.workspace = true
+description = "The system time zone setting of Xila: storage, start-up and publication as TZ"
+
+[dependencies]
+file_system = { workspace = true }
+log = { workspace = true }
+miniserde = { workspace = true }
+task = { workspace = true }
+time_zone = { workspace = true }
+users = { workspace = true }
+virtual_file_system = { workspace = true }
+
+[dev-dependencies]
+task = { workspace = true, features = ["test_harness"] }
+little_fs = { workspace = true }
+testing_support = { workspace = true }
+time = { workspace = true }
+
+[[test]]
+name = "setting"
+path = "tests/setting.rs"
+
+[lib]
+name = "local_time"
