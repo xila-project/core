@@ -3,9 +3,8 @@
 
 use core::time::Duration;
 
-use alloc::string::String;
+use alloc::{string::String, string::ToString, vec::Vec};
 use file_system::{AccessFlags, IoErrorKind, Kind};
-use heapless::{String as HeaplessString, Vec as HeaplessVec};
 use miniserde::Deserialize;
 use task::TaskIdentifier;
 use virtual_file_system::{File, VirtualFileSystem};
@@ -18,41 +17,39 @@ pub const CONFIGURATION_PATH: &str = "/configuration/system/sntp.json";
 pub const MAXIMUM_CONFIGURATION_SIZE: usize = 1024;
 
 /// The largest number of configured servers.
-pub const MAXIMUM_SERVERS: usize = 4;
+pub const MAXIMUM_SERVERS: usize = 3;
 
-/// The largest server name kept, in bytes (the DNS limit is 253).
+/// The largest server name kept, in bytes: the DNS limit for a host name.
 pub const MAXIMUM_SERVER_NAME_LENGTH: usize = 253;
 
 /// The server queried when the configuration file names none.
+///
+/// This is a placeholder only. The NTP Pool asks vendors not to use the
+/// standard `pool.ntp.org` names as a default configuration in a shipped
+/// product: "You must absolutely not use the default pool.ntp.org zone names as
+/// the default configuration in your application or appliance." A vendor zone
+/// such as `xila.pool.ntp.org` must be requested from the NTP Pool by the
+/// project owner before release; see <https://www.ntppool.org/vendors.html>.
 pub const DEFAULT_SERVER: &str = "pool.ntp.org";
 
 /// How often UTC is resynchronized after a success, when the configuration
 /// file says nothing.
 pub const DEFAULT_RESYNC_INTERVAL: Duration = Duration::from_secs(3600);
 
-/// One server name, by host name or IP address.
-pub type ServerName = HeaplessString<MAXIMUM_SERVER_NAME_LENGTH>;
-
-/// The configured server list.
-pub type ServerList = HeaplessVec<ServerName, MAXIMUM_SERVERS>;
-
-/// The parsed SNTP configuration.
+/// The parsed SNTP configuration. The server names are heap allocated once at
+/// startup, so the struct itself stays small.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Configuration {
     /// The servers queried in order until one answers.
-    pub servers: ServerList,
+    pub servers: Vec<String>,
     /// How long to wait after a success before resynchronizing.
     pub resync_interval: Duration,
 }
 
 impl Default for Configuration {
     fn default() -> Self {
-        let mut servers = ServerList::new();
-        servers
-            .push(ServerName::try_from(DEFAULT_SERVER).expect("the default server name fits"))
-            .expect("one server fits");
         Self {
-            servers,
+            servers: alloc::vec![DEFAULT_SERVER.to_string()],
             resync_interval: DEFAULT_RESYNC_INTERVAL,
         }
     }
@@ -61,7 +58,7 @@ impl Default for Configuration {
 /// The file as written. Unknown keys, such as `$schema`, are ignored.
 #[derive(Deserialize)]
 struct ConfigurationFile {
-    servers: Option<alloc::vec::Vec<String>>,
+    servers: Option<Vec<String>>,
     resync_interval_seconds: Option<u64>,
 }
 
@@ -74,8 +71,8 @@ pub enum ConfigurationError {
     EmptyServerList,
     /// More servers than the service keeps.
     TooManyServers,
-    /// A server name longer than the DNS limit.
-    ServerNameTooLong,
+    /// A server name longer than the DNS limit, or empty.
+    InvalidServerName,
     /// A zero resynchronization interval.
     InvalidInterval,
 }
@@ -88,15 +85,15 @@ pub fn parse(text: &str) -> Result<Configuration, ConfigurationError> {
     let servers = match file.servers {
         Some(names) if names.is_empty() => return Err(ConfigurationError::EmptyServerList),
         Some(names) => {
-            let mut servers = ServerList::new();
-            for name in names {
-                let name = ServerName::try_from(name.as_str())
-                    .map_err(|_| ConfigurationError::ServerNameTooLong)?;
-                servers
-                    .push(name)
-                    .map_err(|_| ConfigurationError::TooManyServers)?;
+            if names.len() > MAXIMUM_SERVERS {
+                return Err(ConfigurationError::TooManyServers);
             }
-            servers
+            for name in &names {
+                if name.is_empty() || name.len() > MAXIMUM_SERVER_NAME_LENGTH {
+                    return Err(ConfigurationError::InvalidServerName);
+                }
+            }
+            names
         }
         None => Configuration::default().servers,
     };
@@ -178,8 +175,7 @@ mod tests {
     #[test]
     fn defaults_query_pool_ntp_org_hourly() {
         let configuration = Configuration::default();
-        assert_eq!(configuration.servers.len(), 1);
-        assert_eq!(configuration.servers[0].as_str(), "pool.ntp.org");
+        assert_eq!(configuration.servers, ["pool.ntp.org".to_string()]);
         assert_eq!(configuration.resync_interval, Duration::from_secs(3600));
     }
 
@@ -198,9 +194,10 @@ mod tests {
             r#"{"servers": ["time.example.com", "192.0.2.1"], "resync_interval_seconds": 60}"#,
         )
         .unwrap();
-        assert_eq!(configuration.servers.len(), 2);
-        assert_eq!(configuration.servers[0].as_str(), "time.example.com");
-        assert_eq!(configuration.servers[1].as_str(), "192.0.2.1");
+        assert_eq!(
+            configuration.servers,
+            ["time.example.com".to_string(), "192.0.2.1".to_string()]
+        );
         assert_eq!(configuration.resync_interval, Duration::from_secs(60));
     }
 
@@ -212,12 +209,19 @@ mod tests {
             Err(ConfigurationError::EmptyServerList)
         );
         assert_eq!(
-            parse(r#"{"servers": ["a", "b", "c", "d", "e"]}"#),
+            parse(r#"{"servers": ["a", "b", "c", "d"]}"#),
             Err(ConfigurationError::TooManyServers)
         );
         assert_eq!(
-            parse(&format!(r#"{{"servers": ["{}"]}}"#, "a".repeat(254))),
-            Err(ConfigurationError::ServerNameTooLong)
+            parse(r#"{"servers": [""]}"#),
+            Err(ConfigurationError::InvalidServerName)
+        );
+        assert_eq!(
+            parse(&format!(
+                r#"{{"servers": ["{}"]}}"#,
+                "a".repeat(MAXIMUM_SERVER_NAME_LENGTH + 1)
+            )),
+            Err(ConfigurationError::InvalidServerName)
         );
         assert_eq!(
             parse(r#"{"resync_interval_seconds": 0}"#),
@@ -231,7 +235,12 @@ mod tests {
 
     #[test]
     fn a_full_server_list_is_accepted() {
-        let json = r#"{"servers": ["a", "b", "c", "d"]}"#;
+        let json = r#"{"servers": ["a", "b", "c"]}"#;
         assert_eq!(parse(json).unwrap().servers.len(), MAXIMUM_SERVERS);
+        let json = format!(
+            r#"{{"servers": ["{}"]}}"#,
+            "a".repeat(MAXIMUM_SERVER_NAME_LENGTH)
+        );
+        assert_eq!(parse(&json).unwrap().servers.len(), 1);
     }
 }
