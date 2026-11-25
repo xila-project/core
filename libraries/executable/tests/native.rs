@@ -5,7 +5,7 @@ use core::{
     ptr::NonNull,
     task::{Context, Poll, Waker},
 };
-use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::{process::Command, sync::Mutex};
 
 use abi_application::ProcessLaunch;
@@ -106,8 +106,16 @@ fn build_fixture(name: &str, flags: &str) -> Vec<u8> {
     build_fixture_from("start.c", name, flags)
 }
 
+/// Builds a fixture into a path unique to this call, then reads it back: nextest runs
+/// tests in parallel processes and several tests build the same fixture name, so a
+/// fixed path would let one test read the ELF while another process rewrites it.
 fn build_fixture_from(source: &str, name: &str, flags: &str) -> Vec<u8> {
-    let output = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
+    static BUILD_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let output = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "{name}.{}.{}",
+        std::process::id(),
+        BUILD_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
     let recipe = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../native_loader/fixtures/build.sh"
@@ -122,7 +130,9 @@ fn build_fixture_from(source: &str, name: &str, flags: &str) -> Vec<u8> {
             .unwrap()
             .success()
     );
-    std::fs::read(output).unwrap()
+    let bytes = std::fs::read(&output).unwrap();
+    std::fs::remove_file(&output).unwrap();
+    bytes
 }
 
 /// Compiler flags that link with lld. `-fuse-ld=lld` looks for `ld.lld` on `PATH`;
