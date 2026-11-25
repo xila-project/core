@@ -169,7 +169,7 @@ pub const REPORT_DESCRIPTOR: &[u8] = &[
     0x95, 0x03, //     Report Count (3)
     0x81, 0x06, //     Input (Data, Variable, Relative): x, y, wheel
     0x05, 0x0C, //     Usage Page (Consumer)
-    0x0A, 0x38, 0x02, 0x00, 0x00, //     Usage (AC Pan, 0x0238)
+    0x0A, 0x38, 0x02, //     Usage (AC Pan, 0x0238)
     0x16, 0x80, 0xFF, //     Logical Minimum (-128)
     0x25, 0x7F, //     Logical Maximum (127)
     0x75, 0x08, //     Report Size (8)

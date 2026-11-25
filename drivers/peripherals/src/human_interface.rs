@@ -511,6 +511,12 @@ mod tests {
         report_id: u8,
         output: bool,
         bits: u32,
+        /// Size of one element in bits.
+        size: u32,
+        /// Constant fields (padding) carry no usage.
+        constant: bool,
+        /// True when a Usage, or a Usage Minimum and Maximum, applies to the field.
+        has_usage: bool,
         /// Array fields must carry their usage range as their logical range.
         array: bool,
         usage_minimum: u32,
@@ -527,6 +533,7 @@ mod tests {
         let mut report_count = 0u32;
         let mut usage_minimum = 0u32;
         let mut usage_maximum = 0u32;
+        let mut has_usage = false;
         let mut logical_minimum = 0i32;
         let mut logical_maximum = 0i32;
         let mut index = 0usize;
@@ -557,8 +564,8 @@ mod tests {
                     _ => data as i32,
                 }
             };
-            // Main items have type 01, global items type 00 and local items type 10 in
-            // bits 2-3 of the prefix, so masking with 0xFC keeps the tag only.
+            // Main items have type 00, global items type 01 and local items type 10 in
+            // bits 2-3 of the prefix, so masking with 0xFC keeps the tag and type only.
             match prefix & 0xFC {
                 0x04 => {}                                    // Usage Page (global)
                 0x14 => logical_minimum = signed(data, size), // Logical Minimum (global)
@@ -566,9 +573,17 @@ mod tests {
                 0x74 => report_size = data,                   // Report Size (global)
                 0x84 => report_id = data as u8,               // Report ID (global)
                 0x94 => report_count = data,                  // Report Count (global)
-                0x08 => {}                                    // Usage (local)
-                0x18 => usage_minimum = data,                 // Usage Minimum (local)
-                0x28 => usage_maximum = data,                 // Usage Maximum (local)
+                0x08 => has_usage = true,                     // Usage (local)
+                0x18 => {
+                    // Usage Minimum (local)
+                    usage_minimum = data;
+                    has_usage = true;
+                }
+                0x28 => {
+                    // Usage Maximum (local)
+                    usage_maximum = data;
+                    has_usage = true;
+                }
                 0x80 | 0x90 | 0xB0 => {
                     // Input, Output, Feature (main items).
                     let output = prefix & 0xFC == 0x90;
@@ -577,6 +592,9 @@ mod tests {
                         report_id,
                         output,
                         bits: report_size * report_count,
+                        size: report_size,
+                        constant: flags & 0x01 != 0,
+                        has_usage,
                         // Only Data, Array fields carry a usage range as their logical
                         // range; Constant and Variable fields do not.
                         array: flags & 0x03 == 0,
@@ -585,6 +603,25 @@ mod tests {
                         logical_minimum,
                         logical_maximum,
                     });
+                    // Every Main item clears the local state, as the Linux parser does.
+                    (usage_minimum, usage_maximum, has_usage) = (0, 0, false);
+                }
+                0xA0 | 0xC0 => {
+                    // Collection, End Collection (main items).
+                    (usage_minimum, usage_maximum, has_usage) = (0, 0, false);
+                }
+                tag if tag & 0x0C == 0x00 => {
+                    panic!(
+                        "reserved main item 0x{tag:02X} at offset {}",
+                        index - 1 - size
+                    );
+                }
+                tag if tag & 0x0C == 0x0C => {
+                    // Type 11 is reserved: a wrong item size before it misaligns the walk.
+                    panic!(
+                        "reserved item type 0x{tag:02X} at offset {}",
+                        index - 1 - size
+                    );
                 }
                 _ => {}
             }
@@ -659,6 +696,33 @@ mod tests {
                 "array field on report {} has a logical maximum different from its usage maximum",
                 field.report_id
             );
+        }
+    }
+
+    #[test]
+    fn descriptor_data_fields_have_a_usage() {
+        let fields = walk_descriptor(REPORT_DESCRIPTOR);
+        for field in fields.iter().filter(|field| !field.constant) {
+            assert!(
+                field.has_usage,
+                "a data field on report {} has no usage",
+                field.report_id
+            );
+        }
+    }
+
+    #[test]
+    fn descriptor_mouse_axes_span_the_signed_byte_range() {
+        let fields = walk_descriptor(REPORT_DESCRIPTOR);
+        let axes: Vec<&Field> = fields
+            .iter()
+            .filter(|field| {
+                !field.output && field.report_id == REPORT_IDENTIFIER_MOUSE && field.size == 8
+            })
+            .collect();
+        assert!(!axes.is_empty());
+        for field in axes {
+            assert_eq!((field.logical_minimum, field.logical_maximum), (-128, 127));
         }
     }
 }
