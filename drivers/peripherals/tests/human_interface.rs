@@ -22,8 +22,8 @@ use drivers_peripherals::human_interface::{
 };
 use file_system::{AccessFlags, Flags, IoErrorKind, MemoryDevice};
 use peripherals::human_interface::{
-    Error as ControllerError, HumanInterfaceController, REPORT_ID_CONSUMER, REPORT_ID_KEYBOARD,
-    REPORT_ID_MOUSE,
+    Error as ControllerError, HumanInterfaceController, REPORT_IDENTIFIER_CONSUMER,
+    REPORT_IDENTIFIER_KEYBOARD, REPORT_IDENTIFIER_MOUSE,
 };
 use task::TaskIdentifier;
 use virtual_file_system::{File, VirtualFileSystem};
@@ -157,18 +157,18 @@ async fn mounted_node_forwards_messages_as_reports_and_rejects_invalid_writes() 
         let state = controller.state.lock().unwrap();
         let reports = &state.reports;
         assert_eq!(reports.len(), 3);
-        assert_eq!(reports[0].0, REPORT_ID_KEYBOARD);
+        assert_eq!(reports[0].0, REPORT_IDENTIFIER_KEYBOARD);
         assert_eq!(
             reports[0].1,
             vec![0b0000_0011, 0x00, keyboard::A, keyboard::ENTER, 0, 0, 0, 0]
         );
-        assert_eq!(reports[1].0, REPORT_ID_MOUSE);
+        assert_eq!(reports[1].0, REPORT_IDENTIFIER_MOUSE);
         assert_eq!(reports[1].1, vec![0x01, 0xF6, 0x14, 0x01, 0x00]);
-        assert_eq!(reports[2].0, REPORT_ID_CONSUMER);
+        assert_eq!(reports[2].0, REPORT_IDENTIFIER_CONSUMER);
         assert_eq!(reports[2].1, vec![0xE9, 0x00]);
     }
 
-    // Invalid writes fail with an invalid-input error and send nothing.
+    // Invalid writes fail with an invalid-argument error and send nothing.
     assert_eq!(
         file.write(&[0u8; MESSAGE_SIZE - 1]).await.err(),
         Some(IoErrorKind::InvalidArgument)
@@ -179,15 +179,13 @@ async fn mounted_node_forwards_messages_as_reports_and_rejects_invalid_writes() 
         file.write(&unknown_kind).await.err(),
         Some(IoErrorKind::InvalidArgument)
     );
-    // A valid message followed by an invalid one is rejected as a whole.
+    // A valid message followed by an invalid one returns the accepted byte count;
+    // the first report was already sent.
     let mut mixed = [0u8; 2 * MESSAGE_SIZE];
     mixed[..MESSAGE_SIZE].copy_from_slice(&Message::System { usage: 0 }.encode());
     mixed[MESSAGE_SIZE] = 200;
-    assert_eq!(
-        file.write(&mixed).await.err(),
-        Some(IoErrorKind::InvalidArgument)
-    );
-    assert_eq!(controller.state.lock().unwrap().reports.len(), 3);
+    assert_eq!(file.write(&mixed).await.unwrap(), MESSAGE_SIZE);
+    assert_eq!(controller.state.lock().unwrap().reports.len(), 4);
 
     // Reads are unsupported: the node is write-only for reports.
     let mut read_buffer = [0u8; 8];
@@ -258,6 +256,20 @@ async fn controller_failures_map_to_file_system_errors() {
         .await
         .err(),
         Some(IoErrorKind::InputOutput)
+    );
+
+    // A full transport queue surfaces as WouldBlock, not as a silent drop.
+    controller.state.lock().unwrap().fail_with = Some(ControllerError::Busy);
+    assert_eq!(
+        file.write(
+            &Message::System {
+                usage: system::POWER_DOWN
+            }
+            .encode()
+        )
+        .await
+        .err(),
+        Some(IoErrorKind::WouldBlock)
     );
 
     file.close(vfs).await.unwrap();

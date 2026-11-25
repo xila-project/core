@@ -3,10 +3,10 @@
 //! A Xila device can act as a USB or Bluetooth keyboard, media remote and mouse toward the
 //! computer it is connected to (shortcuts, screenshots, play/pause, volume). An application
 //! writes messages to the device node. The upper half
-//! (`drivers_peripherals::human_interface`) validates the messages and forwards HID reports
-//! to the target controller (`peripherals::human_interface::HumanInterfaceController`), which
-//! every USB and Bluetooth Low Energy lower half implements. The shared HID report descriptor
-//! and the conversion from [`Message`] to report live in `peripherals::human_interface`.
+//! (`drivers_peripherals::human_interface`) validates the message structure and forwards
+//! HID reports to the target controller (`peripherals::human_interface::HumanInterfaceController`),
+//! which every USB and Bluetooth Low Energy lower half implements. The shared HID report
+//! descriptor lives in `peripherals::human_interface`.
 //!
 //! # File contract
 //!
@@ -17,18 +17,23 @@
 //! ## Write
 //!
 //! Each `write` contains one or more messages of exactly [`MESSAGE_SIZE`] (8) bytes. A write
-//! whose length is not a multiple of 8, or that contains an unknown kind in byte 0, fails
-//! with an invalid-input error. Reserved bytes of a message are ignored on decode and written
-//! as zero on encode.
+//! whose length is not a multiple of 8 fails with `InvalidArgument`. Every message must
+//! decode: an unknown kind in byte 0 or a non-zero reserved byte makes the message invalid.
+//! Reserved bytes are written as zero on encode.
+//!
+//! The upper half sends the messages of one write one by one and returns the number of
+//! accepted bytes: when the first message is invalid or its report cannot be sent, the
+//! write fails with an error; when a later message fails, the write returns the accepted
+//! byte count, a multiple of [`MESSAGE_SIZE`].
 //!
 //! Byte 0 of a message is the kind:
 //!
 //! | Kind | Name             | Byte 1                                             | Bytes 2 to 7                                                                |
 //! |------|------------------|----------------------------------------------------|-----------------------------------------------------------------------------|
 //! | `1`  | keyboard         | modifier bitmask, see [`Modifiers`]               | up to six key usages from the HID Keyboard/Keypad page (0x07), `0` = none   |
-//! | `2`  | consumer control | consumer usage (HID page 0x0C), little endian, `0` = release | `0`                                                                |
-//! | `3`  | mouse            | buttons bitmask, see [`MouseButtons`]              | x (i8), y (i8), wheel (i8), pan (i8) in bytes 2 to 5, `0` in bytes 6 and 7   |
-//! | `4`  | system control   | usage from the HID Generic Desktop page: `0x81` power down, `0x82` sleep, `0x83` wake up, `0` = release | `0` |
+//! | `2`  | consumer control | consumer usage (HID page 0x0C), little endian, `0` = release | must be `0`                                                          |
+//! | `3`  | mouse            | buttons bitmask, see [`MouseButtons`]              | x (i8), y (i8), wheel (i8), pan (i8) in bytes 2 to 5, bytes 6 and 7 must be `0` |
+//! | `4`  | system control   | usage from the HID Generic Desktop page: `0x81` power down, `0x82` sleep, `0x83` wake up, `0` = release | must be `0` |
 //!
 //! A keyboard message is the full pressed state: an all-zero keyboard message releases all
 //! keys.
@@ -79,19 +84,133 @@ pub const INDICATOR_SCROLL_LOCK: u8 = 1 << 2;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Error {
     /// The input is not a valid message: an unknown kind, a length that is not a multiple of
-    /// [`MESSAGE_SIZE`].
-    InvalidInput,
+    /// [`MESSAGE_SIZE`], or a non-zero reserved byte.
+    InvalidArgument,
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidInput => write!(formatter, "invalid human interface message"),
+            Self::InvalidArgument => write!(formatter, "invalid human interface message"),
         }
     }
 }
 
 impl core::error::Error for Error {}
+
+/// Generates a hand-written bitmask type with the given named bits.
+macro_rules! bitmask {
+    (
+        $(#[$type_doc:meta])*
+        $name:ident, $bits:ty;
+        $( $(#[$doc:meta])* $constant:ident = $value:expr; )*
+    ) => {
+        $(#[$type_doc])*
+        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+        pub struct $name($bits);
+
+        impl $name {
+            /// No bit set.
+            pub const NONE: Self = Self(0);
+            $( $(#[$doc])* pub const $constant: Self = Self($value); )*
+
+            /// Every defined bit.
+            pub const ALL: Self = Self(0 $(| $value)*);
+
+            /// Empty bitmask.
+            pub const fn empty() -> Self {
+                Self::NONE
+            }
+
+            /// Bitmask from raw bits; unknown bits are retained.
+            pub const fn from_bits_retain(bits: $bits) -> Self {
+                Self(bits)
+            }
+
+            /// Raw bits of the bitmask.
+            pub const fn bits(self) -> $bits {
+                self.0
+            }
+
+            /// `true` when no bit is set.
+            pub const fn is_empty(self) -> bool {
+                self.0 == 0
+            }
+
+            /// `true` when every bit of `other` is set.
+            pub const fn contains(self, other: Self) -> bool {
+                (self.0 & other.0) == other.0
+            }
+
+            /// `true` when at least one bit is set in both.
+            pub const fn intersects(self, other: Self) -> bool {
+                (self.0 & other.0) != 0
+            }
+
+            /// Union of two bitmasks.
+            pub const fn union(self, other: Self) -> Self {
+                Self(self.0 | other.0)
+            }
+
+            /// Set the bits of `other`.
+            pub const fn insert(&mut self, other: Self) {
+                self.0 |= other.0;
+            }
+
+            /// Clear the bits of `other`.
+            pub const fn remove(&mut self, other: Self) {
+                self.0 &= !other.0;
+            }
+        }
+
+        impl BitOr for $name {
+            type Output = Self;
+            fn bitor(self, other: Self) -> Self {
+                self.union(other)
+            }
+        }
+
+        impl BitAnd for $name {
+            type Output = Self;
+            fn bitand(self, other: Self) -> Self {
+                Self(self.0 & other.0)
+            }
+        }
+    };
+}
+
+bitmask! {
+    /// Keyboard modifier bitmask, HID standard order: left control, left shift, left alt,
+    /// left GUI, then the right ones.
+    Modifiers, u8;
+    /// Left control.
+    LEFT_CONTROL = 1 << 0;
+    /// Left shift.
+    LEFT_SHIFT = 1 << 1;
+    /// Left alt.
+    LEFT_ALT = 1 << 2;
+    /// Left GUI (Windows, command, super).
+    LEFT_GUI = 1 << 3;
+    /// Right control.
+    RIGHT_CONTROL = 1 << 4;
+    /// Right shift.
+    RIGHT_SHIFT = 1 << 5;
+    /// Right alt (alt gr).
+    RIGHT_ALT = 1 << 6;
+    /// Right GUI.
+    RIGHT_GUI = 1 << 7;
+}
+
+bitmask! {
+    /// Mouse buttons bitmask: left, right, middle.
+    MouseButtons, u8;
+    /// Left button.
+    LEFT = 1 << 0;
+    /// Right button.
+    RIGHT = 1 << 1;
+    /// Middle button.
+    MIDDLE = 1 << 2;
+}
 
 /// One message of the emulation device.
 ///
@@ -135,7 +254,7 @@ pub enum Message {
 }
 
 impl Message {
-    /// Encode the message as its 8 wire bytes, kind in byte 0.
+    /// Encode the message as its 8 wire bytes, kind in byte 0. Reserved bytes are zero.
     pub fn encode(&self) -> [u8; MESSAGE_SIZE] {
         let mut bytes = [0u8; MESSAGE_SIZE];
         match self {
@@ -170,9 +289,16 @@ impl Message {
         bytes
     }
 
-    /// Decode one 8-byte message. An unknown kind in byte 0 fails with
-    /// [`Error::InvalidInput`]; reserved bytes are ignored.
+    /// Decode one 8-byte message. An unknown kind in byte 0 or a non-zero reserved byte
+    /// fails with [`Error::InvalidArgument`].
     pub fn decode(bytes: &[u8; MESSAGE_SIZE]) -> Result<Self, Error> {
+        /// Reserved bytes of a message must be zero.
+        fn check_reserved(reserved: &[u8]) -> Result<(), Error> {
+            if reserved.iter().any(|&byte| byte != 0) {
+                return Err(Error::InvalidArgument);
+            }
+            Ok(())
+        }
         match bytes[0] {
             KIND_KEYBOARD => Ok(Self::Keyboard {
                 modifiers: Modifiers::from_bits_retain(bytes[1]),
@@ -180,18 +306,27 @@ impl Message {
                     .try_into()
                     .expect("slice of MESSAGE_SIZE - 2 bytes"),
             }),
-            KIND_CONSUMER => Ok(Self::Consumer {
-                usage: u16::from_le_bytes([bytes[1], bytes[2]]),
-            }),
-            KIND_MOUSE => Ok(Self::Mouse {
-                buttons: MouseButtons::from_bits_retain(bytes[1]),
-                x: bytes[2] as i8,
-                y: bytes[3] as i8,
-                wheel: bytes[4] as i8,
-                pan: bytes[5] as i8,
-            }),
-            KIND_SYSTEM => Ok(Self::System { usage: bytes[1] }),
-            _ => Err(Error::InvalidInput),
+            KIND_CONSUMER => {
+                check_reserved(&bytes[3..])?;
+                Ok(Self::Consumer {
+                    usage: u16::from_le_bytes([bytes[1], bytes[2]]),
+                })
+            }
+            KIND_MOUSE => {
+                check_reserved(&bytes[6..])?;
+                Ok(Self::Mouse {
+                    buttons: MouseButtons::from_bits_retain(bytes[1]),
+                    x: bytes[2] as i8,
+                    y: bytes[3] as i8,
+                    wheel: bytes[4] as i8,
+                    pan: bytes[5] as i8,
+                })
+            }
+            KIND_SYSTEM => {
+                check_reserved(&bytes[2..])?;
+                Ok(Self::System { usage: bytes[1] })
+            }
+            _ => Err(Error::InvalidArgument),
         }
     }
 }
@@ -199,17 +334,18 @@ impl Message {
 /// Iterator over the messages of one write.
 ///
 /// [`Messages::new`] checks that the length of the write is a multiple of [`MESSAGE_SIZE`];
-/// every item decodes one message and fails with [`Error::InvalidInput`] on an unknown kind.
+/// every item decodes one message and fails with [`Error::InvalidArgument`] on an unknown kind
+/// or a non-zero reserved byte.
 #[derive(Clone, Debug)]
 pub struct Messages<'a> {
     remaining: &'a [u8],
 }
 
 impl<'a> Messages<'a> {
-    /// Validate the write and return its message iterator.
+    /// Validate the write length and return its message iterator.
     pub fn new(bytes: &'a [u8]) -> Result<Self, Error> {
         if !bytes.len().is_multiple_of(MESSAGE_SIZE) {
-            return Err(Error::InvalidInput);
+            return Err(Error::InvalidArgument);
         }
         Ok(Self { remaining: bytes })
     }
@@ -238,268 +374,113 @@ impl Iterator for Messages<'_> {
 impl ExactSizeIterator for Messages<'_> {}
 impl core::iter::FusedIterator for Messages<'_> {}
 
-/// Keyboard modifier bitmask, HID standard order: left control, left shift, left alt, left
-/// GUI, then the right ones.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Modifiers(u8);
-
-impl Modifiers {
-    /// No modifier pressed.
-    pub const NONE: Self = Self(0);
-    /// Left control.
-    pub const LEFT_CONTROL: Self = Self(1 << 0);
-    /// Left shift.
-    pub const LEFT_SHIFT: Self = Self(1 << 1);
-    /// Left alt.
-    pub const LEFT_ALT: Self = Self(1 << 2);
-    /// Left GUI (Windows, command, super).
-    pub const LEFT_GUI: Self = Self(1 << 3);
-    /// Right control.
-    pub const RIGHT_CONTROL: Self = Self(1 << 4);
-    /// Right shift.
-    pub const RIGHT_SHIFT: Self = Self(1 << 5);
-    /// Right alt (alt gr).
-    pub const RIGHT_ALT: Self = Self(1 << 6);
-    /// Right GUI.
-    pub const RIGHT_GUI: Self = Self(1 << 7);
-    /// Every modifier bit.
-    pub const ALL: Self = Self(0xFF);
-
-    /// Empty bitmask.
-    pub const fn empty() -> Self {
-        Self::NONE
-    }
-
-    /// Bitmask from raw bits; unknown bits are retained.
-    pub const fn from_bits_retain(bits: u8) -> Self {
-        Self(bits)
-    }
-
-    /// Raw bits of the bitmask.
-    pub const fn bits(self) -> u8 {
-        self.0
-    }
-
-    /// `true` when no bit is set.
-    pub const fn is_empty(self) -> bool {
-        self.0 == 0
-    }
-
-    /// `true` when every bit of `other` is set.
-    pub const fn contains(self, other: Self) -> bool {
-        (self.0 & other.0) == other.0
-    }
-
-    /// `true` when at least one bit is set in both.
-    pub const fn intersects(self, other: Self) -> bool {
-        (self.0 & other.0) != 0
-    }
-
-    /// Union of two bitmasks.
-    pub const fn union(self, other: Self) -> Self {
-        Self(self.0 | other.0)
-    }
-
-    /// Set the bits of `other`.
-    pub const fn insert(&mut self, other: Self) {
-        self.0 |= other.0;
-    }
-
-    /// Clear the bits of `other`.
-    pub const fn remove(&mut self, other: Self) {
-        self.0 &= !other.0;
-    }
+/// Generates the Keyboard/Keypad page (0x07) usage constants with doc comments.
+macro_rules! keyboard_usages {
+    ( $( $name:ident = $value:expr, $doc:literal; )* ) => {
+        /// Keyboard/Keypad page (0x07) usages.
+        pub mod keyboard {
+            $( #[doc = $doc] pub const $name: u8 = $value; )*
+        }
+    };
 }
 
-impl BitOr for Modifiers {
-    type Output = Self;
-    fn bitor(self, other: Self) -> Self {
-        self.union(other)
-    }
-}
-
-impl BitAnd for Modifiers {
-    type Output = Self;
-    fn bitand(self, other: Self) -> Self {
-        Self(self.0 & other.0)
-    }
-}
-
-/// Mouse buttons bitmask: left, right, middle.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct MouseButtons(u8);
-
-impl MouseButtons {
-    /// No button pressed.
-    pub const NONE: Self = Self(0);
-    /// Left button.
-    pub const LEFT: Self = Self(1 << 0);
-    /// Right button.
-    pub const RIGHT: Self = Self(1 << 1);
-    /// Middle button.
-    pub const MIDDLE: Self = Self(1 << 2);
-    /// Every button bit.
-    pub const ALL: Self = Self(0x07);
-
-    /// Empty bitmask.
-    pub const fn empty() -> Self {
-        Self::NONE
-    }
-
-    /// Bitmask from raw bits; unknown bits are retained.
-    pub const fn from_bits_retain(bits: u8) -> Self {
-        Self(bits)
-    }
-
-    /// Raw bits of the bitmask.
-    pub const fn bits(self) -> u8 {
-        self.0
-    }
-
-    /// `true` when no bit is set.
-    pub const fn is_empty(self) -> bool {
-        self.0 == 0
-    }
-
-    /// `true` when every bit of `other` is set.
-    pub const fn contains(self, other: Self) -> bool {
-        (self.0 & other.0) == other.0
-    }
-
-    /// `true` when at least one bit is set in both.
-    pub const fn intersects(self, other: Self) -> bool {
-        (self.0 & other.0) != 0
-    }
-
-    /// Union of two bitmasks.
-    pub const fn union(self, other: Self) -> Self {
-        Self(self.0 | other.0)
-    }
-
-    /// Set the bits of `other`.
-    pub const fn insert(&mut self, other: Self) {
-        self.0 |= other.0;
-    }
-
-    /// Clear the bits of `other`.
-    pub const fn remove(&mut self, other: Self) {
-        self.0 &= !other.0;
-    }
-}
-
-impl BitOr for MouseButtons {
-    type Output = Self;
-    fn bitor(self, other: Self) -> Self {
-        self.union(other)
-    }
-}
-
-impl BitAnd for MouseButtons {
-    type Output = Self;
-    fn bitand(self, other: Self) -> Self {
-        Self(self.0 & other.0)
-    }
-}
-
-/// Keyboard/Keypad page (0x07) usages.
-pub mod keyboard {
-    pub const A: u8 = 0x04;
-    pub const B: u8 = 0x05;
-    pub const C: u8 = 0x06;
-    pub const D: u8 = 0x07;
-    pub const E: u8 = 0x08;
-    pub const F: u8 = 0x09;
-    pub const G: u8 = 0x0A;
-    pub const H: u8 = 0x0B;
-    pub const I: u8 = 0x0C;
-    pub const J: u8 = 0x0D;
-    pub const K: u8 = 0x0E;
-    pub const L: u8 = 0x0F;
-    pub const M: u8 = 0x10;
-    pub const N: u8 = 0x11;
-    pub const O: u8 = 0x12;
-    pub const P: u8 = 0x13;
-    pub const Q: u8 = 0x14;
-    pub const R: u8 = 0x15;
-    pub const S: u8 = 0x16;
-    pub const T: u8 = 0x17;
-    pub const U: u8 = 0x18;
-    pub const V: u8 = 0x19;
-    pub const W: u8 = 0x1A;
-    pub const X: u8 = 0x1B;
-    pub const Y: u8 = 0x1C;
-    pub const Z: u8 = 0x1D;
-
-    pub const NUMBER_1: u8 = 0x1E;
-    pub const NUMBER_2: u8 = 0x1F;
-    pub const NUMBER_3: u8 = 0x20;
-    pub const NUMBER_4: u8 = 0x21;
-    pub const NUMBER_5: u8 = 0x22;
-    pub const NUMBER_6: u8 = 0x23;
-    pub const NUMBER_7: u8 = 0x24;
-    pub const NUMBER_8: u8 = 0x25;
-    pub const NUMBER_9: u8 = 0x26;
-    pub const NUMBER_0: u8 = 0x27;
-
-    pub const ENTER: u8 = 0x28;
-    pub const ESCAPE: u8 = 0x29;
-    pub const BACKSPACE: u8 = 0x2A;
-    pub const TAB: u8 = 0x2B;
-    pub const SPACE: u8 = 0x2C;
-
-    pub const CAPS_LOCK: u8 = 0x39;
-
-    pub const F1: u8 = 0x3A;
-    pub const F2: u8 = 0x3B;
-    pub const F3: u8 = 0x3C;
-    pub const F4: u8 = 0x3D;
-    pub const F5: u8 = 0x3E;
-    pub const F6: u8 = 0x3F;
-    pub const F7: u8 = 0x40;
-    pub const F8: u8 = 0x41;
-    pub const F9: u8 = 0x42;
-    pub const F10: u8 = 0x43;
-    pub const F11: u8 = 0x44;
-    pub const F12: u8 = 0x45;
-
-    pub const PRINT_SCREEN: u8 = 0x46;
-    pub const SCROLL_LOCK: u8 = 0x47;
-    pub const PAUSE: u8 = 0x48;
-
-    pub const INSERT: u8 = 0x49;
-    pub const HOME: u8 = 0x4A;
-    pub const PAGE_UP: u8 = 0x4B;
-    pub const DELETE: u8 = 0x4C;
-    pub const END: u8 = 0x4D;
-    pub const PAGE_DOWN: u8 = 0x4E;
-
-    pub const ARROW_RIGHT: u8 = 0x4F;
-    pub const ARROW_LEFT: u8 = 0x50;
-    pub const ARROW_DOWN: u8 = 0x51;
-    pub const ARROW_UP: u8 = 0x52;
-
-    pub const F13: u8 = 0x68;
-    pub const F14: u8 = 0x69;
-    pub const F15: u8 = 0x6A;
-    pub const F16: u8 = 0x6B;
-    pub const F17: u8 = 0x6C;
-    pub const F18: u8 = 0x6D;
-    pub const F19: u8 = 0x6E;
-    pub const F20: u8 = 0x6F;
-    pub const F21: u8 = 0x70;
-    pub const F22: u8 = 0x71;
-    pub const F23: u8 = 0x72;
-    pub const F24: u8 = 0x73;
+keyboard_usages! {
+    A = 0x04, "Letter A key.";
+    B = 0x05, "Letter B key.";
+    C = 0x06, "Letter C key.";
+    D = 0x07, "Letter D key.";
+    E = 0x08, "Letter E key.";
+    F = 0x09, "Letter F key.";
+    G = 0x0A, "Letter G key.";
+    H = 0x0B, "Letter H key.";
+    I = 0x0C, "Letter I key.";
+    J = 0x0D, "Letter J key.";
+    K = 0x0E, "Letter K key.";
+    L = 0x0F, "Letter L key.";
+    M = 0x10, "Letter M key.";
+    N = 0x11, "Letter N key.";
+    O = 0x12, "Letter O key.";
+    P = 0x13, "Letter P key.";
+    Q = 0x14, "Letter Q key.";
+    R = 0x15, "Letter R key.";
+    S = 0x16, "Letter S key.";
+    T = 0x17, "Letter T key.";
+    U = 0x18, "Letter U key.";
+    V = 0x19, "Letter V key.";
+    W = 0x1A, "Letter W key.";
+    X = 0x1B, "Letter X key.";
+    Y = 0x1C, "Letter Y key.";
+    Z = 0x1D, "Letter Z key.";
+    NUMBER_1 = 0x1E, "Digit 1 key.";
+    NUMBER_2 = 0x1F, "Digit 2 key.";
+    NUMBER_3 = 0x20, "Digit 3 key.";
+    NUMBER_4 = 0x21, "Digit 4 key.";
+    NUMBER_5 = 0x22, "Digit 5 key.";
+    NUMBER_6 = 0x23, "Digit 6 key.";
+    NUMBER_7 = 0x24, "Digit 7 key.";
+    NUMBER_8 = 0x25, "Digit 8 key.";
+    NUMBER_9 = 0x26, "Digit 9 key.";
+    NUMBER_0 = 0x27, "Digit 0 key.";
+    ENTER = 0x28, "Enter (return) key.";
+    ESCAPE = 0x29, "Escape key.";
+    BACKSPACE = 0x2A, "Backspace key.";
+    TAB = 0x2B, "Tab key.";
+    SPACE = 0x2C, "Space bar.";
+    CAPS_LOCK = 0x39, "Caps lock key.";
+    F1 = 0x3A, "Function key F1.";
+    F2 = 0x3B, "Function key F2.";
+    F3 = 0x3C, "Function key F3.";
+    F4 = 0x3D, "Function key F4.";
+    F5 = 0x3E, "Function key F5.";
+    F6 = 0x3F, "Function key F6.";
+    F7 = 0x40, "Function key F7.";
+    F8 = 0x41, "Function key F8.";
+    F9 = 0x42, "Function key F9.";
+    F10 = 0x43, "Function key F10.";
+    F11 = 0x44, "Function key F11.";
+    F12 = 0x45, "Function key F12.";
+    PRINT_SCREEN = 0x46, "Print screen key.";
+    SCROLL_LOCK = 0x47, "Scroll lock key.";
+    PAUSE = 0x48, "Pause (break) key.";
+    INSERT = 0x49, "Insert key.";
+    HOME = 0x4A, "Home key.";
+    PAGE_UP = 0x4B, "Page up key.";
+    DELETE = 0x4C, "Delete (forward) key.";
+    END = 0x4D, "End key.";
+    PAGE_DOWN = 0x4E, "Page down key.";
+    ARROW_RIGHT = 0x4F, "Right arrow key.";
+    ARROW_LEFT = 0x50, "Left arrow key.";
+    ARROW_DOWN = 0x51, "Down arrow key.";
+    ARROW_UP = 0x52, "Up arrow key.";
+    F13 = 0x68, "Function key F13.";
+    F14 = 0x69, "Function key F14.";
+    F15 = 0x6A, "Function key F15.";
+    F16 = 0x6B, "Function key F16.";
+    F17 = 0x6C, "Function key F17.";
+    F18 = 0x6D, "Function key F18.";
+    F19 = 0x6E, "Function key F19.";
+    F20 = 0x6F, "Function key F20.";
+    F21 = 0x70, "Function key F21.";
+    F22 = 0x71, "Function key F22.";
+    F23 = 0x72, "Function key F23.";
+    F24 = 0x73, "Function key F24.";
 }
 
 /// Consumer page (0x0C) usages: media remote controls.
 pub mod consumer {
+    /// Play/pause.
     pub const PLAY_PAUSE: u16 = 0x00CD;
+    /// Next track.
     pub const NEXT_TRACK: u16 = 0x00B5;
+    /// Previous track.
     pub const PREVIOUS_TRACK: u16 = 0x00B6;
+    /// Stop.
     pub const STOP: u16 = 0x00B7;
+    /// Volume up.
     pub const VOLUME_UP: u16 = 0x00E9;
+    /// Volume down.
     pub const VOLUME_DOWN: u16 = 0x00EA;
+    /// Mute.
     pub const MUTE: u16 = 0x00E2;
 }
 
@@ -640,19 +621,35 @@ mod tests {
         for kind in [0u8, 5, 42, u8::MAX] {
             let mut bytes = [0u8; MESSAGE_SIZE];
             bytes[0] = kind;
-            assert_eq!(Message::decode(&bytes), Err(Error::InvalidInput));
+            assert_eq!(Message::decode(&bytes), Err(Error::InvalidArgument));
         }
     }
 
     #[test]
-    fn decode_ignores_reserved_bytes() {
-        let mut bytes = Message::Consumer { usage: 0x1234 }.encode();
-        bytes[3] = 0xAA;
-        bytes[7] = 0xBB;
-        assert_eq!(
-            Message::decode(&bytes),
-            Ok(Message::Consumer { usage: 0x1234 })
-        );
+    fn decode_rejects_non_zero_reserved_bytes() {
+        let mut consumer = Message::Consumer { usage: 0x1234 }.encode();
+        consumer[3] = 0xAA;
+        assert_eq!(Message::decode(&consumer), Err(Error::InvalidArgument));
+
+        let mut mouse = Message::Mouse {
+            buttons: MouseButtons::empty(),
+            x: 0,
+            y: 0,
+            wheel: 0,
+            pan: 0,
+        }
+        .encode();
+        mouse[6] = 0x01;
+        assert_eq!(Message::decode(&mouse), Err(Error::InvalidArgument));
+
+        let mut system = Message::System { usage: 0x81 }.encode();
+        system[7] = 0xFF;
+        assert_eq!(Message::decode(&system), Err(Error::InvalidArgument));
+
+        // The keyboard message uses every byte, so nothing is reserved there.
+        let mut keyboard = keyboard_message().encode();
+        keyboard[7] = 0xFF;
+        assert!(Message::decode(&keyboard).is_ok());
     }
 
     #[test]
@@ -662,7 +659,7 @@ mod tests {
         for length in [1, 7, 9, 15, 17] {
             assert_eq!(
                 Messages::new(&bytes[..length]).unwrap_err(),
-                Error::InvalidInput
+                Error::InvalidArgument
             );
         }
         for length in [0, 8, 16, 80] {
@@ -681,7 +678,7 @@ mod tests {
         assert_eq!(messages.len(), 3);
         assert_eq!(messages.next(), Some(Ok(keyboard_message())));
         assert_eq!(messages.next(), Some(Ok(Message::Consumer { usage: 0 })));
-        assert_eq!(messages.next(), Some(Err(Error::InvalidInput)));
+        assert_eq!(messages.next(), Some(Err(Error::InvalidArgument)));
         assert_eq!(messages.next(), None);
     }
 

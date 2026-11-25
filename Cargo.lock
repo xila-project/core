@@ -2344,7 +2344,6 @@ dependencies = [
  "embedded-io",
  "embedded-io-async",
  "portable-atomic",
- "xila-device",
  "xila-synchronization",
 ]
 

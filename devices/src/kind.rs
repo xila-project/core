@@ -12,12 +12,12 @@
 //! | `b'E'`    | `0x45` | Executable          | `executable`                             |
 //! | `b'F'`    | `0x46` | Firmware update     | `firmware_update::device`                |
 //! | `b'H'`    | `0x48` | Hash accelerator    | `device::hash`                           |
-//! | `b'h'`    | `0x68` | Human interface emulation | `device::human_interface` / `drivers_peripherals::human_interface` |
 //! | `b'N'`    | `0x4E` | Neural network      | `device::neural_network` / `drivers_neural_network` |
 //! | `b'P'`    | `0x50` | System power        | `device::power` / `drivers_peripherals::power` |
 //! | `b'T'`    | `0x54` | Terminal / character| `file_system::character_device`          |
 //! | `b'a'`    | `0x61` | ADC                 | `device::adc` / `drivers_peripherals::adc`|
 //! | `b'g'`    | `0x67` | GPIO                | `device::gpio` / `drivers_peripherals::gpio` |
+//! | `b'h'`    | `0x68` | Human interface emulation | `device::human_interface` / `drivers_peripherals::human_interface` |
 //! | `b'i'`    | `0x69` | I2C                 | `device::i2c` / `drivers_peripherals::i2c`|
 //! | `b'n'`    | `0x6E` | Network interface   | `network`                                |
 //! | `b'p'`    | `0x70` | PWM                 | `device::pwm` / `drivers_peripherals::pwm`|
@@ -46,10 +46,6 @@ pub const FIRMWARE_UPDATE: u8 = b'F';
 /// Hardware or software cryptographic hash device (`b'H'`).
 pub const HASH: u8 = b'H';
 
-/// Human interface emulation device, acting as a keyboard, media remote and mouse toward
-/// the connected computer (`b'h'`).
-pub const HUMAN_INTERFACE: u8 = b'h';
-
 /// Neural network inference device (`b'N'`).
 pub const NEURAL_NETWORK: u8 = b'N';
 
@@ -68,6 +64,10 @@ pub const ADC: u8 = b'a';
 
 /// General-purpose input/output line (`b'g'`).
 pub const GPIO: u8 = b'g';
+
+/// Human interface emulation device, acting as a keyboard, media remote and mouse toward
+/// the connected computer (`b'h'`).
+pub const HUMAN_INTERFACE: u8 = b'h';
 
 /// Inter-Integrated Circuit bus endpoint (`b'i'`).
 pub const I2C: u8 = b'i';
@@ -95,12 +95,12 @@ pub const ALL: &[u8] = &[
     EXECUTABLE,
     FIRMWARE_UPDATE,
     HASH,
-    HUMAN_INTERFACE,
     NEURAL_NETWORK,
     POWER,
     TERMINAL,
     ADC,
     GPIO,
+    HUMAN_INTERFACE,
     I2C,
     NETWORK,
     PWM,
