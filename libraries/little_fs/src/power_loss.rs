@@ -41,7 +41,9 @@ use crate::{File, FileSystem, Options};
 /// `fail_after` of them, writes and erases fail and are not applied, simulating
 /// a power loss. `fail_at` fails exactly one program operation and then recovers
 /// (a transient I/O error, not a power loss). `torn_at` applies half of that
-/// program's buffer and then fails like a power loss.
+/// program's buffer and then fails like a power loss. `fail_read_at` with
+/// `fail_read_len` fails a window of consecutive reads starting at that read,
+/// then the device recovers.
 struct FaultDevice {
     inner: MemoryDevice<512>,
     progs: AtomicUsize,
@@ -51,6 +53,7 @@ struct FaultDevice {
     fail_at: AtomicUsize,
     torn_at: AtomicUsize,
     fail_read_at: AtomicUsize,
+    fail_read_len: AtomicUsize,
     failed: AtomicBool,
 }
 
@@ -65,6 +68,7 @@ impl FaultDevice {
             fail_at: AtomicUsize::new(usize::MAX),
             torn_at: AtomicUsize::new(usize::MAX),
             fail_read_at: AtomicUsize::new(usize::MAX),
+            fail_read_len: AtomicUsize::new(1),
             failed: AtomicBool::new(false),
         }))
     }
@@ -100,9 +104,15 @@ impl FaultDevice {
         self.torn_at.store(count, Ordering::SeqCst);
     }
 
-    /// Fail exactly the `count`-th read (a transient read error), then recover.
+    /// Fail the `count`-th read and the `len` reads after it (a transient read
+    /// error window), then recover.
     fn fail_read_at(&self, count: usize) {
         self.fail_read_at.store(count, Ordering::SeqCst);
+    }
+
+    fn fail_read_window(&self, count: usize, len: usize) {
+        self.fail_read_at.store(count, Ordering::SeqCst);
+        self.fail_read_len.store(len, Ordering::SeqCst);
     }
 
     fn allow_all(&self) {
@@ -110,6 +120,7 @@ impl FaultDevice {
         self.fail_at.store(usize::MAX, Ordering::SeqCst);
         self.torn_at.store(usize::MAX, Ordering::SeqCst);
         self.fail_read_at.store(usize::MAX, Ordering::SeqCst);
+        self.fail_read_len.store(1, Ordering::SeqCst);
         self.failed.store(false, Ordering::SeqCst);
     }
 }
@@ -122,7 +133,11 @@ impl DirectBaseOperations for FaultDevice {
         position: Size,
     ) -> Poll<Result<usize>> {
         let count = self.reads.fetch_add(1, Ordering::SeqCst) + 1;
-        if count == self.fail_read_at.load(Ordering::SeqCst) {
+        let start = self.fail_read_at.load(Ordering::SeqCst);
+        if start != usize::MAX
+            && count >= start
+            && count - start < self.fail_read_len.load(Ordering::SeqCst)
+        {
             // Transient read error: the device keeps working afterwards.
             return Poll::Ready(Err(IoErrorKind::InputOutput));
         }
@@ -975,4 +990,328 @@ fn open_file_context_size_is_stable() {
         core::mem::size_of::<crate::attributes::InternalAttributes>(),
         48
     );
+}
+
+// ---------------------------------------------------------------------------
+// Randomised read-fault sweep: random trees with churn, one read-error window
+// injected at every read of a create over an existing entry. The cleanup of a
+// failed create must never remove or alter a pre-existing entry. The fixed
+// seed set includes the seeds that reproduced removals before the read cache
+// was emptied before the cleanup probe.
+// ---------------------------------------------------------------------------
+mod randomised_sweep {
+    use super::*;
+    use crate::Directory;
+    use alloc::string::{String, ToString};
+    use alloc::vec::Vec;
+    use file_system::FileSystemOperations;
+
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+    }
+
+    fn sweep_attributes(uid: u16) -> Attributes {
+        Attributes::new()
+            .set_user(UserIdentifier::new(uid))
+            .set_group(GroupIdentifier::new(43))
+            .set_permissions(Permissions::USER_READ_WRITE)
+            .set_kind(Kind::File)
+    }
+
+    fn sweep_dir_attributes(uid: u16) -> Attributes {
+        Attributes::new()
+            .set_user(UserIdentifier::new(uid))
+            .set_kind(Kind::Directory)
+    }
+
+    fn put(fs: &FileSystem, path: &str, data: &[u8]) {
+        FileSystemOperations::create_file(fs, Path::new(path), &sweep_attributes(42)).unwrap();
+        if !data.is_empty() {
+            fs.operation(|native| {
+                let mut file =
+                    File::lookup(native, Path::new(path), AccessFlags::READ_WRITE.into())?;
+                file.write(native, data, 0)?;
+                file.close(native)
+            })
+            .unwrap();
+        }
+    }
+
+    fn mkdir(fs: &FileSystem, path: &str) {
+        FileSystemOperations::create_directory(fs, Path::new(path), &sweep_dir_attributes(7))
+            .unwrap();
+    }
+
+    /// Build a random tree with random churn; return the directories and files.
+    fn random_layout(fs: &FileSystem, seed: u64) -> (Vec<String>, Vec<String>) {
+        let mut rng = Rng(seed.wrapping_mul(0x9E3779B97F4A7C15) | 1);
+        let mut dirs: Vec<String> = alloc::vec!["/".to_string()];
+        let mut files: Vec<String> = Vec::new();
+        let mut counter = 0;
+        let steps = 8 + rng.below(40);
+        for _ in 0..steps {
+            let parent = dirs[rng.below(dirs.len() as u64) as usize].clone();
+            let name = alloc::format!("n{counter}");
+            counter += 1;
+            let path = if parent == "/" {
+                alloc::format!("/{name}")
+            } else {
+                alloc::format!("{parent}/{name}")
+            };
+            match rng.below(10) {
+                0..=3 => {
+                    let size = match rng.below(4) {
+                        0 => 0,
+                        1 => rng.below(40),
+                        2 => rng.below(300),
+                        _ => rng.below(1500),
+                    } as usize;
+                    let data: Vec<u8> = (0..size).map(|i| (i as u64 ^ rng.next()) as u8).collect();
+                    put(fs, &path, &data);
+                    files.push(path);
+                }
+                4..=5 => {
+                    if dirs.len() < 6 {
+                        mkdir(fs, &path);
+                        dirs.push(path);
+                    }
+                }
+                6 => {
+                    if !files.is_empty() {
+                        let file = files[rng.below(files.len() as u64) as usize].clone();
+                        let _ = FileSystemOperations::set_attributes(
+                            fs,
+                            Path::new(&file),
+                            &Attributes::new().set_permissions(Permissions::ALL_READ_WRITE),
+                        );
+                    }
+                }
+                7 => {
+                    if files.len() > 2 {
+                        let index = rng.below(files.len() as u64) as usize;
+                        let file = files.remove(index);
+                        FileSystemOperations::remove(fs, Path::new(&file)).unwrap();
+                    }
+                }
+                8 => {
+                    if !files.is_empty() {
+                        let file = files[rng.below(files.len() as u64) as usize].clone();
+                        let extra = alloc::vec![7u8; rng.below(600) as usize + 1];
+                        fs.operation(|native| {
+                            let mut handle = File::lookup(
+                                native,
+                                Path::new(&file),
+                                AccessFlags::READ_WRITE.into(),
+                            )?;
+                            handle.write(native, &extra, 0)?;
+                            handle.close(native)
+                        })
+                        .unwrap();
+                    }
+                }
+                _ => {
+                    // Directory churn: add and remove a temporary file to force
+                    // commits and metadata-pair compaction.
+                    let temporary = alloc::format!(
+                        "{}/tmp{counter}",
+                        if parent == "/" { "" } else { parent.as_str() }
+                    );
+                    put(fs, &temporary, b"t");
+                    FileSystemOperations::remove(fs, Path::new(&temporary)).unwrap();
+                }
+            }
+        }
+        (dirs, files)
+    }
+
+    fn walk(fs: &FileSystem, directory: &str, out: &mut Vec<String>) {
+        let names: Vec<(String, Kind, u64)> = fs
+            .operation(|native| {
+                let mut dir = Directory::lookup(native, Path::new(directory))?;
+                let mut entries = Vec::new();
+                while let Some(entry) = dir.read(native)? {
+                    if entry.name == "." || entry.name == ".." {
+                        continue;
+                    }
+                    entries.push((entry.name.clone(), entry.kind, entry.size));
+                }
+                dir.close(native)?;
+                Ok(entries)
+            })
+            .unwrap_or_else(|error| panic!("walk {directory}: {error:?}"));
+        let mut names = names;
+        names.sort_by(|a, b| a.0.cmp(&b.0));
+        for (name, kind, size) in names {
+            let path = if directory == "/" {
+                alloc::format!("/{name}")
+            } else {
+                alloc::format!("{directory}/{name}")
+            };
+            let mut owner = Attributes::new().set_mask(owner_mask());
+            let attributes =
+                match FileSystemOperations::get_attributes(fs, Path::new(&path), &mut owner) {
+                    Ok(()) => {
+                        alloc::format!("{:?}/{:?}", owner.get_user(), owner.get_permissions())
+                    }
+                    Err(error) => alloc::format!("ERR {error:?}"),
+                };
+            let content = if kind == Kind::File {
+                fs.operation(|native| {
+                    let mut file =
+                        File::lookup(native, Path::new(&path), AccessFlags::Read.into())?;
+                    let mut buffer = alloc::vec![0u8; 4096];
+                    let count = file.read(native, &mut buffer, 0)?;
+                    file.close(native)?;
+                    let sum: u64 = buffer[..count].iter().map(|byte| *byte as u64).sum();
+                    Ok(alloc::format!("{count}:{sum}"))
+                })
+                .unwrap_or_else(|error| alloc::format!("READERR {error:?}"))
+            } else {
+                String::new()
+            };
+            out.push(alloc::format!(
+                "{path} {kind:?} size={size} attrs={attributes} content={content}"
+            ));
+            if kind == Kind::Directory {
+                walk(fs, &path, out);
+            }
+        }
+    }
+
+    /// Remount with an empty read cache and snapshot the whole tree.
+    fn snapshot(device: &'static FaultDevice, cache: usize) -> Vec<String> {
+        device.allow_all();
+        let fs = FileSystem::new(device, Options::new(cache)).unwrap();
+        let mut out = Vec::new();
+        walk(&fs, "/", &mut out);
+        std::mem::forget(fs);
+        out
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Target {
+        File,
+        Directory,
+    }
+
+    fn build(
+        seed: u64,
+        cache: usize,
+        remount: bool,
+    ) -> (&'static FaultDevice, FileSystem, Vec<String>, Vec<String>) {
+        let device = FaultDevice::new(DEVICE_SIZE);
+        FileSystem::format(device, Options::new(cache)).unwrap();
+        let fs = FileSystem::new(device, Options::new(cache)).unwrap();
+        let (dirs, files) = random_layout(&fs, seed);
+        let fs = if remount {
+            std::mem::forget(fs);
+            FileSystem::new(device, Options::new(cache)).unwrap()
+        } else {
+            fs
+        };
+        (device, fs, dirs, files)
+    }
+
+    #[test]
+    fn randomised_read_fault_sweep_never_removes_a_preexisting_entry() {
+        // Fixed seed set (fast enough for CI) including the seeds that removed
+        // a pre-existing entry before the read cache was emptied before the
+        // cleanup probe.
+        const SEEDS: [u64; 3] = [18, 28, 40];
+        let mut faulted_creates = 0usize;
+        for seed in SEEDS {
+            let cache = [128usize, 256, 512][(seed % 3) as usize];
+            for remount in [false, true] {
+                let (_probe_device, probe_fs, dirs, files) = build(seed, cache, remount);
+                let mut rng = Rng(seed * 7 + 3);
+                let mut targets: Vec<(String, Target)> = Vec::new();
+                for _ in 0..3 {
+                    if !files.is_empty() {
+                        let file = files[rng.below(files.len() as u64) as usize].clone();
+                        targets.push((file.clone(), Target::File));
+                        targets.push((file, Target::Directory));
+                    }
+                    let directory = dirs[rng.below(dirs.len() as u64) as usize].clone();
+                    if directory != "/" {
+                        targets.push((directory.clone(), Target::Directory));
+                        targets.push((directory, Target::File));
+                    }
+                }
+                std::mem::forget(probe_fs);
+
+                for (target, kind) in targets {
+                    let create = |fs: &FileSystem| match kind {
+                        Target::File => FileSystemOperations::create_file(
+                            fs,
+                            Path::new(&target),
+                            &sweep_attributes(99),
+                        ),
+                        Target::Directory => FileSystemOperations::create_directory(
+                            fs,
+                            Path::new(&target),
+                            &sweep_dir_attributes(99),
+                        ),
+                    };
+                    // Probe: how many reads does a create over the existing
+                    // entry perform?
+                    let (probe_device, probe_fs, _, _) = build(seed, cache, remount);
+                    probe_device.reset_reads();
+                    let result = create(&probe_fs);
+                    assert!(
+                        result.is_err(),
+                        "seed {seed}: create over existing must fail"
+                    );
+                    let total = probe_device.reads();
+                    std::mem::forget(probe_fs);
+                    // Reference tree from a fresh device.
+                    let (reference_device, reference_fs, _, _) = build(seed, cache, remount);
+                    std::mem::forget(reference_fs);
+                    let reference = snapshot(reference_device, cache);
+
+                    for window in [1usize, 2] {
+                        for fault in 1..=total {
+                            let (device, fs, _, _) = build(seed, cache, remount);
+                            device.reset_reads();
+                            device.reset_progs();
+                            device.fail_read_window(fault, window);
+                            let _ = create(&fs);
+                            faulted_creates += 1;
+                            std::mem::forget(fs);
+                            let after = snapshot(device, cache);
+                            for line in &reference {
+                                if !after.contains(line) {
+                                    std::println!(
+                                        "seed {seed} cache {cache} remount {remount} target {target} {kind:?} window {window} fault {fault}/{total}: entry removed or changed: {line}"
+                                    );
+                                    std::println!("REFERENCE ({}):", reference.len());
+                                    for l in &reference {
+                                        std::println!("  R {l}");
+                                    }
+                                    std::println!("AFTER ({}):", after.len());
+                                    for l in &after {
+                                        std::println!("  A {l}");
+                                    }
+                                    panic!("entry removed or changed");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        std::println!(
+            "randomised sweep: {faulted_creates} faulted creates over existing entries, no pre-existing entry removed"
+        );
+    }
 }

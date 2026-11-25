@@ -1,5 +1,5 @@
 use super::{convert_flags, convert_result, littlefs};
-use crate::attributes::{InternalAttributes, entry_is_attribute_less};
+use crate::attributes::{InternalAttributes, drop_read_cache, entry_is_attribute_less};
 use crate::constants;
 use alloc::{boxed::Box, ffi::CString};
 use core::ffi::c_void;
@@ -114,10 +114,15 @@ impl File {
     ///
     /// If a step fails after the entry commit landed (cache allocation, the
     /// attributes commit, close), the half-created name is removed again on a
-    /// best-effort basis, so the path is either fully created or absent. Only
-    /// an attribute-less entry is removed: an entry that has attributes is
-    /// never one this call half-created, so a pre-existing entry is never
-    /// deleted, even when a transient read error fails the create.
+    /// best-effort basis, so the path is either fully created or absent. The
+    /// name is removed only when the entry is attribute-less on a clean read
+    /// cache: `lfs_file_opencfg` performs the entry commit internally, so after
+    /// a failure the probe is the in-call signal that the entry is this call's
+    /// half-created one, while an entry that has attributes is never removed.
+    /// A stale cache left by a failed read can show an older twin of a metadata
+    /// pair and report a pre-existing entry as attribute-less, so the probe
+    /// empties the cache first and a pre-existing entry is never deleted, even
+    /// when a transient read error fails the create.
     pub fn create(
         file_system: &mut littlefs::lfs_t,
         path: &Path,
@@ -160,13 +165,14 @@ impl File {
             Err(error) if error == IoErrorKind::AlreadyExists => Err(error),
             Err(error) => {
                 // The entry commit may have landed before the failure. Remove
-                // the name best effort, but only when it is attribute-less:
-                // an entry that has attributes is not one this call
-                // half-created (a transient read error can make a lookup miss
-                // an existing entry, so existence alone proves nothing), and
-                // an unreadable device leaves the fail-closed entry for the
-                // caller to handle through the VFS.
+                // the name best effort, but only when the entry is
+                // attribute-less on a clean cache; the probe empties the read
+                // cache first, so a stale cache left by a failed read cannot
+                // report a pre-existing entry as attribute-less. An unreadable
+                // device leaves the fail-closed entry for the caller to handle
+                // through the VFS.
                 if entry_is_attribute_less(file_system, &path) {
+                    drop_read_cache(file_system);
                     unsafe {
                         let _ = littlefs::lfs_remove(file_system, path.as_ptr());
                     }

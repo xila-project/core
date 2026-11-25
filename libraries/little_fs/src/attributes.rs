@@ -9,13 +9,29 @@ use users::{GroupIdentifier, UserIdentifier};
 
 use crate::{error::convert_result, littlefs};
 
+/// `LFS_BLOCK_NULL` from lfs.c is `((lfs_block_t)-1)`; it is defined in the C
+/// source and not in the header, so the generated bindings do not export it.
+/// Assigning it to a cache block empties that cache.
+const BLOCK_NULL: littlefs::lfs_block_t = u32::MAX;
+
+/// Empty the read cache. A failed device read leaves the failed block's key in
+/// the cache with stale bytes, and a later lookup can then be served from it
+/// (for example the older twin of a metadata pair, which can show an entry
+/// without its attributes), so after an I/O error every probe of the on-disk
+/// state must start from an empty cache.
+pub(crate) fn drop_read_cache(file_system: &mut littlefs::lfs_t) {
+    file_system.rcache.block = BLOCK_NULL;
+}
+
 /// True when the entry exists but carries no Xila attributes: the signature of
 /// an entry whose creation was interrupted between the entry commit and the
-/// attribute commit. A transient read error can make a lookup miss an existing
-/// entry, so existence alone proves nothing; an entry that has attributes is
-/// never one a create call half-created, and an unreadable device reports
-/// neither, which leaves the entry in place for the caller to handle.
+/// attribute commit. The read cache is emptied first, because a stale cache
+/// left by a failed read can serve an older twin of a metadata pair and report
+/// an existing entry as attribute-less. An entry that has attributes is never
+/// one a create call half-created, and an unreadable device reports neither,
+/// which leaves the entry in place for the caller to handle.
 pub(crate) fn entry_is_attribute_less(file_system: &mut littlefs::lfs_t, path: &CString) -> bool {
+    drop_read_cache(file_system);
     let mut buffer = InternalAttributes::new();
     unsafe {
         matches!(

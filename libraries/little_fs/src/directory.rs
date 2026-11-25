@@ -1,7 +1,7 @@
 use core::{ffi::CStr, mem::MaybeUninit};
 
 use crate::{
-    attributes::{InternalAttributes, entry_is_attribute_less},
+    attributes::{InternalAttributes, drop_read_cache, entry_is_attribute_less},
     constants,
     error::convert_result,
     littlefs,
@@ -30,10 +30,11 @@ impl Directory {
     /// `get_attributes` still reports the kind and size from `lfs_stat`, and
     /// the entry can be removed through its parent or replaced by a new
     /// create. If the attribute commit fails, the half-created directory is
-    /// removed again on a best-effort basis, but only when it is
-    /// attribute-less: an entry that has attributes is never one this call
-    /// half-created, so a pre-existing entry is never deleted, even when a
-    /// transient read error fails the create.
+    /// removed again on a best-effort basis, but only when this call's own
+    /// `lfs_mkdir` committed the entry and the entry is attribute-less after
+    /// emptying the read cache: a stale cache left by a failed read can show
+    /// an older twin of a metadata pair, so a pre-existing entry is never
+    /// deleted, even when a transient read error fails the create.
     pub fn create(
         file_system: &mut littlefs::lfs_t,
         path: &Path,
@@ -47,20 +48,21 @@ impl Directory {
             internal_attributes.kind = Kind::Directory;
         }
 
-        let result = unsafe {
-            convert_result(littlefs::lfs_mkdir(file_system, path.as_ptr()))
-                .map(|_| ())
-                .and_then(|_| {
-                    convert_result(littlefs::lfs_setattr(
-                        file_system,
-                        path.as_ptr(),
-                        InternalAttributes::IDENTIFIER,
-                        &internal_attributes as *const _ as *const _,
-                        size_of::<InternalAttributes>() as u32,
-                    ))
-                    .map(|_| ())
-                })
-        };
+        // Track whether this call's own entry commit succeeded.
+        let mkdir_result =
+            unsafe { convert_result(littlefs::lfs_mkdir(file_system, path.as_ptr())) };
+        let result = mkdir_result.and_then(|_| {
+            convert_result(unsafe {
+                littlefs::lfs_setattr(
+                    file_system,
+                    path.as_ptr(),
+                    InternalAttributes::IDENTIFIER,
+                    &internal_attributes as *const _ as *const _,
+                    size_of::<InternalAttributes>() as u32,
+                )
+            })
+            .map(|_| ())
+        });
         match result {
             Ok(()) => Ok(()),
             // The exclusive check failed before any commit: an existing
@@ -69,12 +71,13 @@ impl Directory {
             Err(error) => {
                 // The directory entry may have landed before the attribute
                 // commit failed. Remove the name best effort, but only when
-                // it is attribute-less: an entry that has attributes is not
-                // one this call half-created (a transient read error can make
-                // a lookup miss an existing entry, so existence alone proves
-                // nothing), and an unreadable device is left fail-closed for
-                // the caller to handle through the VFS.
-                if entry_is_attribute_less(file_system, &path) {
+                // this call's mkdir committed it and it is attribute-less
+                // (the probe empties the read cache first, so a stale cache
+                // cannot report a pre-existing entry as attribute-less); an
+                // unreadable device leaves the fail-closed entry for the
+                // caller to handle through the VFS.
+                if mkdir_result.is_ok() && entry_is_attribute_less(file_system, &path) {
+                    drop_read_cache(file_system);
                     unsafe {
                         let _ = littlefs::lfs_remove(file_system, path.as_ptr());
                     }
