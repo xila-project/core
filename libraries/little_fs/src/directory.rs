@@ -1,6 +1,11 @@
 use core::{ffi::CStr, mem::MaybeUninit};
 
-use crate::{attributes::InternalAttributes, constants, error::convert_result, littlefs};
+use crate::{
+    attributes::{InternalAttributes, entry_is_attribute_less},
+    constants,
+    error::convert_result,
+    littlefs,
+};
 use alloc::{borrow::ToOwned, boxed::Box, ffi::CString, string::ToString};
 use file_system::{
     AttributeFlags, Attributes, Entry, IoErrorKind, Kind, Path, PathOwned, Result, Size, Time,
@@ -25,7 +30,10 @@ impl Directory {
     /// `get_attributes` still reports the kind and size from `lfs_stat`, and
     /// the entry can be removed through its parent or replaced by a new
     /// create. If the attribute commit fails, the half-created directory is
-    /// removed again on a best-effort basis.
+    /// removed again on a best-effort basis, but only when it is
+    /// attribute-less: an entry that has attributes is never one this call
+    /// half-created, so a pre-existing entry is never deleted, even when a
+    /// transient read error fails the create.
     pub fn create(
         file_system: &mut littlefs::lfs_t,
         path: &Path,
@@ -60,9 +68,16 @@ impl Directory {
             Err(error) if error == IoErrorKind::AlreadyExists => Err(error),
             Err(error) => {
                 // The directory entry may have landed before the attribute
-                // commit failed. Remove the attribute-less name best effort.
-                unsafe {
-                    let _ = littlefs::lfs_remove(file_system, path.as_ptr());
+                // commit failed. Remove the name best effort, but only when
+                // it is attribute-less: an entry that has attributes is not
+                // one this call half-created (a transient read error can make
+                // a lookup miss an existing entry, so existence alone proves
+                // nothing), and an unreadable device is left fail-closed for
+                // the caller to handle through the VFS.
+                if entry_is_attribute_less(file_system, &path) {
+                    unsafe {
+                        let _ = littlefs::lfs_remove(file_system, path.as_ptr());
+                    }
                 }
                 Err(error)
             }

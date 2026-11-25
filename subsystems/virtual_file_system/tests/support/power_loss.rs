@@ -341,6 +341,85 @@ async fn power_cut_during_directory_create_leaves_absent_complete_or_removable_e
 }
 
 #[task::test]
+async fn exclusive_create_replaces_an_attribute_less_entry() {
+    // The file create sweep removes an attribute-less entry and re-creates it.
+    // This test covers the other path: an exclusive create of the same name
+    // must replace the attribute-less entry directly, with no removal first.
+    let probe = FaultDevice::new();
+    little_fs::FileSystem::format(probe, options()).unwrap();
+    let (task, virtual_file_system, _) = spawn(probe).await;
+    probe.reset_progs();
+    let file = File::open(
+        virtual_file_system,
+        task,
+        "/probe",
+        exclusive_create_flags(),
+    )
+    .await
+    .unwrap();
+    file.close(virtual_file_system).await.unwrap();
+    let total = probe.progs();
+    assert_eq!(total, 2);
+
+    for cut in 0..=total {
+        let device = FaultDevice::new();
+        little_fs::FileSystem::format(device, options()).unwrap();
+        let (task, virtual_file_system, _) = spawn(device).await;
+        device.reset_progs();
+        device.fail_after(cut);
+        if let Ok(file) =
+            File::open(virtual_file_system, task, "/cut", exclusive_create_flags()).await
+        {
+            let _ = file.close(virtual_file_system).await;
+        }
+        device.allow_all();
+
+        let (task, virtual_file_system, _) = spawn(device).await;
+        if !matches!(
+            classify(
+                virtual_file_system,
+                "/cut",
+                file_system::Kind::File,
+                Permissions::FILE_DEFAULT,
+            )
+            .await,
+            CutState::AttributeLess
+        ) {
+            continue;
+        }
+
+        // The attribute-less entry cannot be opened without create through the
+        // VFS, but an exclusive create of the same name replaces it.
+        assert!(matches!(
+            File::open(
+                virtual_file_system,
+                task,
+                "/cut",
+                Flags::new(AccessFlags::READ_WRITE, None, None),
+            )
+            .await,
+            Err(IoErrorKind::MissingAttribute)
+        ));
+        let file = File::open(virtual_file_system, task, "/cut", exclusive_create_flags())
+            .await
+            .unwrap();
+        file.close(virtual_file_system).await.unwrap();
+        assert!(matches!(
+            classify(
+                virtual_file_system,
+                "/cut",
+                file_system::Kind::File,
+                Permissions::FILE_DEFAULT,
+            )
+            .await,
+            CutState::Complete
+        ));
+        return;
+    }
+    panic!("no cut produced an attribute-less entry");
+}
+
+#[task::test]
 async fn attribute_less_entry_is_removable_by_root_and_by_the_parent_owner() {
     let user = users::UserIdentifier::new(1000);
     let group = users::GroupIdentifier::new(1000);

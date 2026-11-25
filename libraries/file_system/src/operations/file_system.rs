@@ -200,13 +200,18 @@ pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOper
     /// mask already intersected with [`Self::writable_attributes`]. The backend
     /// must apply or ignore the full mask at creation: the caller no longer
     /// rewrites fields afterwards. An empty mask persists the backend defaults.
+    ///
+    /// LittleFS costs two commits for a directory: the entry commit, then the
+    /// attributes commit (`lfs_mkdir` has no attribute configuration).
     fn create_directory(&self, path: &Path, attributes: &Attributes) -> Result<()>;
 
     /// Create a regular file at `path`, persisting `attributes` with the new
-    /// entry in the same commit as the entry creation where the backend can
-    /// (LittleFS commits custom attributes atomically with the file through
-    /// `lfs_file_config.attrs`). See [`Self::create_directory`] for the mask
-    /// contract.
+    /// entry in the same commit as the entry creation where the backend can.
+    ///
+    /// LittleFS costs two commits for a file: the entry commit, then the
+    /// struct+attributes commit, which carries the custom attributes
+    /// atomically with the file through `lfs_file_config.attrs`. See
+    /// [`Self::create_directory`] for the mask contract.
     fn create_file(&self, path: &Path, attributes: &Attributes) -> Result<()>;
 
     /// Remove a file or directory from the file system.

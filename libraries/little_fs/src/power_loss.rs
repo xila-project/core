@@ -46,9 +46,11 @@ struct FaultDevice {
     inner: MemoryDevice<512>,
     progs: AtomicUsize,
     erases: AtomicUsize,
+    reads: AtomicUsize,
     fail_after: AtomicUsize,
     fail_at: AtomicUsize,
     torn_at: AtomicUsize,
+    fail_read_at: AtomicUsize,
     failed: AtomicBool,
 }
 
@@ -58,9 +60,11 @@ impl FaultDevice {
             inner: MemoryDevice::<512>::new(size),
             progs: AtomicUsize::new(0),
             erases: AtomicUsize::new(0),
+            reads: AtomicUsize::new(0),
             fail_after: AtomicUsize::new(usize::MAX),
             fail_at: AtomicUsize::new(usize::MAX),
             torn_at: AtomicUsize::new(usize::MAX),
+            fail_read_at: AtomicUsize::new(usize::MAX),
             failed: AtomicBool::new(false),
         }))
     }
@@ -71,6 +75,14 @@ impl FaultDevice {
 
     fn reset_progs(&self) {
         self.progs.store(0, Ordering::SeqCst);
+    }
+
+    fn reads(&self) -> usize {
+        self.reads.load(Ordering::SeqCst)
+    }
+
+    fn reset_reads(&self) {
+        self.reads.store(0, Ordering::SeqCst);
     }
 
     /// Simulate a power loss after `count` program operations.
@@ -88,10 +100,16 @@ impl FaultDevice {
         self.torn_at.store(count, Ordering::SeqCst);
     }
 
+    /// Fail exactly the `count`-th read (a transient read error), then recover.
+    fn fail_read_at(&self, count: usize) {
+        self.fail_read_at.store(count, Ordering::SeqCst);
+    }
+
     fn allow_all(&self) {
         self.fail_after.store(usize::MAX, Ordering::SeqCst);
         self.fail_at.store(usize::MAX, Ordering::SeqCst);
         self.torn_at.store(usize::MAX, Ordering::SeqCst);
+        self.fail_read_at.store(usize::MAX, Ordering::SeqCst);
         self.failed.store(false, Ordering::SeqCst);
     }
 }
@@ -103,6 +121,11 @@ impl DirectBaseOperations for FaultDevice {
         buffer: &mut [u8],
         position: Size,
     ) -> Poll<Result<usize>> {
+        let count = self.reads.fetch_add(1, Ordering::SeqCst) + 1;
+        if count == self.fail_read_at.load(Ordering::SeqCst) {
+            // Transient read error: the device keeps working afterwards.
+            return Poll::Ready(Err(IoErrorKind::InputOutput));
+        }
         self.inner.read(cx, buffer, position)
     }
 
@@ -711,6 +734,230 @@ fn failed_directory_create_removes_the_half_created_entry() {
         );
         std::mem::forget(fs);
     }
+}
+
+#[test]
+fn read_fault_during_create_never_removes_a_preexisting_entry() {
+    // Scenario A: a pre-existing file with data. First measure how many reads
+    // a create on the populated device performs (it fails with
+    // AlreadyExists, but the reads are the fault points that matter).
+    let probe = FaultDevice::new(DEVICE_SIZE);
+    let fs = format_and_mount(probe);
+    let path = Path::new("/existing");
+    file_system::FileSystemOperations::create_file(&fs, path, &creation_attributes()).unwrap();
+    fs.operation(|native| {
+        let mut file = File::lookup(native, path, AccessFlags::READ_WRITE.into()).unwrap();
+        file.write(native, b"precious", 0)?;
+        file.close(native)
+    })
+    .unwrap();
+    probe.reset_reads();
+    let result = file_system::FileSystemOperations::create_file(&fs, path, &creation_attributes());
+    assert!(matches!(result, Err(IoErrorKind::AlreadyExists)));
+    let total_reads = probe.reads();
+    assert!(total_reads > 0);
+    std::mem::forget(fs);
+
+    for fault in 1..=total_reads {
+        let device = FaultDevice::new(DEVICE_SIZE);
+        let fs = format_and_mount(device);
+        file_system::FileSystemOperations::create_file(&fs, path, &creation_attributes()).unwrap();
+        fs.operation(|native| {
+            let mut file = File::lookup(native, path, AccessFlags::READ_WRITE.into()).unwrap();
+            file.write(native, b"precious", 0)?;
+            file.close(native)
+        })
+        .unwrap();
+        device.reset_reads();
+        device.fail_read_at(fault);
+        // The create may fail, or may even report success: a failed read
+        // poisons the LittleFS read cache, so a later lookup can miss the
+        // existing entry and the exclusive create adds a duplicate name. What
+        // must never happen is the old entry being removed.
+        let _ = file_system::FileSystemOperations::create_file(&fs, path, &creation_attributes());
+        device.allow_all();
+        // Remount with a fresh read cache before checking: the poisoned cache
+        // of the faulted mount can hide the entry even though it is on disk.
+        std::mem::forget(fs);
+        let fs = FileSystem::new(device, options()).unwrap();
+        // The pre-existing file is still there, with its owner and its data.
+        let mut owner = Attributes::new().set_mask(owner_mask());
+        file_system::FileSystemOperations::get_attributes(&fs, path, &mut owner)
+            .unwrap_or_else(|e| panic!("fault {fault}: get_attributes -> {e:?}"));
+        assert_eq!(owner.get_user(), Some(&UserIdentifier::new(42)));
+        fs.operation(|native| {
+            let mut file = File::lookup(native, path, AccessFlags::Read.into()).unwrap();
+            let mut buffer = [0u8; 8];
+            let read = file
+                .read(native, &mut buffer, 0)
+                .unwrap_or_else(|e| panic!("fault {fault}: read -> {e:?}"));
+            assert_eq!(read, 8, "fault {fault}");
+            assert_eq!(&buffer, b"precious");
+            file.close(native)
+        })
+        .unwrap();
+        std::mem::forget(fs);
+    }
+
+    // Scenario B: a pre-existing directory, same sweep.
+    let probe = FaultDevice::new(DEVICE_SIZE);
+    let fs = format_and_mount(probe);
+    let directory = Path::new("/existing-dir");
+    file_system::FileSystemOperations::create_directory(
+        &fs,
+        directory,
+        &Attributes::new()
+            .set_user(UserIdentifier::new(7))
+            .set_kind(Kind::Directory),
+    )
+    .unwrap();
+    probe.reset_reads();
+    let result = file_system::FileSystemOperations::create_directory(
+        &fs,
+        directory,
+        &Attributes::new().set_kind(Kind::Directory),
+    );
+    assert!(matches!(result, Err(IoErrorKind::AlreadyExists)));
+    let total_reads = probe.reads();
+    assert!(total_reads > 0);
+    std::mem::forget(fs);
+
+    for fault in 1..=total_reads {
+        let device = FaultDevice::new(DEVICE_SIZE);
+        let fs = format_and_mount(device);
+        file_system::FileSystemOperations::create_directory(
+            &fs,
+            directory,
+            &Attributes::new()
+                .set_user(UserIdentifier::new(7))
+                .set_kind(Kind::Directory),
+        )
+        .unwrap();
+        device.reset_reads();
+        device.fail_read_at(fault);
+        // Same as for files: the mkdir may fail or report success through a
+        // poisoned read cache, but the pre-existing directory must survive.
+        let _ = file_system::FileSystemOperations::create_directory(
+            &fs,
+            directory,
+            &Attributes::new().set_kind(Kind::Directory),
+        );
+        device.allow_all();
+        // Remount with a fresh read cache before checking.
+        std::mem::forget(fs);
+        let fs = FileSystem::new(device, options()).unwrap();
+        let mut owner = Attributes::new().set_mask(owner_mask());
+        file_system::FileSystemOperations::get_attributes(&fs, directory, &mut owner)
+            .unwrap_or_else(|e| panic!("fault {fault}: get_attributes -> {e:?}"));
+        assert_eq!(owner.get_user(), Some(&UserIdentifier::new(7)));
+        std::mem::forget(fs);
+    }
+}
+
+#[test]
+fn size_change_is_committed_at_once_and_visible_immediately() {
+    let device = FaultDevice::new(DEVICE_SIZE);
+    let fs = format_and_mount(device);
+    let path = Path::new("/file");
+    file_system::FileSystemOperations::create_file(&fs, path, &creation_attributes()).unwrap();
+    fs.operation(|native| {
+        let mut file = File::lookup(native, path, AccessFlags::READ_WRITE.into()).unwrap();
+        file.write(native, b"0123456789", 0)?;
+        file.close(native)
+    })
+    .unwrap();
+
+    // A size change is committed at the call, not deferred to close: a path
+    // stat and a freshly opened handle see the new size right away.
+    device.reset_progs();
+    fs.operation(|native| {
+        let mut file = File::lookup(native, path, AccessFlags::READ_WRITE.into()).unwrap();
+        file.set_attributes(native, &Attributes::new().set_size(3))?;
+        assert_eq!(device.progs(), 1, "size change commits at once");
+        file.close(native)
+    })
+    .unwrap();
+    assert_eq!(
+        device.progs(),
+        1,
+        "close after a committed size change adds nothing"
+    );
+
+    let mut size = Attributes::new().set_mask(AttributeFlags::Size);
+    file_system::FileSystemOperations::get_attributes(&fs, path, &mut size).unwrap();
+    assert_eq!(size.get_size(), Some(&3));
+    fs.operation(|native| {
+        let mut file = File::lookup(native, path, AccessFlags::Read.into()).unwrap();
+        let mut buffer = [0u8; 16];
+        assert_eq!(file.read(native, &mut buffer, 0).unwrap(), 3);
+        file.close(native)
+    })
+    .unwrap();
+}
+
+#[test]
+fn permission_change_with_pending_write_commits_at_once() {
+    let device = FaultDevice::new(DEVICE_SIZE);
+    let fs = format_and_mount(device);
+    let path = Path::new("/file");
+    file_system::FileSystemOperations::create_file(&fs, path, &creation_attributes()).unwrap();
+
+    // A handle-level chmod with a pending write is committed at the call, so
+    // path checks by other openers see the new permissions immediately.
+    device.reset_progs();
+    fs.operation(|native| {
+        let mut file = File::lookup(native, path, AccessFlags::READ_WRITE.into()).unwrap();
+        assert_eq!(file.write(native, b"x", 0)?, 1);
+        assert_eq!(device.progs(), 0, "the write itself is still pending");
+        file.set_attributes(
+            native,
+            &Attributes::new().set_permissions(Permissions::ALL_READ_WRITE),
+        )?;
+        assert_eq!(
+            device.progs(),
+            1,
+            "the chmod commits data and metadata at once"
+        );
+        file.close(native)
+    })
+    .unwrap();
+    assert_eq!(
+        device.progs(),
+        1,
+        "close adds nothing after the chmod commit"
+    );
+    let attributes = read_owner(path, &fs).unwrap();
+    assert_eq!(
+        attributes.get_permissions(),
+        Some(&Permissions::ALL_READ_WRITE)
+    );
+}
+
+#[test]
+fn time_change_with_pending_write_still_defers_to_close() {
+    let device = FaultDevice::new(DEVICE_SIZE);
+    let fs = format_and_mount(device);
+    let path = Path::new("/file");
+    file_system::FileSystemOperations::create_file(&fs, path, &creation_attributes()).unwrap();
+
+    // Time-only changes keep riding along with pending data: 20 writes with a
+    // time update after each, then close, cost exactly one commit.
+    device.reset_progs();
+    fs.operation(|native| {
+        let mut file = File::lookup(native, path, AccessFlags::READ_WRITE.into()).unwrap();
+        for index in 0..20u64 {
+            assert_eq!(file.write(native, b"x", index)?, 1);
+            file.set_attributes(
+                native,
+                &Attributes::new()
+                    .set_modification(Time::new(10_000 + index))
+                    .set_status(Time::new(10_000 + index)),
+            )?;
+        }
+        file.close(native)
+    })
+    .unwrap();
+    assert_eq!(device.progs(), 1);
 }
 
 #[test]

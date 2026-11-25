@@ -1,5 +1,5 @@
 use super::{convert_flags, convert_result, littlefs};
-use crate::attributes::InternalAttributes;
+use crate::attributes::{InternalAttributes, entry_is_attribute_less};
 use crate::constants;
 use alloc::{boxed::Box, ffi::CString};
 use core::ffi::c_void;
@@ -114,7 +114,10 @@ impl File {
     ///
     /// If a step fails after the entry commit landed (cache allocation, the
     /// attributes commit, close), the half-created name is removed again on a
-    /// best-effort basis, so the path is either fully created or absent.
+    /// best-effort basis, so the path is either fully created or absent. Only
+    /// an attribute-less entry is removed: an entry that has attributes is
+    /// never one this call half-created, so a pre-existing entry is never
+    /// deleted, even when a transient read error fails the create.
     pub fn create(
         file_system: &mut littlefs::lfs_t,
         path: &Path,
@@ -124,14 +127,14 @@ impl File {
         InternalAttributes::validate_attribute_mask(attributes.get_mask())?;
 
         let mut internal_attributes = InternalAttributes::from_attributes(attributes);
-        let mut attr = littlefs::lfs_attr {
+        let mut entry_attributes = littlefs::lfs_attr {
             type_: InternalAttributes::IDENTIFIER,
             buffer: &mut internal_attributes as *mut _ as *mut c_void,
             size: core::mem::size_of::<InternalAttributes>() as u32,
         };
         let configuration = littlefs::lfs_file_config {
             attr_count: 1,
-            attrs: &mut attr,
+            attrs: &mut entry_attributes,
             ..littlefs::lfs_file_config::default()
         };
 
@@ -157,10 +160,16 @@ impl File {
             Err(error) if error == IoErrorKind::AlreadyExists => Err(error),
             Err(error) => {
                 // The entry commit may have landed before the failure. Remove
-                // the attribute-less name best effort; a failed removal just
-                // leaves the fail-closed entry for the caller to handle.
-                unsafe {
-                    let _ = littlefs::lfs_remove(file_system, path.as_ptr());
+                // the name best effort, but only when it is attribute-less:
+                // an entry that has attributes is not one this call
+                // half-created (a transient read error can make a lookup miss
+                // an existing entry, so existence alone proves nothing), and
+                // an unreadable device leaves the fail-closed entry for the
+                // caller to handle through the VFS.
+                if entry_is_attribute_less(file_system, &path) {
+                    unsafe {
+                        let _ = littlefs::lfs_remove(file_system, path.as_ptr());
+                    }
                 }
                 Err(error)
             }
@@ -214,22 +223,27 @@ impl File {
             convert_result(unsafe {
                 littlefs::lfs_file_truncate(file_system, &mut self.file, size as u32)
             })?;
-            // The truncate set LFS_F_DIRTY, so the new size is committed with
-            // this handle's next sync or close, not by an extra commit here.
-            // A path-level stat before that still reports the old size. This
-            // keeps ftruncate and a following write at one commit in total.
         }
-        // Attributes already pending with uncommitted state (a write sets
-        // LFS_F_WRITING, a truncate or this call LFS_F_DIRTY) are committed
-        // atomically with that data on the next sync or close, instead of
-        // costing an extra commit here. Checking only LFS_F_DIRTY would sync
-        // after every write, as lfs_file_write sets LFS_F_WRITING only.
-        let already_dirty = self.file.flags & constants::FILE_PENDING != 0;
+        // Only time changes are deferred on a handle with pending state (a
+        // write sets LFS_F_WRITING, a truncate or this call LFS_F_DIRTY): they
+        // ride along with that data on the next sync or close instead of
+        // costing an extra commit per write. Everything else (owner, group,
+        // permissions, kind, size) is committed at once, so path-level stat
+        // and other openers see it immediately. Checking only LFS_F_DIRTY for
+        // the pending state would sync after every write, as lfs_file_write
+        // sets LFS_F_WRITING only.
+        const TIME_FLAGS: AttributeFlags = AttributeFlags::CreationTime
+            .union(AttributeFlags::AccessTime)
+            .union(AttributeFlags::ModificationTime)
+            .union(AttributeFlags::StatusTime);
+        let already_pending = self.file.flags & constants::FILE_PENDING != 0;
+        let time_only = mask.difference(TIME_FLAGS).is_empty();
+        let defer = already_pending && time_only;
         let previous = self.internal_attributes.clone();
         self.internal_attributes
             .update_with_attributes(attributes)?;
         self.file.flags |= constants::FILE_DIRTY;
-        if !already_dirty {
+        if !defer {
             if let Err(error) =
                 convert_result(unsafe { littlefs::lfs_file_sync(file_system, &mut self.file) })
             {

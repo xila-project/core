@@ -840,7 +840,12 @@ impl VirtualFileSystem {
             .await?;
             if replace_attribute_less {
                 // Remove the attribute-less entry left by the interrupted
-                // creation; the create below replaces it.
+                // creation; the create below replaces it. The sticky-bit check
+                // of a plain remove does not apply here: an attribute-less
+                // entry has no readable owner, so on a sticky parent the
+                // replace is allowed for anyone with write permission on the
+                // parent, exactly like the remove path for root and the
+                // parent owner.
                 let target_file_system = file_systems[resolved.mount_index].file_system;
                 if let Some(parent) = resolved.parent_directory.as_ref() {
                     let entry_name = resolved.entry_name(&file_systems)?;
@@ -1441,7 +1446,11 @@ impl VirtualFileSystem {
 
         if replace_attribute_less {
             // Remove the attribute-less entry left by the interrupted
-            // creation; the create below replaces it.
+            // creation; the create below replaces it. The sticky-bit check of
+            // a plain remove does not apply here: an attribute-less entry has
+            // no readable owner, so on a sticky parent the replace is allowed
+            // for anyone with write permission on the parent, exactly like
+            // the remove path for root and the parent owner.
             let target_file_system = file_systems[resolved.mount_index].file_system;
             if let Some(parent) = resolved.parent_directory.as_ref() {
                 let entry_name = resolved.entry_name(&file_systems)?;

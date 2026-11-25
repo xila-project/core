@@ -173,6 +173,11 @@ impl<'a> SynchronousFile<'a> {
     /// regular file, once per open or flush interval. The backend commits them
     /// with the file data on the next sync or close, so this costs no extra
     /// flash write. Best effort: the triggering operation already succeeded.
+    ///
+    /// With several writers on the same file, the committed modification time
+    /// is the one recorded by the handle whose sync or close commits last,
+    /// which depends on the close order. This is never worse than recording a
+    /// time on every open.
     fn touch_modification_time(&mut self) {
         if self.times_touched {
             return;

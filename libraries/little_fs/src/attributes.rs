@@ -1,9 +1,35 @@
 use core::fmt::Debug;
 
+use alloc::ffi::CString;
+
 use file_system::{
     AttributeFlags, Attributes, Inode, IoErrorKind, Kind, Permissions, Result, Time,
 };
 use users::{GroupIdentifier, UserIdentifier};
+
+use crate::{error::convert_result, littlefs};
+
+/// True when the entry exists but carries no Xila attributes: the signature of
+/// an entry whose creation was interrupted between the entry commit and the
+/// attribute commit. A transient read error can make a lookup miss an existing
+/// entry, so existence alone proves nothing; an entry that has attributes is
+/// never one a create call half-created, and an unreadable device reports
+/// neither, which leaves the entry in place for the caller to handle.
+pub(crate) fn entry_is_attribute_less(file_system: &mut littlefs::lfs_t, path: &CString) -> bool {
+    let mut buffer = InternalAttributes::new();
+    unsafe {
+        matches!(
+            convert_result(littlefs::lfs_getattr(
+                file_system,
+                path.as_ptr(),
+                InternalAttributes::IDENTIFIER,
+                &mut buffer as *mut _ as *mut _,
+                size_of::<InternalAttributes>() as u32,
+            )),
+            Err(IoErrorKind::MissingAttribute)
+        )
+    }
+}
 
 #[derive(Clone)]
 #[repr(C)] // For stable layout
