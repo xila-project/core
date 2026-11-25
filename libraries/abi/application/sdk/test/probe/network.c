@@ -4,6 +4,8 @@
  *
  *   sockets     address text, getaddrinfo, a TCP exchange, UDP datagrams and errno values
  *   family      wildcard binds keep their address family
+ *   blocking    a blocking accept resets a cross-family connection and still accepts a
+ *               same-family one on the same listener
  *   no-network  what a process gets without network rights
  *   spawn       a parent granted connect and resolve passes on a subset, never more
  *   child       run by spawn: a child with connect only
@@ -15,10 +17,12 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <poll.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 #include <xila/stubs.h>
 
@@ -395,6 +399,77 @@ static int family(void) {
     return 0;
 }
 
+#define BLOCKING_TCP_PORT 7117
+
+struct accept_call {
+    int listener;
+    int accepted;
+};
+
+static void *accept_once(void *argument) {
+    struct accept_call *call = argument;
+    call->accepted = accept(call->listener, NULL, NULL);
+    return NULL;
+}
+
+/* The accept path: a blocking accept running on a second thread refuses a
+   cross-family connection with a reset, and still accepts a same-family
+   connection on the same listener afterwards. */
+static int blocking(void) {
+    struct sockaddr_in6 any6 = {.sin6_family = AF_INET6,
+                                .sin6_port = htons(BLOCKING_TCP_PORT),
+                                .sin6_addr = IN6ADDR_ANY_INIT};
+    int server = socket(AF_INET6, SOCK_STREAM, 0);
+    CHECK("IPv6 listener", server >= 0 &&
+                             bind(server, (struct sockaddr *)&any6, sizeof(any6)) == 0 &&
+                             listen(server, 1) == 0);
+    struct accept_call call = {.listener = server, .accepted = -1};
+    pthread_t thread;
+    CHECK("accept thread", pthread_create(&thread, NULL, accept_once, &call) == 0);
+
+    /* The foreign-family client completes its handshake; the blocking accept refuses
+       it and resets it at once. */
+    int other = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in to4 = {.sin_family = AF_INET, .sin_port = htons(BLOCKING_TCP_PORT),
+                              .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
+    CHECK("IPv4 handshake", connect(other, (struct sockaddr *)&to4, sizeof(to4)) == 0);
+    struct pollfd other_wait = {.fd = other, .events = POLLIN};
+    CHECK("IPv4 client sees the reset", poll(&other_wait, 1, 2000) == 1 &&
+                                            (other_wait.revents & (POLLIN | POLLERR | POLLHUP)) != 0);
+    char sink;
+    CHECK("IPv4 read refuses at once",
+          recv(other, &sink, sizeof(sink), MSG_DONTWAIT) == -1 &&
+              (errno == ECONNRESET || errno == ECONNREFUSED));
+
+    /* Once the listener listens again, a same-family client is accepted on it. */
+    struct sockaddr_in6 to6 = {.sin6_family = AF_INET6, .sin6_port = htons(BLOCKING_TCP_PORT),
+                               .sin6_addr = IN6ADDR_LOOPBACK_INIT};
+    int same = -1;
+    for (int attempt = 0; attempt < 10 && same < 0; attempt++) {
+        const struct timespec pause = {.tv_sec = 0, .tv_nsec = 100 * 1000 * 1000};
+        nanosleep(&pause, NULL);
+        same = socket(AF_INET6, SOCK_STREAM, 0);
+        if (same < 0 || connect(same, (struct sockaddr *)&to6, sizeof(to6)) != 0) {
+            if (same >= 0)
+                close(same);
+            same = -1;
+        }
+    }
+    CHECK("IPv6 handshake", same >= 0);
+    void *joined = NULL;
+    CHECK("accept thread joins", pthread_join(thread, &joined) == 0);
+    CHECK("accept IPv6", call.accepted >= 0);
+    struct sockaddr_storage peer;
+    socklen_t length = sizeof(peer);
+    CHECK("peer family",
+          getpeername(call.accepted, (struct sockaddr *)&peer, &length) == 0 &&
+              peer.ss_family == AF_INET6 && length == sizeof(struct sockaddr_in6));
+    CHECK("close", close(call.accepted) == 0 && close(same) == 0 && close(other) == 0 &&
+                       close(server) == 0);
+    puts("blocking: ok");
+    return 0;
+}
+
 static int sockets(void) {
     if (address_text() || resolution() || tcp() || udp() || errors())
         return 1;
@@ -488,6 +563,8 @@ int main(int argc, char **argv) {
         return sockets();
     if (strcmp(mode, "family") == 0)
         return family();
+    if (strcmp(mode, "blocking") == 0)
+        return blocking();
     if (strcmp(mode, "no-network") == 0)
         return no_network();
     if (strcmp(mode, "spawn") == 0)

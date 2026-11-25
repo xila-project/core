@@ -578,8 +578,9 @@ How the subset maps onto Core's network stack:
   socket neither reaches nor hears IPv4 peers, and a connect to an IPv4-mapped
   address (`::ffff:a.b.c.d`) fails with `ENETUNREACH`. The unspecified address
   listens on every local address of the socket's family. A connection of the
-  other family to a wildcard listener is refused with an immediate reset, so
-  the peer's connect or first read fails at once. A send to the other
+  other family to a wildcard listener completes its handshake; the peer's first
+  read or write then fails with `ECONNRESET` once the listener is polled or
+  accepted. A send to the other
   family fails with `EAFNOSUPPORT`. Peer addresses are always reported in the
   socket's family. An IPv4 and an IPv6 wildcard bind of the same port do not
   coexist (see the ABI README). IPv6 scopes are not supported.

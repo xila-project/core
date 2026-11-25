@@ -46,6 +46,11 @@ pub struct TcpListener {
     pub(crate) address: NetworkAddress,
     #[cfg(feature = "network")]
     pub(crate) inner: TcpSocket,
+    /// Embassy-time tick by which a reset left pending by a poll must have been sent;
+    /// the listener listens again after it even if the reset is still pending. Zero
+    /// when no reset is pending. Atomic because concurrent poll waits are allowed.
+    #[cfg(feature = "network")]
+    pub(crate) reset_deadline: portable_atomic::AtomicU64,
 }
 /// Owned UDP socket. Sending additionally requires CONNECT on its parent capability.
 pub struct Udp {

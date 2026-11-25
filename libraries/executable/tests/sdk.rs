@@ -933,7 +933,7 @@ async fn runs_sdk_network_probe() {
         .await
         .unwrap();
     install(vfs, parent, "/network", &build_posix_probe("network")).await;
-    for scenario in ["sockets", "family"] {
+    for scenario in ["sockets", "family", "blocking"] {
         let (status, stdout, stderr) = launch_with(
             context,
             parent,
