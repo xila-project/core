@@ -20,14 +20,16 @@
 //!   no IANA zone table.
 //! - `name` (optional) is the IANA zone name that the user chose, for display
 //!   only. It is absent when the user entered a custom TZ string. A program
-//!   with a newer zone table can resolve the name again.
+//!   with a newer zone table can resolve the name again. An invalid name is
+//!   dropped and the TZ string still applies.
 //!
 //! Only root may have written the file: it belongs to root, others cannot
 //! write it, and its group can only if it is root's group, as for the other
 //! files of `/configuration/system`. Everyone can read it. [`set`] replaces it
-//! atomically (a temporary file, then a rename). A missing, unreadable or
-//! invalid file gives UTC (`UTC0`) and one warning at start-up; it never
-//! blocks the start-up.
+//! atomically (a temporary file created with mode 0644, then a rename). A
+//! missing, unreadable or invalid file gives UTC (`UTC0`) and one warning at
+//! start-up, from [`initialize`]; [`load`] logs nothing. It never blocks the
+//! start-up.
 //!
 //! # Publication
 //!
@@ -40,7 +42,10 @@
 //! [`set`] writes the file and then gives `TZ` the new value in the root task
 //! and in every task whose `TZ` is still the previous system value
 //! ([`task::Manager::set_system_environment_variable`]); a task that set a `TZ`
-//! of its own keeps it. Tasks started after the change get the new value at
+//! of its own keeps it, unless it set the system value itself: such a task
+//! cannot be told apart from one that inherited the value, so it follows the
+//! change. Calls of [`set`] are serialised, so the file and `TZ` always hold
+//! the same setting. Tasks started after the change get the new value at
 //! once. A native program that reads `TZ` again, for example through
 //! [`current`] on each display update, follows the change. A WebAssembly guest
 //! copies its environment when it starts, so a running guest keeps the old
@@ -57,9 +62,10 @@ extern crate alloc;
 
 use alloc::string::{String, ToString};
 use file_system::{
-    AccessFlags, CreateFlags, Flags, IntoIoErrorKind, IoErrorKind, Kind, Permission, Permissions,
-    Special, Statistics,
+    AccessFlags, CreateFlags, Flags, IntoIoErrorKind, IoErrorKind, Kind, Path, Permission,
+    Permissions, Special, Statistics,
 };
+use synchronization::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use task::TaskIdentifier;
 use users::{ADMINISTRATOR_GROUP_NAME, GroupIdentifier, UserIdentifier};
 use virtual_file_system::{File, VirtualFileSystem};
@@ -168,10 +174,12 @@ impl Setting {
         TimeZone::parse(&self.time_zone).unwrap_or_else(|_| utc())
     }
 
-    /// Parse the JSON body of a configuration file.
+    /// Parse the JSON body of a configuration file. An invalid `name` is
+    /// dropped: it is for display only, and the TZ string still applies.
     pub fn from_json(text: &str) -> Option<Self> {
         let file: ConfigurationFile = miniserde::json::from_str(text).ok()?;
-        Self::new(file.name.as_deref(), &file.time_zone).ok()
+        let name = file.name.as_deref().filter(|name| is_valid_name(name));
+        Self::new(name, &file.time_zone).ok()
     }
 
     /// The JSON body of a configuration file.
@@ -277,16 +285,12 @@ pub async fn read(
     result.and_then(|setting| closed.map(|()| setting))
 }
 
-/// Read the stored setting, or UTC when it is missing or invalid. A warning
-/// says why UTC is used.
+/// Read the stored setting, or UTC when it is missing or invalid. It logs
+/// nothing; [`initialize`] reports at start-up why UTC is used.
 pub async fn load(virtual_file_system: &VirtualFileSystem, task: TaskIdentifier) -> Setting {
-    match read(virtual_file_system, task).await {
-        Ok(setting) => setting,
-        Err(error) => {
-            log::warning!("Time zone: {CONFIGURATION_PATH} not used ({error}); using UTC");
-            Setting::utc()
-        }
-    }
+    read(virtual_file_system, task)
+        .await
+        .unwrap_or_else(|_| Setting::utc())
 }
 
 /// Load the stored setting and publish its TZ string as `TZ`, in the root task
@@ -299,15 +303,23 @@ pub async fn initialize(
     virtual_file_system: &VirtualFileSystem,
     task: TaskIdentifier,
 ) -> Setting {
-    let setting = load(virtual_file_system, task).await;
-    if let Err(error) = task_manager
+    let setting = match read(virtual_file_system, task).await {
+        Ok(setting) => setting,
+        Err(error) => {
+            log::warning!("Time zone: {CONFIGURATION_PATH} not used ({error}); using UTC");
+            Setting::utc()
+        }
+    };
+    task_manager
         .set_system_environment_variable(ENVIRONMENT_VARIABLE, &setting.time_zone)
-        .await
-    {
-        log::warning!("Time zone: cannot publish {ENVIRONMENT_VARIABLE} ({error})");
-    }
+        .await;
     setting
 }
+
+/// Serialises [`set`]: the file write and the publication of `TZ` of one call
+/// finish before the next call starts, so the file and `TZ` always hold the
+/// same setting. A blocking mutex is not usable here: the write awaits.
+static SET_LOCK: Mutex<CriticalSectionRawMutex, ()> = Mutex::new(());
 
 /// Store a new setting and publish it.
 ///
@@ -331,17 +343,16 @@ pub async fn set(
         return Err(IoErrorKind::PermissionDenied);
     }
 
+    let _guard = SET_LOCK.lock().await;
     write(
         virtual_file_system,
         task::Manager::ROOT_TASK_IDENTIFIER,
         setting.to_json().as_bytes(),
     )
     .await?;
-
     task_manager
         .set_system_environment_variable(ENVIRONMENT_VARIABLE, &setting.time_zone)
-        .await
-        .map_err(IntoIoErrorKind::into_io_error_kind)?;
+        .await;
     Ok(())
 }
 
@@ -367,30 +378,30 @@ async fn write(
     task: TaskIdentifier,
     contents: &[u8],
 ) -> Result<(), IoErrorKind> {
-    match virtual_file_system.remove(task, &TEMPORARY_PATH).await {
+    let temporary = Path::from_str(TEMPORARY_PATH);
+    match virtual_file_system.remove(task, temporary).await {
         Ok(()) | Err(IoErrorKind::NotFound) => (),
         Err(error) => return Err(error),
     }
-    let mut file = File::open(
+    // Root can write; everyone can read, from the creation of the file on.
+    let mut file = File::open_with_permissions(
         virtual_file_system,
         task,
-        TEMPORARY_PATH,
+        temporary,
         Flags::new(
             AccessFlags::Write,
             Some(CreateFlags::CREATE_EXCLUSIVE),
             None,
         ),
-    )
-    .await?;
-    let result = async {
-        // Root can write; everyone can read.
-        file.set_permissions(Permissions::new(
+        Permissions::new(
             Permission::READ_WRITE,
             Permission::Read,
             Permission::Read,
             Special::NONE,
-        ))
-        .await?;
+        ),
+    )
+    .await?;
+    let result = async {
         let mut written = 0;
         while written < contents.len() {
             let count = file.write(&contents[written..]).await?;
@@ -406,13 +417,13 @@ async fn write(
     let result = match result.and(closed) {
         Ok(()) => {
             virtual_file_system
-                .rename(task, &TEMPORARY_PATH, &CONFIGURATION_PATH)
+                .rename(task, &temporary, &Path::from_str(CONFIGURATION_PATH))
                 .await
         }
         Err(error) => Err(error),
     };
     if result.is_err() {
-        let _ = virtual_file_system.remove(task, &TEMPORARY_PATH).await;
+        let _ = virtual_file_system.remove(task, temporary).await;
     }
     result
 }
@@ -435,7 +446,7 @@ pub async fn current(task_manager: &task::Manager, task: TaskIdentifier) -> Time
 
 /// Write a UTC offset in seconds as `+HH:MM`, or `+HH:MM:SS` when the seconds
 /// are not zero. For example, `3600` is `+01:00` and `-12600` is `-03:30`.
-pub fn write_offset(output: &mut impl core::fmt::Write, offset_seconds: i32) -> core::fmt::Result {
+pub fn write_offset(output: &mut dyn core::fmt::Write, offset_seconds: i32) -> core::fmt::Result {
     let sign = if offset_seconds < 0 { '-' } else { '+' };
     let magnitude = offset_seconds.unsigned_abs();
     let (hours, minutes, seconds) = (magnitude / 3600, magnitude / 60 % 60, magnitude % 60);
@@ -444,6 +455,31 @@ pub fn write_offset(output: &mut impl core::fmt::Write, offset_seconds: i32) -> 
     } else {
         write!(output, "{sign}{hours:02}:{minutes:02}:{seconds:02}")
     }
+}
+
+/// Write the local time of `utc` (seconds since the Unix epoch) in `zone`,
+/// for example `2026-03-29 03:00:00 CEST (UTC+02:00)`. Settings and the shell
+/// share it, so it takes a `dyn` writer and is linked once.
+pub fn write_local_time(
+    output: &mut dyn core::fmt::Write,
+    zone: &TimeZone,
+    utc: i64,
+) -> core::fmt::Result {
+    let local = zone.from_utc(utc);
+    let date_time = local.date_time;
+    write!(
+        output,
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02} {} (UTC",
+        date_time.year,
+        date_time.month,
+        date_time.day,
+        date_time.hour,
+        date_time.minute,
+        date_time.second,
+        local.abbreviation,
+    )?;
+    write_offset(output, local.offset_seconds)?;
+    output.write_char(')')
 }
 
 #[cfg(test)]
@@ -510,6 +546,24 @@ mod tests {
         assert_eq!(Setting::from_json(r#"{"name":"Europe/Paris"}"#), None);
         assert_eq!(Setting::from_json(r#"{"time_zone":"bad"}"#), None);
         assert_eq!(Setting::from_json("UTC0"), None);
+    }
+
+    #[test]
+    fn local_time_at_a_daylight_saving_change() {
+        let paris = TimeZone::parse("CET-1CEST,M3.5.0,M10.5.0/3").unwrap();
+        let mut output = String::new();
+        write_local_time(&mut output, &paris, 1_774_745_999).unwrap();
+        assert_eq!(output, "2026-03-29 01:59:59 CET (UTC+01:00)");
+        output.clear();
+        write_local_time(&mut output, &paris, 1_774_746_000).unwrap();
+        assert_eq!(output, "2026-03-29 03:00:00 CEST (UTC+02:00)");
+    }
+
+    #[test]
+    fn an_invalid_name_keeps_the_time_zone() {
+        let setting = Setting::from_json(r#"{"name":"Not a name!","time_zone":"JST-9"}"#).unwrap();
+        assert_eq!(setting.name(), None);
+        assert_eq!(setting.time_zone_string(), "JST-9");
     }
 
     #[test]

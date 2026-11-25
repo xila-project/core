@@ -701,7 +701,28 @@ impl VirtualFileSystem {
         flags: Flags,
         task: TaskIdentifier,
     ) -> Result<File<'a>> {
-        self.open_with_root(path.as_ref(), flags, task, None, true)
+        self.open_with_root(
+            path.as_ref(),
+            flags,
+            task,
+            None,
+            true,
+            Permissions::FILE_DEFAULT,
+        )
+        .await
+    }
+
+    /// Open a file; a file that the call creates gets `permissions` instead of
+    /// `Permissions::FILE_DEFAULT`, from its creation on. An existing file
+    /// keeps its permissions.
+    pub async fn open_with_permissions<'a>(
+        &'a self,
+        path: &impl AsRef<Path>,
+        flags: Flags,
+        task: TaskIdentifier,
+        permissions: Permissions,
+    ) -> Result<File<'a>> {
+        self.open_with_root(path.as_ref(), flags, task, None, true, permissions)
             .await
     }
 
@@ -713,8 +734,15 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         follow_final: bool,
     ) -> Result<File<'a>> {
-        self.open_with_root(path.as_ref(), flags, task, None, follow_final)
-            .await
+        self.open_with_root(
+            path.as_ref(),
+            flags,
+            task,
+            None,
+            follow_final,
+            Permissions::FILE_DEFAULT,
+        )
+        .await
     }
 
     /// Resolve relative paths beneath the supplied root directory.
@@ -725,8 +753,15 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         root: &Path,
     ) -> Result<File<'a>> {
-        self.open_with_root(path.as_ref(), flags, task, Some(root), true)
-            .await
+        self.open_with_root(
+            path.as_ref(),
+            flags,
+            task,
+            Some(root),
+            true,
+            Permissions::FILE_DEFAULT,
+        )
+        .await
     }
 
     /// Resolve relative paths beneath the supplied root directory, atomically
@@ -739,8 +774,15 @@ impl VirtualFileSystem {
         root: &Path,
         follow_final: bool,
     ) -> Result<File<'a>> {
-        self.open_with_root(path.as_ref(), flags, task, Some(root), follow_final)
-            .await
+        self.open_with_root(
+            path.as_ref(),
+            flags,
+            task,
+            Some(root),
+            follow_final,
+            Permissions::FILE_DEFAULT,
+        )
+        .await
     }
 
     async fn open_with_root<'a>(
@@ -750,6 +792,7 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         root: Option<&Path>,
         follow_final: bool,
+        create_permissions: Permissions,
     ) -> Result<File<'a>> {
         let authority = self.task_manager.authority(task).await.map_io_error()?;
 
@@ -866,7 +909,7 @@ impl VirtualFileSystem {
                 .set_modification(time)
                 .set_status(time)
                 .set_access(time)
-                .set_permissions(Permissions::FILE_DEFAULT)
+                .set_permissions(create_permissions)
                 .set_kind(Kind::File);
             let mask = attributes.get_mask().intersection(
                 file_systems[resolved.mount_index]

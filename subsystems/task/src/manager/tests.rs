@@ -284,13 +284,7 @@ async fn test_system_environment_variable() {
 
     // Tasks without the variable follow the root task, which has none.
     let without = manager.register(root, "Without").await.unwrap();
-    assert_eq!(
-        manager
-            .set_system_environment_variable("System", "1")
-            .await
-            .unwrap(),
-        2
-    );
+    manager.set_system_environment_variable("System", "1").await;
     assert_eq!(value(root).await.as_deref(), Some("1"));
     assert_eq!(value(without).await.as_deref(), Some("1"));
 
@@ -306,13 +300,7 @@ async fn test_system_environment_variable() {
         .remove_environment_variable(later, "System")
         .await
         .unwrap();
-    assert_eq!(
-        manager
-            .set_system_environment_variable("System", "2")
-            .await
-            .unwrap(),
-        3
-    );
+    manager.set_system_environment_variable("System", "2").await;
     assert_eq!(value(root).await.as_deref(), Some("2"));
     assert_eq!(value(without).await.as_deref(), Some("2"));
     assert_eq!(value(follower).await.as_deref(), Some("2"));

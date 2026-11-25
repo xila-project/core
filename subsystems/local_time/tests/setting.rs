@@ -359,3 +359,28 @@ async fn a_failed_write_keeps_the_old_setting() {
     assert_eq!(local_time::read(vfs, task).await.unwrap(), paris);
     assert_eq!(variable(manager, task).await.as_deref(), Some(PARIS));
 }
+
+#[test]
+async fn concurrent_sets_leave_the_file_and_tz_in_agreement() {
+    let (task, vfs) = boot().await;
+    let manager = vfs.task_manager();
+    let users = vfs.users_manager();
+    local_time::initialize(manager, vfs, task).await;
+    let paris = Setting::new(Some("Europe/Paris"), PARIS).unwrap();
+    let tokyo = Setting::new(Some("Asia/Tokyo"), "JST-9").unwrap();
+    for _ in 0..8 {
+        let (first, second) = embassy_futures::join::join(
+            local_time::set(manager, users, vfs, task, &paris),
+            local_time::set(manager, users, vfs, task, &tokyo),
+        )
+        .await;
+        first.unwrap();
+        second.unwrap();
+        // The later call wins in both places: the file and `TZ` agree.
+        let stored = local_time::read(vfs, task).await.unwrap();
+        assert_eq!(
+            variable(manager, task).await.as_deref(),
+            Some(stored.time_zone_string())
+        );
+    }
+}

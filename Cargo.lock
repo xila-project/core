@@ -2335,10 +2335,12 @@ dependencies = [
 name = "xila-local-time"
 version = "0.1.0"
 dependencies = [
+ "embassy-futures",
  "miniserde",
  "xila-file-system",
  "xila-little-fs",
  "xila-log",
+ "xila-synchronization",
  "xila-task",
  "xila-testing-support",
  "xila-time",

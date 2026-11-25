@@ -92,6 +92,20 @@ impl<'a> File<'a> {
         Ok(file_identifier)
     }
 
+    /// Open a file; a file that the call creates gets `permissions` from its
+    /// creation on (see `VirtualFileSystem::open_with_permissions`).
+    pub async fn open_with_permissions(
+        virtual_file_system: &'a VirtualFileSystem,
+        task: task::TaskIdentifier,
+        path: impl AsRef<Path>,
+        flags: Flags,
+        permissions: Permissions,
+    ) -> Result<Self> {
+        virtual_file_system
+            .open_with_permissions(&path.as_ref(), flags, task, permissions)
+            .await
+    }
+
     pub async fn create_unnamed_pipe(
         file_system: &'a VirtualFileSystem,
         size: usize,

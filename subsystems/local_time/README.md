@@ -26,17 +26,20 @@ POSIX TZ strings.
 | Key | Required | Meaning |
 | --- | --- | --- |
 | `time_zone` | yes | The POSIX TZ string, at most 64 bytes. Core reads and publishes only this value. |
-| `name` | no | The IANA zone name that the user chose, at most 64 bytes of ASCII letters, digits, `/`, `_`, `-` and `+`. It is for display only and is absent for a custom TZ string. A program with a newer zone table can resolve it again. |
+| `name` | no | The IANA zone name that the user chose, at most 64 bytes of ASCII letters, digits, `/`, `_`, `-` and `+`. It is for display only and is absent for a custom TZ string. A program with a newer zone table can resolve it again. An invalid name is dropped; the TZ string still applies. |
 
 Unknown keys are ignored. The file is at most 256 bytes.
 
 - Only root may have written the file: it belongs to root, others cannot write
   it, and its group can only if it is root's group. Everyone can read it.
-- `local_time::set` replaces it atomically: it writes
-  `/configuration/system/.time_zone.json-new`, then renames it. A failed write
-  keeps the old file and the old `TZ`.
+- `local_time::set` replaces it atomically: it creates
+  `/configuration/system/.time_zone.json-new` with mode 0644, writes it, then
+  renames it. A failed write keeps the old file and the old `TZ`. Calls of
+  `set` are serialised by a mutex across the write and the publication, so the
+  file and `TZ` always hold the same setting.
 - A missing, unreadable, too large or invalid file, or a file that others can
-  write, gives UTC (`UTC0`) and one warning in the log. Start-up continues.
+  write, gives UTC (`UTC0`). `initialize` logs one warning; `load` logs
+  nothing. Start-up continues.
 
 ## Start-up order
 
@@ -56,7 +59,9 @@ started before it).
   `task::Manager::set_system_environment_variable`. That call gives `TZ` the new
   value in the root task and in every task whose `TZ` is still the previous
   system value, under one lock. A task that set a `TZ` of its own (for example
-  with `export TZ=...` in the shell) keeps it.
+  with `export TZ=...` in the shell) keeps it. A task that exported a `TZ`
+  equal to the system value cannot be told apart from one that inherited it,
+  so it follows the next change.
 - Tasks started after a change get the new value at once.
 - A native program that reads `TZ` on each display update, for example with
   `local_time::current`, follows a change at its next update. The graphical
@@ -76,6 +81,7 @@ started before it).
 | `set(task_manager, users_manager, vfs, task, &setting)` | Store and publish a new setting. |
 | `current(task_manager, task)` | The parsed `TZ` of a task, or UTC. |
 | `write_offset(output, seconds)` | Write a UTC offset as `+HH:MM`. |
+| `write_local_time(output, zone, utc)` | Write a local time, such as `2026-03-29 03:00:00 CEST (UTC+02:00)`. Settings and the shell share it (a `dyn` writer, linked once). |
 
 On 32-bit targets, `Setting` is 24 bytes (two heap strings) and `SettingError`
 is 1 byte. `read` allocates a 257 byte buffer on the heap for the duration of
@@ -91,5 +97,5 @@ cargo test -p xila-task --lib system_environment
 The tests cover the start-up with no file, with an IANA name, with a custom TZ
 string, with corrupt files and with a file that others can write; the
 inheritance of `TZ` by a new task; `set` as root, as a member of the
-administrator group and as another user; a task with its own `TZ`; and a failed
-write.
+administrator group and as another user; a task with its own `TZ`; a failed
+write; and two concurrent `set` calls, after which the file and `TZ` agree.

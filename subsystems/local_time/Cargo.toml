@@ -9,12 +9,14 @@ description = "The system time zone setting of Xila: storage, start-up and publi
 file_system = { workspace = true }
 log = { workspace = true }
 miniserde = { workspace = true }
+synchronization = { workspace = true }
 task = { workspace = true }
 time_zone = { workspace = true }
 users = { workspace = true }
 virtual_file_system = { workspace = true }
 
 [dev-dependencies]
+embassy-futures = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }
 little_fs = { workspace = true }
 testing_support = { workspace = true }

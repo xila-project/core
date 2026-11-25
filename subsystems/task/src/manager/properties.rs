@@ -132,9 +132,10 @@ impl Manager {
     /// from their parent, as every variable is inherited.
     ///
     /// All updated tasks share one string, and the update holds one lock, so
-    /// no task sees a mix of the old and the new value. Returns the number of
-    /// updated tasks.
-    pub async fn set_system_environment_variable(&self, name: &str, value: &str) -> Result<usize> {
+    /// no task sees a mix of the old and the new value. A task that set its
+    /// own value equal to the previous system value cannot be told apart from
+    /// one that inherited it, so it follows the change too.
+    pub async fn set_system_environment_variable(&self, name: &str, value: &str) {
         let variable = EnvironmentVariable::new(name, value);
 
         let mut inner = self.0.write().await;
@@ -149,7 +150,6 @@ impl Manager {
             .cloned();
         let previous = previous.as_ref().map(EnvironmentVariable::get_value);
 
-        let mut updated = 0;
         for (identifier, metadata) in inner.tasks.iter_mut() {
             let current = metadata
                 .environment_variables
@@ -161,10 +161,7 @@ impl Manager {
             }
             remove_named(&mut metadata.environment_variables, name);
             metadata.environment_variables.push(variable.clone());
-            updated += 1;
         }
-
-        Ok(updated)
     }
 
     pub async fn remove_environment_variable(
