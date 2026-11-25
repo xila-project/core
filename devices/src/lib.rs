@@ -4,6 +4,7 @@ pub mod adc;
 pub mod audio;
 pub mod gpio;
 pub mod hash;
+pub mod human_interface;
 pub mod i2c;
 pub mod kind;
 pub mod neural_network;

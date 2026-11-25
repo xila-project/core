@@ -5,6 +5,7 @@ edition = "2024"
 rust-version.workspace = true
 
 [dependencies]
+device = { workspace = true, optional = true }
 embedded-hal = { workspace = true, optional = true }
 embedded-hal-async = { workspace = true, optional = true }
 embedded-io = { workspace = true, optional = true }
@@ -20,6 +21,9 @@ default = []
 # Xila-owned one-shot ADC contract.
 adc = []
 gpio = ["dep:embedded-hal"]
+# Human interface emulation controller (keyboard, media remote, mouse toward the connected
+# computer), backed by USB or Bluetooth Low Energy on the target.
+human-interface = ["dep:device"]
 i2c = ["dep:embedded-hal", "dep:embedded-hal-async"]
 spi = ["dep:embedded-hal", "dep:embedded-hal-async"]
 power = []
@@ -28,6 +32,7 @@ uart = ["dep:embedded-io", "dep:embedded-io-async"]
 mock = [
   "adc",
   "gpio",
+  "human-interface",
   "i2c",
   "power",
   "pwm",

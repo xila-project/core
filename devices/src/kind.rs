@@ -12,6 +12,7 @@
 //! | `b'E'`    | `0x45` | Executable          | `executable`                             |
 //! | `b'F'`    | `0x46` | Firmware update     | `firmware_update::device`                |
 //! | `b'H'`    | `0x48` | Hash accelerator    | `device::hash`                           |
+//! | `b'h'`    | `0x68` | Human interface emulation | `device::human_interface` / `drivers_peripherals::human_interface` |
 //! | `b'N'`    | `0x4E` | Neural network      | `device::neural_network` / `drivers_neural_network` |
 //! | `b'P'`    | `0x50` | System power        | `device::power` / `drivers_peripherals::power` |
 //! | `b'T'`    | `0x54` | Terminal / character| `file_system::character_device`          |
@@ -44,6 +45,10 @@ pub const FIRMWARE_UPDATE: u8 = b'F';
 
 /// Hardware or software cryptographic hash device (`b'H'`).
 pub const HASH: u8 = b'H';
+
+/// Human interface emulation device, acting as a keyboard, media remote and mouse toward
+/// the connected computer (`b'h'`).
+pub const HUMAN_INTERFACE: u8 = b'h';
 
 /// Neural network inference device (`b'N'`).
 pub const NEURAL_NETWORK: u8 = b'N';
@@ -90,6 +95,7 @@ pub const ALL: &[u8] = &[
     EXECUTABLE,
     FIRMWARE_UPDATE,
     HASH,
+    HUMAN_INTERFACE,
     NEURAL_NETWORK,
     POWER,
     TERMINAL,
