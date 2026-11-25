@@ -38,6 +38,9 @@ uart = ["dep:peripherals", "dep:embedded-io", "peripherals/uart"]
 i2c = ["dep:embedded-hal", "dep:peripherals", "peripherals/i2c"]
 # GPIO line nodes over `peripherals::gpio` (adapter, control commands, mount helper).
 gpio = ["dep:embedded-hal", "dep:peripherals", "peripherals/gpio"]
+# Human interface emulation node over `peripherals::human_interface` (adapter, control
+# command, mount helper).
+human-interface = ["dep:peripherals", "peripherals/human-interface"]
 # ADC device node over `peripherals::adc` (adapter, control commands, mount helper).
 adc = ["dep:peripherals", "peripherals/adc"]
 # SPI device node over `peripherals::spi` (adapter, control commands, mount helper).

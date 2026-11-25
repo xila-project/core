@@ -20,6 +20,8 @@ pub mod adc;
 mod device;
 #[cfg(feature = "gpio")]
 pub mod gpio;
+#[cfg(feature = "human-interface")]
+pub mod human_interface;
 #[cfg(feature = "i2c")]
 pub mod i2c;
 #[cfg(feature = "vfs")]

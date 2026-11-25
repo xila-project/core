@@ -17,6 +17,7 @@
 //! | `b'T'`    | `0x54` | Terminal / character| `file_system::character_device`          |
 //! | `b'a'`    | `0x61` | ADC                 | `device::adc` / `drivers_peripherals::adc`|
 //! | `b'g'`    | `0x67` | GPIO                | `device::gpio` / `drivers_peripherals::gpio` |
+//! | `b'h'`    | `0x68` | Human interface emulation | `device::human_interface` / `drivers_peripherals::human_interface` |
 //! | `b'i'`    | `0x69` | I2C                 | `device::i2c` / `drivers_peripherals::i2c`|
 //! | `b'n'`    | `0x6E` | Network interface   | `network`                                |
 //! | `b'p'`    | `0x70` | PWM                 | `device::pwm` / `drivers_peripherals::pwm`|
@@ -64,6 +65,10 @@ pub const ADC: u8 = b'a';
 /// General-purpose input/output line (`b'g'`).
 pub const GPIO: u8 = b'g';
 
+/// Human interface emulation device, acting as a keyboard, media remote and mouse toward
+/// the connected computer (`b'h'`).
+pub const HUMAN_INTERFACE: u8 = b'h';
+
 /// Inter-Integrated Circuit bus endpoint (`b'i'`).
 pub const I2C: u8 = b'i';
 
@@ -95,6 +100,7 @@ pub const ALL: &[u8] = &[
     TERMINAL,
     ADC,
     GPIO,
+    HUMAN_INTERFACE,
     I2C,
     NETWORK,
     PWM,

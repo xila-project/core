@@ -42,6 +42,7 @@ impl Path {
     pub const ADC_DEVICES: &'static Path = Self::from_str("/devices/adc");
     pub const GPIO_DEVICES: &'static Path = Self::from_str("/devices/gpio");
     pub const PWM_DEVICES: &'static Path = Self::from_str("/devices/pwm");
+    pub const HUMAN_INTERFACE_DEVICES: &'static Path = Self::from_str("/devices/human_interface");
 
     /// System and application configuration.
     pub const CONFIGURATION: &'static Path = Self::from_str("/configuration");
