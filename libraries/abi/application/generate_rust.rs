@@ -167,7 +167,7 @@ pub fn generate(root: &Path, out: &Path, export: &cbindgen::ExportConfig, table:
     }
     assert!(remaining.is_empty(), "Missing wire types: {remaining:?}");
 
-    let bindings = prettyplease::unparse(&syn2::parse_file(&bindings).unwrap());
+    let bindings = prettyplease::unparse(&syn::parse_file(&bindings).unwrap());
     fs::write(
         out.join("bindings.rs"),
         format!("// Generated from the native application ABI. Do not edit.\n\n{bindings}"),
