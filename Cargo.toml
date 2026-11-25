@@ -96,6 +96,9 @@ darling = { version = "0.24" }
 regex = { version = "1" }
 embedded-io-async = { version = "0.7", features = ["alloc"] }
 embedded-io = { version = "0.7", features = ["alloc"] }
+# Real-time clock chip traits (`DateTimeAccess` with `chrono::NaiveDateTime`),
+# implemented by chip crates such as `ds323x` for the DS3231.
+rtcc = { version = "0.4", default-features = false }
 embedded-tls = { version = "0.19", default-features = false, features = [
   "alloc",
 ] }

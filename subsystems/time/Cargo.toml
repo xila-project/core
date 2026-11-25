@@ -5,16 +5,35 @@ edition = "2024"
 rust-version.workspace = true
 
 [dependencies]
+embassy-futures = { workspace = true, optional = true }
 embassy-time = { workspace = true }
 file_system = { workspace = true }
 log = { workspace = true }
+peripherals = { workspace = true, optional = true }
 shared = { workspace = true }
 synchronization = { workspace = true }
+task = { workspace = true, optional = true }
+users = { workspace = true, optional = true }
 embedded-i18n = { workspace = true }
+
+[features]
+default = []
+# Runtime services around the kernel clock, kept outside it: the real-time
+# clock start-up read and write-back task, and the privileged manual UTC set
+# API. The manager's critical section never runs any of this.
+services = [
+  "dep:embassy-futures",
+  "dep:peripherals",
+  "peripherals/real-time-clock",
+  "dep:task",
+  "dep:users",
+]
 
 [dev-dependencies]
 testing_support = { workspace = true }
 task = { workspace = true, features = ["test_harness"] }
+users = { workspace = true }
+peripherals = { workspace = true, features = ["mock", "real-time-clock"] }
 log = { workspace = true }
 
 [[test]]
@@ -27,6 +46,11 @@ name = "time"
 [[test]]
 name = "realtime"
 path = "Tests/realtime.rs"
+
+[[test]]
+name = "services"
+path = "Tests/services.rs"
+required-features = ["services"]
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dev-dependencies]
 critical-section = { workspace = true, features = ["std"] }

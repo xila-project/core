@@ -53,3 +53,6 @@ graphics_rendering_rgb565 = ["graphics", "graphics/rendering_rgb565"]
 graphics_rendering_xrgb8888 = ["graphics", "graphics/rendering_xrgb8888"]
 # Portable task and executor CPU activity counters (`task::metrics`).
 task_metrics = ["task/metrics"]
+# Runtime services around the time subsystem: the real-time clock start-up
+# read and write-back task, and the privileged manual UTC set API.
+time_services = ["time/services"]

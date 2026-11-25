@@ -30,6 +30,10 @@ embedded_i18n::i18n!("locales");
 
 mod error;
 mod manager;
+#[cfg(feature = "services")]
+pub mod manual;
+#[cfg(feature = "services")]
+pub mod real_time_clock;
 mod realtime;
 
 pub use error::*;

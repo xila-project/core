@@ -27,6 +27,8 @@ i2c = ["dep:embedded-hal", "dep:embedded-hal-async"]
 spi = ["dep:embedded-hal", "dep:embedded-hal-async"]
 power = []
 pwm = ["dep:embedded-hal"]
+# Real-time clock (wall-clock UTC across resets) lower-half contract.
+real-time-clock = []
 uart = ["dep:embedded-io", "dep:embedded-io-async"]
 mock = [
   "adc",
@@ -35,6 +37,7 @@ mock = [
   "i2c",
   "power",
   "pwm",
+  "real-time-clock",
   "spi",
   "uart",
   "dep:portable-atomic",

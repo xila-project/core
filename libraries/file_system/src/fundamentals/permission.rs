@@ -194,6 +194,16 @@ impl Permissions {
         Permission::READ_WRITE,
         Special::NONE,
     );
+    /// Device whose writes are reserved to its owner (root when the runtime
+    /// mounts it): owner read-write, group and others read-only. Used for
+    /// device nodes whose write commands change system state, like the
+    /// real-time clock.
+    pub const PRIVILEGED_DEVICE: Self = Self::new(
+        Permission::READ_WRITE,
+        Permission::Read,
+        Permission::Read,
+        Special::NONE,
+    );
 
     /// Creates a new permission.
     pub const fn new(

@@ -354,6 +354,11 @@ cargo nextest run --locked -p xila-time-zone --features iana-all
 cargo test --locked -p xila-time-zone --features iana-all --doc
 cargo nextest run --locked -p xila-time-zone --features iana-europe
 cargo test --locked -p xila-time-zone --features iana-europe --doc
+# The real-time clock features are not in the workspace feature list above.
+cargo nextest run --locked -p xila-time --features services
+cargo test --locked -p xila-time --features services --doc
+cargo nextest run --locked -p xila-drivers-peripherals --features real-time-clock,external-real-time-clock
+cargo nextest run --locked -p xila-peripherals --features real-time-clock,mock
 # The graphics feature also enables environment.
 cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888,xila-testing/graphics --no-run
 mise run test:native-loader

@@ -18,6 +18,9 @@ pub mod power;
 #[cfg(feature = "pwm")]
 pub mod pwm;
 
+#[cfg(feature = "real-time-clock")]
+pub mod real_time_clock;
+
 #[cfg(feature = "spi")]
 pub mod spi;
 
