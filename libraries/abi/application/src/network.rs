@@ -241,10 +241,12 @@ fn refuse_other_family_poll(
     use smoltcp::socket::tcp::State;
     if foreign_connection(socket, listener.address) {
         socket.abort();
-        listener.reset_deadline.store(
-            embassy_time::Instant::now().as_ticks() + RESET_TIMEOUT_TICKS,
-            portable_atomic::Ordering::Relaxed,
-        );
+        // SAFETY: the closure does not lock the deadline again, so no aliasing.
+        unsafe {
+            listener.reset_deadline.lock_mut(|deadline| {
+                *deadline = embassy_time::Instant::now().as_ticks() + RESET_TIMEOUT_TICKS;
+            })
+        };
         socket.register_send_waker(cx.waker());
         true
     } else if socket.state() == State::Closed {
@@ -255,9 +257,7 @@ fn refuse_other_family_poll(
         if socket.remote_endpoint().is_none() {
             listen_again(socket, listener.address);
         } else {
-            let deadline = listener
-                .reset_deadline
-                .load(portable_atomic::Ordering::Relaxed);
+            let deadline = listener.reset_deadline.lock(|deadline| *deadline);
             if embassy_time::Instant::now().as_ticks() >= deadline {
                 // The stack could not send the reset within the limit; listen again
                 // and let the peer see the refusal at its next send, as before.
@@ -409,7 +409,7 @@ pub unsafe extern "C" fn xila_tcp_listen(
             network: Network::new(network.manager, u32::from(network.rights))?,
             address,
             inner,
-            reset_deadline: portable_atomic::AtomicU64::new(0),
+            reset_deadline: synchronization::blocking_mutex::Mutex::new(0),
         }
         .into_raw())
     })();
