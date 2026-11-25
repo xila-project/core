@@ -10,8 +10,8 @@ pub struct Configuration {
     context: &'static dyn DirectBlockDevice,
     read_size: usize,
     program_size: usize,
-    block_size: usize,
-    block_count: usize,
+    block_size: u32,
+    block_count: u32,
     block_cycles: Option<u16>,
     maximum_file_size: Option<usize>,
     maximum_attributes_size: Option<usize>,
@@ -50,12 +50,13 @@ impl Configuration {
 
     pub fn new(
         device: &'static dyn DirectBlockDevice,
-        block_size: usize,
-        block_count: usize,
+        block_size: u32,
+        block_count: u32,
         cache_size: usize,
         look_ahead_size: usize,
     ) -> Option<Self> {
-        if !(block_size % cache_size) == 0 {
+        // LittleFS requires the cache size to divide the block size.
+        if cache_size == 0 || !(block_size as usize).is_multiple_of(cache_size) {
             return None;
         }
 
@@ -146,31 +147,50 @@ impl TryFrom<Configuration> for littlefs::lfs_config {
 
         let context = Context::new(configuration.context);
 
+        // LittleFS stores every size and count in a 32-bit field. Reject what
+        // it cannot represent instead of truncating.
+        let read_size = u32::try_from(configuration.read_size).map_err(|_| ())?;
+        let prog_size = u32::try_from(configuration.program_size).map_err(|_| ())?;
+        let cache_size = u32::try_from(configuration.cache_size).map_err(|_| ())?;
+        let lookahead_size = u32::try_from(configuration.look_ahead_size).map_err(|_| ())?;
+        let name_max =
+            u32::try_from(configuration.maximum_name_size.unwrap_or(0)).map_err(|_| ())?; // Default value : 255 (LFS_NAME_MAX)
+        let file_max =
+            u32::try_from(configuration.maximum_file_size.unwrap_or(0)).map_err(|_| ())?; // Default value : 2,147,483,647 (2 GiB) (LFS_FILE_MAX)
+        let attr_max =
+            u32::try_from(configuration.maximum_attributes_size.unwrap_or(0)).map_err(|_| ())?; // Default value : 1022 (LFS_ATTR_MAX)
+        let compact_thresh =
+            u32::try_from(configuration.compact_threshold.unwrap_or(0)).map_err(|_| ())?; // Default value : 0 (LFS_COMPACT_THRESH)
+        let metadata_max =
+            u32::try_from(configuration.metadata_maxium.unwrap_or(0)).map_err(|_| ())?; // Default value : 0 (LFS_METADATA_MAX)
+        let inline_max =
+            u32::try_from(configuration.inline_maximum.unwrap_or(0)).map_err(|_| ())?; // Default value : 0 (LFS_INLINE_MAX)
+
         let lfs_configuration = littlefs::lfs_config {
             context: context as *mut _ as *mut _,
             read: Some(callbacks::read_callback),
             prog: Some(callbacks::programm_callback),
             erase: Some(callbacks::erase_callback),
             sync: Some(callbacks::flush_callback),
-            read_size: configuration.read_size as u32,
-            prog_size: configuration.program_size as u32,
-            block_size: configuration.block_size as u32,
-            block_count: configuration.block_count as u32,
+            read_size,
+            prog_size,
+            block_size: configuration.block_size,
+            block_count: configuration.block_count,
             block_cycles: match configuration.block_cycles {
                 Some(block_cycles) => block_cycles as i32,
                 None => -1,
             },
-            cache_size: configuration.cache_size as u32,
-            lookahead_size: configuration.look_ahead_size as u32,
+            cache_size,
+            lookahead_size,
             read_buffer: null_mut(),
             prog_buffer: null_mut(),
             lookahead_buffer: null_mut(),
-            name_max: configuration.maximum_name_size.unwrap_or(0) as u32, // Default value : 255 (LFS_NAME_MAX)
-            file_max: configuration.maximum_file_size.unwrap_or(0) as u32, // Default value : 2,147,483,647 (2 GiB) (LFS_FILE_MAX)
-            attr_max: configuration.maximum_attributes_size.unwrap_or(0) as u32, // Default value : 1022 (LFS_ATTR_MAX)
-            compact_thresh: configuration.compact_threshold.unwrap_or(0) as u32, // Default value : 0 (LFS_COMPACT_THRESH)
-            metadata_max: configuration.metadata_maxium.unwrap_or(0) as u32, // Default value : 0 (LFS_METADATA_MAX)
-            inline_max: configuration.inline_maximum.unwrap_or(0) as u32, // Default value : 0 (LFS_INLINE_MAX)
+            name_max,
+            file_max,
+            attr_max,
+            compact_thresh,
+            metadata_max,
+            inline_max,
         };
 
         Ok(lfs_configuration)

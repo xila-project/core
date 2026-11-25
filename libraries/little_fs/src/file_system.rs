@@ -67,14 +67,19 @@ impl FileSystem {
         let block_size = device
             .get_block_size()
             .map_err(|_| IoErrorKind::InputOutput)?;
-        let block_count = device
-            .get_block_count()
-            .map_err(|_| IoErrorKind::InputOutput)?;
+        // LittleFS counts blocks in a 32-bit field. Reject a device with more
+        // blocks than it can address instead of truncating the count.
+        let block_count = u32::try_from(
+            device
+                .get_block_count()
+                .map_err(|_| IoErrorKind::InputOutput)?,
+        )
+        .map_err(|_| IoErrorKind::InvalidArgument)?;
 
         let mut configuration = Configuration::new(
             device,
-            block_size as _,
-            block_count as _,
+            block_size,
+            block_count,
             options.cache_size,
             options.cache_size,
         )
@@ -641,7 +646,7 @@ mod tests {
     extern crate std;
 
     use file_system::{
-        AttributeFlags, MemoryDevice,
+        AttributeFlags, MemoryDevice, PartitionDevice,
         file_system::tests::{FileSystemTestCapabilities, implement_file_system_tests},
     };
 
@@ -1034,6 +1039,33 @@ mod tests {
             .operation(|native| Ok(unsafe { (*native.cfg).block_cycles }))
             .unwrap();
         assert_eq!(block_cycles, -1);
+    }
+
+    #[test]
+    fn block_counts_above_32_bits_are_rejected() {
+        let base = MemoryDevice::<512>::new_static(512 * 128);
+        // A partition can claim more blocks than LittleFS can address without
+        // backing them with storage.
+        let device: &'static dyn DirectBlockDevice = Box::leak(Box::new(PartitionDevice::new(
+            base,
+            0,
+            (1u64 << 32) + 16,
+            512,
+        )));
+        let options = Options::new(CACHE_SIZE);
+
+        assert_eq!(
+            FileSystem::new(device, options).err(),
+            Some(IoErrorKind::InvalidArgument)
+        );
+        assert_eq!(
+            FileSystem::format(device, options).err(),
+            Some(IoErrorKind::InvalidArgument)
+        );
+        assert_eq!(
+            FileSystem::new_format(device, options).err(),
+            Some(IoErrorKind::InvalidArgument)
+        );
     }
 
     fn find_entry(fs: &FileSystem, directory_path: &Path, name: &str) -> Entry {
