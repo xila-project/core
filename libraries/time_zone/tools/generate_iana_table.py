@@ -280,7 +280,10 @@ def emit(path, version, zones, subset, command):
         lines.append(f'    "{rust_string(name)}\\0",')
     lines.append(");")
     lines.append("")
-    lines.append("pub(crate) const NAME_OFFSETS: &[u32] = &[")
+    # The offsets index the name blob. They are stored as u16 when the blob
+    # fits, which saves 2 bytes per zone, and as u32 otherwise.
+    offset_type = "u16" if name_offsets[-1] <= 0xFFFF else "u32"
+    lines.append(f"pub(crate) const NAME_OFFSETS: &[{offset_type}] = &[")
     for index in range(0, len(name_offsets), 8):
         lines.append("    " + ", ".join(str(value) for value in name_offsets[index : index + 8]) + ",")
     lines.append("];")
