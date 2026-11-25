@@ -55,7 +55,8 @@ impl Configuration {
         cache_size: usize,
         look_ahead_size: usize,
     ) -> Option<Self> {
-        if !(block_size as usize % cache_size) == 0 {
+        // LittleFS requires the cache size to divide the block size.
+        if cache_size == 0 || !(block_size as usize).is_multiple_of(cache_size) {
             return None;
         }
 
