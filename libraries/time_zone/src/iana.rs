@@ -17,16 +17,20 @@
 //! prefix, `CST6CDT`, `EST5EDT`, `MST7MDT` and `PST8PDT`, are in
 //! `iana-america`. `Factory` is in no table.
 //!
-//! The tables hold the canonical names only. With `iana-legacy-aliases`, each
-//! enabled region also holds its legacy aliases: the names that tzdata defines
-//! only as a `Link` of its `backward` file, for example `US/Eastern`, `Japan`
-//! or `Asia/Calcutta`. An alias is in the region of its prefix, or, without a
-//! region prefix, in the region of the zone that it names (`US/Eastern` is in
-//! `iana-america`).
+//! By default, the tables hold the canonical names and the listed aliases:
+//! the `backward` links that tzdata `zone.tab` lists for a country, such as
+//! `Europe/Amsterdam`, `Europe/Oslo` or `Atlantic/Reykjavik` (zones that
+//! tzdata merged into another one), so that every country keeps its names.
+//! With `iana-legacy-aliases`, each enabled region also holds the other
+//! `backward` links, for example `US/Eastern`, `Japan` or `Asia/Calcutta`. An
+//! alias is in the region of its prefix, or, without a region prefix, in the
+//! region of the zone that it names (`US/Eastern` is in `iana-america`). An
+//! alias row is its name and the index of the TZ string of the zone that it
+//! names, shared with that zone.
 //!
-//! [`zone_name`] lists the regions in the order of the table above, the
-//! canonical names of a region first, each part sorted by name. Zones of a
-//! region that share a TZ string share it in one string blob.
+//! [`zone_name`] lists the regions in the order of the table above, the names
+//! of each region sorted, aliases included. Zones of a region that share a TZ
+//! string share it in one string blob.
 //!
 //! ```
 //! # #[cfg(feature = "iana-europe")]
@@ -103,50 +107,50 @@ impl Table {
 
 /// The tables of the enabled features, in the order of [`zone_name`].
 const TABLES: &[&Table] = &[
-    #[cfg(feature = "iana-africa")]
-    &generated::africa::CANONICAL,
+    #[cfg(all(feature = "iana-africa", not(feature = "iana-legacy-aliases")))]
+    &generated::africa::TABLE,
     #[cfg(all(feature = "iana-africa", feature = "iana-legacy-aliases"))]
-    &generated::africa::LEGACY_ALIASES,
-    #[cfg(feature = "iana-america")]
-    &generated::america::CANONICAL,
+    &generated::africa::TABLE_WITH_LEGACY_ALIASES,
+    #[cfg(all(feature = "iana-america", not(feature = "iana-legacy-aliases")))]
+    &generated::america::TABLE,
     #[cfg(all(feature = "iana-america", feature = "iana-legacy-aliases"))]
-    &generated::america::LEGACY_ALIASES,
-    #[cfg(feature = "iana-antarctica")]
-    &generated::antarctica::CANONICAL,
+    &generated::america::TABLE_WITH_LEGACY_ALIASES,
+    #[cfg(all(feature = "iana-antarctica", not(feature = "iana-legacy-aliases")))]
+    &generated::antarctica::TABLE,
     #[cfg(all(feature = "iana-antarctica", feature = "iana-legacy-aliases"))]
-    &generated::antarctica::LEGACY_ALIASES,
-    #[cfg(feature = "iana-arctic")]
-    &generated::arctic::CANONICAL,
+    &generated::antarctica::TABLE_WITH_LEGACY_ALIASES,
+    #[cfg(all(feature = "iana-arctic", not(feature = "iana-legacy-aliases")))]
+    &generated::arctic::TABLE,
     #[cfg(all(feature = "iana-arctic", feature = "iana-legacy-aliases"))]
-    &generated::arctic::LEGACY_ALIASES,
-    #[cfg(feature = "iana-asia")]
-    &generated::asia::CANONICAL,
+    &generated::arctic::TABLE_WITH_LEGACY_ALIASES,
+    #[cfg(all(feature = "iana-asia", not(feature = "iana-legacy-aliases")))]
+    &generated::asia::TABLE,
     #[cfg(all(feature = "iana-asia", feature = "iana-legacy-aliases"))]
-    &generated::asia::LEGACY_ALIASES,
-    #[cfg(feature = "iana-atlantic")]
-    &generated::atlantic::CANONICAL,
+    &generated::asia::TABLE_WITH_LEGACY_ALIASES,
+    #[cfg(all(feature = "iana-atlantic", not(feature = "iana-legacy-aliases")))]
+    &generated::atlantic::TABLE,
     #[cfg(all(feature = "iana-atlantic", feature = "iana-legacy-aliases"))]
-    &generated::atlantic::LEGACY_ALIASES,
-    #[cfg(feature = "iana-australia")]
-    &generated::australia::CANONICAL,
+    &generated::atlantic::TABLE_WITH_LEGACY_ALIASES,
+    #[cfg(all(feature = "iana-australia", not(feature = "iana-legacy-aliases")))]
+    &generated::australia::TABLE,
     #[cfg(all(feature = "iana-australia", feature = "iana-legacy-aliases"))]
-    &generated::australia::LEGACY_ALIASES,
-    #[cfg(feature = "iana-etc")]
-    &generated::etc::CANONICAL,
+    &generated::australia::TABLE_WITH_LEGACY_ALIASES,
+    #[cfg(all(feature = "iana-etc", not(feature = "iana-legacy-aliases")))]
+    &generated::etc::TABLE,
     #[cfg(all(feature = "iana-etc", feature = "iana-legacy-aliases"))]
-    &generated::etc::LEGACY_ALIASES,
-    #[cfg(feature = "iana-europe")]
-    &generated::europe::CANONICAL,
+    &generated::etc::TABLE_WITH_LEGACY_ALIASES,
+    #[cfg(all(feature = "iana-europe", not(feature = "iana-legacy-aliases")))]
+    &generated::europe::TABLE,
     #[cfg(all(feature = "iana-europe", feature = "iana-legacy-aliases"))]
-    &generated::europe::LEGACY_ALIASES,
-    #[cfg(feature = "iana-indian")]
-    &generated::indian::CANONICAL,
+    &generated::europe::TABLE_WITH_LEGACY_ALIASES,
+    #[cfg(all(feature = "iana-indian", not(feature = "iana-legacy-aliases")))]
+    &generated::indian::TABLE,
     #[cfg(all(feature = "iana-indian", feature = "iana-legacy-aliases"))]
-    &generated::indian::LEGACY_ALIASES,
-    #[cfg(feature = "iana-pacific")]
-    &generated::pacific::CANONICAL,
+    &generated::indian::TABLE_WITH_LEGACY_ALIASES,
+    #[cfg(all(feature = "iana-pacific", not(feature = "iana-legacy-aliases")))]
+    &generated::pacific::TABLE,
     #[cfg(all(feature = "iana-pacific", feature = "iana-legacy-aliases"))]
-    &generated::pacific::LEGACY_ALIASES,
+    &generated::pacific::TABLE_WITH_LEGACY_ALIASES,
 ];
 
 /// The number of zone names in the enabled tables.

@@ -7,18 +7,19 @@
 
 use crate::iana::Table;
 
-/// Canonical names of the Arctic region (names: 0, TZ strings: 0).
-pub(crate) const CANONICAL: Table = Table {
-    names: "",
-    name_offsets: &[0],
-    zone_string: &[],
-    strings: "",
-    string_offsets: &[0],
+/// Canonical names and listed aliases of the Arctic region (names: 1, TZ strings: 1).
+#[cfg(not(feature = "iana-legacy-aliases"))]
+pub(crate) const TABLE: Table = Table {
+    names: "Arctic/Longyearbyen\0",
+    name_offsets: &[0, 20],
+    zone_string: &[0],
+    strings: "CET-1CEST,M3.5.0,M10.5.0/3\0",
+    string_offsets: &[0, 27],
 };
 
-/// Legacy aliases of the Arctic region (names: 1, TZ strings: 1).
+/// All names of the Arctic region, with the legacy aliases (names: 1, TZ strings: 1).
 #[cfg(feature = "iana-legacy-aliases")]
-pub(crate) const LEGACY_ALIASES: Table = Table {
+pub(crate) const TABLE_WITH_LEGACY_ALIASES: Table = Table {
     names: "Arctic/Longyearbyen\0",
     name_offsets: &[0, 20],
     zone_string: &[0],

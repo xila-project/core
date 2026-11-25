@@ -22,10 +22,15 @@ afterwards.
 
 Classification of the names:
 
-- A legacy alias is a name that tzdata defines only as a `Link` line of the
-  `backward` file, for example `US/Eastern`, `Japan`, `GB` or `Asia/Calcutta`.
-  Every other name is canonical, including the `Etc/` names and `GMT` of the
-  `etcetera` file.
+- A canonical name is a name that tzdata defines with a `Zone` line, or with a
+  `Link` line outside the `backward` file (the `Etc/` names and `GMT` of the
+  `etcetera` file).
+- A listed alias is a `Link` of the `backward` file that `zone.tab` lists for
+  a country, for example `Europe/Amsterdam`, `Europe/Oslo` or
+  `Atlantic/Reykjavik` (zones that tzdata merged into another one). Listed
+  aliases are in the default tables, so that every country keeps its names.
+- A legacy alias is any other `Link` of the `backward` file, for example
+  `US/Eastern`, `Japan`, `GB` or `Asia/Calcutta`.
 - The region of a name is its prefix before the first `/` when that prefix is
   one of REGIONS (`Europe/Paris` is in `europe`). A canonical name without such
   a prefix takes the region of the source file that defines it (SOURCE_REGION:
@@ -36,8 +41,11 @@ Classification of the names:
 - `Factory` (the `factory` file, a placeholder for an unconfigured system) is
   in no table.
 
-Each region file holds a table of the canonical names and a table of the legacy
-aliases; the crate compiles the second one only with `iana-legacy-aliases`.
+Each region file holds two tables: `TABLE` with the canonical names and the
+listed aliases, and `TABLE_WITH_LEGACY_ALIASES` with the legacy aliases too,
+all sorted by name. The crate compiles the second one instead of the first
+with `iana-legacy-aliases`. An alias is a row like any other: its name and
+the index of the TZ string of the zone that it names, shared with that zone.
 
 The IANA time zone database is released into the public domain by IANA
 (https://data.iana.org/time-zones/); the generated files record that
@@ -167,8 +175,20 @@ def compile_zoneinfo(tzdata, zic, workdir):
     return zoneinfo
 
 
+def read_listed(tzdata):
+    """The zone names that `zone.tab` lists, one or more per country."""
+    listed = set()
+    for line in (tzdata / "zone.tab").read_text().splitlines():
+        if line.startswith("#") or not line.strip():
+            continue
+        listed.add(line.split("\t")[2].strip())
+    if not listed:
+        raise SystemExit("no rows in zone.tab")
+    return listed
+
+
 def read_sources(tzdata):
-    """The source file of every name, and the legacy aliases of `backward`:
+    """The source file of every name, and the aliases of `backward`:
     {alias: the zone that it names}."""
     sources = {}
     aliases = {}
@@ -238,8 +258,9 @@ def prefix_region(name):
     return None
 
 
-def classify(zones, sources, aliases):
-    """{region: (canonical names, legacy names)}, each sorted."""
+def classify(zones, sources, aliases, listed):
+    """{region: (canonical names and listed aliases, legacy aliases)}, each
+    sorted."""
     def canonical_region(name):
         region = prefix_region(name)
         if region is not None:
@@ -260,7 +281,7 @@ def classify(zones, sources, aliases):
             while target in aliases:
                 target = aliases[target]
             region = prefix_region(name) or canonical_region(target)
-            tables[region][1].append(name)
+            tables[region][0 if name in listed else 1].append(name)
         else:
             tables[canonical_region(name)][0].append(name)
     return tables
@@ -299,8 +320,10 @@ def table_lines(constant, zones, names, description):
         return [f"    {field}: concat!("] + [f'        "{rust_string(value)}\\0",' for value in values] + ["    ),"]
 
     lines = [f"/// {description} (names: {len(names)}, TZ strings: {len(strings)})."]
-    if constant == "LEGACY_ALIASES":
+    if constant == "TABLE_WITH_LEGACY_ALIASES":
         lines.append('#[cfg(feature = "iana-legacy-aliases")]')
+    else:
+        lines.append('#[cfg(not(feature = "iana-legacy-aliases"))]')
     lines.append(f"pub(crate) const {constant}: Table = Table {{")
     lines += blob("names", names)
     lines.append("    name_offsets: &[")
@@ -330,9 +353,16 @@ def emit_region(path, version, zones, region, canonical, legacy, command):
         "use crate::iana::Table;",
         "",
     ]
-    lines += table_lines("CANONICAL", zones, canonical, f"Canonical names of the {REGIONS[region]} region")
+    lines += table_lines(
+        "TABLE", zones, canonical, f"Canonical names and listed aliases of the {REGIONS[region]} region"
+    )
     lines.append("")
-    lines += table_lines("LEGACY_ALIASES", zones, legacy, f"Legacy aliases of the {REGIONS[region]} region")
+    lines += table_lines(
+        "TABLE_WITH_LEGACY_ALIASES",
+        zones,
+        sorted(canonical + legacy),
+        f"All names of the {REGIONS[region]} region, with the legacy aliases",
+    )
     lines.append("")
     path.write_text("\n".join(lines))
 
@@ -379,6 +409,7 @@ def main():
         tzdata = extract_archive(args.archive, workdir) if args.archive else args.tzdata
         version = read_release_version(tzdata)
         sources, aliases = read_sources(tzdata)
+        listed = read_listed(tzdata)
         zones = collect(compile_zoneinfo(tzdata, args.zic, workdir))
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
@@ -387,14 +418,14 @@ def main():
     if missing:
         raise SystemExit(f"legacy aliases without a compiled zone: {', '.join(missing)}")
 
-    tables = classify(zones, sources, aliases)
+    tables = classify(zones, sources, aliases, listed)
     for region, (canonical, legacy) in tables.items():
         emit_region(out_dir / f"{region}.rs", version, zones, region, canonical, legacy, command)
-        print(f"{region}.rs: {len(canonical)} canonical names, {len(legacy)} legacy aliases")
+        print(f"{region}.rs: {len(canonical)} names by default, {len(legacy)} legacy aliases")
     emit_module(out_dir / "mod.rs", version, command)
     total = sum(len(canonical) for canonical, _ in tables.values())
     legacy = sum(len(legacy) for _, legacy in tables.values())
-    print(f"total: {total} canonical names, {legacy} legacy aliases; tzdata {version}")
+    print(f"total: {total} names by default, {legacy} legacy aliases; tzdata {version}")
 
 
 if __name__ == "__main__":

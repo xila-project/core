@@ -7,8 +7,9 @@
 
 use crate::iana::Table;
 
-/// Canonical names of the Etc region (names: 29, TZ strings: 28).
-pub(crate) const CANONICAL: Table = Table {
+/// Canonical names and listed aliases of the Etc region (names: 29, TZ strings: 28).
+#[cfg(not(feature = "iana-legacy-aliases"))]
+pub(crate) const TABLE: Table = Table {
     names: concat!(
         "Etc/GMT\0",
         "Etc/GMT+1\0",
@@ -84,17 +85,46 @@ pub(crate) const CANONICAL: Table = Table {
     ],
 };
 
-/// Legacy aliases of the Etc region (names: 15, TZ strings: 2).
+/// All names of the Etc region, with the legacy aliases (names: 44, TZ strings: 28).
 #[cfg(feature = "iana-legacy-aliases")]
-pub(crate) const LEGACY_ALIASES: Table = Table {
+pub(crate) const TABLE_WITH_LEGACY_ALIASES: Table = Table {
     names: concat!(
+        "Etc/GMT\0",
         "Etc/GMT+0\0",
+        "Etc/GMT+1\0",
+        "Etc/GMT+10\0",
+        "Etc/GMT+11\0",
+        "Etc/GMT+12\0",
+        "Etc/GMT+2\0",
+        "Etc/GMT+3\0",
+        "Etc/GMT+4\0",
+        "Etc/GMT+5\0",
+        "Etc/GMT+6\0",
+        "Etc/GMT+7\0",
+        "Etc/GMT+8\0",
+        "Etc/GMT+9\0",
         "Etc/GMT-0\0",
+        "Etc/GMT-1\0",
+        "Etc/GMT-10\0",
+        "Etc/GMT-11\0",
+        "Etc/GMT-12\0",
+        "Etc/GMT-13\0",
+        "Etc/GMT-14\0",
+        "Etc/GMT-2\0",
+        "Etc/GMT-3\0",
+        "Etc/GMT-4\0",
+        "Etc/GMT-5\0",
+        "Etc/GMT-6\0",
+        "Etc/GMT-7\0",
+        "Etc/GMT-8\0",
+        "Etc/GMT-9\0",
         "Etc/GMT0\0",
         "Etc/Greenwich\0",
         "Etc/UCT\0",
+        "Etc/UTC\0",
         "Etc/Universal\0",
         "Etc/Zulu\0",
+        "GMT\0",
         "GMT+0\0",
         "GMT-0\0",
         "GMT0\0",
@@ -105,9 +135,46 @@ pub(crate) const LEGACY_ALIASES: Table = Table {
         "Zulu\0",
     ),
     name_offsets: &[
-        0, 10, 20, 29, 43, 51, 65, 74, 80, 86, 91, 101, 105, 109, 119, 124,
+        0, 8, 18, 28, 39, 50, 61, 71, 81, 91, 101, 111, 121, 131, 141, 151, 161, 172, 183, 194,
+        205, 216, 226, 236, 246, 256, 266, 276, 286, 296, 305, 319, 327, 335, 349, 358, 362, 368,
+        374, 379, 389, 393, 397, 407, 412,
     ],
-    zone_string: &[0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1],
-    strings: concat!("GMT0\0", "UTC0\0",),
-    string_offsets: &[0, 5, 10],
+    zone_string: &[
+        26, 26, 14, 23, 24, 25, 15, 16, 17, 18, 19, 20, 21, 22, 26, 0, 9, 10, 11, 12, 13, 1, 2, 3,
+        4, 5, 6, 7, 8, 26, 26, 27, 27, 27, 27, 26, 26, 26, 26, 26, 27, 27, 27, 27,
+    ],
+    strings: concat!(
+        "<+01>-1\0",
+        "<+02>-2\0",
+        "<+03>-3\0",
+        "<+04>-4\0",
+        "<+05>-5\0",
+        "<+06>-6\0",
+        "<+07>-7\0",
+        "<+08>-8\0",
+        "<+09>-9\0",
+        "<+10>-10\0",
+        "<+11>-11\0",
+        "<+12>-12\0",
+        "<+13>-13\0",
+        "<+14>-14\0",
+        "<-01>1\0",
+        "<-02>2\0",
+        "<-03>3\0",
+        "<-04>4\0",
+        "<-05>5\0",
+        "<-06>6\0",
+        "<-07>7\0",
+        "<-08>8\0",
+        "<-09>9\0",
+        "<-10>10\0",
+        "<-11>11\0",
+        "<-12>12\0",
+        "GMT0\0",
+        "UTC0\0",
+    ),
+    string_offsets: &[
+        0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 81, 90, 99, 108, 117, 124, 131, 138, 145, 152, 159,
+        166, 173, 180, 188, 196, 204, 209, 214,
+    ],
 };

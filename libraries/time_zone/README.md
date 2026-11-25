@@ -80,21 +80,21 @@ combine. Within a table the names are sorted for binary search, and zones that
 share a TZ string share it in one string blob; the lookup compares the name
 bytes itself, without `memcmp`.
 
-| Feature | Names | Canonical names | Legacy aliases |
+| Feature | Names | Names by default | Legacy aliases |
 | --- | --- | ---: | ---: |
 | none (default) | no names (the `iana` module exists, with no names) | 0 | 0 |
-| `iana-africa` | `Africa/...` | 19 | 38 |
-| `iana-america` | `America/...`, `CST6CDT`, `EST5EDT`, `MST7MDT`, `PST8PDT` | 125 | 79 |
-| `iana-antarctica` | `Antarctica/...` | 8 | 4 |
-| `iana-arctic` | `Arctic/...` | 0 | 1 |
-| `iana-asia` | `Asia/...` | 74 | 33 |
-| `iana-atlantic` | `Atlantic/...` | 8 | 4 |
+| `iana-africa` | `Africa/...` | 52 | 5 |
+| `iana-america` | `America/...`, `CST6CDT`, `EST5EDT`, `MST7MDT`, `PST8PDT` | 148 | 56 |
+| `iana-antarctica` | `Antarctica/...` | 11 | 1 |
+| `iana-arctic` | `Arctic/...` | 1 | 0 |
+| `iana-asia` | `Asia/...` | 82 | 25 |
+| `iana-atlantic` | `Atlantic/...` | 10 | 2 |
 | `iana-australia` | `Australia/...` | 11 | 12 |
 | `iana-etc` | `Etc/...` and `GMT`, the fixed offset zones | 29 | 15 |
-| `iana-europe` | `Europe/...` | 38 | 37 |
-| `iana-indian` | `Indian/...` | 3 | 8 |
-| `iana-pacific` | `Pacific/...` | 30 | 21 |
-| `iana-all` | every region | 345 | 252 |
+| `iana-europe` | `Europe/...` | 58 | 17 |
+| `iana-indian` | `Indian/...` | 11 | 0 |
+| `iana-pacific` | `Pacific/...` | 38 | 13 |
+| `iana-all` | every region | 451 | 146 |
 
 - A region holds the names with its prefix only. The European zones with
   another prefix are in their own region: `Africa/Ceuta` in `iana-africa`,
@@ -105,16 +105,20 @@ bytes itself, without `memcmp`.
   zones that tzdata keeps for the United States rules; they are in
   `iana-america`. `Factory`, the placeholder for an unconfigured system, is in
   no table.
-- A legacy alias is a name that tzdata defines only as a `Link` line of its
-  `backward` file, for example `US/Eastern`, `Japan`, `GB`, `Asia/Calcutta` or
-  `Europe/Amsterdam` (merged into `Europe/Brussels` in tzdata 2022b). The tables
-  hold the canonical names only; `iana-legacy-aliases` adds the aliases of every
-  enabled region. An alias is in the region of its prefix, or, without a region
-  prefix, in the region of the zone that it names (`US/Eastern` and `Japan` are
-  in `iana-america` and `iana-asia`). The names of the `etcetera` file are
-  canonical, including `GMT`.
-- `Arctic/Longyearbyen` is the only `Arctic/` name and it is an alias, so
-  `iana-arctic` is empty without `iana-legacy-aliases`.
+- The names by default are the canonical names (a `Zone` line, or a `Link`
+  outside the `backward` file, such as `GMT` and the `Etc/` names) and the
+  listed aliases: the 106 `backward` links that tzdata `zone.tab` lists for a
+  country, for example `Europe/Amsterdam`, `Europe/Oslo`, `Europe/Stockholm`,
+  `Atlantic/Reykjavik` and `Asia/Kuwait` (zones that tzdata merged into
+  another one). So every country keeps the names that it uses.
+- A legacy alias is any other `backward` link, for example `US/Eastern`,
+  `Japan`, `GB` or `Asia/Calcutta`. `iana-legacy-aliases` adds them to every
+  enabled region. An alias is in the region of its prefix, or, without a
+  region prefix, in the region of the zone that it names (`US/Eastern` and
+  `Japan` are in `iana-america` and `iana-asia`).
+- An alias row holds its name and the index of the TZ string of the zone that
+  it names, shared with that zone; no string is repeated within a region.
+  Each region is sorted by name, aliases included.
 
 The tables come from tzdata **2026f** (`iana::TZDATA_VERSION`). The IANA time
 zone database is released into the public domain by IANA
@@ -145,33 +149,29 @@ instant in both directions and walks every enabled table, linked for
 | Features | Linked size | Table cost | Table cost with `iana-legacy-aliases` |
 | --- | ---: | ---: | ---: |
 | none | 6,908 bytes | 0 | 0 |
-| `iana-africa` | 7,730 bytes | 822 | 1,684 |
-| `iana-america` | 10,402 bytes | 3,494 | 5,464 |
-| `iana-antarctica` | 7,516 bytes | 608 | 876 |
-| `iana-arctic` | 6,908 bytes | 0 | 488 |
-| `iana-asia` | 8,850 bytes | 1,942 | 2,720 |
-| `iana-atlantic` | 7,520 bytes | 612 | 884 |
-| `iana-australia` | 7,644 bytes | 736 | 1,212 |
-| `iana-etc` | 7,906 bytes | 998 | 1,284 |
-| `iana-europe` | 8,116 bytes | 1,208 | 2,056 |
-| `iana-indian` | 7,299 bytes | 391 | 744 |
-| `iana-pacific` | 8,138 bytes | 1,230 | 1,844 |
-| `iana-all` | 16,408 bytes | 9,500 | 15,720 |
+| `iana-africa` | 8,344 bytes | 1,436 | 1,502 |
+| `iana-america` | 10,878 bytes | 3,970 | 5,000 |
+| `iana-antarctica` | 7,658 bytes | 750 | 774 |
+| `iana-arctic` | 6,992 bytes | 84 | 84 |
+| `iana-asia` | 8,982 bytes | 2,074 | 2,436 |
+| `iana-atlantic` | 7,590 bytes | 682 | 752 |
+| `iana-australia` | 7,644 bytes | 736 | 978 |
+| `iana-etc` | 7,906 bytes | 998 | 1,166 |
+| `iana-europe` | 8,496 bytes | 1,588 | 1,792 |
+| `iana-indian` | 7,526 bytes | 618 | 618 |
+| `iana-pacific` | 8,282 bytes | 1,374 | 1,566 |
+| `iana-all` | 18,560 bytes | 11,652 | 14,008 |
 
-Each cost above includes about 280 bytes of lookup code, which several regions
-share: `iana-europe`, `iana-atlantic`, `iana-africa` and `iana-asia` together
-cost 3,744 bytes (10,652 bytes linked), 840 bytes less than the sum of their
-costs. A region repeats the TZ strings that it shares
-with another region, and the alias table of a region repeats the TZ strings of
-its canonical table: `iana-all` costs 621 bytes more than one table of all the
-canonical names would (15,787 bytes linked), and 2,226 bytes more with the
-aliases (20,402 bytes). Offsets are 16-bit and string indexes 8-bit; the
-generator fails if a table outgrows them. BSS is 8 bytes in all
+Each cost above includes the lookup code (about 280 bytes), which several
+regions share. A region repeats the TZ strings that it shares with another
+region; `iana-all` costs 11,652 bytes by default (451 names) and 14,008 bytes
+with the aliases (597 names). Offsets are 16-bit and string indexes 8-bit;
+the generator fails if a table outgrows them. BSS is 8 bytes in all
 configurations.
 
 For `xtensa-esp32s3-none-elf` (the ESP32-S3 target of Platforms), the crate
-object inside the rlib measures 9,212 bytes with no table, 10,652 with
-`iana-europe`, 18,909 with `iana-all` and 25,113 with `iana-all` and
+object inside the rlib measures 9,325 bytes with no table, 11,033 with
+`iana-europe`, 21,061 with `iana-all` and 23,415 with `iana-all` and
 `iana-legacy-aliases` (text plus rodata, before the final link), built with
 `RUSTFLAGS="-C opt-level=z" rustup run esp cargo build --release
 -Zbuild-std=core --target xtensa-esp32s3-none-elf -p xila-time-zone` and the
@@ -181,7 +181,7 @@ unused code.
 For comparison, the closed prototype #538 measured 1,963 bytes for UTC only,
 18,300 bytes with Paris and 29,088 bytes with six zone identifiers on
 Cortex-M: the POSIX TZ design converts with about 6.9 KB of code and no table,
-and the 345 canonical names of all regions cost about 9.5 KB on Cortex-M.
+and the 451 names of all regions cost about 11.7 KB on Cortex-M.
 
 Stack use on `thumbv7em-none-eabihf`, from `-Z emit-stack-sizes` (nightly):
 the deepest frame of the crate is 128 bytes (`TimeZone::is_daylight_saving_at`,

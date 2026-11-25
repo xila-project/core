@@ -7,8 +7,9 @@
 
 use crate::iana::Table;
 
-/// Canonical names of the Australia region (names: 11, TZ strings: 7).
-pub(crate) const CANONICAL: Table = Table {
+/// Canonical names and listed aliases of the Australia region (names: 11, TZ strings: 7).
+#[cfg(not(feature = "iana-legacy-aliases"))]
+pub(crate) const TABLE: Table = Table {
     names: concat!(
         "Australia/Adelaide\0",
         "Australia/Brisbane\0",
@@ -36,26 +37,43 @@ pub(crate) const CANONICAL: Table = Table {
     string_offsets: &[0, 13, 50, 60, 91, 99, 128, 135],
 };
 
-/// Legacy aliases of the Australia region (names: 12, TZ strings: 6).
+/// All names of the Australia region, with the legacy aliases (names: 23, TZ strings: 7).
 #[cfg(feature = "iana-legacy-aliases")]
-pub(crate) const LEGACY_ALIASES: Table = Table {
+pub(crate) const TABLE_WITH_LEGACY_ALIASES: Table = Table {
     names: concat!(
         "Australia/ACT\0",
+        "Australia/Adelaide\0",
+        "Australia/Brisbane\0",
+        "Australia/Broken_Hill\0",
         "Australia/Canberra\0",
         "Australia/Currie\0",
+        "Australia/Darwin\0",
+        "Australia/Eucla\0",
+        "Australia/Hobart\0",
         "Australia/LHI\0",
+        "Australia/Lindeman\0",
+        "Australia/Lord_Howe\0",
+        "Australia/Melbourne\0",
         "Australia/NSW\0",
         "Australia/North\0",
+        "Australia/Perth\0",
         "Australia/Queensland\0",
         "Australia/South\0",
+        "Australia/Sydney\0",
         "Australia/Tasmania\0",
         "Australia/Victoria\0",
         "Australia/West\0",
         "Australia/Yancowinna\0",
     ),
-    name_offsets: &[0, 14, 33, 50, 64, 78, 94, 115, 131, 150, 169, 184, 205],
-    zone_string: &[4, 4, 4, 0, 4, 1, 3, 2, 4, 4, 5, 2],
+    name_offsets: &[
+        0, 14, 33, 52, 74, 93, 110, 127, 143, 160, 174, 193, 213, 233, 247, 263, 279, 300, 316,
+        333, 352, 371, 386, 407,
+    ],
+    zone_string: &[
+        5, 3, 4, 3, 5, 5, 2, 0, 5, 1, 4, 1, 5, 5, 2, 6, 4, 3, 5, 5, 5, 6, 3,
+    ],
     strings: concat!(
+        "<+0845>-8:45\0",
         "<+1030>-10:30<+11>-11,M10.1.0,M4.1.0\0",
         "ACST-9:30\0",
         "ACST-9:30ACDT,M10.1.0,M4.1.0/3\0",
@@ -63,5 +81,5 @@ pub(crate) const LEGACY_ALIASES: Table = Table {
         "AEST-10AEDT,M10.1.0,M4.1.0/3\0",
         "AWST-8\0",
     ),
-    string_offsets: &[0, 37, 47, 78, 86, 115, 122],
+    string_offsets: &[0, 13, 50, 60, 91, 99, 128, 135],
 };

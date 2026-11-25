@@ -29,6 +29,25 @@ fn version_is_recorded() {
     );
 }
 
+fn region(name: &str) -> Option<&str> {
+    name.split_once('/').map(|(region, _)| region)
+}
+
+#[test]
+fn names_are_sorted_within_each_region_and_looked_up() {
+    let mut previous: Option<&str> = None;
+    for index in 0..iana::zone_count() {
+        let name = iana::zone_name(index).unwrap();
+        if let Some(previous) = previous
+            && region(previous) == region(name)
+            && region(name).is_some()
+        {
+            assert!(previous < name, "{previous} !< {name}");
+        }
+        previous = Some(name);
+    }
+}
+
 #[test]
 fn names_are_unique_and_looked_up() {
     let count = iana::zone_count();
@@ -102,20 +121,30 @@ fn known_zones_convert() {
     assert_eq!(dublin.daylight_saving_offset_seconds(), Some(0));
 }
 
-/// Legacy aliases: names that tzdata 2026f defines only as a `Link` of its
-/// `backward` file, with the region feature that holds each one.
+/// Legacy aliases: `backward` links of tzdata 2026f that `zone.tab` does not
+/// list, with the region feature that holds each one.
 const LEGACY_ALIASES: &[(bool, &str)] = &[
     (cfg!(feature = "iana-america"), "US/Eastern"),
     (cfg!(feature = "iana-america"), "Canada/Pacific"),
-    (cfg!(feature = "iana-arctic"), "Arctic/Longyearbyen"),
     (cfg!(feature = "iana-asia"), "Asia/Calcutta"),
     (cfg!(feature = "iana-asia"), "Japan"),
-    (cfg!(feature = "iana-atlantic"), "Atlantic/Reykjavik"),
-    (cfg!(feature = "iana-europe"), "Europe/Amsterdam"),
     (cfg!(feature = "iana-europe"), "Europe/Kiev"),
     (cfg!(feature = "iana-europe"), "GB"),
     (cfg!(feature = "iana-europe"), "Portugal"),
     (cfg!(feature = "iana-etc"), "Etc/UCT"),
+];
+
+/// Listed aliases: `backward` links that `zone.tab` lists for a country. They
+/// are in the default tables.
+const LISTED_ALIASES: &[(bool, &str)] = &[
+    (cfg!(feature = "iana-arctic"), "Arctic/Longyearbyen"),
+    (cfg!(feature = "iana-atlantic"), "Atlantic/Reykjavik"),
+    (cfg!(feature = "iana-asia"), "Asia/Kuwait"),
+    (cfg!(feature = "iana-asia"), "Asia/Muscat"),
+    (cfg!(feature = "iana-america"), "America/Nassau"),
+    (cfg!(feature = "iana-europe"), "Europe/Amsterdam"),
+    (cfg!(feature = "iana-europe"), "Europe/Oslo"),
+    (cfg!(feature = "iana-europe"), "Europe/Stockholm"),
 ];
 
 #[test]
@@ -129,6 +158,18 @@ fn legacy_aliases_only_with_the_feature() {
             "{name}"
         );
     }
+}
+
+#[test]
+fn listed_aliases_by_default() {
+    for (region, name) in LISTED_ALIASES {
+        assert_eq!(iana::contains(name), *region, "{name}");
+    }
+    #[cfg(feature = "iana-europe")]
+    assert_eq!(
+        iana::time_zone_string("Europe/Amsterdam"),
+        iana::time_zone_string("Europe/Brussels")
+    );
 }
 
 #[cfg(all(feature = "iana-legacy-aliases", feature = "iana-all"))]
@@ -150,7 +191,7 @@ fn all_zones_table() {
     let expected = if cfg!(feature = "iana-legacy-aliases") {
         597
     } else {
-        345
+        451
     };
     assert_eq!(iana::zone_count(), expected);
     assert_eq!(iana::time_zone_string("Asia/Kolkata"), Some("IST-5:30"));
@@ -192,7 +233,7 @@ fn europe_region_alone() {
     let expected = if cfg!(feature = "iana-legacy-aliases") {
         75
     } else {
-        38
+        58
     };
     assert_eq!(iana::zone_count(), expected);
     assert!(!iana::contains("Atlantic/Madeira"));

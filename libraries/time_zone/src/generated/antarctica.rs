@@ -7,42 +7,67 @@
 
 use crate::iana::Table;
 
-/// Canonical names of the Antarctica region (names: 8, TZ strings: 6).
-pub(crate) const CANONICAL: Table = Table {
+/// Canonical names and listed aliases of the Antarctica region (names: 11, TZ strings: 9).
+#[cfg(not(feature = "iana-legacy-aliases"))]
+pub(crate) const TABLE: Table = Table {
     names: concat!(
         "Antarctica/Casey\0",
         "Antarctica/Davis\0",
+        "Antarctica/DumontDUrville\0",
         "Antarctica/Macquarie\0",
         "Antarctica/Mawson\0",
+        "Antarctica/McMurdo\0",
         "Antarctica/Palmer\0",
         "Antarctica/Rothera\0",
+        "Antarctica/Syowa\0",
         "Antarctica/Troll\0",
         "Antarctica/Vostok\0",
     ),
-    name_offsets: &[0, 17, 34, 55, 73, 91, 110, 127, 145],
-    zone_string: &[3, 2, 5, 1, 4, 4, 0, 1],
+    name_offsets: &[0, 17, 34, 60, 81, 99, 118, 136, 155, 172, 189, 207],
+    zone_string: &[4, 3, 5, 7, 2, 8, 6, 6, 1, 0, 2],
     strings: concat!(
         "<+00>0<+02>-2,M3.5.0/1,M10.5.0/3\0",
+        "<+03>-3\0",
         "<+05>-5\0",
         "<+07>-7\0",
         "<+08>-8\0",
+        "<+10>-10\0",
         "<-03>3\0",
         "AEST-10AEDT,M10.1.0,M4.1.0/3\0",
+        "NZST-12NZDT,M9.5.0,M4.1.0/3\0",
     ),
-    string_offsets: &[0, 33, 41, 49, 57, 64, 93],
+    string_offsets: &[0, 33, 41, 49, 57, 65, 74, 81, 110, 138],
 };
 
-/// Legacy aliases of the Antarctica region (names: 4, TZ strings: 3).
+/// All names of the Antarctica region, with the legacy aliases (names: 12, TZ strings: 9).
 #[cfg(feature = "iana-legacy-aliases")]
-pub(crate) const LEGACY_ALIASES: Table = Table {
+pub(crate) const TABLE_WITH_LEGACY_ALIASES: Table = Table {
     names: concat!(
+        "Antarctica/Casey\0",
+        "Antarctica/Davis\0",
         "Antarctica/DumontDUrville\0",
+        "Antarctica/Macquarie\0",
+        "Antarctica/Mawson\0",
         "Antarctica/McMurdo\0",
+        "Antarctica/Palmer\0",
+        "Antarctica/Rothera\0",
         "Antarctica/South_Pole\0",
         "Antarctica/Syowa\0",
+        "Antarctica/Troll\0",
+        "Antarctica/Vostok\0",
     ),
-    name_offsets: &[0, 26, 45, 67, 84],
-    zone_string: &[1, 2, 2, 0],
-    strings: concat!("<+03>-3\0", "<+10>-10\0", "NZST-12NZDT,M9.5.0,M4.1.0/3\0",),
-    string_offsets: &[0, 8, 17, 45],
+    name_offsets: &[0, 17, 34, 60, 81, 99, 118, 136, 155, 177, 194, 211, 229],
+    zone_string: &[4, 3, 5, 7, 2, 8, 6, 6, 8, 1, 0, 2],
+    strings: concat!(
+        "<+00>0<+02>-2,M3.5.0/1,M10.5.0/3\0",
+        "<+03>-3\0",
+        "<+05>-5\0",
+        "<+07>-7\0",
+        "<+08>-8\0",
+        "<+10>-10\0",
+        "<-03>3\0",
+        "AEST-10AEDT,M10.1.0,M4.1.0/3\0",
+        "NZST-12NZDT,M9.5.0,M4.1.0/3\0",
+    ),
+    string_offsets: &[0, 33, 41, 49, 57, 65, 74, 81, 110, 138],
 };

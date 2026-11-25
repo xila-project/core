@@ -7,36 +7,60 @@
 
 use crate::iana::Table;
 
-/// Canonical names of the Indian region (names: 3, TZ strings: 3).
-pub(crate) const CANONICAL: Table = Table {
-    names: concat!("Indian/Chagos\0", "Indian/Maldives\0", "Indian/Mauritius\0",),
-    name_offsets: &[0, 14, 30, 47],
-    zone_string: &[2, 1, 0],
-    strings: concat!("<+04>-4\0", "<+05>-5\0", "<+06>-6\0",),
-    string_offsets: &[0, 8, 16, 24],
-};
-
-/// Legacy aliases of the Indian region (names: 8, TZ strings: 5).
-#[cfg(feature = "iana-legacy-aliases")]
-pub(crate) const LEGACY_ALIASES: Table = Table {
+/// Canonical names and listed aliases of the Indian region (names: 11, TZ strings: 6).
+#[cfg(not(feature = "iana-legacy-aliases"))]
+pub(crate) const TABLE: Table = Table {
     names: concat!(
         "Indian/Antananarivo\0",
+        "Indian/Chagos\0",
         "Indian/Christmas\0",
         "Indian/Cocos\0",
         "Indian/Comoro\0",
         "Indian/Kerguelen\0",
         "Indian/Mahe\0",
+        "Indian/Maldives\0",
+        "Indian/Mauritius\0",
         "Indian/Mayotte\0",
         "Indian/Reunion\0",
     ),
-    name_offsets: &[0, 20, 37, 50, 64, 81, 93, 108, 123],
-    zone_string: &[4, 3, 2, 4, 1, 0, 4, 0],
+    name_offsets: &[0, 20, 34, 51, 64, 78, 95, 107, 123, 140, 155, 170],
+    zone_string: &[5, 3, 4, 2, 5, 1, 0, 1, 0, 5, 0],
     strings: concat!(
         "<+04>-4\0",
         "<+05>-5\0",
         "<+0630>-6:30\0",
+        "<+06>-6\0",
         "<+07>-7\0",
         "EAT-3\0",
     ),
-    string_offsets: &[0, 8, 16, 29, 37, 43],
+    string_offsets: &[0, 8, 16, 29, 37, 45, 51],
+};
+
+/// All names of the Indian region, with the legacy aliases (names: 11, TZ strings: 6).
+#[cfg(feature = "iana-legacy-aliases")]
+pub(crate) const TABLE_WITH_LEGACY_ALIASES: Table = Table {
+    names: concat!(
+        "Indian/Antananarivo\0",
+        "Indian/Chagos\0",
+        "Indian/Christmas\0",
+        "Indian/Cocos\0",
+        "Indian/Comoro\0",
+        "Indian/Kerguelen\0",
+        "Indian/Mahe\0",
+        "Indian/Maldives\0",
+        "Indian/Mauritius\0",
+        "Indian/Mayotte\0",
+        "Indian/Reunion\0",
+    ),
+    name_offsets: &[0, 20, 34, 51, 64, 78, 95, 107, 123, 140, 155, 170],
+    zone_string: &[5, 3, 4, 2, 5, 1, 0, 1, 0, 5, 0],
+    strings: concat!(
+        "<+04>-4\0",
+        "<+05>-5\0",
+        "<+0630>-6:30\0",
+        "<+06>-6\0",
+        "<+07>-7\0",
+        "EAT-3\0",
+    ),
+    string_offsets: &[0, 8, 16, 29, 37, 45, 51],
 };

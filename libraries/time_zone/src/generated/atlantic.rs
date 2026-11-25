@@ -7,8 +7,9 @@
 
 use crate::iana::Table;
 
-/// Canonical names of the Atlantic region (names: 8, TZ strings: 6).
-pub(crate) const CANONICAL: Table = Table {
+/// Canonical names and listed aliases of the Atlantic region (names: 10, TZ strings: 7).
+#[cfg(not(feature = "iana-legacy-aliases"))]
+pub(crate) const TABLE: Table = Table {
     names: concat!(
         "Atlantic/Azores\0",
         "Atlantic/Bermuda\0",
@@ -16,37 +17,53 @@ pub(crate) const CANONICAL: Table = Table {
         "Atlantic/Cape_Verde\0",
         "Atlantic/Faroe\0",
         "Atlantic/Madeira\0",
+        "Atlantic/Reykjavik\0",
         "Atlantic/South_Georgia\0",
+        "Atlantic/St_Helena\0",
         "Atlantic/Stanley\0",
     ),
-    name_offsets: &[0, 16, 33, 49, 69, 84, 101, 124, 141],
-    zone_string: &[1, 4, 5, 0, 5, 5, 2, 3],
+    name_offsets: &[0, 16, 33, 49, 69, 84, 101, 120, 143, 162, 179],
+    zone_string: &[1, 4, 6, 0, 6, 6, 5, 2, 5, 3],
     strings: concat!(
         "<-01>1\0",
         "<-01>1<+00>,M3.5.0/0,M10.5.0/1\0",
         "<-02>2\0",
         "<-03>3\0",
         "AST4ADT,M3.2.0,M11.1.0\0",
+        "GMT0\0",
         "WET0WEST,M3.5.0/1,M10.5.0\0",
     ),
-    string_offsets: &[0, 7, 38, 45, 52, 75, 101],
+    string_offsets: &[0, 7, 38, 45, 52, 75, 80, 106],
 };
 
-/// Legacy aliases of the Atlantic region (names: 4, TZ strings: 3).
+/// All names of the Atlantic region, with the legacy aliases (names: 12, TZ strings: 8).
 #[cfg(feature = "iana-legacy-aliases")]
-pub(crate) const LEGACY_ALIASES: Table = Table {
+pub(crate) const TABLE_WITH_LEGACY_ALIASES: Table = Table {
     names: concat!(
+        "Atlantic/Azores\0",
+        "Atlantic/Bermuda\0",
+        "Atlantic/Canary\0",
+        "Atlantic/Cape_Verde\0",
         "Atlantic/Faeroe\0",
+        "Atlantic/Faroe\0",
         "Atlantic/Jan_Mayen\0",
+        "Atlantic/Madeira\0",
         "Atlantic/Reykjavik\0",
+        "Atlantic/South_Georgia\0",
         "Atlantic/St_Helena\0",
+        "Atlantic/Stanley\0",
     ),
-    name_offsets: &[0, 16, 35, 54, 73],
-    zone_string: &[2, 0, 1, 1],
+    name_offsets: &[0, 16, 33, 49, 69, 85, 100, 119, 136, 155, 178, 197, 214],
+    zone_string: &[1, 4, 7, 0, 7, 7, 5, 7, 6, 2, 6, 3],
     strings: concat!(
+        "<-01>1\0",
+        "<-01>1<+00>,M3.5.0/0,M10.5.0/1\0",
+        "<-02>2\0",
+        "<-03>3\0",
+        "AST4ADT,M3.2.0,M11.1.0\0",
         "CET-1CEST,M3.5.0,M10.5.0/3\0",
         "GMT0\0",
         "WET0WEST,M3.5.0/1,M10.5.0\0",
     ),
-    string_offsets: &[0, 27, 32, 58],
+    string_offsets: &[0, 7, 38, 45, 52, 75, 102, 107, 133],
 };
