@@ -1,6 +1,7 @@
 //! Per-user appearance preferences: theme and screen brightness. Record
 //! layouts and preset IDs are stable on disk; version 1 records, which have no
-//! brightness, still load at full brightness.
+//! brightness, still load at full brightness, and a saved brightness outside
+//! the allowed range is clamped on load instead of rejecting the record.
 use crate as graphics;
 use crate::{BRIGHTNESS_FULL, Color, Error, lvgl};
 use file_system::{AccessFlags, CreateFlags, Flags, Permissions};
@@ -109,7 +110,6 @@ impl Appearance {
         if bytes[4] > 1
             || bytes[5] >= PRESET_COUNT
             || bytes[6] >= PRESET_COUNT
-            || brightness < MINIMUM_BRIGHTNESS
             || checksum(&bytes[..body]) != u32::from_le_bytes(bytes[body..].try_into().ok()?)
         {
             return None;
@@ -118,7 +118,10 @@ impl Appearance {
             is_dark: bytes[4] != 0,
             primary: bytes[5],
             secondary: bytes[6],
-            brightness,
+            // Clamp instead of rejecting: the checksum already guards against
+            // corruption, and a level saved below the current minimum (raised
+            // after the record was written) must not discard the theme.
+            brightness: brightness.clamp(MINIMUM_BRIGHTNESS, BRIGHTNESS_FULL),
         })
     }
 
@@ -270,16 +273,29 @@ mod tests {
                 secondary: PRESET_COUNT,
                 ..Appearance::default()
             },
-            Appearance {
-                brightness: MINIMUM_BRIGHTNESS - 1,
-                ..Appearance::default()
-            },
-            Appearance {
-                brightness: 0,
-                ..Appearance::default()
-            },
         ] {
             assert_eq!(Appearance::decode(&invalid.encode()), None);
+        }
+    }
+
+    #[test]
+    fn brightness_below_the_minimum_is_clamped_and_the_theme_kept() {
+        // A record saved before the minimum was raised keeps its theme and
+        // loads with the brightness clamped to the allowed range.
+        for brightness in [0, 1, MINIMUM_BRIGHTNESS - 1] {
+            let saved = Appearance {
+                is_dark: false,
+                primary: 3,
+                secondary: 5,
+                brightness,
+            };
+            assert_eq!(
+                Appearance::decode(&saved.encode()),
+                Some(Appearance {
+                    brightness: MINIMUM_BRIGHTNESS,
+                    ..saved
+                })
+            );
         }
     }
 
