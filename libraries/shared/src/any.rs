@@ -7,13 +7,13 @@ use crate::PlainData;
 #[derive(Debug, PartialEq, Eq)]
 pub struct AnyByLayout([u8]);
 
-impl<'a, T> From<&'a mut T> for &'a mut AnyByLayout {
+impl<'a, T: PlainData> From<&'a mut T> for &'a mut AnyByLayout {
     fn from(argument: &'a mut T) -> Self {
         AnyByLayout::from_mutable(argument)
     }
 }
 
-impl<'a, T> From<&'a T> for &'a AnyByLayout {
+impl<'a, T: PlainData> From<&'a T> for &'a AnyByLayout {
     fn from(argument: &'a T) -> Self {
         AnyByLayout::from(argument)
     }
@@ -36,14 +36,22 @@ impl AnyByLayout {
         }
     }
 
-    pub const fn from_mutable<T>(argument: &mut T) -> &mut Self {
+    /// Views a plain-data value as raw bytes.
+    ///
+    /// `T` must be [`PlainData`], so the bytes can always be read back as a
+    /// valid `T` (for example through [`AnyByLayout::cast`]); with a `bool` or
+    /// enum `T`, safe code could write an invalid value such as `2` for a
+    /// `bool` through [`AnyByLayout::as_mutable_bytes`].
+    pub const fn from_mutable<T: PlainData>(argument: &mut T) -> &mut Self {
         unsafe {
             let slice = slice::from_raw_parts_mut(argument as *mut T as *mut u8, size_of::<T>());
             &mut *(slice as *mut [u8] as *mut Self)
         }
     }
 
-    pub fn from<T>(argument: &T) -> &Self {
+    /// Views a plain-data value as raw bytes; see [`AnyByLayout::from_mutable`]
+    /// for the `T: PlainData` requirement.
+    pub fn from<T: PlainData>(argument: &T) -> &Self {
         unsafe {
             let slice = slice::from_raw_parts(argument as *const T as *const u8, size_of::<T>());
             &*(slice as *const [u8] as *const Self)
@@ -275,6 +283,7 @@ mod tests {
                 a: u32,
                 b: u16,
                 c: u8,
+                reserved: u8,
             }
         }
 
@@ -282,6 +291,7 @@ mod tests {
             a: 100,
             b: 200,
             c: 50,
+            reserved: 0,
         };
         let expected = original.clone();
         let any = AnyByLayout::from_mutable(&mut original);
