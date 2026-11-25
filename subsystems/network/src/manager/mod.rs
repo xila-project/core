@@ -94,6 +94,26 @@ impl Manager {
         Ok(u64::from_le_bytes(buffer))
     }
 
+    /// A random 32-bit value from the random device, or `None` when the device
+    /// fails or returns fewer than 4 bytes (logged once). Used for query
+    /// jitter, which then falls back to zero.
+    pub(crate) fn random_u32(&self) -> Option<u32> {
+        use portable_atomic::{AtomicBool, Ordering};
+        static FAILURE_LOGGED: AtomicBool = AtomicBool::new(false);
+        let mut buffer = [0u8; 4];
+        match self.random_device.read_sync(&mut buffer, 0) {
+            Ok(4) => Some(u32::from_le_bytes(buffer)),
+            Ok(_) | Err(_) => {
+                if !FAILURE_LOGGED.swap(true, Ordering::Relaxed) {
+                    log::warning!(
+                        "network: the random device did not return 4 bytes; jitter falls back to zero"
+                    );
+                }
+                None
+            }
+        }
+    }
+
     pub(crate) async fn find_first_available_stack(stacks: &StackList) -> Option<Stack> {
         for stack in stacks {
             let available = stack.with(|s| s.is_available()).await;
@@ -240,6 +260,16 @@ impl Manager {
             .await
         })
         .await
+    }
+
+    /// Whether the selected interface, or the first available one, has at
+    /// least one IP address: the signal that the network is up for clients.
+    pub async fn has_ip_address(&self, interface_name: Option<&str>) -> bool {
+        let stacks = self.stacks.read().await;
+        match Self::select_stack(&stacks, interface_name).await {
+            Ok(stack) => stack.with(|s| s.get_ip_addresses_count() > 0).await,
+            Err(_) => false,
+        }
     }
 
     pub async fn new_tcp_socket(

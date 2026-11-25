@@ -9,6 +9,7 @@ mod device;
 mod error;
 mod fundamentals;
 mod manager;
+pub mod sntp;
 mod socket;
 
 pub use device::*;
@@ -123,6 +124,12 @@ pub mod tests {
         file.control(
             ADD_IP_ADDRESS,
             &IpCidrAbi::from(IpCidr::new_ipv4([127, 0, 0, 1], 8)),
+        )
+        .await
+        .unwrap();
+        file.control(
+            ADD_IP_ADDRESS,
+            &IpCidrAbi::from(IpCidr::new_ipv4([127, 0, 0, 2], 8)),
         )
         .await
         .unwrap();

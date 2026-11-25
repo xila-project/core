@@ -45,6 +45,25 @@ impl UdpSocket {
         self.context.poll_with_mutable(context, f)
     }
 
+    /// Bind to the next ephemeral port the stack allocates, for a client that
+    /// sends first. Returns the bound port.
+    pub async fn bind_ephemeral(&mut self) -> Result<Port> {
+        let port = self
+            .context
+            .stack
+            .with_mutable(|stack| stack.get_next_port())
+            .await;
+        self.bind(port).await?;
+        Ok(port)
+    }
+
+    /// Close the current binding and bind a fresh ephemeral port, dropping
+    /// any queued datagrams: each exchange then sends from a new source port.
+    pub async fn rebind_ephemeral(&mut self) -> Result<Port> {
+        self.with_mutable(|socket| socket.close()).await;
+        self.bind_ephemeral().await
+    }
+
     pub async fn bind(&mut self, port: Port) -> Result<()> {
         let port = port.into_inner();
 

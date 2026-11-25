@@ -1498,6 +1498,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sntpc"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "294278b134cd7d06d7f22eca970aebe38707864c080f66547f9ad26327534af3"
+dependencies = [
+ "cfg-if",
+ "log",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2355,7 +2365,10 @@ dependencies = [
  "embassy-time",
  "embedded-io-async",
  "heapless",
+ "miniserde",
+ "portable-atomic",
  "smoltcp",
+ "sntpc",
  "xila-device",
  "xila-file-system",
  "xila-little-fs",
