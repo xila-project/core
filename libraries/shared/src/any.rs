@@ -55,8 +55,10 @@ impl AnyByLayout {
             return None;
         }
         // SAFETY: `is_exact_fit` proved that the payload is exactly
-        // `size_of::<T>()` bytes long and aligned for `T`, so it holds one
-        // valid `T`. The exclusive borrow of `self` gives unique access.
+        // `size_of::<T>()` bytes long and aligned for `T`. Size and alignment do
+        // not prove that the bytes are a valid `T`: control command payload types
+        // must accept every bit pattern (plain integers and byte arrays, not
+        // `bool` or enums). The exclusive borrow of `self` gives unique access.
         Some(unsafe { &mut *self.0.as_mut_ptr().cast::<T>() })
     }
 
@@ -67,8 +69,10 @@ impl AnyByLayout {
             return None;
         }
         // SAFETY: `is_exact_fit` proved that the payload is exactly
-        // `size_of::<T>()` bytes long and aligned for `T`, so it holds one
-        // valid `T`.
+        // `size_of::<T>()` bytes long and aligned for `T`. Size and alignment do
+        // not prove that the bytes are a valid `T`: control command payload types
+        // must accept every bit pattern (plain integers and byte arrays, not
+        // `bool` or enums).
         Some(unsafe { &*self.0.as_ptr().cast::<T>() })
     }
 
@@ -211,6 +215,13 @@ mod tests {
         let misaligned = unsafe { AnyByLayout::from_raw_parts(bytes.0.as_mut_ptr().add(1), 4) };
         assert!(misaligned.cast::<u32>().is_none());
         assert!(misaligned.cast_mutable::<u32>().is_none());
+
+        // A longer misaligned payload holds one aligned `u32` after a prefix: the
+        // old check accepted it and read the value at the wrong offset.
+        let misaligned_longer =
+            unsafe { AnyByLayout::from_raw_parts(bytes.0.as_mut_ptr().add(1), 7) };
+        assert!(misaligned_longer.cast::<u32>().is_none());
+        assert!(misaligned_longer.cast_mutable::<u32>().is_none());
 
         let aligned = unsafe { AnyByLayout::from_raw_parts(bytes.0.as_mut_ptr(), 4) };
         assert!(aligned.cast::<u32>().is_some());
