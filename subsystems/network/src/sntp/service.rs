@@ -16,7 +16,9 @@
 //! servers are tried in order, so a confirming answer from another server or
 //! resolved address is preferred; with a single server, a later exchange of
 //! the same server confirms, which means a single-server setup only resists a
-//! blind off-path attacker.
+//! blind off-path attacker. A pending step expires only after twice the larger
+//! of the resynchronization interval and the maximum retry delay (30 min), so
+//! the confirming attempt always comes before the expiry.
 //!
 //! Query times carry a random jitter, as the NTP Pool vendor guidance asks:
 //! 0 to 2 s before the first query, and 0 to 12 percent added to every
@@ -220,13 +222,31 @@ enum Attempt {
 /// A large clock step waiting for a confirming second answer: the signed
 /// offset in nanoseconds (candidate minus the current clock), the server that
 /// reported it, the address that answered, and the monotonic instant when it
-/// was recorded. It expires after about one resynchronization interval.
+/// was recorded. It expires after [`pending_step_age_limit`].
 #[derive(Clone, Debug)]
 struct PendingStep {
     offset_nanos: i128,
     server: usize,
     address: Option<IpAddress>,
     recorded_at: Duration,
+}
+
+/// The age limit of a pending step: the larger of the resynchronization
+/// interval and the maximum retry delay, times two. After an unconfirmed step
+/// the loop waits a retry delay (60 s first, doubling up to 30 min), so the
+/// limit must exceed the longest wait before the confirming attempt: with the
+/// smallest interval (60 s) a limit of one interval expired the step before
+/// the next attempt and a single server could never confirm.
+fn pending_step_age_limit(configuration: &Configuration) -> Duration {
+    configuration
+        .resync_interval
+        .max(MAXIMUM_RETRY_DELAY)
+        .saturating_mul(2)
+}
+
+/// Whether a pending step recorded at `recorded_at` is expired at `now`.
+fn pending_step_expired(pending: &PendingStep, now: Duration, limit: Duration) -> bool {
+    now.saturating_sub(pending.recorded_at) > limit
 }
 
 /// A cached name resolution.
@@ -429,9 +449,11 @@ async fn attempt(
     pending_step: &mut Option<PendingStep>,
 ) -> Attempt {
     let now = time.monotonic_now();
-    // A pending step expires after about one resynchronization interval.
+    // A pending step expires after the age limit, which is always longer than
+    // the wait before the confirming attempt.
+    let age_limit = pending_step_age_limit(configuration);
     if let Some(pending) = pending_step.as_ref()
-        && now.saturating_sub(pending.recorded_at) > configuration.resync_interval
+        && pending_step_expired(pending, now, age_limit)
     {
         *pending_step = None;
     }
@@ -945,10 +967,55 @@ mod tests {
         server_task.join().await;
     }
 
-    /// A pending step expires after about one resynchronization interval: with
-    /// a 1 s interval, a step recorded 2 s ago no longer confirms.
+    /// The pending-step age limit is independent of the retry race: at the
+    /// smallest interval (60 s) it is twice the maximum retry delay, so a step
+    /// recorded one retry delay ago is not expired.
+    #[test]
+    fn the_pending_step_age_limit_beats_the_retry_race() {
+        let minimum = Configuration {
+            servers: vec![String::from("a")],
+            resync_interval: Duration::from_secs(60),
+        };
+        let limit = pending_step_age_limit(&minimum);
+        assert_eq!(limit, MAXIMUM_RETRY_DELAY * 2);
+        assert!(
+            limit > retry_delay(1),
+            "the first retry delay comes before the expiry"
+        );
+        assert!(
+            limit > MAXIMUM_RETRY_DELAY,
+            "the longest retry delay comes before the expiry"
+        );
+        let pending = PendingStep {
+            offset_nanos: 2_000_000_000_000,
+            server: 0,
+            address: None,
+            recorded_at: Duration::ZERO,
+        };
+        assert!(!pending_step_expired(&pending, retry_delay(1), limit));
+        assert!(!pending_step_expired(&pending, MAXIMUM_RETRY_DELAY, limit));
+        assert!(!pending_step_expired(&pending, limit, limit));
+        assert!(pending_step_expired(
+            &pending,
+            limit + Duration::from_secs(1),
+            limit
+        ));
+        // At a larger interval the limit follows the interval, saturated.
+        let large = Configuration {
+            servers: vec![String::from("a")],
+            resync_interval: Duration::from_secs(7 * 24 * 3600),
+        };
+        assert_eq!(
+            pending_step_age_limit(&large),
+            Duration::from_secs(2 * 7 * 24 * 3600)
+        );
+    }
+
+    /// At the minimum resynchronization interval (60 s), a +2000 s step is
+    /// confirmed by the next attempt: the age limit (twice the maximum retry
+    /// delay) is far longer than the wait before that attempt.
     #[task::test]
-    async fn a_pending_step_expires_after_one_interval() {
+    async fn a_large_step_confirms_at_the_minimum_interval() {
         let _lock = TEST_MUTEX.lock().await;
         let network = initialize().await;
         let time_manager = host_time_manager();
@@ -967,10 +1034,10 @@ mod tests {
         .await;
         ready.wait().await;
 
-        // A one-second resynchronization interval for the expiry test.
+        // resync_interval_seconds = 60, the clamped minimum.
         let configuration = Box::leak(Box::new(Configuration {
             servers: vec![String::from("127.0.0.1")],
-            resync_interval: Duration::from_secs(1),
+            resync_interval: Duration::from_secs(60),
         }));
         let mut states = vec![ServerState::default()];
         let mut adapter = None;
@@ -991,8 +1058,7 @@ mod tests {
         assert!(matches!(first, Attempt::Unconfirmed), "{first:?}");
         assert!(pending_step.is_some());
 
-        // More than one interval passes; the offsets would still agree.
-        task::sleep(Duration::from_secs(2)).await;
+        // The next attempt (after one retry delay in the real loop) confirms.
         let second = attempt(
             &client,
             network,
@@ -1005,9 +1071,10 @@ mod tests {
         )
         .await;
         assert!(
-            matches!(second, Attempt::Unconfirmed),
-            "the expired pending step did not confirm: {second:?}"
+            matches!(second, Attempt::Synchronized(_)),
+            "the step confirms at the minimum interval: {second:?}"
         );
+        assert!(pending_step.is_none());
         server_task.join().await;
     }
 
