@@ -90,12 +90,12 @@ impl Directory {
         file_system: &mut littlefs::lfs_t,
         position: Size,
     ) -> Result<()> {
+        // LittleFS directory positions are unsigned 32-bit offsets. Reject what
+        // it cannot represent instead of truncating, as a wrapped position
+        // would resume the listing at the wrong entry.
+        let position = u32::try_from(position).map_err(|_| IoErrorKind::FileTooLarge)?;
         convert_result(unsafe {
-            littlefs::lfs_dir_seek(
-                file_system,
-                &mut self.directory,
-                position as littlefs::lfs_off_t,
-            )
+            littlefs::lfs_dir_seek(file_system, &mut self.directory, position)
         })?;
 
         Ok(())
@@ -204,5 +204,38 @@ impl Directory {
         convert_result(unsafe { littlefs::lfs_dir_close(file_system, &mut self.directory) })?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_position_rejects_positions_above_32_bits() {
+        let device = file_system::MemoryDevice::<512>::new_static(512 * 128);
+        let fs = crate::FileSystem::new_format(device, crate::Options::new(256)).unwrap();
+        fs.operation(|native| {
+            let mut directory = Directory::lookup(native, Path::ROOT)?;
+
+            // A position LittleFS can represent still reaches it: 2 skips the
+            // "." and ".." pseudo-entries.
+            directory.set_position(native, 2)?;
+            assert_eq!(directory.get_position(native)?, 2);
+
+            // Positions above 32 bits are rejected before the call; a
+            // truncated position would silently resume at the wrong entry.
+            for position in [(u32::MAX as Size) + 1, (1u64 << 32) + 2, (1u64 << 32) + 100] {
+                assert_eq!(
+                    directory.set_position(native, position),
+                    Err(IoErrorKind::FileTooLarge)
+                );
+            }
+
+            // A rejected position must not move the directory.
+            assert_eq!(directory.get_position(native)?, 2);
+            directory.close(native)
+        })
+        .unwrap();
     }
 }
