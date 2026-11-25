@@ -5,12 +5,28 @@ use alloc::{boxed::Box, ffi::CString};
 use core::ffi::c_void;
 use file_system::{AttributeFlags, Attributes, Flags, IoErrorKind, Path, Position, Result, Size};
 
-fn convert_position(position: &Position) -> (i32, i32) {
-    match position {
-        Position::Start(position) => (*position as i32, constants::SEEK_START),
-        Position::Current(position) => (*position as i32, constants::SEEK_CURRENT),
-        Position::End(position) => (*position as i32, constants::SEEK_END),
+// LittleFS uses signed 32-bit offsets. Reject what it cannot represent
+// instead of truncating, as a wrapped offset would read or overwrite the
+// wrong bytes.
+fn convert_position(position: &Position) -> Result<(i32, i32)> {
+    let offset = match position {
+        Position::Start(position) => i32::try_from(*position),
+        Position::Current(position) => i32::try_from(*position),
+        Position::End(position) => i32::try_from(*position),
     }
+    .map_err(|_| IoErrorKind::FileTooLarge)?;
+    let whence = match position {
+        Position::Start(_) => constants::SEEK_START,
+        Position::Current(_) => constants::SEEK_CURRENT,
+        Position::End(_) => constants::SEEK_END,
+    };
+    Ok((offset, whence))
+}
+
+// One LittleFS call accepts at most i32::MAX bytes, as its byte count is a
+// signed 32-bit value.
+fn convert_length(length: usize) -> u32 {
+    length.min(i32::MAX as usize) as u32
 }
 
 pub struct File {
@@ -167,13 +183,14 @@ impl File {
         &mut self,
         file_system: &mut littlefs::lfs_t,
         buffer: &mut [u8],
-        absolue_position: Size,
+        absolute_position: Size,
     ) -> Result<usize> {
+        let position = i32::try_from(absolute_position).map_err(|_| IoErrorKind::FileTooLarge)?;
         let bytes_read = unsafe {
             convert_result(littlefs::lfs_file_seek(
                 file_system,
                 &mut self.file,
-                absolue_position as i32,
+                position,
                 constants::SEEK_START,
             ))?;
 
@@ -181,7 +198,7 @@ impl File {
                 file_system,
                 &mut self.file,
                 buffer.as_mut_ptr() as *mut _,
-                buffer.len() as u32,
+                convert_length(buffer.len()),
             ))?
         };
 
@@ -192,13 +209,14 @@ impl File {
         &mut self,
         file_system: &mut littlefs::lfs_t,
         buffer: &[u8],
-        absolue_position: Size,
+        absolute_position: Size,
     ) -> Result<usize> {
+        let position = i32::try_from(absolute_position).map_err(|_| IoErrorKind::FileTooLarge)?;
         let bytes_written = unsafe {
             convert_result(littlefs::lfs_file_seek(
                 file_system,
                 &mut self.file,
-                absolue_position as i32,
+                position,
                 constants::SEEK_START,
             ))?;
 
@@ -206,7 +224,7 @@ impl File {
                 file_system,
                 &mut self.file,
                 buffer.as_ptr() as *const _,
-                buffer.len() as u32,
+                convert_length(buffer.len()),
             ))?
         };
 
@@ -219,7 +237,7 @@ impl File {
         _: Size,
         position: &Position,
     ) -> Result<Size> {
-        let (offset, whence) = convert_position(position);
+        let (offset, whence) = convert_position(position)?;
 
         let offset = unsafe {
             convert_result(littlefs::lfs_file_seek(
@@ -245,6 +263,41 @@ impl File {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_write_and_seek_reject_positions_above_32_bits() {
+        let device = file_system::MemoryDevice::<512>::new_static(512 * 128);
+        let fs = crate::FileSystem::new_format(device, crate::Options::new(256)).unwrap();
+        fs.operation(|native| {
+            let path = Path::new("/positions");
+            File::create(native, path)?;
+            let mut file = File::lookup(native, path, file_system::AccessFlags::READ_WRITE.into())?;
+
+            assert_eq!(file.write(native, b"Xila", 0)?, 4);
+
+            let mut buffer = [0u8; 4];
+            for position in [1u64 << 31, (1u64 << 32) + 100] {
+                assert_eq!(
+                    file.read(native, &mut buffer, position),
+                    Err(IoErrorKind::FileTooLarge)
+                );
+                assert_eq!(
+                    file.write(native, b"oops", position),
+                    Err(IoErrorKind::FileTooLarge)
+                );
+                assert_eq!(
+                    file.set_position(native, 0, &Position::Start(position)),
+                    Err(IoErrorKind::FileTooLarge)
+                );
+            }
+
+            // A wrapped offset must not overwrite the start of the file.
+            assert_eq!(file.read(native, &mut buffer, 0)?, 4);
+            assert_eq!(&buffer, b"Xila");
+            file.close(native)
+        })
+        .unwrap();
+    }
 
     #[test]
     fn errored_handle_rejects_metadata_without_publishing_cached_changes() {
