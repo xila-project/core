@@ -48,6 +48,10 @@ impl From<Duration> for Timestamp {
 pub enum ClockSource {
     Host,
     Rtc,
+    /// The firmware's build date, used as the fallback epoch when no real-time
+    /// clock, network or manual source established UTC. It is never written
+    /// back to a real-time clock.
+    BuildDate,
     Manual,
     Network,
 }

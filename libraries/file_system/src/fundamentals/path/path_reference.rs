@@ -43,6 +43,8 @@ impl Path {
     pub const GPIO_DEVICES: &'static Path = Self::from_str("/devices/gpio");
     pub const PWM_DEVICES: &'static Path = Self::from_str("/devices/pwm");
     pub const HUMAN_INTERFACE_DEVICES: &'static Path = Self::from_str("/devices/human_interface");
+    /// Real-time clock node holding wall-clock time (UTC) across resets.
+    pub const REAL_TIME_CLOCK: &'static Path = Self::from_str("/devices/time/real_time_clock");
 
     /// System and application configuration.
     pub const CONFIGURATION: &'static Path = Self::from_str("/configuration");

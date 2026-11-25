@@ -21,6 +21,7 @@
 //! | `b'i'`    | `0x69` | I2C                 | `device::i2c` / `drivers_peripherals::i2c`|
 //! | `b'n'`    | `0x6E` | Network interface   | `network`                                |
 //! | `b'p'`    | `0x70` | PWM                 | `device::pwm` / `drivers_peripherals::pwm`|
+//! | `b'r'`    | `0x72` | Real-time clock     | `device::real_time_clock` / `drivers_peripherals::real_time_clock` |
 //! | `b's'`    | `0x73` | SPI                 | `device::spi` / `drivers_peripherals::spi`|
 //! | `b'u'`    | `0x75` | UART                | `device::uart` / `drivers_peripherals::uart` |
 //! | `b'w'`    | `0x77` | Wi-Fi               | `network`                                |
@@ -78,6 +79,9 @@ pub const NETWORK: u8 = b'n';
 /// Pulse-width modulation channel (`b'p'`).
 pub const PWM: u8 = b'p';
 
+/// Real-time clock: wall-clock time (UTC) kept across resets and power-off (`b'r'`).
+pub const REAL_TIME_CLOCK: u8 = b'r';
+
 /// Serial Peripheral Interface endpoint (`b's'`).
 pub const SPI: u8 = b's';
 
@@ -104,6 +108,7 @@ pub const ALL: &[u8] = &[
     I2C,
     NETWORK,
     PWM,
+    REAL_TIME_CLOCK,
     SPI,
     UART,
     WIFI,

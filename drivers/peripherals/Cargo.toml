@@ -11,6 +11,7 @@ embedded-hal = { workspace = true, optional = true }
 file_system = { workspace = true }
 peripherals = { workspace = true, optional = true }
 portable-atomic = { workspace = true }
+rtcc = { workspace = true, optional = true }
 shared = { workspace = true }
 synchronization = { workspace = true }
 task = { workspace = true, optional = true }
@@ -23,6 +24,7 @@ testing = { workspace = true }
 embedded-hal = { workspace = true }
 peripherals = { workspace = true, features = ["mock"] }
 little_fs = { workspace = true }
+memory_file_system = { workspace = true }
 time = { workspace = true }
 users = { workspace = true }
 log = { workspace = true }
@@ -48,6 +50,12 @@ spi = ["dep:embedded-hal", "dep:peripherals", "peripherals/spi"]
 # PWM device node over `peripherals::pwm` (adapter, control commands, mount helper).
 power = ["dep:peripherals", "peripherals/power"]
 pwm = ["dep:embedded-hal", "dep:peripherals", "peripherals/pwm"]
+# Real-time clock node over `peripherals::real_time_clock` (adapter, control commands, mount
+# helper).
+real-time-clock = ["dep:peripherals", "peripherals/real-time-clock"]
+# Generic external RTC chip lower half over `rtcc::DateTimeAccess` (for example `ds323x` on an
+# I2C bus).
+external-real-time-clock = ["real-time-clock", "dep:rtcc"]
 
 [lib]
 name = "drivers_peripherals"

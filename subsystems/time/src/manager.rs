@@ -1,9 +1,10 @@
 use crate::{
     Error, RealtimeSample, RealtimeSource, RealtimeStatus, Result, Synchronization, Timestamp,
 };
-use core::cell::RefCell;
+use core::cell::{Cell, RefCell};
 use core::time::Duration;
 use synchronization::blocking_mutex::{Mutex, raw::CriticalSectionRawMutex};
+use synchronization::signal::Signal;
 
 /// Nominal resolution of the default monotonic source, rounded up to nanoseconds.
 /// Actual precision can be coarser (for example, browser privacy restrictions).
@@ -74,10 +75,18 @@ fn duration_from_ticks(ticks: u64) -> Duration {
 /// State updates and reads are serialized with a short critical section, without
 /// allocation or I/O while locked. Custom monotonic sources must be nonblocking
 /// and safe to call in that critical section.
+///
+/// Every successful `set_realtime` and every `invalidate` also bumps
+/// [`Manager::change_generation`] and signals [`Manager::wait_for_change`] after
+/// the critical section is released, so a runtime service (for example the
+/// real-time clock write-back task) can react to UTC changes without polling and
+/// without holding the clock lock. The signal has a single consumer.
 pub struct Manager<'a> {
     monotonic_clock: &'a dyn MonotonicClock,
     start_time: Duration,
     realtime: Mutex<CriticalSectionRawMutex, RefCell<RealtimeStatus>>,
+    changes: Mutex<CriticalSectionRawMutex, Cell<u64>>,
+    change_signal: Signal<CriticalSectionRawMutex, u64>,
 }
 
 impl<'a> Manager<'a> {
@@ -112,6 +121,8 @@ impl<'a> Manager<'a> {
                 correction_nanoseconds: 0,
                 synchronization: None,
             })),
+            changes: Mutex::new(Cell::new(0)),
+            change_signal: Signal::new(),
         }
     }
 
@@ -160,7 +171,7 @@ impl<'a> Manager<'a> {
         if sample.resolution.is_zero() {
             return Err(Error::InvalidResolution);
         }
-        self.realtime.lock(|state| {
+        let result = self.realtime.lock(|state| {
             let now = self.monotonic_now();
             let correction = sample
                 .timestamp
@@ -177,7 +188,13 @@ impl<'a> Manager<'a> {
                 }),
             };
             Ok(())
-        })
+        });
+        // Notify after the clock lock is released: waiters must never run
+        // inside the critical section.
+        if result.is_ok() {
+            self.notify_change();
+        }
+        result
     }
 
     /// Sample a trusted source explicitly; failed reads leave existing UTC intact.
@@ -189,6 +206,40 @@ impl<'a> Manager<'a> {
         self.realtime.lock(|state| *state.borrow())
     }
 
+    /// The current synchronization, or `None` while UTC is invalid.
+    pub fn synchronization(&self) -> Option<Synchronization> {
+        self.status().synchronization
+    }
+
+    /// Generation of the UTC state. Increases on every successful
+    /// [`Manager::set_realtime`] and every [`Manager::invalidate`]; read it to
+    /// then wait for the next change with [`Manager::wait_for_change`].
+    pub fn change_generation(&self) -> u64 {
+        self.changes.lock(|changes| changes.get())
+    }
+
+    /// Waits until the UTC state changed after `generation` and returns the new
+    /// generation. The signal has a single consumer: one waiter at a time.
+    pub async fn wait_for_change(&self, generation: u64) -> u64 {
+        loop {
+            let signaled = self.change_signal.wait().await;
+            if signaled > generation {
+                return signaled;
+            }
+        }
+    }
+
+    /// Bumps the generation and signals waiters. Called after the clock lock is
+    /// released, never inside it.
+    fn notify_change(&self) {
+        let generation = self.changes.lock(|changes| {
+            let next = changes.get().wrapping_add(1);
+            changes.set(next);
+            next
+        });
+        self.change_signal.signal(generation);
+    }
+
     /// Mark UTC invalid without disturbing the monotonic clock or its deadlines.
     pub fn invalidate(&self) {
         self.realtime.lock(|state| {
@@ -197,6 +248,7 @@ impl<'a> Manager<'a> {
                 synchronization: None,
             };
         });
+        self.notify_change();
     }
 
     /// Nominal quantization; this remains queryable while UTC is invalid.

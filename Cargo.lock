@@ -1320,6 +1320,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "rtcc"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34cdafab440283cfef25f6b08e6dde7339c80efa920865c96a4e1923caae0ee7"
+dependencies = [
+ "chrono",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2160,10 +2169,12 @@ dependencies = [
  "embedded-hal 1.0.0",
  "embedded-io",
  "portable-atomic",
+ "rtcc",
  "xila-device",
  "xila-file-system",
  "xila-little-fs",
  "xila-log",
+ "xila-memory-file-system",
  "xila-peripherals",
  "xila-shared",
  "xila-synchronization",
@@ -2505,14 +2516,17 @@ name = "xila-time"
 version = "0.1.0"
 dependencies = [
  "critical-section",
+ "embassy-futures",
  "embassy-time",
  "embedded-i18n",
  "xila-file-system",
  "xila-log",
+ "xila-peripherals",
  "xila-shared",
  "xila-synchronization",
  "xila-task",
  "xila-testing-support",
+ "xila-users",
 ]
 
 [[package]]
