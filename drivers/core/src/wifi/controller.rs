@@ -222,11 +222,12 @@ impl MockWifiController {
         let result = self.shared.state.lock(|state| {
             let mut state = state.borrow_mut();
             match command {
-                GET_KIND::IDENTIFIER => *GET_KIND::cast_output(output)? = InterfaceKind::WiFi,
+                GET_KIND::IDENTIFIER => *GET_KIND::cast_output(output)? = InterfaceKind::WiFi as u8,
                 IS_LINK_UP::IDENTIFIER => {
-                    *IS_LINK_UP::cast_output(output)? = state.alive
+                    *IS_LINK_UP::cast_output(output)? = (state.alive
                         && state.radio == WifiRadioState::ON
-                        && state.connection == WifiConnectionState::CONNECTED
+                        && state.connection == WifiConnectionState::CONNECTED)
+                        as u8
                 }
                 GET_WIFI_CAPABILITIES::IDENTIFIER => {
                     *GET_WIFI_CAPABILITIES::cast_output(output)? = WifiCapabilities {
