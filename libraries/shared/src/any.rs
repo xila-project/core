@@ -1,6 +1,8 @@
 use core::mem::align_of;
 use core::slice;
 
+use crate::PlainData;
+
 #[repr(transparent)]
 #[derive(Debug, PartialEq, Eq)]
 pub struct AnyByLayout([u8]);
@@ -50,29 +52,32 @@ impl AnyByLayout {
 
     /// Returns the payload as a `T` only when it is an exact fit: the payload
     /// length equals `size_of::<T>()` and its address is aligned for `T`.
-    pub fn cast_mutable<T>(&mut self) -> Option<&mut T> {
+    ///
+    /// `T` must be [`PlainData`], so every payload byte pattern is a valid `T`;
+    /// a `bool` or enum payload can never hold an invalid value this way.
+    pub fn cast_mutable<T: PlainData>(&mut self) -> Option<&mut T> {
         if !self.is_exact_fit::<T>() {
             return None;
         }
         // SAFETY: `is_exact_fit` proved that the payload is exactly
-        // `size_of::<T>()` bytes long and aligned for `T`. Size and alignment do
-        // not prove that the bytes are a valid `T`: control command payload types
-        // must accept every bit pattern (plain integers and byte arrays, not
-        // `bool` or enums). The exclusive borrow of `self` gives unique access.
+        // `size_of::<T>()` bytes long and aligned for `T`, and `T: PlainData`
+        // proves that every bit pattern of that size is a valid `T`. The
+        // exclusive borrow of `self` gives unique access.
         Some(unsafe { &mut *self.0.as_mut_ptr().cast::<T>() })
     }
 
     /// Returns the payload as a `T` only when it is an exact fit: the payload
     /// length equals `size_of::<T>()` and its address is aligned for `T`.
-    pub fn cast<T>(&self) -> Option<&T> {
+    ///
+    /// `T` must be [`PlainData`], so every payload byte pattern is a valid `T`;
+    /// a `bool` or enum payload can never hold an invalid value this way.
+    pub fn cast<T: PlainData>(&self) -> Option<&T> {
         if !self.is_exact_fit::<T>() {
             return None;
         }
         // SAFETY: `is_exact_fit` proved that the payload is exactly
-        // `size_of::<T>()` bytes long and aligned for `T`. Size and alignment do
-        // not prove that the bytes are a valid `T`: control command payload types
-        // must accept every bit pattern (plain integers and byte arrays, not
-        // `bool` or enums).
+        // `size_of::<T>()` bytes long and aligned for `T`, and `T: PlainData`
+        // proves that every bit pattern of that size is a valid `T`.
         Some(unsafe { &*self.0.as_ptr().cast::<T>() })
     }
 
@@ -263,11 +268,14 @@ mod tests {
 
     #[test]
     fn test_struct_conversion() {
-        #[derive(Debug, PartialEq, Clone)]
-        struct TestStruct {
-            a: u32,
-            b: u16,
-            c: u8,
+        crate::plain_data! {
+            #[repr(C)]
+            #[derive(Debug, PartialEq, Clone)]
+            struct TestStruct {
+                a: u32,
+                b: u16,
+                c: u8,
+            }
         }
 
         let mut original = TestStruct {

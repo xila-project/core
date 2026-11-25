@@ -95,7 +95,7 @@ pub async fn hash_password(
     .await
     .map_err(Error::FailedToHashPassword)?;
 
-    file.control(SET_ALGORITHM, &HashAlgorithm::Sha512)
+    file.control(SET_ALGORITHM, &(HashAlgorithm::Sha512 as u8))
         .await
         .map_err(Error::FailedToHashPassword)?;
 

@@ -7,13 +7,59 @@ use file_system::{
 };
 use shared::AnyByLayout;
 
+pub type MainFunction = Option<
+    Box<dyn Fn(&'static ExecutableContext, Standard<'static>, Vec<String>) -> MainFuture + 'static>,
+>;
+
+file_system::plain_data! {
+    #[repr(C)]
+    /// Plain-data payload of [`GET_MAIN_FUNCTION`]: the two words of a
+    /// [`MainFunction`] fat pointer, so the payload size and layout are
+    /// unchanged. A function pointer is not plain data, so the payload type
+    /// is this mirror; the host converts it back where the value is read.
+    #[derive(Clone, Copy, Debug, Default)]
+    pub struct MainFunctionAbi {
+        pub data: usize,
+        pub vtable: usize,
+    }
+}
+
+const _: () = assert!(
+    core::mem::size_of::<MainFunctionAbi>() == core::mem::size_of::<MainFunction>()
+        && core::mem::align_of::<MainFunctionAbi>() == core::mem::align_of::<MainFunction>(),
+    "MainFunctionAbi must mirror the MainFunction fat pointer"
+);
+
+impl From<MainFunction> for MainFunctionAbi {
+    fn from(value: MainFunction) -> Self {
+        // SAFETY: the const assertion above proves the sizes and alignments
+        // match, and a fat pointer is exactly two words.
+        unsafe { core::mem::transmute(value) }
+    }
+}
+
+impl MainFunctionAbi {
+    /// Reinterprets a payload written by the host device as the function
+    /// pointer it carries.
+    ///
+    /// # Safety
+    ///
+    /// The value must come from a [`MainFunction`] produced by the host:
+    /// arbitrary bytes are not a valid function pointer.
+    pub unsafe fn into_main_function(self) -> MainFunction {
+        // SAFETY: the caller guarantees the payload holds a real
+        // `MainFunction`; sizes and alignments match (asserted above).
+        unsafe { core::mem::transmute(self) }
+    }
+}
+
 define_command!(
     GET_MAIN_FUNCTION,
     Read,
     device::kind::EXECUTABLE,
     1,
     (),
-    MainFunction
+    MainFunctionAbi
 );
 
 pub trait ExecutableTrait: 'static + Send + Sync {
@@ -58,10 +104,6 @@ impl ExecutableContext {
 pub type MainFuture =
     Pin<Box<dyn Future<Output = core::result::Result<(), NonZeroUsize>> + 'static>>;
 
-pub type MainFunction = Option<
-    Box<dyn Fn(&'static ExecutableContext, Standard<'static>, Vec<String>) -> MainFuture + 'static>,
->;
-
 pub struct ExecutableWrapper<T: ExecutableTrait>(T, &'static ExecutableContext);
 
 impl<T: ExecutableTrait> ExecutableWrapper<T> {
@@ -105,12 +147,13 @@ impl<T: ExecutableTrait> DirectBaseOperations for ExecutableWrapper<T> {
                 GET_MAIN_FUNCTION::IDENTIFIER => {
                     let output = GET_MAIN_FUNCTION::cast_output(output)?;
                     let executable_context = self.1;
-                    *output = Some(Box::new(move |context, standard, arguments| {
+                    let main: MainFunction = Some(Box::new(move |context, standard, arguments| {
                         let mut standard = standard;
                         standard.context = context;
                         debug_assert!(core::ptr::eq(context, executable_context));
                         T::main(standard, arguments)
                     }));
+                    *output = MainFunctionAbi::from(main);
                     Ok(())
                 }
                 _ => Err(file_system::IoErrorKind::Unsupported),
@@ -146,4 +189,21 @@ macro_rules! mount_executables {
     }()
 };
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn main_function_abi_round_trips_a_function_pointer() {
+        let main: MainFunction = Some(Box::new(|_, _, _| Box::pin(async { Ok(()) })));
+        let abi = MainFunctionAbi::from(main);
+        // SAFETY: the payload was produced from a real `MainFunction`.
+        let recovered = unsafe { abi.into_main_function() };
+        assert!(recovered.is_some());
+        let abi = MainFunctionAbi::from(MainFunction::None);
+        // SAFETY: the payload was produced from a real `MainFunction`.
+        assert!(unsafe { abi.into_main_function() }.is_none());
+    }
 }

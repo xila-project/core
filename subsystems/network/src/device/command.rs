@@ -1,5 +1,43 @@
-use crate::{InterfaceKind, IpAddress, IpCidr, MacAddress, Route};
-use file_system::{ControlCommand, define_command};
+use crate::{IpAddressAbi, IpCidrAbi, MacAddress, RouteAbi};
+use file_system::{ControlCommand, IoErrorKind, define_command};
+
+file_system::plain_data! {
+    #[repr(C)]
+    /// Plain-data payload mirror of `Option<usize>`: same size and alignment
+    /// on every target, but every byte pattern is a valid value. `present` is
+    /// `0` or `1`; any other value is rejected with `InvalidArgument`.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct OptionalUsizeAbi {
+        pub present: u8,
+        pub reserved: [u8; core::mem::size_of::<usize>() - 1],
+        pub value: usize,
+    }
+}
+
+impl From<Option<usize>> for OptionalUsizeAbi {
+    fn from(value: Option<usize>) -> Self {
+        match value {
+            Some(value) => Self {
+                present: 1,
+                reserved: [0; core::mem::size_of::<usize>() - 1],
+                value,
+            },
+            None => Self::default(),
+        }
+    }
+}
+
+impl TryFrom<OptionalUsizeAbi> for Option<usize> {
+    type Error = IoErrorKind;
+
+    fn try_from(value: OptionalUsizeAbi) -> file_system::Result<Self> {
+        match value.present {
+            0 if value.value == 0 => Ok(None),
+            1 => Ok(Some(value.value)),
+            _ => Err(IoErrorKind::InvalidArgument),
+        }
+    }
+}
 
 // GET_KIND previously collided with GET_STATE at n/1. Consumers must rebuild
 // for n/21; keep all existing generic command numbers stable.
@@ -9,7 +47,7 @@ define_command!(
     device::kind::NETWORK,
     CommandNumber::GetKind as u8,
     (),
-    InterfaceKind
+    u8
 );
 
 #[repr(u8)]
@@ -38,12 +76,18 @@ enum CommandNumber {
     GetKind,
 }
 
+// Payload convention: a payload must be plain data, so a payload byte pattern
+// can never be an invalid value of the payload type. Flags and enum-like
+// values are stored as bytes (`0` or `1`, or the enum discriminant) and
+// converted with `TryFrom` where the value is read, rejecting unknown values
+// with `InvalidArgument`. Structured values use their plain-data `*Abi`
+// mirrors (`IpAddressAbi`, `IpCidrAbi`, `RouteAbi`, `OptionalUsizeAbi`).
 define_command!(
     SET_STATE,
     Write,
     device::kind::NETWORK,
     CommandNumber::SetState as u8,
-    bool,
+    u8,
     ()
 );
 define_command!(
@@ -52,7 +96,7 @@ define_command!(
     device::kind::NETWORK,
     CommandNumber::GetState as u8,
     (),
-    bool
+    u8
 );
 define_command!(
     GET_HARDWARE_ADDRESS,
@@ -84,7 +128,7 @@ define_command!(
     device::kind::NETWORK,
     CommandNumber::GetMaximumBurstSize as u8,
     (),
-    Option<usize>
+    OptionalUsizeAbi
 );
 define_command!(
     IS_LINK_UP,
@@ -92,7 +136,7 @@ define_command!(
     device::kind::NETWORK,
     CommandNumber::IsLinkUp as u8,
     (),
-    bool
+    u8
 );
 define_command!(
     GET_ROUTE_COUNT,
@@ -108,14 +152,14 @@ define_command!(
     device::kind::NETWORK,
     CommandNumber::GetRoute as u8,
     usize,
-    Route
+    RouteAbi
 );
 define_command!(
     ADD_ROUTE,
     Write,
     device::kind::NETWORK,
     CommandNumber::AddRoute as u8,
-    Route,
+    RouteAbi,
     ()
 );
 define_command!(
@@ -140,14 +184,14 @@ define_command!(
     device::kind::NETWORK,
     CommandNumber::GetDnsServer as u8,
     usize,
-    IpAddress
+    IpAddressAbi
 );
 define_command!(
     ADD_DNS_SERVER,
     Write,
     device::kind::NETWORK,
     CommandNumber::AddDnsServer as u8,
-    IpAddress,
+    IpAddressAbi,
     ()
 );
 define_command!(
@@ -163,7 +207,7 @@ define_command!(
     Write,
     device::kind::NETWORK,
     CommandNumber::SetDhcpState as u8,
-    bool,
+    u8,
     ()
 );
 define_command!(
@@ -172,7 +216,7 @@ define_command!(
     device::kind::NETWORK,
     CommandNumber::GetDhcpState as u8,
     (),
-    bool
+    u8
 );
 define_command!(
     GET_IP_ADDRESS_COUNT,
@@ -188,14 +232,14 @@ define_command!(
     device::kind::NETWORK,
     CommandNumber::GetIpAddress as u8,
     usize,
-    IpCidr
+    IpCidrAbi
 );
 define_command!(
     ADD_IP_ADDRESS,
     Write,
     device::kind::NETWORK,
     CommandNumber::AddIpAddress as u8,
-    IpCidr,
+    IpCidrAbi,
     ()
 );
 define_command!(
@@ -206,3 +250,41 @@ define_command!(
     usize,
     ()
 );
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_usize_abi_round_trips_and_keeps_the_option_layout() {
+        assert_eq!(
+            core::mem::size_of::<OptionalUsizeAbi>(),
+            core::mem::size_of::<Option<usize>>()
+        );
+        assert_eq!(
+            core::mem::align_of::<OptionalUsizeAbi>(),
+            core::mem::align_of::<Option<usize>>()
+        );
+        assert_eq!(
+            Option::<usize>::try_from(OptionalUsizeAbi::from(Some(1500))).unwrap(),
+            Some(1500)
+        );
+        assert_eq!(
+            Option::<usize>::try_from(OptionalUsizeAbi::from(None)).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn optional_usize_abi_rejects_an_unknown_present_byte() {
+        let abi = OptionalUsizeAbi {
+            present: 2,
+            reserved: [0; core::mem::size_of::<usize>() - 1],
+            value: 0,
+        };
+        assert_eq!(
+            Option::<usize>::try_from(abi),
+            Err(IoErrorKind::InvalidArgument)
+        );
+    }
+}

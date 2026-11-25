@@ -240,7 +240,9 @@ async fn execute_inner(
 
     let new_user = get_overridden_user(&statistics, user)?;
 
-    let main_function: MainFunction = file.control(GET_MAIN_FUNCTION, &()).await?;
+    let main_function_abi = file.control(GET_MAIN_FUNCTION, &()).await?;
+    // SAFETY: the device wrote a real `MainFunction` into the payload.
+    let main_function = unsafe { main_function_abi.into_main_function() };
 
     let main = main_function.ok_or(Error::FailedToGetMainFunction)?;
 

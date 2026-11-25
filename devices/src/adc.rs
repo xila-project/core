@@ -19,44 +19,52 @@ use file_system::{ControlCommand, define_command};
 /// Version of every ADC control ABI struct in this module.
 pub const ABI_VERSION: u16 = 1;
 
-/// Carries only the ABI version. Used as input of queries and output of commands
-/// that have no other payload.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct VersionAbi {
-    pub version: u16,
-    pub reserved: u16,
+file_system::plain_data! {
+    #[repr(C)]
+    /// Carries only the ABI version. Used as input of queries and output of commands
+    /// that have no other payload.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct VersionAbi {
+        pub version: u16,
+        pub reserved: u16,
+    }
 }
 
-/// Converter geometry. `reference_millivolts` is meaningful only when
-/// `reference_present` is 1.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct InfoAbi {
-    pub version: u16,
-    pub channels: u8,
-    pub resolution_bits: u8,
-    pub reference_millivolts: u32,
-    pub reference_present: u8,
-    pub reserved: [u8; 3],
+file_system::plain_data! {
+    #[repr(C)]
+    /// Converter geometry. `reference_millivolts` is meaningful only when
+    /// `reference_present` is 1.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct InfoAbi {
+        pub version: u16,
+        pub channels: u8,
+        pub resolution_bits: u8,
+        pub reference_millivolts: u32,
+        pub reference_present: u8,
+        pub reserved: [u8; 3],
+    }
 }
 
-/// Selects the channel used by plain reads.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SelectChannelAbi {
-    pub version: u16,
-    pub channel: u8,
-    pub reserved: u8,
+file_system::plain_data! {
+    #[repr(C)]
+    /// Selects the channel used by plain reads.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct SelectChannelAbi {
+        pub version: u16,
+        pub channel: u8,
+        pub reserved: u8,
+    }
 }
 
-/// One conversion in millivolts.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct MillivoltsAbi {
-    pub version: u16,
-    pub reserved: u16,
-    pub millivolts: u32,
+file_system::plain_data! {
+    #[repr(C)]
+    /// One conversion in millivolts.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct MillivoltsAbi {
+        pub version: u16,
+        pub reserved: u16,
+        pub millivolts: u32,
+    }
 }
 
 define_command!(GET_INFO, Read, crate::kind::ADC, 0x00, VersionAbi, InfoAbi);

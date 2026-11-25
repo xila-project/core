@@ -29,28 +29,32 @@ pub const FLOW_CONTROL_NONE: u8 = 0;
 pub const FLOW_CONTROL_RTS_CTS: u8 = 1;
 pub const FLOW_CONTROL_XON_XOFF: u8 = 2;
 
-/// Carries only the ABI version. Used as input and output of commands that
-/// have no other payload.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct VersionAbi {
-    pub version: u32,
+file_system::plain_data! {
+    #[repr(C)]
+    /// Carries only the ABI version. Used as input and output of commands that
+    /// have no other payload.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct VersionAbi {
+        pub version: u32,
+    }
 }
 
-/// UART line configuration.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ConfigAbi {
-    pub version: u32,
-    pub baud_rate: u32,
-    /// 5, 6, 7 or 8.
-    pub data_bits: u8,
-    /// 1 or 2.
-    pub stop_bits: u8,
-    /// One of `PARITY_NONE`, `PARITY_EVEN`, `PARITY_ODD`.
-    pub parity: u8,
-    /// One of `FLOW_CONTROL_NONE`, `FLOW_CONTROL_RTS_CTS`, `FLOW_CONTROL_XON_XOFF`.
-    pub flow_control: u8,
+file_system::plain_data! {
+    #[repr(C)]
+    /// UART line configuration.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct ConfigAbi {
+        pub version: u32,
+        pub baud_rate: u32,
+        /// 5, 6, 7 or 8.
+        pub data_bits: u8,
+        /// 1 or 2.
+        pub stop_bits: u8,
+        /// One of `PARITY_NONE`, `PARITY_EVEN`, `PARITY_ODD`.
+        pub parity: u8,
+        /// One of `FLOW_CONTROL_NONE`, `FLOW_CONTROL_RTS_CTS`, `FLOW_CONTROL_XON_XOFF`.
+        pub flow_control: u8,
+    }
 }
 
 define_command!(

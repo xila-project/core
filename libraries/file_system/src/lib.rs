@@ -110,6 +110,8 @@ mod time;
 
 pub use error::*;
 
+pub use shared::{PlainData, plain_data};
+
 pub use context::*;
 
 pub use devices::*;

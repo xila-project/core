@@ -9,12 +9,14 @@ define_command!(GET_BLOCK_SIZE, Read, b'B', 0, (), u32);
 define_command!(GET_BLOCK_COUNT, Read, b'B', 1, (), Size);
 define_command!(ERASE, Write, b'B', 2, EraseRange, ());
 
-/// Byte range of a block device, relative to its start.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct EraseRange {
-    pub position: Size,
-    pub size: Size,
+crate::plain_data! {
+    #[repr(C)]
+    /// Byte range of a block device, relative to its start.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct EraseRange {
+        pub position: Size,
+        pub size: Size,
+    }
 }
 
 pub trait BlockDevice: BaseOperations + MountOperations {}

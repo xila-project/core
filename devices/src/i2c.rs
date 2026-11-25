@@ -18,46 +18,54 @@ pub const ABI_VERSION: u16 = 1;
 /// Largest write or read length of one `WRITE_READ` transfer.
 pub const MAX_TRANSFER_LENGTH: usize = 64;
 
-/// Input of `SELECT_ADDRESS`.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SelectAddressInput {
-    pub version: u16,
-    /// `0` selects a 7-bit address, `1` a 10-bit address.
-    pub ten_bit: u8,
-    pub reserved: u8,
-    pub address: u16,
+file_system::plain_data! {
+    #[repr(C)]
+    /// Input of `SELECT_ADDRESS`.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct SelectAddressInput {
+        pub version: u16,
+        /// `0` selects a 7-bit address, `1` a 10-bit address.
+        pub ten_bit: u8,
+        pub reserved: u8,
+        pub address: u16,
+    }
 }
 
-/// Output of `GET_FREQUENCY`.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct FrequencyOutput {
-    pub version: u16,
-    /// `1` when the controller supports 10-bit addresses.
-    pub ten_bit_supported: u8,
-    pub reserved: u8,
-    pub frequency_hz: u32,
-    pub max_frequency_hz: u32,
+file_system::plain_data! {
+    #[repr(C)]
+    /// Output of `GET_FREQUENCY`.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct FrequencyOutput {
+        pub version: u16,
+        /// `1` when the controller supports 10-bit addresses.
+        pub ten_bit_supported: u8,
+        pub reserved: u8,
+        pub frequency_hz: u32,
+        pub max_frequency_hz: u32,
+    }
 }
 
-/// Input of `SET_FREQUENCY`.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SetFrequencyInput {
-    pub version: u16,
-    pub reserved: u16,
-    pub frequency_hz: u32,
+file_system::plain_data! {
+    #[repr(C)]
+    /// Input of `SET_FREQUENCY`.
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct SetFrequencyInput {
+        pub version: u16,
+        pub reserved: u16,
+        pub frequency_hz: u32,
+    }
 }
 
-/// Input of `WRITE_READ`. Only the first `write_length` bytes of `write` are sent.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WriteReadInput {
-    pub version: u16,
-    pub write_length: u8,
-    pub read_length: u8,
-    pub write: [u8; MAX_TRANSFER_LENGTH],
+file_system::plain_data! {
+    #[repr(C)]
+    /// Input of `WRITE_READ`. Only the first `write_length` bytes of `write` are sent.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct WriteReadInput {
+        pub version: u16,
+        pub write_length: u8,
+        pub read_length: u8,
+        pub write: [u8; MAX_TRANSFER_LENGTH],
+    }
 }
 
 impl Default for WriteReadInput {
@@ -71,14 +79,16 @@ impl Default for WriteReadInput {
     }
 }
 
-/// Output of `WRITE_READ`. The first `read_length` bytes of `read` are valid.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WriteReadOutput {
-    pub version: u16,
-    pub read_length: u8,
-    pub reserved: u8,
-    pub read: [u8; MAX_TRANSFER_LENGTH],
+file_system::plain_data! {
+    #[repr(C)]
+    /// Output of `WRITE_READ`. The first `read_length` bytes of `read` are valid.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct WriteReadOutput {
+        pub version: u16,
+        pub read_length: u8,
+        pub reserved: u8,
+        pub read: [u8; MAX_TRANSFER_LENGTH],
+    }
 }
 
 impl Default for WriteReadOutput {

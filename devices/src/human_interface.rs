@@ -494,25 +494,29 @@ pub mod system {
     pub const WAKE_UP: u8 = 0x83;
 }
 
-/// Carries only the ABI version and a reserved field. Input of [`GET_STATUS`].
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct VersionAbi {
-    pub version: u16,
-    pub reserved: u16,
+file_system::plain_data! {
+    #[repr(C)]
+    /// Carries only the ABI version and a reserved field. Input of [`GET_STATUS`].
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct VersionAbi {
+        pub version: u16,
+        pub reserved: u16,
+    }
 }
 
-/// Connection state and keyboard indicators of the computer. Output of [`GET_STATUS`].
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct StatusAbi {
-    pub version: u16,
-    /// `1` when a computer is connected and listening, else `0`.
-    pub connected: u8,
-    /// Keyboard indicator bitmask from the computer: [`INDICATOR_NUM_LOCK`],
-    /// [`INDICATOR_CAPS_LOCK`], [`INDICATOR_SCROLL_LOCK`].
-    pub indicators: u8,
-    pub reserved: [u8; 4],
+file_system::plain_data! {
+    #[repr(C)]
+    /// Connection state and keyboard indicators of the computer. Output of [`GET_STATUS`].
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct StatusAbi {
+        pub version: u16,
+        /// `1` when a computer is connected and listening, else `0`.
+        pub connected: u8,
+        /// Keyboard indicator bitmask from the computer: [`INDICATOR_NUM_LOCK`],
+        /// [`INDICATOR_CAPS_LOCK`], [`INDICATOR_SCROLL_LOCK`].
+        pub indicators: u8,
+        pub reserved: [u8; 4],
+    }
 }
 
 define_command!(
