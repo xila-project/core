@@ -4,6 +4,8 @@
  *
  *   sockets     address text, getaddrinfo, a TCP exchange, UDP datagrams and errno values
  *   family      wildcard binds keep their address family
+ *   blocking    a blocking accept resets a cross-family connection and still accepts a
+ *               same-family one on the same listener
  *   no-network  what a process gets without network rights
  *   spawn       a parent granted connect and resolve passes on a subset, never more
  *   child       run by spawn: a child with connect only
@@ -15,10 +17,12 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <poll.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 #include <xila/stubs.h>
 
@@ -277,10 +281,11 @@ static int errors(void) {
 #define FAMILY_TCP_PORT 7111
 #define FAMILY_UDP_PORT 7112
 
-/* A wildcard bind keeps its address family. The probe sends IPv4 traffic only, which
-   the test's loopback interface carries: an IPv6 wildcard bind must not get it, while an
-   IPv4 one gets it and reports IPv4 peers. The other direction runs the same check
-   (`same_family` in the ABI, which has a unit test for both). */
+/* A wildcard bind keeps its address family. A listener bound to 0.0.0.0 or :: refuses
+   a connection of the other family and resets it at once, so the peer's first read
+   fails without it sending anything, while a same-family connection is accepted with
+   a peer of that family. The test's loopback carries 127.0.0.1 and ::1, so both
+   directions run. */
 static int family(void) {
     struct sockaddr_in6 any6 = {.sin6_family = AF_INET6, .sin6_port = htons(FAMILY_TCP_PORT),
                                 .sin6_addr = IN6ADDR_ANY_INIT};
@@ -289,7 +294,8 @@ static int family(void) {
                              bind(server6, (struct sockaddr *)&any6, sizeof(any6)) == 0 &&
                              listen(server6, 1) == 0);
     /* The IPv4 connection completes its handshake with the listening socket, which
-       then refuses it: it is never reported or accepted. */
+       then refuses it: it is never reported or accepted, and the client is reset at
+       once. */
     int other = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in to4 = {.sin_family = AF_INET, .sin_port = htons(FAMILY_TCP_PORT),
                               .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
@@ -297,6 +303,13 @@ static int family(void) {
     struct pollfd wait = {.fd = server6, .events = POLLIN};
     CHECK("poll refuses IPv4", poll(&wait, 1, 100) == 0);
     CHECK("accept refuses IPv4", accept(server6, NULL, NULL) == -1 && errno == EAGAIN);
+    struct pollfd other_wait = {.fd = other, .events = POLLIN};
+    CHECK("IPv4 client sees the reset", poll(&other_wait, 1, 1000) == 1 &&
+                                            (other_wait.revents & (POLLIN | POLLERR | POLLHUP)) != 0);
+    char sink;
+    CHECK("IPv4 read refuses at once",
+          recv(other, &sink, sizeof(sink), MSG_DONTWAIT) == -1 &&
+              (errno == ECONNRESET || errno == ECONNREFUSED));
     CHECK("close IPv6 server", close(other) == 0 && close(server6) == 0);
 
     struct sockaddr_in any = {.sin_family = AF_INET, .sin_port = htons(FAMILY_TCP_PORT + 2),
@@ -313,6 +326,29 @@ static int family(void) {
     CHECK("accept IPv4", accepted >= 0 && peer.ss_family == AF_INET &&
                              length == sizeof(struct sockaddr_in));
     CHECK("close TCP", close(accepted) == 0 && close(client) == 0 && close(server) == 0);
+
+    /* The reverse direction: an IPv6 client to an IPv4 wildcard listener is refused
+       and reset at once as well. */
+    struct sockaddr_in any4 = {.sin_family = AF_INET, .sin_port = htons(FAMILY_TCP_PORT + 4),
+                               .sin_addr.s_addr = htonl(INADDR_ANY)};
+    int server4 = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+    CHECK("IPv4 wildcard server", server4 >= 0 &&
+                                     bind(server4, (struct sockaddr *)&any4, sizeof(any4)) == 0 &&
+                                     listen(server4, 1) == 0);
+    int v6client = socket(AF_INET6, SOCK_STREAM, 0);
+    struct sockaddr_in6 to6b = {.sin6_family = AF_INET6, .sin6_port = htons(FAMILY_TCP_PORT + 4),
+                                .sin6_addr = IN6ADDR_LOOPBACK_INIT};
+    CHECK("IPv6 handshake", connect(v6client, (struct sockaddr *)&to6b, sizeof(to6b)) == 0);
+    struct pollfd wait4 = {.fd = server4, .events = POLLIN};
+    CHECK("poll refuses IPv6", poll(&wait4, 1, 100) == 0);
+    CHECK("accept refuses IPv6", accept(server4, NULL, NULL) == -1 && errno == EAGAIN);
+    struct pollfd six_client = {.fd = v6client, .events = POLLIN};
+    CHECK("IPv6 client sees the reset", poll(&six_client, 1, 1000) == 1 &&
+                                            (six_client.revents & (POLLIN | POLLERR | POLLHUP)) != 0);
+    CHECK("IPv6 read refuses at once",
+          recv(v6client, &sink, sizeof(sink), MSG_DONTWAIT) == -1 &&
+              (errno == ECONNRESET || errno == ECONNREFUSED));
+    CHECK("close IPv4 wildcard server", close(v6client) == 0 && close(server4) == 0);
 
     /* UDP: an IPv6 wildcard socket drops IPv4 datagrams. */
     any6.sin6_port = htons(FAMILY_UDP_PORT);
@@ -360,6 +396,77 @@ static int family(void) {
                                 errno == ENETUNREACH);
     CHECK("close UDP", close(six) == 0 && close(sender) == 0 && close(receiver) == 0);
     puts("family: ok");
+    return 0;
+}
+
+#define BLOCKING_TCP_PORT 7117
+
+struct accept_call {
+    int listener;
+    int accepted;
+};
+
+static void *accept_once(void *argument) {
+    struct accept_call *call = argument;
+    call->accepted = accept(call->listener, NULL, NULL);
+    return NULL;
+}
+
+/* The accept path: a blocking accept running on a second thread refuses a
+   cross-family connection with a reset, and still accepts a same-family
+   connection on the same listener afterwards. */
+static int blocking(void) {
+    struct sockaddr_in6 any6 = {.sin6_family = AF_INET6,
+                                .sin6_port = htons(BLOCKING_TCP_PORT),
+                                .sin6_addr = IN6ADDR_ANY_INIT};
+    int server = socket(AF_INET6, SOCK_STREAM, 0);
+    CHECK("IPv6 listener", server >= 0 &&
+                             bind(server, (struct sockaddr *)&any6, sizeof(any6)) == 0 &&
+                             listen(server, 1) == 0);
+    struct accept_call call = {.listener = server, .accepted = -1};
+    pthread_t thread;
+    CHECK("accept thread", pthread_create(&thread, NULL, accept_once, &call) == 0);
+
+    /* The foreign-family client completes its handshake; the blocking accept refuses
+       it and resets it at once. */
+    int other = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in to4 = {.sin_family = AF_INET, .sin_port = htons(BLOCKING_TCP_PORT),
+                              .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
+    CHECK("IPv4 handshake", connect(other, (struct sockaddr *)&to4, sizeof(to4)) == 0);
+    struct pollfd other_wait = {.fd = other, .events = POLLIN};
+    CHECK("IPv4 client sees the reset", poll(&other_wait, 1, 2000) == 1 &&
+                                            (other_wait.revents & (POLLIN | POLLERR | POLLHUP)) != 0);
+    char sink;
+    CHECK("IPv4 read refuses at once",
+          recv(other, &sink, sizeof(sink), MSG_DONTWAIT) == -1 &&
+              (errno == ECONNRESET || errno == ECONNREFUSED));
+
+    /* Once the listener listens again, a same-family client is accepted on it. */
+    struct sockaddr_in6 to6 = {.sin6_family = AF_INET6, .sin6_port = htons(BLOCKING_TCP_PORT),
+                               .sin6_addr = IN6ADDR_LOOPBACK_INIT};
+    int same = -1;
+    for (int attempt = 0; attempt < 10 && same < 0; attempt++) {
+        const struct timespec pause = {.tv_sec = 0, .tv_nsec = 100 * 1000 * 1000};
+        nanosleep(&pause, NULL);
+        same = socket(AF_INET6, SOCK_STREAM, 0);
+        if (same < 0 || connect(same, (struct sockaddr *)&to6, sizeof(to6)) != 0) {
+            if (same >= 0)
+                close(same);
+            same = -1;
+        }
+    }
+    CHECK("IPv6 handshake", same >= 0);
+    void *joined = NULL;
+    CHECK("accept thread joins", pthread_join(thread, &joined) == 0);
+    CHECK("accept IPv6", call.accepted >= 0);
+    struct sockaddr_storage peer;
+    socklen_t length = sizeof(peer);
+    CHECK("peer family",
+          getpeername(call.accepted, (struct sockaddr *)&peer, &length) == 0 &&
+              peer.ss_family == AF_INET6 && length == sizeof(struct sockaddr_in6));
+    CHECK("close", close(call.accepted) == 0 && close(same) == 0 && close(other) == 0 &&
+                       close(server) == 0);
+    puts("blocking: ok");
     return 0;
 }
 
@@ -456,6 +563,8 @@ int main(int argc, char **argv) {
         return sockets();
     if (strcmp(mode, "family") == 0)
         return family();
+    if (strcmp(mode, "blocking") == 0)
+        return blocking();
     if (strcmp(mode, "no-network") == 0)
         return no_network();
     if (strcmp(mode, "spawn") == 0)

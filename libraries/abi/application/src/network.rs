@@ -158,23 +158,123 @@ fn same_family(family: u32, address: &smoltcp::wire::IpAddress) -> bool {
     theirs == family
 }
 
-/// A listener that has a connection from the other family than it was bound with
-/// aborts it and listens again, so a wildcard listener keeps its family. Returns
-/// whether it did.
-fn refuse_other_family(socket: &mut smoltcp::socket::tcp::Socket, address: NetworkAddress) -> bool {
+/// Whether the listener socket holds a connection from the other family than it was
+/// bound with, which a wildcard listener refuses so that it keeps its family.
+fn foreign_connection(socket: &smoltcp::socket::tcp::Socket, address: NetworkAddress) -> bool {
     use smoltcp::socket::tcp::State;
-    let foreign = matches!(socket.state(), State::Established | State::CloseWait)
+    matches!(socket.state(), State::Established | State::CloseWait)
         && socket
             .remote_endpoint()
-            .is_some_and(|remote| !same_family(address.family, &remote.addr));
-    if foreign {
-        socket.abort();
-        if let Ok(endpoint) = address.endpoint() {
-            // The socket is closed after `abort`, so listening cannot fail on its state.
-            let _ = socket.listen(listen_endpoint(endpoint).into_smoltcp());
-        }
+            .is_some_and(|remote| !same_family(address.family, &remote.addr))
+}
+
+/// Listen on the listener's address again, after a connection was refused.
+fn listen_again(socket: &mut smoltcp::socket::tcp::Socket, address: NetworkAddress) {
+    if let Ok(endpoint) = address.endpoint() {
+        let _ = socket.listen(listen_endpoint(endpoint).into_smoltcp());
     }
-    foreign
+}
+
+/// Upper bound on waiting for the stack to send the reset that refuses a cross-family
+/// connection. The stack may never send it: on Ethernet or Wi-Fi the peer's link-layer
+/// address can be gone, and smoltcp retries neighbor discovery forever. When the limit
+/// fires, the listener goes back to listening and the peer sees the refusal only at its
+/// next send, as before.
+const RESET_TIMEOUT_MS: u64 = 1000;
+/// The same limit, in Embassy-time ticks, for the deadline a poll stores on a listener.
+const RESET_TIMEOUT_TICKS: u64 = embassy_time::Duration::from_millis(RESET_TIMEOUT_MS).as_ticks();
+
+/// A listener that has a connection from the other family than it was bound with resets
+/// it, so a wildcard listener keeps its family and the peer is refused at once. Also
+/// waits out a reset that a poll left pending on the closed socket, because `accept`
+/// re-listens on a closed socket and would drop it. Returns whether it did.
+///
+/// The stack sends the reset on its next poll, so it is waited for before listening
+/// again: listening before the reset went out would forget the connection it is sent
+/// on, leaving the peer to see the refusal only once it sends data itself. The wait is
+/// bounded by [`RESET_TIMEOUT_MS`], and the listener listens again whatever the wait
+/// ended on.
+async fn refuse_other_family(socket: &mut TcpSocket, address: NetworkAddress) -> bool {
+    // The check and the abort, in one closure.
+    let refuse = socket
+        .with_mutable(|s| {
+            if foreign_connection(s, address) {
+                s.abort();
+                true
+            } else {
+                // A poll may have aborted a connection and left its reset pending.
+                use smoltcp::socket::tcp::State;
+                s.state() == State::Closed && s.remote_endpoint().is_some()
+            }
+        })
+        .await;
+    if !refuse {
+        return false;
+    }
+    // `flush` completes once the pending reset has been sent; race it against the
+    // limit so a reset the stack cannot send does not hang the listener.
+    let _ = embassy_futures::select::select(
+        socket.flush(),
+        embassy_time::Timer::after_millis(RESET_TIMEOUT_MS),
+    )
+    .await;
+    listen_again_socket(socket, address).await;
+    true
+}
+
+/// [`listen_again`] through the socket's stack lock.
+async fn listen_again_socket(socket: &mut TcpSocket, address: NetworkAddress) {
+    socket.with_mutable(|s| listen_again(s, address)).await;
+}
+
+/// The poll form of [`refuse_other_family`]: a poll cannot wait for the reset, so the
+/// socket is aborted, the task is woken once the reset has been sent, and the listener
+/// then listens again. The deadline stored on the listener bounds that wait: a later
+/// poll listens again after it even if the reset is still pending, and the peer then
+/// sees the refusal only at its next send, as before. Returns whether the connection
+/// was foreign.
+fn refuse_other_family_poll(
+    socket: &mut smoltcp::socket::tcp::Socket,
+    listener: &TcpListener,
+    cx: &mut core::task::Context<'_>,
+) -> bool {
+    use smoltcp::socket::tcp::State;
+    if foreign_connection(socket, listener.address) {
+        socket.abort();
+        let deadline = embassy_time::Instant::now().as_ticks() + RESET_TIMEOUT_TICKS;
+        listener.reset_deadline.lock(|cell| cell.set(deadline));
+        socket.register_send_waker(cx.waker());
+        true
+    } else if socket.state() == State::Closed {
+        // The reset went out, or a waiting connection was reset by its peer, or the
+        // reset is still pending: listen again once it went out or its deadline
+        // fired, so the listener keeps its family. Poll reports nothing instead of
+        // XILA_POLL_ERR meanwhile, which is closer to POSIX.
+        if socket.remote_endpoint().is_none() {
+            listen_again(socket, listener.address);
+        } else {
+            // Read the deadline before arming the timer, so `schedule_wake` never runs
+            // inside the critical section.
+            let deadline = listener.reset_deadline.lock(core::cell::Cell::get);
+            if embassy_time::Instant::now().as_ticks() >= deadline {
+                // The stack could not send the reset within the limit; listen again
+                // and let the peer see the refusal at its next send, as before.
+                listen_again(socket, listener.address);
+            } else {
+                // The reset may still go out before the deadline: wake this poll then
+                // too, in case another waker replaced the one registered at abort, so
+                // the listener re-listens as soon as the RST is sent.
+                socket.register_send_waker(cx.waker());
+                // Also wake this poll at the deadline, to listen again even if the
+                // reset is still pending then.
+                let timer = embassy_time::Timer::at(embassy_time::Instant::from_ticks(deadline));
+                let _ = core::pin::pin!(timer).poll(cx);
+            }
+        }
+        false
+    } else {
+        false
+    }
 }
 
 // Small fixed socket buffers; no ABI-side staging buffer on I/O paths.
@@ -311,6 +411,7 @@ pub unsafe extern "C" fn xila_tcp_listen(
             network: Network::new(network.manager, u32::from(network.rights))?,
             address,
             inner,
+            reset_deadline: synchronization::blocking_mutex::Mutex::new(core::cell::Cell::new(0)),
         }
         .into_raw())
     })();
@@ -343,6 +444,12 @@ pub unsafe extern "C" fn xila_tcp_accept(
         let endpoint = listen_endpoint(listener.address.endpoint()?);
         let address = listener.address;
         loop {
+            // A poll may have aborted a connection and left its reset pending: wait it
+            // out and listen again before accepting, because `accept` re-listens on a
+            // closed socket and would drop the pending reset.
+            if suspend_on(refuse_other_family(&mut listener.inner, address)) {
+                continue;
+            }
             suspend_on(
                 listener
                     .inner
@@ -350,11 +457,7 @@ pub unsafe extern "C" fn xila_tcp_accept(
             )
             .map_err(Status::from)?;
             // A wildcard listener takes connections of its own family only.
-            if !suspend_on(
-                listener
-                    .inner
-                    .with_mutable(|socket| refuse_other_family(socket, address)),
-            ) {
+            if !suspend_on(refuse_other_family(&mut listener.inner, address)) {
                 break;
             }
         }
@@ -809,7 +912,7 @@ fn drop_other_family(socket: &mut smoltcp::socket::udp::Socket, family: u32) {
 pub(crate) fn tcp_readiness(
     connection: &TcpSocket,
     cx: &mut core::task::Context<'_>,
-    listener: Option<NetworkAddress>,
+    listener: Option<&TcpListener>,
     events: u16,
 ) -> u16 {
     use crate::{XILA_POLL_ERR, XILA_POLL_HUP, XILA_POLL_IN, XILA_POLL_OUT};
@@ -817,10 +920,11 @@ pub(crate) fn tcp_readiness(
     use smoltcp::socket::tcp::State;
 
     // A listener refuses a connection of the other family before it reports one, so
-    // `poll` and a nonblocking accept never see it.
-    if let Some(address) = listener {
-        let _ = connection.poll_with_mutable(cx, |socket, _| {
-            Poll::Ready(refuse_other_family(socket, address))
+    // `poll` and a nonblocking accept never see it. The reset is sent by the stack on
+    // its next poll; the task is woken then, and the listener listens again.
+    if let Some(listener) = listener {
+        let _ = connection.poll_with_mutable(cx, |socket, cx| {
+            Poll::Ready(refuse_other_family_poll(socket, listener, cx))
         });
     }
     let listener = listener.is_some();
@@ -831,7 +935,9 @@ pub(crate) fn tcp_readiness(
         if listener {
             if matches!(state, State::Established | State::CloseWait) {
                 ready |= events & XILA_POLL_IN;
-            } else if state == State::Closed {
+            } else if state == State::Closed && socket.remote_endpoint().is_none() {
+                // The listener is closed without a connection and could not listen
+                // again: report an error.
                 ready |= XILA_POLL_ERR;
             }
         } else {

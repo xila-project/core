@@ -46,6 +46,15 @@ pub struct TcpListener {
     pub(crate) address: NetworkAddress,
     #[cfg(feature = "network")]
     pub(crate) inner: TcpSocket,
+    /// Embassy-time tick by which the last reset that a poll left pending must have been
+    /// sent; the listener listens again after it even if the reset is still pending.
+    /// Stale afterwards. Behind a mutex because concurrent poll waits are allowed and
+    /// 64-bit atomics are not available on every target.
+    #[cfg(feature = "network")]
+    pub(crate) reset_deadline: synchronization::blocking_mutex::Mutex<
+        synchronization::blocking_mutex::raw::CriticalSectionRawMutex,
+        core::cell::Cell<u64>,
+    >,
 }
 /// Owned UDP socket. Sending additionally requires CONNECT on its parent capability.
 pub struct Udp {
