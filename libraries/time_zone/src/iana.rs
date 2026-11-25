@@ -7,7 +7,7 @@
 //!
 //! | Feature | Names |
 //! | --- | --- |
-//! | none (default) | no table |
+//! | none (default) | no names: [`zone_count`] is 0 and every lookup fails |
 //! | `iana-africa`, `iana-america`, `iana-antarctica`, `iana-arctic`, `iana-asia`, `iana-atlantic`, `iana-australia`, `iana-europe`, `iana-indian`, `iana-pacific` | the names with that prefix, for example `Europe/Paris` |
 //! | `iana-etc` | the fixed offset zones `Etc/...` and `GMT` |
 //! | `iana-all` | every region |
@@ -200,5 +200,19 @@ impl TimeZone {
     /// not reachable here; it is still handled to keep the function total.
     pub fn from_iana_name(name: &str) -> Option<TimeZone> {
         TimeZone::parse(time_zone_string(name)?).ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn lookups_follow_the_enabled_regions() {
+        let europe = cfg!(feature = "iana-europe");
+        assert_eq!(super::contains("Europe/Paris"), europe);
+        assert_eq!(super::time_zone_string("Europe/Paris").is_some(), europe);
+        if super::TABLES.is_empty() {
+            assert_eq!(super::zone_count(), 0);
+            assert_eq!(super::zone_name(0), None);
+        }
     }
 }

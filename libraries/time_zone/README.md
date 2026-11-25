@@ -82,7 +82,7 @@ bytes itself, without `memcmp`.
 
 | Feature | Names | Canonical names | Legacy aliases |
 | --- | --- | ---: | ---: |
-| none (default) | no table | 0 | 0 |
+| none (default) | no names (the `iana` module exists, with no names) | 0 | 0 |
 | `iana-africa` | `Africa/...` | 19 | 38 |
 | `iana-america` | `America/...`, `CST6CDT`, `EST5EDT`, `MST7MDT`, `PST8PDT` | 125 | 79 |
 | `iana-antarctica` | `Antarctica/...` | 8 | 4 |
