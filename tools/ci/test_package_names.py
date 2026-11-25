@@ -26,7 +26,6 @@ EXPECTED_PACKAGE_NAMES = {
     "libraries/audio/Cargo.toml": "xila-audio",
     "libraries/authentication/Cargo.toml": "xila-authentication",
     "libraries/bootsplash/Cargo.toml": "xila-bootsplash",
-    "libraries/time_zone/Cargo.toml": "xila-time-zone",
     "libraries/debug_protocol/Cargo.toml": "xila-debug-protocol",
     "libraries/executable/Cargo.toml": "xila-executable",
     "libraries/file_system/Cargo.toml": "xila-file-system",
@@ -43,6 +42,7 @@ EXPECTED_PACKAGE_NAMES = {
     "libraries/synchronization/Cargo.toml": "xila-synchronization",
     "libraries/testing/Cargo.toml": "xila-testing",
     "libraries/testing/support/Cargo.toml": "xila-testing-support",
+    "libraries/time_zone/Cargo.toml": "xila-time-zone",
     "subsystems/graphics/Cargo.toml": "xila-graphics",
     "subsystems/graphics/bindings_generator/Cargo.toml": "xila-graphics-bindgen",
     "subsystems/graphics/tests/call_transport/Cargo.toml": "xila-graphics-call-transport-test",
@@ -72,6 +72,7 @@ EXPECTED_LIBRARY_TARGETS = {
     "libraries/synchronization/Cargo.toml": "synchronization",
     "libraries/testing/Cargo.toml": "testing",
     "libraries/testing/support/Cargo.toml": "testing_support",
+    "libraries/time_zone/Cargo.toml": "time_zone",
     "drivers/core/Cargo.toml": "drivers_core",
     "libraries/file_system/Cargo.toml": "file_system",
     "libraries/io_error/Cargo.toml": "io_error",
@@ -97,7 +98,6 @@ EXPECTED_LIBRARY_TARGETS = {
     "drivers/peripherals/Cargo.toml": "drivers_peripherals",
     "libraries/peripherals/Cargo.toml": "peripherals",
     "libraries/bootsplash/Cargo.toml": "bootsplash",
-    "libraries/time_zone/Cargo.toml": "time_zone",
     "subsystems/graphics/bindings_generator/Cargo.toml": "graphics_bindgen",
 }
 

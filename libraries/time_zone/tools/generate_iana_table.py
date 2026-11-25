@@ -1,25 +1,40 @@
 #!/usr/bin/env python3
 """Generate the IANA zone name tables of the xila-time-zone crate.
 
-The script reads a compiled IANA time zone database (a directory of TZif
-files, for example /usr/share/zoneinfo or the output of zic on a pinned tzdata
-release) and writes src/generated/all.rs and src/generated/europe.rs next to
-this script. The last line of every TZif v2+ file holds the POSIX TZ string of
-the zone; that string is what the table maps the IANA name to.
+The script reads the IANA time zone database and writes src/generated/all.rs
+and src/generated/europe.rs next to this script. The last line of every TZif
+v2+ file holds the POSIX TZ string of the zone; that string is what the table
+maps the IANA name to.
 
-To build the input from a pinned release, for example tzdata 2026f:
+Canonical input: an extracted tzdata release, for example the pinned release
+tzdata 2026f:
 
     curl -sO https://data.iana.org/time-zones/releases/tzdata2026f.tar.gz
+    # SHA-256: 01b4a91cec5167ed48c11e8ab78f2048cead78ce94b0cafcad0ae8c5a3044d3d
     tar xzf tzdata2026f.tar.gz
-    zic -d zoneinfo-2026f tzdata-2026f/africa tzdata-2026f/antarctica \
-        tzdata-2026f/asia tzdata-2026f/australasia tzdata-2026f/backward \
-        tzdata-2026f/etcetera tzdata-2026f/europe tzdata-2026f/northamerica \
-        tzdata-2026f/southamerica tzdata-2026f/factory
-    python3 libraries/time_zone/tools/generate_iana_table.py \
-        --zoneinfo zoneinfo-2026f --version 2026f
+    python3 libraries/time_zone/tools/generate_iana_table.py --tzdata tzdata-2026f
     cargo fmt
 
-Run the iana tests afterwards to check that every generated string parses:
+The version is read from the `version` file of the release (and cross-checked
+against the `# version` line of `tzdata.zi` when that file is present); the
+script fails if they disagree. The script runs zic itself into a temporary
+work directory (it honours TMPDIR) and removes that directory afterwards.
+
+Alternatively a precompiled zoneinfo tree can be used, with an explicit
+version (no default):
+
+    python3 libraries/time_zone/tools/generate_iana_table.py \
+        --zoneinfo /usr/share/zoneinfo --version 2026f
+
+The Europe subset holds the `Europe/` zones, the European zones outside that
+prefix listed in EUROPE_EXTRA_ZONES, and the backward links whose target is in
+the subset (EUROPE_LINKS in --zoneinfo mode, computed from the `backward` file
+in --tzdata mode).
+
+The IANA time zone database is released into the public domain by IANA
+(https://data.iana.org/time-zones/); the generated files record that
+provenance. Run the iana tests afterwards to check that every generated string
+parses:
 
     cargo test -p xila-time-zone --features iana-all
 """
@@ -27,19 +42,147 @@ Run the iana tests afterwards to check that every generated string parses:
 import argparse
 import pathlib
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
+
+# Pinned tzdata release that the checked-in tables were generated from.
+TZDATA_RELEASE_URL = "https://data.iana.org/time-zones/releases/tzdata2026f.tar.gz"
+TZDATA_RELEASE_SHA256 = "01b4a91cec5167ed48c11e8ab78f2048cead78ce94b0cafcad0ae8c5a3044d3d"
+
+# tzdata source files that zic compiles into the zone set (the same list as the
+# default `make zones` target, without backzone).
+ZONE_SOURCE_FILES = [
+    "africa",
+    "antarctica",
+    "asia",
+    "australasia",
+    "backward",
+    "etcetera",
+    "europe",
+    "northamerica",
+    "southamerica",
+    "factory",
+]
 
 # Directories of a zoneinfo tree that repeat the same zones.
 SKIP_DIRECTORIES = {"right", "posix"}
 
+# European zones outside the Europe/ prefix.
+EUROPE_EXTRA_ZONES = [
+    "Africa/Ceuta",
+    "Arctic/Longyearbyen",
+    "Asia/Nicosia",
+    "Atlantic/Azores",
+    "Atlantic/Canary",
+    "Atlantic/Faroe",
+    "Atlantic/Madeira",
+    "Atlantic/Reykjavik",
+    "Iceland",
+]
+
+# Backward links whose target is a European zone (used in --zoneinfo mode,
+# where the `backward` source file is not available).
+EUROPE_LINKS = [
+    "Arctic/Longyearbyen",
+    "Asia/Istanbul",
+    "Atlantic/Faeroe",
+    "Atlantic/Jan_Mayen",
+    "CET",
+    "EET",
+    "Eire",
+    "Europe/Amsterdam",
+    "Europe/Belfast",
+    "Europe/Bratislava",
+    "Europe/Busingen",
+    "Europe/Copenhagen",
+    "Europe/Guernsey",
+    "Europe/Isle_of_Man",
+    "Europe/Jersey",
+    "Europe/Kiev",
+    "Europe/Ljubljana",
+    "Europe/Luxembourg",
+    "Europe/Mariehamn",
+    "Europe/Monaco",
+    "Europe/Nicosia",
+    "Europe/Oslo",
+    "Europe/Podgorica",
+    "Europe/San_Marino",
+    "Europe/Sarajevo",
+    "Europe/Skopje",
+    "Europe/Stockholm",
+    "Europe/Tiraspol",
+    "Europe/Uzhgorod",
+    "Europe/Vaduz",
+    "Europe/Vatican",
+    "Europe/Zagreb",
+    "Europe/Zaporozhye",
+    "GB",
+    "GB-Eire",
+    "Iceland",
+    "MET",
+    "Poland",
+    "Portugal",
+    "Turkey",
+    "W-SU",
+    "WET",
+]
+
 # A light check of the POSIX TZ grammar; the Rust tests parse every string
 # strictly.
 _NAME = r"(?:[A-Za-z]{3,}|<[^>]{3,}>)"
-_HMS = r"[+-]?\d{1,3}(?::\d{2}(?::\d{2})?)?"
+_HOURS_MINUTES_SECONDS = r"[+-]?\d{1,3}(?::\d{2}(?::\d{2})?)?"
 _RULE = r"(?:M\d{1,2}\.\d\.\d|J\d{1,3}|\d{1,3})(?:/[+-]?\d{1,3}(?::\d{2}(?::\d{2})?)?)?"
 LOOSE_TZ = re.compile(
-    "^" + _NAME + _HMS + "(?:" + _NAME + "(?:" + _HMS + ")?(?:," + _RULE + "," + _RULE + ")?)?$"
+    "^" + _NAME + _HOURS_MINUTES_SECONDS
+    + "(?:" + _NAME + "(?:" + _HOURS_MINUTES_SECONDS + ")?(?:," + _RULE + "," + _RULE + ")?)?$"
 )
+
+
+def read_release_version(tzdata):
+    """Read the version of a tzdata release and cross-check its sources."""
+    version_file = tzdata / "version"
+    if not version_file.is_file():
+        raise SystemExit(f"no `version` file in {tzdata}; pass --zoneinfo and --version instead")
+    version = version_file.read_text().strip()
+    zi = tzdata / "tzdata.zi"
+    if zi.is_file():
+        match = re.search(r"^#\s*version\s+(\S+)", zi.read_text(), re.MULTILINE)
+        if match and match.group(1) != version:
+            raise SystemExit(f"version mismatch: `version` says {version}, tzdata.zi says {match.group(1)}")
+    return version
+
+
+def compile_zoneinfo(tzdata, zic, workdir):
+    """Run zic on the release sources into workdir; return the zoneinfo dir."""
+    zoneinfo = workdir / "zoneinfo"
+    sources = [tzdata / name for name in ZONE_SOURCE_FILES]
+    missing = [str(path) for path in sources if not path.is_file()]
+    if missing:
+        raise SystemExit(f"missing tzdata source files: {', '.join(missing)}")
+    subprocess.run([zic, "-d", str(zoneinfo), *map(str, sources)], check=True)
+    return zoneinfo
+
+
+def europe_links_from_backward(tzdata):
+    """Backward link names whose target (or `#=` comment) is a European zone."""
+    def is_european(name):
+        return name.startswith("Europe/") or name in EUROPE_EXTRA_ZONES
+
+    links = []
+    backward = tzdata / "backward"
+    if not backward.is_file():
+        return sorted(EUROPE_LINKS)
+    for line in backward.read_text().splitlines():
+        if not line.startswith("Link"):
+            continue
+        parts = line.split()
+        target, name = parts[1], parts[2]
+        comment = line.split("#=", 1)[1].strip() if "#=" in line else None
+        if is_european(comment or target):
+            links.append(name)
+    return sorted(set(links))
 
 
 def posix_footer(path):
@@ -59,7 +202,7 @@ def posix_footer(path):
     return footer or None
 
 
-def collect(zoneinfo, version):
+def collect(zoneinfo):
     """Collect (name, TZ string) pairs from a zoneinfo tree."""
     zones = {}
     for path in sorted(zoneinfo.rglob("*")):
@@ -82,16 +225,23 @@ def collect(zoneinfo, version):
     return zones
 
 
+def europe_subset(zones, links):
+    """Names of the Europe subset."""
+    return sorted(
+        name
+        for name in zones
+        if name.startswith("Europe/") or name in EUROPE_EXTRA_ZONES or name in links
+    )
+
+
 def rust_string(text):
     """Escape one string as a Rust string literal body."""
     return text.replace("\\", "\\\\").replace('"', '\\"').replace("\0", "\\0")
 
 
-def emit(path, version, zones, subset_prefix, command):
+def emit(path, version, zones, subset, command):
     """Write one generated table file."""
-    names = sorted(zones)
-    if subset_prefix is not None:
-        names = [name for name in names if name.startswith(subset_prefix)]
+    names = sorted(zones) if subset is None else subset
     strings = sorted(set(zones[name] for name in names))
     string_index = {value: index for index, value in enumerate(strings)}
 
@@ -115,7 +265,11 @@ def emit(path, version, zones, subset_prefix, command):
 
     lines = [
         f"// Generated by {command}. Do not edit.",
-        f"// IANA time zone database version: {version}.",
+        "//",
+        "// Source: IANA time zone database (tzdata) " + version + ", public domain,",
+        "// " + TZDATA_RELEASE_URL,
+        "// SHA-256 of the release tarball: " + TZDATA_RELEASE_SHA256,
+        "// The POSIX TZ string of each zone is the last line of its TZif v2+ file.",
         f"// Zones: {len(names)}. Unique TZ strings: {len(strings)}.",
         "",
         f'pub(crate) const TZDATA_VERSION: &str = "{version}";',
@@ -128,12 +282,12 @@ def emit(path, version, zones, subset_prefix, command):
     lines.append("")
     lines.append("pub(crate) const NAME_OFFSETS: &[u32] = &[")
     for index in range(0, len(name_offsets), 8):
-        lines.append("    " + ", ".join(str(v) for v in name_offsets[index : index + 8]) + ",")
+        lines.append("    " + ", ".join(str(value) for value in name_offsets[index : index + 8]) + ",")
     lines.append("];")
     lines.append("")
     lines.append("pub(crate) const ZONE_STRING: &[u16] = &[")
     for index in range(0, len(zone_string), 12):
-        lines.append("    " + ", ".join(str(v) for v in zone_string[index : index + 12]) + ",")
+        lines.append("    " + ", ".join(str(value) for value in zone_string[index : index + 12]) + ",")
     lines.append("];")
     lines.append("")
     lines.append("pub(crate) const STRINGS: &str = concat!(")
@@ -143,7 +297,7 @@ def emit(path, version, zones, subset_prefix, command):
     lines.append("")
     lines.append("pub(crate) const STRING_OFFSETS: &[u32] = &[")
     for index in range(0, len(string_offsets), 8):
-        lines.append("    " + ", ".join(str(v) for v in string_offsets[index : index + 8]) + ",")
+        lines.append("    " + ", ".join(str(value) for value in string_offsets[index : index + 8]) + ",")
     lines.append("];")
     lines.append("")
     path.write_text("\n".join(lines))
@@ -152,23 +306,47 @@ def emit(path, version, zones, subset_prefix, command):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--zoneinfo", type=pathlib.Path, required=True,
+    parser.add_argument("--tzdata", type=pathlib.Path, default=None,
+                        help="extracted tzdata release directory (canonical input; runs zic)")
+    parser.add_argument("--zoneinfo", type=pathlib.Path, default=None,
                         help="directory of compiled TZif files (a zoneinfo tree)")
-    parser.add_argument("--version", default="2026f",
-                        help="tzdata version of the input (recorded in the generated files)")
+    parser.add_argument("--version", default=None,
+                        help="tzdata version of a --zoneinfo input (required, no default)")
+    parser.add_argument("--zic", default="zic", help="path of the zic compiler")
     parser.add_argument("--out-dir", type=pathlib.Path, default=None,
                         help="output directory, default: src/generated next to this script")
     args = parser.parse_args()
 
     out_dir = args.out_dir or pathlib.Path(__file__).resolve().parent.parent / "src" / "generated"
     out_dir.mkdir(parents=True, exist_ok=True)
-    zones = collect(args.zoneinfo, args.version)
     command = "tools/generate_iana_table.py"
-    all_count = emit(out_dir / "all.rs", args.version, zones, None, command)
-    europe_count = emit(out_dir / "europe.rs", args.version, zones, "Europe/", command)
+
+    if args.tzdata is not None:
+        if args.zoneinfo is not None:
+            raise SystemExit("pass either --tzdata or --zoneinfo, not both")
+        version = read_release_version(args.tzdata)
+        workdir = pathlib.Path(tempfile.mkdtemp(prefix="xila-time-zone-generate-"))
+        try:
+            zoneinfo = compile_zoneinfo(args.tzdata, args.zic, workdir)
+            zones = collect(zoneinfo)
+            links = europe_links_from_backward(args.tzdata)
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+    elif args.zoneinfo is not None:
+        if args.version is None:
+            raise SystemExit("--zoneinfo needs an explicit --version (there is no default)")
+        version = args.version
+        zones = collect(args.zoneinfo)
+        links = sorted(EUROPE_LINKS)
+    else:
+        raise SystemExit("pass --tzdata or --zoneinfo")
+
+    subset = europe_subset(zones, links)
+    all_count = emit(out_dir / "all.rs", version, zones, None, command)
+    europe_count = emit(out_dir / "europe.rs", version, zones, subset, command)
     print(f"all.rs: {all_count[0]} zones, {all_count[1]} unique TZ strings")
     print(f"europe.rs: {europe_count[0]} zones, {europe_count[1]} unique TZ strings")
-    print(f"tzdata version recorded: {args.version}")
+    print(f"tzdata version recorded: {version}")
 
 
 if __name__ == "__main__":

@@ -24,11 +24,11 @@ fn names_are_sorted_unique_and_looked_up() {
         let current = iana::zone_name(index).unwrap();
         assert!(previous < current, "{previous} !< {current}");
         assert!(iana::contains(previous));
-        assert!(!iana::tz_string(previous).unwrap().is_empty());
+        assert!(!iana::time_zone_string(previous).unwrap().is_empty());
     }
     assert!(iana::zone_name(count).is_none());
     assert!(!iana::contains("Not/AZone"));
-    assert_eq!(iana::tz_string("Not/AZone"), None);
+    assert_eq!(iana::time_zone_string("Not/AZone"), None);
     assert!(TimeZone::from_iana_name("Not/AZone").is_none());
 }
 
@@ -36,64 +36,69 @@ fn names_are_sorted_unique_and_looked_up() {
 fn every_table_string_parses() {
     for index in 0..iana::zone_count() {
         let name = iana::zone_name(index).unwrap();
-        let tz_string = iana::tz_string(name).unwrap();
+        let tz_string = iana::time_zone_string(name).unwrap();
         assert!(
             TimeZone::parse(tz_string).is_ok(),
             "{name}: {tz_string:?} does not parse"
         );
         // The lookup returns the same string for the parsed zone.
         let zone = TimeZone::from_iana_name(name).unwrap();
-        assert!(zone.std_abbreviation().len() >= 3, "{name}");
+        assert!(zone.standard_abbreviation().len() >= 3, "{name}");
     }
 }
 
 #[test]
 fn known_zones_convert() {
     let paris = TimeZone::from_iana_name("Europe/Paris").unwrap();
-    assert_eq!(paris.std_abbreviation(), "CET");
-    assert_eq!(paris.dst_abbreviation(), Some("CEST"));
-    assert_eq!(paris.std_offset_seconds(), 3600);
+    assert_eq!(paris.standard_abbreviation(), "CET");
+    assert_eq!(paris.daylight_saving_abbreviation(), Some("CEST"));
+    assert_eq!(paris.standard_offset_seconds(), 3600);
     let local = paris.from_utc(1_721_044_800); // 2024-07-15 12:00:00 UTC
     assert_eq!(local.abbreviation, "CEST");
     assert_eq!(local.offset_seconds, 7200);
-    assert!(local.dst);
+    assert!(local.daylight_saving);
 
     let dublin = TimeZone::from_iana_name("Europe/Dublin").unwrap();
-    assert_eq!(dublin.std_abbreviation(), "IST");
-    assert_eq!(dublin.dst_abbreviation(), Some("GMT"));
-    assert_eq!(dublin.dst_offset_seconds(), Some(0));
-}
-
-#[cfg(feature = "iana-all")]
-#[test]
-fn all_zones_table_spot_checks() {
-    let kolkata = TimeZone::from_iana_name("Asia/Kolkata").unwrap();
-    assert_eq!(kolkata.std_offset_seconds(), 19_800);
-    assert!(!kolkata.has_dst());
-    assert_eq!(iana::tz_string("Asia/Kolkata"), Some("IST-5:30"));
+    assert_eq!(dublin.standard_abbreviation(), "IST");
+    assert_eq!(dublin.daylight_saving_abbreviation(), Some("GMT"));
+    assert_eq!(dublin.daylight_saving_offset_seconds(), Some(0));
 }
 
 #[cfg(feature = "iana-all")]
 #[test]
 fn all_zones_table() {
     assert!(iana::zone_count() > 500, "{}", iana::zone_count());
-    assert_eq!(iana::tz_string("Asia/Kolkata"), Some("IST-5:30"));
+    assert_eq!(iana::time_zone_string("Asia/Kolkata"), Some("IST-5:30"));
     assert_eq!(
-        iana::tz_string("Europe/Paris"),
+        iana::time_zone_string("Europe/Paris"),
         Some("CET-1CEST,M3.5.0,M10.5.0/3")
     );
     assert!(iana::contains("US/Pacific"));
     assert!(iana::contains("Asia/Calcutta")); // a backward link
     assert!(iana::contains("Etc/UTC"));
+    let kolkata = TimeZone::from_iana_name("Asia/Kolkata").unwrap();
+    assert_eq!(kolkata.standard_offset_seconds(), 19_800);
+    assert!(!kolkata.has_daylight_saving());
 }
 
 #[cfg(all(feature = "iana-europe", not(feature = "iana-all")))]
 #[test]
 fn europe_subset_table() {
+    // The subset holds the Europe/ zones plus the European zones outside that
+    // prefix and the backward links to them.
     assert!(iana::zone_count() > 50, "{}", iana::zone_count());
-    assert!(iana::zone_count() < 100, "{}", iana::zone_count());
+    assert!(iana::zone_count() < 200, "{}", iana::zone_count());
     assert!(iana::contains("Europe/Paris"));
     assert!(iana::contains("Europe/Dublin"));
+    assert!(iana::contains("Atlantic/Canary"));
+    assert!(iana::contains("Atlantic/Madeira"));
+    assert!(iana::contains("Atlantic/Reykjavik"));
+    assert!(iana::contains("Arctic/Longyearbyen"));
+    assert!(iana::contains("Asia/Nicosia"));
+    assert!(iana::contains("Iceland")); // a backward link
+    assert!(iana::contains("Portugal"));
+    assert!(iana::contains("Poland"));
+    assert!(iana::contains("GB"));
     assert!(!iana::contains("America/New_York"));
     assert!(!iana::contains("Asia/Kolkata"));
 }

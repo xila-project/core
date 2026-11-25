@@ -18,9 +18,9 @@
 //! use time_zone::{iana, TimeZone};
 //!
 //! let paris = TimeZone::from_iana_name("Europe/Paris").unwrap();
-//! assert_eq!(paris.std_abbreviation(), "CET");
+//! assert_eq!(paris.standard_abbreviation(), "CET");
 //! assert_eq!(
-//!     iana::tz_string("Europe/Dublin"),
+//!     iana::time_zone_string("Europe/Dublin"),
 //!     Some("IST-1GMT0,M10.5.0,M3.5.0/1")
 //! );
 //! assert!(TimeZone::from_iana_name("Not/AZone").is_none());
@@ -56,7 +56,7 @@ pub fn contains(name: &str) -> bool {
 }
 
 /// The POSIX TZ string of an IANA zone name, if the table has the name.
-pub fn tz_string(name: &str) -> Option<&'static str> {
+pub fn time_zone_string(name: &str) -> Option<&'static str> {
     let index = lookup(name)?;
     let string_index = table::ZONE_STRING[index] as usize;
     let start = *table::STRING_OFFSETS.get(string_index)? as usize;
@@ -64,10 +64,10 @@ pub fn tz_string(name: &str) -> Option<&'static str> {
     Some(&table::STRINGS[start..end - 1])
 }
 
-/// Binary search for a zone name in the sorted name blob.
+/// Binary search for a zone name in the sorted name blob. The lookup compares
+/// bytes in a loop so that it needs no `memcmp` call; some freestanding targets
+/// do not provide one.
 fn lookup(name: &str) -> Option<usize> {
-    // The comparison is a byte loop so that no `memcmp` call is needed; some
-    // freestanding targets do not provide one.
     let mut low = 0;
     let mut high = zone_count();
     while low < high {
@@ -93,13 +93,13 @@ fn compare(left: &[u8], right: &[u8]) -> Ordering {
     left.len().cmp(&right.len())
 }
 
-impl TimeZone<'static> {
+impl TimeZone {
     /// Parse the POSIX TZ string of an IANA zone name, for example
     /// `Europe/Paris`. Returns None when the table does not have the name.
     ///
     /// Every string in the generated table parses, so the parse error path is
     /// not reachable here; it is still handled to keep the function total.
-    pub fn from_iana_name(name: &str) -> Option<TimeZone<'static>> {
-        TimeZone::parse(tz_string(name)?).ok()
+    pub fn from_iana_name(name: &str) -> Option<TimeZone> {
+        TimeZone::parse(time_zone_string(name)?).ok()
     }
 }

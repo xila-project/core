@@ -349,6 +349,11 @@ cargo nextest run --locked --workspace --features xila/graphics_rendering_xrgb88
 cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888,xila-graphics/headless_screen,xila-io-error/std --doc
 cargo nextest run --locked -p xila-abi-application --no-default-features
 cargo test --locked -p xila-abi-application --no-default-features --doc
+# The IANA table features are not in the workspace feature list above.
+cargo nextest run --locked -p xila-time-zone --features iana-all
+cargo test --locked -p xila-time-zone --features iana-all --doc
+cargo nextest run --locked -p xila-time-zone --features iana-europe
+cargo test --locked -p xila-time-zone --features iana-europe --doc
 # The graphics feature also enables environment.
 cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888,xila-testing/graphics --no-run
 mise run test:native-loader
@@ -518,6 +523,7 @@ for target in thumbv7em-none-eabihf riscv32imafc-unknown-none-elf; do
   cargo check --locked -p xila --target "$target"
   cargo check --locked -p xila --no-default-features --target "$target"
   cargo check --locked -p xila --features task_metrics --target "$target"
+  cargo check --locked -p xila-time-zone --features iana-all --target "$target"
 done
 # Graphics is C-backed and its FFI differs by target: `c_char` is unsigned on ARM and RISC-V.
 cargo check --locked -p xila-graphics --features rendering_rgb565 --target thumbv7em-none-eabihf

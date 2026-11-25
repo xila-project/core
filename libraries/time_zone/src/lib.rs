@@ -8,8 +8,9 @@
 //! A time zone is described by one POSIX TZ string, the `TZ` format of POSIX
 //! `tzset`: `std offset [dst [offset] [,rule,rule]]`, for example
 //! `CET-1CEST,M3.5.0,M10.5.0/3` for `Europe/Paris`. [`TimeZone::parse`] turns the
-//! string into a small `Copy` value; the two transition rules are packed into
-//! one 32-bit [`Rule`] each. All errors are explicit, see [`ParseError`].
+//! string into a `Copy` value of 32 bytes that owns its abbreviations; each of
+//! the two transition rules is packed into one 32-bit [`Rule`] value. All
+//! invalid strings return an explicit [`ParseError`].
 //!
 //! Conversions use plain `i64` seconds since the Unix epoch
 //! (1970-01-01T00:00:00Z), not the `Timestamp` type of the `time` subsystem, so
@@ -29,9 +30,12 @@
 //!
 //! Limit: a POSIX TZ string holds only the current rules of a zone, not its
 //! history. Instants far in the past or future can differ from the full IANA
-//! database by the rule changes in between, and zones whose future rules are
-//! not expressible in POSIX form (for example Morocco during Ramadan) use the
-//! approximation that the tzdata POSIX footer carries.
+//! database by the rule changes in between. The current rules of some zones are
+//! also not expressible in POSIX form, and their tzdata POSIX footer is an
+//! approximation: America/Havana (Cuba keeps -04 until 2027, while the footer
+//! says -05 with United States rules), Asia/Gaza and Asia/Hebron, and
+//! Africa/Casablanca and Africa/El_Aaiun (Morocco during Ramadan, footer
+//! `<+00>0`).
 //!
 //! ```
 //! use time_zone::TimeZone;
@@ -40,11 +44,14 @@
 //! let local = paris.from_utc(1_721_044_800); // 2024-07-15T12:00:00Z
 //! assert_eq!(local.offset_seconds, 7200);
 //! assert_eq!(local.abbreviation, "CEST");
-//! assert!(local.dst);
+//! assert!(local.daylight_saving);
 //! assert_eq!((local.date_time.hour, local.date_time.minute), (14, 0));
 //! ```
 #![no_std]
 #![forbid(unsafe_code)]
+
+#[cfg(test)]
+extern crate std;
 
 mod civil;
 mod generated;
@@ -57,4 +64,4 @@ mod zone;
 pub use civil::DateTime;
 pub use parse::ParseError;
 pub use rule::{Rule, RuleKind};
-pub use zone::{Local, LocalToUtc, TimeZone};
+pub use zone::{ABBREVIATION_MAX, Local, LocalToUtc, TimeZone};

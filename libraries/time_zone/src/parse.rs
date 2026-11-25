@@ -1,28 +1,26 @@
 //! Parser for POSIX TZ strings, the `TZ` format of POSIX `tzset`:
 //! `std offset [dst [offset] [,rule,rule]]`.
 //!
-//! Names are either at least three letters (`CET`) or quoted in angle brackets
-//! (`<+03>`). Offsets are `[+-]hh[:mm[:ss]]` within 24 hours. Rules are
+//! See [`TimeZone::parse`] for the accepted format and the defaults. A name is
+//! either at least three letters (`CET`) or quoted in angle brackets
+//! (`<+03>`); a quoted name may hold only ASCII alphanumeric characters, `+`
+//! and `-`, and at most 7 bytes so that it fits the abbreviation buffer of
+//! [`TimeZone`]. Offsets are `[+-]hh[:mm[:ss]]` within 24 hours. Rules are
 //! `Mm.w.d[/time]`, `Jn[/time]` or `n[/time]`; a rule time is a signed
 //! `[+-]hh[:mm[:ss]]` within the POSIX 2024 range of 167 hours, and it defaults
-//! to 02:00:00. A DST name without rules uses the United States rules
-//! `M3.2.0/2,M11.1.0/2`, and a DST offset without a value is one hour ahead of
-//! the standard offset.
+//! to 02:00:00. Minutes and seconds are always 0 to 59.
 
 use crate::rule::{Rule, RuleKind};
-use crate::zone::TimeZone;
+use crate::zone::{ABBREVIATION_MAX, Abbreviation, TimeZone};
 use core::fmt;
 
-/// Default time of a rule without `/time`: 02:00:00.
-const DEFAULT_RULE_TIME: i32 = 2 * 3600;
+/// Default start rule when a daylight saving name is given without rules:
+/// `M3.2.0`, with the default time 02:00:00.
+const DEFAULT_START: Rule = Rule::implicit(RuleKind::MonthWeekDay, 77);
 
-/// Default start rule when a DST name is given without rules: `M3.2.0`.
-// M3.2.0, packed as ((3 - 1) * 5 + (2 - 1)) * 7 + 0.
-const DEFAULT_START: Rule = Rule::new(RuleKind::MonthWeekDay, 77, DEFAULT_RULE_TIME);
-
-/// Default end rule when a DST name is given without rules: `M11.1.0`.
-// M11.1.0, packed as ((11 - 1) * 5 + (1 - 1)) * 7 + 0.
-const DEFAULT_END: Rule = Rule::new(RuleKind::MonthWeekDay, 350, DEFAULT_RULE_TIME);
+/// Default end rule when a daylight saving name is given without rules:
+/// `M11.1.0`, with the default time 02:00:00.
+const DEFAULT_END: Rule = Rule::implicit(RuleKind::MonthWeekDay, 350);
 
 /// The largest zone offset of POSIX: 24 hours.
 const MAX_OFFSET_SECONDS: i64 = 24 * 3600;
@@ -40,21 +38,27 @@ pub enum ParseError {
     MissingName,
     /// A zone name has fewer than three bytes.
     NameTooShort,
+    /// A zone name has a character that is not allowed: a quoted name may hold
+    /// only ASCII alphanumeric characters, `+` and `-`.
+    InvalidNameCharacter,
+    /// A zone name is longer than the 7 bytes of the abbreviation buffer.
+    NameTooLong,
     /// A quoted name is not closed with `>`.
     UnterminatedName,
     /// The standard offset is missing.
     MissingOffset,
-    /// The standard offset is malformed.
+    /// The standard offset is malformed, or its minutes or seconds are above
+    /// 59.
     InvalidOffset,
     /// The standard offset is larger than 24 hours.
     OffsetOutOfRange,
-    /// Rules are given without a DST name.
-    RulesWithoutDst,
+    /// Rules are given without a daylight saving name.
+    RulesWithoutDaylightSaving,
     /// A transition rule is malformed.
     InvalidRule,
     /// A number of a rule is out of its range.
     RuleOutOfRange,
-    /// A rule time is malformed.
+    /// A rule time is malformed, or its minutes or seconds are above 59.
     InvalidTime,
     /// A rule time is larger than 167 hours.
     TimeOutOfRange,
@@ -70,14 +74,24 @@ impl fmt::Display for ParseError {
             ParseError::Empty => "the TZ string is empty",
             ParseError::MissingName => "a zone name is missing",
             ParseError::NameTooShort => "a zone name has fewer than three bytes",
+            ParseError::InvalidNameCharacter => {
+                "a quoted zone name has a character that is not ASCII alphanumeric, + or -"
+            }
+            ParseError::NameTooLong => "a zone name is longer than 7 bytes",
             ParseError::UnterminatedName => "a quoted zone name is not closed",
             ParseError::MissingOffset => "the standard offset is missing",
-            ParseError::InvalidOffset => "the standard offset is malformed",
+            ParseError::InvalidOffset => {
+                "the standard offset is malformed, or its minutes or seconds are above 59"
+            }
             ParseError::OffsetOutOfRange => "the standard offset is larger than 24 hours",
-            ParseError::RulesWithoutDst => "rules are given without a DST name",
+            ParseError::RulesWithoutDaylightSaving => {
+                "rules are given without a daylight saving name"
+            }
             ParseError::InvalidRule => "a transition rule is malformed",
             ParseError::RuleOutOfRange => "a number of a rule is out of range",
-            ParseError::InvalidTime => "a rule time is malformed",
+            ParseError::InvalidTime => {
+                "a rule time is malformed, or its minutes or seconds are above 59"
+            }
             ParseError::TimeOutOfRange => "a rule time is larger than 167 hours",
             ParseError::MissingEndRule => "the rule pair has only one rule",
             ParseError::TrailingCharacters => "extra characters follow the TZ string",
@@ -87,9 +101,8 @@ impl fmt::Display for ParseError {
 
 impl core::error::Error for ParseError {}
 
-/// Parse a POSIX TZ string into a [`TimeZone`] that borrows its abbreviations
-/// from the input.
-pub(crate) fn parse(input: &str) -> Result<TimeZone<'_>, ParseError> {
+/// Parse a POSIX TZ string into an owned [`TimeZone`].
+pub(crate) fn parse(input: &str) -> Result<TimeZone, ParseError> {
     Parser { input, pos: 0 }.parse_zone()
 }
 
@@ -129,8 +142,13 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Read `[+-]hh[:mm[:ss]]` and return the signed value in seconds.
-    fn parse_hms(&mut self, missing: ParseError, invalid: ParseError) -> Result<i64, ParseError> {
+    /// Read `[+-]hh[:mm[:ss]]` and return the signed value in seconds. The
+    /// minutes and seconds must be 0 to 59.
+    fn parse_hours_minutes_seconds(
+        &mut self,
+        missing: ParseError,
+        invalid: ParseError,
+    ) -> Result<i64, ParseError> {
         let sign = match self.peek() {
             Some(b'-') => {
                 self.pos += 1;
@@ -147,14 +165,14 @@ impl<'a> Parser<'a> {
         if self.peek() == Some(b':') {
             self.pos += 1;
             let (minutes, count) = self.digits(2).ok_or(invalid)?;
-            if count != 2 {
+            if count != 2 || minutes > 59 {
                 return Err(invalid);
             }
             total += minutes * 60;
             if self.peek() == Some(b':') {
                 self.pos += 1;
                 let (seconds, count) = self.digits(2).ok_or(invalid)?;
-                if count != 2 {
+                if count != 2 || seconds > 59 {
                     return Err(invalid);
                 }
                 total += seconds;
@@ -163,7 +181,8 @@ impl<'a> Parser<'a> {
         Ok(sign * total)
     }
 
-    /// Read a zone name: `<...>` or at least three letters.
+    /// Read a zone name: `<...>` or at least three letters. Returns the name
+    /// and its end position.
     fn parse_name(&mut self) -> Result<&'a str, ParseError> {
         if self.peek() == Some(b'<') {
             self.pos += 1;
@@ -177,6 +196,14 @@ impl<'a> Parser<'a> {
                         if name.len() < 3 {
                             return Err(ParseError::NameTooShort);
                         }
+                        if name.len() > ABBREVIATION_MAX {
+                            return Err(ParseError::NameTooLong);
+                        }
+                        if !name.bytes().all(|byte| {
+                            byte.is_ascii_alphanumeric() || byte == b'+' || byte == b'-'
+                        }) {
+                            return Err(ParseError::InvalidNameCharacter);
+                        }
                         return Ok(name);
                     }
                     Some(_) => self.pos += 1,
@@ -184,7 +211,7 @@ impl<'a> Parser<'a> {
             }
         }
         let start = self.pos;
-        while matches!(self.peek(), Some(c) if c.is_ascii_alphabetic()) {
+        while matches!(self.peek(), Some(byte) if byte.is_ascii_alphabetic()) {
             self.pos += 1;
         }
         let name = &self.input[start..self.pos];
@@ -194,12 +221,16 @@ impl<'a> Parser<'a> {
         if name.len() < 3 {
             return Err(ParseError::NameTooShort);
         }
+        if name.len() > ABBREVIATION_MAX {
+            return Err(ParseError::NameTooLong);
+        }
         Ok(name)
     }
 
     /// Read a zone offset and return it in POSIX form, positive west of UTC.
     fn parse_zone_offset(&mut self) -> Result<i64, ParseError> {
-        let value = self.parse_hms(ParseError::MissingOffset, ParseError::InvalidOffset)?;
+        let value =
+            self.parse_hours_minutes_seconds(ParseError::MissingOffset, ParseError::InvalidOffset)?;
         if value.abs() > MAX_OFFSET_SECONDS {
             return Err(ParseError::OffsetOutOfRange);
         }
@@ -240,7 +271,7 @@ impl<'a> Parser<'a> {
                 }
                 (RuleKind::JulianNoLeap, (day - 1) as u16)
             }
-            Some(c) if c.is_ascii_digit() => {
+            Some(byte) if byte.is_ascii_digit() => {
                 let (day, _) = self.digits(3).ok_or(ParseError::InvalidRule)?;
                 if day > 365 {
                     return Err(ParseError::RuleOutOfRange);
@@ -249,41 +280,44 @@ impl<'a> Parser<'a> {
             }
             _ => return Err(ParseError::InvalidRule),
         };
-        let time = if self.eat(b'/') {
-            let value = self.parse_hms(ParseError::InvalidTime, ParseError::InvalidTime)?;
+        if self.eat(b'/') {
+            let value =
+                self.parse_hours_minutes_seconds(ParseError::InvalidTime, ParseError::InvalidTime)?;
             if value.abs() > MAX_RULE_TIME_SECONDS {
                 return Err(ParseError::TimeOutOfRange);
             }
-            value as i32
+            Ok(Rule::new(kind, date, value as i32))
         } else {
-            DEFAULT_RULE_TIME
-        };
-        Ok(Rule::new(kind, date, time))
+            Ok(Rule::implicit(kind, date))
+        }
     }
 
-    fn parse_zone(&mut self) -> Result<TimeZone<'a>, ParseError> {
+    fn parse_zone(&mut self) -> Result<TimeZone, ParseError> {
         if self.input.is_empty() {
             return Err(ParseError::Empty);
         }
-        let std_abbr = self.parse_name()?;
+        let standard_name = self.parse_name()?;
         // POSIX offsets are positive west of UTC; store seconds east of UTC.
-        let std_offset = -self.parse_zone_offset()? as i32;
+        let standard_offset = -self.parse_zone_offset()? as i32;
         if self.pos >= self.input.len() {
-            return Ok(TimeZone::fixed(std_abbr, std_offset));
+            return Ok(TimeZone::fixed(
+                Abbreviation::from_name(standard_name).ok_or(ParseError::NameTooLong)?,
+                standard_offset,
+            ));
         }
         if self.peek() == Some(b',') {
-            return Err(ParseError::RulesWithoutDst);
+            return Err(ParseError::RulesWithoutDaylightSaving);
         }
-        let dst_abbr = self.parse_name()?;
+        let daylight_saving_name = self.parse_name()?;
         let next_starts_offset = match self.peek() {
             Some(b'+') | Some(b'-') => true,
-            Some(c) => c.is_ascii_digit(),
+            Some(byte) => byte.is_ascii_digit(),
             None => false,
         };
-        let dst_offset = if next_starts_offset {
+        let daylight_saving_offset = if next_starts_offset {
             -self.parse_zone_offset()? as i32
         } else {
-            std_offset + 3600
+            standard_offset + 3600
         };
         let (start, end) = if self.eat(b',') {
             let start = self.parse_rule()?;
@@ -298,8 +332,13 @@ impl<'a> Parser<'a> {
         if self.pos < self.input.len() {
             return Err(ParseError::TrailingCharacters);
         }
-        Ok(TimeZone::with_dst(
-            std_abbr, std_offset, dst_abbr, dst_offset, start, end,
+        Ok(TimeZone::with_daylight_saving(
+            Abbreviation::from_name(standard_name).ok_or(ParseError::NameTooLong)?,
+            standard_offset,
+            Abbreviation::from_name(daylight_saving_name).ok_or(ParseError::NameTooLong)?,
+            daylight_saving_offset,
+            start,
+            end,
         ))
     }
 }

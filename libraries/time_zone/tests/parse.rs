@@ -4,37 +4,48 @@
 use time_zone::{ParseError, RuleKind, TimeZone};
 
 #[test]
-fn simple_zones_without_dst() {
+fn simple_zones_without_daylight_saving() {
     let utc = TimeZone::parse("UTC0").unwrap();
-    assert_eq!(utc.std_abbreviation(), "UTC");
-    assert_eq!(utc.std_offset_seconds(), 0);
-    assert!(!utc.has_dst());
+    assert_eq!(utc.standard_abbreviation(), "UTC");
+    assert_eq!(utc.standard_offset_seconds(), 0);
+    assert!(!utc.has_daylight_saving());
 
     let kolkata = TimeZone::parse("IST-5:30").unwrap();
-    assert_eq!(kolkata.std_abbreviation(), "IST");
-    assert_eq!(kolkata.std_offset_seconds(), 5 * 3600 + 30 * 60);
-    assert!(!kolkata.has_dst());
+    assert_eq!(kolkata.standard_abbreviation(), "IST");
+    assert_eq!(kolkata.standard_offset_seconds(), 5 * 3600 + 30 * 60);
+    assert!(!kolkata.has_daylight_saving());
 
     let tokyo = TimeZone::parse("JST-9").unwrap();
-    assert_eq!(tokyo.std_offset_seconds(), 9 * 3600);
+    assert_eq!(tokyo.standard_offset_seconds(), 9 * 3600);
+
+    // An offset of exactly 24 hours is allowed. POSIX offsets are positive
+    // west of UTC, so `XXX-24` is 24 hours east and `XXX24` is 24 hours west.
+    let zone = TimeZone::parse("XXX-24").unwrap();
+    assert_eq!(zone.standard_offset_seconds(), 24 * 3600);
+    let zone = TimeZone::parse("XXX24:00:00").unwrap();
+    assert_eq!(zone.standard_offset_seconds(), -24 * 3600);
 
     let chatham = TimeZone::parse("<+1245>-12:45<+1345>,M9.5.0/2:45,M4.1.0/3:45").unwrap();
-    assert_eq!(chatham.std_abbreviation(), "+1245");
-    assert_eq!(chatham.std_offset_seconds(), 12 * 3600 + 45 * 60);
-    assert_eq!(chatham.dst_abbreviation(), Some("+1345"));
-    // The DST offset is omitted, so it is one hour ahead of the standard one.
-    assert_eq!(chatham.dst_offset_seconds(), Some(13 * 3600 + 45 * 60));
+    assert_eq!(chatham.standard_abbreviation(), "+1245");
+    assert_eq!(chatham.standard_offset_seconds(), 12 * 3600 + 45 * 60);
+    assert_eq!(chatham.daylight_saving_abbreviation(), Some("+1345"));
+    // The daylight saving offset is omitted, so it is one hour ahead of the
+    // standard one.
+    assert_eq!(
+        chatham.daylight_saving_offset_seconds(),
+        Some(13 * 3600 + 45 * 60)
+    );
     assert_eq!(chatham.start_rule().time_seconds(), 2 * 3600 + 45 * 60);
     assert_eq!(chatham.end_rule().time_seconds(), 3 * 3600 + 45 * 60);
 }
 
 #[test]
-fn dst_zone_with_rules() {
+fn zone_with_daylight_saving_rules() {
     let paris = TimeZone::parse("CET-1CEST,M3.5.0,M10.5.0/3").unwrap();
-    assert_eq!(paris.std_abbreviation(), "CET");
-    assert_eq!(paris.std_offset_seconds(), 3600);
-    assert_eq!(paris.dst_abbreviation(), Some("CEST"));
-    assert_eq!(paris.dst_offset_seconds(), Some(7200));
+    assert_eq!(paris.standard_abbreviation(), "CET");
+    assert_eq!(paris.standard_offset_seconds(), 3600);
+    assert_eq!(paris.daylight_saving_abbreviation(), Some("CEST"));
+    assert_eq!(paris.daylight_saving_offset_seconds(), Some(7200));
     assert_eq!(paris.start_rule().kind(), RuleKind::MonthWeekDay);
     assert_eq!(
         (
@@ -44,9 +55,11 @@ fn dst_zone_with_rules() {
         ),
         (3, 5, 0)
     );
-    // A rule without a time defaults to 02:00:00.
+    // A rule without a time defaults to 02:00:00 and is not explicit.
     assert_eq!(paris.start_rule().time_seconds(), 2 * 3600);
+    assert!(!paris.start_rule().has_explicit_time());
     assert_eq!(paris.end_rule().time_seconds(), 3 * 3600);
+    assert!(paris.end_rule().has_explicit_time());
     assert_eq!(
         (
             paris.end_rule().month(),
@@ -58,14 +71,18 @@ fn dst_zone_with_rules() {
 }
 
 #[test]
-fn dst_with_explicit_offset_and_default_rules() {
-    // The DST offset is given, and no rules means the United States rules.
+fn daylight_saving_with_explicit_offset_and_default_rules() {
+    // The daylight saving offset is given, and no rules means the United
+    // States rules.
     let zone = TimeZone::parse("EST5EDT4,M3.2.0,M11.1.0").unwrap();
-    assert_eq!(zone.std_offset_seconds(), -5 * 3600);
-    assert_eq!(zone.dst_offset_seconds(), Some(-4 * 3600));
+    assert_eq!(zone.standard_offset_seconds(), -5 * 3600);
+    assert_eq!(zone.daylight_saving_offset_seconds(), Some(-4 * 3600));
 
     let default_rules = TimeZone::parse("EST5EDT").unwrap();
-    assert_eq!(default_rules.dst_offset_seconds(), Some(-4 * 3600));
+    assert_eq!(
+        default_rules.daylight_saving_offset_seconds(),
+        Some(-4 * 3600)
+    );
     assert_eq!(
         (
             default_rules.start_rule().month(),
@@ -75,6 +92,7 @@ fn dst_with_explicit_offset_and_default_rules() {
         (3, 2, 0)
     );
     assert_eq!(default_rules.start_rule().time_seconds(), 2 * 3600);
+    assert!(!default_rules.start_rule().has_explicit_time());
     assert_eq!(
         (
             default_rules.end_rule().month(),
@@ -83,6 +101,11 @@ fn dst_with_explicit_offset_and_default_rules() {
         ),
         (11, 1, 0)
     );
+
+    // An explicit /2 stays explicit.
+    let explicit = TimeZone::parse("EST5EDT,M3.2.0/2,M11.1.0/2").unwrap();
+    assert!(explicit.start_rule().has_explicit_time());
+    assert_eq!(format!("{:?}", explicit.start_rule()), "M3.2.0/2");
 }
 
 #[test]
@@ -103,6 +126,7 @@ fn rule_forms_and_signed_times() {
     let zone = TimeZone::parse("EEE-2FFF,M3.4.4/26,M10.5.0").unwrap();
     assert_eq!(zone.start_rule().time_seconds(), 26 * 3600);
     assert_eq!(zone.end_rule().time_seconds(), 2 * 3600);
+    assert!(!zone.end_rule().has_explicit_time());
 
     let zone = TimeZone::parse("GGG2HHH,M3.5.0/-1,M10.5.0/0").unwrap();
     assert_eq!(zone.start_rule().time_seconds(), -3600);
@@ -115,26 +139,27 @@ fn rule_forms_and_signed_times() {
 
     // Signs and seconds in offsets.
     let zone = TimeZone::parse("<+0545>-5:45").unwrap();
-    assert_eq!(zone.std_offset_seconds(), 5 * 3600 + 45 * 60);
+    assert_eq!(zone.standard_offset_seconds(), 5 * 3600 + 45 * 60);
     let zone = TimeZone::parse("KKK+2:30:15").unwrap();
-    assert_eq!(zone.std_offset_seconds(), -(2 * 3600 + 30 * 60 + 15));
+    assert_eq!(zone.standard_offset_seconds(), -(2 * 3600 + 30 * 60 + 15));
 }
 
 #[test]
-fn negative_dst_offset() {
+fn negative_daylight_saving_offset() {
     // Europe/Dublin: the daylight saving offset is smaller than the standard
     // one.
     let dublin = TimeZone::parse("IST-1GMT0,M10.5.0,M3.5.0/1").unwrap();
-    assert_eq!(dublin.std_abbreviation(), "IST");
-    assert_eq!(dublin.std_offset_seconds(), 3600);
-    assert_eq!(dublin.dst_abbreviation(), Some("GMT"));
-    assert_eq!(dublin.dst_offset_seconds(), Some(0));
+    assert_eq!(dublin.standard_abbreviation(), "IST");
+    assert_eq!(dublin.standard_offset_seconds(), 3600);
+    assert_eq!(dublin.daylight_saving_abbreviation(), Some("GMT"));
+    assert_eq!(dublin.daylight_saving_offset_seconds(), Some(0));
 }
 
 #[test]
 fn invalid_strings() {
     let cases: &[(&str, ParseError)] = &[
         ("", ParseError::Empty),
+        ("UTC", ParseError::MissingOffset),
         ("5EDT", ParseError::MissingName),
         ("-1CEST", ParseError::MissingName),
         ("AB1", ParseError::NameTooShort),
@@ -142,12 +167,20 @@ fn invalid_strings() {
         ("<AB>1", ParseError::NameTooShort),
         ("<A>1", ParseError::NameTooShort),
         ("<ABC", ParseError::UnterminatedName),
+        ("<a,b>-3", ParseError::InvalidNameCharacter),
+        ("<a b c>-3", ParseError::InvalidNameCharacter),
+        ("<é é>-3", ParseError::InvalidNameCharacter),
+        ("<abc>-3<d,e>", ParseError::InvalidNameCharacter),
+        ("<abcdefgh>1", ParseError::NameTooLong),
+        ("ABCDEFGH-1", ParseError::NameTooLong),
         ("CET", ParseError::MissingOffset),
         ("CET-", ParseError::MissingOffset),
         ("CET-x", ParseError::MissingOffset),
         ("CET-1:", ParseError::InvalidOffset),
         ("CET-1:2", ParseError::InvalidOffset),
         ("CET-1:2:3:4", ParseError::InvalidOffset),
+        ("CET-1:99", ParseError::InvalidOffset),
+        ("CET-1:00:99", ParseError::InvalidOffset),
         ("CET--1", ParseError::MissingOffset),
         ("CET-25", ParseError::OffsetOutOfRange),
         ("CET-24:00:01", ParseError::OffsetOutOfRange),
@@ -159,7 +192,10 @@ fn invalid_strings() {
             ParseError::TrailingCharacters,
         ),
         ("CET-1CEST,M3.5.0;M10.5.0", ParseError::MissingEndRule),
-        ("EST5,M3.2.0,M11.1.0", ParseError::RulesWithoutDst),
+        (
+            "EST5,M3.2.0,M11.1.0",
+            ParseError::RulesWithoutDaylightSaving,
+        ),
         ("CET-1CEST,X3.5.0,M10.5.0", ParseError::InvalidRule),
         ("CET-1CEST,M0.5.0,M10.5.0", ParseError::RuleOutOfRange),
         ("CET-1CEST,M13.5.0,M10.5.0", ParseError::RuleOutOfRange),
@@ -172,6 +208,8 @@ fn invalid_strings() {
         ("CET-1CEST,M3.5,M10.5.0", ParseError::InvalidRule),
         ("CET-1CEST,M3.5.0/,M10.5.0", ParseError::InvalidTime),
         ("CET-1CEST,M3.5.0/2:,M10.5.0", ParseError::InvalidTime),
+        ("CET-1CEST,M3.5.0/2:60,M10.5.0", ParseError::InvalidTime),
+        ("CET-1CEST,M3.5.0/2:00:60,M10.5.0", ParseError::InvalidTime),
         ("CET-1CEST,M3.5.0/168,M10.5.0", ParseError::TimeOutOfRange),
         ("CET-1CEST,M3.5.0/-168,M10.5.0", ParseError::TimeOutOfRange),
         ("CET-1CEST,M3.5.0/25C,M10.5.0", ParseError::MissingEndRule),
@@ -187,13 +225,19 @@ fn invalid_strings() {
 }
 
 #[test]
-fn parsed_value_is_copy_and_small() {
+fn parsed_value_is_copy_and_32_bytes() {
     fn assert_copy<T: Copy>() {}
-    assert_copy::<TimeZone<'_>>();
+    assert_copy::<TimeZone>();
+    // The two abbreviation buffers, two offsets and two rules, with no
+    // padding: 8 + 8 + 4 + 4 + 4 + 4.
+    assert_eq!(core::mem::size_of::<TimeZone>(), 32);
     assert_eq!(core::mem::size_of::<time_zone::Rule>(), 4);
     let zone = TimeZone::parse("CET-1CEST,M3.5.0,M10.5.0/3").unwrap();
     let copy = zone;
     assert_eq!(zone, copy);
+    // The value owns its abbreviations: it does not borrow the input.
+    let owned = TimeZone::parse(&String::from("CET-1CEST,M3.5.0,M10.5.0/3")).unwrap();
+    assert_eq!(owned.standard_abbreviation(), "CET");
 }
 
 #[test]
@@ -202,11 +246,13 @@ fn error_display_is_not_empty() {
         ParseError::Empty,
         ParseError::MissingName,
         ParseError::NameTooShort,
+        ParseError::InvalidNameCharacter,
+        ParseError::NameTooLong,
         ParseError::UnterminatedName,
         ParseError::MissingOffset,
         ParseError::InvalidOffset,
         ParseError::OffsetOutOfRange,
-        ParseError::RulesWithoutDst,
+        ParseError::RulesWithoutDaylightSaving,
         ParseError::InvalidRule,
         ParseError::RuleOutOfRange,
         ParseError::InvalidTime,

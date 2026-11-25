@@ -65,7 +65,7 @@ fn utc_to_local_matches_the_host_database() {
     }
 }
 
-fn check_utc_to_local(name: &str, zone: &TimeZone<'_>, host: &chrono_tz::Tz, utc: i64) {
+fn check_utc_to_local(name: &str, zone: &TimeZone, host: &chrono_tz::Tz, utc: i64) {
     let local = zone.from_utc(utc);
     let host_local = host.timestamp_opt(utc, 0).single().unwrap();
     assert_eq!(
@@ -108,7 +108,7 @@ fn check_utc_to_local(name: &str, zone: &TimeZone<'_>, host: &chrono_tz::Tz, utc
     // The daylight saving flag is the host database's extra offset being
     // non-zero at that instant.
     let host_dst = host_local.offset().dst_offset().num_seconds() != 0;
-    assert_eq!(local.dst, host_dst, "{name} {utc}");
+    assert_eq!(local.daylight_saving, host_dst, "{name} {utc}");
 }
 
 #[test]
