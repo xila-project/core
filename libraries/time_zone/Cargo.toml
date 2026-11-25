@@ -1,0 +1,20 @@
+[package]
+name = "xila-time-zone"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "POSIX TZ rule parsing and UTC to local civil time conversion without allocation"
+
+[lib]
+name = "time_zone"
+
+[features]
+default = []
+# Compile the full IANA zone name table (name to POSIX TZ string).
+iana-all = []
+# Compile the Europe subset of the IANA zone name table.
+iana-europe = []
+
+[dev-dependencies]
+chrono = { version = "0.4", default-features = false, features = ["alloc"] }
+chrono-tz = "0.10"

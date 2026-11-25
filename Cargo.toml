@@ -54,6 +54,7 @@ embedded-i18n = { version = "=0.2.0", default-features = false, features = [
 testing = { package = "xila-testing", path = "libraries/testing" }
 testing_support = { package = "xila-testing-support", path = "libraries/testing/support" }
 device = { package = "xila-device", path = "devices" }
+time_zone = { package = "xila-time-zone", path = "libraries/time_zone" }
 
 # - Drivers
 drivers_core = { package = "xila-drivers-core", path = "drivers/core" }
@@ -141,6 +142,7 @@ members = [
   "subsystems/log",
   "subsystems/lifecycle",
   "libraries/bootsplash",
+  "libraries/time_zone",
   "drivers/core",
 
   "devices",

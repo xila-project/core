@@ -349,6 +349,11 @@ cargo nextest run --locked --workspace --features xila/graphics_rendering_xrgb88
 cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888,xila-graphics/headless_screen,xila-io-error/std --doc
 cargo nextest run --locked -p xila-abi-application --no-default-features
 cargo test --locked -p xila-abi-application --no-default-features --doc
+# The IANA table features are not in the workspace feature list above.
+cargo nextest run --locked -p xila-time-zone --features iana-all
+cargo test --locked -p xila-time-zone --features iana-all --doc
+cargo nextest run --locked -p xila-time-zone --features iana-europe
+cargo test --locked -p xila-time-zone --features iana-europe --doc
 # The graphics feature also enables environment.
 cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888,xila-testing/graphics --no-run
 mise run test:native-loader
@@ -518,6 +523,7 @@ for target in thumbv7em-none-eabihf riscv32imafc-unknown-none-elf; do
   cargo check --locked -p xila --target "$target"
   cargo check --locked -p xila --no-default-features --target "$target"
   cargo check --locked -p xila --features task_metrics --target "$target"
+  cargo check --locked -p xila-time-zone --features iana-all --target "$target"
 done
 # Graphics is C-backed and its FFI differs by target: `c_char` is unsigned on ARM and RISC-V.
 cargo check --locked -p xila-graphics --features rendering_rgb565 --target thumbv7em-none-eabihf
@@ -589,7 +595,7 @@ env = { CC_xtensa_esp32s3_none_elf = "xtensa-esp32s3-elf-gcc", BINDGEN_EXTRA_CLA
 # CAS: like esp-hal for these chips, select portable-atomic's single-core backend.
 run = """
 set -eu
-rustup run esp cargo build --locked -Zbuild-std=core,alloc --target xtensa-esp32s3-none-elf -p xila-little-fs -p xila-graphics -p xila-stackful -p xila-virtual-file-system -p xila-native-loader -p xila-abi-application -p xila-executable --features xila-graphics/rendering_rgb565,xila-abi-application/network,xila-abi-application/graphics,xila-executable/native-dev,xila-executable/graphics
+rustup run esp cargo build --locked -Zbuild-std=core,alloc --target xtensa-esp32s3-none-elf -p xila-little-fs -p xila-graphics -p xila-stackful -p xila-virtual-file-system -p xila-native-loader -p xila-abi-application -p xila-executable -p xila-time-zone --features xila-time-zone/iana-all,xila-graphics/rendering_rgb565,xila-abi-application/network,xila-abi-application/graphics,xila-executable/native-dev,xila-executable/graphics
 rustup run esp cargo build --locked -Zbuild-std=core,alloc --target xtensa-esp32-none-elf -p xila-stackful -p xila-virtual-file-system -p xila-native-loader -p xila-abi-application
 RUSTFLAGS="--cfg portable_atomic_unsafe_assume_single_core" rustup run esp cargo build --locked -Zbuild-std=core,alloc --target xtensa-esp32s2-none-elf -p xila-stackful -p xila-virtual-file-system -p xila-native-loader -p xila-abi-application
 """
