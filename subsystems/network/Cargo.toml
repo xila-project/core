@@ -42,6 +42,7 @@ smoltcp = { workspace = true, features = [
   "auto-icmp-echo-reply",
 ] }
 heapless = { version = "0.9" }
+miniserde = { workspace = true }
 
 [dev-dependencies]
 testing_support = { workspace = true }

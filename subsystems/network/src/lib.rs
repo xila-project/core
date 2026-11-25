@@ -9,6 +9,7 @@ mod device;
 mod error;
 mod fundamentals;
 mod manager;
+pub mod sntp;
 mod socket;
 
 pub use device::*;

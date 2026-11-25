@@ -2355,6 +2355,7 @@ dependencies = [
  "embassy-time",
  "embedded-io-async",
  "heapless",
+ "miniserde",
  "smoltcp",
  "xila-device",
  "xila-file-system",

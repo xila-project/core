@@ -242,6 +242,16 @@ impl Manager {
         .await
     }
 
+    /// Whether the selected interface, or the first available one, has at
+    /// least one IP address: the signal that the network is up for clients.
+    pub async fn has_ip_address(&self, interface_name: Option<&str>) -> bool {
+        let stacks = self.stacks.read().await;
+        match Self::select_stack(&stacks, interface_name).await {
+            Ok(stack) => stack.with(|s| s.get_ip_addresses_count() > 0).await,
+            Err(_) => false,
+        }
+    }
+
     pub async fn new_tcp_socket(
         &self,
         transmit_buffer_size: usize,
