@@ -59,12 +59,14 @@ pub enum Failure {
     TimedOut,
 }
 
-/// What one successful exchange produced: the `sntpc` result and the monotonic
-/// instant just after the answer was processed.
-#[derive(Clone, Copy, Debug)]
+/// What one successful exchange produced: the `sntpc` result, the monotonic
+/// instant just after the answer was processed, and the address that answered.
+#[derive(Clone, Debug)]
 pub struct Exchange {
     pub result: sntpc::NtpResult,
     pub received_monotonic: Duration,
+    /// The address the answer came from.
+    pub answered_from: IpAddress,
 }
 
 /// What applying an exchange changed.
@@ -94,6 +96,7 @@ pub struct Applied {
 pub struct SntpUdpSocket {
     socket: Mutex<CriticalSectionRawMutex, UdpSocket>,
     last_io_error: Mutex<CriticalSectionRawMutex, Option<IoErrorKind>>,
+    last_response_source: Mutex<CriticalSectionRawMutex, Option<SocketAddr>>,
 }
 
 impl SntpUdpSocket {
@@ -101,6 +104,7 @@ impl SntpUdpSocket {
         Self {
             socket: Mutex::new(socket),
             last_io_error: Mutex::new(None),
+            last_response_source: Mutex::new(None),
         }
     }
 
@@ -124,6 +128,11 @@ impl SntpUdpSocket {
     /// The kind of the last socket error, if any.
     pub async fn last_io_error(&self) -> Option<IoErrorKind> {
         *self.last_io_error.lock().await
+    }
+
+    /// The source address of the last received datagram, if any.
+    pub async fn last_response_source(&self) -> Option<SocketAddr> {
+        *self.last_response_source.lock().await
     }
 
     /// Record a socket error and map it to the `sntpc` error.
@@ -155,13 +164,14 @@ impl sntpc::NtpUdpSocket for SntpUdpSocket {
     async fn recv_from(&self, packet: &mut [u8]) -> sntpc::Result<(usize, SocketAddr)> {
         let socket = self.socket.lock().await;
         match socket.read_from(packet).await {
-            Ok((size, remote)) => Ok((
-                size,
-                SocketAddr::new(
+            Ok((size, remote)) => {
+                let source = SocketAddr::new(
                     to_core_ip(remote.remote_address),
                     remote.remote_port.into_inner(),
-                ),
-            )),
+                );
+                *self.last_response_source.lock().await = Some(source);
+                Ok((size, source))
+            }
             Err(kind) => Err(self.record_io_error(kind).await),
         }
     }
@@ -272,11 +282,15 @@ impl<'a> Client<'a> {
         addresses: &[IpAddress],
         socket: &SntpUdpSocket,
     ) -> core::result::Result<Exchange, Failure> {
-        let deadline = self.time.monotonic_now() + RESPONSE_TIMEOUT;
+        let total_deadline = self.time.monotonic_now() + RESPONSE_TIMEOUT;
+        // Every address gets a share of the attempt deadline, at least 1 s,
+        // so a silent first address cannot starve the others.
+        let share = (RESPONSE_TIMEOUT / addresses.len().max(1) as u32).max(Duration::from_secs(1));
         let mut last_error = Failure::Protocol(sntpc::Error::Network);
         let mut kiss_of_death: Option<sntpc::Error> = None;
         for address in addresses {
             let destination = SocketAddr::new(to_core_ip(address.clone()), SERVER_PORT);
+            let deadline = (self.time.monotonic_now() + share).min(total_deadline);
             match self.exchange_one(destination, socket, deadline).await {
                 Ok(exchange) => return Ok(exchange),
                 Err(Failure::Protocol(error @ sntpc::Error::KissOfDeath(_))) => {
@@ -329,9 +343,15 @@ impl<'a> Client<'a> {
             let answer = sntpc::sntp_process_response(destination, socket, context, sent);
             match select(answer, task::sleep(deadline - now)).await {
                 Either::First(Ok(result)) => {
+                    let answered_from = socket
+                        .last_response_source()
+                        .await
+                        .map(|source| from_core_ip(source.ip()))
+                        .unwrap_or_else(|| from_core_ip(destination.ip()));
                     return Ok(Exchange {
                         result,
                         received_monotonic: self.time.monotonic_now(),
+                        answered_from,
                     });
                 }
                 Either::First(Err(error)) => {
@@ -566,6 +586,7 @@ mod tests {
         let exchange = Exchange {
             result: result(20_000, 3_600_000_000),
             received_monotonic: received,
+            answered_from: IpAddress::new_ipv4([192, 0, 2, 1]),
         };
         let applied = apply(&time_manager, &exchange, None).unwrap();
         let synchronization = time_manager.status().synchronization.expect("synchronized");
@@ -595,6 +616,7 @@ mod tests {
         let exchange = Exchange {
             result: result(0, 0),
             received_monotonic: time_manager.monotonic_now(),
+            answered_from: IpAddress::new_ipv4([192, 0, 2, 1]),
         };
         let applied = apply(&time_manager, &exchange, None).unwrap();
         let offset = applied.offset_nanos.expect("clock was set before");
@@ -612,6 +634,7 @@ mod tests {
         let exchange = Exchange {
             result: result(60_000_000, 0),
             received_monotonic: time_manager.monotonic_now(),
+            answered_from: IpAddress::new_ipv4([192, 0, 2, 1]),
         };
         assert_eq!(
             apply(&time_manager, &exchange, None),
@@ -630,6 +653,7 @@ mod tests {
         let exchange = Exchange {
             result: result(1_000, 0),
             received_monotonic: time_manager.monotonic_now(),
+            answered_from: IpAddress::new_ipv4([192, 0, 2, 1]),
         };
         assert_eq!(
             apply(&time_manager, &exchange, Some(minimum)),

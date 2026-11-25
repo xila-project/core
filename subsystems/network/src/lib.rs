@@ -127,6 +127,12 @@ pub mod tests {
         )
         .await
         .unwrap();
+        file.control(
+            ADD_IP_ADDRESS,
+            &IpCidrAbi::from(IpCidr::new_ipv4([127, 0, 0, 2], 8)),
+        )
+        .await
+        .unwrap();
 
         file.close(virtual_file_system).await.unwrap();
 

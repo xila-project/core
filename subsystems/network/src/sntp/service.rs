@@ -219,12 +219,14 @@ enum Attempt {
 
 /// A large clock step waiting for a confirming second answer: the signed
 /// offset in nanoseconds (candidate minus the current clock), the server that
-/// reported it and the address that answered.
+/// reported it, the address that answered, and the monotonic instant when it
+/// was recorded. It expires after about one resynchronization interval.
 #[derive(Clone, Debug)]
 struct PendingStep {
     offset_nanos: i128,
     server: usize,
     address: Option<IpAddress>,
+    recorded_at: Duration,
 }
 
 /// A cached name resolution.
@@ -427,6 +429,12 @@ async fn attempt(
     pending_step: &mut Option<PendingStep>,
 ) -> Attempt {
     let now = time.monotonic_now();
+    // A pending step expires after about one resynchronization interval.
+    if let Some(pending) = pending_step.as_ref()
+        && now.saturating_sub(pending.recorded_at) > configuration.resync_interval
+    {
+        *pending_step = None;
+    }
     let mut last_error = Failure::Protocol(SntpError::Network);
     let mut queried = false;
     let mut unconfirmed = false;
@@ -462,10 +470,18 @@ async fn attempt(
                 let already_network = time
                     .status()
                     .synchronization
-                    .is_some_and(|s| s.source == time::ClockSource::Network);
-                if already_network && let Ok(current) = time.realtime_now() {
-                    let offset_nanos = candidate.as_nanos() - current.as_nanos();
-                    if offset_nanos.abs() > MAXIMUM_CLOCK_STEP.as_nanos() as i128 {
+                    .is_some_and(|status| status.source == time::ClockSource::Network);
+                let offset_nanos = if already_network {
+                    time.realtime_now()
+                        .ok()
+                        .map(|current| candidate.as_nanos() - current.as_nanos())
+                } else {
+                    None
+                };
+                match offset_nanos {
+                    Some(offset_nanos)
+                        if offset_nanos.abs() > MAXIMUM_CLOCK_STEP.as_nanos() as i128 =>
+                    {
                         let confirmed = pending_step.as_ref().is_some_and(|pending| {
                             (offset_nanos - pending.offset_nanos).abs()
                                 <= STEP_CONFIRMATION_TOLERANCE.as_nanos() as i128
@@ -473,7 +489,7 @@ async fn attempt(
                         if confirmed {
                             if let Some(pending) = pending_step.take()
                                 && (pending.server != index
-                                    || pending.address.as_ref() != addresses.first())
+                                    || pending.address != Some(exchange.answered_from.clone()))
                             {
                                 log::information!(
                                     "SNTP: the large clock step is confirmed by a second server or address"
@@ -483,15 +499,18 @@ async fn attempt(
                             *pending_step = Some(PendingStep {
                                 offset_nanos,
                                 server: index,
-                                address: addresses.first().cloned(),
+                                address: Some(exchange.answered_from.clone()),
+                                recorded_at: now,
                             });
                             unconfirmed = true;
                             last_error = Failure::Protocol(SntpError::InvalidTimestamp);
                             continue;
                         }
                     }
-                } else {
-                    *pending_step = None;
+                    // Any other answer (in range, or before the first network
+                    // synchronization) clears the pending step, so a stale
+                    // step can never confirm a later answer.
+                    _ => *pending_step = None,
                 }
                 match client.apply(&exchange) {
                     Ok(applied) => {
@@ -716,6 +735,7 @@ mod tests {
 
         // The honest server answers "now plus 2000 s" at answer time.
         let (ready, server_task) = spawn_scripted_server(
+            [127, 0, 0, 1],
             move |request| {
                 let now = time_manager.realtime_now().unwrap().as_nanos();
                 alloc::vec![valid_answer(now + 2_000_000_000_000)(request)]
@@ -788,6 +808,7 @@ mod tests {
         // The attacker always answers the same frozen time, 5000 s ahead.
         let constant = T0 + 5_000_000_000_000;
         let (ready, server_task) = spawn_scripted_server(
+            [127, 0, 0, 1],
             move |request| alloc::vec![valid_answer(constant)(request)],
             2,
         )
@@ -840,6 +861,156 @@ mod tests {
         server_task.join().await;
     }
 
+    /// An in-range answer applies and clears the pending step, so a single
+    /// later large answer does not confirm at once.
+    #[task::test]
+    async fn an_in_range_answer_clears_the_pending_step() {
+        let _lock = TEST_MUTEX.lock().await;
+        let network = initialize().await;
+        let time_manager = host_time_manager();
+        set_network_clock(time_manager, T0);
+        let client = Client::new(network, time_manager, None);
+
+        // The server answers +2000 s, then in range, then +2000 s again.
+        let calls = Cell::new(0usize);
+        let (ready, server_task) = spawn_scripted_server(
+            [127, 0, 0, 1],
+            move |request| {
+                let call = calls.get();
+                calls.set(call + 1);
+                let now = time_manager.realtime_now().unwrap().as_nanos();
+                let offset = if call == 1 { 0 } else { 2000 };
+                alloc::vec![valid_answer(now + offset * 1_000_000_000)(request)]
+            },
+            3,
+        )
+        .await;
+        ready.wait().await;
+
+        let configuration = test_configuration(&["127.0.0.1"]);
+        let mut states = vec![ServerState::default()];
+        let mut adapter = None;
+        let mut dns_cache: Vec<DnsEntry> = Vec::new();
+        let mut pending_step: Option<PendingStep> = None;
+
+        let first = attempt(
+            &client,
+            network,
+            time_manager,
+            configuration,
+            &mut states,
+            &mut adapter,
+            &mut dns_cache,
+            &mut pending_step,
+        )
+        .await;
+        assert!(matches!(first, Attempt::Unconfirmed), "{first:?}");
+        assert!(pending_step.is_some());
+
+        let second = attempt(
+            &client,
+            network,
+            time_manager,
+            configuration,
+            &mut states,
+            &mut adapter,
+            &mut dns_cache,
+            &mut pending_step,
+        )
+        .await;
+        assert!(
+            matches!(second, Attempt::Synchronized(_)),
+            "the in-range answer applies: {second:?}"
+        );
+        assert!(
+            pending_step.is_none(),
+            "the applied answer cleared the pending step"
+        );
+
+        let third = attempt(
+            &client,
+            network,
+            time_manager,
+            configuration,
+            &mut states,
+            &mut adapter,
+            &mut dns_cache,
+            &mut pending_step,
+        )
+        .await;
+        assert!(
+            matches!(third, Attempt::Unconfirmed),
+            "a single later large answer does not confirm without a pending step: {third:?}"
+        );
+        server_task.join().await;
+    }
+
+    /// A pending step expires after about one resynchronization interval: with
+    /// a 1 s interval, a step recorded 2 s ago no longer confirms.
+    #[task::test]
+    async fn a_pending_step_expires_after_one_interval() {
+        let _lock = TEST_MUTEX.lock().await;
+        let network = initialize().await;
+        let time_manager = host_time_manager();
+        set_network_clock(time_manager, T0);
+        let client = Client::new(network, time_manager, None);
+
+        // The server always answers 2000 s ahead of the current clock.
+        let (ready, server_task) = spawn_scripted_server(
+            [127, 0, 0, 1],
+            move |request| {
+                let now = time_manager.realtime_now().unwrap().as_nanos();
+                alloc::vec![valid_answer(now + 2_000_000_000_000)(request)]
+            },
+            2,
+        )
+        .await;
+        ready.wait().await;
+
+        // A one-second resynchronization interval for the expiry test.
+        let configuration = Box::leak(Box::new(Configuration {
+            servers: vec![String::from("127.0.0.1")],
+            resync_interval: Duration::from_secs(1),
+        }));
+        let mut states = vec![ServerState::default()];
+        let mut adapter = None;
+        let mut dns_cache: Vec<DnsEntry> = Vec::new();
+        let mut pending_step: Option<PendingStep> = None;
+
+        let first = attempt(
+            &client,
+            network,
+            time_manager,
+            configuration,
+            &mut states,
+            &mut adapter,
+            &mut dns_cache,
+            &mut pending_step,
+        )
+        .await;
+        assert!(matches!(first, Attempt::Unconfirmed), "{first:?}");
+        assert!(pending_step.is_some());
+
+        // More than one interval passes; the offsets would still agree.
+        task::sleep(Duration::from_secs(2)).await;
+        let second = attempt(
+            &client,
+            network,
+            time_manager,
+            configuration,
+            &mut states,
+            &mut adapter,
+            &mut dns_cache,
+            &mut pending_step,
+        )
+        .await;
+        assert!(
+            matches!(second, Attempt::Unconfirmed),
+            "the expired pending step did not confirm: {second:?}"
+        );
+        server_task.join().await;
+    }
+
     /// A RATE kiss of death defers the next attempt until the deadline.
     #[task::test]
     async fn a_rate_kiss_defers_the_next_attempt() {
@@ -857,7 +1028,7 @@ mod tests {
             response[40..48].copy_from_slice(&request[40..48]);
             alloc::vec![response]
         };
-        let (ready, server_task) = spawn_scripted_server(kod, 1).await;
+        let (ready, server_task) = spawn_scripted_server([127, 0, 0, 1], kod, 1).await;
         ready.wait().await;
 
         let configuration = test_configuration(&["127.0.0.1"]);
@@ -923,6 +1094,7 @@ mod tests {
         // The first answer is garbage (mode 5), the second is valid.
         let calls = Cell::new(0usize);
         let (ready, server_task) = spawn_scripted_server(
+            [127, 0, 0, 1],
             move |request| {
                 if calls.get() == 0 {
                     calls.set(1);

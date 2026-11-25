@@ -23,9 +23,10 @@
 //! without a battery clock) are rejected. After the first network
 //! synchronization, a clock step larger than 1000 s is applied only when a
 //! second answer confirms it: the signed offset of the two answers (candidate
-//! minus the current clock) must agree within 5 s. A confirming answer from
-//! another server or resolved address is preferred; with a single server, a
-//! later exchange of the same server confirms, so a single-server setup only
+//! minus the current clock) must agree within 5 s. Another configured server
+//! in the same attempt confirms at once; otherwise a later attempt confirms,
+//! possibly from another address if DNS rotates. With a single server, only
+//! later exchanges of that server can confirm, so a single-server setup only
 //! resists a blind off-path attacker. Unauthenticated SNTP cannot stop an
 //! on-path attacker, and `sntpc` 0.11 does not randomize the low bits of the
 //! transmit timestamp as RFC 5905 section 8 asks; each exchange sends from a
@@ -65,8 +66,8 @@ pub(crate) mod support {
     };
 
     use super::client::SERVER_PORT;
+    use crate::UdpMetadata;
     use crate::tests::{initialize, task_manager};
-    use crate::{Port, UdpMetadata};
 
     pub(crate) static TEST_MUTEX: Mutex<CriticalSectionRawMutex, ()> = Mutex::new(());
 
@@ -87,10 +88,11 @@ pub(crate) mod support {
         (seconds << 32) | fraction
     }
 
-    /// Spawn a scripted server on 127.0.0.1:123 that reads `requests`
-    /// requests and sends back the answers `answer` builds from each
-    /// request's transmit timestamp (bytes 40 to 48), in order.
+    /// Spawn a scripted server on `bind`:123 that reads `requests` requests
+    /// and sends back the answers `answer` builds from each request's
+    /// transmit timestamp (bytes 40 to 48), in order.
     pub(crate) async fn spawn_scripted_server(
+        bind: [u8; 4],
         answer: impl Fn([u8; 48]) -> Vec<[u8; 48]> + Send + 'static,
         requests: usize,
     ) -> (
@@ -102,8 +104,12 @@ pub(crate) mod support {
             .new_udp_socket(64, 64, 4, 4, None)
             .await
             .expect("server socket");
+        let endpoint = core::net::SocketAddr::new(
+            core::net::IpAddr::V4(core::net::Ipv4Addr::new(bind[0], bind[1], bind[2], bind[3])),
+            SERVER_PORT,
+        );
         server_socket
-            .bind(Port::from_inner(SERVER_PORT))
+            .with_mutable(|socket| socket.bind(endpoint))
             .await
             .expect("server bind");
 
@@ -205,6 +211,7 @@ mod tests {
         let server_transmit_unix_nanos =
             time_manager.realtime_now().unwrap().as_nanos() + 3_600_000_000_000;
         let (ready, server_task) = spawn_scripted_server(
+            [127, 0, 0, 1],
             move |request| alloc::vec![valid_answer(server_transmit_unix_nanos)(request)],
             1,
         )
@@ -252,6 +259,7 @@ mod tests {
         let server_transmit_unix_nanos =
             time_manager.realtime_now().unwrap().as_nanos() + 3_600_000_000_000;
         let (ready, server_task) = spawn_scripted_server(
+            [127, 0, 0, 1],
             move |request| {
                 let mut forged = valid_answer(server_transmit_unix_nanos)(request);
                 // A forged originate timestamp: not what the client sent.
@@ -297,7 +305,7 @@ mod tests {
             response[40..48].copy_from_slice(&request[40..48]);
             alloc::vec![response]
         };
-        let (ready, server_task) = spawn_scripted_server(deny, 1).await;
+        let (ready, server_task) = spawn_scripted_server([127, 0, 0, 1], deny, 1).await;
         ready.wait().await;
 
         let mut adapter = None;
@@ -321,6 +329,46 @@ mod tests {
         server_task.join().await;
     }
 
+    /// A silent first address only burns its share of the deadline: the second
+    /// address still gets its chance and answers.
+    #[task::test]
+    async fn a_silent_first_address_does_not_starve_the_second() {
+        let _lock = TEST_MUTEX.lock().await;
+        let network_manager = initialize().await;
+        let time_manager = host_time_manager();
+        let client = Client::new(network_manager, time_manager, None);
+
+        let server_transmit_unix_nanos = time_manager.realtime_now().unwrap().as_nanos();
+        // The server listens on 127.0.0.2 only.
+        let (ready, server_task) = spawn_scripted_server(
+            [127, 0, 0, 2],
+            move |request| alloc::vec![valid_answer(server_transmit_unix_nanos)(request)],
+            1,
+        )
+        .await;
+        ready.wait().await;
+
+        let mut adapter = None;
+        let socket = client.ensure_socket(&mut adapter).await.unwrap();
+        let addresses = [
+            IpAddress::new_ipv4([127, 0, 0, 1]),
+            IpAddress::new_ipv4([127, 0, 0, 2]),
+        ];
+        let start = time_manager.monotonic_now();
+        let exchange = client
+            .exchange_addresses(&addresses, socket)
+            .await
+            .expect("the second address answers within its share");
+        let elapsed = time_manager.monotonic_now() - start;
+        server_task.join().await;
+
+        assert_eq!(exchange.answered_from, IpAddress::new_ipv4([127, 0, 0, 2]));
+        assert!(
+            elapsed < super::client::RESPONSE_TIMEOUT,
+            "the silent first address did not consume the whole deadline: {elapsed:?}"
+        );
+    }
+
     /// An answer that does not echo the request transmit timestamp is rejected
     /// by `sntpc`, and the clock is left alone.
     #[task::test]
@@ -336,7 +384,7 @@ mod tests {
             response[24..32].copy_from_slice(&ntp_wire(2_000_000_000_000_000_000).to_be_bytes());
             alloc::vec![response]
         };
-        let (ready, server_task) = spawn_scripted_server(forged, 1).await;
+        let (ready, server_task) = spawn_scripted_server([127, 0, 0, 1], forged, 1).await;
         ready.wait().await;
 
         let mut adapter = None;
@@ -375,7 +423,7 @@ mod tests {
             response[40..48].copy_from_slice(&request[40..48]);
             alloc::vec![response]
         };
-        let (ready, server_task) = spawn_scripted_server(kod, 1).await;
+        let (ready, server_task) = spawn_scripted_server([127, 0, 0, 1], kod, 1).await;
         ready.wait().await;
 
         let mut adapter = None;
