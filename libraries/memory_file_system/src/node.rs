@@ -51,6 +51,28 @@ impl Node {
         }
     }
 
+    pub(crate) fn with_attributes(
+        name: Box<str>,
+        parent: u32,
+        generation: u32,
+        attributes: NodeAttributes,
+    ) -> Self {
+        Self {
+            inode: attributes.inode,
+            creation: attributes.creation,
+            modification: attributes.modification,
+            access: attributes.access,
+            status: attributes.status,
+            name,
+            parent,
+            generation,
+            user: attributes.user,
+            group: attributes.group,
+            permissions: attributes.permissions,
+            kind: attributes.kind,
+        }
+    }
+
     pub(crate) fn is_directory(&self) -> bool {
         self.kind == Kind::Directory
     }

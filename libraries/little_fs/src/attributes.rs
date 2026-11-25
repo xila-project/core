@@ -67,6 +67,18 @@ impl InternalAttributes {
         })
     }
 
+    /// Build the stored attributes for a new entry: backend defaults with the
+    /// fields selected by `attributes.get_mask()` applied on top. Used on the
+    /// create path so the real owner, permissions and times are committed
+    /// together with the entry instead of being rewritten afterwards.
+    pub fn from_attributes(attributes: &Attributes) -> Self {
+        let mut internal = unsafe { Self::new_uninitialized().assume_init() };
+        // Ignore the result: fields absent from the mask keep their defaults,
+        // and the mask was already validated by the caller.
+        let _ = internal.update_with_attributes(attributes);
+        internal
+    }
+
     pub fn update_attributes(&self, statistics: &mut Attributes) -> Result<()> {
         let requested = statistics.get_mask();
         let available = requested.intersection(Self::PERSISTED_ATTRIBUTE_FLAGS);

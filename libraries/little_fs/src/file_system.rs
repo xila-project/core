@@ -279,9 +279,9 @@ impl FileSystemOperations for FileSystem {
         })
     }
 
-    fn create_directory(&self, path: &Path) -> Result<()> {
+    fn create_directory(&self, path: &Path, attributes: &Attributes) -> Result<()> {
         self.operation(|file_system| {
-            Directory::create(file_system, path)?;
+            Directory::create(file_system, path, attributes)?;
 
             Ok(())
         })
@@ -307,8 +307,8 @@ impl FileSystemOperations for FileSystem {
         })
     }
 
-    fn create_file(&self, path: &Path) -> Result<()> {
-        self.operation(|file_system| File::create(file_system, path))
+    fn create_file(&self, path: &Path, attributes: &Attributes) -> Result<()> {
+        self.operation(|file_system| File::create(file_system, path, attributes))
     }
 
     fn get_attributes(&self, path: &Path, attributes: &mut Attributes) -> Result<()> {
@@ -682,7 +682,7 @@ mod tests {
     fn littlefs_unsupported_attribute_masks_are_rejected_without_mutation() {
         let fs = initialize();
         let file = Path::new("/unsupported-attributes.txt");
-        FileSystemOperations::create_file(&fs, file).unwrap();
+        FileSystemOperations::create_file(&fs, file, &Attributes::new()).unwrap();
 
         let original_permissions = file_system::Permissions::ALL_READ_WRITE;
         FileSystemOperations::set_attributes(
@@ -740,7 +740,7 @@ mod tests {
         BaseOperations::close(&fs, &mut file_context).unwrap();
 
         let directory = Path::new("/unsupported-attributes-dir");
-        FileSystemOperations::create_directory(&fs, directory).unwrap();
+        FileSystemOperations::create_directory(&fs, directory, &Attributes::new()).unwrap();
         let mut path_directory_attributes = Attributes::new()
             .set_mask(AttributeFlags::Kind | AttributeFlags::Size | AttributeFlags::Links);
         FileSystemOperations::get_attributes(&fs, directory, &mut path_directory_attributes)
@@ -782,7 +782,7 @@ mod tests {
     fn littlefs_rejects_unsupported_attribute_all_mask_without_mutation() {
         let fs = initialize();
         let file = Path::new("/all-attributes.txt");
-        FileSystemOperations::create_file(&fs, file).unwrap();
+        FileSystemOperations::create_file(&fs, file, &Attributes::new()).unwrap();
         let original = file_system::Permissions::ALL_READ_WRITE;
         FileSystemOperations::set_attributes(
             &fs,
@@ -809,7 +809,7 @@ mod tests {
     fn path_ownership_updates_every_open_cache_and_survives_close() {
         let fs = initialize();
         let path = Path::new("/owners");
-        FileSystemOperations::create_file(&fs, path).unwrap();
+        FileSystemOperations::create_file(&fs, path, &Attributes::new()).unwrap();
         let mut first = Context::new_empty();
         let mut second = Context::new_empty();
         for context in [&mut first, &mut second] {
@@ -835,7 +835,7 @@ mod tests {
         let fs = initialize();
         let original = Path::new("/old");
         let moved = Path::new("/moved");
-        FileSystemOperations::create_file(&fs, original).unwrap();
+        FileSystemOperations::create_file(&fs, original, &Attributes::new()).unwrap();
         let mut open = Context::new_empty();
         fs.lookup_file(
             &mut open,
@@ -857,7 +857,7 @@ mod tests {
             file_system::AccessFlags::READ_WRITE.into(),
         )
         .unwrap();
-        FileSystemOperations::create_file(&fs, original).unwrap();
+        FileSystemOperations::create_file(&fs, original, &Attributes::new()).unwrap();
         let owner = users::UserIdentifier::new(123);
         FileSystemOperations::set_attributes(&fs, moved, &Attributes::new().set_user(owner))
             .unwrap();
@@ -871,7 +871,7 @@ mod tests {
         AttributeOperations::get_attributes(&fs, &mut open, &mut attributes).unwrap();
         assert_eq!(attributes.get_user(), Some(&owner));
         FileSystemOperations::remove(&fs, moved).unwrap();
-        FileSystemOperations::create_file(&fs, moved).unwrap();
+        FileSystemOperations::create_file(&fs, moved, &Attributes::new()).unwrap();
         FileSystemOperations::set_attributes(
             &fs,
             moved,
@@ -887,7 +887,7 @@ mod tests {
     fn handle_chmod_after_flush_is_persisted_and_visible_to_other_handles() {
         let fs = initialize();
         let path = Path::new("/chmod");
-        FileSystemOperations::create_file(&fs, path).unwrap();
+        FileSystemOperations::create_file(&fs, path, &Attributes::new()).unwrap();
         let mut first = Context::new_empty();
         let mut second = Context::new_empty();
         for context in [&mut first, &mut second] {
@@ -915,7 +915,7 @@ mod tests {
     fn stale_handle_chmod_cannot_overwrite_another_opens_data() {
         let fs = initialize();
         let path = Path::new("/stale-chmod");
-        FileSystemOperations::create_file(&fs, path).unwrap();
+        FileSystemOperations::create_file(&fs, path, &Attributes::new()).unwrap();
         let mut writer = Context::new_empty();
         let mut stale = Context::new_empty();
         for context in [&mut writer, &mut stale] {
@@ -956,8 +956,9 @@ mod tests {
         let file_system = FileSystem::new(device, options).unwrap();
         let directory = Path::new("/persistent");
         let file = Path::new("/persistent/data");
-        FileSystemOperations::create_directory(&file_system, directory).unwrap();
-        FileSystemOperations::create_file(&file_system, file).unwrap();
+        FileSystemOperations::create_directory(&file_system, directory, &Attributes::new())
+            .unwrap();
+        FileSystemOperations::create_file(&file_system, file, &Attributes::new()).unwrap();
 
         let mut context = Context::new_empty();
         file_system
@@ -993,7 +994,8 @@ mod tests {
 
         let file_system = FileSystem::new(device, Options::new(CACHE_SIZE)).unwrap();
         let directory = Path::new("/shared");
-        FileSystemOperations::create_directory(&file_system, directory).unwrap();
+        FileSystemOperations::create_directory(&file_system, directory, &Attributes::new())
+            .unwrap();
         FileSystemOperations::set_attributes(
             &file_system,
             directory,
@@ -1086,7 +1088,7 @@ mod tests {
     fn directory_listing_reports_file_inode_and_modification_time() {
         let fs = initialize();
         let path = Path::new("/note.txt");
-        FileSystemOperations::create_file(&fs, path).unwrap();
+        FileSystemOperations::create_file(&fs, path, &Attributes::new()).unwrap();
 
         let payload = b"hello littlefs";
         let mut file = Context::new_empty();
@@ -1142,7 +1144,7 @@ mod tests {
         .unwrap();
 
         let subdir = Path::new("/folder");
-        FileSystemOperations::create_directory(&fs, subdir).unwrap();
+        FileSystemOperations::create_directory(&fs, subdir, &Attributes::new()).unwrap();
 
         let initial_mtime = file_system::Time::new(1_700_000_200);
         FileSystemOperations::set_attributes(
@@ -1228,7 +1230,7 @@ mod symlink_tests {
         FileSystem::format(device, options).unwrap();
         let filesystem = FileSystem::new(device, options).unwrap();
         let link = Path::from_str("/link");
-        FileSystemOperations::create_file(&filesystem, link).unwrap();
+        FileSystemOperations::create_file(&filesystem, link, &Attributes::new()).unwrap();
 
         let target = b"../data/target";
         let mut context = Context::new_empty();

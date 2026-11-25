@@ -75,33 +75,62 @@ impl File {
             ))?;
         }
 
+        // LittleFS marks a write open with configured attributes dirty so the
+        // attributes are rewritten on close. When the open neither creates nor
+        // truncates the file, drop that flag again: an open for writing that
+        // writes nothing must not cost a metadata commit. Writes and truncates
+        // set the flag again, and the attributes are then committed atomically
+        // with the data on sync or close.
+        let write_access =
+            (little_fs_flags as u32) & constants::FILE_ACCESS_MASK != constants::FILE_READ_ONLY;
+        if write_access
+            && little_fs_flags & (constants::OPEN_CREATE | constants::OPEN_TRUNCATE) == 0
+        {
+            file.file.flags &= !constants::FILE_DIRTY;
+        }
+
         Ok(file)
     }
 
-    pub fn create(file_system: &mut littlefs::lfs_t, path: &Path) -> Result<()> {
+    /// Create a file, committing `attributes` together with the file.
+    ///
+    /// The attribute buffer is attached through `lfs_file_config.attrs`, so
+    /// LittleFS writes it atomically with the file on close: the entry commit
+    /// and the following struct+attributes commit never leave the file with
+    /// default or missing owner and permissions. The buffer only has to
+    /// outlive this call because the file is closed before returning.
+    pub fn create(
+        file_system: &mut littlefs::lfs_t,
+        path: &Path,
+        attributes: &Attributes,
+    ) -> Result<()> {
         let path = CString::new(path.as_str()).map_err(|_| IoErrorKind::InvalidArgument)?;
+        InternalAttributes::validate_attribute_mask(attributes.get_mask())?;
+
+        let mut internal_attributes = InternalAttributes::from_attributes(attributes);
+        let mut attr = littlefs::lfs_attr {
+            type_: InternalAttributes::IDENTIFIER,
+            buffer: &mut internal_attributes as *mut _ as *mut c_void,
+            size: core::mem::size_of::<InternalAttributes>() as u32,
+        };
+        let configuration = littlefs::lfs_file_config {
+            attr_count: 1,
+            attrs: &mut attr,
+            ..littlefs::lfs_file_config::default()
+        };
 
         let mut file = littlefs::lfs_file_t::default();
 
         unsafe {
-            convert_result(littlefs::lfs_file_open(
+            convert_result(littlefs::lfs_file_opencfg(
                 file_system,
                 &mut file,
                 path.as_ptr(),
-                constants::OPEN_CREATE | constants::OPEN_EXCLUSIVE,
+                constants::OPEN_READ_WRITE | constants::OPEN_CREATE | constants::OPEN_EXCLUSIVE,
+                &configuration,
             ))?;
 
             convert_result(littlefs::lfs_file_close(file_system, &mut file))?;
-
-            let internal_attributes = InternalAttributes::new_uninitialized().assume_init();
-
-            convert_result(littlefs::lfs_setattr(
-                file_system,
-                path.as_ptr(),
-                InternalAttributes::IDENTIFIER,
-                &internal_attributes as *const _ as *const _,
-                size_of::<InternalAttributes>() as u32,
-            ))?;
         }
         Ok(())
     }
@@ -154,26 +183,45 @@ impl File {
                 littlefs::lfs_file_truncate(file_system, &mut self.file, size as u32)
             })?;
         }
+        // Attributes already pending with uncommitted data (a write or a
+        // truncate of this call) are committed atomically with that data on
+        // the next sync or close, instead of costing an extra commit here.
+        let already_dirty = self.file.flags & constants::FILE_DIRTY != 0;
         let previous = self.internal_attributes.clone();
         self.internal_attributes
             .update_with_attributes(attributes)?;
         self.file.flags |= constants::FILE_DIRTY;
-        if let Err(error) =
-            convert_result(unsafe { littlefs::lfs_file_sync(file_system, &mut self.file) })
-        {
-            self.internal_attributes = previous;
-            return Err(error);
+        if !already_dirty {
+            if let Err(error) =
+                convert_result(unsafe { littlefs::lfs_file_sync(file_system, &mut self.file) })
+            {
+                self.internal_attributes = previous;
+                return Err(error);
+            }
+            // Publish only after a successful commit. A failed commit must not
+            // make independent contexts report a metadata change as successful.
+            let current = self.internal_attributes.clone();
+            crate::open_metadata::synchronize(file_system, &self.file, &current);
         }
-        // Publish only after a successful commit. A failed commit must not
-        // make independent contexts report a metadata change as successful.
-        let current = self.internal_attributes.clone();
-        crate::open_metadata::synchronize(file_system, &self.file, &current);
         Ok(())
     }
 
     pub fn close(&mut self, file_system: &mut littlefs::lfs_t) -> Result<()> {
         unsafe {
-            convert_result(littlefs::lfs_file_close(file_system, &mut self.file))?;
+            let mut result: Result<()> = Ok(());
+            if self.file.flags & constants::FILE_ERRORED == 0 {
+                result = convert_result(littlefs::lfs_file_sync(file_system, &mut self.file))
+                    .map(|_| ());
+                if result.is_ok() {
+                    // The close below commits pending data and attributes
+                    // atomically; publish them to the other open handles first.
+                    let current = self.internal_attributes.clone();
+                    crate::open_metadata::synchronize(file_system, &self.file, &current);
+                }
+            }
+            let close = convert_result(littlefs::lfs_file_close(file_system, &mut self.file));
+            result?;
+            close?;
         }
 
         Ok(())
@@ -212,6 +260,11 @@ impl File {
         absolute_position: Size,
     ) -> Result<usize> {
         let position = i32::try_from(absolute_position).map_err(|_| IoErrorKind::FileTooLarge)?;
+        // A zero-byte write is not a mutation: it must not dirty the file and
+        // must not trigger a metadata commit on close.
+        if buffer.is_empty() {
+            return Ok(0);
+        }
         let bytes_written = unsafe {
             convert_result(littlefs::lfs_file_seek(
                 file_system,
@@ -255,6 +308,10 @@ impl File {
         unsafe {
             convert_result(littlefs::lfs_file_sync(file_system, &mut self.file))?;
         }
+        // The sync committed the attribute buffer together with the data;
+        // publish it to the other open handles of the same object.
+        let current = self.internal_attributes.clone();
+        crate::open_metadata::synchronize(file_system, &self.file, &current);
 
         Ok(())
     }
@@ -308,7 +365,7 @@ mod tests {
         let fs = crate::FileSystem::new_format(device, crate::Options::new(256)).unwrap();
         fs.operation(|native| {
             let path = Path::new("/errored");
-            File::create(native, path)?;
+            File::create(native, path, &Attributes::new())?;
             let mut file = File::lookup(native, path, file_system::AccessFlags::READ_WRITE.into())?;
             let original = file.internal_attributes.permissions;
             // Fault state left by LittleFS after a failed write/commit. Its

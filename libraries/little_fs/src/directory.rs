@@ -2,7 +2,9 @@ use core::{ffi::CStr, mem::MaybeUninit};
 
 use crate::{attributes::InternalAttributes, constants, error::convert_result, littlefs};
 use alloc::{borrow::ToOwned, boxed::Box, ffi::CString, string::ToString};
-use file_system::{Attributes, Entry, IoErrorKind, Kind, Path, PathOwned, Result, Size, Time};
+use file_system::{
+    AttributeFlags, Attributes, Entry, IoErrorKind, Kind, Path, PathOwned, Result, Size, Time,
+};
 
 pub struct Directory {
     directory: littlefs::lfs_dir_t,
@@ -13,14 +15,29 @@ unsafe impl Send for Directory {}
 unsafe impl Sync for Directory {}
 
 impl Directory {
-    pub fn create(file_system: &mut littlefs::lfs_t, path: &Path) -> Result<()> {
-        let path = CString::new(path.as_str()).unwrap();
+    /// Create a directory, persisting `attributes` with the new entry.
+    ///
+    /// `lfs_mkdir` has no attribute configuration, so the attributes land in
+    /// the commit immediately after the directory entry instead of in the
+    /// same one. Until that commit lands, the directory exists without Xila
+    /// attributes: metadata reads fail closed with `MissingAttribute` rather
+    /// than reporting root with no permissions, and the entry can still be
+    /// removed through its parent.
+    pub fn create(
+        file_system: &mut littlefs::lfs_t,
+        path: &Path,
+        attributes: &Attributes,
+    ) -> Result<()> {
+        let path = CString::new(path.as_str()).map_err(|_| IoErrorKind::InvalidArgument)?;
+        InternalAttributes::validate_attribute_mask(attributes.get_mask())?;
 
         unsafe {
             convert_result(littlefs::lfs_mkdir(file_system, path.as_ptr()))?;
 
-            let mut internal_attributes = InternalAttributes::new_uninitialized().assume_init();
-            internal_attributes.kind = Kind::Directory;
+            let mut internal_attributes = InternalAttributes::from_attributes(attributes);
+            if !attributes.get_mask().contains(AttributeFlags::Kind) {
+                internal_attributes.kind = Kind::Directory;
+            }
 
             convert_result(littlefs::lfs_setattr(
                 file_system,
