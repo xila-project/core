@@ -115,11 +115,13 @@ impl File {
     /// If a step fails after the entry commit landed (cache allocation, the
     /// attributes commit, close), the half-created name is removed again on a
     /// best-effort basis, so the path is either fully created or absent. The
-    /// name is removed only when the entry is attribute-less on a clean read
-    /// cache: `lfs_file_opencfg` performs the entry commit internally, so after
-    /// a failure the probe is the in-call signal that the entry is this call's
-    /// half-created one, while an entry that has attributes is never removed.
-    /// A stale cache left by a failed read can show an older twin of a metadata
+    /// name is looked up before the create: a name that exists is never ours
+    /// to clean up (this also protects a legacy attribute-less file, which the
+    /// probe below could not tell from an entry this call half-created), and a
+    /// failed lookup commits nothing. After a lookup that reports the name
+    /// absent, an entry that exists after a failure is this call's own, and
+    /// it is removed only when it is attribute-less on a clean read cache: a
+    /// stale cache left by a failed read can show an older twin of a metadata
     /// pair and report a pre-existing entry as attribute-less, so the probe
     /// empties the cache first and a pre-existing entry is never deleted, even
     /// when a transient read error fails the create.
@@ -130,6 +132,25 @@ impl File {
     ) -> Result<()> {
         let path = CString::new(path.as_str()).map_err(|_| IoErrorKind::InvalidArgument)?;
         InternalAttributes::validate_attribute_mask(attributes.get_mask())?;
+
+        // Look the name up before the create, under the file system lock held
+        // by the caller: a name that exists answers AlreadyExists, and a
+        // lookup error other than "absent" is returned with nothing committed.
+        {
+            let mut information = littlefs::lfs_info::default();
+            let status =
+                unsafe { littlefs::lfs_stat(file_system, path.as_ptr(), &mut information) };
+            if status == 0 {
+                return Err(IoErrorKind::AlreadyExists);
+            }
+            if status != littlefs::lfs_error_LFS_ERR_NOENT {
+                return convert_result(status).map(|_| ());
+            }
+        }
+        // Empty the read cache before the create itself: a failed read during
+        // the lookup above can leave the failed block's key in the cache with
+        // stale bytes, and the create must not be served from them.
+        drop_read_cache(file_system);
 
         let mut internal_attributes = InternalAttributes::from_attributes(attributes);
         let mut entry_attributes = littlefs::lfs_attr {
@@ -170,9 +191,10 @@ impl File {
                 // cache first, so a stale cache left by a failed read cannot
                 // report a pre-existing entry as attribute-less. An unreadable
                 // device leaves the fail-closed entry for the caller to handle
-                // through the VFS.
+                // through the VFS. No second cache drop is needed before the
+                // remove: the probe only answers from successful reads, so the
+                // cache can hold fresh bytes only.
                 if entry_is_attribute_less(file_system, &path) {
-                    drop_read_cache(file_system);
                     unsafe {
                         let _ = littlefs::lfs_remove(file_system, path.as_ptr());
                     }

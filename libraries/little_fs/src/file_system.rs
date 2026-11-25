@@ -3,7 +3,7 @@ use core::ptr::null_mut;
 use super::{Configuration, Directory, convert_result, littlefs};
 use crate::{
     File,
-    attributes::InternalAttributes,
+    attributes::{self, InternalAttributes},
     configuration::{self},
     constants,
 };
@@ -172,7 +172,18 @@ impl FileSystem {
     ) -> Result<T> {
         let mut file_system = self.file_system.try_get()?;
 
-        operation(&mut file_system)
+        let result = operation(&mut file_system);
+        // A failed device read leaves the failed block's key in the read cache
+        // with stale bytes, and later operations could be served from it. Drop
+        // the cache after any I/O or corruption error so the next operation
+        // starts from the device.
+        if matches!(
+            result,
+            Err(IoErrorKind::InputOutput | IoErrorKind::CorruptData)
+        ) {
+            attributes::drop_read_cache(&mut file_system);
+        }
+        result
     }
 
     pub fn operation_with_context<I: 'static, T>(
@@ -186,7 +197,16 @@ impl FileSystem {
             .get_private_data_of_type::<SharedContext<I>>()
             .ok_or(IoErrorKind::InvalidArgument)?;
         let mut file = file.try_lock().map_err(|_| IoErrorKind::WouldBlock)?;
-        operation(&mut file_system, &mut file)
+        let result = operation(&mut file_system, &mut file);
+        // Same as `operation`: never let a failed read poison the cache for
+        // the next operation.
+        if matches!(
+            result,
+            Err(IoErrorKind::InputOutput | IoErrorKind::CorruptData)
+        ) {
+            attributes::drop_read_cache(&mut file_system);
+        }
+        result
     }
 }
 

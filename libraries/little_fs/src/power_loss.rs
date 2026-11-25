@@ -1314,4 +1314,290 @@ mod randomised_sweep {
             "randomised sweep: {faulted_creates} faulted creates over existing entries, no pre-existing entry removed"
         );
     }
+
+    /// An entry without any Xila attribute but with data, as an image built by
+    /// a host tool would contain.
+    fn layout_legacy_with_data(fs: &FileSystem) {
+        fs.operation(|native| {
+            let mut file = crate::littlefs::lfs_file_t::default();
+            let path = alloc::ffi::CString::new("/legacy").unwrap();
+            let opened = unsafe {
+                crate::littlefs::lfs_file_open(
+                    native,
+                    &mut file,
+                    path.as_ptr(),
+                    crate::constants::OPEN_READ_WRITE | crate::constants::OPEN_CREATE,
+                )
+            };
+            assert_eq!(opened, 0);
+            let data = b"legacy-precious-data";
+            let written = unsafe {
+                crate::littlefs::lfs_file_write(
+                    native,
+                    &mut file,
+                    data.as_ptr() as *const _,
+                    data.len() as u32,
+                )
+            };
+            assert_eq!(written, data.len() as i32);
+            let closed = unsafe { crate::littlefs::lfs_file_close(native, &mut file) };
+            assert_eq!(closed, 0);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    fn build_legacy(
+        cache: usize,
+        remount: bool,
+    ) -> (&'static FaultDevice, FileSystem, Vec<String>, Vec<String>) {
+        let device = FaultDevice::new(DEVICE_SIZE);
+        FileSystem::format(device, Options::new(cache)).unwrap();
+        let fs = FileSystem::new(device, Options::new(cache)).unwrap();
+        layout_legacy_with_data(&fs);
+        let fs = if remount {
+            std::mem::forget(fs);
+            FileSystem::new(device, Options::new(cache)).unwrap()
+        } else {
+            fs
+        };
+        (
+            device,
+            fs,
+            alloc::vec![],
+            alloc::vec!["/legacy".to_string()],
+        )
+    }
+
+    #[test]
+    fn legacy_attribute_less_file_with_data_survives_read_faults() {
+        // A create over a legacy attribute-less file must never remove it: the
+        // pre-create lookup answers AlreadyExists for it. One window-1 read
+        // fault during the create deleted it at every sweep before that.
+        let mut faulted_creates = 0usize;
+        for cache in [128usize, 256, 512] {
+            for remount in [false, true] {
+                for window in [1usize, 2] {
+                    // Probe: reads a create over the existing entry performs.
+                    let (probe_device, probe_fs, _, _) = build_legacy(cache, remount);
+                    probe_device.reset_reads();
+                    let result = FileSystemOperations::create_file(
+                        &probe_fs,
+                        Path::new("/legacy"),
+                        &sweep_attributes(99),
+                    );
+                    assert!(matches!(result, Err(IoErrorKind::AlreadyExists)));
+                    let total = probe_device.reads();
+                    std::mem::forget(probe_fs);
+                    // Reference tree from a fresh device.
+                    let (reference_device, reference_fs, _, _) = build_legacy(cache, remount);
+                    std::mem::forget(reference_fs);
+                    let reference = snapshot(reference_device, cache);
+
+                    for fault in 1..=total {
+                        let (device, fs, _, _) = build_legacy(cache, remount);
+                        device.reset_reads();
+                        device.reset_progs();
+                        device.fail_read_window(fault, window);
+                        let _ = FileSystemOperations::create_file(
+                            &fs,
+                            Path::new("/legacy"),
+                            &sweep_attributes(99),
+                        );
+                        faulted_creates += 1;
+                        std::mem::forget(fs);
+                        let after = snapshot(device, cache);
+                        for line in &reference {
+                            assert!(
+                                after.contains(line),
+                                "legacy cache {cache} remount {remount} window {window} fault {fault}/{total}: entry removed or changed: {line}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        std::println!(
+            "legacy sweep: {faulted_creates} faulted creates over the legacy file, it survived every fault point"
+        );
+    }
+
+    /// Pick the sweep targets for a seed, as two random file and directory pairs.
+    fn pick_targets(seed: u64, dirs: &[String], files: &[String]) -> Vec<(String, Target)> {
+        let mut rng = Rng(seed * 7 + 3);
+        let mut targets: Vec<(String, Target)> = Vec::new();
+        for _ in 0..2 {
+            if !files.is_empty() {
+                let file = files[rng.below(files.len() as u64) as usize].clone();
+                targets.push((file.clone(), Target::File));
+                targets.push((file, Target::Directory));
+            }
+            let directory = dirs[rng.below(dirs.len() as u64) as usize].clone();
+            if directory != "/" {
+                targets.push((directory.clone(), Target::Directory));
+                targets.push((directory, Target::File));
+            }
+        }
+        targets
+    }
+
+    fn create_over(
+        target: &str,
+        kind: Target,
+    ) -> impl Fn(&FileSystem) -> file_system::Result<()> + '_ {
+        move |fs| match kind {
+            Target::File => {
+                FileSystemOperations::create_file(fs, Path::new(target), &sweep_attributes(99))
+            }
+            Target::Directory => FileSystemOperations::create_directory(
+                fs,
+                Path::new(target),
+                &sweep_dir_attributes(99),
+            ),
+        }
+    }
+
+    /// After a faulted create without a remount, the live mount must show the
+    /// same tree as a clean mount. Fails without the operation-level cache
+    /// drop, where the stale read cache serves wrong bytes after the failed
+    /// read.
+    #[test]
+    fn live_state_after_faulted_create_matches_reference() {
+        const SEEDS: [u64; 3] = [1, 2, 3];
+        let mut cases = 0usize;
+        let mut mismatches = 0usize;
+        for seed in SEEDS {
+            let cache = [128usize, 256, 512][(seed % 3) as usize];
+            let (_d, fs0, dirs, files) = build(seed, cache, true);
+            std::mem::forget(fs0);
+            for (target, kind) in pick_targets(seed, &dirs, &files) {
+                let create = create_over(&target, kind);
+                let (probe_device, probe_fs, _, _) = build(seed, cache, true);
+                probe_device.reset_reads();
+                let _ = create(&probe_fs);
+                let total = probe_device.reads();
+                std::mem::forget(probe_fs);
+                let (reference_device, reference_fs, _, _) = build(seed, cache, true);
+                std::mem::forget(reference_fs);
+                let reference = snapshot(reference_device, cache);
+
+                for window in [1usize, 2] {
+                    for fault in 1..=total {
+                        let (device, fs, _, _) = build(seed, cache, true);
+                        device.reset_reads();
+                        device.fail_read_window(fault, window);
+                        let _ = create(&fs);
+                        device.allow_all();
+                        let mut live = Vec::new();
+                        let walked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            walk(&fs, "/", &mut live)
+                        }));
+                        cases += 1;
+                        if walked.is_err() {
+                            live.clear();
+                            live.push(String::from("WALK ERROR"));
+                        }
+                        if live != reference {
+                            mismatches += 1;
+                            if mismatches <= 5 {
+                                std::println!(
+                                    "LIVE MISMATCH seed {seed} cache {cache} target {target} {kind:?} window {window} fault {fault}/{total}"
+                                );
+                                for line in &reference {
+                                    if !live.contains(line) {
+                                        std::println!("   LIVE MISSING/CHANGED: {line}");
+                                    }
+                                }
+                                for line in &live {
+                                    if !reference.contains(line) {
+                                        std::println!("   LIVE NEW: {line}");
+                                    }
+                                }
+                            }
+                        }
+                        std::mem::forget(fs);
+                    }
+                }
+            }
+        }
+        std::println!("live sweep: {cases} faulted creates, {mismatches} live-mount mismatches");
+        assert_eq!(mismatches, 0);
+    }
+
+    /// After a faulted create without a remount, further writes on the same
+    /// mount must not damage the volume: a clean remount shows the reference
+    /// tree plus exactly the new entries. Fails without the operation-level
+    /// cache drop, where the stale read cache corrupts unrelated entries.
+    #[test]
+    fn write_after_faulted_create_does_not_damage_the_volume() {
+        const SEEDS: [u64; 3] = [1, 2, 3];
+        let mut cases = 0usize;
+        let mut damaged = 0usize;
+        for seed in SEEDS {
+            let cache = [128usize, 256, 512][(seed % 3) as usize];
+            let (_d, fs0, dirs, files) = build(seed, cache, true);
+            std::mem::forget(fs0);
+            for (target, kind) in pick_targets(seed, &dirs, &files) {
+                let create = create_over(&target, kind);
+                let (probe_device, probe_fs, _, _) = build(seed, cache, true);
+                probe_device.reset_reads();
+                let _ = create(&probe_fs);
+                let total = probe_device.reads();
+                std::mem::forget(probe_fs);
+                let (reference_device, reference_fs, _, _) = build(seed, cache, true);
+                std::mem::forget(reference_fs);
+                let reference = snapshot(reference_device, cache);
+
+                for window in [1usize, 2] {
+                    for fault in 1..=total {
+                        let (device, fs, _, _) = build(seed, cache, true);
+                        device.reset_reads();
+                        device.fail_read_window(fault, window);
+                        let _ = create(&fs);
+                        device.allow_all();
+                        // Write more on the same mount, without a remount.
+                        let mut follow_up_errors = 0usize;
+                        for index in 0..6 {
+                            let name = alloc::format!("/zz{index}");
+                            if FileSystemOperations::create_file(
+                                &fs,
+                                Path::new(&name),
+                                &sweep_attributes(5),
+                            )
+                            .is_err()
+                            {
+                                follow_up_errors += 1;
+                            }
+                        }
+                        cases += 1;
+                        std::mem::forget(fs);
+                        device.allow_all();
+                        let after = snapshot(device, cache);
+                        let bad = !reference.iter().all(|line| after.contains(line))
+                            || after.len() != reference.len() + 6 - follow_up_errors;
+                        if bad {
+                            damaged += 1;
+                            if damaged <= 3 {
+                                std::println!(
+                                    "DAMAGED seed {seed} cache {cache} target {target} {kind:?} window {window} fault {fault}/{total} follow-up-errors {follow_up_errors}"
+                                );
+                                for line in &reference {
+                                    if !after.contains(line) {
+                                        std::println!("   MISSING/CHANGED: {line}");
+                                    }
+                                }
+                                for line in &after {
+                                    if !reference.contains(line) {
+                                        std::println!("   NEW: {line}");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        std::println!("write-after sweep: {cases} faulted creates, {damaged} damaged volumes");
+        assert_eq!(damaged, 0);
+    }
 }
