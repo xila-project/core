@@ -205,6 +205,36 @@ pub async fn load(virtual_file_system: &VirtualFileSystem, task: TaskIdentifier)
 mod tests {
     use super::*;
     use alloc::format;
+    use file_system::{Kind, Permissions, Statistics, Time};
+    use users::{GroupIdentifier, UserIdentifier};
+
+    fn statistics(user: u16, group: u16, permissions: u16) -> Statistics {
+        Statistics::new(
+            0,
+            1,
+            10,
+            Time::new(0),
+            Time::new(0),
+            Time::new(0),
+            Time::new(0),
+            Kind::File,
+            Permissions::from_octal(permissions).unwrap(),
+            UserIdentifier::new(user),
+            GroupIdentifier::new(group),
+        )
+    }
+
+    #[test]
+    fn only_root_may_have_written_the_configuration_file() {
+        assert!(is_written_by_root_only(&statistics(0, 0, 0o644)));
+        assert!(is_written_by_root_only(&statistics(0, 0, 0o600)));
+        // The group may write only when it is root's group.
+        assert!(is_written_by_root_only(&statistics(0, 0, 0o664)));
+        assert!(!is_written_by_root_only(&statistics(0, 0, 0o646)));
+        assert!(!is_written_by_root_only(&statistics(0, 1000, 0o664)));
+        // Not owned by root.
+        assert!(!is_written_by_root_only(&statistics(1000, 0, 0o644)));
+    }
 
     #[test]
     fn defaults_query_pool_ntp_org_hourly() {

@@ -95,13 +95,23 @@ impl Manager {
     }
 
     /// A random 32-bit value from the random device, or `None` when the device
-    /// cannot be read. Used for query jitter.
+    /// fails or returns fewer than 4 bytes (logged once). Used for query
+    /// jitter, which then falls back to zero.
     pub(crate) fn random_u32(&self) -> Option<u32> {
+        use portable_atomic::{AtomicBool, Ordering};
+        static FAILURE_LOGGED: AtomicBool = AtomicBool::new(false);
         let mut buffer = [0u8; 4];
-        self.random_device
-            .read_sync(&mut buffer, 0)
-            .ok()
-            .map(|_| u32::from_le_bytes(buffer))
+        match self.random_device.read_sync(&mut buffer, 0) {
+            Ok(4) => Some(u32::from_le_bytes(buffer)),
+            Ok(_) | Err(_) => {
+                if !FAILURE_LOGGED.swap(true, Ordering::Relaxed) {
+                    log::warning!(
+                        "network: the random device did not return 4 bytes; jitter falls back to zero"
+                    );
+                }
+                None
+            }
+        }
     }
 
     pub(crate) async fn find_first_available_stack(stacks: &StackList) -> Option<Stack> {

@@ -7,12 +7,21 @@
 //! reboot, and `RATE` sets a monotonic `not_before` deadline for that server
 //! (now plus the doubled interval): servers whose deadline has not passed are
 //! skipped, and the service sleeps until the earliest deadline. Each event is
-//! logged once per server.
+//! logged once per server. A successful answer resets the server's rate
+//! multiplier.
+//!
+//! After the first network synchronization, a clock step larger than 1000 s is
+//! applied only when a second answer confirms it: the signed offset (candidate
+//! minus the current clock) of the two answers must agree within 5 s. The
+//! servers are tried in order, so a confirming answer from another server or
+//! resolved address is preferred; with a single server, a later exchange of
+//! the same server confirms, which means a single-server setup only resists a
+//! blind off-path attacker.
 //!
 //! Query times carry a random jitter, as the NTP Pool vendor guidance asks:
 //! 0 to 2 s before the first query, and 0 to 12 percent added to every
-//! resynchronization interval and retry delay. Resolved server names are
-//! cached for one hour.
+//! resynchronization interval, retry delay and deferred wait. Resolved server
+//! names are cached for one hour, and dropped after a failed exchange.
 
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -58,8 +67,8 @@ pub(crate) const DNS_CACHE_LIFETIME: Duration = Duration::from_secs(3600);
 /// Random delay before the first query, from zero up to this bound.
 pub(crate) const FIRST_QUERY_JITTER: Duration = Duration::from_secs(2);
 
-/// Random percentage added to every interval and retry delay, from 0 up to
-/// this value.
+/// Random percentage added to every interval, retry delay and deferred wait,
+/// from 0 up to this value.
 pub(crate) const JITTER_PERCENT: u64 = 12;
 
 /// The delay before retrying after `failures` consecutive failures: the
@@ -208,6 +217,16 @@ enum Attempt {
     Unconfirmed,
 }
 
+/// A large clock step waiting for a confirming second answer: the signed
+/// offset in nanoseconds (candidate minus the current clock), the server that
+/// reported it and the address that answered.
+#[derive(Clone, Debug)]
+struct PendingStep {
+    offset_nanos: i128,
+    server: usize,
+    address: Option<IpAddress>,
+}
+
 /// A cached name resolution.
 struct DnsEntry {
     name: String,
@@ -246,6 +265,12 @@ async fn resolve_cached(
     Ok(addresses)
 }
 
+/// Drop the cached resolution of `name`, for example after a failed exchange:
+/// the next attempt resolves it again.
+fn drop_cache_entry(cache: &mut Vec<DnsEntry>, name: &str) {
+    cache.retain(|entry| entry.name != name);
+}
+
 /// The SNTP service, assembled from the runtime subsystems it needs.
 pub struct Service {
     task_manager: &'static TaskManager,
@@ -256,9 +281,10 @@ pub struct Service {
 }
 
 impl Service {
-    /// `minimum_timestamp` is the platform's floor for UTC, for example the
-    /// build date on devices without a battery clock: answers before it are
-    /// rejected.
+    /// `minimum_timestamp` is the platform's floor for UTC, as Unix time in
+    /// UTC: on a device without a battery clock, the build date, for example
+    /// `time::Timestamp::from(core::time::Duration::from_secs(BUILD_EPOCH))`.
+    /// Answers before it are rejected.
     pub fn new(
         task_manager: &'static TaskManager,
         network: &'static Manager,
@@ -311,7 +337,7 @@ async fn run(
         .map(|_| ServerState::default())
         .collect();
     let mut dns_cache: Vec<DnsEntry> = Vec::new();
-    let mut pending_step: Option<Timestamp> = None;
+    let mut pending_step: Option<PendingStep> = None;
     let mut failures: u32 = 0;
     let mut synchronized_once = false;
     let mut first_query = true;
@@ -355,7 +381,7 @@ async fn run(
                 // Every usable server is rate-limited: wait for the earliest
                 // deadline.
                 let wait = deadline.saturating_sub(time.monotonic_now());
-                task::sleep(wait).await;
+                task::sleep(add_jitter(network, wait)).await;
             }
             Attempt::Unconfirmed => {
                 failures = failures.saturating_add(1);
@@ -398,7 +424,7 @@ async fn attempt(
     states: &mut [ServerState],
     adapter: &mut Option<client::SntpUdpSocket>,
     dns_cache: &mut Vec<DnsEntry>,
-    pending_step: &mut Option<Timestamp>,
+    pending_step: &mut Option<PendingStep>,
 ) -> Attempt {
     let now = time.monotonic_now();
     let mut last_error = Failure::Protocol(SntpError::Network);
@@ -409,8 +435,14 @@ async fn attempt(
             continue;
         }
         queried = true;
+        let addresses = match resolve_cached(network, dns_cache, server, now).await {
+            Ok(addresses) => addresses,
+            Err(error) => {
+                last_error = error;
+                continue;
+            }
+        };
         let result = async {
-            let addresses = resolve_cached(network, dns_cache, server, now).await?;
             let socket = client.ensure_socket(adapter).await.map_err(Failure::Io)?;
             client.exchange_addresses(&addresses, socket).await
         }
@@ -425,34 +457,47 @@ async fn attempt(
                     }
                 };
                 // After the first network synchronization, a step larger than
-                // the bound is applied only when a second answer agrees.
+                // the bound is applied only when a second answer confirms it:
+                // the signed offsets of the two answers must agree.
                 let already_network = time
                     .status()
                     .synchronization
                     .is_some_and(|s| s.source == time::ClockSource::Network);
-                let step = time
-                    .realtime_now()
-                    .ok()
-                    .map(|current| (candidate.as_nanos() - current.as_nanos()).abs());
-                if already_network
-                    && matches!(step, Some(step) if step > MAXIMUM_CLOCK_STEP.as_nanos() as i128)
-                {
-                    if pending_step.is_some_and(|pending| {
-                        (candidate.as_nanos() - pending.as_nanos()).abs()
-                            <= STEP_CONFIRMATION_TOLERANCE.as_nanos() as i128
-                    }) {
-                        *pending_step = None;
-                    } else {
-                        *pending_step = Some(candidate);
-                        unconfirmed = true;
-                        last_error = Failure::Protocol(SntpError::InvalidTimestamp);
-                        continue;
+                if already_network && let Ok(current) = time.realtime_now() {
+                    let offset_nanos = candidate.as_nanos() - current.as_nanos();
+                    if offset_nanos.abs() > MAXIMUM_CLOCK_STEP.as_nanos() as i128 {
+                        let confirmed = pending_step.as_ref().is_some_and(|pending| {
+                            (offset_nanos - pending.offset_nanos).abs()
+                                <= STEP_CONFIRMATION_TOLERANCE.as_nanos() as i128
+                        });
+                        if confirmed {
+                            if let Some(pending) = pending_step.take()
+                                && (pending.server != index
+                                    || pending.address.as_ref() != addresses.first())
+                            {
+                                log::information!(
+                                    "SNTP: the large clock step is confirmed by a second server or address"
+                                );
+                            }
+                        } else {
+                            *pending_step = Some(PendingStep {
+                                offset_nanos,
+                                server: index,
+                                address: addresses.first().cloned(),
+                            });
+                            unconfirmed = true;
+                            last_error = Failure::Protocol(SntpError::InvalidTimestamp);
+                            continue;
+                        }
                     }
                 } else {
                     *pending_step = None;
                 }
                 match client.apply(&exchange) {
                     Ok(applied) => {
+                        // A success clears the rate multiplier of the server
+                        // that answered.
+                        states[index].rate_multiplier = 1;
                         return Attempt::Synchronized(Outcome {
                             server: &configuration.servers[index],
                             applied,
@@ -472,7 +517,12 @@ async fn attempt(
                 );
                 last_error = Failure::Protocol(SntpError::KissOfDeath(code));
             }
-            Err(error) => last_error = error,
+            Err(error) => {
+                // A failed or timed-out exchange: resolve the name again on
+                // the next attempt.
+                drop_cache_entry(dns_cache, server);
+                last_error = error;
+            }
         }
     }
     if unconfirmed {
@@ -499,7 +549,36 @@ fn log_success(outcome: &Outcome) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sntp::support::{
+        TEST_MUTEX, host_time_manager, spawn_scripted_server, valid_answer,
+    };
+    use crate::tests::initialize;
     use alloc::vec;
+    use core::cell::Cell;
+    use time::{ClockSource, RealtimeSample};
+
+    /// 2027-01-01 00:00:00 UTC, in Unix nanoseconds.
+    const T0: i128 = 1_800_000_000_000_000_000;
+
+    /// A static configuration with the given server names and a one-hour
+    /// resynchronization interval.
+    fn test_configuration(servers: &[&str]) -> &'static Configuration {
+        Box::leak(Box::new(Configuration {
+            servers: servers.iter().map(|name| String::from(*name)).collect(),
+            resync_interval: Duration::from_secs(3600),
+        }))
+    }
+
+    /// Set the clock to `nanos`, claiming a network synchronization.
+    fn set_network_clock(time: &time::Manager<'_>, nanos: i128) {
+        time.set_realtime(RealtimeSample {
+            timestamp: Timestamp::from_nanos(nanos),
+            source: ClockSource::Network,
+            resolution: Duration::from_secs(1),
+            accuracy: None,
+        })
+        .unwrap();
+    }
 
     #[test]
     fn retry_delay_doubles_and_is_bounded() {
@@ -622,5 +701,279 @@ mod tests {
             Duration::from_secs(3600)
         ));
         assert_eq!(state, ServerState::default());
+    }
+
+    /// An honest server that is 2000 s ahead of the (network-synchronized but
+    /// wrong) local clock: its two answers carry the same signed offset, so
+    /// the second one confirms the large step and applies it.
+    #[task::test]
+    async fn an_honest_large_step_is_confirmed_by_a_second_answer() {
+        let _lock = TEST_MUTEX.lock().await;
+        let network = initialize().await;
+        let time_manager = host_time_manager();
+        set_network_clock(time_manager, T0);
+        let client = Client::new(network, time_manager, None);
+
+        // The honest server answers "now plus 2000 s" at answer time.
+        let (ready, server_task) = spawn_scripted_server(
+            move |request| {
+                let now = time_manager.realtime_now().unwrap().as_nanos();
+                alloc::vec![valid_answer(now + 2_000_000_000_000)(request)]
+            },
+            2,
+        )
+        .await;
+        ready.wait().await;
+
+        let configuration = test_configuration(&["127.0.0.1"]);
+        let mut states = vec![ServerState::default()];
+        let mut adapter = None;
+        let mut dns_cache: Vec<DnsEntry> = Vec::new();
+        let mut pending_step: Option<PendingStep> = None;
+
+        let first = attempt(
+            &client,
+            network,
+            time_manager,
+            configuration,
+            &mut states,
+            &mut adapter,
+            &mut dns_cache,
+            &mut pending_step,
+        )
+        .await;
+        assert!(
+            matches!(first, Attempt::Unconfirmed),
+            "the first answer alone does not apply a 2000 s step: {first:?}"
+        );
+        let pending = pending_step.as_ref().expect("a step is pending");
+        assert!(
+            (pending.offset_nanos - 2_000_000_000_000).abs() < 1_000_000_000,
+            "the pending step is the signed offset: {}",
+            pending.offset_nanos
+        );
+
+        // Ten seconds pass: the local clock advances and the honest server
+        // follows it, so the offset stays the same.
+        set_network_clock(time_manager, T0 + 10_000_000_000);
+        let second = attempt(
+            &client,
+            network,
+            time_manager,
+            configuration,
+            &mut states,
+            &mut adapter,
+            &mut dns_cache,
+            &mut pending_step,
+        )
+        .await;
+        assert!(
+            matches!(second, Attempt::Synchronized(_)),
+            "the second answer confirms the step: {second:?}"
+        );
+        assert!(pending_step.is_none());
+        server_task.join().await;
+    }
+
+    /// A server repeating one constant wrong time: the signed offset moves
+    /// with the local clock, so the second answer does not confirm it.
+    #[task::test]
+    async fn a_constant_wrong_time_is_not_confirmed() {
+        let _lock = TEST_MUTEX.lock().await;
+        let network = initialize().await;
+        let time_manager = host_time_manager();
+        set_network_clock(time_manager, T0);
+        let client = Client::new(network, time_manager, None);
+
+        // The attacker always answers the same frozen time, 5000 s ahead.
+        let constant = T0 + 5_000_000_000_000;
+        let (ready, server_task) = spawn_scripted_server(
+            move |request| alloc::vec![valid_answer(constant)(request)],
+            2,
+        )
+        .await;
+        ready.wait().await;
+
+        let configuration = test_configuration(&["127.0.0.1"]);
+        let mut states = vec![ServerState::default()];
+        let mut adapter = None;
+        let mut dns_cache: Vec<DnsEntry> = Vec::new();
+        let mut pending_step: Option<PendingStep> = None;
+
+        let first = attempt(
+            &client,
+            network,
+            time_manager,
+            configuration,
+            &mut states,
+            &mut adapter,
+            &mut dns_cache,
+            &mut pending_step,
+        )
+        .await;
+        assert!(matches!(first, Attempt::Unconfirmed), "{first:?}");
+
+        // Ten seconds pass: the constant answer is now 10 s further from the
+        // local clock, outside the confirmation tolerance.
+        set_network_clock(time_manager, T0 + 10_000_000_000);
+        let second = attempt(
+            &client,
+            network,
+            time_manager,
+            configuration,
+            &mut states,
+            &mut adapter,
+            &mut dns_cache,
+            &mut pending_step,
+        )
+        .await;
+        assert!(
+            matches!(second, Attempt::Unconfirmed),
+            "a constant wrong time never confirms: {second:?}"
+        );
+        // The clock was not set to the wrong time.
+        let realtime = time_manager.realtime_now().unwrap().as_nanos();
+        assert!(
+            (realtime - (T0 + 10_000_000_000)).abs() < 1_000_000_000,
+            "the clock kept its own time: {realtime}"
+        );
+        server_task.join().await;
+    }
+
+    /// A RATE kiss of death defers the next attempt until the deadline.
+    #[task::test]
+    async fn a_rate_kiss_defers_the_next_attempt() {
+        let _lock = TEST_MUTEX.lock().await;
+        let network = initialize().await;
+        let time_manager = host_time_manager();
+        let client = Client::new(network, time_manager, None);
+
+        let kod = |request: [u8; 48]| {
+            let mut response = [0u8; 48];
+            response[0] = 0x24 | (3 << 6);
+            response[1] = 0; // stratum 0: kiss of death
+            response[12..16].copy_from_slice(b"RATE");
+            response[24..32].copy_from_slice(&request[40..48]);
+            response[40..48].copy_from_slice(&request[40..48]);
+            alloc::vec![response]
+        };
+        let (ready, server_task) = spawn_scripted_server(kod, 1).await;
+        ready.wait().await;
+
+        let configuration = test_configuration(&["127.0.0.1"]);
+        let mut states = vec![ServerState::default()];
+        let mut adapter = None;
+        let mut dns_cache: Vec<DnsEntry> = Vec::new();
+        let mut pending_step: Option<PendingStep> = None;
+
+        let first = attempt(
+            &client,
+            network,
+            time_manager,
+            configuration,
+            &mut states,
+            &mut adapter,
+            &mut dns_cache,
+            &mut pending_step,
+        )
+        .await;
+        assert!(
+            matches!(
+                first,
+                Attempt::Failed(Failure::Protocol(SntpError::KissOfDeath(
+                    KissOfDeathCode::Rate
+                )))
+            ),
+            "{first:?}"
+        );
+        server_task.join().await;
+
+        let before = time_manager.monotonic_now();
+        let second = attempt(
+            &client,
+            network,
+            time_manager,
+            configuration,
+            &mut states,
+            &mut adapter,
+            &mut dns_cache,
+            &mut pending_step,
+        )
+        .await;
+        match second {
+            Attempt::Deferred(deadline) => {
+                assert!(deadline > before, "the deadline is in the future");
+                assert_eq!(deadline, states[0].not_before.unwrap());
+                // Roughly the doubled interval from the kiss of death.
+                assert!(deadline - before >= Duration::from_secs(7199));
+            }
+            other => panic!("expected a deferred attempt, got {other:?}"),
+        }
+    }
+
+    /// A failed exchange drops the cached resolution of the name; a successful
+    /// one keeps it.
+    #[task::test]
+    async fn a_failed_exchange_drops_the_dns_cache_entry() {
+        let _lock = TEST_MUTEX.lock().await;
+        let network = initialize().await;
+        let time_manager = host_time_manager();
+        let client = Client::new(network, time_manager, None);
+
+        // The first answer is garbage (mode 5), the second is valid.
+        let calls = Cell::new(0usize);
+        let (ready, server_task) = spawn_scripted_server(
+            move |request| {
+                if calls.get() == 0 {
+                    calls.set(1);
+                    let mut response = valid_answer(T0)(request);
+                    response[0] = 0x25; // mode 5: rejected by sntpc
+                    alloc::vec![response]
+                } else {
+                    alloc::vec![valid_answer(T0)(request)]
+                }
+            },
+            2,
+        )
+        .await;
+        ready.wait().await;
+
+        let configuration = test_configuration(&["127.0.0.1"]);
+        let mut states = vec![ServerState::default()];
+        let mut adapter = None;
+        let mut dns_cache: Vec<DnsEntry> = Vec::new();
+        let mut pending_step: Option<PendingStep> = None;
+
+        let first = attempt(
+            &client,
+            network,
+            time_manager,
+            configuration,
+            &mut states,
+            &mut adapter,
+            &mut dns_cache,
+            &mut pending_step,
+        )
+        .await;
+        assert!(matches!(first, Attempt::Failed(_)), "{first:?}");
+        assert!(
+            dns_cache.is_empty(),
+            "the failed exchange dropped the cached resolution"
+        );
+
+        let second = attempt(
+            &client,
+            network,
+            time_manager,
+            configuration,
+            &mut states,
+            &mut adapter,
+            &mut dns_cache,
+            &mut pending_step,
+        )
+        .await;
+        assert!(matches!(second, Attempt::Synchronized(_)), "{second:?}");
+        assert_eq!(dns_cache.len(), 1, "the success cached the resolution");
+        server_task.join().await;
     }
 }

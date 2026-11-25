@@ -14,8 +14,8 @@ use synchronization::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex
 use time::{ClockSource, RealtimeSample, Timestamp};
 
 use crate::{
-    DnsQueryKind, IntoIoErrorKind, IoErrorKind, IpAddress, Ipv4, Ipv6, Manager, Port, Result,
-    UdpMetadata, UdpSocket,
+    IntoIoErrorKind, IoErrorKind, IpAddress, Ipv4, Ipv6, Manager, Port, Result, UdpMetadata,
+    UdpSocket,
 };
 
 /// UDP port of the NTP servers.
@@ -264,54 +264,51 @@ impl<'a> Client<'a> {
         Ok(socket.as_mut().expect("socket was just created"))
     }
 
-    /// Query one server by name or address: resolve the name, then exchange
-    /// with each address in turn.
-    pub async fn exchange(
-        &self,
-        server: &str,
-        socket: &SntpUdpSocket,
-    ) -> core::result::Result<Exchange, Failure> {
-        let addresses = self
-            .network
-            .resolve(server, DnsQueryKind::A | DnsQueryKind::Aaaa, true, None)
-            .await
-            .map_err(|error| Failure::Io(error.kind()))?;
-        self.exchange_addresses(&addresses, socket).await
-    }
-
-    /// Exchange with each address in turn until one answers.
+    /// Exchange with each address in turn until one answers. One deadline
+    /// covers all the addresses of the name. A kiss-of-death answer is kept in
+    /// preference to the errors of the later addresses.
     pub async fn exchange_addresses(
         &self,
         addresses: &[IpAddress],
         socket: &SntpUdpSocket,
     ) -> core::result::Result<Exchange, Failure> {
+        let deadline = self.time.monotonic_now() + RESPONSE_TIMEOUT;
         let mut last_error = Failure::Protocol(sntpc::Error::Network);
+        let mut kiss_of_death: Option<sntpc::Error> = None;
         for address in addresses {
             let destination = SocketAddr::new(to_core_ip(address.clone()), SERVER_PORT);
-            match self.exchange_one(destination, socket).await {
+            match self.exchange_one(destination, socket, deadline).await {
                 Ok(exchange) => return Ok(exchange),
+                Err(Failure::Protocol(error @ sntpc::Error::KissOfDeath(_))) => {
+                    if kiss_of_death.is_none() {
+                        kiss_of_death = Some(error);
+                    }
+                    last_error = Failure::Protocol(error);
+                }
                 Err(error) => last_error = error,
             }
         }
-        Err(last_error)
+        Err(match kiss_of_death {
+            Some(error) => Failure::Protocol(error),
+            None => last_error,
+        })
     }
 
-    /// One request/response with one server address. Stray datagrams (a wrong
-    /// source address or a wrong originate timestamp) are skipped until the
-    /// deadline, so that one stray packet does not abort the exchange.
+    /// One request/response with one server address, bounded by `deadline`.
+    /// Stray datagrams (a wrong source address, a wrong originate timestamp
+    /// or an oversized payload) are skipped until the deadline, so that one
+    /// stray packet does not abort the exchange.
     async fn exchange_one(
         &self,
         destination: SocketAddr,
         socket: &SntpUdpSocket,
+        deadline: Duration,
     ) -> core::result::Result<Exchange, Failure> {
         socket.discard_pending().await;
-        // A fresh source port per exchange, when the stack allows it.
-        if let Err(error) = socket.rebind_ephemeral().await {
-            log::debug!(
-                "SNTP: cannot rebind a fresh source port ({error}); keeping the current one"
-            );
-        }
-        let deadline = self.time.monotonic_now() + RESPONSE_TIMEOUT;
+        // A fresh source port per exchange (the stack's port counter is
+        // sequential). A failure leaves the socket closed: report it so the
+        // caller can rebuild the socket.
+        socket.rebind_ephemeral().await.map_err(Failure::Io)?;
         let now = self.time.monotonic_now();
         if now >= deadline {
             return Err(Failure::TimedOut);
@@ -342,6 +339,7 @@ impl<'a> Client<'a> {
                         error,
                         sntpc::Error::ResponseAddressMismatch
                             | sntpc::Error::IncorrectOriginTimestamp
+                            | sntpc::Error::IncorrectPayload
                     ) {
                         // A stray datagram: read the next one.
                         continue;
@@ -470,6 +468,7 @@ pub fn invalidates_socket(error: IoErrorKind) -> bool {
             | IoErrorKind::NetworkUnreachable
             | IoErrorKind::HostUnreachable
             | IoErrorKind::DeviceUnavailable
+            | IoErrorKind::InvalidState
     )
 }
 
@@ -531,6 +530,7 @@ mod tests {
         assert!(invalidates_socket(IoErrorKind::NetworkUnreachable));
         assert!(invalidates_socket(IoErrorKind::HostUnreachable));
         assert!(invalidates_socket(IoErrorKind::DeviceUnavailable));
+        assert!(invalidates_socket(IoErrorKind::InvalidState));
         assert!(!invalidates_socket(IoErrorKind::TimedOut));
         assert!(!invalidates_socket(IoErrorKind::InvalidData));
     }

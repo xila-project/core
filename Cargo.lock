@@ -2366,6 +2366,7 @@ dependencies = [
  "embedded-io-async",
  "heapless",
  "miniserde",
+ "portable-atomic",
  "smoltcp",
  "sntpc",
  "xila-device",

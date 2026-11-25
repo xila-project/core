@@ -43,6 +43,7 @@ smoltcp = { workspace = true, features = [
 ] }
 heapless = { version = "0.9" }
 miniserde = { workspace = true }
+portable-atomic = { workspace = true }
 sntpc = { version = "0.11", default-features = false, features = ["log"] }
 
 [dev-dependencies]
