@@ -21,8 +21,11 @@ impl Directory {
     /// the commit immediately after the directory entry instead of in the
     /// same one. Until that commit lands, the directory exists without Xila
     /// attributes: metadata reads fail closed with `MissingAttribute` rather
-    /// than reporting root with no permissions, and the entry can still be
-    /// removed through its parent.
+    /// than reporting root with no permissions. The name is not dead, though:
+    /// `get_attributes` still reports the kind and size from `lfs_stat`, and
+    /// the entry can be removed through its parent or replaced by a new
+    /// create. If the attribute commit fails, the half-created directory is
+    /// removed again on a best-effort basis.
     pub fn create(
         file_system: &mut littlefs::lfs_t,
         path: &Path,
@@ -31,24 +34,39 @@ impl Directory {
         let path = CString::new(path.as_str()).map_err(|_| IoErrorKind::InvalidArgument)?;
         InternalAttributes::validate_attribute_mask(attributes.get_mask())?;
 
-        unsafe {
-            convert_result(littlefs::lfs_mkdir(file_system, path.as_ptr()))?;
-
-            let mut internal_attributes = InternalAttributes::from_attributes(attributes);
-            if !attributes.get_mask().contains(AttributeFlags::Kind) {
-                internal_attributes.kind = Kind::Directory;
-            }
-
-            convert_result(littlefs::lfs_setattr(
-                file_system,
-                path.as_ptr(),
-                InternalAttributes::IDENTIFIER,
-                &internal_attributes as *const _ as *const _,
-                size_of::<InternalAttributes>() as u32,
-            ))?;
+        let mut internal_attributes = InternalAttributes::from_attributes(attributes);
+        if !attributes.get_mask().contains(AttributeFlags::Kind) {
+            internal_attributes.kind = Kind::Directory;
         }
 
-        Ok(())
+        let result = unsafe {
+            convert_result(littlefs::lfs_mkdir(file_system, path.as_ptr()))
+                .map(|_| ())
+                .and_then(|_| {
+                    convert_result(littlefs::lfs_setattr(
+                        file_system,
+                        path.as_ptr(),
+                        InternalAttributes::IDENTIFIER,
+                        &internal_attributes as *const _ as *const _,
+                        size_of::<InternalAttributes>() as u32,
+                    ))
+                    .map(|_| ())
+                })
+        };
+        match result {
+            Ok(()) => Ok(()),
+            // The exclusive check failed before any commit: an existing
+            // entry must not be removed.
+            Err(error) if error == IoErrorKind::AlreadyExists => Err(error),
+            Err(error) => {
+                // The directory entry may have landed before the attribute
+                // commit failed. Remove the attribute-less name best effort.
+                unsafe {
+                    let _ = littlefs::lfs_remove(file_system, path.as_ptr());
+                }
+                Err(error)
+            }
+        }
     }
 
     pub fn lookup(file_system: &mut littlefs::lfs_t, path: &Path) -> Result<Box<Self>> {
@@ -141,8 +159,7 @@ impl Directory {
         let name = name.to_str().unwrap().to_string();
 
         let entry_path = Self::resolve_entry_path(&self.path, &name)?;
-        let mut stored_attributes =
-            unsafe { InternalAttributes::new_uninitialized().assume_init() };
+        let mut stored_attributes = InternalAttributes::new();
         let result = unsafe {
             littlefs::lfs_getattr(
                 file_system,

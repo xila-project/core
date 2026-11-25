@@ -136,7 +136,7 @@ impl FileSystem {
 
             if let Err(IoErrorKind::MissingAttribute) = result {
                 // Set root attributes if not present
-                let mut internal_attributes = InternalAttributes::new_uninitialized().assume_init();
+                let mut internal_attributes = InternalAttributes::new();
                 internal_attributes.kind = Kind::Directory;
 
                 convert_result(littlefs::lfs_setattr(
@@ -320,10 +320,9 @@ impl FileSystemOperations for FileSystem {
         self.operation(|file_system| {
             let path = CString::new(path.as_str()).map_err(|_| IoErrorKind::InvalidArgument)?;
 
-            let mut internal_attributes =
-                unsafe { InternalAttributes::new_uninitialized().assume_init() };
+            let mut internal_attributes = InternalAttributes::new();
 
-            convert_result(unsafe {
+            let result = unsafe {
                 littlefs::lfs_getattr(
                     file_system,
                     path.as_ptr(),
@@ -331,20 +330,63 @@ impl FileSystemOperations for FileSystem {
                     &mut internal_attributes as *mut _ as *mut _,
                     size_of::<InternalAttributes>() as u32,
                 )
-            })?;
+            };
+            match convert_result(result) {
+                Ok(_) => {
+                    internal_attributes.update_attributes(attributes)?;
 
-            internal_attributes.update_attributes(attributes)?;
+                    if requested.contains(AttributeFlags::Size)
+                        && matches!(internal_attributes.kind, Kind::File | Kind::SymbolicLink)
+                    {
+                        let mut info = littlefs::lfs_info::default();
 
-            if requested.contains(AttributeFlags::Size)
-                && matches!(internal_attributes.kind, Kind::File | Kind::SymbolicLink)
-            {
-                let mut info = littlefs::lfs_info::default();
+                        convert_result(unsafe {
+                            littlefs::lfs_stat(file_system, path.as_ptr(), &mut info)
+                        })?;
 
-                convert_result(unsafe {
-                    littlefs::lfs_stat(file_system, path.as_ptr(), &mut info)
-                })?;
-
-                *attributes = attributes.clone().set_size(info.size as Size);
+                        *attributes = attributes.clone().set_size(info.size as Size);
+                    }
+                }
+                // A power loss during creation can leave an entry without
+                // attributes. The name still exists: report the fields
+                // `lfs_stat` can provide (kind, size, inode 0) so it can be
+                // inspected and removed. Owner, permissions and times stay
+                // unavailable: requests for them fail closed with
+                // `MissingAttribute` instead of reporting root with no rights.
+                Err(IoErrorKind::MissingAttribute) => {
+                    const STAT_FIELDS: AttributeFlags = AttributeFlags::Kind
+                        .union(AttributeFlags::Inode)
+                        .union(AttributeFlags::Size);
+                    // Only requests fully answerable from `lfs_stat` fall back;
+                    // anything asking for stored metadata (owner, permissions,
+                    // times) still fails closed with `MissingAttribute`.
+                    if !requested.difference(STAT_FIELDS).is_empty() {
+                        return Err(IoErrorKind::MissingAttribute);
+                    }
+                    let stat_only = requested;
+                    let mut info = littlefs::lfs_info::default();
+                    convert_result(unsafe {
+                        littlefs::lfs_stat(file_system, path.as_ptr(), &mut info)
+                    })?;
+                    *attributes = attributes.clone().set_mask(stat_only);
+                    if stat_only.contains(AttributeFlags::Kind) {
+                        let kind = if info.type_ == constants::TYPE_DIRECTORY {
+                            Kind::Directory
+                        } else {
+                            Kind::File
+                        };
+                        *attributes = attributes.clone().set_kind(kind);
+                    }
+                    if stat_only.contains(AttributeFlags::Inode) {
+                        *attributes = attributes.clone().set_inode(0);
+                    }
+                    if stat_only.contains(AttributeFlags::Size)
+                        && info.type_ == constants::TYPE_REGULAR
+                    {
+                        *attributes = attributes.clone().set_size(info.size as Size);
+                    }
+                }
+                Err(error) => return Err(error),
             }
 
             Ok(())
@@ -361,8 +403,7 @@ impl FileSystemOperations for FileSystem {
         self.operation(|file_system| {
             let path = CString::new(path.as_str()).map_err(|_| IoErrorKind::InvalidArgument)?;
 
-            let mut internal_attributes =
-                unsafe { InternalAttributes::new_uninitialized().assume_init() };
+            let mut internal_attributes = InternalAttributes::new();
 
             if mask != InternalAttributes::PERSISTED_ATTRIBUTE_FLAGS {
                 convert_result(unsafe {

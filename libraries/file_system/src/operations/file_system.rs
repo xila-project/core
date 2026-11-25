@@ -197,9 +197,9 @@ pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOper
     /// entry in the same commit as the entry creation where the backend can.
     ///
     /// `attributes.get_mask()` selects the fields to persist; callers pass the
-    /// mask already intersected with [`Self::writable_attributes`]. Fields the
-    /// backend cannot persist atomically with creation are applied by the
-    /// caller afterwards. An empty mask persists the backend defaults.
+    /// mask already intersected with [`Self::writable_attributes`]. The backend
+    /// must apply or ignore the full mask at creation: the caller no longer
+    /// rewrites fields afterwards. An empty mask persists the backend defaults.
     fn create_directory(&self, path: &Path, attributes: &Attributes) -> Result<()>;
 
     /// Create a regular file at `path`, persisting `attributes` with the new

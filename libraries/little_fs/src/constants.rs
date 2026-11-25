@@ -37,6 +37,12 @@ pub const FILE_ACCESS_MASK: u32 = littlefs::lfs_open_flags_LFS_O_RDWR as u32;
 pub const FILE_READ_ONLY: u32 = littlefs::lfs_open_flags_LFS_O_RDONLY as u32;
 /// The file does not match storage because of a write.
 pub const FILE_DIRTY: u32 = littlefs::lfs_open_flags_LFS_F_DIRTY as u32;
+/// The file has data written since the last flush. LittleFS sets this, not
+/// `LFS_F_DIRTY`, on `lfs_file_write`, so pending state must check both.
+pub const FILE_WRITING: u32 = littlefs::lfs_open_flags_LFS_F_WRITING as u32;
+/// The file has uncommitted data or metadata (`LFS_F_WRITING | LFS_F_DIRTY`):
+/// the next sync or close commits it.
+pub const FILE_PENDING: u32 = FILE_DIRTY | FILE_WRITING;
 /// The file does not match storage because another open changed it.
 pub const FILE_DUSTY: u32 = littlefs::lfs_open_flags_LFS_F_DUSTY as u32;
 /// A write or commit failed; LittleFS no longer syncs the file.

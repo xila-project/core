@@ -1702,23 +1702,6 @@ impl VirtualFileSystem {
         (1..Inode::MAX).find(|&inode| !devices.contains_key(&inode))
     }
 
-    pub(super) async fn set_attributes(
-        file_system: &dyn FileSystemOperations,
-        path: &Path,
-        attributes: &Attributes,
-    ) -> Result<()> {
-        let mask = attributes.get_mask();
-        if mask.is_empty() {
-            return Ok(());
-        }
-        let mut current = Attributes::new().set_mask(mask);
-        Self::get_attributes(file_system, path, &mut current).await?;
-        if attributes_equal(&current, attributes) {
-            return Ok(());
-        }
-        poll(|| FileSystemOperations::set_attributes(file_system, path, attributes)).await
-    }
-
     pub(super) async fn get_attributes(
         file_system: &dyn FileSystemOperations,
         path: &Path,

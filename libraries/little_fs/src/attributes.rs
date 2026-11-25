@@ -1,4 +1,4 @@
-use core::{fmt::Debug, mem::MaybeUninit};
+use core::fmt::Debug;
 
 use file_system::{
     AttributeFlags, Attributes, Inode, IoErrorKind, Kind, Permissions, Result, Time,
@@ -52,8 +52,10 @@ impl InternalAttributes {
         }
     }
 
-    pub fn new_uninitialized() -> MaybeUninit<Self> {
-        MaybeUninit::new(Self {
+    /// Backend defaults: no owner rights, regular file kind, zero times and
+    /// inode. The create path applies the caller's attribute mask on top.
+    pub const fn new() -> Self {
+        Self {
             inode: 0,
             creation: Time::new(0),
             modification: Time::new(0),
@@ -64,7 +66,7 @@ impl InternalAttributes {
             permissions: Permissions::NONE,
             kind: Kind::File,
             reserved: 0,
-        })
+        }
     }
 
     /// Build the stored attributes for a new entry: backend defaults with the
@@ -72,7 +74,7 @@ impl InternalAttributes {
     /// create path so the real owner, permissions and times are committed
     /// together with the entry instead of being rewritten afterwards.
     pub fn from_attributes(attributes: &Attributes) -> Self {
-        let mut internal = unsafe { Self::new_uninitialized().assume_init() };
+        let mut internal = Self::new();
         // Ignore the result: fields absent from the mask keep their defaults,
         // and the mask was already validated by the caller.
         let _ = internal.update_with_attributes(attributes);

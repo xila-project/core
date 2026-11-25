@@ -29,6 +29,10 @@ mod metadata_authorization;
 #[path = "support/mutation_times.rs"]
 mod mutation_times;
 
+#[cfg(target_os = "linux")]
+#[path = "support/power_loss.rs"]
+mod power_loss;
+
 async fn initialize() -> (TaskIdentifier, &'static VirtualFileSystem) {
     let time_manager = Box::leak(Box::new(
         time::Manager::new(&testing_support::TimeDevice).unwrap(),

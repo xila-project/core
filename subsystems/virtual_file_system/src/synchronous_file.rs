@@ -28,6 +28,12 @@ pub struct SynchronousFile<'a> {
     cursor: crate::cursor::Cursor,
     pub(crate) flags: Flags,
     pub(crate) context: Context,
+    /// The modification and status times were recorded on this handle since
+    /// the last flush: only the first write of more than zero bytes after an
+    /// open or a flush touches them, so repeated writes cost no extra metadata.
+    times_touched: bool,
+    /// A metadata-update failure was already logged for this handle.
+    time_error_logged: bool,
 }
 
 impl Debug for SynchronousFile<'_> {
@@ -57,6 +63,8 @@ impl<'a> SynchronousFile<'a> {
             cursor: crate::cursor::Cursor::new(position, flags.get_state()),
             flags: flags.set_status(StateFlags::empty()),
             context,
+            times_touched: false,
+            time_error_logged: false,
         }
     }
 
@@ -162,18 +170,29 @@ impl<'a> SynchronousFile<'a> {
     }
 
     /// Update the modification and status times after a mutation of an open
-    /// regular file. The backend commits them with the file data on the next
-    /// sync or close, so this costs no extra flash write. Best effort: the
-    /// triggering operation already succeeded.
+    /// regular file, once per open or flush interval. The backend commits them
+    /// with the file data on the next sync or close, so this costs no extra
+    /// flash write. Best effort: the triggering operation already succeeded.
     fn touch_modification_time(&mut self) {
+        if self.times_touched {
+            return;
+        }
         if let Err(error) = self
             .virtual_file_system
             .touch_handle_modification_time(&self.item, &mut self.context)
         {
             match error {
                 IoErrorKind::Unsupported | IoErrorKind::ResourceBusy | IoErrorKind::WouldBlock => {}
-                _ => log::warning!("Failed to update modification time after a write: {error}"),
+                _ => {
+                    // Log once per handle, not on every write of an errored one.
+                    if !self.time_error_logged {
+                        self.time_error_logged = true;
+                        log::warning!("Failed to update modification time after a write: {error}");
+                    }
+                }
             }
+        } else {
+            self.times_touched = true;
         }
     }
 
@@ -236,10 +255,17 @@ impl<'a> SynchronousFile<'a> {
         &mut self,
         cx: &mut core::task::Context<'_>,
     ) -> core::task::Poll<Result<()>> {
-        self.item
+        let result = self
+            .item
             .as_base_operations()
             .ok_or(IoErrorKind::Unsupported)?
-            .flush(&mut self.context, cx)
+            .flush(&mut self.context, cx);
+        // A successful flush committed the pending data and times: the next
+        // write is a new mutation and records the times again.
+        if let core::task::Poll::Ready(Ok(())) = result {
+            self.times_touched = false;
+        }
+        result
     }
 
     pub(crate) fn poll_control(
@@ -369,6 +395,9 @@ impl<'a> SynchronousFile<'a> {
             .as_base_operations()
             .ok_or(IoErrorKind::Unsupported)?
             .flush_sync(&mut self.context)?;
+        // The flush committed the pending data and times: the next write is a
+        // new mutation and records the times again.
+        self.times_touched = false;
 
         Ok(())
     }
@@ -393,6 +422,10 @@ impl<'a> SynchronousFile<'a> {
             cursor: self.cursor.duplicate(),
             flags: self.flags,
             context,
+            // The duplicate shares the native context, whose pending times
+            // are already recorded.
+            times_touched: self.times_touched,
+            time_error_logged: self.time_error_logged,
         })
     }
 

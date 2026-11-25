@@ -3,7 +3,10 @@
 //! VFS stamps on creations, writes, truncations and resizes.
 
 use super::*;
-use file_system::{DirectBaseOperations, DirectBlockDevice, MountOperations, Permissions, Size};
+use alloc::vec;
+use file_system::{
+    ControlCommand, DirectBaseOperations, DirectBlockDevice, MountOperations, Permissions, Size,
+};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use virtual_file_system::MountOptions;
 
@@ -63,6 +66,18 @@ impl DirectBaseOperations for CountingDevice {
         input: &shared::AnyByLayout,
         output: &mut shared::AnyByLayout,
     ) -> core::task::Poll<file_system::Result<()>> {
+        // An erase is not a program operation: zero the block directly on the
+        // inner device so it does not count towards the write count (the
+        // default pattern-write fallback would count one write per byte).
+        if command == file_system::block_device::ERASE::IDENTIFIER {
+            let range = file_system::block_device::ERASE::cast_input(input)?;
+            let block = vec![0u8; range.size as usize];
+            return match self.inner.write(context, &block, range.position) {
+                core::task::Poll::Ready(Ok(_)) => core::task::Poll::Ready(Ok(())),
+                core::task::Poll::Ready(Err(error)) => core::task::Poll::Ready(Err(error)),
+                core::task::Poll::Pending => core::task::Poll::Pending,
+            };
+        }
         self.inner.control(context, command, input, output)
     }
 }
@@ -203,6 +218,59 @@ async fn modification_time_follows_writes_not_write_opens() {
     assert_eq!(statistics.status.as_u64(), 3_000);
     // The access time is untouched by writes under the default relative policy.
     assert_eq!(statistics.access.as_u64(), 1_000);
+}
+
+#[task::test]
+async fn several_writes_on_one_handle_then_close_is_one_flash_write() {
+    let (task, virtual_file_system, time_manager, device) = initialize_counting(1_000).await;
+
+    File::write_to_path(virtual_file_system, task, "/file", b"hello")
+        .await
+        .unwrap();
+
+    // The modification time is recorded on the first write after the open only;
+    // all writes and the time update are committed together on close.
+    set_clock(time_manager, 4_000);
+    device.reset_write_count();
+    let mut file = File::open(
+        virtual_file_system,
+        task,
+        "/file",
+        AccessFlags::Write.into(),
+    )
+    .await
+    .unwrap();
+    for index in 0..20u8 {
+        file.write(&[index]).await.unwrap();
+    }
+    file.close(virtual_file_system).await.unwrap();
+    assert_eq!(device.write_count(), 1);
+
+    let statistics = statistics_of(virtual_file_system, "/file").await;
+    assert_eq!(statistics.modification.as_u64(), 4_000);
+    assert_eq!(statistics.status.as_u64(), 4_000);
+    // The handle cursor started at 0, so the 20 one-byte writes overwrote and
+    // extended the 5 existing bytes up to 20.
+    assert_eq!(statistics.size, 20);
+
+    // After a flush, the next write records the times again.
+    set_clock(time_manager, 5_000);
+    device.reset_write_count();
+    let mut file = File::open(
+        virtual_file_system,
+        task,
+        "/file",
+        AccessFlags::Write.into(),
+    )
+    .await
+    .unwrap();
+    file.write(b"a").await.unwrap();
+    file.flush().await.unwrap();
+    file.write(b"b").await.unwrap();
+    file.close(virtual_file_system).await.unwrap();
+    assert_eq!(device.write_count(), 2);
+    let statistics = statistics_of(virtual_file_system, "/file").await;
+    assert_eq!(statistics.modification.as_u64(), 5_000);
 }
 
 #[task::test]
