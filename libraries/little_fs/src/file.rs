@@ -291,9 +291,12 @@ mod tests {
                 );
             }
 
-            // A wrapped offset must not overwrite the start of the file.
+            // A write at 2^32 + 100 that wrapped to 32 bits would land at offset 100
+            // and grow the file. The file must still hold its 4 bytes only.
             assert_eq!(file.read(native, &mut buffer, 0)?, 4);
             assert_eq!(&buffer, b"Xila");
+            assert_eq!(file.read(native, &mut buffer, 4)?, 0);
+            assert_eq!(file.read(native, &mut buffer, 100)?, 0);
             file.close(native)
         })
         .unwrap();
