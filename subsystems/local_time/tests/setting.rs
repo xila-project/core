@@ -384,3 +384,18 @@ async fn concurrent_sets_leave_the_file_and_tz_in_agreement() {
         );
     }
 }
+
+#[test]
+async fn the_setting_in_use_is_kept_in_ram() {
+    let (task, vfs) = boot().await;
+    let manager = vfs.task_manager();
+    let users = vfs.users_manager();
+    write_configuration(vfs, task, br#"{"name":"Asia/Tokyo","time_zone":"JST-9"}"#).await;
+    local_time::initialize(manager, vfs, task).await;
+    assert_eq!(local_time::stored().name(), Some("Asia/Tokyo"));
+    let paris = Setting::new(Some("Europe/Paris"), PARIS).unwrap();
+    local_time::set(manager, users, vfs, task, &paris)
+        .await
+        .unwrap();
+    assert_eq!(local_time::stored(), paris);
+}

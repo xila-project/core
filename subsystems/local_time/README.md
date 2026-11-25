@@ -34,7 +34,8 @@ Unknown keys are ignored. The file is at most 256 bytes.
   it, and its group can only if it is root's group. Everyone can read it.
 - `local_time::set` replaces it atomically: it creates
   `/configuration/system/.time_zone.json-new` with mode 0644, writes it, then
-  renames it. A failed write keeps the old file and the old `TZ`. Calls of
+  renames it. A failed write keeps the old file and the old `TZ`, and may leave
+  the temporary file, which the next write truncates. Calls of
   `set` are serialised by a mutex across the write and the publication, so the
   file and `TZ` always hold the same setting.
 - A missing, unreadable, too large or invalid file, or a file that others can
@@ -76,7 +77,8 @@ started before it).
 | `Setting::new(name, time_zone)` | Check and build a setting. |
 | `validate_time_zone(text)` | Check a TZ string (length and syntax), for input fields. |
 | `read(vfs, task)` | The stored setting, or the reason it cannot be used. |
-| `load(vfs, task)` | The stored setting, or UTC with one warning. |
+| `load(vfs, task)` | The stored setting, or UTC. It logs nothing. |
+| `stored()` | The setting in use, kept in RAM by `initialize` and `set`; it reads no file. |
 | `initialize(task_manager, vfs, task)` | `load`, then publish `TZ`. Start-up only. |
 | `set(task_manager, users_manager, vfs, task, &setting)` | Store and publish a new setting. |
 | `current(task_manager, task)` | The parsed `TZ` of a task, or UTC. |

@@ -26,7 +26,8 @@
 //! Only root may have written the file: it belongs to root, others cannot
 //! write it, and its group can only if it is root's group, as for the other
 //! files of `/configuration/system`. Everyone can read it. [`set`] replaces it
-//! atomically (a temporary file created with mode 0644, then a rename). A
+//! atomically (a temporary file created with mode 0644, then a rename; a
+//! temporary file left by a failed write is truncated by the next one). A
 //! missing, unreadable or invalid file gives UTC (`UTC0`) and one warning at
 //! start-up, from [`initialize`]; [`load`] logs nothing. It never blocks the
 //! start-up.
@@ -61,11 +62,15 @@
 extern crate alloc;
 
 use alloc::string::{String, ToString};
+use core::cell::RefCell;
 use file_system::{
     AccessFlags, CreateFlags, Flags, IntoIoErrorKind, IoErrorKind, Kind, Path, Permission,
     Permissions, Special, Statistics,
 };
-use synchronization::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use synchronization::{
+    blocking_mutex::{Mutex as BlockingMutex, raw::CriticalSectionRawMutex},
+    mutex::Mutex,
+};
 use task::TaskIdentifier;
 use users::{ADMINISTRATOR_GROUP_NAME, GroupIdentifier, UserIdentifier};
 use virtual_file_system::{File, VirtualFileSystem};
@@ -313,7 +318,24 @@ pub async fn initialize(
     task_manager
         .set_system_environment_variable(ENVIRONMENT_VARIABLE, &setting.time_zone)
         .await;
+    store(&setting);
     setting
+}
+
+/// The setting in use, as [`initialize`] loaded it or [`set`] stored it. It is
+/// kept in RAM (24 bytes and two short heap strings), so that programs that
+/// show the setting, such as Settings, do not read the file again.
+static IN_USE: BlockingMutex<CriticalSectionRawMutex, RefCell<Option<Setting>>> =
+    BlockingMutex::new(RefCell::new(None));
+
+fn store(setting: &Setting) {
+    IN_USE.lock(|in_use| *in_use.borrow_mut() = Some(setting.clone()));
+}
+
+/// The setting in use: the one that [`initialize`] loaded or that [`set`]
+/// stored last, or UTC before [`initialize`]. It does not read the file.
+pub fn stored() -> Setting {
+    IN_USE.lock(|in_use| in_use.borrow().clone().unwrap_or_else(Setting::utc))
 }
 
 /// Serialises [`set`]: the file write and the publication of `TZ` of one call
@@ -353,6 +375,7 @@ pub async fn set(
     task_manager
         .set_system_environment_variable(ENVIRONMENT_VARIABLE, &setting.time_zone)
         .await;
+    store(setting);
     Ok(())
 }
 
@@ -379,20 +402,14 @@ async fn write(
     contents: &[u8],
 ) -> Result<(), IoErrorKind> {
     let temporary = Path::from_str(TEMPORARY_PATH);
-    match virtual_file_system.remove(task, temporary).await {
-        Ok(()) | Err(IoErrorKind::NotFound) => (),
-        Err(error) => return Err(error),
-    }
-    // Root can write; everyone can read, from the creation of the file on.
+    // Root can write; everyone can read, from the creation of the file on. A
+    // temporary file left by an interrupted write is truncated and reused:
+    // only root can create it, so its permissions are already these.
     let mut file = File::open_with_permissions(
         virtual_file_system,
         task,
         temporary,
-        Flags::new(
-            AccessFlags::Write,
-            Some(CreateFlags::CREATE_EXCLUSIVE),
-            None,
-        ),
+        Flags::new(AccessFlags::Write, Some(CreateFlags::CREATE_TRUNCATE), None),
         Permissions::new(
             Permission::READ_WRITE,
             Permission::Read,
@@ -414,18 +431,15 @@ async fn write(
     }
     .await;
     let closed = file.close(virtual_file_system).await;
-    let result = match result.and(closed) {
+    // A failed write leaves the temporary file; the next write truncates it.
+    match result.and(closed) {
         Ok(()) => {
             virtual_file_system
                 .rename(task, &temporary, &Path::from_str(CONFIGURATION_PATH))
                 .await
         }
         Err(error) => Err(error),
-    };
-    if result.is_err() {
-        let _ = virtual_file_system.remove(task, temporary).await;
     }
-    result
 }
 
 /// The time zone of a task: its `TZ` variable, parsed. UTC when the task has
