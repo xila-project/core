@@ -46,8 +46,8 @@ fn naive(date_time: &DateTime) -> chrono::NaiveDateTime {
 
 #[test]
 fn utc_to_local_matches_the_host_database() {
-    for (name, tz_string) in ZONES {
-        let zone = TimeZone::parse(tz_string).unwrap();
+    for (name, time_zone_string) in ZONES {
+        let zone = TimeZone::parse(time_zone_string).unwrap();
         let host: chrono_tz::Tz = name.parse().unwrap();
 
         let mut utc = 1_704_067_200; // 2024-01-01 00:00:00 UTC
@@ -113,8 +113,8 @@ fn check_utc_to_local(name: &str, zone: &TimeZone, host: &chrono_tz::Tz, utc: i6
 
 #[test]
 fn local_to_utc_matches_the_host_database() {
-    for (name, tz_string) in ZONES {
-        let zone = TimeZone::parse(tz_string).unwrap();
+    for (name, time_zone_string) in ZONES {
+        let zone = TimeZone::parse(time_zone_string).unwrap();
         let host: chrono_tz::Tz = name.parse().unwrap();
 
         for year in [2024, 2025, 2026] {
@@ -143,8 +143,8 @@ fn local_to_utc_matches_the_host_database() {
                         let ours = zone.to_utc(date_time);
                         let host_result = host.from_local_datetime(&naive(&date_time));
                         match (ours, host_result) {
-                            (LocalToUtc::Unique(utc), LocalResult::Single(dt)) => {
-                                assert_eq!(utc, dt.timestamp(), "{name} {date_time:?}");
+                            (LocalToUtc::Unique(utc), LocalResult::Single(host_time)) => {
+                                assert_eq!(utc, host_time.timestamp(), "{name} {date_time:?}");
                             }
                             (
                                 LocalToUtc::Ambiguous { earlier, later },

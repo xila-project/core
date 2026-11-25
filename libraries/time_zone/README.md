@@ -120,12 +120,14 @@ instant in both directions and walks the whole table, built with Rust 1.97,
 | `iana-all` (598 zones) | 22,232 bytes | 23,153 / 8,185 / 14,800 bytes |
 
 BSS is 8 bytes in all Cortex-M configurations. For `xtensa-esp32s3-none-elf`
-(the ESP32-S3 target of Platforms) the crate object inside the rlib measures
-12,696 bytes with no table, 15,412 with `iana-europe` and 27,845 with
-`iana-all` (code plus rodata, before the final link); the final link needs the
-`xtensa-esp32s3-elf-gcc` linker of the esp-rs toolchain, which is not
-installed on the measuring machine, so no linked size is reported for that
-target.
+(the ESP32-S3 target of Platforms), the crate object inside the rlib measures
+9,212 bytes with no table, 11,698 with `iana-europe` and 24,135 with
+`iana-all` (code plus rodata, before the final link), built with
+`RUSTFLAGS="-C opt-level=z" rustup run esp cargo build --release
+-Zbuild-std=core --target xtensa-esp32s3-none-elf -p xila-time-zone` and the
+matching `--features`. The linked size is smaller, because the linker removes
+unused code; it is not reported, because the final link needs the
+`xtensa-esp32s3-elf-gcc` linker of the esp-rs toolchain.
 
 For comparison, the closed prototype #538 measured 1,963 bytes for UTC only,
 18,300 bytes with Paris and 29,088 bytes with six zone identifiers on

@@ -36,10 +36,10 @@ fn names_are_sorted_unique_and_looked_up() {
 fn every_table_string_parses() {
     for index in 0..iana::zone_count() {
         let name = iana::zone_name(index).unwrap();
-        let tz_string = iana::time_zone_string(name).unwrap();
+        let time_zone_string = iana::time_zone_string(name).unwrap();
         assert!(
-            TimeZone::parse(tz_string).is_ok(),
-            "{name}: {tz_string:?} does not parse"
+            TimeZone::parse(time_zone_string).is_ok(),
+            "{name}: {time_zone_string:?} does not parse"
         );
         // The lookup returns the same string for the parsed zone.
         let zone = TimeZone::from_iana_name(name).unwrap();

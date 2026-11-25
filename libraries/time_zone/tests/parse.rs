@@ -156,6 +156,21 @@ fn negative_daylight_saving_offset() {
 }
 
 #[test]
+fn names_of_exactly_seven_bytes_are_accepted() {
+    // `ABBREVIATION_MAX` is 7: the longest name that fits must parse, and the
+    // next length must fail (see `invalid_strings`).
+    let unquoted = TimeZone::parse("ABCDEFG1").unwrap();
+    assert_eq!(unquoted.standard_abbreviation(), "ABCDEFG");
+    let quoted = TimeZone::parse("<abcdefg>1").unwrap();
+    assert_eq!(quoted.standard_abbreviation(), "abcdefg");
+    let daylight_saving = TimeZone::parse("ABCDEFG1HIJKLMN").unwrap();
+    assert_eq!(
+        daylight_saving.daylight_saving_abbreviation(),
+        Some("HIJKLMN")
+    );
+}
+
+#[test]
 fn invalid_strings() {
     let cases: &[(&str, ParseError)] = &[
         ("", ParseError::Empty),
