@@ -67,7 +67,6 @@ embedded-hal-async = { version = "1", default-features = false }
 miniserde = { version = "0.1", default-features = false }
 cbindgen = { version = "0.29" }
 syn = { version = "3.0" }
-syn2 = { package = "syn", version = "2" }
 prettyplease = "0.3"
 quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }

@@ -1973,7 +1973,6 @@ dependencies = [
  "prettyplease 0.3.0",
  "quote",
  "smoltcp",
- "syn 2.0.119",
  "syn 3.0.10",
  "xila-file-system",
  "xila-graphics",
@@ -2219,7 +2218,6 @@ dependencies = [
  "prettyplease 0.3.0",
  "proc-macro2",
  "quote",
- "syn 2.0.119",
  "syn 3.0.10",
 ]
 

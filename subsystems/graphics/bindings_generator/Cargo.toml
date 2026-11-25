@@ -12,7 +12,6 @@ syn = { workspace = true, features = ["full", "visit", "extra-traits"] }
 [dev-dependencies]
 cbindgen = { workspace = true }
 prettyplease = { workspace = true }
-syn2 = { workspace = true, features = ["full"] }
 # Tests derive the catalog from the host bindings. The library takes the
 # bindings source as an argument, so no build script runs LVGL's bindgen for it.
 lvgl_rust_sys = { workspace = true }

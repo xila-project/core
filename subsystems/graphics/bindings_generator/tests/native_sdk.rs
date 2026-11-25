@@ -11,7 +11,7 @@ fn abi_directory() -> PathBuf {
 }
 
 fn format(source: &str) -> String {
-    prettyplease::unparse(&syn2::parse_file(source).expect("generated Rust parses"))
+    prettyplease::unparse(&syn::parse_file(source).expect("generated Rust parses"))
 }
 
 /// Rust, as the single module `xila-sys` compiles.
