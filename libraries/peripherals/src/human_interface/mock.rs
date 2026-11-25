@@ -71,6 +71,12 @@ impl HumanInterfaceMock {
     }
 }
 
+impl Default for HumanInterfaceMock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HumanInterfaceController for HumanInterfaceMock {
     fn send_report(&mut self, identifier: u8, report: &[u8]) -> Result<(), Error> {
         let fail_with = *self

@@ -258,10 +258,10 @@ mod tests {
             if let Some(error) = self.fail_with {
                 return Err(error);
             }
-            if let Some(limit) = self.fail_after {
-                if self.count >= limit {
-                    return Err(ControllerError::Busy);
-                }
+            if let Some(limit) = self.fail_after
+                && self.count >= limit
+            {
+                return Err(ControllerError::Busy);
             }
             let mut bytes = [0u8; 8];
             bytes[..report.len()].copy_from_slice(report);
