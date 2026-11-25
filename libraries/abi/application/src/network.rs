@@ -241,12 +241,8 @@ fn refuse_other_family_poll(
     use smoltcp::socket::tcp::State;
     if foreign_connection(socket, listener.address) {
         socket.abort();
-        // SAFETY: the closure does not lock the deadline again, so no aliasing.
-        unsafe {
-            listener.reset_deadline.lock_mut(|deadline| {
-                *deadline = embassy_time::Instant::now().as_ticks() + RESET_TIMEOUT_TICKS;
-            })
-        };
+        let deadline = embassy_time::Instant::now().as_ticks() + RESET_TIMEOUT_TICKS;
+        listener.reset_deadline.lock(|cell| cell.set(deadline));
         socket.register_send_waker(cx.waker());
         true
     } else if socket.state() == State::Closed {
@@ -257,14 +253,20 @@ fn refuse_other_family_poll(
         if socket.remote_endpoint().is_none() {
             listen_again(socket, listener.address);
         } else {
-            let deadline = listener.reset_deadline.lock(|deadline| *deadline);
+            // Read the deadline before arming the timer, so `schedule_wake` never runs
+            // inside the critical section.
+            let deadline = listener.reset_deadline.lock(core::cell::Cell::get);
             if embassy_time::Instant::now().as_ticks() >= deadline {
                 // The stack could not send the reset within the limit; listen again
                 // and let the peer see the refusal at its next send, as before.
                 listen_again(socket, listener.address);
             } else {
-                // Wake this poll at the deadline, to listen again even if the reset
-                // is still pending then.
+                // The reset may still go out before the deadline: wake this poll then
+                // too, in case another waker replaced the one registered at abort, so
+                // the listener re-listens as soon as the RST is sent.
+                socket.register_send_waker(cx.waker());
+                // Also wake this poll at the deadline, to listen again even if the
+                // reset is still pending then.
                 let timer = embassy_time::Timer::at(embassy_time::Instant::from_ticks(deadline));
                 let _ = core::pin::pin!(timer).poll(cx);
             }
@@ -409,7 +411,7 @@ pub unsafe extern "C" fn xila_tcp_listen(
             network: Network::new(network.manager, u32::from(network.rights))?,
             address,
             inner,
-            reset_deadline: synchronization::blocking_mutex::Mutex::new(0),
+            reset_deadline: synchronization::blocking_mutex::Mutex::new(core::cell::Cell::new(0)),
         }
         .into_raw())
     })();
@@ -934,9 +936,8 @@ pub(crate) fn tcp_readiness(
             if matches!(state, State::Established | State::CloseWait) {
                 ready |= events & XILA_POLL_IN;
             } else if state == State::Closed && socket.remote_endpoint().is_none() {
-                // A closed listener still attached to a connection is being reset, or
-                // a waiting connection was reset by its peer: report nothing until the
-                // reset has been sent and it listens again, which is closer to POSIX.
+                // The listener is closed without a connection and could not listen
+                // again: report an error.
                 ready |= XILA_POLL_ERR;
             }
         } else {
