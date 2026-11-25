@@ -99,8 +99,8 @@ impl<'a, D: BaseOperations> PartitionDevice<'a, D> {
     /// let partition = PartitionDevice::new(&base_device, 100, 50, 512);
     /// assert_eq!(partition.get_block_count(), 50);
     /// ```
-    pub const fn get_block_count(&self) -> u32 {
-        self.size as u32 / self.block_size
+    pub const fn get_block_count(&self) -> Size {
+        self.size / (self.block_size as Size)
     }
 
     pub const fn get_start_lba(&self) -> Size {
