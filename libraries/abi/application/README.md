@@ -574,6 +574,31 @@ feature: `runtime::startup()` and `runtime::api()` call `__xila_current_startup(
 `linked` and `link` features exclude each other. `link` builds a standalone static PIE
 image; `linked` builds code for the firmware's own linker.
 
+A C program linked into the firmware is localized first, so its globals are private to it:
+the SDK's `link-archive` command (see [the SDK README](sdk/README.md)) packs
+`crt0_linked.o`, the program and the SDK archives into one archive whose only global
+defined symbol is the entry, renamed from `xila_linked_start`; `crt0_linked.o` is `crt0.c`
+built with `-DXILA_SDK_LINKED`, with the same startup and version check as `_xila_start`
+but no ABI note and no `_xila_start`. Compile the program with `-fPIE`, like every SDK
+object: position-independent code links into both the firmware's image and PIE host
+binaries (Linux tests, Rust test binaries), which non-PIC code cannot. Two different
+localized programs therefore never collide and can run concurrently in the plain form.
+Two concurrent launches of the *same* program, however, share that program's
+`.data`/`.bss` (`xila_sdk_api`, `xila_process`, `stdout`, ...), so declare a C program
+with the `exclusive` form of `linked_executable!` (or run it with
+`run_linked_exclusive` over an `ExclusiveSlot`): a second concurrent launch fails
+immediately with `BUSY_FAILURE` (16, `EBUSY`) without touching the entry, and the slot is
+released when the run returns, exits or is cancelled while suspended.
+
+Every launch of a linked C program starts from pristine SDK state: `xila_linked_start`
+resets the POSIX runtime (descriptors, standard streams, environment, exit handlers,
+locks, `getopt`, ...) before `main` runs, whichever way the previous run of the same
+program ended, including a cancellation, whose process heap the host already freed.
+Picolibc's file-static `hcreate` and `getpwent`/`getgrent` state is not reset; avoid
+those in relaunched linked programs. The program's own C `static` variables persist
+across launches, though: initialize them at the top of `main` if a relaunch must not see
+the previous run's values.
+
 The adapter exists only on targets with stack switching (Linux on x86-64 and AArch64, and bare
 metal Arm, RISC-V, Xtensa and x86-64). On other targets the `native-linked` feature compiles
 and adds nothing, because a program that cannot suspend would block the executor.

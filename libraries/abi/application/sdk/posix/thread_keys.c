@@ -1,4 +1,5 @@
 #include <pthread.h>
+#include <string.h>
 
 #include "internal.h"
 
@@ -10,6 +11,14 @@ struct key_destructor {
 /* Only linked into images which use POSIX keys. Entries with no destructor
    do not need a record here. The ABI owns key lifetimes and TLS values. */
 static struct key_destructor destructors[XILA_THREAD_KEYS_MAX];
+
+/* Back to the pristine empty table, for a relaunch of the same linked program after a
+   previous run was cancelled: the ABI owns key lifetimes, and the host discarded them with
+   the run. startup.c calls this hook through a weak no-op default, so an image that uses no keys does not link
+   it. */
+__attribute__((visibility("hidden"))) void xila_thread_keys_reset(void) {
+    memset(destructors, 0, sizeof destructors);
+}
 
 int pthread_key_create(pthread_key_t *key, void (*destructor)(void *)) {
     XilaStatus status = xila_thread_key_create(key);

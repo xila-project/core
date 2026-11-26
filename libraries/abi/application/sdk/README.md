@@ -34,6 +34,8 @@ xila-sdk-0.1-<target>/
     posix/stdlib.h          wrapper for the SDK's getenv declaration
   lib/
     crt0.o                  _xila_start: checks the startup, installs the API table
+    crt0_linked.o           xila_linked_start, for a program linked into the firmware
+                            (link-archive): same checks, no ABI note, no _xila_start
     libxila.a               indirect-call stubs for every XilaApi slot, and the graphics
                             functions of xila/graphics.h
     libxila_posix.a         the POSIX layer; also defines xila_main, which calls main
@@ -95,6 +97,95 @@ discards buffered output and skips exit handlers.
 clocks, `nanosleep`, `getentropy` and `getenv`. Core's test builds it with this
 toolchain file and runs it through the VFS, the executable dispatch table, the
 native loader and the ABI table (`libraries/executable/tests/sdk.rs`).
+
+## Linked C programs: `link-archive`
+
+A C program can also be linked into the firmware itself, instead of being loaded as an
+image. The SDK's `link-archive` command turns one such program into a static archive
+whose only global defined symbol is its entry:
+
+```sh
+# Compile the program with -fPIE, like every SDK object (crt0_linked.o included), and
+# the SDK's headers: position-independent code links into both the firmware's image and
+# PIE host binaries (Linux tests, Rust test binaries), which non-PIC code cannot.
+clang --target=x86_64-unknown-none-elf -c app.c -o app.o \
+  -std=gnu11 -Os -fPIE -ffunction-sections -fdata-sections -fno-stack-protector \
+  -fno-unwind-tables -fno-asynchronous-unwind-tables -D_GNU_SOURCE -nostdinc \
+  -isystem <sdk>/include/posix -isystem <sdk>/include -isystem <clang resource dir>/include
+# Localize it: one archive, one global symbol.
+python tools/sdk/build.py link-archive \
+  --sdk <sdk> --entry my_app --output libmy_app.a app.o
+```
+
+`link-archive` runs `ld.lld -r` over `<sdk>/lib/crt0_linked.o`, your objects or archives
+and `--start-group <sdk>/lib/libxila_posix.a <sdk>/lib/libxila.a <sdk>/lib/libc.a
+[compiler runtime] --end-group` (the compiler runtime, Arm's or RISC-V's `libgcc.a`,
+joins the group when the SDK's target has one and its cross compiler is installed;
+`--builtins <archive>` adds one explicitly), producing one relocatable object with
+`xila_linked_start` and your `main` pulled in. It then inspects the undefined symbols
+(`llvm-nm --undefined-only`): every weak undefined one is resolved to the absolute 0, so it
+reads as null in the firmware instead of binding to a host symbol (glibc's `stderr` in a
+Linux PIE test binary, for example), and any strong undefined symbol is an error unless
+the firmware provides it (`__xila_current_startup`, or `--allow-undefined <symbol>`).
+It then renames `xila_linked_start` to `--entry` and localizes every other symbol
+(`llvm-objcopy --redefine-sym`, then `--keep-global-symbol=<entry>`), and packs the
+result with `llvm-ar rcs`. `--entry` must be a C identifier
+(`^[A-Za-z_][A-Za-z0-9_]*$`).
+
+Every libc, POSIX, crt0 and application global or static of the program becomes local,
+so `main`, `malloc`, `printf`, `exit`, `stdout`, `xila_process`, `xila_sdk_api`, ...
+never collide with the host firmware's symbols, with bare-metal `compiler_builtins`,
+or with another linked program's. Two archives built this way link into one firmware
+without a single colliding symbol, and `nm <lib.a>` shows the entry as the only global
+`T` symbol and no undefined one except the allowed ones.
+
+`crt0_linked.o` is `crt0.c` compiled with `-DXILA_SDK_LINKED` and the same `-fPIE` as every
+other SDK object: it emits no `.note.xila.abi` and no `_xila_start`, and defines
+`int32_t xila_linked_start(const XilaStartup *startup)` with the same
+startup/API/version compatibility check as `_xila_start`, installing `xila_sdk_api` and
+`xila_sdk_process` around the call to `xila_main` (the POSIX layer, which calls your
+`main`) and restoring them to the fallback table and NULL on return.
+
+### Relaunching a linked program
+
+`xila_linked_start` resets the SDK and POSIX runtime state on every launch: the descriptor
+table, the standard streams and their locks and buffers, the stdio file list, the
+environment tables and cache, the exit-handler table, the spawned-child list, the
+once-call list, the key-destructor table, the global libc lock, the `strtok` state and
+picolibc's `getopt` globals (`optind`, `opterr`, `optopt`, `optarg`) all go back to their
+pristine initial values before `xila_main` runs. This holds whichever way the previous run
+ended: a normal return or exit already cleaned up, but a cancellation (the run future
+dropped while the program was suspended) runs no cleanup, and the host frees the process
+heap with the abandoned coroutine, so the reset is what keeps the next run from touching
+freed memory. Each module provides its reset hook, and a weak no-op default in
+`startup.c`/`fd.c` covers the modules that are not linked, so they cost no code.
+
+Known picolibc limits: file-static heap state inside picolibc's `hcreate`/`hsearch` hash
+table and `getpwent`/`getgrent` stream iterators is not exposed for reset, so avoid those
+functions in relaunched linked programs.
+
+Application-owned C `static` variables are different: they live in the program's own
+`.data`/`.bss`, which persists across launches of the same program. Initialize them at the
+top of `main` (or use the `exclusive` form and accept one instance at a time) if a relaunch
+must not see the previous run's values.
+
+Link the archive into the firmware and run it with `xila-executable`'s linked-program
+support, in the `exclusive` form, because two concurrent launches of the *same* program
+share that program's `.data`/`.bss`:
+
+```rust
+executable::linked_executable!(unsafe pub MyApp => my_app, exclusive, stack_size = 64 * 1024);
+```
+
+`mount_executables!` mounts the declared type like any other executable. A second
+concurrent launch of an exclusive program fails immediately with `BUSY_FAILURE` (16,
+`EBUSY`) without touching the entry or its globals; the slot is released when the
+program returns or exits, and also when its run is cancelled while suspended.
+`executable::run_linked_exclusive` and `executable::ExclusiveSlot` are the underlying
+API. Use the plain (non-exclusive) form only for programs whose globals are safe to
+share between concurrent instances, such as a Rust program that keeps its state in the
+host's per-process startup block. Two *different* localized programs can run
+concurrently in the plain form: their localized globals are private to each.
 
 ## Rust
 

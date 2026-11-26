@@ -6,9 +6,9 @@
  * picolibc's own member seeds the guard from a constructor, which the loader rejects, so
  * the SDK removes it from libc.a (DROPPED_MEMBERS in tools/sdk/build.py). This file takes
  * its place and is linked only by an image that uses the protector. xila_posix_initialize
- * seeds the guard (weakly, so an image without it does not link this file) before any
- * function that is protected runs: crt0, xila_main and the code that seeds the guard are
- * built without the protector, as is this file. */
+ * seeds the guard (through a weak no-op default in startup.c, so an image without this
+ * file still links) before any function that is protected runs: crt0, xila_main and the
+ * code that seeds the guard are built without the protector, as is this file. */
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
@@ -21,7 +21,7 @@
    functions overflowing into the canary stop at it. Better than nothing, not secret. */
 uintptr_t __stack_chk_guard = (uintptr_t)0x595e9fbd94fda700ULL;
 
-NO_PROTECTOR void xila_stack_guard_seed(void) {
+NO_PROTECTOR __attribute__((visibility("hidden"))) void xila_stack_guard_seed(void) {
     uintptr_t value = 0;
     if (getentropy(&value, sizeof value) != 0)
         return;

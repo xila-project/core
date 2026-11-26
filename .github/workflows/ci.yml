@@ -384,10 +384,10 @@ jobs:
         env:
           SDK_PACKAGES: ${{ matrix.packages }}
         run: mise run "$SDK_PACKAGES"
-      - name: "Test | SDK ELF checker"
-        run: mise run ci:sdk-test
       - name: "Build | SDK archive"
         run: mise run ci:sdk-build
+      - name: "Test | SDK ELF checker"
+        run: mise run ci:sdk-test
       - name: "Test | SDK example image"
         run: mise run ci:sdk-verify
       - name: "Report | Upload SDK archive"

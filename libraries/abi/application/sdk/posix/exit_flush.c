@@ -22,6 +22,13 @@
 
 FILE *__stdio_file_list;
 
+/* Back to the pristine empty list, for a relaunch of the same linked program after a
+   previous run was cancelled: every FILE fopen allocated for it lived on that run's heap,
+   which the host freed with the abandoned coroutine. startup.c calls this hook through a weak no-op default. */
+__attribute__((visibility("hidden"))) void xila_stdio_list_reset(void) {
+    __stdio_file_list = NULL;
+}
+
 void _bufio_exit_flush(void) {
     for (FILE *file = __stdio_file_list; file != NULL;) {
         FILE *next = ((struct __file_bufio *)file)->next;

@@ -14,11 +14,11 @@
 
 extern int main(int argc, char **argv);
 
-/* The atexit() table (onexit.c); weak so that an image which never registers a handler
-   does not link the table. */
+/* The atexit() table (onexit.c). Weak default below: a program that registers no handler
+   links no table, and exit() calls the no-op. */
 extern void xila_run_exit_handlers(int status) __attribute__((weak));
 
-/* The stack protector guard (stack_protector.c); weak for the same reason. */
+/* The stack protector guard (stack_protector.c); weak default for the same reason. */
 extern void xila_stack_guard_seed(void) __attribute__((weak));
 
 /* Only a strong reference to environ extracts the member with the builder.
@@ -29,6 +29,82 @@ __attribute__((weak, visibility("hidden"), noinline)) int xila_environ_initializ
 
 static jmp_buf *exit_target;
 static int exit_status;
+
+/* Per-run reset hooks of the POSIX modules. Every module that keeps static state holding
+   heap pointers, locks, buffers or per-run bookkeeping defines its hook strongly (hidden);
+   the weak no-op defaults here keep the symbols defined when that module is not linked, so
+   the calls below are ordinary calls to a defined symbol and an unlinked module costs no
+   code beyond the no-op. A previous run of the same linked program may have ended by
+   cancellation, which runs no cleanup: the host freed that run's process heap with the
+   abandoned coroutine, so every static that can still point into it must be reset before
+   this run touches it. */
+__attribute__((weak, visibility("hidden"), noinline)) void xila_stdin_reset(void) {}
+__attribute__((weak, visibility("hidden"), noinline)) void xila_stdout_reset(void) {}
+__attribute__((weak, visibility("hidden"), noinline)) void xila_stderr_reset(void) {}
+__attribute__((weak, visibility("hidden"), noinline)) void xila_stdio_list_reset(void) {}
+__attribute__((weak, visibility("hidden"), noinline)) void xila_environ_reset(void) {}
+__attribute__((weak, visibility("hidden"), noinline)) void xila_env_cache_reset(void) {}
+__attribute__((weak, visibility("hidden"), noinline)) void xila_onexit_reset(void) {}
+__attribute__((weak, visibility("hidden"), noinline)) void xila_process_reset(void) {}
+__attribute__((weak, visibility("hidden"), noinline)) void xila_thread_sync_reset(void) {}
+__attribute__((weak, visibility("hidden"), noinline)) void xila_thread_keys_reset(void) {}
+__attribute__((weak, visibility("hidden"), noinline)) void xila_libc_lock_reset(void) {}
+__attribute__((weak, visibility("hidden"), noinline)) void xila_strtok_reset(void) {}
+
+/* Weak defaults for the two optional members above: no handler table, no stack guard. */
+__attribute__((weak, visibility("hidden"), noinline)) void xila_run_exit_handlers(int status) {
+    (void)status;
+}
+__attribute__((weak, visibility("hidden"), noinline)) void xila_stack_guard_seed(void) {}
+
+/* Weak defaults for picolibc's optional weak function hooks, keeping their exact
+   fallback behaviour (strerror uses its built-in table, arc4random sees no fork and no
+   abort hook) while avoiding weak undefined PLT/PC-relative call relocations that a PIE
+   host link rejects when resolved to absolute 0. Their headers declare default
+   visibility; link-archive localizes them in the output archive. */
+__attribute__((weak, noinline)) char *_user_strerror(int errnum, int internal, int *errptr) {
+    (void)errnum;
+    (void)internal;
+    (void)errptr;
+    return NULL;
+}
+__attribute__((weak, noinline)) int arc4random_fork_detect(void) { return 0; }
+__attribute__((weak, noinline)) void arc4random_abort(void) {}
+
+/* Picolibc's getopt keeps its parser cursor and flags in these globals across linked
+   launches. Weak data references go through the GOT in PIE builds (so unlinked getopt
+   resolves to null and costs no code) and reset getopt on every launch when linked. */
+extern int optind __attribute__((weak));
+extern int opterr __attribute__((weak));
+extern int optopt __attribute__((weak));
+extern char *optarg __attribute__((weak));
+
+/* Drop every trace of a previous run of the same program, whichever way it ended: a
+   normal exit already cleaned up, but a cancellation left stale pointers behind. */
+static void reset_previous_run(void) {
+    exit_target = NULL;
+    exit_status = 0;
+    xila_stdin_reset();
+    xila_stdout_reset();
+    xila_stderr_reset();
+    xila_stdio_list_reset();
+    xila_environ_reset();
+    xila_env_cache_reset();
+    xila_onexit_reset();
+    xila_process_reset();
+    xila_thread_sync_reset();
+    xila_thread_keys_reset();
+    xila_libc_lock_reset();
+    xila_strtok_reset();
+    if (&optind != NULL)
+        optind = 0;
+    if (&opterr != NULL)
+        opterr = 1;
+    if (&optopt != NULL)
+        optopt = 0;
+    if (&optarg != NULL)
+        optarg = NULL;
+}
 
 /* One argv block on the process heap: pointer array, then the NUL-terminated copies. */
 static char **build_arguments(const XilaStartup *startup, int *argc) {
@@ -65,8 +141,7 @@ __attribute__((no_stack_protector)) int xila_posix_initialize(const XilaStartup 
     if (xila_fd_initialize(startup) != 0)
         return -1;
     /* Before any function built with the stack protector runs. */
-    if (xila_stack_guard_seed != NULL)
-        xila_stack_guard_seed();
+    xila_stack_guard_seed();
     *argv = build_arguments(startup, argc);
     if (*argv == NULL)
         return -1;
@@ -82,6 +157,9 @@ __attribute__((no_stack_protector)) void xila_posix_shutdown(void) {
 }
 
 int32_t xila_main(const XilaStartup *startup) {
+    /* A relaunch of the same linked program starts from pristine runtime state, even when
+       the previous run was cancelled mid-call and cleaned up nothing. */
+    reset_previous_run();
     int argc = 0;
     char **argv = NULL;
     if (xila_posix_initialize(startup, &argc, &argv) != 0)
@@ -103,7 +181,7 @@ int32_t xila_main(const XilaStartup *startup) {
 void exit(int status) {
     bool live = false;
     (void)xila_thread_has_workers(&live);
-    if (!live && xila_run_exit_handlers != NULL) {
+    if (!live) {
         xila_run_exit_handlers(status);
         (void)xila_thread_has_workers(&live);
     }

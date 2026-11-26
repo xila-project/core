@@ -28,6 +28,17 @@ static char **retained;
 static char **pool;
 char **environ = empty_environment;
 
+/* Back to the pristine empty environment, for a relaunch of the same linked program after
+   a previous run (cancelled or not) left tables and strings behind: they were allocated on
+   that run's heap, which the host freed. startup.c calls this hook through a weak no-op default, so an image
+   that never references environ does not link it. */
+__attribute__((visibility("hidden"))) void xila_environ_reset(void) {
+    owned = empty_environment;
+    retained = NULL;
+    pool = NULL;
+    environ = empty_environment;
+}
+
 static void publish(char **table) {
     owned = environ = table != NULL ? table : empty_environment;
 }

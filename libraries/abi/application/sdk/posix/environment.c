@@ -14,6 +14,14 @@ struct env_value {
 
 static struct env_value *values;
 
+/* Drop the getenv cache, for a relaunch of the same linked program after a previous run:
+   the cached values were allocated on that run's heap, which the host freed. startup.c
+   calls this hook through a weak no-op default, so an image that never calls getenv does
+   not link this file. */
+__attribute__((visibility("hidden"))) void xila_env_cache_reset(void) {
+    values = NULL;
+}
+
 static const char *value_name(const struct env_value *entry) {
     return entry->value + entry->length + 1;
 }

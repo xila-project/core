@@ -8,12 +8,12 @@ use std::{future::poll_fn, sync::Mutex};
 
 use abi_application::{File as NativeFile, XilaStartup};
 use executable::{
-    ExecutableContext, Launch, LinkedHome, LinkedOptions, Standard, execute, execute_with,
-    linked_executable, mount_executables, run_linked,
+    BUSY_FAILURE, ExecutableContext, Launch, LinkedHome, LinkedOptions, Standard, execute,
+    execute_with, linked_executable, mount_executables, run_linked, run_linked_exclusive,
 };
 use file_system::{
     AccessFlags, CreateFlags, DirectBaseOperations, DirectCharacterDevice, Flags, MountOperations,
-    PathOwned, Permissions, Size,
+    PathOwned, Permissions, Size, StateFlags,
 };
 use task::{EnvironmentVariable, TaskIdentifier};
 use testing_support::MemoryManager;
@@ -234,6 +234,58 @@ linked_executable!(unsafe RustFirst => first::xila_entry, stack_size = STACK);
 linked_executable!(unsafe RustSecond => second::xila_second_entry, stack_size = STACK);
 
 // ---------------------------------------------------------------------------------------
+// Localized C fixtures: two copies of one C program, each with every symbol but its entry
+// localized by the build script, linked into this binary (see build.rs and
+// tests/linked_c/program.c). Both copies define `helper`, `malloc` and `static int state`.
+// ---------------------------------------------------------------------------------------
+
+mod linked_c {
+    include!(concat!(env!("OUT_DIR"), "/linked_c_fixtures.rs"));
+}
+
+linked_executable!(unsafe CAlpha => linked_c::xila_c_alpha_entry, stack_size = STACK);
+linked_executable!(unsafe CBeta => linked_c::xila_c_beta_entry, stack_size = STACK);
+
+// ---------------------------------------------------------------------------------------
+// Exclusive programs: one instance at a time.
+// ---------------------------------------------------------------------------------------
+
+/// Returns at once.
+unsafe extern "C" fn quick(_startup: *const XilaStartup) -> i32 {
+    0
+}
+
+/// Writes one ready byte to the output stream, then suspends reading one byte from the
+/// input stream: the test reads the ready byte, checks a concurrent launch fails busy, and
+/// releases the run by writing the byte. No sleeps anywhere.
+unsafe extern "C" fn slow(startup: *const XilaStartup) -> i32 {
+    let startup = unsafe { &*startup };
+    unsafe {
+        let mut count = 0;
+        abi_application::xila_file_write(
+            startup.standard_output,
+            c"R".as_ptr().cast::<c_void>(),
+            1,
+            &mut count,
+        );
+        let mut byte = [0u8; 1];
+        let mut read = 0;
+        abi_application::xila_file_read(
+            startup.standard_input,
+            byte.as_mut_ptr().cast::<c_void>(),
+            1,
+            &mut read,
+        );
+    }
+    0
+}
+
+linked_executable!(unsafe ExclusiveSlow => slow, exclusive, stack_size = STACK);
+
+/// The single-instance slot of the direct `run_linked_exclusive` test below.
+static EXCLUSIVE_SLOT: AtomicBool = AtomicBool::new(false);
+
+// ---------------------------------------------------------------------------------------
 // Fixture.
 // ---------------------------------------------------------------------------------------
 
@@ -288,7 +340,10 @@ async fn setup() -> (&'static ExecutableContext, TaskIdentifier) {
         &[
             (&"/report", CReport),
             (&"/first", RustFirst),
-            (&"/second", RustSecond)
+            (&"/second", RustSecond),
+            (&"/c-alpha", CAlpha),
+            (&"/c-beta", CBeta),
+            (&"/exclusive-slow", ExclusiveSlow)
         ]
     )
     .await
@@ -441,11 +496,19 @@ fn sdk_and_host_declare_the_same_startup_block() {
     );
 }
 
-static BLOCKED: AtomicBool = AtomicBool::new(false);
-static OPENED: AtomicUsize = AtomicUsize::new(0);
+// The tests run in parallel in one process, so each gets its own flags: sharing them made
+// the assertions below race the other test's runs.
+static CANCEL_BLOCKED: AtomicBool = AtomicBool::new(false);
+static CANCEL_OPENED: AtomicUsize = AtomicUsize::new(0);
+static EXCLUSIVE_BLOCKED: AtomicBool = AtomicBool::new(false);
+static EXCLUSIVE_OPENED: AtomicUsize = AtomicUsize::new(0);
 
 /// Opens a file and a pipe, then waits on the pipe, which no one writes to.
-unsafe extern "C" fn blocked(startup: *const XilaStartup) -> i32 {
+unsafe fn blocked_run(
+    blocked: &AtomicBool,
+    opened: &AtomicUsize,
+    startup: *const XilaStartup,
+) -> i32 {
     let startup = unsafe { &*startup };
     unsafe {
         let mut file = ptr::null_mut();
@@ -457,13 +520,13 @@ unsafe extern "C" fn blocked(startup: *const XilaStartup) -> i32 {
             &mut file,
         );
         assert_eq!(status, abi_application::Status::Ok);
-        OPENED.fetch_add(1, Ordering::SeqCst);
+        opened.fetch_add(1, Ordering::SeqCst);
         let (mut reader, mut writer) = (ptr::null_mut(), ptr::null_mut());
         assert_eq!(
             abi_application::xila_pipe_create(startup.process, 0, &mut reader, &mut writer),
             abi_application::Status::Ok
         );
-        BLOCKED.store(true, Ordering::SeqCst);
+        blocked.store(true, Ordering::SeqCst);
         let mut buffer = [0u8; 4];
         let mut count = 0;
         abi_application::xila_file_read(
@@ -473,9 +536,19 @@ unsafe extern "C" fn blocked(startup: *const XilaStartup) -> i32 {
             &mut count,
         );
         // Never reached: the program is cancelled while it waits.
-        BLOCKED.store(false, Ordering::SeqCst);
+        blocked.store(false, Ordering::SeqCst);
     }
     0
+}
+
+unsafe extern "C" fn blocked(startup: *const XilaStartup) -> i32 {
+    // SAFETY: a test entry that obeys the startup rules.
+    unsafe { blocked_run(&CANCEL_BLOCKED, &CANCEL_OPENED, startup) }
+}
+
+unsafe extern "C" fn blocked_exclusive(startup: *const XilaStartup) -> i32 {
+    // SAFETY: a test entry that obeys the startup rules.
+    unsafe { blocked_run(&EXCLUSIVE_BLOCKED, &EXCLUSIVE_OPENED, startup) }
 }
 
 #[task::test]
@@ -514,7 +587,7 @@ async fn cancelled_program_releases_its_stack_state_and_handles() {
     .await;
     drop(warm);
 
-    BLOCKED.store(false, Ordering::SeqCst);
+    CANCEL_BLOCKED.store(false, Ordering::SeqCst);
     // Everything the run allocates, its streams included, is counted.
     let before = MemoryManager::thread_allocations();
     let standard = streams(context, parent, "cancel").await;
@@ -525,13 +598,13 @@ async fn cancelled_program_releases_its_stack_state_and_handles() {
     })
     .await;
     assert!(
-        BLOCKED.load(Ordering::SeqCst),
+        CANCEL_BLOCKED.load(Ordering::SeqCst),
         "the program did not reach its blocking call"
     );
     drop(program);
     let held = MemoryManager::thread_allocations().since(before);
     // The coroutine is gone: its read never completed.
-    assert!(BLOCKED.load(Ordering::SeqCst));
+    assert!(CANCEL_BLOCKED.load(Ordering::SeqCst));
     // The coroutine stack, the process state and the heap went back to the allocator.
     assert!(held.deallocated_bytes() >= STACK, "{held:?}");
     assert_eq!(
@@ -541,5 +614,227 @@ async fn cancelled_program_releases_its_stack_state_and_handles() {
     );
     // Every handle of the program is closed, so the device can go away.
     vfs.unmount("/probe", false).await.unwrap();
-    assert_eq!(OPENED.load(Ordering::SeqCst), 2);
+    assert_eq!(CANCEL_OPENED.load(Ordering::SeqCst), 2);
+}
+
+// ---------------------------------------------------------------------------------------
+// Exclusive linked programs: one instance at a time, released on return and on
+// cancellation.
+// ---------------------------------------------------------------------------------------
+
+/// One instance of the program is suspended reading from a pipe. A second concurrent
+/// launch fails immediately with `BUSY_FAILURE` and never touches the entry; dropping
+/// the first (a cancellation mid-pipe-read) releases the slot, and so does a normal
+/// return.
+#[task::test]
+async fn exclusive_run_fails_busy_while_suspended_and_recovers_after_cancellation() {
+    let (context, parent) = setup().await;
+    let vfs = context.virtual_file_system;
+    vfs.mount_character_device(parent, "/probe", Sink)
+        .await
+        .unwrap();
+    vfs.set_permissions(parent, "/probe", Permissions::ALL_READ_WRITE)
+        .await
+        .unwrap();
+    let home = || LinkedHome::read_write(PathOwned::new("/".into()).unwrap());
+    // SAFETY: `blocked` and `quick` are test entries that obey the startup rules, fit on
+    // the stack and return without unwinding.
+    let start_blocked = |standard| unsafe {
+        run_linked_exclusive(
+            &EXCLUSIVE_SLOT,
+            blocked_exclusive,
+            LinkedOptions::new().stack_size(STACK).home(home()),
+            standard,
+            vec![],
+        )
+    };
+    let start_quick = |standard| unsafe {
+        run_linked_exclusive(
+            &EXCLUSIVE_SLOT,
+            quick,
+            LinkedOptions::new().stack_size(STACK),
+            standard,
+            vec![],
+        )
+    };
+
+    EXCLUSIVE_BLOCKED.store(false, Ordering::SeqCst);
+
+    // The first instance suspends on the pipe read.
+    let mut first = start_blocked(streams(context, parent, "excl-first").await);
+    poll_fn(|cx| {
+        assert!(first.as_mut().poll(cx).is_pending());
+        Poll::Ready(())
+    })
+    .await;
+    assert!(EXCLUSIVE_BLOCKED.load(Ordering::SeqCst));
+    let opened_before = EXCLUSIVE_OPENED.load(Ordering::SeqCst);
+
+    // A second launch while the first is suspended fails at once, without running the
+    // entry: the open counter does not move.
+    let second = start_blocked(streams(context, parent, "excl-second").await);
+    assert_eq!(second.await, Err(BUSY_FAILURE));
+    assert_eq!(
+        EXCLUSIVE_OPENED.load(Ordering::SeqCst),
+        opened_before,
+        "a busy launch touched the entry or its globals"
+    );
+
+    // Cancelling the first (dropping the future mid-pipe-read) releases the slot: a new
+    // launch runs to completion.
+    drop(first);
+    assert_eq!(
+        start_quick(streams(context, parent, "excl-third").await).await,
+        Ok(())
+    );
+
+    // A blocked instance can start again; dropping it releases the slot once more, and a
+    // normal return releases it too.
+    let mut fourth = start_blocked(streams(context, parent, "excl-fourth").await);
+    poll_fn(|cx| {
+        assert!(fourth.as_mut().poll(cx).is_pending());
+        Poll::Ready(())
+    })
+    .await;
+    assert!(EXCLUSIVE_BLOCKED.load(Ordering::SeqCst));
+    drop(fourth);
+    assert_eq!(
+        start_quick(streams(context, parent, "excl-fifth").await).await,
+        Ok(())
+    );
+}
+
+/// The `exclusive` form of `linked_executable!`, mounted and run through `execute`: while
+/// one instance is suspended, a concurrent launch's task exits with `BUSY_FAILURE`; once
+/// the first finishes normally, a new launch succeeds. The first instance's streams are
+/// pipes held by the test, so the handshake is deterministic: the entry writes one ready
+/// byte to its stdout pipe and then blocks reading its stdin pipe; the test reads the
+/// ready byte, launches the second instance, then releases the first by writing its stdin.
+#[task::test]
+async fn exclusive_executable_fails_a_concurrent_launch_with_busy_then_relaunches() {
+    let (context, parent) = setup().await;
+    let vfs = context.virtual_file_system;
+    let create = Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None);
+    let (mut out_reader, out_writer) = vfs
+        .create_unnamed_pipe(512, StateFlags::empty())
+        .await
+        .unwrap();
+    let (in_reader, mut in_writer) = vfs
+        .create_unnamed_pipe(512, StateFlags::empty())
+        .await
+        .unwrap();
+    let error = File::open(vfs, parent, "/slow-first.err", create)
+        .await
+        .unwrap();
+
+    let first = execute(
+        context,
+        "/exclusive-slow",
+        vec![],
+        Standard::new(context, in_reader, out_writer, error),
+        None,
+    )
+    .await
+    .unwrap();
+    // Read the entry's ready byte: this suspends until the entry writes it, so once it
+    // arrives the first instance holds the slot and is suspended on its stdin read.
+    let mut ready = [0u8; 1];
+    assert_eq!(out_reader.read(&mut ready).await.unwrap(), 1);
+    assert_eq!(&ready, b"R");
+
+    // A concurrent launch while the first is suspended fails with BUSY_FAILURE.
+    let second = execute(
+        context,
+        "/exclusive-slow",
+        vec![],
+        streams(context, parent, "slow-second").await,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(second.join().await, -(BUSY_FAILURE.get() as isize));
+
+    // Release the first instance: its stdin read completes and it returns normally, which
+    // releases the slot.
+    in_writer.write(b"R").await.unwrap();
+    assert_eq!(first.join().await, 0);
+
+    // A new launch after the normal return succeeds (its stdin is an empty file, so the
+    // entry's read returns EOF at once).
+    let third = execute(
+        context,
+        "/exclusive-slow",
+        vec![],
+        streams(context, parent, "slow-third").await,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(third.join().await, 0);
+}
+
+/// Two localized C programs, both defining `helper`, `malloc` and `static int state`, run
+/// concurrently through `XilaStartup` with full isolation: each sees its own `state`
+/// count 1, 2, 3 and returns zero. Skipped when the build host had no clang/ld.lld/
+/// llvm-objcopy to build the fixtures.
+#[task::test]
+async fn two_localized_c_programs_run_concurrently_with_isolated_globals() {
+    if !linked_c::AVAILABLE {
+        return;
+    }
+    let (context, parent) = setup().await;
+    let vfs = context.virtual_file_system;
+    let mut handles = Vec::new();
+    for (path, name, label) in [
+        ("/c-alpha", "alpha", "calpha"),
+        ("/c-beta", "beta", "cbeta"),
+    ] {
+        let standard = streams(context, parent, label).await;
+        handles.push(
+            execute(context, path, vec![name.into()], standard, None)
+                .await
+                .unwrap(),
+        );
+    }
+    for handle in handles {
+        assert_eq!(handle.join().await, 0);
+    }
+    for (name, label) in [("alpha", "calpha"), ("beta", "cbeta")] {
+        let out = read_all(vfs, parent, &format!("/{label}.out")).await;
+        assert_eq!(out.matches("state=").count(), 3, "{label}: {out}");
+        for step in 1..=3 {
+            assert!(
+                out.contains(&format!("{name} state={step}\n")),
+                "{label}: {out}"
+            );
+        }
+    }
+}
+
+/// The same localized C program run twice sequentially: the SDK resets its own state on
+/// every launch, and the fixture resets its application-owned `state` at the top of its
+/// entry, so each run counts 1, 2, 3 again and returns zero. Skipped when the build host
+/// had no clang/ld.lld/llvm-objcopy to build the fixtures.
+#[task::test]
+async fn a_localized_c_program_runs_sequentially_with_fresh_state_each_time() {
+    if !linked_c::AVAILABLE {
+        return;
+    }
+    let (context, parent) = setup().await;
+    let vfs = context.virtual_file_system;
+    for round in 0..2 {
+        let standard = streams(context, parent, &format!("cseq{round}")).await;
+        let handle = execute(context, "/c-alpha", vec!["alpha".into()], standard, None)
+            .await
+            .unwrap();
+        assert_eq!(handle.join().await, 0, "round {round}");
+        let out = read_all(vfs, parent, &format!("/cseq{round}.out")).await;
+        assert_eq!(out.matches("state=").count(), 3, "round {round}: {out}");
+        for step in 1..=3 {
+            assert!(
+                out.contains(&format!("alpha state={step}\n")),
+                "round {round}: {out}"
+            );
+        }
+    }
 }
