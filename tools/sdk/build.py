@@ -371,8 +371,8 @@ def build_picolibc(source, target, work):
 #   libc_ssp_stack_protector.c.o: seeds __stack_chk_guard from a constructor. The POSIX
 #     layer defines __stack_chk_guard and __stack_chk_fail (posix/stack_protector.c) and
 #     seeds the guard from xila_posix_initialize.
-#   interrupt.c.o (x86_64 only): the interrupt descriptor table setup (__idt), a constructor
-#     that is only reachable from bare-metal x86 start-up code the SDK does not use. Arm's
+#   interrupt.c.o (x86_64 and aarch64): bare-metal interrupt/vector-table setup placed in
+#     `.init`, reachable only from bare-metal start-up code the SDK does not use. Arm's
 #     member of the same name (the vector table and default handlers) has no constructor
 #     and stays.
 # The POSIX layer provides the retarget locks and the nonblocking ftrylockfile.
@@ -392,7 +392,7 @@ DROPPED_MEMBERS = (
     ("libc_stdlib_unsetenv.c.o", None),
     ("libos_fallback_getpid.c.o", None),
     ("libc_ssp_stack_protector.c.o", None),
-    ("interrupt.c.o", ("x86_64-unknown-linux-gnu",)),
+    ("interrupt.c.o", ("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu")),
 )
 
 
