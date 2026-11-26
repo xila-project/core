@@ -93,7 +93,7 @@ impl LoadedImage {
                 name,
                 stack,
                 entry,
-                move |coroutine| drive_owned(coroutine, owner),
+                move |coroutine| drive_owned(coroutine, owner.erase()),
                 map,
             )
         })
@@ -117,6 +117,6 @@ impl LoadedImage {
     ) -> Result<impl Future<Output = i32> + 'static, Error> {
         let (entry, owner) = unsafe { self.prepare(startup)? };
         let coroutine = unsafe { Coroutine::new(stack, entry) };
-        Ok(drive_owned(coroutine, owner))
+        Ok(drive_owned(coroutine, owner.erase()))
     }
 }

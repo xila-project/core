@@ -23,19 +23,19 @@ pub type NativeEntry = unsafe extern "C" fn(*const XilaStartup) -> i32;
 /// A program that is cancelled while suspended has its frames discarded, with no
 /// destructor run on them (see `stackful::Coroutine::new`). That is sound because the
 /// frames own nothing: dropping [`ProcessOwner`] releases the state's resources and handles
-/// from the host side, then frees the keep-alive value, the heap and the state. No driver
-/// keeps a pointer into a program buffer between polls, because `BaseOperations` are
+/// from the host side, then frees the heap, the state and, last, the keep-alive value. No
+/// driver keeps a pointer into a program buffer between polls, because `BaseOperations` are
 /// poll-based, so a suspended coroutine holds no reference that the executor or a device
 /// could still use.
 struct Record<K> {
-    /// Declared first, so it is dropped before the heap and the state, as an image
-    /// that holds the code of the program must stay mapped until nothing can run it.
-    _keep: K,
     heap: UnsafeCell<Heap>,
     state: UnsafeCell<HostState>,
+    /// Declared last, so it is dropped after the heap and the state: a kept image holds the
+    /// code of the program, so it stays mapped until nothing can run it any more.
+    _keep: K,
 }
 
-/// The owner of a leaked [`Record`] allocation, freeing it on drop.
+/// The owner of a leaked `Record` allocation, freeing it on drop.
 ///
 /// It must outlive the program's coroutine, whose frames point into the allocation:
 /// [`drive_owned`] holds it beside the coroutine and drops it afterwards, on every path.
@@ -55,9 +55,9 @@ impl<K> ProcessOwner<K> {
         // SAFETY: the allocation is valid and uninitialized, for the layout of `Record`.
         unsafe {
             pointer.write(Record {
-                _keep: keep,
                 heap: UnsafeCell::new(Heap::new()),
                 state: UnsafeCell::new(state),
+                _keep: keep,
             });
         }
         Ok(Self(pointer))
@@ -101,7 +101,9 @@ impl<K> ProcessOwner<K> {
     ///
     /// # Safety
     /// `entry` obeys the startup lifetime rules, fits on the coroutine stack, and returns
-    /// without unwinding. It stays callable until the owner is dropped.
+    /// without unwinding. It stays callable until the owner is dropped. The returned closure
+    /// must be invoked at most once, and only inside a coroutine that is dropped before the
+    /// owner (see [`drive_owned`]).
     pub unsafe fn entry(
         &self,
         entry: NativeEntry,
@@ -134,11 +136,40 @@ impl<K> Drop for ProcessOwner<K> {
     }
 }
 
+/// A [`ProcessOwner`] with the type of its keep-alive value erased, so that one instantiation
+/// of [`drive_owned`] serves every owner type instead of duplicating `drive_process` per type.
+pub struct AnyProcessOwner {
+    record: NonNull<core::ffi::c_void>,
+    drop_record: unsafe fn(NonNull<core::ffi::c_void>),
+}
+
+impl<K> ProcessOwner<K> {
+    /// Erase the type of the keep-alive value. The drop behavior is unchanged.
+    pub fn erase(self) -> AnyProcessOwner {
+        unsafe fn drop_record<K>(record: NonNull<core::ffi::c_void>) {
+            // The pointer came from `ProcessOwner::<K>::new`, through `erase`.
+            drop(ProcessOwner::<K>(record.cast()))
+        }
+        let this = core::mem::ManuallyDrop::new(self);
+        AnyProcessOwner {
+            record: this.0.cast(),
+            drop_record: drop_record::<K>,
+        }
+    }
+}
+
+impl Drop for AnyProcessOwner {
+    fn drop(&mut self) {
+        // SAFETY: the pointer and the drop glue came from `ProcessOwner::erase`.
+        unsafe { (self.drop_record)(self.record) }
+    }
+}
+
 /// Drive the program's coroutine to its end, then free what it ran on. The coroutine is
 /// dropped before `owner`, on every path, including the future being dropped while the
 /// program is suspended: the temporary that holds it is the newest object of this
 /// function, so it is the first to be dropped.
-pub async fn drive_owned<K>(coroutine: Coroutine, owner: ProcessOwner<K>) -> i32 {
+pub async fn drive_owned(coroutine: Coroutine, owner: AnyProcessOwner) -> i32 {
     let status = drive_process(coroutine).await;
     drop(owner);
     status
@@ -163,5 +194,5 @@ pub unsafe fn start_process<K: 'static>(
     launch: Option<ProcessLaunch>,
 ) -> impl Future<Output = i32> + 'static {
     let coroutine = unsafe { Coroutine::new(stack, owner.entry(entry, launch)) };
-    drive_owned(coroutine, owner)
+    drive_owned(coroutine, owner.erase())
 }

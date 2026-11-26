@@ -1,8 +1,8 @@
 [package]
 name = "xila-sys"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
-rust-version = "1.97"
+rust-version.workspace = true
 license = "Apache-2.0"
 description = "Raw bindings for Xila native applications"
 

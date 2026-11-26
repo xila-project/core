@@ -535,15 +535,27 @@ file, no loader and no executable memory. Enable `xila-executable/native-linked`
 `xila/native-linked`), and declare the entry with `executable::linked_executable!`:
 
 ```rust
-executable::linked_executable!(pub Greeter => greeter_entry, stack_size = 16 * 1024);
+executable::linked_executable!(unsafe pub Greeter => greeter_entry, stack_size = 16 * 1024);
 ```
 
 `mount_executables!` mounts the declared type like any other executable. The adapter
-`executable::run_linked` starts one stackful coroutine per running program. It uses
+`executable::run_linked` (an `unsafe fn`, because the entry is trusted firmware code)
+starts one stackful coroutine per running program. It uses
 `ProcessLaunch`, so the program has the process capability, its arguments and standard
 streams, the environment of its task, its home directory, optional network rights and
-`xila_process_exit`. A cancelled program is cleaned up like a loaded one (see
-`ProcessOwner`).
+`xila_process_exit`.
+
+The host releases what a running program holds when it returns, calls
+`xila_process_exit` or is cancelled: the handles it opened (files, directories, sockets),
+its standard streams, its graphics objects, its coroutine stack and the allocations of its
+`XilaStartup` heap (see `ProcessOwner`).
+
+For a linked Rust application, `alloc` uses the firmware's global allocator, not
+`XilaStartup.heap`, so Rust heap allocations are not reclaimed when `xila_process_exit` or
+a cancellation discards the program's frames: they leak. An application `static` is shared
+by every concurrent instance and outlives the process, and a panic runs the firmware's
+panic handler. For the same reasons `xila-sys` does not compile `ProcessAllocator` or
+`panic_abort` with its `linked` feature.
 
 `LinkedOptions` has three settings. `stack_size` is the usable coroutine stack, 4 KiB by
 default. `network` is the set of network rights, none by default. `home` is the home

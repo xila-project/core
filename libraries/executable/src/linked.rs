@@ -22,6 +22,11 @@ use stackful::{DEFAULT_MIN_STACK_SIZE, MIN_STACK_SIZE, Stack};
 
 use crate::{Home, MainFuture, NetworkRights, Standard};
 
+/// The rights of a home directory that the program can read and write: the ABI's
+/// `XILA_RIGHT_READ | XILA_RIGHT_WRITE`.
+const READ_WRITE_RIGHTS: u8 =
+    (abi_application::XILA_RIGHT_READ | abi_application::XILA_RIGHT_WRITE) as u8;
+
 /// The entry of a linked program: the C ABI of a native entry.
 ///
 /// # Safety
@@ -42,7 +47,7 @@ pub const unsafe fn linked_entry<T>(entry: unsafe extern "C" fn(*const T) -> i32
     unsafe { core::mem::transmute(entry) }
 }
 
-/// The arguments of a program, named for [`linked_executable!`].
+/// The arguments of a program, named for `linked_executable!`.
 #[doc(hidden)]
 pub type LinkedArguments = Vec<String>;
 
@@ -63,7 +68,10 @@ pub enum LinkedHome {
 impl LinkedHome {
     /// A directory that the program can read and write.
     pub fn read_write(path: PathOwned) -> Self {
-        Self::Path(Home { path, rights: 3 })
+        Self::Path(Home {
+            path,
+            rights: READ_WRITE_RIGHTS,
+        })
     }
 }
 
@@ -132,11 +140,11 @@ fn exit_code(status: i32) -> core::result::Result<(), NonZeroUsize> {
 /// An exit status of zero resolves to `Ok(())`. Any other status resolves to an error that
 /// holds its absolute value. A program that cannot start resolves to [`START_FAILURE`].
 ///
-/// # Safety contract
-/// The caller vouches that `entry` is trusted code that obeys the startup rules, fits on the
-/// configured stack and returns without unwinding. Linked code is part of the firmware, so
-/// it is not confined.
-pub fn run_linked(
+/// # Safety
+/// The caller vouches that `entry` is trusted code that obeys the startup rules of
+/// `XilaStartup`, fits on the configured stack and returns without unwinding. Linked code is
+/// part of the firmware, so it is not confined.
+pub unsafe fn run_linked(
     entry: LinkedEntry,
     options: LinkedOptions,
     standard: Standard<'static>,
@@ -157,39 +165,58 @@ pub fn run_linked(
             rights: home.rights,
         });
 
-        // Allocated before the state, fallibly: a failed start must leave nothing behind.
-        let Some(stack) = Stack::try_with_min_size(options.stack_size, MIN_STACK_SIZE) else {
-            log::error!(
-                "linked program: no memory for a stack of {} bytes",
-                options.stack_size
-            );
+        let Some((stack, owner, launch)) = linked_setup(
+            options.stack_size,
+            options.network,
+            standard,
+            arguments,
+            home,
+        ) else {
             return Err(START_FAILURE);
         };
-        let (input, output, error) = standard.split();
-        let wrap = |file: virtual_file_system::File<'static>| {
-            Some(abi_application::File::new(file.into_synchronous_file()))
-        };
-        let owner =
-            match ProcessOwner::from_startup((), arguments, wrap(input), wrap(output), wrap(error))
-            {
-                Ok(owner) => owner,
-                Err(status) => {
-                    log::error!("linked program: cannot allocate the process state: {status:?}");
-                    return Err(START_FAILURE);
-                }
-            };
-        let launch = ProcessLaunch {
-            host: context,
-            // The task keeps the environment that it copied from its parent.
-            environment: None,
-            home,
-            network: u32::from(options.network.bits()),
-        };
-        // SAFETY: the caller of the macro or function vouches for the entry. The future runs
-        // on the executor that polls it, which is the one of the task that started it.
+        // SAFETY: the caller vouches for the entry. The future runs on the executor that
+        // polls it, which is the one of the task that started it.
         let status = unsafe { start_process(stack, owner, entry, Some(launch)) }.await;
         exit_code(status)
     })
+}
+
+/// The synchronous setup of a linked program: the coroutine stack, the process owner and
+/// the launch request. Fallible, and a failed start leaves nothing behind. Kept out of the
+/// future and never inlined into it, so the state machine holds neither the stack nor the
+/// owner setup, and one copy of this code serves every linked program.
+#[inline(never)]
+fn linked_setup(
+    stack_size: usize,
+    network: NetworkRights,
+    standard: Standard<'static>,
+    arguments: Vec<String>,
+    home: Option<HomeGrant>,
+) -> Option<(Stack, ProcessOwner<()>, ProcessLaunch)> {
+    // Allocated before the state, fallibly: a failed start must leave nothing behind.
+    let Some(stack) = Stack::try_with_min_size(stack_size, MIN_STACK_SIZE) else {
+        log::error!("linked program: no memory for a stack of {stack_size} bytes");
+        return None;
+    };
+    let host = standard.context;
+    let (input, output, error) = standard.split();
+    let wrap = |file: virtual_file_system::File<'static>| {
+        Some(abi_application::File::new(file.into_synchronous_file()))
+    };
+    let Ok(owner) =
+        ProcessOwner::from_startup((), arguments, wrap(input), wrap(output), wrap(error))
+    else {
+        log::error!("linked program: cannot allocate the process state");
+        return None;
+    };
+    let launch = ProcessLaunch {
+        host,
+        // The task keeps the environment that it copied from its parent.
+        environment: None,
+        home,
+        network: u32::from(network.bits()),
+    };
+    Some((stack, owner, launch))
 }
 
 /// The user's home as a grant, or `None` if the task, the user or the account has none.
@@ -198,24 +225,28 @@ async fn user_home(context: &'static crate::ExecutableContext) -> Option<Home> {
     let task = manager.try_get_current_task_identifier().await.ok()?;
     let user = manager.get_user(task).await.ok()?;
     let path = context.virtual_file_system.get_user_home(user).await.ok()?;
-    Some(Home { path, rights: 3 })
+    Some(Home {
+        path,
+        rights: READ_WRITE_RIGHTS,
+    })
 }
 
-/// Declare an executable that runs a linked entry, for `mount_executables!`.
+/// Declare an executable that runs a linked entry, for `mount_executables!`. The `unsafe`
+/// token is required: it vouches that the entry is trusted code, because calling an
+/// arbitrary C-ABI entry is unsafe.
 ///
 /// ```ignore
-/// executable::linked_executable!(pub Greeter => greeter_entry);
-/// executable::linked_executable!(Worker => worker_entry, stack_size = 32 * 1024,
+/// executable::linked_executable!(unsafe pub Greeter => greeter_entry);
+/// executable::linked_executable!(unsafe Worker => worker_entry, stack_size = 32 * 1024,
 ///     network = NetworkRights::CONNECT);
 /// ```
 ///
 /// The entry is an `unsafe extern "C" fn(*const XilaStartup) -> i32`, either from
-/// `abi_application` or from `xila-sys` (see [`linked_entry`]). Declaring it vouches that the
-/// entry is trusted code that obeys the startup rules. The optional settings
+/// `abi_application` or from `xila-sys` (see [`linked_entry`]). The optional settings
 /// are the builder methods of [`LinkedOptions`]: `stack_size`, `network` and `home`.
 #[macro_export]
 macro_rules! linked_executable {
-    ($(#[$attribute:meta])* $visibility:vis $name:ident => $entry:path $(, $setting:ident = $value:expr)* $(,)?) => {
+    ($(#[$attribute:meta])* unsafe $visibility:vis $name:ident => $entry:path $(, $setting:ident = $value:expr)* $(,)?) => {
         $(#[$attribute])*
         $visibility struct $name;
 
@@ -224,13 +255,17 @@ macro_rules! linked_executable {
                 standard: $crate::Standard<'static>,
                 arguments: $crate::LinkedArguments,
             ) -> $crate::MainFuture {
-                $crate::run_linked(
-                    // SAFETY: the declaration vouches for the entry, see `linked_executable!`.
-                    unsafe { $crate::linked_entry($entry) },
-                    $crate::LinkedOptions::new() $(.$setting($value))*,
-                    standard,
-                    arguments,
-                )
+                // SAFETY: the `unsafe` token at the declaration vouches for the entry: it is
+                // trusted code that obeys the startup rules, fits on the configured stack
+                // and returns without unwinding.
+                unsafe {
+                    $crate::run_linked(
+                        $crate::linked_entry($entry),
+                        $crate::LinkedOptions::new() $(.$setting($value))*,
+                        standard,
+                        arguments,
+                    )
+                }
             }
         }
     };

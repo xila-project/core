@@ -156,7 +156,7 @@ unsafe extern "C" fn c_report(startup: *const XilaStartup) -> i32 {
     }
 }
 
-linked_executable!(CReport => c_report, stack_size = STACK, home = LinkedHome::read_write(PathOwned::new("/".into()).unwrap()));
+linked_executable!(unsafe CReport => c_report, stack_size = STACK, home = LinkedHome::read_write(PathOwned::new("/".into()).unwrap()));
 
 // ---------------------------------------------------------------------------------------
 // Entries written with `xila-sys`, in linked mode.
@@ -230,8 +230,8 @@ mod second {
     xila_sys::entry!(super::sys_main, symbol = xila_second_entry);
 }
 
-linked_executable!(RustFirst => first::xila_entry, stack_size = STACK);
-linked_executable!(RustSecond => second::xila_second_entry, stack_size = STACK);
+linked_executable!(unsafe RustFirst => first::xila_entry, stack_size = STACK);
+linked_executable!(unsafe RustSecond => second::xila_second_entry, stack_size = STACK);
 
 // ---------------------------------------------------------------------------------------
 // Fixture.
@@ -491,12 +491,16 @@ async fn cancelled_program_releases_its_stack_state_and_handles() {
         .unwrap();
     let home = || LinkedHome::read_write(PathOwned::new("/".into()).unwrap());
     let start = |standard| {
-        run_linked(
-            blocked,
-            LinkedOptions::new().stack_size(STACK).home(home()),
-            standard,
-            vec![],
-        )
+        // SAFETY: `blocked` is a test entry that obeys the startup rules, fits on the
+        // stack and returns without unwinding.
+        unsafe {
+            run_linked(
+                blocked,
+                LinkedOptions::new().stack_size(STACK).home(home()),
+                standard,
+                vec![],
+            )
+        }
     };
 
     // A first, complete run warms every lazily initialized service, so the accounting below
