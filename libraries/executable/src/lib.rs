@@ -9,6 +9,26 @@ mod building;
 mod error;
 mod format;
 #[cfg(all(
+    feature = "native-linked",
+    any(
+        all(
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            target_os = "linux"
+        ),
+        all(
+            any(
+                target_arch = "x86_64",
+                target_arch = "aarch64",
+                target_arch = "arm",
+                target_arch = "riscv32",
+                target_arch = "xtensa"
+            ),
+            target_os = "none"
+        )
+    )
+))]
+mod linked;
+#[cfg(all(
     feature = "native-dev",
     any(
         all(
@@ -28,6 +48,26 @@ mod format;
     )
 ))]
 mod native;
+#[cfg(all(
+    any(feature = "native-dev", feature = "native-linked"),
+    any(
+        all(
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            target_os = "linux"
+        ),
+        all(
+            any(
+                target_arch = "x86_64",
+                target_arch = "aarch64",
+                target_arch = "arm",
+                target_arch = "riscv32",
+                target_arch = "xtensa"
+            ),
+            target_os = "none"
+        )
+    )
+))]
+mod process_host;
 mod standard;
 mod traits;
 
@@ -36,6 +76,26 @@ pub use building::*;
 pub use error::*;
 pub use file_system as exported_file_system;
 pub use format::*;
+#[cfg(all(
+    feature = "native-linked",
+    any(
+        all(
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            target_os = "linux"
+        ),
+        all(
+            any(
+                target_arch = "x86_64",
+                target_arch = "aarch64",
+                target_arch = "arm",
+                target_arch = "riscv32",
+                target_arch = "xtensa"
+            ),
+            target_os = "none"
+        )
+    )
+))]
+pub use linked::*;
 #[cfg(all(
     feature = "native-dev",
     any(
@@ -56,6 +116,7 @@ pub use format::*;
     )
 ))]
 pub use native::NativeFormat;
+
 #[cfg(feature = "native-dev")]
 pub use native_loader;
 pub use standard::*;

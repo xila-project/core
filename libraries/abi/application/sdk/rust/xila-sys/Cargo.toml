@@ -6,7 +6,6 @@ rust-version = "1.97"
 license = "Apache-2.0"
 description = "Raw bindings for Xila native applications"
 
-[workspace]
 
 [dependencies]
 xila-version = { path = "../../../../../version", optional = true }
@@ -14,3 +13,7 @@ xila-version = { path = "../../../../../version", optional = true }
 [features]
 runtime = ["dep:xila-version"]
 link = ["runtime"]
+# Link the application into the firmware. The firmware's adapter hands each running
+# program its own startup block through `__xila_current_startup`, so concurrent
+# applications never share a static. Excludes `link`, the standalone static PIE image.
+linked = ["runtime"]

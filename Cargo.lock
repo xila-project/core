@@ -2206,6 +2206,7 @@ dependencies = [
  "xila-shared",
  "xila-stackful",
  "xila-synchronization",
+ "xila-sys",
  "xila-task",
  "xila-testing-support",
  "xila-time",
@@ -2461,6 +2462,13 @@ dependencies = [
  "critical-section",
  "embassy-sync",
  "portable-atomic-util",
+]
+
+[[package]]
+name = "xila-sys"
+version = "0.1.0"
+dependencies = [
+ "xila-version",
 ]
 
 [[package]]

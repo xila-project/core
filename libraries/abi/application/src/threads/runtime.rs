@@ -1,5 +1,5 @@
 use super::*;
-use crate::{Process, Status, registry::Registry, suspend_dynamic};
+use crate::{Process, Status, XilaStartup, registry::Registry, suspend_dynamic};
 use alloc::{alloc::alloc, boxed::Box, vec::Vec};
 use core::{
     alloc::Layout,
@@ -72,6 +72,9 @@ struct Group {
     process: Cell<*const Process>,
     /// The handles the process opened: the host state's registry.
     registry: Cell<*const Registry>,
+    /// The startup block of the process, for `__xila_current_startup`. One pointer for the
+    /// whole process: main and its workers read the same one.
+    startup: Cell<*const XilaStartup>,
     workers: RefCell<Vec<Option<Worker>>>,
     /// Main's coroutine, out of here while it runs. Declared after `workers`, so a
     /// cancellation drops the workers first, as `shut_down` stops them first.
@@ -88,6 +91,7 @@ impl Group {
         Self {
             process: Cell::new(ptr::null()),
             registry: Cell::new(ptr::null()),
+            startup: Cell::new(ptr::null()),
             workers: RefCell::new(Vec::new()),
             main: RefCell::new(None),
             next_thread: Cell::new(MAIN_THREAD + 1),
@@ -229,6 +233,20 @@ pub(crate) fn bind_registry(registry: *const Registry) {
     if let Ok((group, _)) = current() {
         group.registry.set(registry);
     }
+}
+
+/// Record the startup block of the calling thread's process, or clear it with null, and
+/// return the one it replaces. Without a process group, which is the case outside a driven
+/// coroutine, it does nothing and returns null.
+pub(crate) fn bind_startup(startup: *const XilaStartup) -> *const XilaStartup {
+    current().map_or(ptr::null(), |(group, _)| group.startup.replace(startup))
+}
+
+/// The startup block of the calling thread's process, or null outside a bound process.
+/// Concurrent processes on one executor each see their own, because the pointer lives in
+/// the process's group, which the driver installs around every resume.
+pub(crate) fn current_startup() -> *const XilaStartup {
+    current().map_or(ptr::null(), |(group, _)| group.startup.get())
 }
 
 /// The registry of the calling thread's process, once its entry has started.

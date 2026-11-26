@@ -29,6 +29,23 @@ mod network_types;
 mod poll;
 mod process;
 mod registry;
+#[cfg(any(
+    all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_os = "linux"
+    ),
+    all(
+        any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "arm",
+            target_arch = "riscv32",
+            target_arch = "xtensa"
+        ),
+        target_os = "none"
+    )
+))]
+mod runner;
 mod startup;
 #[cfg(feature = "network")]
 pub use network::*;
@@ -54,6 +71,23 @@ pub use metadata::*;
 pub use poll::*;
 pub use process::*;
 pub use random::*;
+#[cfg(any(
+    all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        target_os = "linux"
+    ),
+    all(
+        any(
+            target_arch = "x86_64",
+            target_arch = "aarch64",
+            target_arch = "arm",
+            target_arch = "riscv32",
+            target_arch = "xtensa"
+        ),
+        target_os = "none"
+    )
+))]
+pub use runner::*;
 pub use startup::*;
 pub use status::*;
 pub use time::*;

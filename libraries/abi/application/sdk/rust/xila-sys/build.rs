@@ -10,7 +10,9 @@ fn main() {
     if env::var_os("CARGO_FEATURE_LINK").is_none() {
         // A bare-metal guest without `link` gets no entry point or linker script:
         // the link fails, or yields an image the loader rejects.
+        // A linked application is part of the firmware: the firmware's linker makes it.
         if env::var_os("CARGO_FEATURE_RUNTIME").is_some()
+            && env::var_os("CARGO_FEATURE_LINKED").is_none()
             && env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("none")
         {
             println!("cargo::warning=xila-sys: enable xila-sys/link to build a Xila executable");

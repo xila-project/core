@@ -36,6 +36,7 @@ virtual_file_system = { workspace = true, features = ["test_harness"] }
 default = []
 building = []
 native-dev = ["dep:abi_application", "dep:native_loader", "dep:stackful"]
+native-linked = ["dep:abi_application", "dep:stackful"]
 graphics = ["dep:graphics", "abi_application?/graphics"]
 network = ["dep:network", "abi_application?/network"]
 
@@ -52,5 +53,8 @@ strict = true
 libc = "0.2"
 little_fs.workspace = true
 portable-atomic.workspace = true
+xila-sys = { path = "../abi/application/sdk/rust/xila-sys", features = [
+  "linked",
+] }
 # The graphics test renders in XRGB8888, as the graphics crate's own tests do.
 graphics = { workspace = true, features = ["rendering_xrgb8888"] }

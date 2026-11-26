@@ -528,6 +528,44 @@ objects open and release access when the entry returns. The Rust helper drops
 the startup resources when the entry returns. The caller supplies the process
 heap and owns its teardown.
 
+## Statically linked programs (`native-linked`)
+
+A program that is linked into the firmware runs as a full native process, with no ELF
+file, no loader and no executable memory. Enable `xila-executable/native-linked` (or
+`xila/native-linked`), and declare the entry with `executable::linked_executable!`:
+
+```rust
+executable::linked_executable!(pub Greeter => greeter_entry, stack_size = 16 * 1024);
+```
+
+`mount_executables!` mounts the declared type like any other executable. The adapter
+`executable::run_linked` starts one stackful coroutine per running program. It uses
+`ProcessLaunch`, so the program has the process capability, its arguments and standard
+streams, the environment of its task, its home directory, optional network rights and
+`xila_process_exit`. A cancelled program is cleaned up like a loaded one (see
+`ProcessOwner`).
+
+`LinkedOptions` has three settings. `stack_size` is the usable coroutine stack, 4 KiB by
+default. `network` is the set of network rights, none by default. `home` is the home
+directory capability: `LinkedHome::User` (the default) is the home that the account of the
+task's user records, `LinkedHome::None` grants none, and `LinkedHome::Path` grants a
+directory.
+
+Several linked programs can run on one executor at the same time, so a program must not keep
+its startup block in a global. `__xila_current_startup()` returns the block of the process that
+the calling coroutine belongs to. The host stores it in the process's group when `enter`
+starts the entry, and clears it when the entry returns or exits. It returns null outside a
+process. On a target without stack switching, one program runs at a time and the call returns
+the block of the running entry. Rust applications get this from `xila-sys` with its `linked`
+feature: `runtime::startup()` and `runtime::api()` call `__xila_current_startup()`, and
+`xila_sys::entry!(main)` emits `unsafe extern "C" fn xila_entry` without the ELF note. The
+`linked` and `link` features exclude each other. `link` builds a standalone static PIE
+image; `linked` builds code for the firmware's own linker.
+
+The adapter exists only on targets with stack switching (Linux on x86-64 and AArch64, and bare
+metal Arm, RISC-V, Xtensa and x86-64). On other targets the `native-linked` feature compiles
+and adds nothing, because a program that cannot suspend would block the executor.
+
 ## SDK startup
 
 Applications written in C normally use the published [SDK](sdk/README.md): picolibc
