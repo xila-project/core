@@ -123,6 +123,13 @@ struct once_call {
 
 static struct once_call *running_once_calls;
 
+/* Back to the pristine empty list, for a relaunch of the same linked program after a
+   previous run was cancelled: the in-flight once calls were recorded on that run's
+   abandoned stacks. startup.c calls this hook through a weak no-op default. */
+__attribute__((visibility("hidden"))) void xila_thread_sync_reset(void) {
+    running_once_calls = NULL;
+}
+
 static void forget_once_call(struct once_call *call) {
     for (struct once_call **link = &running_once_calls; *link != NULL; link = &(*link)->next) {
         if (*link == call) {

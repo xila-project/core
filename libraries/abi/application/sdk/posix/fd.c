@@ -15,6 +15,44 @@
 
 struct xila_process xila_process;
 
+/* Weak no-op defaults for the socket entry points, so the calls in this file and the rest
+   of the layer always target a defined symbol (never a weak undefined one, whose call
+   relocation a PIE host link rejects once it is resolved to the absolute 0): socket.c
+   overrides them with the real definitions when it is linked. They are unreachable without
+   socket.c, which alone can create a socket descriptor. */
+__attribute__((weak, visibility("hidden"), noinline)) XilaStatus
+xila_socket_release(struct xila_socket *socket) {
+    (void)socket;
+    return XILA_STATUS_UNSUPPORTED;
+}
+__attribute__((weak, visibility("hidden"), noinline)) void
+xila_socket_retain(struct xila_socket *socket) {
+    (void)socket;
+}
+__attribute__((weak, visibility("hidden"), noinline)) ssize_t
+xila_socket_read(struct xila_socket *socket, void *buffer, size_t size) {
+    (void)socket; (void)buffer; (void)size;
+    return -1;
+}
+__attribute__((weak, visibility("hidden"), noinline)) ssize_t
+xila_socket_write(struct xila_socket *socket, const void *buffer, size_t size) {
+    (void)socket; (void)buffer; (void)size;
+    return -1;
+}
+__attribute__((weak, visibility("hidden"), noinline)) void
+xila_socket_poll_entry(const struct xila_socket *socket, XilaPollEntry *entry) {
+    (void)socket; (void)entry;
+}
+__attribute__((weak, visibility("hidden"), noinline)) int
+xila_socket_get_flags(const struct xila_socket *socket) {
+    (void)socket;
+    return 0;
+}
+__attribute__((weak, visibility("hidden"), noinline)) void
+xila_socket_set_flags(struct xila_socket *socket, int flags) {
+    (void)socket; (void)flags;
+}
+
 static int grow(size_t wanted) {
     size_t count = xila_process.fd_count;
     if (wanted > XILA_OPEN_MAX)
@@ -35,6 +73,11 @@ static int grow(size_t wanted) {
 }
 
 int xila_fd_initialize(const XilaStartup *startup) {
+    /* A previous run of the same linked program may have been cancelled while suspended:
+       it ran no shutdown, so `fds` can still name heap memory the host freed with the
+       abandoned coroutine, and `realloc` below would read through it. Zero the whole
+       process state before anything reads it. */
+    xila_process = (struct xila_process){0};
     xila_process.startup = startup;
     xila_process.process = startup->process;
     if (startup->heap == NULL)

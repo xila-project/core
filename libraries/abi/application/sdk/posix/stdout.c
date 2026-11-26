@@ -17,3 +17,13 @@ static struct __file_bufio stdout_file =
     FDEV_SETUP_POSIX(1, stdout_buffer, sizeof(stdout_buffer), __SWR, __BLBF);
 
 FILE *const stdout = &stdout_file.xfile.cfile.file;
+
+/* Back to the pristine initial state, for a relaunch of the same linked program after a
+   previous run was cancelled: the FILE's lazily allocated lock and any bytes still sitting
+   in its buffer lived on that run's heap, which the host freed with the abandoned
+   coroutine. startup.c calls this hook through a weak no-op default, so an image that never touches stdout does
+   not link it. */
+__attribute__((visibility("hidden"))) void xila_stdout_reset(void) {
+    stdout_file = (struct __file_bufio)FDEV_SETUP_POSIX(1, stdout_buffer, sizeof(stdout_buffer),
+                                                        __SWR, __BLBF);
+}

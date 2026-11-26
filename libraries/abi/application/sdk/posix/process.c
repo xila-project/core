@@ -195,6 +195,16 @@ static struct spawned_child *children;
 static size_t child_count;
 static size_t child_capacity;
 
+/* Back to the pristine empty list, for a relaunch of the same linked program after a
+   previous run was cancelled: the list was allocated on that run's heap, which the host
+   freed, and the host closed the child handles left in it. startup.c calls this hook
+   weakly, so an image that never spawns does not link it. */
+__attribute__((visibility("hidden"))) void xila_process_reset(void) {
+    children = NULL;
+    child_count = 0;
+    child_capacity = 0;
+}
+
 static int remember_child(pid_t pid, XilaChild *handle) {
     if (child_count == child_capacity) {
         size_t capacity = child_capacity == 0 ? 4 : child_capacity * 2;

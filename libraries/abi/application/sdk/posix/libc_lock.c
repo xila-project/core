@@ -11,6 +11,13 @@ struct __lock {
 
 struct __lock __lock___libc_recursive_mutex = {.mutex = {.recursive = true}};
 
+/* Back to the pristine unlocked state, for a relaunch of the same linked program after a
+   previous run was cancelled while holding the global libc lock. startup.c calls this
+   hook through a weak no-op default, so the symbol is always defined. */
+__attribute__((visibility("hidden"))) void xila_libc_lock_reset(void) {
+    __lock___libc_recursive_mutex = (struct __lock){.mutex = {.recursive = true}};
+}
+
 static void lock_init(_LOCK_T *lock, bool recursive) {
     *lock = xila_heap_alloc(sizeof(**lock));
     if (*lock == NULL) {

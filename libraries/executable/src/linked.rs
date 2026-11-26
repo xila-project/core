@@ -9,6 +9,21 @@
 //! Programs run concurrently on the executor of the task that started them. A program finds
 //! its own startup block through `__xila_current_startup`, never through a global.
 //!
+//! Every launch of a C program starts from pristine SDK state: `xila_linked_start` resets the
+//! whole SDK/POSIX runtime (descriptors, standard streams and their locks and buffers, the
+//! environment, the exit handlers, the locks, ...) before `main` runs, whichever way the
+//! previous launch of the same program ended, including a cancellation, whose process heap
+//! the host already freed. The program's own C `static` variables persist across launches,
+//! though: initialize them at the top of `main` if a relaunch must not see the previous
+//! run's values.
+//!
+//! A C program localized with `llvm-objcopy` (see the SDK's `link-archive` command) gets
+//! private `.data`/`.bss` per program, so two different programs never collide. Two
+//! concurrent launches of the *same* C program, however, share that program's globals
+//! (`xila_sdk_api`, `xila_process`, `stdout`, ...), so such a program runs exclusively:
+//! [`run_linked_exclusive`] runs one instance at a time and fails a second concurrent
+//! launch with [`BUSY_FAILURE`].
+//!
 //! This module exists only on targets with stack switching (Linux on x86-64 and AArch64,
 //! and bare-metal Arm, RISC-V, Xtensa and x86-64). On any other target the `native-linked`
 //! feature compiles and adds nothing: a linked program cannot suspend there, so it has no
@@ -18,7 +33,12 @@ use abi_application::{HomeGrant, NativeEntry, ProcessLaunch, ProcessOwner, start
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::num::NonZeroUsize;
 use file_system::PathOwned;
+use portable_atomic::Ordering;
 use stackful::{DEFAULT_MIN_STACK_SIZE, MIN_STACK_SIZE, Stack};
+
+/// The flag type of an [`ExclusiveSlot`], re-exported so a declaration site (and the
+/// `exclusive` form of `linked_executable!`) can name it.
+pub use portable_atomic::AtomicBool;
 
 use crate::{Home, MainFuture, NetworkRights, Standard};
 
@@ -53,6 +73,10 @@ pub type LinkedArguments = Vec<String>;
 
 /// The exit code of a program that could not start: no stack, no state or no task.
 pub const START_FAILURE: NonZeroUsize = NonZeroUsize::MIN;
+
+/// The exit code of an exclusive program that could not start because another instance of
+/// the same program is already running: 16, `EBUSY`.
+pub const BUSY_FAILURE: NonZeroUsize = NonZeroUsize::new(16).unwrap();
 
 /// The directory that a linked program gets as its home capability.
 pub enum LinkedHome {
@@ -181,6 +205,89 @@ pub unsafe fn run_linked(
     })
 }
 
+/// The single-instance slot of an exclusive linked program: one static [`AtomicBool`] per
+/// program, shared by every launch of that program.
+///
+/// A C program localized with `llvm-objcopy` gets private `.data`/`.bss` per program, so
+/// two different programs never collide; two concurrent launches of the same program,
+/// however, share that program's globals. An exclusive program therefore runs one instance
+/// at a time: the slot is taken before the entry runs and released when the run ends.
+pub struct ExclusiveSlot {
+    active: &'static AtomicBool,
+}
+
+impl ExclusiveSlot {
+    /// A slot over a static flag: `false` means no instance is running.
+    pub const fn new(active: &'static AtomicBool) -> Self {
+        Self { active }
+    }
+
+    /// Take the slot if it is free, else return `None`: the caller must not touch the entry
+    /// or its globals when the slot is busy.
+    pub fn try_acquire(&self) -> Option<ExclusiveGuard> {
+        self.active
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .ok()
+            .map(|_| ExclusiveGuard {
+                active: self.active,
+            })
+    }
+}
+
+/// Holds an [`ExclusiveSlot`] until it is dropped. Dropping releases the slot with
+/// `store(false, Ordering::Release)`, so a normal return and a cancellation (the run future
+/// dropped while the program is suspended mid-call) both free it.
+pub struct ExclusiveGuard {
+    active: &'static AtomicBool,
+}
+
+impl Drop for ExclusiveGuard {
+    fn drop(&mut self) {
+        self.active.store(false, Ordering::Release);
+    }
+}
+
+/// Run an exclusive linked entry as a native process: like [`run_linked`], but only one
+/// instance of the program runs at a time.
+///
+/// The slot is taken on the first poll of the returned future, right before the entry runs:
+/// a future that is never polled holds nothing, and if another instance of the same program
+/// already holds the slot, the future resolves to [`BUSY_FAILURE`] without touching the
+/// entry or its globals. The slot is released when the program returns or exits, and also
+/// when the returned future is dropped (cancelled) while the program is suspended, so the
+/// next launch can start. Every launch starts from pristine SDK state (the module docs
+/// describe the reset `xila_linked_start` performs even after a cancellation), so a relaunch
+/// after a cancelled run is safe.
+///
+/// # Safety
+/// The same contract as [`run_linked`]: the caller vouches that `entry` is trusted code
+/// that obeys the startup rules of `XilaStartup`, fits on the configured stack and returns
+/// without unwinding. In addition, every launch of `entry` must go through the same `slot`:
+/// two different [`ExclusiveSlot`]s for one entry (for example two `exclusive`
+/// declarations of the same entry) would let two instances run concurrently and share the
+/// program's globals.
+pub unsafe fn run_linked_exclusive(
+    slot: &'static AtomicBool,
+    entry: LinkedEntry,
+    options: LinkedOptions,
+    standard: Standard<'static>,
+    arguments: Vec<String>,
+) -> MainFuture {
+    Box::pin(async move {
+        // Taken on the first poll, right before the run: a busy slot fails the launch
+        // immediately, without touching the entry or its globals. The guard moves into the
+        // future's state, so dropping the future (cancelling the run mid-call) releases the
+        // slot too.
+        let Some(guard) = ExclusiveSlot::new(slot).try_acquire() else {
+            return Err(BUSY_FAILURE);
+        };
+        // SAFETY: the caller vouches for the entry, as for `run_linked`.
+        let result = unsafe { run_linked(entry, options, standard, arguments) }.await;
+        drop(guard);
+        result
+    })
+}
+
 /// The synchronous setup of a linked program: the coroutine stack, the process owner and
 /// the launch request. Fallible, and a failed start leaves nothing behind. Kept out of the
 /// future and never inlined into it, so the state machine holds neither the stack nor the
@@ -241,6 +348,24 @@ async fn user_home(context: &'static crate::ExecutableContext) -> Option<Home> {
 ///     network = NetworkRights::CONNECT);
 /// ```
 ///
+/// With the `exclusive` token, one instance of the program runs at a time: a second
+/// concurrent launch fails immediately with [`BUSY_FAILURE`] instead of sharing the
+/// program's globals. Use it for a C program linked with the SDK's `link-archive` command:
+///
+/// ```ignore
+/// executable::linked_executable!(unsafe pub MyCApp => my_c_app_entry, exclusive);
+/// executable::linked_executable!(unsafe pub MyCApp => my_c_app_entry, exclusive,
+///     stack_size = 32 * 1024);
+/// ```
+///
+/// Declare the `exclusive` form at most once per entry: every launch of a given entry must
+/// share the same [`ExclusiveSlot`], and two `exclusive` declarations for one entry would
+/// give each its own slot, letting two instances run concurrently. Each launch starts from
+/// pristine SDK state (`xila_linked_start` resets the SDK/POSIX runtime even after a
+/// cancellation); the program's own C `static` variables persist across launches, so
+/// initialize them at the top of `main` if a relaunch must not see the previous run's
+/// values.
+///
 /// The entry is an `unsafe extern "C" fn(*const XilaStartup) -> i32`, either from
 /// `abi_application` or from `xila-sys` (see [`linked_entry`]). The optional settings
 /// are the builder methods of [`LinkedOptions`]: `stack_size`, `network` and `home`.
@@ -268,5 +393,38 @@ macro_rules! linked_executable {
                 }
             }
         }
+    };
+    ($(#[$attribute:meta])* unsafe $visibility:vis $name:ident => $entry:path, exclusive $(, $setting:ident = $value:expr)* $(,)?) => {
+        $(#[$attribute])*
+        $visibility struct $name;
+
+        // The slot lives in an anonymous constant, so two `exclusive` declarations in the
+        // same module get one static each. Declare the form once per entry: every launch of
+        // an entry must share one slot, or two instances could run concurrently.
+        const _: () = {
+            /// Held from the start of a run until the run returns or is cancelled: one
+            /// instance of this program runs at a time.
+            static ACTIVE: $crate::AtomicBool = $crate::AtomicBool::new(false);
+
+            impl $crate::ExecutableTrait for $name {
+                fn main(
+                    standard: $crate::Standard<'static>,
+                    arguments: $crate::LinkedArguments,
+                ) -> $crate::MainFuture {
+                    // SAFETY: the `unsafe` token at the declaration vouches for the entry:
+                    // it is trusted code that obeys the startup rules, fits on the
+                    // configured stack and returns without unwinding.
+                    unsafe {
+                        $crate::run_linked_exclusive(
+                            &ACTIVE,
+                            $crate::linked_entry($entry),
+                            $crate::LinkedOptions::new() $(.$setting($value))*,
+                            standard,
+                            arguments,
+                        )
+                    }
+                }
+            }
+        };
     };
 }

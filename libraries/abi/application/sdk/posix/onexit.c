@@ -5,13 +5,14 @@
  * with picolibc's table a handler registered by an application would never be called.
  * This file provides picolibc's _on_exit (the function atexit.c, onexit.c and
  * cxa-atexit.c call) and the function exit() uses to run the table, in one archive
- * member: a program that registers no handler links neither the table nor this code,
- * and exit() finds xila_run_exit_handlers undefined (it references it weakly).
+ * member: a program that registers no handler links neither the table nor this code, and
+ * exit() calls the weak no-op default of xila_run_exit_handlers that startup.c provides.
  *
  * Handlers run in the reverse order of registration, each one removed before it is
  * called, so a handler may register another or call exit() itself. */
 #include <limits.h>
 #include <stddef.h>
+#include <string.h>
 
 /* picolibc's local-onexit.h, which is not installed: the numbers are part of the
    contract between its three callers and _on_exit. */
@@ -31,6 +32,13 @@ struct on_exit {
 
 static struct on_exit handlers[ATEXIT_MAX];
 
+/* Back to the pristine empty table, for a relaunch of the same linked program after a
+   previous run was cancelled before its exit handlers ran. startup.c calls this hook
+   weakly, so an image that registers no handler does not link it. */
+__attribute__((visibility("hidden"))) void xila_onexit_reset(void) {
+    memset(handlers, 0, sizeof handlers); /* KIND_EMPTY is zero */
+}
+
 int _on_exit(int kind, union on_exit_func func, void *argument) {
     for (size_t index = 0; index < ATEXIT_MAX; ++index) {
         if (handlers[index].kind == KIND_EMPTY) {
@@ -43,7 +51,7 @@ int _on_exit(int kind, union on_exit_func func, void *argument) {
     return -1;
 }
 
-void xila_run_exit_handlers(int status) {
+__attribute__((visibility("hidden"))) void xila_run_exit_handlers(int status) {
     for (;;) {
         size_t index = ATEXIT_MAX;
         while (index > 0 && handlers[index - 1].kind == KIND_EMPTY)

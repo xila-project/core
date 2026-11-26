@@ -70,9 +70,10 @@ int xila_fd_initialize(const XilaStartup *startup);
 
 /* Sockets (socket.c). The rest of the layer reaches them through weak references, so an
    image that never creates a socket does not link socket.c: only a socket descriptor,
-   which socket.c created, leads to these calls. */
+   which socket.c created, leads to these calls. fd.c supplies weak no-op defaults, so the
+   calls always target a defined symbol and never an undefined one. */
 #ifdef XILA_SOCKET_DEFINITIONS
-#define XILA_SOCKET_LINKAGE
+#define XILA_SOCKET_LINKAGE __attribute__((visibility("hidden")))
 #else
 #define XILA_SOCKET_LINKAGE __attribute__((weak))
 #endif

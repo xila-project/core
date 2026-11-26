@@ -2,12 +2,21 @@
 """Build the Xila native SDK for one target.
 
     uv run --no-project --with meson==X --with ninja==Y python tools/sdk/build.py build --target T
+    python tools/sdk/build.py link-archive --sdk <sdk-dir> --entry my_app --output libmy_app.a app.o
 
 The SDK is picolibc (built from the pinned upstream release), the Xila POSIX layer,
 crt0, the generated API stubs, the static-PIE linker script and a CMake toolchain
 file, packed as target/sdk/xila-sdk-<xila_version>-<target>.tar.zst. Everything is produced
 under target/sdk; nothing outside it is written. Python 3.12 or later, clang, lld,
 llvm-ar, meson and ninja are required.
+
+`link-archive` turns one C program into a static archive whose only global defined
+symbol is its entry: the firmware links the archive into itself and calls the entry
+through `xila-executable`'s linked-program support, with every libc, POSIX, crt0 and
+application symbol of the program localized, so two such programs never collide. Weak
+undefined symbols are resolved to the absolute 0 first, so they read as null instead of
+binding to a host symbol (glibc's `stderr` in a Linux test binary); any other undefined
+symbol is an error unless the firmware provides it (`--allow-undefined`).
 """
 
 import argparse
@@ -347,12 +356,17 @@ def compile_sdk(target, install, work):
     ]
     base = ["clang", f"--target={config['triple']}", *config["flags"], *COMMON_FLAGS, *include]
 
-    def compile_one(source, name):
+    def compile_one(source, name, defines=()):
         output = objects / f"{name}.o"
-        run([*base, "-c", source, "-o", output])
+        run([*base, *defines, "-c", source, "-o", output])
         return output
 
     crt0 = compile_one(SDK_SOURCE / "sdk/crt0.c", "crt0")
+    # The linked variant of crt0: no ABI note, no _xila_start, xila_linked_start instead.
+    # It keeps -fPIE like every other object: position-independent code links into both
+    # the firmware's non-PIE image and PIE host binaries (Linux tests, Rust test
+    # binaries), which non-PIC code cannot (R_X86_64_32S in a PIE link).
+    crt0_linked = compile_one(SDK_SOURCE / "sdk/crt0.c", "crt0_linked", ["-DXILA_SDK_LINKED"])
     stubs = compile_one(SDK_SOURCE / "sdk/stubs.c", "stubs")
     graphics = compile_one(SDK_SOURCE / "sdk/graphics.c", "graphics")
     posix = [compile_one(SDK_SOURCE / f"sdk/posix/{name}.c", name) for name in POSIX_SOURCES]
@@ -365,7 +379,202 @@ def compile_sdk(target, install, work):
         staging = libraries / f"{archive}.{os.getpid()}"
         run([ar, "rcsD", staging, *members])
         os.replace(staging, libraries / archive)
-    return crt0, libraries
+    return crt0, crt0_linked, libraries
+
+
+# The entry symbol of a link-archive program: a valid C identifier.
+ENTRY_SYMBOL = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# Symbols the firmware itself defines, so a localized archive may leave them undefined:
+# `__xila_current_startup` backs xila-sys's linked runtime. Callers can allow more with
+# --allow-undefined.
+FIRMWARE_DEFINED = frozenset({"__xila_current_startup"})
+
+
+def validate_entry_symbol(entry):
+    """A C identifier: the firmware references the entry by this exact symbol name."""
+    if not ENTRY_SYMBOL.match(entry):
+        sys.exit(f"error: --entry {entry!r} is not a C identifier "
+                 "(expected ^[A-Za-z_][A-Za-z0-9_]*$)")
+    return entry
+
+
+def undefined_symbols(obj, nm):
+    """The undefined symbols of a relocatable object as (weak, strong) name lists.
+
+    `llvm-nm --undefined-only --format=posix` prints one `name kind value size` line per
+    undefined symbol: kind `U` is a strong undefined reference, `w`/`v` a weak one, which
+    a host link would satisfy with any matching symbol (glibc's `stderr` in a Linux test
+    binary) instead of leaving it null."""
+    output = subprocess.run([nm, "--undefined-only", "--format=posix", str(obj)],
+                            capture_output=True, text=True, check=True).stdout
+    weak, strong = [], []
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        (strong if parts[1] == "U" else weak).append(parts[0])
+    return weak, strong
+
+
+# Relocation types that cannot target an absolute-0 symbol in a PIE link (direct
+# PC-relative or PLT calls). Data references through a GOT (`*GOT*`) are safe.
+ZERO_UNSAFE_RELOC = re.compile(r"(?:PLT|PC32|PC24|CALL|JUMP|BRANCH)")
+RELOC_LINE = re.compile(r"^\s*0x[0-9a-fA-F]+\s+(\S+)\s+(\S+)")
+
+
+def unsafe_zero_relocations(obj, weak_names, readobj):
+    """Return sorted `(symbol, relocation)` pairs where a weak undefined symbol that
+    `link-archive` is about to resolve to absolute 0 is referenced by a direct call or
+    PC-relative relocation. On x86_64 PIE links, lld and GNU ld reject such relocations
+    against absolute symbols; the SDK must provide a weak hidden default instead."""
+    if not weak_names:
+        return []
+    weak_set = set(weak_names)
+    output = subprocess.run([readobj, "--relocs", str(obj)],
+                            capture_output=True, text=True, check=True).stdout
+    bad = set()
+    for line in output.splitlines():
+        match = RELOC_LINE.match(line)
+        if not match:
+            continue
+        reloc, symbol = match.group(1), match.group(2)
+        if symbol not in weak_set or "GOT" in reloc:
+            continue
+        if ZERO_UNSAFE_RELOC.search(reloc):
+            bad.add((symbol, reloc))
+    return sorted(bad)
+
+
+def sdk_libraries(sdk):
+    """The SDK's lib directory and the archives link-archive links a program against."""
+    lib = sdk / "lib"
+    archives = {
+        "crt0_linked": lib / "crt0_linked.o",
+        "libxila_posix": lib / "libxila_posix.a",
+        "libxila": lib / "libxila.a",
+        "libc": lib / "libc.a",
+    }
+    missing = [path for path in archives.values() if not path.exists()]
+    if missing:
+        sys.exit(f"error: {', '.join(str(path) for path in missing)} not found: "
+                 f"pass --sdk the directory of an SDK built by `build.py build`")
+    return archives
+
+
+def sdk_builtins(sdk, extra):
+    """The compiler runtime archives of the SDK's target, when it has one (Arm's libgcc,
+    RISC-V's libgcc), plus any --builtins paths. They join the link group like the SDK's
+    own archives; on the host target there is none.
+
+    When the target's cross compiler is not installed, its runtime is simply not bundled:
+    a note goes to stderr and the caller (link-archive) proceeds without it, so the host
+    or firmware must supply the builtins the program needs with --builtins."""
+    builtins = []
+    info = sdk / "sdk.json"
+    if info.exists():
+        target = json.loads(info.read_text()).get("target")
+        command = TARGETS.get(target, {}).get("builtins")
+        if command:
+            if shutil.which(str(command[0])) is None:
+                print(f"note: {command[0]} not found: the compiler builtins of {target} are "
+                      "not bundled; pass them with --builtins if the program needs them",
+                      file=sys.stderr)
+            else:
+                try:
+                    result = subprocess.run([str(part) for part in command],
+                                            capture_output=True, text=True)
+                except FileNotFoundError:
+                    result = None
+                if result is not None and result.returncode == 0:
+                    path = Path(result.stdout.strip())
+                    if path.is_file():
+                        builtins.append(path)
+    builtins.extend(Path(path) for path in extra)
+    return builtins
+
+
+def link_archive_plan(archives, entry, output, inputs, builtins, work, tools,
+                      weak_undefined=()):
+    """The commands `link-archive` runs, as data: combine every input with crt0_linked.o
+    and the SDK archives into one relocatable object, resolve every weak undefined symbol
+    to the absolute 0, rename the entry, localize every other symbol, and pack the result
+    into the output archive. `tools` maps lld, objcopy and ar to their paths; every command
+    is a list of strings.
+
+    The resolve step matters: a weak undefined symbol the SDK archives did not define (the
+    POSIX layer references its optional modules weakly) would otherwise stay a global
+    undefined symbol in the archive, and a host link would satisfy it with any matching
+    symbol, glibc's `stderr` in a Linux PIE test binary for example. Defined as the absolute
+    0, it reads as null, exactly what a weak reference must see, and the localization below
+    makes it local, so it can never bind outside the archive. Position-independent code
+    (every SDK object is -fPIE) links the result into both PIE and non-PIE binaries."""
+    combined = str(work / "combined.o")
+    resolved = str(work / "resolved.o")
+    renamed = str(work / "renamed.o")
+    localized = str(work / f"{entry}.o")
+    group = [str(archives["libxila_posix"]), str(archives["libxila"]), str(archives["libc"]),
+             *[str(path) for path in builtins]]
+    return [
+        [tools["lld"], "-r", "-o", combined, "--undefined=xila_linked_start",
+         str(archives["crt0_linked"]), *[str(path) for path in inputs],
+         "--start-group", *group, "--end-group"],
+        [tools["lld"], "-r", "-o", resolved,
+         *[f"--defsym={name}=0" for name in weak_undefined], combined],
+        # Rename first, then keep the new name global: llvm-objcopy matches
+        # --keep-global-symbol against the name before --redefine-sym renames it.
+        [tools["objcopy"], f"--redefine-sym=xila_linked_start={entry}", resolved, renamed],
+        [tools["objcopy"], f"--keep-global-symbol={entry}", renamed, localized],
+        [tools["ar"], "rcs", str(output), localized],
+    ]
+
+
+def link_archive(args):
+    """Localize one C program into an archive whose only global defined symbol is its
+    entry: link crt0_linked.o, the program and the SDK archives into one relocatable
+    object, resolve every weak undefined symbol to 0 and reject any strong undefined
+    symbol the firmware does not provide, then make every symbol except the entry local,
+    so the program's libc, POSIX, crt0 and application globals never collide with the
+    host's or another program's, and its weak references can never bind to a host symbol."""
+    entry = validate_entry_symbol(args.entry)
+    sdk = Path(args.sdk)
+    archives = sdk_libraries(sdk)
+    inputs = [Path(name) for name in args.inputs]
+    for path in inputs:
+        if not path.exists():
+            sys.exit(f"error: input {path} not found")
+    builtins = sdk_builtins(sdk, args.builtins)
+    allow_undefined = FIRMWARE_DEFINED | set(args.allow_undefined)
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    tools = {"lld": find_tool("ld.lld"), "objcopy": find_tool("llvm-objcopy"),
+             "ar": find_tool("llvm-ar"), "nm": find_tool("llvm-nm"),
+             "readobj": find_tool("llvm-readobj")}
+    with tempfile.TemporaryDirectory(prefix=".link-archive-", dir=output.parent) as work:
+        work = Path(work)
+        run(link_archive_plan(archives, entry, output, inputs, builtins, work, tools)[0])
+        weak, strong = undefined_symbols(work / "combined.o", tools["nm"])
+        unexpected = sorted(name for name in strong if name not in allow_undefined)
+        if unexpected:
+            sys.exit("error: the program leaves strong undefined symbols the firmware does "
+                     "not provide: " + ", ".join(unexpected) +
+                     " (pass --allow-undefined <symbol> to accept one explicitly)")
+        bad_relocs = unsafe_zero_relocations(work / "combined.o", weak, tools["readobj"])
+        if bad_relocs:
+            details = ", ".join(f"{sym} ({rel})" for sym, rel in bad_relocs)
+            sys.exit("error: weak undefined symbol(s) have direct call/PC-relative relocations "
+                     "that cannot resolve to absolute 0 in a PIE link: " + details +
+                     " (provide a weak hidden default definition instead)")
+        plan = link_archive_plan(archives, entry, output, inputs, builtins, work, tools,
+                                 weak_undefined=weak)
+        for command in plan[1:]:
+            run(command)
+        remaining_weak, remaining_strong = undefined_symbols(work / f"{entry}.o", tools["nm"])
+        leftover = remaining_weak + sorted(n for n in remaining_strong if n not in allow_undefined)
+        if leftover:
+            sys.exit("error: localization left undefined symbols in the archive: " +
+                     ", ".join(leftover))
+    print(f"linked archive: {output} (only global symbol: {entry})")
 
 
 def resource_dir(target):
@@ -410,7 +619,7 @@ def rust_sdk_files():
     return files
 
 
-def assemble(target, pin, install, crt0, libraries, work):
+def assemble(target, pin, install, crt0, crt0_linked, libraries, work):
     header = (SDK_SOURCE / "include/xila/application.h").read_text()
     major, minor = (
         int(re.search(rf"^#define XILA_VERSION_{part} (\d+)$", header, re.M).group(1))
@@ -430,6 +639,7 @@ def assemble(target, pin, install, crt0, libraries, work):
     shutil.copy(SDK_SOURCE / "include/xila/graphics.h", root / "include/xila/")
     shutil.copy(SDK_SOURCE / "sdk/stubs.h", root / "include/xila/")
     shutil.copy(crt0, root / "lib/crt0.o")
+    shutil.copy(crt0_linked, root / "lib/crt0_linked.o")
     for archive in ("libxila.a", "libxila_posix.a"):
         shutil.copy(libraries / archive, root / "lib" / archive)
     shutil.copy(install / "lib/libc.a", root / "lib/libc.a")
@@ -472,6 +682,7 @@ def assemble(target, pin, install, crt0, libraries, work):
         "compiler": clang.stdout.splitlines()[0],
         "data_alignment": config["data_alignment"],
         "entry": "_xila_start -> xila_main -> main",
+        "linked_entry": "xila_linked_start -> xila_main -> main",
     }, indent=2, sort_keys=True) + "\n")
     return name, root
 
@@ -516,9 +727,10 @@ def build(args):
     work.mkdir(parents=True, exist_ok=True)
     install = build_picolibc(source, target, work)
     drop_members(install, target)
-    crt0, libraries = compile_sdk(target, install, work)
-    name, root = assemble(target, pin, install, crt0, libraries, work)
-    scan_constructors([root / "lib/crt0.o", *sorted((root / "lib").glob("*.a"))])
+    crt0, crt0_linked, libraries = compile_sdk(target, install, work)
+    name, root = assemble(target, pin, install, crt0, crt0_linked, libraries, work)
+    scan_constructors([root / "lib/crt0.o", root / "lib/crt0_linked.o",
+                       *sorted((root / "lib").glob("*.a"))])
     archive = pack(name, root)
     print(f"sdk directory: {root}")
     print(f"sdk archive:   {archive}")
@@ -734,6 +946,24 @@ def main():
     rust_parser = commands.add_parser("rust-example", help="build and check the Rust static PIE example")
     rust_parser.add_argument("--target", choices=sorted(TARGETS), help="build only this target")
     rust_parser.set_defaults(function=rust_example)
+    archive_parser = commands.add_parser(
+        "link-archive",
+        help="localize one linked C program into an archive with a single entry symbol")
+    archive_parser.add_argument("--sdk", required=True,
+                                help="the SDK directory (xila-sdk-<version>-<target>)")
+    archive_parser.add_argument("--entry", required=True,
+                                help="the program's entry symbol, a C identifier")
+    archive_parser.add_argument("--output", required=True, help="the archive to write (<lib.a>)")
+    archive_parser.add_argument("--builtins", action="append", default=[], metavar="ARCHIVE",
+                                help="an extra compiler runtime archive for the link group "
+                                     "(repeatable)")
+    archive_parser.add_argument("--allow-undefined", action="append", default=[],
+                                metavar="SYMBOL",
+                                help="a strong undefined symbol the firmware provides "
+                                     "(repeatable); anything else is an error")
+    archive_parser.add_argument("inputs", nargs="+", metavar="OBJECT",
+                                help="the program's object files or archives")
+    archive_parser.set_defaults(function=link_archive)
     args = parser.parse_args()
     if args.command != "rust-example":
         # Put the versioned LLVM directory on PATH for Meson and Clang's linker probes.

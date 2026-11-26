@@ -4,8 +4,12 @@
 
 #include "internal.h"
 
-extern void xila_run_key_destructors(void) __attribute__((weak));
-extern void xila_abandon_once_calls(void) __attribute__((weak));
+/* Weak hidden defaults so calls below always target a defined symbol (never a weak
+   undefined function whose PLT/PC-relative call relocation a PIE host link rejects
+   once resolved to the absolute 0); thread_keys.c and thread_sync.c override them
+   strongly when linked. */
+__attribute__((weak, visibility("hidden"), noinline)) void xila_run_key_destructors(void) {}
+__attribute__((weak, visibility("hidden"), noinline)) void xila_abandon_once_calls(void) {}
 
 struct thread_start {
     void *(*entry)(void *);
@@ -16,8 +20,7 @@ static void *start_thread(void *argument) {
     struct thread_start start = *(struct thread_start *)argument;
     xila_heap_release(argument);
     void *result = start.entry(start.argument);
-    if (xila_run_key_destructors != NULL)
-        xila_run_key_destructors();
+    xila_run_key_destructors();
     return result;
 }
 
@@ -92,10 +95,8 @@ void pthread_exit(void *result) {
     if (thread == XILA_MAIN_THREAD)
         abort();
     /* Give back the once controls whose routine this thread leaves unfinished. */
-    if (xila_abandon_once_calls != NULL)
-        xila_abandon_once_calls();
-    if (xila_run_key_destructors != NULL)
-        xila_run_key_destructors();
+    xila_abandon_once_calls();
+    xila_run_key_destructors();
     (void)xila_thread_exit(result);
     abort();
 }

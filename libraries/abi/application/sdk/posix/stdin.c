@@ -17,3 +17,12 @@ static struct __file_bufio stdin_file =
     FDEV_SETUP_POSIX(0, stdin_buffer, sizeof(stdin_buffer), __SRD, 0);
 
 FILE *const stdin = &stdin_file.xfile.cfile.file;
+
+/* Back to the pristine initial state, for a relaunch of the same linked program after a
+   previous run was cancelled: the FILE's lazily allocated lock lived on that run's heap,
+   which the host freed with the abandoned coroutine. startup.c calls this hook through a weak no-op default, so
+   an image that never touches stdin does not link it. */
+__attribute__((visibility("hidden"))) void xila_stdin_reset(void) {
+    stdin_file = (struct __file_bufio)FDEV_SETUP_POSIX(0, stdin_buffer, sizeof(stdin_buffer),
+                                                       __SRD, 0);
+}

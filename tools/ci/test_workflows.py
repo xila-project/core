@@ -454,7 +454,7 @@ class WorkflowPolicy(unittest.TestCase):
             self.assertIn(f"target: {target}", sdk)
         self.assertNotIn("apt-get", sdk)
         steps = re.findall(r"run: (?:mise run )?(\S+)", sdk)
-        self.assertEqual(steps, ['"$SDK_PACKAGES"', "ci:sdk-test", "ci:sdk-build", "ci:sdk-verify"])
+        self.assertEqual(steps, ['"$SDK_PACKAGES"', "ci:sdk-build", "ci:sdk-test", "ci:sdk-verify"])
         self.assertIn("actions/upload-artifact@v7", sdk)
         self.assertIn("target/sdk/xila-sdk-*.tar.zst", sdk)
         self.assertIn("if-no-files-found: error", sdk)
