@@ -28,9 +28,11 @@
 //! alias row is its name and the index of the TZ string of the zone that it
 //! names, shared with that zone.
 //!
-//! [`zone_name`] lists the regions in the order of the table above, the names
-//! of each region sorted, aliases included. Zones of a region that share a TZ
-//! string share it in one string blob.
+//! [`zone_name`] lists the enabled region tables in alphabetical order of
+//! feature name (`iana-africa` through `iana-pacific`, with `iana-etc` between
+//! `iana-australia` and `iana-europe`), with the names of each table sorted,
+//! aliases included. Zones of a region that share a TZ string share it in one
+//! string blob.
 //!
 //! ```
 //! # #[cfg(feature = "iana-europe")]
@@ -218,5 +220,27 @@ mod tests {
             assert_eq!(super::zone_count(), 0);
             assert_eq!(super::zone_name(0), None);
         }
+    }
+
+    #[test]
+    fn each_table_is_strictly_sorted() {
+        for table in super::TABLES {
+            let mut previous: Option<&str> = None;
+            for index in 0..table.count() {
+                let name = table.name(index).unwrap();
+                if let Some(previous) = previous {
+                    assert!(previous < name, "{previous} !< {name}");
+                }
+                previous = Some(name);
+            }
+        }
+    }
+
+    #[test]
+    fn utc_const_matches_parse() {
+        assert_eq!(
+            crate::TimeZone::utc(),
+            crate::TimeZone::parse("UTC0").unwrap()
+        );
     }
 }

@@ -34,8 +34,10 @@
 //!
 //! # Publication
 //!
-//! [`initialize`] runs once at start-up, before the shell, and sets `TZ` to the
-//! stored TZ string in the root task and in every task that has no `TZ` yet.
+//! [`initialize`] runs once at start-up, before the shell, and publishes the
+//! stored TZ string via [`task::Manager::set_system_environment_variable`]: in
+//! the root task and in every task whose current `TZ` matches the root task's
+//! previous value (every task without `TZ` when called once at start-up).
 //! Every task inherits the environment of its parent, so native executables
 //! and WebAssembly guests (through WASI `environ_get`) see `TZ` from their
 //! start.
@@ -222,9 +224,8 @@ fn is_valid_name(name: &str) -> bool {
 }
 
 /// UTC as a parsed time zone.
-pub fn utc() -> TimeZone {
-    // `UTC0` always parses; the fallback keeps the function total.
-    TimeZone::parse(DEFAULT_TIME_ZONE).expect("UTC0 is a valid TZ string")
+pub const fn utc() -> TimeZone {
+    TimeZone::utc()
 }
 
 /// Whether only root can have written a file: it belongs to root, others may
@@ -298,11 +299,13 @@ pub async fn load(virtual_file_system: &VirtualFileSystem, task: TaskIdentifier)
         .unwrap_or_else(|_| Setting::utc())
 }
 
-/// Load the stored setting and publish its TZ string as `TZ`, in the root task
-/// and in every task without `TZ`. Call it once at start-up, after the file
-/// systems are mounted and before the shell or the startup application starts.
-/// It returns the setting in use, UTC when the stored one is missing or
-/// invalid.
+/// Load the stored setting and publish its TZ string as `TZ` via
+/// [`task::Manager::set_system_environment_variable`] (in the root task and in
+/// every task whose `TZ` matches the root task's previous value, which is every
+/// task without `TZ` when called once at start-up). Call it once at start-up,
+/// after the file systems are mounted and before the shell or the startup
+/// application starts. It returns the setting in use, UTC when the stored one
+/// is missing or invalid.
 pub async fn initialize(
     task_manager: &task::Manager,
     virtual_file_system: &VirtualFileSystem,
