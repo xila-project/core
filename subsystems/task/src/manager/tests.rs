@@ -270,6 +270,55 @@ async fn test_environment_replacement() {
 }
 
 #[test(task_path = crate)]
+async fn test_system_environment_variable() {
+    let manager = initialize();
+    let root = manager.get_current_task_identifier().await;
+    assert_eq!(root, Manager::ROOT_TASK_IDENTIFIER);
+    let value = async |task| {
+        manager
+            .get_environment_variable(task, "System")
+            .await
+            .ok()
+            .map(|variable| alloc::string::String::from(variable.get_value()))
+    };
+
+    // Tasks without the variable follow the root task, which has none.
+    let without = manager.register(root, "Without").await.unwrap();
+    manager.set_system_environment_variable("System", "1").await;
+    assert_eq!(value(root).await.as_deref(), Some("1"));
+    assert_eq!(value(without).await.as_deref(), Some("1"));
+
+    // A new task inherits the value; a task with its own value keeps it.
+    let follower = manager.register(without, "Follower").await.unwrap();
+    let own = manager.register(root, "Own").await.unwrap();
+    manager
+        .set_environment_variable(own, "System", "mine")
+        .await
+        .unwrap();
+    let later = manager.register(root, "Later").await.unwrap();
+    manager
+        .remove_environment_variable(later, "System")
+        .await
+        .unwrap();
+    manager.set_system_environment_variable("System", "2").await;
+    assert_eq!(value(root).await.as_deref(), Some("2"));
+    assert_eq!(value(without).await.as_deref(), Some("2"));
+    assert_eq!(value(follower).await.as_deref(), Some("2"));
+    assert_eq!(value(own).await.as_deref(), Some("mine"));
+    // Once the root task has a value, a task without one is not updated.
+    assert_eq!(value(later).await, None);
+    // Other variables are unaffected.
+    assert_eq!(
+        manager
+            .get_environment_variables(follower)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test(task_path = crate)]
 async fn test_environment_variable_inheritance() {
     let manager = initialize();
 

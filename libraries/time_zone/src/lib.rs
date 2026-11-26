@@ -24,9 +24,10 @@
 //!   a unique instant, both instants of a repeated local time (autumn), or a
 //!   nonexistent local time (spring gap). It never picks one silently.
 //!
-//! With the `iana-all` or `iana-europe` Cargo features, a generated table maps
-//! IANA identifiers such as `Europe/Paris` to their POSIX TZ string; see the
-//! `iana` module. Without a feature, no table is compiled.
+//! With a region feature (`iana-europe`, `iana-america` and the others, which
+//! combine) or `iana-all`, generated tables map IANA identifiers such as
+//! `Europe/Paris` to their POSIX TZ string; see the `iana` module. Without a
+//! feature, the `iana` module has no names and links no table.
 //!
 //! Limit: a POSIX TZ string holds only the current rules of a zone, not its
 //! history. Instants far in the past or future can differ from the full IANA
@@ -55,7 +56,6 @@ extern crate std;
 
 mod civil;
 mod generated;
-#[cfg(any(feature = "iana-all", feature = "iana-europe"))]
 pub mod iana;
 mod parse;
 mod rule;

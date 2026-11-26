@@ -64,7 +64,7 @@ depends = ["clippy:host", "clippy:guest"]
 
 [tasks."docs:host"]
 description = "Build host documentation"
-run = "cargo doc --workspace --features xila/graphics,xila/graphics_rendering_xrgb8888,xila/audio,xila/neural_network,xila/bootsplash,xila/time_zone,xila/time_zone_iana_all,xila-testing/graphics --target x86_64-unknown-linux-gnu"
+run = "cargo doc --workspace --features xila/graphics,xila/graphics_rendering_xrgb8888,xila/audio,xila/neural_network,xila/bootsplash,xila/time_zone,xila-time-zone/iana-all,xila-time-zone/iana-legacy-aliases,xila-testing/graphics --target x86_64-unknown-linux-gnu"
 
 [tasks."docs:guest"]
 description = "Build guest documentation"

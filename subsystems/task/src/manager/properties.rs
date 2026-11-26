@@ -123,6 +123,47 @@ impl Manager {
         Ok(())
     }
 
+    /// Set the system value of the variable `name` to `value`.
+    ///
+    /// The root task gets `value`, and so does every task that still follows
+    /// the system value: a task whose `name` equals the root task's previous
+    /// value, or that has no `name` when the root task had none. A task that
+    /// set a value of its own keeps it. Tasks spawned later inherit `value`
+    /// from their parent, as every variable is inherited.
+    ///
+    /// All updated tasks share one string, and the update holds one lock, so
+    /// no task sees a mix of the old and the new value. A task that set its
+    /// own value equal to the previous system value cannot be told apart from
+    /// one that inherited it, so it follows the change too.
+    pub async fn set_system_environment_variable(&self, name: &str, value: &str) {
+        let variable = EnvironmentVariable::new(name, value);
+
+        let mut inner = self.0.write().await;
+        let previous = inner
+            .tasks
+            .get(&Self::ROOT_TASK_IDENTIFIER)
+            .and_then(|root| {
+                root.environment_variables
+                    .iter()
+                    .find(|variable| variable.get_name() == name)
+            })
+            .cloned();
+        let previous = previous.as_ref().map(EnvironmentVariable::get_value);
+
+        for (identifier, metadata) in inner.tasks.iter_mut() {
+            let current = metadata
+                .environment_variables
+                .iter()
+                .find(|variable| variable.get_name() == name)
+                .map(EnvironmentVariable::get_value);
+            if *identifier != Self::ROOT_TASK_IDENTIFIER && current != previous {
+                continue;
+            }
+            remove_named(&mut metadata.environment_variables, name);
+            metadata.environment_variables.push(variable.clone());
+        }
+    }
+
     pub async fn remove_environment_variable(
         &self,
         task_identifier: TaskIdentifier,

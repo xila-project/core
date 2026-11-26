@@ -102,6 +102,17 @@ impl TimeZone {
         parse::parse(input)
     }
 
+    /// UTC (`UTC0`) as a time zone without parsing at run time.
+    pub const fn utc() -> Self {
+        Self::fixed(
+            Abbreviation {
+                bytes: *b"UTC\0\0\0\0",
+                length: 3,
+            },
+            0,
+        )
+    }
+
     pub(crate) const fn fixed(standard_abbreviation: Abbreviation, standard_offset: i32) -> Self {
         Self {
             standard_abbreviation,

@@ -1,50 +1,68 @@
 #!/usr/bin/env python3
 """Generate the IANA zone name tables of the xila-time-zone crate.
 
-The script reads the IANA time zone database and writes src/generated/all.rs
-and src/generated/europe.rs next to this script. The last line of every TZif
-v2+ file holds the POSIX TZ string of the zone; that string is what the table
-maps the IANA name to.
+The script reads one release of the IANA time zone database and writes one
+table file per region into src/generated, plus src/generated/mod.rs. Each
+table maps IANA names such as `Europe/Paris` to the POSIX TZ string of the
+zone: the last line of its TZif v2+ file, as compiled by zic.
 
-Canonical input: an extracted tzdata release, for example the pinned release
-tzdata 2026f:
+Canonical input: the pinned release tarball, whose SHA-256 the script checks
+before it extracts the tarball:
 
     curl -sO https://data.iana.org/time-zones/releases/tzdata2026f.tar.gz
-    # SHA-256: 01b4a91cec5167ed48c11e8ab78f2048cead78ce94b0cafcad0ae8c5a3044d3d
-    tar xzf tzdata2026f.tar.gz
-    python3 libraries/time_zone/tools/generate_iana_table.py --tzdata tzdata-2026f
+    python3 libraries/time_zone/tools/generate_iana_table.py --archive tzdata2026f.tar.gz
     cargo fmt
 
-The version is read from the `version` file of the release (and cross-checked
-against the `# version` line of `tzdata.zi` when that file is present); the
-script fails if they disagree. The script runs zic itself into a temporary
-work directory (it honours TMPDIR) and removes that directory afterwards.
+An extracted release directory is also accepted with `--tzdata DIR`, without
+the checksum check. The version is read from the `version` file of the release
+(and cross-checked against the `# version` line of `tzdata.zi` when that file
+is present); the script fails if they disagree. The script runs zic itself
+into a temporary work directory (it honours TMPDIR) and removes that directory
+afterwards.
 
-Alternatively a precompiled zoneinfo tree can be used, with an explicit
-version (no default):
+Classification of the names:
 
-    python3 libraries/time_zone/tools/generate_iana_table.py \
-        --zoneinfo /usr/share/zoneinfo --version 2026f
+- A canonical name is a name that tzdata defines with a `Zone` line, or with a
+  `Link` line outside the `backward` file (the `Etc/` names and `GMT` of the
+  `etcetera` file).
+- A listed alias is a `Link` of the `backward` file that `zone.tab` lists for
+  a country, for example `Europe/Amsterdam`, `Europe/Oslo` or
+  `Atlantic/Reykjavik` (zones that tzdata merged into another one). Listed
+  aliases are in the default tables, so that every country keeps its names.
+- A legacy alias is any other `Link` of the `backward` file, for example
+  `US/Eastern`, `Japan`, `GB` or `Asia/Calcutta`.
+- The region of a name is its prefix before the first `/` when that prefix is
+  one of REGIONS (`Europe/Paris` is in `europe`). A canonical name without such
+  a prefix takes the region of the source file that defines it (SOURCE_REGION:
+  `GMT` is in `etc`), or of BACKWARD_ZONE_REGION for the four zones that the
+  `backward` file defines with `Zone` lines (`EST5EDT` is in `america`). A legacy alias without such a
+  prefix takes the region of the zone that it names (its `#=` comment when
+  there is one, otherwise its link target).
+- `Factory` (the `factory` file, a placeholder for an unconfigured system) is
+  in no table.
 
-The Europe subset holds the `Europe/` zones, the European zones outside that
-prefix listed in EUROPE_EXTRA_ZONES, and the backward links whose target is in
-the subset (EUROPE_LINKS in --zoneinfo mode, computed from the `backward` file
-in --tzdata mode).
+Each region file holds two tables: `TABLE` with the canonical names and the
+listed aliases, and `TABLE_WITH_LEGACY_ALIASES` with the legacy aliases too,
+all sorted by name. The crate compiles the second one instead of the first
+with `iana-legacy-aliases`. An alias is a row like any other: its name and
+the index of the TZ string of the zone that it names, shared with that zone.
 
 The IANA time zone database is released into the public domain by IANA
 (https://data.iana.org/time-zones/); the generated files record that
 provenance. Run the iana tests afterwards to check that every generated string
 parses:
 
-    cargo test -p xila-time-zone --features iana-all
+    cargo test -p xila-time-zone --features iana-all,iana-legacy-aliases
 """
 
 import argparse
+import hashlib
 import pathlib
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 
 # Pinned tzdata release that the checked-in tables were generated from.
@@ -66,68 +84,48 @@ ZONE_SOURCE_FILES = [
     "factory",
 ]
 
+# Regions: the Cargo feature is `iana-<region>`, the name prefix is the value.
+REGIONS = {
+    "africa": "Africa",
+    "america": "America",
+    "antarctica": "Antarctica",
+    "arctic": "Arctic",
+    "asia": "Asia",
+    "atlantic": "Atlantic",
+    "australia": "Australia",
+    "etc": "Etc",
+    "europe": "Europe",
+    "indian": "Indian",
+    "pacific": "Pacific",
+}
+
+# Region of a canonical name without a region prefix, by its source file.
+SOURCE_REGION = {
+    "africa": "africa",
+    "antarctica": "antarctica",
+    "asia": "asia",
+    "australasia": "australia",
+    "etcetera": "etc",
+    "europe": "europe",
+    "northamerica": "america",
+    "southamerica": "america",
+}
+
+# Region of the canonical zones that the `backward` file defines with `Zone`
+# lines (the backward-compatibility zones of the United States rules). They are
+# not links, so they are canonical.
+BACKWARD_ZONE_REGION = {
+    "CST6CDT": "america",
+    "EST5EDT": "america",
+    "MST7MDT": "america",
+    "PST8PDT": "america",
+}
+
+# Names in no table.
+EXCLUDED_NAMES = {"Factory"}
+
 # Directories of a zoneinfo tree that repeat the same zones.
 SKIP_DIRECTORIES = {"right", "posix"}
-
-# European zones outside the Europe/ prefix.
-EUROPE_EXTRA_ZONES = [
-    "Africa/Ceuta",
-    "Arctic/Longyearbyen",
-    "Asia/Nicosia",
-    "Atlantic/Azores",
-    "Atlantic/Canary",
-    "Atlantic/Faroe",
-    "Atlantic/Madeira",
-    "Atlantic/Reykjavik",
-    "Iceland",
-]
-
-# Backward links whose target is a European zone (used in --zoneinfo mode,
-# where the `backward` source file is not available).
-EUROPE_LINKS = [
-    "Arctic/Longyearbyen",
-    "Asia/Istanbul",
-    "Atlantic/Faeroe",
-    "Atlantic/Jan_Mayen",
-    "CET",
-    "EET",
-    "Eire",
-    "Europe/Amsterdam",
-    "Europe/Belfast",
-    "Europe/Bratislava",
-    "Europe/Busingen",
-    "Europe/Copenhagen",
-    "Europe/Guernsey",
-    "Europe/Isle_of_Man",
-    "Europe/Jersey",
-    "Europe/Kiev",
-    "Europe/Ljubljana",
-    "Europe/Luxembourg",
-    "Europe/Mariehamn",
-    "Europe/Monaco",
-    "Europe/Nicosia",
-    "Europe/Oslo",
-    "Europe/Podgorica",
-    "Europe/San_Marino",
-    "Europe/Sarajevo",
-    "Europe/Skopje",
-    "Europe/Stockholm",
-    "Europe/Tiraspol",
-    "Europe/Uzhgorod",
-    "Europe/Vaduz",
-    "Europe/Vatican",
-    "Europe/Zagreb",
-    "Europe/Zaporozhye",
-    "GB",
-    "GB-Eire",
-    "Iceland",
-    "MET",
-    "Poland",
-    "Portugal",
-    "Turkey",
-    "W-SU",
-    "WET",
-]
 
 # A light check of the POSIX TZ grammar; the Rust tests parse every string
 # strictly.
@@ -140,11 +138,23 @@ LOOSE_TZ = re.compile(
 )
 
 
+def extract_archive(archive, workdir):
+    """Check the SHA-256 of the release tarball and extract it into workdir."""
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    if digest != TZDATA_RELEASE_SHA256:
+        raise SystemExit(f"SHA-256 of {archive} is {digest}, expected {TZDATA_RELEASE_SHA256}")
+    target = workdir / "tzdata"
+    target.mkdir()
+    with tarfile.open(archive) as release:
+        release.extractall(target, filter="data")
+    return target
+
+
 def read_release_version(tzdata):
     """Read the version of a tzdata release and cross-check its sources."""
     version_file = tzdata / "version"
     if not version_file.is_file():
-        raise SystemExit(f"no `version` file in {tzdata}; pass --zoneinfo and --version instead")
+        raise SystemExit(f"no `version` file in {tzdata}")
     version = version_file.read_text().strip()
     zi = tzdata / "tzdata.zi"
     if zi.is_file():
@@ -165,24 +175,36 @@ def compile_zoneinfo(tzdata, zic, workdir):
     return zoneinfo
 
 
-def europe_links_from_backward(tzdata):
-    """Backward link names whose target (or `#=` comment) is a European zone."""
-    def is_european(name):
-        return name.startswith("Europe/") or name in EUROPE_EXTRA_ZONES
-
-    links = []
-    backward = tzdata / "backward"
-    if not backward.is_file():
-        return sorted(EUROPE_LINKS)
-    for line in backward.read_text().splitlines():
-        if not line.startswith("Link"):
+def read_listed(tzdata):
+    """The zone names that `zone.tab` lists, one or more per country."""
+    listed = set()
+    for line in (tzdata / "zone.tab").read_text().splitlines():
+        if line.startswith("#") or not line.strip():
             continue
-        parts = line.split()
-        target, name = parts[1], parts[2]
-        comment = line.split("#=", 1)[1].strip() if "#=" in line else None
-        if is_european(comment or target):
-            links.append(name)
-    return sorted(set(links))
+        listed.add(line.split("\t")[2].strip())
+    if not listed:
+        raise SystemExit("no rows in zone.tab")
+    return listed
+
+
+def read_sources(tzdata):
+    """The source file of every name, and the aliases of `backward`:
+    {alias: the zone that it names}."""
+    sources = {}
+    aliases = {}
+    for file_name in ZONE_SOURCE_FILES:
+        for line in (tzdata / file_name).read_text().splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[0] == "Zone":
+                sources[parts[1]] = file_name
+            elif len(parts) >= 3 and parts[0] == "Link":
+                sources[parts[2]] = file_name
+                if file_name == "backward":
+                    comment = line.split("#=", 1)[1].strip() if "#=" in line else None
+                    aliases[parts[2]] = comment or parts[1]
+    if not aliases:
+        raise SystemExit("no Link lines in the `backward` file")
+    return sources, aliases
 
 
 def posix_footer(path):
@@ -225,13 +247,44 @@ def collect(zoneinfo):
     return zones
 
 
-def europe_subset(zones, links):
-    """Names of the Europe subset."""
-    return sorted(
-        name
-        for name in zones
-        if name.startswith("Europe/") or name in EUROPE_EXTRA_ZONES or name in links
-    )
+def prefix_region(name):
+    """The region of a name from its prefix, or None."""
+    if "/" not in name:
+        return None
+    prefix = name.split("/", 1)[0]
+    for region, region_prefix in REGIONS.items():
+        if prefix == region_prefix:
+            return region
+    return None
+
+
+def classify(zones, sources, aliases, listed):
+    """{region: (canonical names and listed aliases, legacy aliases)}, each
+    sorted."""
+    def canonical_region(name):
+        region = prefix_region(name)
+        if region is not None:
+            return region
+        source = sources.get(name)
+        if source == "backward" and name in BACKWARD_ZONE_REGION:
+            return BACKWARD_ZONE_REGION[name]
+        if source not in SOURCE_REGION:
+            raise SystemExit(f"no region for {name} (source file {source})")
+        return SOURCE_REGION[source]
+
+    tables = {region: ([], []) for region in REGIONS}
+    for name in sorted(zones):
+        if name in EXCLUDED_NAMES:
+            continue
+        if name in aliases:
+            target = aliases[name]
+            while target in aliases:
+                target = aliases[target]
+            region = prefix_region(name) or canonical_region(target)
+            tables[region][0 if name in listed else 1].append(name)
+        else:
+            tables[canonical_region(name)][0].append(name)
+    return tables
 
 
 def rust_string(text):
@@ -239,30 +292,56 @@ def rust_string(text):
     return text.replace("\\", "\\\\").replace('"', '\\"').replace("\0", "\\0")
 
 
-def emit(path, version, zones, subset, command):
-    """Write one generated table file."""
-    names = sorted(zones) if subset is None else subset
+def table_lines(constant, zones, names, description):
+    """The Rust lines of one table constant."""
     strings = sorted(set(zones[name] for name in names))
     string_index = {value: index for index, value in enumerate(strings)}
+    if len(strings) > 0xFF:
+        raise SystemExit(f"{constant}: {len(strings)} TZ strings do not fit the u8 index")
 
-    names_blob = "".join(name + "\0" for name in names)
-    name_offsets = []
-    offset = 0
-    for name in names:
-        name_offsets.append(offset)
-        offset += len(name) + 1
-    name_offsets.append(offset)  # sentinel, the end of the blob
+    def offsets(values):
+        result = [0]
+        for value in values:
+            result.append(result[-1] + len(value) + 1)
+        if result[-1] > 0xFFFF:
+            raise SystemExit(f"{constant}: a blob of {result[-1]} bytes does not fit the u16 offsets")
+        return result
 
-    strings_blob = "".join(value + "\0" for value in strings)
-    string_offsets = []
-    offset = 0
-    for value in strings:
-        string_offsets.append(offset)
-        offset += len(value) + 1
-    string_offsets.append(offset)  # sentinel
+    def numbers(values, per_line):
+        return [
+            "        " + ", ".join(str(value) for value in values[index : index + per_line]) + ","
+            for index in range(0, len(values), per_line)
+        ]
 
-    zone_string = [string_index[zones[name]] for name in names]
+    def blob(field, values):
+        # `concat!` only for two strings or more: Clippy rejects it otherwise.
+        if len(values) < 2:
+            return [f'    {field}: "' + "".join(rust_string(value) + "\\0" for value in values) + '",']
+        return [f"    {field}: concat!("] + [f'        "{rust_string(value)}\\0",' for value in values] + ["    ),"]
 
+    lines = [f"/// {description} (names: {len(names)}, TZ strings: {len(strings)})."]
+    if constant == "TABLE_WITH_LEGACY_ALIASES":
+        lines.append('#[cfg(feature = "iana-legacy-aliases")]')
+    else:
+        lines.append('#[cfg(not(feature = "iana-legacy-aliases"))]')
+    lines.append(f"pub(crate) const {constant}: Table = Table {{")
+    lines += blob("names", names)
+    lines.append("    name_offsets: &[")
+    lines += numbers(offsets(names), 10)
+    lines.append("    ],")
+    lines.append("    zone_string: &[")
+    lines += numbers([string_index[zones[name]] for name in names], 16)
+    lines.append("    ],")
+    lines += blob("strings", strings)
+    lines.append("    string_offsets: &[")
+    lines += numbers(offsets(strings), 10)
+    lines.append("    ],")
+    lines.append("};")
+    return lines
+
+
+def emit_region(path, version, zones, region, canonical, legacy, command):
+    """Write the table file of one region."""
     lines = [
         f"// Generated by {command}. Do not edit.",
         "//",
@@ -270,83 +349,83 @@ def emit(path, version, zones, subset, command):
         "// " + TZDATA_RELEASE_URL,
         "// SHA-256 of the release tarball: " + TZDATA_RELEASE_SHA256,
         "// The POSIX TZ string of each zone is the last line of its TZif v2+ file.",
-        f"// Zones: {len(names)}. Unique TZ strings: {len(strings)}.",
+        "",
+        "use crate::iana::Table;",
+        "",
+    ]
+    lines += table_lines(
+        "TABLE", zones, canonical, f"Canonical names and listed aliases of the {REGIONS[region]} region"
+    )
+    lines.append("")
+    lines += table_lines(
+        "TABLE_WITH_LEGACY_ALIASES",
+        zones,
+        sorted(canonical + legacy),
+        f"All names of the {REGIONS[region]} region, with the legacy aliases",
+    )
+    lines.append("")
+    path.write_text("\n".join(lines))
+
+
+def emit_module(path, version, command):
+    """Write mod.rs: one module per region feature, and the version."""
+    lines = [
+        f"// Generated by {command}. Do not edit.",
+        "",
+        "//! Generated IANA tables, one module per region.",
+        "//!",
+        "//! Run `tools/generate_iana_table.py` to regenerate them from the pinned",
+        "//! IANA time zone database release, then run `cargo fmt`.",
         "",
         f'pub(crate) const TZDATA_VERSION: &str = "{version}";',
         "",
-        "pub(crate) const NAMES: &str = concat!(",
     ]
-    for name in names:
-        lines.append(f'    "{rust_string(name)}\\0",')
-    lines.append(");")
-    lines.append("")
-    lines.append("pub(crate) const NAME_OFFSETS: &[u32] = &[")
-    for index in range(0, len(name_offsets), 8):
-        lines.append("    " + ", ".join(str(value) for value in name_offsets[index : index + 8]) + ",")
-    lines.append("];")
-    lines.append("")
-    lines.append("pub(crate) const ZONE_STRING: &[u16] = &[")
-    for index in range(0, len(zone_string), 12):
-        lines.append("    " + ", ".join(str(value) for value in zone_string[index : index + 12]) + ",")
-    lines.append("];")
-    lines.append("")
-    lines.append("pub(crate) const STRINGS: &str = concat!(")
-    for value in strings:
-        lines.append(f'    "{rust_string(value)}\\0",')
-    lines.append(");")
-    lines.append("")
-    lines.append("pub(crate) const STRING_OFFSETS: &[u32] = &[")
-    for index in range(0, len(string_offsets), 8):
-        lines.append("    " + ", ".join(str(value) for value in string_offsets[index : index + 8]) + ",")
-    lines.append("];")
+    for region in REGIONS:
+        lines.append(f'#[cfg(feature = "iana-{region}")]')
+        lines.append(f"pub(crate) mod {region};")
     lines.append("")
     path.write_text("\n".join(lines))
-    return len(names), len(strings)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--archive", type=pathlib.Path, default=None,
+                        help="pinned release tarball (canonical input; checked against its SHA-256)")
     parser.add_argument("--tzdata", type=pathlib.Path, default=None,
-                        help="extracted tzdata release directory (canonical input; runs zic)")
-    parser.add_argument("--zoneinfo", type=pathlib.Path, default=None,
-                        help="directory of compiled TZif files (a zoneinfo tree)")
-    parser.add_argument("--version", default=None,
-                        help="tzdata version of a --zoneinfo input (required, no default)")
+                        help="extracted release directory (no checksum check)")
     parser.add_argument("--zic", default="zic", help="path of the zic compiler")
     parser.add_argument("--out-dir", type=pathlib.Path, default=None,
                         help="output directory, default: src/generated next to this script")
     args = parser.parse_args()
+    if (args.archive is None) == (args.tzdata is None):
+        raise SystemExit("pass either --archive or --tzdata")
 
     out_dir = args.out_dir or pathlib.Path(__file__).resolve().parent.parent / "src" / "generated"
     out_dir.mkdir(parents=True, exist_ok=True)
     command = "tools/generate_iana_table.py"
 
-    if args.tzdata is not None:
-        if args.zoneinfo is not None:
-            raise SystemExit("pass either --tzdata or --zoneinfo, not both")
-        version = read_release_version(args.tzdata)
-        workdir = pathlib.Path(tempfile.mkdtemp(prefix="xila-time-zone-generate-"))
-        try:
-            zoneinfo = compile_zoneinfo(args.tzdata, args.zic, workdir)
-            zones = collect(zoneinfo)
-            links = europe_links_from_backward(args.tzdata)
-        finally:
-            shutil.rmtree(workdir, ignore_errors=True)
-    elif args.zoneinfo is not None:
-        if args.version is None:
-            raise SystemExit("--zoneinfo needs an explicit --version (there is no default)")
-        version = args.version
-        zones = collect(args.zoneinfo)
-        links = sorted(EUROPE_LINKS)
-    else:
-        raise SystemExit("pass --tzdata or --zoneinfo")
+    workdir = pathlib.Path(tempfile.mkdtemp(prefix="xila-time-zone-generate-"))
+    try:
+        tzdata = extract_archive(args.archive, workdir) if args.archive else args.tzdata
+        version = read_release_version(tzdata)
+        sources, aliases = read_sources(tzdata)
+        listed = read_listed(tzdata)
+        zones = collect(compile_zoneinfo(tzdata, args.zic, workdir))
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
 
-    subset = europe_subset(zones, links)
-    all_count = emit(out_dir / "all.rs", version, zones, None, command)
-    europe_count = emit(out_dir / "europe.rs", version, zones, subset, command)
-    print(f"all.rs: {all_count[0]} zones, {all_count[1]} unique TZ strings")
-    print(f"europe.rs: {europe_count[0]} zones, {europe_count[1]} unique TZ strings")
-    print(f"tzdata version recorded: {version}")
+    missing = sorted(name for name in aliases if name not in zones)
+    if missing:
+        raise SystemExit(f"legacy aliases without a compiled zone: {', '.join(missing)}")
+
+    tables = classify(zones, sources, aliases, listed)
+    for region, (canonical, legacy) in tables.items():
+        emit_region(out_dir / f"{region}.rs", version, zones, region, canonical, legacy, command)
+        print(f"{region}.rs: {len(canonical)} names by default, {len(legacy)} legacy aliases")
+    emit_module(out_dir / "mod.rs", version, command)
+    total = sum(len(canonical) for canonical, _ in tables.values())
+    legacy = sum(len(legacy) for _, legacy in tables.values())
+    print(f"total: {total} names by default, {legacy} legacy aliases; tzdata {version}")
 
 
 if __name__ == "__main__":
