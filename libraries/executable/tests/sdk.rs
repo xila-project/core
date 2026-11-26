@@ -82,8 +82,16 @@ fn build_sdk_program(source: &Path, name: &str, format: &str) -> Vec<u8> {
     }
     format.hash(&mut hasher);
     name.hash(&mut hasher);
-    let build = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-        .join(format!("sdk-{name}-{:016x}", hasher.finish()));
+    // Isolate each invocation by PID and counter so parallel tests (both under
+    // `cargo test` threads and `cargo nextest` processes) never race on the same
+    // CMake build directory when building the same SDK program.
+    static BUILD_COUNTER: portable_atomic::AtomicUsize = portable_atomic::AtomicUsize::new(0);
+    let build = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "sdk-{name}-{:016x}-{}-{}",
+        hasher.finish(),
+        std::process::id(),
+        BUILD_COUNTER.fetch_add(1, portable_atomic::Ordering::Relaxed),
+    ));
     run(Command::new("cmake")
         .arg("-S")
         .arg(source)
@@ -96,7 +104,9 @@ fn build_sdk_program(source: &Path, name: &str, format: &str) -> Vec<u8> {
         .arg(format!("-DXILA_PRINTF_FORMAT={format}"))
         .arg("-DCMAKE_BUILD_TYPE=MinSizeRel"));
     run(Command::new("cmake").arg("--build").arg(&build));
-    std::fs::read(build.join(format!("{name}.elf"))).unwrap()
+    let image = std::fs::read(build.join(format!("{name}.elf"))).unwrap();
+    let _ = std::fs::remove_dir_all(&build);
+    image
 }
 
 fn build_sdk_example(format: &str) -> Vec<u8> {
