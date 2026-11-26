@@ -54,6 +54,60 @@ struct Control {
     tls: [Cell<usize>; TLS_SLOTS],
     native_context: Cell<*const ()>,
 }
+/// Maximum number of bare-metal CPU cores tracked by the per-core current-coroutine table.
+pub const MAX_CORES: usize = 8;
+
+/// Platform hook returning the calling CPU core's index in `0..MAX_CORES`.
+pub type CoreIdProvider = fn() -> usize;
+
+#[cfg(any(not(target_os = "linux"), test))]
+fn single_core_id() -> usize {
+    0
+}
+
+#[cfg(any(not(target_os = "linux"), test))]
+struct PerCoreCurrent {
+    provider: Cell<CoreIdProvider>,
+    slots: [Cell<usize>; MAX_CORES],
+}
+
+#[cfg(any(not(target_os = "linux"), test))]
+impl PerCoreCurrent {
+    const fn new() -> Self {
+        Self {
+            provider: Cell::new(single_core_id),
+            slots: [const { Cell::new(0) }; MAX_CORES],
+        }
+    }
+
+    fn core_index(&self) -> usize {
+        let core = (self.provider.get())();
+        assert!(
+            core < MAX_CORES,
+            "stackful core id {core} exceeds MAX_CORES ({MAX_CORES})"
+        );
+        core
+    }
+
+    fn get(&self) -> *const Control {
+        let core = self.core_index();
+        self.slots[core].get() as *const Control
+    }
+
+    fn set(&self, value: *const Control) {
+        let core = self.core_index();
+        self.slots[core].set(value as usize);
+    }
+
+    fn set_provider(&self, provider: CoreIdProvider) {
+        assert!(
+            self.slots.iter().all(|slot| slot.get() == 0),
+            "cannot change stackful core id provider while a coroutine is active"
+        );
+        self.provider.set(provider);
+    }
+}
+
 #[cfg(target_os = "linux")]
 std::thread_local! { static CURRENT: Cell<*const Control> = const { Cell::new(core::ptr::null()) }; }
 #[cfg(target_os = "linux")]
@@ -66,14 +120,37 @@ fn set_current(value: *const Control) {
 }
 
 #[cfg(not(target_os = "linux"))]
-static CURRENT: critical_section::Mutex<Cell<usize>> = critical_section::Mutex::new(Cell::new(0));
+static CURRENT: critical_section::Mutex<PerCoreCurrent> =
+    critical_section::Mutex::new(PerCoreCurrent::new());
 #[cfg(not(target_os = "linux"))]
 fn current() -> *const Control {
-    critical_section::with(|cs| CURRENT.borrow(cs).get() as *const Control)
+    critical_section::with(|cs| CURRENT.borrow(cs).get())
 }
 #[cfg(not(target_os = "linux"))]
 fn set_current(value: *const Control) {
-    critical_section::with(|cs| CURRENT.borrow(cs).set(value as usize));
+    critical_section::with(|cs| CURRENT.borrow(cs).set(value));
+}
+
+/// Register the platform hook that identifies the calling CPU core on bare metal.
+///
+/// By default, bare-metal targets assume a single core (index `0`). Multi-core bare-metal
+/// firmware (such as dual-core ESP32-S3 or ESP32-P4) must register a provider once at
+/// start-up before any coroutine runs on a secondary core.
+///
+/// On Linux each OS thread already has its own thread-local current-coroutine pointer, so
+/// this function is a no-op there.
+///
+/// Panics on bare metal if any coroutine is currently active when called.
+///
+/// # Safety
+/// `provider` must return a unique index in `0..MAX_CORES` for each physical CPU core that
+/// can execute concurrently, and must be safe to call inside a `critical_section` without
+/// blocking, allocating, or panicking on valid cores.
+pub unsafe fn set_core_id_provider(provider: CoreIdProvider) {
+    #[cfg(not(target_os = "linux"))]
+    critical_section::with(|cs| CURRENT.borrow(cs).set_provider(provider));
+    #[cfg(target_os = "linux")]
+    let _ = provider;
 }
 
 /// A native coroutine. Neither Send nor Sync: poll it on its creating executor thread.
@@ -110,11 +187,12 @@ impl Coroutine {
     /// the coroutine may keep a pointer into its stack beyond the call that is suspended:
     /// the stack is freed and reused once the coroutine is dropped.
     ///
-    /// On bare metal the current coroutine is one global, so while any coroutine is
-    /// live, no other core may call an API that reaches [`suspend_on`]: the native
-    /// application ABI and the synchronous VFS files and directories. That core would
-    /// see the live coroutine as its own and switch onto its stack. A per-core current
-    /// pointer (xila-project/core#682) lifts this restriction.
+    /// On bare metal, the default current-coroutine slot assumes a single core (`0`).
+    /// Multi-core firmware must register a per-core ID hook with [`set_core_id_provider`]
+    /// before starting coroutines on secondary cores; without one, another core calling
+    /// an API that reaches [`suspend_on`] (the native application ABI or synchronous VFS
+    /// files and directories) while a coroutine is live would see that coroutine as its
+    /// own and switch onto its stack.
     pub unsafe fn new<F: FnOnce() -> i32 + 'static>(stack: Stack, entry: F) -> Self {
         // The entry and corosensei's initial frame sit at the top of the stack.
         assert!(
@@ -532,4 +610,84 @@ where
 /// Bytes in the shared control allocation, including the two Rc reference counts.
 pub const fn control_allocation_size() -> usize {
     core::mem::size_of::<Control>() + 2 * core::mem::size_of::<usize>()
+}
+
+#[cfg(test)]
+mod per_core_tests {
+    use super::*;
+
+    std::thread_local! {
+        static SIMULATED_CORE: Cell<usize> = const { Cell::new(0) };
+    }
+
+    fn simulated_core_id() -> usize {
+        SIMULATED_CORE.with(Cell::get)
+    }
+
+    fn out_of_range_core_id() -> usize {
+        MAX_CORES
+    }
+
+    #[test]
+    fn default_provider_uses_core_zero() {
+        let table = PerCoreCurrent::new();
+        assert!(table.get().is_null());
+        let sentinel = 0x1000usize as *const Control;
+        table.set(sentinel);
+        assert_eq!(table.get(), sentinel);
+        table.set(core::ptr::null());
+        assert!(table.get().is_null());
+    }
+
+    #[test]
+    fn isolates_current_pointer_per_core() {
+        let table = PerCoreCurrent::new();
+        table.set_provider(simulated_core_id);
+
+        let core0_ptr = 0x2000usize as *const Control;
+        let core1_ptr = 0x3000usize as *const Control;
+        let last_core_ptr = 0x4000usize as *const Control;
+
+        SIMULATED_CORE.with(|c| c.set(0));
+        table.set(core0_ptr);
+
+        SIMULATED_CORE.with(|c| c.set(1));
+        assert!(table.get().is_null());
+        table.set(core1_ptr);
+
+        SIMULATED_CORE.with(|c| c.set(MAX_CORES - 1));
+        assert!(table.get().is_null());
+        table.set(last_core_ptr);
+
+        SIMULATED_CORE.with(|c| c.set(0));
+        assert_eq!(table.get(), core0_ptr);
+        SIMULATED_CORE.with(|c| c.set(1));
+        assert_eq!(table.get(), core1_ptr);
+        SIMULATED_CORE.with(|c| c.set(MAX_CORES - 1));
+        assert_eq!(table.get(), last_core_ptr);
+
+        // Clearing all slots allows changing the provider again.
+        table.set(core::ptr::null());
+        SIMULATED_CORE.with(|c| c.set(1));
+        table.set(core::ptr::null());
+        SIMULATED_CORE.with(|c| c.set(0));
+        table.set(core::ptr::null());
+        table.set_provider(single_core_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "while a coroutine is active")]
+    fn rejects_provider_change_while_coroutine_active() {
+        let table = PerCoreCurrent::new();
+        table.set(0x5000usize as *const Control);
+        table.set_provider(simulated_core_id);
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds MAX_CORES")]
+    fn rejects_out_of_range_core_id() {
+        let table = PerCoreCurrent::new();
+        table.set_provider(out_of_range_core_id);
+        let _ = table.get();
+    }
 }

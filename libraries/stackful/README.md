@@ -56,10 +56,12 @@ live observer is rejected because the control block stores one waker.
 spawner explicitly; it must never choose the manager's load-balanced default.
 It returns Core's task join handle and identifier. All handles and the driver
 are !Send/!Sync. Linux permits separate executor threads, each with its own current
-pointer. Bare metal currently permits **one executor core only**, with current
-pointer access protected by short critical sections; interrupts remain enabled
-while native code runs. Never invoke coroutine APIs from an ISR. Dual-core MCU
-execution needs a per-core current-pointer hook before it is supported.
+pointer. Bare metal defaults to a single core (index `0`), with current-pointer
+access protected by short critical sections; interrupts remain enabled while native
+code runs. Never invoke coroutine APIs from an ISR. Multi-core bare-metal firmware
+(such as dual-core ESP32-S3 or ESP32-P4) registers its core-ID reader once at
+start-up with `set_core_id_provider` (up to `MAX_CORES` cores) before running
+coroutines on secondary cores, giving each core an isolated current-coroutine slot.
 The platform supplies the allocator, critical-section implementation, and time
 and executor drivers as usual.
 

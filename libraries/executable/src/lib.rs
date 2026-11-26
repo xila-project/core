@@ -119,6 +119,26 @@ pub use native::NativeFormat;
 
 #[cfg(feature = "native-dev")]
 pub use native_loader;
+#[cfg(all(
+    any(feature = "native-dev", feature = "native-linked"),
+    any(
+        all(
+            any(target_arch = "x86_64", target_arch = "aarch64"),
+            target_os = "linux"
+        ),
+        all(
+            any(
+                target_arch = "x86_64",
+                target_arch = "aarch64",
+                target_arch = "arm",
+                target_arch = "riscv32",
+                target_arch = "xtensa"
+            ),
+            target_os = "none"
+        )
+    )
+))]
+pub use stackful;
 pub use standard::*;
 pub use task as exported_task;
 pub use traits::*;
