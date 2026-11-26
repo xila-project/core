@@ -82,8 +82,16 @@ fn build_sdk_program(source: &Path, name: &str, format: &str) -> Vec<u8> {
     }
     format.hash(&mut hasher);
     name.hash(&mut hasher);
-    let build = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-        .join(format!("sdk-{name}-{:016x}", hasher.finish()));
+    // Isolate each invocation by PID and counter so parallel tests (both under
+    // `cargo test` threads and `cargo nextest` processes) never race on the same
+    // CMake build directory when building the same SDK program.
+    static BUILD_COUNTER: portable_atomic::AtomicUsize = portable_atomic::AtomicUsize::new(0);
+    let build = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "sdk-{name}-{:016x}-{}-{}",
+        hasher.finish(),
+        std::process::id(),
+        BUILD_COUNTER.fetch_add(1, portable_atomic::Ordering::Relaxed),
+    ));
     run(Command::new("cmake")
         .arg("-S")
         .arg(source)
@@ -96,7 +104,9 @@ fn build_sdk_program(source: &Path, name: &str, format: &str) -> Vec<u8> {
         .arg(format!("-DXILA_PRINTF_FORMAT={format}"))
         .arg("-DCMAKE_BUILD_TYPE=MinSizeRel"));
     run(Command::new("cmake").arg("--build").arg(&build));
-    std::fs::read(build.join(format!("{name}.elf"))).unwrap()
+    let image = std::fs::read(build.join(format!("{name}.elf"))).unwrap();
+    let _ = std::fs::remove_dir_all(&build);
+    image
 }
 
 fn build_sdk_example(format: &str) -> Vec<u8> {
@@ -990,4 +1000,560 @@ async fn runs_sdk_network_probe() {
     .await;
     assert_eq!(status, 0, "{}", String::from_utf8_lossy(&stderr));
     assert_eq!(stdout, b"no-network: ok\nspawn: ok\n");
+}
+
+// ---------------------------------------------------------------------------------------
+// The hexdump example, in both of its forms: the ELF the native loader runs
+// (/hexdump.elf) and the localized archive linked into this test binary and mounted at
+// /linked/hexdump. The dynamic ELF test always runs under native-dev; the linked-archive
+// tests additionally require native-linked and the xila_linked_hexdump cfg emitted by
+// build.rs (enforced via XILA_REQUIRE_LINKED_HEXDUMP=1 in `test:native-loader`).
+// ---------------------------------------------------------------------------------------
+
+mod hexdump {
+    use super::*;
+    use file_system::StateFlags;
+
+    /// The example's sample input: printable ASCII, control bytes and high bytes.
+    fn hexdump_sample() -> Vec<u8> {
+        let mut sample = b"Hello, Xila!\n".to_vec();
+        sample.extend_from_slice(&[
+            0x00, 0x01, 0x08, 0x09, 0x0a, 0x1f, 0x20, 0x7e, 0x7f, 0x80, 0xfe, 0xff,
+        ]);
+        sample.extend_from_slice(b"0123456789abcdef");
+        sample
+    }
+
+    /// The canonical dump of `data` with these -s/-n/-c settings, exactly as hexdump.c
+    /// prints it (see its usage text): %08lx, two spaces, hex bytes separated by single
+    /// spaces (one extra space after the 8th byte of a 16-column row, partial final rows
+    /// padded with spaces to align the ASCII column), two spaces, then the printable
+    /// bytes or '.' between pipes.
+    fn expected_dump(data: &[u8], skip: usize, limit: usize, columns: usize) -> Vec<u8> {
+        let start = skip.min(data.len());
+        let end = if limit == usize::MAX {
+            data.len()
+        } else {
+            start.saturating_add(limit).min(data.len())
+        };
+        let mut out = Vec::new();
+        let mut offset = skip as u64;
+        for row in data[start..end].chunks(columns) {
+            out.extend_from_slice(format!("{offset:08x}  ").as_bytes());
+            for index in 0..columns {
+                if index > 0 {
+                    out.push(b' ');
+                }
+                if let Some(byte) = row.get(index) {
+                    out.extend_from_slice(format!("{byte:02x}").as_bytes());
+                } else {
+                    out.extend_from_slice(b"  ");
+                }
+                if columns == 16 && index == 7 {
+                    out.push(b' ');
+                }
+            }
+            out.extend_from_slice(b"  |");
+            for byte in row {
+                out.push(if (0x20..=0x7e).contains(byte) {
+                    *byte
+                } else {
+                    b'.'
+                });
+            }
+            out.extend_from_slice(b"|\n");
+            offset += row.len() as u64;
+        }
+        out
+    }
+
+    /// A context with the SDK's loader, a filesystem and the entropy device the linked
+    /// runs initialize from.
+    async fn hexdump_setup() -> (&'static ExecutableContext, TaskIdentifier) {
+        let (context, parent) = setup().await;
+        let vfs = context.virtual_file_system;
+        vfs.create_directory(parent, &"/devices").await.unwrap();
+        vfs.create_directory(parent, &"/devices/random")
+            .await
+            .unwrap();
+        vfs.mount_character_device(parent, "/devices/random/source", FixtureEntropy)
+            .await
+            .unwrap();
+        (context, parent)
+    }
+
+    /// An empty stdin file.
+    async fn empty_input(vfs: &'static VirtualFileSystem, parent: TaskIdentifier) -> File<'static> {
+        let create = Flags::new(
+            AccessFlags::READ_WRITE,
+            Some(CreateFlags::CREATE_TRUNCATE),
+            None,
+        );
+        File::open(vfs, parent, "/input", create).await.unwrap()
+    }
+
+    /// A pipe holding `bytes` whose writer is already closed: a non-seekable stdin that
+    /// ends in EOF after the bytes.
+    async fn pipe_input(vfs: &'static VirtualFileSystem, bytes: &[u8]) -> File<'static> {
+        let (reader, mut writer) = vfs
+            .create_unnamed_pipe(512, StateFlags::empty())
+            .await
+            .unwrap();
+        assert_eq!(writer.write(bytes).await.unwrap(), bytes.len());
+        writer.close(vfs).await.unwrap();
+        reader
+    }
+
+    /// The standard streams of a run labelled `label`, with `input` as stdin and
+    /// /{label}.out, /{label}.err as stdout and stderr.
+    async fn hexdump_standard(
+        context: &'static ExecutableContext,
+        parent: TaskIdentifier,
+        label: &str,
+        input: File<'static>,
+    ) -> Standard<'static> {
+        let vfs = context.virtual_file_system;
+        let create = Flags::new(
+            AccessFlags::READ_WRITE,
+            Some(CreateFlags::CREATE_TRUNCATE),
+            None,
+        );
+        let output = File::open(vfs, parent, format!("/{label}.out").as_str(), create)
+            .await
+            .unwrap();
+        let error = File::open(vfs, parent, format!("/{label}.err").as_str(), create)
+            .await
+            .unwrap();
+        Standard::new(context, input, output, error)
+    }
+
+    /// Run `path` with `arguments` and `input` as stdin, to its end; returns the exit
+    /// status, stdout and stderr.
+    async fn run_hexdump(
+        context: &'static ExecutableContext,
+        parent: TaskIdentifier,
+        path: &str,
+        label: &str,
+        arguments: &[&str],
+        input: File<'static>,
+    ) -> (isize, Vec<u8>, Vec<u8>) {
+        let vfs = context.virtual_file_system;
+        let standard = hexdump_standard(context, parent, label, input).await;
+        let launch = Launch::default().with_home(Home {
+            path: PathOwned::new("/".into()).unwrap(),
+            rights: XILA_RIGHT_READ | XILA_RIGHT_WRITE,
+        });
+        let handle = execute_with(
+            context,
+            path,
+            arguments
+                .iter()
+                .map(|argument| (*argument).into())
+                .collect(),
+            standard,
+            None,
+            launch,
+        )
+        .await
+        .unwrap();
+        let status = handle.join().await;
+        assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
+        (
+            status,
+            read_all(vfs, parent, &format!("/{label}.out")).await,
+            read_all(vfs, parent, &format!("/{label}.err")).await,
+        )
+    }
+
+    /// The shared hexdump suite, run against the program at `path`: (status, stdout,
+    /// stderr) of six scenarios, in order.
+    async fn hexdump_suite(
+        context: &'static ExecutableContext,
+        parent: TaskIdentifier,
+        path: &str,
+        tag: &str,
+    ) -> Vec<(isize, Vec<u8>, Vec<u8>)> {
+        let vfs = context.virtual_file_system;
+        let sample = hexdump_sample();
+        install(vfs, parent, "/sample.bin", &sample).await;
+        install(vfs, parent, "/part-a.bin", b"Hello").await;
+        install(vfs, parent, "/part-b.bin", b", Xila!\n").await;
+        let mut results = Vec::new();
+        // 1. Canonical dump of a file in the home directory.
+        results.push(
+            run_hexdump(
+                context,
+                parent,
+                path,
+                &format!("{tag}-file"),
+                &["sample.bin"],
+                empty_input(vfs, parent).await,
+            )
+            .await,
+        );
+        // 2. Pipe/stdin dump: the non-seekable skip, the length limit and a custom width.
+        let pipe = pipe_input(vfs, &sample).await;
+        results.push(
+            run_hexdump(
+                context,
+                parent,
+                path,
+                &format!("{tag}-pipe"),
+                &["-s", "2", "-n", "6", "-c", "4"],
+                pipe,
+            )
+            .await,
+        );
+        // 3. Round trip: -r turns the dump of scenario 1 back into the original bytes.
+        let dump = results[0].1.clone();
+        let pipe = pipe_input(vfs, &dump).await;
+        results.push(
+            run_hexdump(
+                context,
+                parent,
+                path,
+                &format!("{tag}-reverse"),
+                &["-r"],
+                pipe,
+            )
+            .await,
+        );
+        // 4. Multi-file -s carryover: skipping 7 bytes skips all 5 of part-a.bin and the
+        // first 2 of part-b.bin, starting at offset 0x00000007.
+        results.push(
+            run_hexdump(
+                context,
+                parent,
+                path,
+                &format!("{tag}-multi-skip"),
+                &["-s", "7", "part-a.bin", "part-b.bin"],
+                empty_input(vfs, parent).await,
+            )
+            .await,
+        );
+        // 5. A missing file: the strerror(ENOENT) diagnostic on stderr, exit 1.
+        results.push(
+            run_hexdump(
+                context,
+                parent,
+                path,
+                &format!("{tag}-missing"),
+                &["/no-such-file.bin"],
+                empty_input(vfs, parent).await,
+            )
+            .await,
+        );
+        // 6. An invalid option: the usage diagnostic on stderr, exit 2.
+        results.push(
+            run_hexdump(
+                context,
+                parent,
+                path,
+                &format!("{tag}-bad-option"),
+                &["-Z"],
+                empty_input(vfs, parent).await,
+            )
+            .await,
+        );
+        results
+    }
+
+    fn assert_suite_expectations(
+        results: &[(isize, Vec<u8>, Vec<u8>)],
+        program: &str,
+        negated_exit: bool,
+    ) {
+        let sample = hexdump_sample();
+        assert_eq!(results.len(), 6);
+        assert_eq!(
+            results[0],
+            (0, expected_dump(&sample, 0, usize::MAX, 16), Vec::new())
+        );
+        assert_eq!(results[1], (0, expected_dump(&sample, 2, 6, 4), Vec::new()));
+        assert_eq!(results[2], (0, sample, Vec::new()));
+        assert_eq!(
+            results[3],
+            (
+                0,
+                expected_dump(b"Hello, Xila!\n", 7, usize::MAX, 16),
+                Vec::new()
+            )
+        );
+        let sign: isize = if negated_exit { -1 } else { 1 };
+        assert_eq!(results[4].0, sign);
+        assert_eq!(results[4].1, Vec::new());
+        assert_eq!(
+            results[4].2,
+            format!("{program}: /no-such-file.bin: No such file or directory\n").into_bytes()
+        );
+        assert_eq!(results[5].0, 2 * sign);
+        assert_eq!(results[5].1, Vec::new());
+        assert!(
+            results[5]
+                .2
+                .starts_with(format!("usage: {program} [-r]").as_bytes()),
+            "{}",
+            String::from_utf8_lossy(&results[5].2)
+        );
+    }
+
+    /// Always runs under `native-dev` (independent of `native-linked`): builds and
+    /// exercises the dynamic `/hexdump.elf` through the native loader.
+    #[task::test]
+    async fn runs_sdk_hexdump_elf() {
+        let (context, parent) = hexdump_setup().await;
+        let vfs = context.virtual_file_system;
+        install(
+            vfs,
+            parent,
+            "/hexdump.elf",
+            &build_sdk_program(
+                &sdk_directory().join("share/xila/example/hexdump"),
+                "hexdump",
+                "integer",
+            ),
+        )
+        .await;
+        let dynamic = hexdump_suite(context, parent, "/hexdump.elf", "elf-only").await;
+        assert_suite_expectations(&dynamic, "hexdump.elf", false);
+    }
+
+    #[cfg(all(feature = "native-linked", xila_linked_hexdump))]
+    mod linked {
+        use super::*;
+        use core::task::Poll;
+        use executable::{
+            BUSY_FAILURE, ExecutableTrait, LinkedHome, linked_executable, mount_executables,
+        };
+        use std::future::poll_fn;
+
+        /// The localized SDK hexdump example, linked into this test binary by build.rs.
+        mod linked_hexdump {
+            include!(concat!(env!("OUT_DIR"), "/hexdump_linked.rs"));
+        }
+
+        // The statically linked archive form of the example, mounted at /linked/hexdump.
+        // Exclusive, because two concurrent launches of one localized C program would
+        // share its globals.
+        linked_executable!(unsafe LinkedHexdump => linked_hexdump::xila_linked_hexdump, exclusive, stack_size = 64 * 1024, home = LinkedHome::read_write(PathOwned::new("/".into()).unwrap()));
+
+        /// The diagnostics name the program as argv[0]: "hexdump.elf" when loaded,
+        /// "hexdump" when linked. Normalize that difference before comparing.
+        fn normalize_program_name(bytes: &[u8]) -> Vec<u8> {
+            String::from_utf8_lossy(bytes)
+                .replace("hexdump.elf", "hexdump")
+                .into_bytes()
+        }
+
+        /// The exact same suite against the dynamic ELF and against the statically linked
+        /// archive: byte-for-byte identical stdout, stderr (modulo argv[0]) and exit codes.
+        #[task::test]
+        async fn hexdump_matches_between_the_loaded_elf_and_the_linked_archive() {
+            let (context, parent) = hexdump_setup().await;
+            let vfs = context.virtual_file_system;
+            install(
+                vfs,
+                parent,
+                "/hexdump.elf",
+                &build_sdk_program(
+                    &sdk_directory().join("share/xila/example/hexdump"),
+                    "hexdump",
+                    "integer",
+                ),
+            )
+            .await;
+            vfs.create_directory(parent, &"/linked").await.unwrap();
+            mount_executables!(context, vfs, parent, &[(&"/linked/hexdump", LinkedHexdump)])
+                .await
+                .unwrap();
+
+            let dynamic = hexdump_suite(context, parent, "/hexdump.elf", "elf").await;
+            let linked = hexdump_suite(context, parent, "/linked/hexdump", "linked").await;
+            assert_suite_expectations(&dynamic, "hexdump.elf", false);
+            // A linked entry's exit status is reported negated (see tests/linked.rs),
+            // while the loaded ELF reports it raw.
+            assert_suite_expectations(&linked, "hexdump", true);
+
+            // And the two modes agree byte for byte on every scenario (the exit status
+            // modulo the sign convention above).
+            for (dynamic_result, linked_result) in dynamic.iter().zip(&linked) {
+                assert_eq!(
+                    dynamic_result.0.unsigned_abs(),
+                    linked_result.0.unsigned_abs()
+                );
+                assert_eq!(dynamic_result.1, linked_result.1);
+                assert_eq!(
+                    normalize_program_name(&dynamic_result.2),
+                    normalize_program_name(&linked_result.2)
+                );
+            }
+        }
+
+        /// The linked mode on its own: sequential relaunches with different flags (getopt's
+        /// globals are reset on every launch), a run cancelled mid-pipe-read followed by a
+        /// clean relaunch, and a concurrent launch that fails BUSY_FAILURE while an instance
+        /// is suspended.
+        #[task::test]
+        async fn linked_hexdump_relaunches_cancels_mid_read_and_fails_busy() {
+            let (context, parent) = hexdump_setup().await;
+            let vfs = context.virtual_file_system;
+            vfs.create_directory(parent, &"/linked").await.unwrap();
+            mount_executables!(context, vfs, parent, &[(&"/linked/hexdump", LinkedHexdump)])
+                .await
+                .unwrap();
+            let sample = hexdump_sample();
+            install(vfs, parent, "/sample.bin", &sample).await;
+
+            // Sequential relaunches, each with its own flags.
+            let cases: [(&str, Vec<&str>, Vec<u8>); 3] = [
+                (
+                    "rel-c4",
+                    vec!["-c", "4", "sample.bin"],
+                    expected_dump(&sample, 0, usize::MAX, 4),
+                ),
+                (
+                    "rel-n3",
+                    vec!["-n", "3", "sample.bin"],
+                    expected_dump(&sample, 0, 3, 16),
+                ),
+                (
+                    "rel-sn",
+                    vec!["-s", "1", "-n", "5", "-c", "8", "sample.bin"],
+                    expected_dump(&sample, 1, 5, 8),
+                ),
+            ];
+            for (label, arguments, expected) in cases {
+                let result = run_hexdump(
+                    context,
+                    parent,
+                    "/linked/hexdump",
+                    label,
+                    &arguments,
+                    empty_input(vfs, parent).await,
+                )
+                .await;
+                assert_eq!(result, (0, expected, Vec::new()), "{label}");
+            }
+
+            // Poll a run once on the test's real task context: the in-memory VFS and
+            // buffered pipe bytes are ready immediately, so a single poll runs through
+            // startup, enters C main, consumes the available bytes, flushes every full
+            // row to stdout, and suspends on the next pipe read.
+            async fn suspend(run: &mut executable::MainFuture) -> bool {
+                poll_fn(|cx| Poll::Ready(run.as_mut().poll(cx).is_pending())).await
+            }
+
+            // A run cancelled mid-pipe-read: the stdin pipe holds the whole 41-byte
+            // sample while its writer stays open, and stdout is a pipe so we can observe
+            // the flushed rows before dropping the run (LittleFS buffers file writes
+            // until close). hexdump prints and flushes the first two full 16-byte rows
+            // (stdout is line-buffered) and then blocks in fread waiting for more bytes
+            // of the third row.
+            let (in_reader, mut in_writer) = vfs
+                .create_unnamed_pipe(512, StateFlags::empty())
+                .await
+                .unwrap();
+            let (mut out_reader, out_writer) = vfs
+                .create_unnamed_pipe(512, StateFlags::empty())
+                .await
+                .unwrap();
+            let create = Flags::new(
+                AccessFlags::READ_WRITE,
+                Some(CreateFlags::CREATE_TRUNCATE),
+                None,
+            );
+            let error = File::open(vfs, parent, "/cancel.err", create)
+                .await
+                .unwrap();
+            assert_eq!(in_writer.write(&sample).await.unwrap(), sample.len());
+            let mut run =
+                LinkedHexdump::main(Standard::new(context, in_reader, out_writer, error), vec![]);
+            assert!(
+                suspend(&mut run).await,
+                "the run did not suspend on the pipe read"
+            );
+            // Proves execution genuinely entered hexdump, flushed two full rows, and
+            // suspended mid-read before we drop it.
+            let expected_partial = expected_dump(&sample[..32], 0, 32, 16);
+            let mut partial = vec![0u8; expected_partial.len()];
+            assert_eq!(
+                out_reader.read(&mut partial).await.unwrap(),
+                expected_partial.len()
+            );
+            assert_eq!(partial, expected_partial);
+            drop(run); // cancelled mid-pipe-read: the slot and the SDK state are released
+            out_reader.close(vfs).await.unwrap();
+            in_writer.close(vfs).await.unwrap();
+            // A clean relaunch right after the cancellation.
+            let result = run_hexdump(
+                context,
+                parent,
+                "/linked/hexdump",
+                "after-cancel",
+                &["sample.bin"],
+                empty_input(vfs, parent).await,
+            )
+            .await;
+            assert_eq!(
+                result,
+                (0, expected_dump(&sample, 0, usize::MAX, 16), Vec::new())
+            );
+
+            // One instance suspended on a pipe read holds the exclusive slot: a concurrent
+            // launch fails with BUSY_FAILURE without running the entry.
+            let (in_reader, mut in_writer) = vfs
+                .create_unnamed_pipe(512, StateFlags::empty())
+                .await
+                .unwrap();
+            let (mut out_reader, out_writer) = vfs
+                .create_unnamed_pipe(512, StateFlags::empty())
+                .await
+                .unwrap();
+            let error = File::open(vfs, parent, "/busy-first.err", create)
+                .await
+                .unwrap();
+            assert_eq!(in_writer.write(&sample[..16]).await.unwrap(), 16);
+            let mut first =
+                LinkedHexdump::main(Standard::new(context, in_reader, out_writer, error), vec![]);
+            assert!(suspend(&mut first).await, "the first run did not suspend");
+            let expected_row = expected_dump(&sample[..16], 0, 16, 16);
+            let mut first_row = vec![0u8; expected_row.len()];
+            assert_eq!(
+                out_reader.read(&mut first_row).await.unwrap(),
+                expected_row.len()
+            );
+            assert_eq!(first_row, expected_row);
+            let second = LinkedHexdump::main(
+                hexdump_standard(
+                    context,
+                    parent,
+                    "busy-second",
+                    empty_input(vfs, parent).await,
+                )
+                .await,
+                vec!["sample.bin".into()],
+            )
+            .await;
+            assert_eq!(second, Err(BUSY_FAILURE));
+            // Release the first: closing the writer ends its read with EOF, it exits cleanly
+            // and frees the slot.
+            in_writer.close(vfs).await.unwrap();
+            assert_eq!(first.await, Ok(()));
+            out_reader.close(vfs).await.unwrap();
+            // A new launch after that runs to completion.
+            let result = run_hexdump(
+                context,
+                parent,
+                "/linked/hexdump",
+                "after-busy",
+                &["sample.bin"],
+                empty_input(vfs, parent).await,
+            )
+            .await;
+            assert_eq!(
+                result,
+                (0, expected_dump(&sample, 0, usize::MAX, 16), Vec::new())
+            );
+        }
+    }
 }

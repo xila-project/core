@@ -574,7 +574,7 @@ def link_archive(args):
         if leftover:
             sys.exit("error: localization left undefined symbols in the archive: " +
                      ", ".join(leftover))
-    print(f"linked archive: {output} (only global symbol: {entry})")
+    print(f"linked archive: {output} (entry: {entry})")
 
 
 def resource_dir(target):
@@ -631,7 +631,8 @@ def assemble(target, pin, install, crt0, crt0_linked, libraries, work):
     (root / "include/xila").mkdir(parents=True, exist_ok=True)
     (root / "lib").mkdir(exist_ok=True)
     (root / "cmake").mkdir(exist_ok=True)
-    (root / "share/xila/example/hello").mkdir(parents=True, exist_ok=True)
+    for example in ("hello", "hexdump"):
+        (root / "share/xila/example" / example).mkdir(parents=True, exist_ok=True)
 
     shutil.copytree(install / "include", root / "include", dirs_exist_ok=True)
     shutil.copytree(SDK_SOURCE / "sdk/posix/include", root / "include", dirs_exist_ok=True)
@@ -645,8 +646,9 @@ def assemble(target, pin, install, crt0, crt0_linked, libraries, work):
     shutil.copy(install / "lib/libc.a", root / "lib/libc.a")
     shutil.copy(install / "lib/libm.a", root / "lib/libm.a")  # empty: libm is inside libc.a
     shutil.copy(LINKER_SCRIPT, root / "lib/xila-static-pie.ld")
-    for example in (SDK_SOURCE / "sdk/example/hello").iterdir():
-        shutil.copy(example, root / "share/xila/example/hello" / example.name)
+    for example in ("hello", "hexdump"):
+        for file in (SDK_SOURCE / "sdk/example" / example).iterdir():
+            shutil.copy(file, root / "share/xila/example" / example / file.name)
     shutil.copy(SDK_SOURCE / "sdk/README.md", root / "README.md")
     for relative, contents in rust_sdk_files().items():
         destination = root / "rust" / relative
@@ -814,6 +816,73 @@ def verify_c_program(target, sdk, name, source, *options):
     return image
 
 
+def compile_packaged_example(target, sdk, name):
+    """Compile an SDK example source exactly like the SDK compiles its own objects: the
+    toolchain file's flags over the packaged headers, so the SDK directory alone suffices.
+    Returns the object path, under target/<target>/example-<name>-linked."""
+    config = TARGETS[target]
+    include = [
+        "-nostdinc",
+        f"-isystem{sdk / 'include/posix'}",
+        f"-isystem{sdk / 'include'}",
+        f"-isystem{resource_dir(target)}/include",
+    ]
+    output = OUTPUT / target / f"example-{name}-linked" / f"{name}.o"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    run(["clang", f"--target={config['triple']}", *config["flags"], *COMMON_FLAGS, *include,
+         "-c", sdk / "share/xila/example" / name / f"{name}.c", "-o", output])
+    return output
+
+
+def parse_nm_defined(text):
+    """Parse `llvm-nm --extern-only --defined-only --format=posix` output into {name: kind}.
+
+    Excludes `N` (debugging labels such as `.Ldebug_info0` or `.LLST0` from GCC's `libgcc.a`)
+    and undefined symbols (`U`), while keeping all global defined classes including `C`
+    (common), `i` (indirect function) and `u` (unique global)."""
+    defined = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue  # an archive member header
+        name, kind = parts[0], parts[1]
+        if kind != "N" and kind != "U" and (kind.isupper() or kind in ("i", "u")):
+            defined[name] = kind
+    return defined
+
+
+def nm_archive_symbols(archive, nm):
+    """(global defined {name: kind}, weak undefined, strong undefined) of an archive."""
+    defined_output = subprocess.run(
+        [nm, "--extern-only", "--defined-only", "--format=posix", str(archive)],
+        capture_output=True, text=True, check=True).stdout
+    defined = parse_nm_defined(defined_output)
+    weak, strong = undefined_symbols(archive, nm)
+    return defined, weak, strong
+
+
+def verify_linked_example(target, sdk, name):
+    """Build lib<name>.a from the example's object with link-archive (entry
+    xila_linked_<name>), check that the entry is the only global defined symbol and that
+    no weak or unexpected undefined symbol remains, and report the localized size."""
+    entry = f"xila_linked_{name}"
+    work = OUTPUT / target / f"example-{name}-linked"
+    obj = compile_packaged_example(target, sdk, name)
+    archive = work / f"lib{name}.a"
+    link_archive(argparse.Namespace(sdk=str(sdk), entry=entry, output=str(archive),
+                                    builtins=[], allow_undefined=[], inputs=[str(obj)]))
+    defined, weak, strong = nm_archive_symbols(archive, find_tool("llvm-nm"))
+    if defined != {entry: "T"}:
+        sys.exit(f"error: {archive}: global defined symbols are {defined}, expected only "
+                 f"{entry} (T)")
+    leftover = weak + sorted(symbol for symbol in strong if symbol not in FIRMWARE_DEFINED)
+    if leftover:
+        sys.exit(f"error: {archive}: undefined symbols remain: {', '.join(leftover)}")
+    run([find_tool("llvm-size"), archive])
+    print(f"{archive}: {archive.stat().st_size} bytes on disk; the only global defined symbol "
+          f"is {entry} (T), no weak and no unexpected undefined symbol remains")
+
+
 def verify_rust_crate(sdk):
     """Check the archived Rust sources and build them outside the checkout."""
     prefix = f"{sdk.name}/rust"
@@ -878,6 +947,12 @@ def verify(args):
         print(f"{name}.elf: environ builder {'present' if links_builder else 'absent'}")
     for name in ("threads", "ssp", "graphics"):
         verify_c_program(target, sdk, name, SDK_SOURCE / "sdk/test" / name)
+    # The hexdump example, in both of its forms: the ELF the loader runs, and the
+    # localized archive link-archive produces for a firmware that links it in.
+    hexdump = verify_c_program(target, sdk, "hexdump", sdk / "share/xila/example/hexdump")
+    run([find_tool("llvm-size"), hexdump])
+    print(f"{hexdump}: ELF file {hexdump.stat().st_size} bytes")
+    verify_linked_example(target, sdk, "hexdump")
     run([find_tool("llvm-size"), image])
     print("\nBytes by origin (map):")
     sizes = map_sizes(map_file.read_text())
