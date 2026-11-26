@@ -20,8 +20,6 @@
 
 #define DEFAULT_COLUMNS 16UL
 #define MAX_COLUMNS 64UL
-/* Largest single fseek step, so a huge -s value never overflows long. */
-#define SEEK_STEP (1UL << 30)
 
 static void print_usage(FILE *stream, const char *program) {
     fprintf(stream,
@@ -34,20 +32,22 @@ static void print_usage(FILE *stream, const char *program) {
             "Each output line is:  %%08lx  hex bytes  |ascii|\\n\n"
             "  the input offset in hex (at least 8 digits), two spaces, the row's\n"
             "  bytes in hex separated by single spaces (one extra space after the\n"
-            "  8th byte when -c is 16 and the row has more than 8 bytes), two spaces,\n"
-            "  then the row's bytes that are printable (0x20..0x7e) or '.' otherwise,\n"
-            "  between pipes.\n"
+            "  8th byte when -c is 16, and partial final rows padded with spaces so\n"
+            "  the ASCII column stays aligned), two spaces, then the row's bytes\n"
+            "  that are printable (0x20..0x7e) or '.' otherwise, between pipes.\n"
             "\n"
             "  -n length    dump at most length bytes (non-negative decimal integer);\n"
             "               with -r, write at most length raw bytes\n"
             "  -s skip      skip skip bytes of input first: fseek on seekable files, a\n"
             "               discard-read loop on non-seekable streams (pipes, stdin)\n"
             "  -c columns   bytes per line, 1..64 (default 16)\n"
-            "  -r           reverse: parse hex input and write the raw bytes to stdout;\n"
-            "               canonical lines and raw hex tokens both work: a leading\n"
-            "               token of 8 or more hex digits followed by more tokens on the\n"
-            "               line is an offset and is skipped, and everything from the\n"
-            "               first '|' on is the ASCII column and is ignored\n"
+            "  -r           reverse: parse hex input produced by this tool or raw\n"
+            "               whitespace-separated hex tokens (not util-linux '*' repeat\n"
+            "               markers or standalone trailing offset lines) and write the\n"
+            "               raw bytes to stdout: a leading token of 8 or more hex\n"
+            "               digits followed by more tokens on the line is an offset\n"
+            "               and is skipped, and everything from the first '|' on is\n"
+            "               the ASCII column and is ignored\n"
             "  -h           print this help on stdout and exit 0\n"
             "\n"
             "Exit status: 0 on success, 1 on an I/O or file-open error (\"<program>:\n"
@@ -65,6 +65,12 @@ static int usage_error(const char *program) {
 static int report_io(const char *program, const char *path) {
     fprintf(stderr, "%s: %s: %s\n", program, path, strerror(errno));
     return 1;
+}
+
+static int report_stdout_io(const char *program) {
+    if (errno == 0)
+        errno = EIO;
+    return report_io(program, "stdout");
 }
 
 static int hex_value(int c) {
@@ -93,39 +99,55 @@ static int parse_count(const char *text, unsigned long *value) {
     return 0;
 }
 
-/* Skip count bytes of stream: fseek while the stream is seekable, then a
- * discard-read loop for non-seekable streams (pipes, stdin from a pipe). */
-static int skip_bytes(FILE *stream, unsigned long count, const char *program,
-                      const char *path) {
-    while (count > 0) {
-        unsigned long step = count > SEEK_STEP ? SEEK_STEP : count;
-        if (fseek(stream, (long)step, SEEK_CUR) != 0)
-            break; /* not seekable: fall back to reading */
-        count -= step;
+/* Skip up to *skip bytes of stream, decrementing *skip and advancing *offset
+ * by the actual number of bytes skipped. Uses ftell/fseek on seekable files so
+ * a skip larger than the current file carries the remainder into the next file,
+ * and falls back to a discard-read loop on non-seekable streams. */
+static int skip_bytes(FILE *stream, unsigned long *skip, unsigned long *offset,
+                      const char *program, const char *path) {
+    long cur = ftell(stream);
+    if (cur >= 0 && fseek(stream, 0, SEEK_END) == 0) {
+        long end = ftell(stream);
+        if (end >= cur) {
+            unsigned long available = (unsigned long)(end - cur);
+            unsigned long advance = *skip < available ? *skip : available;
+            if (advance < available && fseek(stream, cur + (long)advance, SEEK_SET) != 0)
+                return report_io(program, path);
+            *skip -= advance;
+            if (offset != NULL)
+                *offset += advance;
+            return 0;
+        }
+        (void)fseek(stream, cur, SEEK_SET);
     }
     unsigned char discard[MAX_COLUMNS];
-    while (count > 0) {
-        size_t want = count < sizeof discard ? (size_t)count : sizeof discard;
+    while (*skip > 0) {
+        size_t want = *skip < sizeof discard ? (size_t)*skip : sizeof discard;
         size_t got = fread(discard, 1, want, stream);
         if (got == 0) {
             if (ferror(stream))
                 return report_io(program, path);
-            return 0; /* EOF: the rest of the skip is past the end */
+            return 0; /* EOF: remaining *skip carries over to the next file */
         }
-        count -= got;
+        *skip -= got;
+        if (offset != NULL)
+            *offset += got;
     }
     return 0;
 }
 
-/* One canonical line: offset, hex bytes, then the printable ASCII column. */
+/* One canonical line: offset, hex bytes (padded to columns), then the printable ASCII column. */
 static void print_row(unsigned long offset, const unsigned char *row, size_t count,
                       size_t columns) {
     printf("%08lx  ", offset);
-    for (size_t i = 0; i < count; i++) {
+    for (size_t i = 0; i < columns; i++) {
         if (i > 0)
             putchar(' ');
-        printf("%02x", (unsigned)row[i]);
-        if (columns == DEFAULT_COLUMNS && i == 7 && i + 1 < count)
+        if (i < count)
+            printf("%02x", (unsigned)row[i]);
+        else
+            fputs("  ", stdout);
+        if (columns == DEFAULT_COLUMNS && i == 7)
             putchar(' ');
     }
     fputs("  |", stdout);
@@ -138,11 +160,11 @@ static int dump_stream(FILE *stream, const char *path, unsigned long *skip,
                        unsigned long *limit, size_t columns, unsigned long *offset,
                        const char *program) {
     if (*skip > 0) {
-        int status = skip_bytes(stream, *skip, program, path);
-        *offset += *skip; /* skipped bytes are part of the input position */
-        *skip = 0;
+        int status = skip_bytes(stream, skip, offset, program, path);
         if (status != 0)
             return status;
+        if (*skip > 0)
+            return 0; /* this stream ended before finishing the skip */
     }
     unsigned char row[MAX_COLUMNS];
     while (*limit > 0) {
@@ -156,6 +178,8 @@ static int dump_stream(FILE *stream, const char *path, unsigned long *skip,
             break; /* EOF */
         }
         print_row(*offset, row, count, columns);
+        if (ferror(stdout))
+            return report_stdout_io(program);
         *offset += count;
         *limit -= count;
         if (count < want)
@@ -279,10 +303,11 @@ static long read_line(FILE *stream, char **buffer, size_t *capacity) {
 static int reverse_stream(FILE *stream, const char *path, unsigned long *skip,
                           unsigned long *limit, const char *program) {
     if (*skip > 0) {
-        int status = skip_bytes(stream, *skip, program, path);
-        *skip = 0;
+        int status = skip_bytes(stream, skip, NULL, program, path);
         if (status != 0)
             return status;
+        if (*skip > 0)
+            return 0; /* this stream ended before finishing the skip */
     }
     size_t capacity = 256;
     char *line = malloc(capacity);
@@ -352,6 +377,8 @@ int main(int argc, char **argv) {
             break;
         case 'h':
             print_usage(stdout, program);
+            if (fflush(stdout) != 0 || ferror(stdout))
+                return report_stdout_io(program);
             return 0;
         default:
             return usage_error(program);
@@ -360,21 +387,28 @@ int main(int argc, char **argv) {
     size_t columns = (size_t)columns_value;
     unsigned long offset = 0;
     if (optind >= argc) {
-        return process(stdin, "-", reverse, &skip, &limit, columns, &offset, program);
-    }
-    for (int index = optind; index < argc; index++) {
-        const char *path = argv[index];
-        FILE *stream = stdin;
-        if (strcmp(path, "-") != 0) {
-            stream = fopen(path, "rb");
-            if (stream == NULL)
-                return report_io(program, path);
-        }
-        int status = process(stream, path, reverse, &skip, &limit, columns, &offset, program);
-        if (stream != stdin)
-            fclose(stream);
+        int status = process(stdin, "-", reverse, &skip, &limit, columns, &offset, program);
         if (status != 0)
             return status;
+    } else {
+        for (int index = optind; index < argc; index++) {
+            const char *path = argv[index];
+            FILE *stream = stdin;
+            if (strcmp(path, "-") != 0) {
+                stream = fopen(path, "rb");
+                if (stream == NULL)
+                    return report_io(program, path);
+            }
+            int status = process(stream, path, reverse, &skip, &limit, columns, &offset, program);
+            if (stream != stdin)
+                fclose(stream);
+            if (status != 0)
+                return status;
+            if (limit == 0)
+                break;
+        }
     }
+    if (fflush(stdout) != 0 || ferror(stdout))
+        return report_stdout_io(program);
     return 0;
 }

@@ -191,6 +191,7 @@ esac
 description = "Test ELF validation, executable dispatch, native C startup and the SDK's C library on Linux x86-64"
 depends = ["sdk:build"]
 tools."github:nextest-rs/nextest" = "cargo-nextest-{{ vars.nextest_version }}"
+env.XILA_REQUIRE_LINKED_HEXDUMP = "1"
 run = """
 set -eu
 cargo nextest run --locked -p xila-executable --features native-dev,native-linked,graphics,network

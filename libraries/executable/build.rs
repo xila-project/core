@@ -11,7 +11,8 @@
 //! localizes it with `tools/sdk/build.py link-archive` into `libxila_linked_hexdump.a`,
 //! which the test binary links and mounts as `/linked/hexdump`. Without a built SDK it
 //! writes a fallback module and emits no `xila_linked_hexdump` cfg, so the test skips
-//! the linked mode instead of failing the build.
+//! the linked mode instead of failing the build (unless `XILA_REQUIRE_LINKED_HEXDUMP=1`
+//! is set, which fails the build loudly if the linked archive cannot be built).
 
 use std::{
     env, fs,
@@ -34,8 +35,15 @@ const HOST_TARGET: &str = "x86_64-unknown-linux-gnu";
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=tests/linked_c");
+    println!("cargo:rerun-if-changed={HEXDUMP_SOURCE}");
+    println!("cargo:rerun-if-changed=../../tools/sdk/build.py");
+    // Watch the default host SDK directory unconditionally so building the SDK after a
+    // fallback build retriggers build.rs instead of keeping the cached fallback.
+    println!("cargo:rerun-if-changed=../../target/sdk/{HOST_TARGET}");
     // The tool lookup goes through PATH (and clang's -print-prog-name).
     println!("cargo:rerun-if-env-changed=PATH");
+    println!("cargo:rerun-if-env-changed=XILA_SDK_DIRECTORY");
+    println!("cargo:rerun-if-env-changed=XILA_REQUIRE_LINKED_HEXDUMP");
     // Declared unconditionally, so rustc and clippy never warn about the cfg below.
     println!("cargo:rustc-check-cfg=cfg(xila_linked_hexdump)");
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
@@ -43,6 +51,7 @@ fn main() {
 
     let linked = env::var_os("CARGO_FEATURE_NATIVE_LINKED").is_some();
     let native_dev = env::var_os("CARGO_FEATURE_NATIVE_DEV").is_some();
+    let require_linked_hexdump = env::var("XILA_REQUIRE_LINKED_HEXDUMP").as_deref() == Ok("1");
     let host = env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux")
         && env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("x86_64");
     if !linked || !host {
@@ -51,6 +60,11 @@ fn main() {
         return;
     }
     let Some(tools) = find_tools() else {
+        if native_dev && require_linked_hexdump {
+            panic!(
+                "XILA_REQUIRE_LINKED_HEXDUMP=1: missing one of clang, ld.lld, llvm-objcopy, llvm-ar"
+            );
+        }
         write_fallback(&out_dir);
         write_hexdump_module(&out_dir, false);
         return;
@@ -129,12 +143,25 @@ fn main() {
 
     // The hexdump example archive, for the dual-mode suite of tests/sdk.rs: only with
     // native-dev too (that test is the only consumer) and a built host SDK. Otherwise
-    // the test skips the linked mode instead of failing the build.
-    if native_dev && build_hexdump_archive(&out_dir, &manifest, &tools) {
-        println!("cargo:rustc-link-search=native={}", out_dir.display());
-        println!("cargo:rustc-link-lib=static=xila_linked_hexdump");
-        println!("cargo:rustc-cfg=xila_linked_hexdump");
-        write_hexdump_module(&out_dir, true);
+    // the test skips the linked mode instead of failing the build, unless
+    // XILA_REQUIRE_LINKED_HEXDUMP=1 is set (as in test:native-loader).
+    if native_dev {
+        match build_hexdump_archive(&out_dir, &manifest, &tools) {
+            Ok(()) => {
+                println!("cargo:rustc-link-search=native={}", out_dir.display());
+                println!("cargo:rustc-link-lib=static=xila_linked_hexdump");
+                println!("cargo:rustc-cfg=xila_linked_hexdump");
+                write_hexdump_module(&out_dir, true);
+            }
+            Err(reason) => {
+                if require_linked_hexdump {
+                    panic!(
+                        "XILA_REQUIRE_LINKED_HEXDUMP=1: failed to build libxila_linked_hexdump.a: {reason}"
+                    );
+                }
+                write_hexdump_module(&out_dir, false);
+            }
+        }
     } else {
         write_hexdump_module(&out_dir, false);
     }
@@ -142,10 +169,12 @@ fn main() {
 
 /// Compile the SDK's hexdump example with the packaged SDK's headers and localize it
 /// with `tools/sdk/build.py link-archive`, exactly as a firmware build would. Returns
-/// false, building nothing, when no host SDK is available or a tool is missing.
-fn build_hexdump_archive(out_dir: &Path, manifest: &Path, tools: &Tools) -> bool {
+/// `Err(reason)`, building nothing, when no host SDK is available or a tool is missing.
+fn build_hexdump_archive(out_dir: &Path, manifest: &Path, tools: &Tools) -> Result<(), String> {
     let Some(sdk) = host_sdk_directory(manifest) else {
-        return false;
+        return Err(format!(
+            "no complete {HOST_TARGET} SDK found in XILA_SDK_DIRECTORY or target/sdk/{HOST_TARGET}"
+        ));
     };
     // link-archive needs all of these; check them here so a partial toolset skips the
     // archive instead of failing the build.
@@ -157,16 +186,14 @@ fn build_hexdump_archive(out_dir: &Path, manifest: &Path, tools: &Tools) -> bool
         "llvm-readobj",
     ] {
         if find_tool(name).is_none() {
-            return false;
+            return Err(format!("missing tool {name}"));
         }
     }
     let Some(python) = which("python3") else {
-        return false;
+        return Err("missing python3 on PATH".into());
     };
     let source = manifest.join(HEXDUMP_SOURCE);
     let build_py = manifest.join("../../tools/sdk/build.py");
-    println!("cargo:rerun-if-changed={}", source.display());
-    println!("cargo:rerun-if-changed={}", build_py.display());
     for file in [
         "sdk.json",
         "cmake/xila-toolchain.cmake",
@@ -177,7 +204,6 @@ fn build_hexdump_archive(out_dir: &Path, manifest: &Path, tools: &Tools) -> bool
     ] {
         println!("cargo:rerun-if-changed={}", sdk.join(file).display());
     }
-    println!("cargo:rerun-if-env-changed=XILA_SDK_DIRECTORY");
 
     let resource = Command::new(&tools.clang)
         .arg("--target=x86_64-unknown-none-elf")
@@ -188,7 +214,7 @@ fn build_hexdump_archive(out_dir: &Path, manifest: &Path, tools: &Tools) -> bool
         .filter(|output| output.status.success())
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string());
     let Some(resource) = resource else {
-        return false;
+        return Err("clang -print-resource-dir failed".into());
     };
     let object = out_dir.join("hexdump.o");
     // The same flags and include layout as the SDK's toolchain file, over the packaged
@@ -227,17 +253,16 @@ fn build_hexdump_archive(out_dir: &Path, manifest: &Path, tools: &Tools) -> bool
         .arg("--output")
         .arg(&archive)
         .arg(&object));
-    true
+    Ok(())
 }
 
-/// The built host SDK: `XILA_SDK_DIRECTORY` when it holds one, else the newest
-/// `xila-sdk-*` directory under the workspace's `target/sdk` for the host target.
+/// The built host SDK: `XILA_SDK_DIRECTORY` when set (must be a complete host SDK),
+/// else the newest `xila-sdk-*` directory under the workspace's `target/sdk` for the
+/// host target.
 fn host_sdk_directory(manifest: &Path) -> Option<PathBuf> {
     if let Some(directory) = env::var_os("XILA_SDK_DIRECTORY") {
         let directory = PathBuf::from(directory);
-        if sdk_is_complete(&directory) {
-            return Some(directory);
-        }
+        return sdk_is_complete(&directory).then_some(directory);
     }
     let parent = manifest.join("../../target/sdk").join(HOST_TARGET);
     let mut found: Vec<PathBuf> = fs::read_dir(parent)
@@ -253,16 +278,23 @@ fn host_sdk_directory(manifest: &Path) -> Option<PathBuf> {
     found.pop().filter(|path| sdk_is_complete(path))
 }
 
-/// The files link-archive links a program against.
+/// The files link-archive links a program against, for the host target.
 fn sdk_is_complete(sdk: &Path) -> bool {
-    [
-        "lib/crt0_linked.o",
-        "lib/libxila_posix.a",
-        "lib/libxila.a",
-        "lib/libc.a",
-    ]
-    .iter()
-    .all(|file| sdk.join(file).is_file())
+    let target_matches = fs::read_to_string(sdk.join("sdk.json"))
+        .ok()
+        .is_some_and(|text| {
+            let compact: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+            compact.contains(&format!("\"target\":\"{HOST_TARGET}\""))
+        });
+    target_matches
+        && [
+            "lib/crt0_linked.o",
+            "lib/libxila_posix.a",
+            "lib/libxila.a",
+            "lib/libc.a",
+        ]
+        .iter()
+        .all(|file| sdk.join(file).is_file())
 }
 
 /// The generated module of tests/sdk.rs: the linked hexdump entry when the archive was

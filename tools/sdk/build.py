@@ -574,7 +574,7 @@ def link_archive(args):
         if leftover:
             sys.exit("error: localization left undefined symbols in the archive: " +
                      ", ".join(leftover))
-    print(f"linked archive: {output} (only global symbol: {entry})")
+    print(f"linked archive: {output} (entry: {entry})")
 
 
 def resource_dir(target):
@@ -834,22 +834,31 @@ def compile_packaged_example(target, sdk, name):
     return output
 
 
-def nm_archive_symbols(archive, nm):
-    """(global defined {name: kind}, weak undefined, strong undefined) of an archive."""
-    output = subprocess.run([nm, "--format=posix", str(archive)],
-                            capture_output=True, text=True, check=True).stdout
-    defined, weak, strong = {}, [], []
-    for line in output.splitlines():
+# Global defined symbol kinds in POSIX `nm` output. `N` (debugging labels such as
+# `.Ldebug_info0` or `.LLST0` from GCC's `libgcc.a`) is excluded on purpose.
+GLOBAL_DEFINED_KINDS = frozenset({"A", "B", "D", "R", "T", "V", "W"})
+
+
+def parse_nm_defined(text):
+    """Parse `llvm-nm --extern-only --defined-only --format=posix` output into {name: kind}."""
+    defined = {}
+    for line in text.splitlines():
         parts = line.split()
         if len(parts) < 2:
             continue  # an archive member header
         name, kind = parts[0], parts[1]
-        if kind == "U":
-            strong.append(name)
-        elif kind in ("w", "v"):
-            weak.append(name)
-        elif kind.isupper():
+        if kind in GLOBAL_DEFINED_KINDS:
             defined[name] = kind
+    return defined
+
+
+def nm_archive_symbols(archive, nm):
+    """(global defined {name: kind}, weak undefined, strong undefined) of an archive."""
+    defined_output = subprocess.run(
+        [nm, "--extern-only", "--defined-only", "--format=posix", str(archive)],
+        capture_output=True, text=True, check=True).stdout
+    defined = parse_nm_defined(defined_output)
+    weak, strong = undefined_symbols(archive, nm)
     return defined, weak, strong
 
 
@@ -941,9 +950,7 @@ def verify(args):
         verify_c_program(target, sdk, name, SDK_SOURCE / "sdk/test" / name)
     # The hexdump example, in both of its forms: the ELF the loader runs, and the
     # localized archive link-archive produces for a firmware that links it in.
-    hexdump_map = OUTPUT / target / "example-hexdump/hexdump.map"
-    hexdump = verify_c_program(target, sdk, "hexdump", sdk / "share/xila/example/hexdump",
-                               f"-DCMAKE_EXE_LINKER_FLAGS=-Map={hexdump_map}")
+    hexdump = verify_c_program(target, sdk, "hexdump", sdk / "share/xila/example/hexdump")
     run([find_tool("llvm-size"), hexdump])
     print(f"{hexdump}: ELF file {hexdump.stat().st_size} bytes")
     verify_linked_example(target, sdk, "hexdump")

@@ -82,6 +82,42 @@ class EntrySymbolTest(unittest.TestCase):
                 build.validate_entry_symbol(entry)
 
 
+class NmArchiveSymbolsTest(unittest.TestCase):
+    """Global defined symbol filtering: ignore debug labels (`N`) and locals, keep real globals."""
+
+    def test_ignores_debug_labels_and_keeps_global_defined_symbols(self):
+        sample = "\n".join([
+            "libhexdump.a[xila_linked_hexdump.o]:",
+            ".LASF0 N 0 ",
+            ".LLRL18 N 0 ",
+            ".LLST0 N 0 ",
+            ".Ldebug_abbrev0 N 0 ",
+            ".Ldebug_info0 N 0 ",
+            ".Ldebug_line0 N 0 ",
+            "main t 0 10",
+            "counter d 0 4",
+            "xila_linked_hexdump T 0 40",
+            "stray_data D 40 4",
+            "stray_weak W 44 8",
+            "stray_rodata R 4c 4",
+            "stray_bss B 50 4",
+            "stray_abs A 0 ",
+            "stray_weak_obj V 54 4",
+        ])
+        self.assertEqual(
+            build.parse_nm_defined(sample),
+            {
+                "xila_linked_hexdump": "T",
+                "stray_data": "D",
+                "stray_weak": "W",
+                "stray_rodata": "R",
+                "stray_bss": "B",
+                "stray_abs": "A",
+                "stray_weak_obj": "V",
+            },
+        )
+
+
 class LinkArchivePlanTest(unittest.TestCase):
     """The command construction: combine, resolve weak undefined, rename, localize, pack."""
 
@@ -365,6 +401,11 @@ int main(int argc, char **argv) {{ (void)argc; (void)argv; return helper(counter
             weak, strong = nm_undefined(output)
             self.assertEqual(weak, [], f"{name}: weak undefined left: {weak}")
             self.assertEqual(strong, [], f"{name}: strong undefined left: {strong}")
+            # Verify the build.py archive helper agrees with the direct checks above.
+            self.assertEqual(
+                build.nm_archive_symbols(output, tool("llvm-nm")),
+                ({entry: "T"}, [], []),
+            )
 
     def test_the_two_archives_link_into_one_binary_without_collisions(self):
         # A minimal host, as the firmware is one: it builds a startup block and calls both
