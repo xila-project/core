@@ -52,7 +52,7 @@ unsafe extern "C" {
 /// build never emits the symbol, because the host (`xila-abi-application`) provides it.
 #[cfg(all(test, feature = "linked"))]
 #[unsafe(no_mangle)]
-pub extern "C" fn __xila_current_startup() -> *const XilaStartup {
+extern "C" fn __xila_current_startup() -> *const XilaStartup {
     TEST_STARTUP.load(Ordering::Acquire)
 }
 

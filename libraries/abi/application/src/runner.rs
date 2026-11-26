@@ -143,10 +143,13 @@ pub struct AnyProcessOwner {
     drop_record: unsafe fn(NonNull<core::ffi::c_void>),
 }
 
-impl<K> ProcessOwner<K> {
+impl<K: 'static> ProcessOwner<K> {
     /// Erase the type of the keep-alive value. The drop behavior is unchanged.
     pub fn erase(self) -> AnyProcessOwner {
-        unsafe fn drop_record<K>(record: NonNull<core::ffi::c_void>) {
+        /// # Safety
+        /// `record` must have come from `ProcessOwner::<K>::new` for this exact `K`,
+        /// and this function must be called at most once for it.
+        unsafe fn drop_record<K: 'static>(record: NonNull<core::ffi::c_void>) {
             // The pointer came from `ProcessOwner::<K>::new`, through `erase`.
             drop(ProcessOwner::<K>(record.cast()))
         }
