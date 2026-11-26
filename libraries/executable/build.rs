@@ -35,11 +35,6 @@ const HOST_TARGET: &str = "x86_64-unknown-linux-gnu";
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=tests/linked_c");
-    println!("cargo:rerun-if-changed={HEXDUMP_SOURCE}");
-    println!("cargo:rerun-if-changed=../../tools/sdk/build.py");
-    // Watch the default host SDK directory unconditionally so building the SDK after a
-    // fallback build retriggers build.rs instead of keeping the cached fallback.
-    println!("cargo:rerun-if-changed=../../target/sdk/{HOST_TARGET}");
     // The tool lookup goes through PATH (and clang's -print-prog-name).
     println!("cargo:rerun-if-env-changed=PATH");
     println!("cargo:rerun-if-env-changed=XILA_SDK_DIRECTORY");
@@ -58,6 +53,20 @@ fn main() {
         write_fallback(&out_dir);
         write_hexdump_module(&out_dir, false);
         return;
+    }
+    if native_dev {
+        // Only emit rerun-if-changed for paths that actually exist: Cargo treats a
+        // missing rerun-if-changed path as permanently dirty and rebuilds on every run.
+        for relative in [
+            HEXDUMP_SOURCE,
+            "../../tools/sdk/build.py",
+            &format!("../../target/sdk/{HOST_TARGET}"),
+        ] {
+            let path = manifest.join(relative);
+            if path.exists() {
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
+        }
     }
     let Some(tools) = find_tools() else {
         if native_dev && require_linked_hexdump {

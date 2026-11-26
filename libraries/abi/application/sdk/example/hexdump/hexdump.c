@@ -120,6 +120,8 @@ static int skip_bytes(FILE *stream, unsigned long *skip, unsigned long *offset,
         }
         (void)fseek(stream, cur, SEEK_SET);
     }
+    /* A non-seekable stream leaves ESPIPE in errno from ftell/fseek; clear it before reading. */
+    errno = 0;
     unsigned char discard[MAX_COLUMNS];
     while (*skip > 0) {
         size_t want = *skip < sizeof discard ? (size_t)*skip : sizeof discard;

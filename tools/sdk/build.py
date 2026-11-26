@@ -834,20 +834,19 @@ def compile_packaged_example(target, sdk, name):
     return output
 
 
-# Global defined symbol kinds in POSIX `nm` output. `N` (debugging labels such as
-# `.Ldebug_info0` or `.LLST0` from GCC's `libgcc.a`) is excluded on purpose.
-GLOBAL_DEFINED_KINDS = frozenset({"A", "B", "D", "R", "T", "V", "W"})
-
-
 def parse_nm_defined(text):
-    """Parse `llvm-nm --extern-only --defined-only --format=posix` output into {name: kind}."""
+    """Parse `llvm-nm --extern-only --defined-only --format=posix` output into {name: kind}.
+
+    Excludes `N` (debugging labels such as `.Ldebug_info0` or `.LLST0` from GCC's `libgcc.a`)
+    and undefined symbols (`U`), while keeping all global defined classes including `C`
+    (common), `i` (indirect function) and `u` (unique global)."""
     defined = {}
     for line in text.splitlines():
         parts = line.split()
         if len(parts) < 2:
             continue  # an archive member header
         name, kind = parts[0], parts[1]
-        if kind in GLOBAL_DEFINED_KINDS:
+        if kind != "N" and kind != "U" and (kind.isupper() or kind in ("i", "u")):
             defined[name] = kind
     return defined
 

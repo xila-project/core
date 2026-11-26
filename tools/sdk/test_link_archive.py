@@ -103,6 +103,9 @@ class NmArchiveSymbolsTest(unittest.TestCase):
             "stray_bss B 50 4",
             "stray_abs A 0 ",
             "stray_weak_obj V 54 4",
+            "stray_common C 4 4",
+            "stray_ifunc i 58 4",
+            "stray_unique u 5c 4",
         ])
         self.assertEqual(
             build.parse_nm_defined(sample),
@@ -114,6 +117,9 @@ class NmArchiveSymbolsTest(unittest.TestCase):
                 "stray_bss": "B",
                 "stray_abs": "A",
                 "stray_weak_obj": "V",
+                "stray_common": "C",
+                "stray_ifunc": "i",
+                "stray_unique": "u",
             },
         )
 
