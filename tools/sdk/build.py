@@ -384,14 +384,23 @@ def rust_sdk_files():
         for source in sources
     }
 
-    # Replace the checkout-relative dependency path with the bundled sibling crate.
+    # Replace the checkout-relative dependency path with the bundled sibling crate. In the
+    # checkout the crate is a member of Core's workspace (the executable tests use it), so its
+    # manifest has no workspace table. The bundled copy sits outside that workspace and needs
+    # its own, or Cargo would search the user's parent directories for one.
+    workspace = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]
     manifest = Path("xila-sys/Cargo.toml")
     bindings = files[manifest].decode()
     checkout_path = tomllib.loads(bindings)["dependencies"]["xila-version"]["path"]
-    files[manifest] = bindings.replace(f'path = "{checkout_path}"', 'path = "../xila-version"').encode()
+    bindings = bindings.replace(f'path = "{checkout_path}"', 'path = "../xila-version"')
+    # Resolve the fields the crate inherits from Core's workspace, so the bundled copy builds
+    # with the empty `[workspace]` table appended below.
+    for field in ("version", "edition", "rust-version"):
+        bindings = re.sub(rf"^{field}\.workspace = true$", f'{field} = "{workspace[field]}"',
+                          bindings, flags=re.M)
+    files[manifest] = (bindings.rstrip("\n") + "\n\n[workspace]\n").encode()
 
     # Resolve the version crate's inherited fields without shipping the full Core workspace.
-    workspace = tomllib.loads((ROOT / "Cargo.toml").read_text())["workspace"]["package"]
     version = (VERSION_CRATE / "Cargo.toml").read_text()
     for field in ("version", "edition", "rust-version"):
         version = re.sub(rf"^{field}\.workspace = true$", f'{field} = "{workspace[field]}"',

@@ -3,9 +3,9 @@
 //! Every function has the name, arguments and result of its Wasm guest
 //! counterpart, so a Rust application written against the guest API builds
 //! natively with little change. The module is generated from the same
-//! declaration (`graphics_bindgen`); only [`call`] is written by hand.
+//! declaration (`graphics_bindgen`); only `call` is written by hand.
 //!
-//! A call returns its result, or the non-zero [`Status`](crate::Status) the
+//! A call returns its result, or the non-zero [`Status`] the
 //! host reported as an `i32`. Objects are 32-bit handles the host checks,
 //! never LVGL pointers, and the host deletes whatever a process still owns
 //! when it ends. Raw `lv_*` functions are not exposed: they would bypass the
@@ -51,6 +51,9 @@ unsafe fn call<T>(function: FunctionCall, arguments: &[usize]) -> Result<T> {
 }
 
 #[cfg(test)]
+// The tests record the calls in statics, like `runtime.rs`: only load/store, which are
+// also available on Cortex-M0.
+#[allow(clippy::disallowed_types)]
 mod tests {
     use super::*;
     use crate::{XILA_VERSION_MAJOR, XILA_VERSION_MINOR, XilaApi, XilaStartup};

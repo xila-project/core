@@ -1,23 +1,78 @@
-//! Entry and process-heap support for standalone native Rust applications.
+//! Entry and process-heap support for native Rust applications.
+//!
+//! Two modes exist, selected by a Cargo feature:
+//!
+//! - Standalone (`runtime`, `link`): the loader calls `_xila_start` and the runtime keeps the
+//!   startup data in one static, because an image runs one process.
+//! - Linked (`linked`): the application is part of the firmware. Several applications can run
+//!   at once on one executor, so no static holds the startup data: [`startup`] asks the host
+//!   for the one of the calling process (`__xila_current_startup`). In this mode the firmware's
+//!   own `#[global_allocator]` and panic handler apply: `ProcessAllocator` and `panic_abort` are
+//!   not compiled, because installing the process heap as the global allocator would make every
+//!   firmware allocation outside a process return null, and a panic runs the firmware's handler.
 
 // The runtime uses only load/store, which are also available on Cortex-M0.
 #![allow(clippy::disallowed_types)]
-use core::{
-    alloc::{GlobalAlloc, Layout},
-    ffi::c_void,
-    mem::size_of,
-    ptr,
-    sync::atomic::{AtomicPtr, Ordering},
-};
+#[cfg(not(feature = "linked"))]
+use core::alloc::{GlobalAlloc, Layout};
+#[cfg(not(feature = "linked"))]
+use core::ffi::c_void;
+use core::mem::size_of;
+#[cfg(any(test, not(feature = "linked")))]
+use core::ptr;
+#[cfg(any(test, not(feature = "linked")))]
+use core::sync::atomic::{AtomicPtr, Ordering};
 
 use xila_version::Version;
 
-use crate::{Status, XILA_HEAP_ALIGNMENT, XILA_VERSION_MAJOR, XILA_VERSION_MINOR};
+#[cfg(not(feature = "linked"))]
+use crate::{Status, XILA_HEAP_ALIGNMENT};
+use crate::{XILA_VERSION_MAJOR, XILA_VERSION_MINOR};
 use crate::{XilaApi, XilaStartup};
 
 /// The Xila version this crate was generated for, packed as `(major << 16) | minor`.
 const VERSION: u32 = Version::new(XILA_VERSION_MAJOR as u16, XILA_VERSION_MINOR as u16).packed();
+#[cfg(all(not(test), not(feature = "linked")))]
 static STARTUP: AtomicPtr<XilaStartup> = AtomicPtr::new(ptr::null_mut());
+
+// In a test build the crate may be compiled with `linked` (Cargo unifies features across the
+// workspace), where the host symbol is absent: back it with a test-only static instead.
+#[cfg(test)]
+static TEST_STARTUP: AtomicPtr<XilaStartup> = AtomicPtr::new(ptr::null_mut());
+
+#[cfg(all(feature = "linked", not(test)))]
+unsafe extern "C" {
+    /// The startup data of the process that the calling coroutine runs, or null. Defined by
+    /// the host (`xila-abi-application`), which installs it around every resume.
+    fn __xila_current_startup() -> *const XilaStartup;
+}
+
+/// Test-only stand-in for the host's `__xila_current_startup`, so the crate's own unit tests
+/// link and run when compiled with `linked`. It is strictly a `cfg(test)` item: a non-test
+/// build never emits the symbol, because the host (`xila-abi-application`) provides it.
+#[cfg(all(test, feature = "linked"))]
+#[unsafe(no_mangle)]
+extern "C" fn __xila_current_startup() -> *const XilaStartup {
+    TEST_STARTUP.load(Ordering::Acquire)
+}
+
+/// The startup data of the running application, or null outside its entry.
+#[inline]
+fn current() -> *const XilaStartup {
+    #[cfg(test)]
+    {
+        TEST_STARTUP.load(Ordering::Acquire)
+    }
+    #[cfg(all(not(test), feature = "linked"))]
+    {
+        // SAFETY: the host function only reads a pointer it owns.
+        unsafe { __xila_current_startup() }
+    }
+    #[cfg(all(not(test), not(feature = "linked")))]
+    {
+        STARTUP.load(Ordering::Acquire)
+    }
+}
 
 /// ABI note consumed by the native ELF loader: an ELF note named `XILA` of type 1
 /// whose four-byte descriptor is the Xila version the executable was built for,
@@ -46,6 +101,7 @@ pub const ABI_NOTE: AbiNote = AbiNote {
 /// Emit the image entry point and the required ELF ABI note. Invoke once with
 /// a function of type `unsafe fn(*const XilaStartup) -> i32`. It receives the
 /// host's borrowed startup data and returns the application's status.
+#[cfg(not(feature = "linked"))]
 #[macro_export]
 macro_rules! entry {
     ($main:path) => {
@@ -58,6 +114,36 @@ macro_rules! entry {
         /// and call this entry once per loaded image.
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn _xila_start(startup: *const $crate::XilaStartup) -> i32 {
+            unsafe { $crate::runtime::start(startup, $main) }
+        }
+    };
+}
+
+/// Emit the entry of an application that is linked into the firmware: a C-ABI function
+/// `xila_entry` of type `unsafe extern "C" fn(*const XilaStartup) -> i32`, which the
+/// firmware passes to its linked-program adapter. Invoke it once per module with a function
+/// of type `unsafe fn(*const XilaStartup) -> i32`.
+///
+/// `entry!(main, symbol = name)` names the function `name` and exports it with that unmangled
+/// C symbol, for firmware that links the entry by name. Unlike the standalone entry, it emits
+/// no ELF note and no `_xila_start`: there is no image for a loader to check.
+#[cfg(feature = "linked")]
+#[macro_export]
+macro_rules! entry {
+    ($main:path) => {
+        /// # Safety
+        /// The host must supply the startup data described by Xila's native ABI and call
+        /// this entry once per running process.
+        pub unsafe extern "C" fn xila_entry(startup: *const $crate::XilaStartup) -> i32 {
+            unsafe { $crate::runtime::start(startup, $main) }
+        }
+    };
+    ($main:path, symbol = $symbol:ident) => {
+        /// # Safety
+        /// The host must supply the startup data described by Xila's native ABI and call
+        /// this entry once per running process.
+        #[unsafe(no_mangle)]
+        pub unsafe extern "C" fn $symbol(startup: *const $crate::XilaStartup) -> i32 {
             unsafe { $crate::runtime::start(startup, $main) }
         }
     };
@@ -87,9 +173,18 @@ pub unsafe fn start(
         return -1;
     }
 
+    // Linked mode keeps no copy: the host binds the startup data to the process. A test
+    // build keeps it in the test-only static, which also backs the test-only
+    // `__xila_current_startup` under `linked`.
+    #[cfg(all(not(test), not(feature = "linked")))]
     STARTUP.store(startup.cast_mut(), Ordering::Release);
+    #[cfg(test)]
+    TEST_STARTUP.store(startup.cast_mut(), Ordering::Release);
     let result = unsafe { main(startup) };
+    #[cfg(all(not(test), not(feature = "linked")))]
     STARTUP.store(ptr::null_mut(), Ordering::Release);
+    #[cfg(test)]
+    TEST_STARTUP.store(ptr::null_mut(), Ordering::Release);
     result
 }
 
@@ -104,22 +199,26 @@ const fn compatible(declared: u32, running: u32) -> bool {
 /// Return the host's startup data during entry.
 pub fn startup() -> Option<&'static XilaStartup> {
     // SAFETY: start installs validated startup data for the duration of entry.
-    unsafe { STARTUP.load(Ordering::Acquire).as_ref() }
+    unsafe { current().as_ref() }
 }
 
 /// Return the installed API table during entry.
 pub fn api() -> Option<&'static XilaApi> {
     // SAFETY: start installs validated startup data for the duration of entry.
     // The host's immutable table remains valid for the lifetime of the image.
-    let startup = unsafe { STARTUP.load(Ordering::Acquire).as_ref() }?;
+    let startup = unsafe { current().as_ref() }?;
     unsafe { startup.api.as_ref() }
 }
 
 /// Terminate the native process with status 134. Call from the application's
 /// `#[panic_handler]` with `panic = "abort"`. The host reclaims the process
 /// heap and image. Rust destructors do not run.
+///
+/// Not compiled with the `linked` feature: a linked application is part of the firmware and
+/// its panics run the firmware's panic handler.
+#[cfg(not(feature = "linked"))]
 pub fn panic_abort() -> ! {
-    if let Some(startup) = unsafe { STARTUP.load(Ordering::Acquire).as_ref() }
+    if let Some(startup) = unsafe { current().as_ref() }
         && let Some(api) = unsafe { startup.api.as_ref() }
     {
         // The host grants this capability for native processes; built-in entries
@@ -176,14 +275,20 @@ pub fn panic_abort() -> ! {
 /// Over-aligned blocks store the original heap pointer immediately before
 /// the aligned address. Reallocation uses the host heap directly when the
 /// requested alignment is within the heap's guarantee.
+///
+/// Not compiled with the `linked` feature: a linked application is part of the firmware, so
+/// `alloc` uses the firmware's global allocator. Installing this allocator there would make
+/// every firmware allocation outside a process return null.
+#[cfg(not(feature = "linked"))]
 pub struct ProcessAllocator;
 
 // SAFETY: the runtime installs a process heap for the duration of guest
 // execution. Ordinary blocks use the heap's published alignment, and
 // over-aligned blocks recover the original allocation when freed.
+#[cfg(not(feature = "linked"))]
 unsafe impl GlobalAlloc for ProcessAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let startup = STARTUP.load(Ordering::Acquire);
+        let startup = current();
         if startup.is_null() {
             return ptr::null_mut();
         }
@@ -221,7 +326,7 @@ unsafe impl GlobalAlloc for ProcessAllocator {
     }
 
     unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-        let startup = STARTUP.load(Ordering::Acquire);
+        let startup = current();
         if startup.is_null() {
             // The host reclaims any remaining blocks when the process exits.
             return;
@@ -250,7 +355,7 @@ unsafe impl GlobalAlloc for ProcessAllocator {
             return resized;
         }
 
-        let startup = STARTUP.load(Ordering::Acquire);
+        let startup = current();
         if startup.is_null() {
             return ptr::null_mut();
         }

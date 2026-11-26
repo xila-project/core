@@ -366,6 +366,8 @@ pub unsafe extern "C" fn xila_process_exit(process: *const Process, status: i32)
     // SAFETY: the pointer is the live host state, which the coroutine's frames do
     // not hold. The driver will never poll another coroutine, even if cleanup suspends.
     unsafe { Resources::release(process.resources) };
+    // The startup block lives in the released state: nothing may find it any more.
+    crate::threads::bind_startup(ptr::null());
     crate::exit_coroutine(status)
 }
 

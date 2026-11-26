@@ -95,10 +95,23 @@ pub use runtime::*;
 mod unsupported {
     use super::*;
     use crate::{Process, Status};
+    use core::sync::atomic::{AtomicPtr, Ordering};
     include!(concat!(env!("OUT_DIR"), "/disabled_threads.rs"));
 
     pub(crate) fn bind_process(_: *const Process) {}
     pub(crate) fn bind_registry(_: *const crate::registry::Registry) {}
+
+    /// Without stack switching a program runs to completion on its task, so one slot is
+    /// enough: [`bind_startup`] saves what it replaces and the caller restores it.
+    static STARTUP: AtomicPtr<crate::XilaStartup> = AtomicPtr::new(core::ptr::null_mut());
+
+    /// Install `startup` and return the previous value, to restore when the entry ends.
+    pub(crate) fn bind_startup(startup: *const crate::XilaStartup) -> *const crate::XilaStartup {
+        STARTUP.swap(startup.cast_mut(), Ordering::AcqRel)
+    }
+    pub(crate) fn current_startup() -> *const crate::XilaStartup {
+        STARTUP.load(Ordering::Acquire)
+    }
     pub(crate) fn stop_workers() {}
     pub(crate) fn prepare_exit(_: *const Process) -> Result<(), Status> {
         Ok(())

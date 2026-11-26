@@ -44,6 +44,25 @@ pub struct XilaStartup {
     pub network: *const Network,
 }
 
+/// The startup block of the program that the calling coroutine runs, or null.
+///
+/// A linked program reads its own arguments, streams and capabilities through it, without
+/// a process-wide `static` that a second program on the same executor would overwrite.
+/// The block is valid until the entry returns or exits: do not keep the pointer.
+///
+/// It returns null in a thread that is not part of a running program. On a target without
+/// stack switching one program runs at a time, and the pointer is valid during its entry.
+///
+/// This is the contract between the firmware and a linked Rust application (`xila-sys` with
+/// its `linked` feature). A standalone image receives its startup block as an argument, so
+/// the C header does not declare it.
+///
+/// cbindgen:ignore
+#[unsafe(no_mangle)]
+pub extern "C" fn __xila_current_startup() -> *const XilaStartup {
+    crate::threads::current_startup()
+}
+
 /// What the entry call borrows and the process owner releases when it ends. Kept in
 /// one place so `xila_process_exit` can release it before it abandons the stack, and so
 /// the host can release it when it cancels the process.
@@ -386,7 +405,11 @@ pub(crate) unsafe fn enter(
     }
     // Every thread of the program registers the handles it opens here.
     crate::threads::bind_registry(unsafe { &raw const (*resources).handles });
+    // Concurrent programs on one executor each find their own startup block through
+    // `__xila_current_startup`. Cleared again when the entry ends.
+    let previous = crate::threads::bind_startup(startup);
     let status = unsafe { entry(startup) };
+    crate::threads::bind_startup(previous);
     if managed {
         crate::threads::stop_workers();
     }
