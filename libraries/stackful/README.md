@@ -65,6 +65,62 @@ coroutines on secondary cores, giving each core an isolated current-coroutine sl
 The platform supplies the allocator, critical-section implementation, and time
 and executor drivers as usual.
 
+## Stack allocation and PSRAM
+
+By default, `Stack` allocates and frees its backing block through the Rust
+global allocator (`StackAllocator::GLOBAL`). On boards whose global heap places
+large allocations in external PSRAM (such as Espressif ESP32, ESP32-S3, and
+ESP32-P4 boards), a coroutine stack allocated through the global allocator can
+land in PSRAM. On chips where PSRAM shares the flash cache, any flash write
+executed while running on a PSRAM stack would fault, and PSRAM stacks also
+incur higher latency.
+
+Platforms can override the stack allocator once at start-up with
+`set_stack_allocator(StackAllocator::new(allocate, deallocate))` before
+launching native coroutines:
+
+```rust,no_run
+use core::alloc::Layout;
+use stackful::{StackAllocator, set_stack_allocator};
+
+unsafe fn allocate_stack(layout: Layout) -> *mut u8 {
+    // SAFETY: forwarded to the platform memory manager with a valid layout.
+    unsafe {
+        memory::global_manager()
+            .allocate(memory::CapabilityFlags::AlwaysAccessible, layout)
+    }
+}
+
+unsafe fn deallocate_stack(pointer: *mut u8, layout: Layout) {
+    // SAFETY: `pointer` was returned by `allocate_stack` with `layout`.
+    unsafe { memory::global_manager().deallocate(pointer, layout) }
+}
+
+// SAFETY: `memory::global_manager()` returns exclusive, writable internal SRAM
+// blocks that stay accessible across interrupts and flash writes, and releases
+// them with the matching layout.
+unsafe {
+    set_stack_allocator(StackAllocator::new(allocate_stack, deallocate_stack));
+}
+```
+
+Safety contract for `set_stack_allocator`:
+- `allocate` must return either null (causing `Stack::try_with_min_size` to
+  return `None` without calling `deallocate`, and `Stack::new` /
+  `Stack::with_min_size` to invoke `handle_alloc_error`) or a non-null pointer
+  to at least `layout.size()` exclusive, writable bytes aligned to
+  `layout.align()`.
+- The returned memory must remain valid and accessible across interrupts and
+  flash writes until released via `deallocate`.
+- `deallocate` must safely release any non-null pointer returned by `allocate`
+  when called with the exact matching `Layout`.
+- Both hooks must be safe to call from any thread or core that creates or drops
+  a `Stack`, without requiring a critical section to be held by the caller.
+- Each `Stack` retains the `deallocate` function pointer from the allocator
+  that created it, so `Drop` always frees via the matching deallocator even if
+  `set_stack_allocator` is changed later (for example in tests; pass
+  `StackAllocator::GLOBAL` to restore the default).
+
 ## Safety and lifetime
 
 Construction is unsafe: native stack usage must fit the supplied stack, including
@@ -205,11 +261,11 @@ implementations may allocate themselves. The task-manager adapter adds the
 manager's existing pool, metadata and join allocations (including its current
 leaked task-pool behavior).
 
-On x86_64: `Stack` is 24 bytes; `Coroutine` and `JoinHandle` are each 8 bytes;
-the shared control allocation is 184 bytes including `Rc` counts. On 32-bit
-targets (`thumbv7em-none-eabihf`, `riscv32imac-unknown-none-elf`) `Control` is 88
-bytes and the allocation 96 bytes, the same as with the former hand-written
-switch. Each stack adds 64 guard bytes plus up to 15 rounding bytes; corosensei's
+On x86_64: `Stack` is 32 bytes; `Coroutine` and `JoinHandle` are each 8 bytes;
+the shared control allocation is 192 bytes including `Rc` counts. On 32-bit
+targets (`thumbv7em-none-eabihf`, `riscv32imac-unknown-none-elf`) `Control` is 92
+bytes and the allocation 100 bytes (one function pointer larger than before, to
+pair each `Stack` with its matching deallocator). Each stack adds 64 guard bytes plus up to 15 rounding bytes; corosensei's
 initial frame and the entry closure occupy usable stack space. On Xtensa a
 coroutine that yields once paints 320 bytes of its stack (windowed frames reserve
 a register save area each). `footprint_and_switch_timing` measures two switches
