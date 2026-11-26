@@ -3,7 +3,10 @@ mod fp;
 #[path = "stack.rs"]
 mod stack;
 use stack::{Backing, check_guard_at};
-pub use stack::{DEFAULT_MIN_STACK_SIZE, MIN_STACK_SIZE, Stack};
+pub use stack::{
+    DEFAULT_MIN_STACK_SIZE, MIN_STACK_SIZE, Stack, StackAllocateFn, StackAllocator,
+    StackDeallocateFn, set_stack_allocator,
+};
 
 use alloc::rc::Rc;
 use core::{
