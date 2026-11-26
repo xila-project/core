@@ -76,11 +76,11 @@ impl FileSystemOperations for DummyFileSystem {
         todo!()
     }
 
-    fn create_directory(&self, _path: &Path) -> Result<()> {
+    fn create_directory(&self, _path: &Path, _attributes: &Attributes) -> Result<()> {
         todo!()
     }
 
-    fn create_file(&self, _path: &Path) -> Result<()> {
+    fn create_file(&self, _path: &Path, _attributes: &Attributes) -> Result<()> {
         todo!()
     }
 

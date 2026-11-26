@@ -50,13 +50,25 @@ pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOper
         Err(crate::IoErrorKind::Unsupported)
     }
 
-    /// Create a child directory `name` inside the opened `parent` directory.
-    fn create_directory_entry(&self, _parent: &Context, _name: &str) -> Result<()> {
+    /// Create a child directory `name` inside the opened `parent` directory,
+    /// persisting `attributes` with the new entry where the backend can.
+    fn create_directory_entry(
+        &self,
+        _parent: &Context,
+        _name: &str,
+        _attributes: &Attributes,
+    ) -> Result<()> {
         Err(crate::IoErrorKind::Unsupported)
     }
 
-    /// Create a child regular file `name` inside the opened `parent` directory.
-    fn create_file_entry(&self, _parent: &Context, _name: &str) -> Result<()> {
+    /// Create a child regular file `name` inside the opened `parent` directory,
+    /// persisting `attributes` with the new entry where the backend can.
+    fn create_file_entry(
+        &self,
+        _parent: &Context,
+        _name: &str,
+        _attributes: &Attributes,
+    ) -> Result<()> {
         Err(crate::IoErrorKind::Unsupported)
     }
 
@@ -91,8 +103,15 @@ pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOper
     }
 
     /// Create a symbolic link named `name` inside the opened `parent`
-    /// directory pointing to `target`.
-    fn create_symlink_entry(&self, _target: &Path, _parent: &Context, _name: &str) -> Result<()> {
+    /// directory pointing to `target`, persisting `attributes` with the new
+    /// entry where the backend can.
+    fn create_symlink_entry(
+        &self,
+        _target: &Path,
+        _parent: &Context,
+        _name: &str,
+        _attributes: &Attributes,
+    ) -> Result<()> {
         Err(crate::IoErrorKind::Unsupported)
     }
 
@@ -129,10 +148,11 @@ pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOper
         Err(crate::IoErrorKind::Unsupported)
     }
 
-    /// Create a symbolic link without resolving its target. Backends that do not
-    /// support native links or a durable Xila link representation may keep the
-    /// default implementation.
-    fn create_symlink(&self, _target: &Path, _link: &Path) -> Result<()> {
+    /// Create a symbolic link without resolving its target, persisting
+    /// `attributes` with the new entry where the backend can. Backends that do
+    /// not support native links or a durable Xila link representation may keep
+    /// the default implementation.
+    fn create_symlink(&self, _target: &Path, _link: &Path, _attributes: &Attributes) -> Result<()> {
         Err(crate::IoErrorKind::Unsupported)
     }
 
@@ -173,9 +193,26 @@ pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOper
 
     fn lookup_file(&self, context: &mut Context, path: &Path, flags: Flags) -> Result<()>;
 
-    fn create_directory(&self, path: &Path) -> Result<()>;
+    /// Create a directory at `path`, persisting `attributes` with the new
+    /// entry in the same commit as the entry creation where the backend can.
+    ///
+    /// `attributes.get_mask()` selects the fields to persist; callers pass the
+    /// mask already intersected with [`Self::writable_attributes`]. The backend
+    /// must apply or ignore the full mask at creation: the caller no longer
+    /// rewrites fields afterwards. An empty mask persists the backend defaults.
+    ///
+    /// LittleFS costs two commits for a directory: the entry commit, then the
+    /// attributes commit (`lfs_mkdir` has no attribute configuration).
+    fn create_directory(&self, path: &Path, attributes: &Attributes) -> Result<()>;
 
-    fn create_file(&self, path: &Path) -> Result<()>;
+    /// Create a regular file at `path`, persisting `attributes` with the new
+    /// entry in the same commit as the entry creation where the backend can.
+    ///
+    /// LittleFS costs two commits for a file: the entry commit, then the
+    /// struct+attributes commit, which carries the custom attributes
+    /// atomically with the file through `lfs_file_config.attrs`. See
+    /// [`Self::create_directory`] for the mask contract.
+    fn create_file(&self, path: &Path, attributes: &Attributes) -> Result<()>;
 
     /// Remove a file or directory from the file system.
     ///
@@ -388,7 +425,7 @@ pub mod tests {
         let mut context = Context::new_empty();
 
         // Test file creation
-        fs.create_file(test_file).unwrap();
+        fs.create_file(test_file, &Attributes::new()).unwrap();
 
         // Test file lookup
         fs.lookup_file(&mut context, test_file, AccessFlags::Read.into())
@@ -409,9 +446,9 @@ pub mod tests {
     {
         // Test creating file that already exists
         let test_file = Path::new("/duplicate.txt");
-        fs.create_file(test_file).unwrap();
+        fs.create_file(test_file, &Attributes::new()).unwrap();
 
-        let result = fs.create_file(test_file);
+        let result = fs.create_file(test_file, &Attributes::new());
         assert!(
             matches!(result, Err(IoErrorKind::AlreadyExists)),
             "Creating duplicate file should return AlreadyExists error"
@@ -430,7 +467,7 @@ pub mod tests {
         let mut context = Context::new_empty();
 
         // Test directory creation
-        fs.create_directory(test_dir).unwrap();
+        fs.create_directory(test_dir, &Attributes::new()).unwrap();
 
         // Test directory lookup
         fs.lookup_directory(&mut context, test_dir).unwrap();
@@ -455,10 +492,10 @@ pub mod tests {
         let child_dir = Path::new("/parent/child");
 
         // Create parent directory
-        fs.create_directory(parent_dir).unwrap();
+        fs.create_directory(parent_dir, &Attributes::new()).unwrap();
 
         // Create child directory
-        fs.create_directory(child_dir).unwrap();
+        fs.create_directory(child_dir, &Attributes::new()).unwrap();
 
         // Try to remove parent with child (should fail)
         let result = fs.remove(parent_dir);
@@ -484,7 +521,7 @@ pub mod tests {
         let mut context = Context::new_empty();
 
         // Create source file
-        fs.create_file(source).unwrap();
+        fs.create_file(source, &Attributes::new()).unwrap();
 
         // Test rename
         fs.rename(source, destination).unwrap();
@@ -517,8 +554,8 @@ pub mod tests {
         assert_eq!(result, Err(IoErrorKind::NotFound),);
 
         // Create both files
-        fs.create_file(source).unwrap();
-        fs.create_file(destination).unwrap();
+        fs.create_file(source, &Attributes::new()).unwrap();
+        fs.create_file(destination, &Attributes::new()).unwrap();
 
         // Test renaming to existing file
         //let _ = fs.rename(source, destination);
@@ -543,11 +580,11 @@ pub mod tests {
         let file_in_dir2 = Path::new("/dir2/file.txt");
 
         // Create directories
-        fs.create_directory(dir1).unwrap();
-        fs.create_directory(dir2).unwrap();
+        fs.create_directory(dir1, &Attributes::new()).unwrap();
+        fs.create_directory(dir2, &Attributes::new()).unwrap();
 
         // Create file in dir1
-        fs.create_file(file_in_dir1).unwrap();
+        fs.create_file(file_in_dir1, &Attributes::new()).unwrap();
 
         // Move file to dir2
         fs.rename(file_in_dir1, file_in_dir2).unwrap();
@@ -580,7 +617,7 @@ pub mod tests {
         F: FileSystemOperations,
     {
         let test_file = Path::new("/attr_test.txt");
-        fs.create_file(test_file).unwrap();
+        fs.create_file(test_file, &Attributes::new()).unwrap();
 
         let writable = capabilities.writable.intersection(AttributeFlags::all());
         let readable = capabilities.readable.intersection(AttributeFlags::all());
@@ -693,7 +730,7 @@ pub mod tests {
         let test_dir = Path::new("/attr_dir");
 
         // Create test directory
-        fs.create_directory(test_dir).unwrap();
+        fs.create_directory(test_dir, &Attributes::new()).unwrap();
 
         // Get directory attributes
         let mut attrs = Attributes::new().set_mask(AttributeFlags::Kind);
@@ -741,7 +778,7 @@ pub mod tests {
         // Test empty filename (directory operations might handle this differently)
         let path = Path::new("/.txt");
         // If path is valid, file system should handle it appropriately
-        let file_result = fs.create_file(path);
+        let file_result = fs.create_file(path, &Attributes::new());
         // Result depends on implementation - may succeed or fail
         if file_result.is_ok() {
             fs.remove(path).unwrap();
@@ -762,7 +799,7 @@ pub mod tests {
 
         for file_path in &files {
             let path = Path::new(file_path);
-            fs.create_file(path).unwrap();
+            fs.create_file(path, &Attributes::new()).unwrap();
         }
 
         // Verify all files exist
@@ -790,15 +827,15 @@ pub mod tests {
         let file = Path::new("/consistency_test/file.txt");
 
         // Create directory and file
-        fs.create_directory(dir).unwrap();
-        fs.create_file(file).unwrap();
+        fs.create_directory(dir, &Attributes::new()).unwrap();
+        fs.create_file(file, &Attributes::new()).unwrap();
 
         // Attempt to create file with same name as directory should fail
-        let result = fs.create_file(dir);
+        let result = fs.create_file(dir, &Attributes::new());
         result.unwrap_err();
 
         // Attempt to create directory with same name as file should fail
-        let result = fs.create_directory(file);
+        let result = fs.create_directory(file, &Attributes::new());
         result.unwrap_err();
 
         // Cleanup
@@ -814,7 +851,7 @@ pub mod tests {
         let test_file = Path::new("/flags_test.txt");
         let mut context = Context::new_empty();
 
-        fs.create_file(test_file).unwrap();
+        fs.create_file(test_file, &Attributes::new()).unwrap();
 
         // Test with different flag combinations
         fs.lookup_file(&mut context, test_file, AccessFlags::Read.into())
@@ -861,7 +898,7 @@ pub mod tests {
         let long_name = "/this_is_a_very_long_filename_that_tests_the_limits.txt";
         let path = Path::new(long_name);
 
-        let result = fs.create_file(path);
+        let result = fs.create_file(path, &Attributes::new());
         // May succeed or fail depending on file system limits
         if result.is_ok() {
             fs.remove(path).unwrap();
@@ -881,7 +918,7 @@ pub mod tests {
 
         for name in &special_chars {
             let path = Path::new(name);
-            let result = fs.create_file(path);
+            let result = fs.create_file(path, &Attributes::new());
             if result.is_ok() {
                 fs.remove(path).unwrap();
             }
@@ -899,7 +936,7 @@ pub mod tests {
         let mut context = Context::new_empty();
 
         // Create and open file for writing
-        fs.create_file(test_file).unwrap();
+        fs.create_file(test_file, &Attributes::new()).unwrap();
         fs.lookup_file(&mut context, test_file, AccessFlags::Write.into())
             .unwrap();
 
@@ -948,7 +985,7 @@ pub mod tests {
         let test_file = Path::new("/write_test.txt");
         let mut context = Context::new_empty();
 
-        fs.create_file(test_file).unwrap();
+        fs.create_file(test_file, &Attributes::new()).unwrap();
         fs.lookup_file(&mut context, test_file, AccessFlags::Write.into())
             .unwrap();
 
@@ -982,7 +1019,7 @@ pub mod tests {
         let test_file = Path::new("/pattern_test.txt");
         let mut context = Context::new_empty();
 
-        fs.create_file(test_file).unwrap();
+        fs.create_file(test_file, &Attributes::new()).unwrap();
         fs.lookup_file(&mut context, test_file, AccessFlags::Write.into())
             .unwrap();
 
@@ -1022,7 +1059,7 @@ pub mod tests {
         let test_file = Path::new("/vectored_test.txt");
         let mut context = Context::new_empty();
 
-        fs.create_file(test_file).unwrap();
+        fs.create_file(test_file, &Attributes::new()).unwrap();
         fs.lookup_file(&mut context, test_file, AccessFlags::Write.into())
             .unwrap();
 
@@ -1065,7 +1102,7 @@ pub mod tests {
         let test_file = Path::new("/position_test.txt");
         let mut context = Context::new_empty();
 
-        fs.create_file(test_file).unwrap();
+        fs.create_file(test_file, &Attributes::new()).unwrap();
         fs.lookup_file(&mut context, test_file, AccessFlags::READ_WRITE.into())
             .unwrap();
 
@@ -1108,7 +1145,7 @@ pub mod tests {
         let test_file = Path::new("/read_until_test.txt");
         let mut context = Context::new_empty();
 
-        fs.create_file(test_file).unwrap();
+        fs.create_file(test_file, &Attributes::new()).unwrap();
         fs.lookup_file(&mut context, test_file, AccessFlags::READ_WRITE.into())
             .unwrap();
 
@@ -1140,7 +1177,7 @@ pub mod tests {
         let test_file = Path::new("/flush_test.txt");
         let mut context = Context::new_empty();
 
-        fs.create_file(test_file).unwrap();
+        fs.create_file(test_file, &Attributes::new()).unwrap();
         fs.lookup_file(&mut context, test_file, AccessFlags::Write.into())
             .unwrap();
 
@@ -1170,7 +1207,7 @@ pub mod tests {
         let test_file = Path::new("/empty_test.txt");
         let mut context = Context::new_empty();
 
-        fs.create_file(test_file).unwrap();
+        fs.create_file(test_file, &Attributes::new()).unwrap();
         fs.lookup_file(&mut context, test_file, AccessFlags::Read.into())
             .unwrap();
 
@@ -1198,7 +1235,7 @@ pub mod tests {
         let test_file = Path::new("/large_test.txt");
         let mut context = Context::new_empty();
 
-        fs.create_file(test_file).unwrap();
+        fs.create_file(test_file, &Attributes::new()).unwrap();
         fs.lookup_file(&mut context, test_file, AccessFlags::READ_WRITE.into())
             .unwrap();
 
@@ -1241,10 +1278,10 @@ pub mod tests {
         let mut context = Context::new_empty();
 
         // Create directory and files
-        fs.create_directory(test_dir).unwrap();
-        fs.create_file(file1).unwrap();
-        fs.create_file(file2).unwrap();
-        fs.create_file(file3).unwrap();
+        fs.create_directory(test_dir, &Attributes::new()).unwrap();
+        fs.create_file(file1, &Attributes::new()).unwrap();
+        fs.create_file(file2, &Attributes::new()).unwrap();
+        fs.create_file(file3, &Attributes::new()).unwrap();
 
         // Open directory for reading
         fs.lookup_directory(&mut context, test_dir).unwrap();
@@ -1292,9 +1329,9 @@ pub mod tests {
         let mut context = Context::new_empty();
 
         // Create directory and files
-        fs.create_directory(test_dir).unwrap();
-        fs.create_file(file1).unwrap();
-        fs.create_file(file2).unwrap();
+        fs.create_directory(test_dir, &Attributes::new()).unwrap();
+        fs.create_file(file1, &Attributes::new()).unwrap();
+        fs.create_file(file2, &Attributes::new()).unwrap();
 
         // Open directory
         fs.lookup_directory(&mut context, test_dir).unwrap();
@@ -1338,8 +1375,8 @@ pub mod tests {
         let mut context = Context::new_empty();
 
         // Create directory and file
-        fs.create_directory(test_dir).unwrap();
-        fs.create_file(file).unwrap();
+        fs.create_directory(test_dir, &Attributes::new()).unwrap();
+        fs.create_file(file, &Attributes::new()).unwrap();
 
         // Open directory
         fs.lookup_directory(&mut context, test_dir).unwrap();
@@ -1384,7 +1421,7 @@ pub mod tests {
         let test_dir = Path::new("/empty_dir");
         let mut context = Context::new_empty();
 
-        fs.create_directory(test_dir).unwrap();
+        fs.create_directory(test_dir, &Attributes::new()).unwrap();
         fs.lookup_directory(&mut context, test_dir).unwrap();
 
         // Read from empty directory (may have . and .. entries)
@@ -1411,9 +1448,10 @@ pub mod tests {
         let mut context = Context::new_empty();
 
         // Create structures
-        fs.create_directory(test_dir).unwrap();
-        fs.create_file(test_file).unwrap();
-        fs.create_directory(test_subdir).unwrap();
+        fs.create_directory(test_dir, &Attributes::new()).unwrap();
+        fs.create_file(test_file, &Attributes::new()).unwrap();
+        fs.create_directory(test_subdir, &Attributes::new())
+            .unwrap();
 
         // Open and read directory
         fs.lookup_directory(&mut context, test_dir).unwrap();
@@ -1460,7 +1498,7 @@ pub mod tests {
         let mut context = Context::new_empty();
 
         // Create file
-        fs.create_file(test_file).unwrap();
+        fs.create_file(test_file, &Attributes::new()).unwrap();
 
         // Open file
         let open_result = fs.lookup_file(&mut context, test_file, AccessFlags::Read.into());
@@ -1475,7 +1513,7 @@ pub mod tests {
 
         // Open directory
         let test_dir = Path::new("/open_close_dir");
-        fs.create_directory(test_dir).unwrap();
+        fs.create_directory(test_dir, &Attributes::new()).unwrap();
 
         let open_result = fs.lookup_directory(&mut context, test_dir);
         open_result.unwrap();

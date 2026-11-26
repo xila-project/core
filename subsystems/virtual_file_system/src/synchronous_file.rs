@@ -28,6 +28,12 @@ pub struct SynchronousFile<'a> {
     cursor: crate::cursor::Cursor,
     pub(crate) flags: Flags,
     pub(crate) context: Context,
+    /// The modification and status times were recorded on this handle since
+    /// the last flush: only the first write of more than zero bytes after an
+    /// open or a flush touches them, so repeated writes cost no extra metadata.
+    times_touched: bool,
+    /// A metadata-update failure was already logged for this handle.
+    time_error_logged: bool,
 }
 
 impl Debug for SynchronousFile<'_> {
@@ -57,6 +63,8 @@ impl<'a> SynchronousFile<'a> {
             cursor: crate::cursor::Cursor::new(position, flags.get_state()),
             flags: flags.set_status(StateFlags::empty()),
             context,
+            times_touched: false,
+            time_error_logged: false,
         }
     }
 
@@ -154,6 +162,58 @@ impl<'a> SynchronousFile<'a> {
         })
     }
 
+    fn file_system_operations(&self) -> Option<&'static dyn file_system::FileSystemOperations> {
+        match &self.item {
+            ItemStatic::File(file_system) => Some(*file_system),
+            _ => None,
+        }
+    }
+
+    /// Update the modification and status times after a mutation of an open
+    /// regular file, once per open or flush interval. The backend commits them
+    /// with the file data on the next sync or close, so this costs no extra
+    /// flash write. Best effort: the triggering operation already succeeded.
+    ///
+    /// With several writers on the same file, the committed modification time
+    /// is the one recorded by the handle whose sync or close commits last,
+    /// which depends on the close order. This is never worse than recording a
+    /// time on every open.
+    fn touch_modification_time(&mut self) {
+        if self.times_touched {
+            return;
+        }
+        if let Err(error) = self
+            .virtual_file_system
+            .touch_handle_modification_time(&self.item, &mut self.context)
+        {
+            match error {
+                IoErrorKind::Unsupported | IoErrorKind::ResourceBusy | IoErrorKind::WouldBlock => {}
+                _ => {
+                    // Log once per handle, not on every write of an errored one.
+                    if !self.time_error_logged {
+                        self.time_error_logged = true;
+                        log::warning!("Failed to update modification time after a write: {error}");
+                    }
+                }
+            }
+        } else {
+            self.times_touched = true;
+        }
+    }
+
+    /// Attach the result of a backend write to the modification-time update.
+    fn after_write(
+        &mut self,
+        result: core::task::Poll<Result<usize>>,
+    ) -> core::task::Poll<Result<usize>> {
+        if let core::task::Poll::Ready(Ok(count)) = result
+            && count > 0
+        {
+            self.touch_modification_time();
+        }
+        result
+    }
+
     fn append_position(&mut self) -> Option<Size> {
         // Some devices cannot report a size. Keep the cursor for those devices.
         if self.state().contains(StateFlags::Append) {
@@ -173,8 +233,13 @@ impl<'a> SynchronousFile<'a> {
             return core::task::Poll::Ready(Err(IoErrorKind::BadDescriptor));
         }
         if let Some(offset) = offset {
-            let operations = Self::positional_operations(&self.item)?;
-            return operations.write(&mut self.context, cx, buffer, offset);
+            let result = Self::positional_operations(&self.item)?.write(
+                &mut self.context,
+                cx,
+                buffer,
+                offset,
+            );
+            return self.after_write(result);
         }
         let append_position = self.append_position();
         let operations = self
@@ -182,22 +247,30 @@ impl<'a> SynchronousFile<'a> {
             .as_base_operations()
             .ok_or(IoErrorKind::Unsupported)?;
         let context = &mut self.context;
-        self.cursor.poll_update(|position| {
+        let result = self.cursor.poll_update(|position| {
             let position = append_position.unwrap_or(position);
             operations
                 .write(context, cx, buffer, position)
                 .map(|result| result.map(|count| (count, position + count as Size)))
-        })
+        });
+        self.after_write(result)
     }
 
     pub(crate) fn poll_flush(
         &mut self,
         cx: &mut core::task::Context<'_>,
     ) -> core::task::Poll<Result<()>> {
-        self.item
+        let result = self
+            .item
             .as_base_operations()
             .ok_or(IoErrorKind::Unsupported)?
-            .flush(&mut self.context, cx)
+            .flush(&mut self.context, cx);
+        // A successful flush committed the pending data and times: the next
+        // write is a new mutation and records the times again.
+        if let core::task::Poll::Ready(Ok(())) = result {
+            self.times_touched = false;
+        }
+        result
     }
 
     pub(crate) fn poll_control(
@@ -230,11 +303,17 @@ impl<'a> SynchronousFile<'a> {
             .as_base_operations()
             .ok_or(IoErrorKind::Unsupported)?;
         let context = &mut self.context;
-        self.cursor.update(|position| {
+        let result = self.cursor.update(|position| {
             let position = append_position.unwrap_or(position);
             let count = operations.write_sync(context, buffer, position)?;
             Ok((count, position + count as Size))
-        })
+        });
+        if let Ok(count) = result
+            && count > 0
+        {
+            self.touch_modification_time();
+        }
+        result
     }
 
     pub fn write_vectored(&mut self, buffers: &[&[u8]]) -> Result<usize> {
@@ -246,10 +325,16 @@ impl<'a> SynchronousFile<'a> {
             .as_base_operations()
             .ok_or(IoErrorKind::Unsupported)?;
         let context = &mut self.context;
-        self.cursor.update(|position| {
+        let result = self.cursor.update(|position| {
             let count = operations.write_vectored_sync(context, buffers, position)?;
             Ok((count, position + count as Size))
-        })
+        });
+        if let Ok(count) = result
+            && count > 0
+        {
+            self.touch_modification_time();
+        }
+        result
     }
 
     pub fn write_line(&mut self, buffer: &[u8]) -> Result<usize> {
@@ -315,6 +400,9 @@ impl<'a> SynchronousFile<'a> {
             .as_base_operations()
             .ok_or(IoErrorKind::Unsupported)?
             .flush_sync(&mut self.context)?;
+        // The flush committed the pending data and times: the next write is a
+        // new mutation and records the times again.
+        self.times_touched = false;
 
         Ok(())
     }
@@ -339,6 +427,10 @@ impl<'a> SynchronousFile<'a> {
             cursor: self.cursor.duplicate(),
             flags: self.flags,
             context,
+            // The duplicate shares the native context, whose pending times
+            // are already recorded.
+            times_touched: self.times_touched,
+            time_error_logged: self.time_error_logged,
         })
     }
 
@@ -354,14 +446,30 @@ impl<'a> SynchronousFile<'a> {
     }
 
     /// Resize through an already opened writable file without changing its cursor.
+    /// Resizing mutates the file, so the modification and status times are
+    /// updated with the size change and committed together with it.
     pub fn set_size(&mut self, size: Size) -> Result<()> {
         if !self.flags.get_access().contains(AccessFlags::Write) {
             return Err(IoErrorKind::BadDescriptor);
         }
+        let mut attributes = Attributes::new().set_size(size);
+        if let Some(file_system) = self.file_system_operations()
+            && let Ok(time) = self.virtual_file_system.current_time()
+        {
+            let times = Attributes::new().set_modification(time).set_status(time);
+            let mask = AttributeFlags::Size
+                | times
+                    .get_mask()
+                    .intersection(file_system.writable_attributes());
+            attributes = attributes
+                .set_modification(time)
+                .set_status(time)
+                .set_mask(mask);
+        }
         self.item
             .as_attributes_operations()
             .ok_or(IoErrorKind::Unsupported)?
-            .set_attributes(&mut self.context, &Attributes::new().set_size(size))?;
+            .set_attributes(&mut self.context, &attributes)?;
         Ok(())
     }
 
@@ -401,7 +509,14 @@ impl<'a> SynchronousFile<'a> {
         if !self.flags.get_access().contains(AccessFlags::Write) {
             return Err(IoErrorKind::BadDescriptor);
         }
-        Self::positional_operations(&self.item)?.write_sync(&mut self.context, buffer, offset)
+        let result =
+            Self::positional_operations(&self.item)?.write_sync(&mut self.context, buffer, offset);
+        if let Ok(count) = result
+            && count > 0
+        {
+            self.touch_modification_time();
+        }
+        result
     }
 
     pub fn set_owner(

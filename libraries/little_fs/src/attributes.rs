@@ -1,9 +1,62 @@
-use core::{fmt::Debug, mem::MaybeUninit};
+use core::fmt::Debug;
+
+use alloc::ffi::CString;
 
 use file_system::{
     AttributeFlags, Attributes, Inode, IoErrorKind, Kind, Permissions, Result, Time,
 };
 use users::{GroupIdentifier, UserIdentifier};
+
+use crate::{error::convert_result, littlefs};
+
+/// `LFS_BLOCK_NULL` from lfs.c is `((lfs_block_t)-1)`; it is defined in the C
+/// source and not in the header, so the generated bindings do not export it.
+/// Assigning it to a cache block empties that cache.
+const BLOCK_NULL: littlefs::lfs_block_t = u32::MAX;
+
+/// Empty the read cache. A failed device read leaves the failed block's key in
+/// the cache with stale bytes, and a later lookup can then be served from it
+/// (for example the older twin of a metadata pair, which can show an entry
+/// without its attributes), so after an I/O error every probe of the on-disk
+/// state must start from an empty cache.
+pub(crate) fn drop_read_cache(file_system: &mut littlefs::lfs_t) {
+    file_system.rcache.block = BLOCK_NULL;
+}
+
+/// Empty the read cache of an open file. LittleFS reads the data of a file
+/// through the cache of that file, and a failed read leaves the key of the
+/// failed block in it with stale bytes: a retried read at the same position
+/// would return them.
+pub(crate) fn drop_file_cache(file: &mut littlefs::lfs_file_t) {
+    file.cache.block = BLOCK_NULL;
+}
+
+/// True when the entry exists but carries no Xila attributes: the signature of
+/// an entry whose creation was interrupted between the entry commit and the
+/// attribute commit. The read cache is emptied first, because a stale cache
+/// left by a failed read can serve an older twin of a metadata pair and report
+/// an existing entry as attribute-less. An entry that has attributes is never
+/// one a create call half-created, and an unreadable device reports neither,
+/// which leaves the entry in place for the caller to handle.
+pub(crate) fn entry_is_attribute_less(file_system: &mut littlefs::lfs_t, path: &CString) -> bool {
+    // Local drop, kept because the probe runs inside a create call whose own
+    // error return may not be an I/O error: the operation-level drop would not
+    // fire, and the cleanup remove right after must not read stale bytes.
+    drop_read_cache(file_system);
+    let mut buffer = InternalAttributes::new();
+    unsafe {
+        matches!(
+            convert_result(littlefs::lfs_getattr(
+                file_system,
+                path.as_ptr(),
+                InternalAttributes::IDENTIFIER,
+                &mut buffer as *mut _ as *mut _,
+                size_of::<InternalAttributes>() as u32,
+            )),
+            Err(IoErrorKind::MissingAttribute)
+        )
+    }
+}
 
 #[derive(Clone)]
 #[repr(C)] // For stable layout
@@ -52,8 +105,10 @@ impl InternalAttributes {
         }
     }
 
-    pub fn new_uninitialized() -> MaybeUninit<Self> {
-        MaybeUninit::new(Self {
+    /// Backend defaults: no owner rights, regular file kind, zero times and
+    /// inode. The create path applies the caller's attribute mask on top.
+    pub const fn new() -> Self {
+        Self {
             inode: 0,
             creation: Time::new(0),
             modification: Time::new(0),
@@ -64,7 +119,19 @@ impl InternalAttributes {
             permissions: Permissions::NONE,
             kind: Kind::File,
             reserved: 0,
-        })
+        }
+    }
+
+    /// Build the stored attributes for a new entry: backend defaults with the
+    /// fields selected by `attributes.get_mask()` applied on top. Used on the
+    /// create path so the real owner, permissions and times are committed
+    /// together with the entry instead of being rewritten afterwards.
+    pub fn from_attributes(attributes: &Attributes) -> Self {
+        let mut internal = Self::new();
+        // Ignore the result: fields absent from the mask keep their defaults,
+        // and the mask was already validated by the caller.
+        let _ = internal.update_with_attributes(attributes);
+        internal
     }
 
     pub fn update_attributes(&self, statistics: &mut Attributes) -> Result<()> {

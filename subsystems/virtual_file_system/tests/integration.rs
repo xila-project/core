@@ -25,6 +25,14 @@ mod access_time_policy;
 #[path = "support/metadata_authorization.rs"]
 mod metadata_authorization;
 
+#[cfg(target_os = "linux")]
+#[path = "support/mutation_times.rs"]
+mod mutation_times;
+
+#[cfg(target_os = "linux")]
+#[path = "support/power_loss.rs"]
+mod power_loss;
+
 async fn initialize() -> (TaskIdentifier, &'static VirtualFileSystem) {
     let time_manager = Box::leak(Box::new(
         time::Manager::new(&testing_support::TimeDevice).unwrap(),
@@ -3157,6 +3165,7 @@ mod symlink_confinement_regression_tests {
             name: &str,
             kind: SimulatedNodeKind,
             permissions: Permissions,
+            attributes: &Attributes,
         ) -> file_system::Result<Inode> {
             if let Some(SimulatedNode {
                 kind: SimulatedNodeKind::Directory { entries },
@@ -3168,20 +3177,19 @@ mod symlink_confinement_regression_tests {
             }
             let inode = state.next_inode;
             state.next_inode += 1;
-            state.nodes.insert(
+            let mut node = SimulatedNode {
                 inode,
-                SimulatedNode {
-                    inode,
-                    kind,
-                    user: UserIdentifier::ROOT,
-                    group: GroupIdentifier::ROOT,
-                    permissions,
-                    creation: Time::new(1),
-                    modification: Time::new(1),
-                    access: Time::new(1),
-                    status: Time::new(1),
-                },
-            );
+                kind,
+                user: UserIdentifier::ROOT,
+                group: GroupIdentifier::ROOT,
+                permissions,
+                creation: Time::new(1),
+                modification: Time::new(1),
+                access: Time::new(1),
+                status: Time::new(1),
+            };
+            Self::write_node_attributes(&mut node, attributes);
+            state.nodes.insert(inode, node);
             if let Some(SimulatedNode {
                 kind: SimulatedNodeKind::Directory { entries },
                 ..
@@ -3208,6 +3216,7 @@ mod symlink_confinement_regression_tests {
                     entries: BTreeMap::new(),
                 },
                 Permissions::DIRECTORY_DEFAULT,
+                &Attributes::new(),
             )
         }
 
@@ -3226,6 +3235,7 @@ mod symlink_confinement_regression_tests {
                     contents: contents.to_vec(),
                 },
                 Permissions::FILE_DEFAULT,
+                &Attributes::new(),
             )
         }
 
@@ -3244,6 +3254,7 @@ mod symlink_confinement_regression_tests {
                     target: String::from(target),
                 },
                 Permissions::ALL_FULL,
+                &Attributes::new(),
             )
         }
 
@@ -3281,6 +3292,7 @@ mod symlink_confinement_regression_tests {
                             target: symlink_target,
                         },
                         Permissions::ALL_FULL,
+                        &Attributes::new(),
                     )
                     .unwrap();
                 }
@@ -3304,6 +3316,7 @@ mod symlink_confinement_regression_tests {
                             target: symlink_target,
                         },
                         Permissions::ALL_FULL,
+                        &Attributes::new(),
                     )
                     .unwrap();
                 }
@@ -3718,11 +3731,20 @@ mod symlink_confinement_regression_tests {
             Ok(())
         }
 
-        fn create_directory(&self, _path: &Path) -> file_system::Result<()> {
+        fn create_directory(
+            &self,
+            _path: &Path,
+            _attributes: &Attributes,
+        ) -> file_system::Result<()> {
             panic!("directory-entry backend must not receive path-based create_directory");
         }
 
-        fn create_directory_entry(&self, parent: &Context, name: &str) -> file_system::Result<()> {
+        fn create_directory_entry(
+            &self,
+            parent: &Context,
+            name: &str,
+            attributes: &Attributes,
+        ) -> file_system::Result<()> {
             let parent_inode = Self::context_inode(parent)?;
             let mut state = self.state();
             Self::insert_node(
@@ -3733,15 +3755,21 @@ mod symlink_confinement_regression_tests {
                     entries: BTreeMap::new(),
                 },
                 Permissions::DIRECTORY_DEFAULT,
+                attributes,
             )?;
             Ok(())
         }
 
-        fn create_file(&self, _path: &Path) -> file_system::Result<()> {
+        fn create_file(&self, _path: &Path, _attributes: &Attributes) -> file_system::Result<()> {
             panic!("directory-entry backend must not receive path-based create_file");
         }
 
-        fn create_file_entry(&self, parent: &Context, name: &str) -> file_system::Result<()> {
+        fn create_file_entry(
+            &self,
+            parent: &Context,
+            name: &str,
+            attributes: &Attributes,
+        ) -> file_system::Result<()> {
             let parent_inode = Self::context_inode(parent)?;
             let mut state = self.state();
             Self::insert_node(
@@ -3752,6 +3780,7 @@ mod symlink_confinement_regression_tests {
                     contents: Vec::new(),
                 },
                 Permissions::FILE_DEFAULT,
+                attributes,
             )?;
             Ok(())
         }
@@ -3815,7 +3844,12 @@ mod symlink_confinement_regression_tests {
             Ok(())
         }
 
-        fn create_symlink(&self, _target: &Path, _link: &Path) -> file_system::Result<()> {
+        fn create_symlink(
+            &self,
+            _target: &Path,
+            _link: &Path,
+            _attributes: &Attributes,
+        ) -> file_system::Result<()> {
             panic!("directory-entry backend must not receive path-based create_symlink");
         }
 
@@ -3824,6 +3858,7 @@ mod symlink_confinement_regression_tests {
             target: &Path,
             parent: &Context,
             name: &str,
+            attributes: &Attributes,
         ) -> file_system::Result<()> {
             let parent_inode = Self::context_inode(parent)?;
             let mut state = self.state();
@@ -3835,6 +3870,7 @@ mod symlink_confinement_regression_tests {
                     target: String::from(target.as_str()),
                 },
                 Permissions::ALL_FULL,
+                attributes,
             )?;
             Ok(())
         }

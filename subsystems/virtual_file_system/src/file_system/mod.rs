@@ -9,8 +9,8 @@ use core::cell::RefCell;
 use core::ptr;
 use exported_file_system::{BlockDevice, CharacterDevice, CreateFlags, Permission, Permissions};
 use file_system::{
-    AccessFlags, AttributeFlags, Attributes, BaseOperations, Context, FileSystemOperations, Flags,
-    Inode, Kind, Path, PathOwned, StateFlags, Statistics,
+    AccessFlags, AttributeFlags, AttributeOperations, Attributes, BaseOperations, Context,
+    FileSystemOperations, Flags, Inode, Kind, Path, PathOwned, StateFlags, Statistics,
 };
 use synchronization::{
     blocking_mutex::{Mutex as BlockingMutex, raw::CriticalSectionRawMutex},
@@ -24,9 +24,15 @@ use utilities::*;
 const MAX_SYMLINK_TARGET_LENGTH: usize = 4096;
 
 /// Policy controlling when read operations update a mounted file system's access time.
+///
+/// The policy applies to read-only opens: reads through a read-write handle
+/// do not update the access time, so a read-write open that writes nothing
+/// costs no metadata commit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AccessTimePolicy {
-    /// Never update the access time on read. Write opens still update modification and access times.
+    /// Never update the access time on read. Writes update the modification
+    /// and status times on the first write of more than zero bytes after an
+    /// open or a flush.
     Never,
     /// Update the access time on read only when it is older than the modification or status time, or older than 24 hours.
     #[default]
@@ -778,16 +784,35 @@ impl VirtualFileSystem {
             .await?;
 
         let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
-        let exists =
+        // An entry left without attributes by a power loss during creation is
+        // replaced by a create, after the parent write permission check below,
+        // instead of failing the name until a reformat.
+        let mut replace_attribute_less = false;
+        let mut exists =
             match Self::target_attributes(&file_systems, &mut resolved, &mut attributes).await {
                 Ok(()) => true,
                 Err(IoErrorKind::NotFound) => false,
+                Err(IoErrorKind::MissingAttribute) if open.contains(CreateFlags::Create) => {
+                    replace_attribute_less = true;
+                    false
+                }
                 Err(error) => return Err(error),
             };
-        if exists {
-            if exclusive_create {
-                return Err(IoErrorKind::AlreadyExists);
+        if exists && exclusive_create {
+            // Distinguish a complete entry from an attribute-less one (whose
+            // kind the backend can still report from the directory entry):
+            // the former is reported as existing, the latter is replaced.
+            let mut probe = Attributes::new().set_mask(AttributeFlags::User);
+            match Self::target_attributes(&file_systems, &mut resolved, &mut probe).await {
+                Ok(()) => return Err(IoErrorKind::AlreadyExists),
+                Err(IoErrorKind::MissingAttribute) => {
+                    replace_attribute_less = true;
+                    exists = false;
+                }
+                Err(error) => return Err(error),
             }
+        }
+        if exists {
             if attributes.get_kind() == Some(&Kind::SymbolicLink) {
                 return Err(IoErrorKind::SymlinkLoop);
             }
@@ -813,16 +838,27 @@ impl VirtualFileSystem {
                 task,
             )
             .await?;
-            let time = time?;
-            if let Some(parent) = resolved.parent_directory.as_ref() {
-                let entry_name = resolved.entry_name(&file_systems)?;
+            if replace_attribute_less {
+                // Remove the attribute-less entry left by the interrupted
+                // creation; the create below replaces it. The sticky-bit check
+                // of a plain remove does not apply here: an attribute-less
+                // entry has no readable owner, so on a sticky parent the
+                // replace is allowed for anyone with write permission on the
+                // parent, exactly like the remove path for root and the
+                // parent owner.
                 let target_file_system = file_systems[resolved.mount_index].file_system;
-                poll(|| target_file_system.create_file_entry(parent.context(), entry_name)).await?;
-            } else {
-                let target_file_system = file_systems[resolved.mount_index].file_system;
-                let relative_path = resolved.relative_path(&file_systems)?;
-                poll(|| target_file_system.create_file(relative_path)).await?;
+                if let Some(parent) = resolved.parent_directory.as_ref() {
+                    let entry_name = resolved.entry_name(&file_systems)?;
+                    poll(|| target_file_system.remove_entry(parent.context(), entry_name)).await?;
+                } else {
+                    let relative_path = resolved.relative_path(&file_systems)?;
+                    poll(|| target_file_system.remove(relative_path)).await?;
+                }
             }
+            let time = time?;
+            // The backend persists these attributes with the new entry itself
+            // (LittleFS commits them atomically with the file), so no separate
+            // metadata commit follows the creation.
             let attributes = Attributes::new()
                 .set_user(user)
                 .set_group(group)
@@ -838,30 +874,35 @@ impl VirtualFileSystem {
                     .writable_attributes(),
             );
             let attributes = attributes.set_mask(mask);
-            Self::set_target_attributes(&file_systems, &mut resolved, &attributes).await?;
+            if let Some(parent) = resolved.parent_directory.as_ref() {
+                let entry_name = resolved.entry_name(&file_systems)?;
+                let target_file_system = file_systems[resolved.mount_index].file_system;
+                poll(|| {
+                    target_file_system.create_file_entry(parent.context(), entry_name, &attributes)
+                })
+                .await?;
+            } else {
+                let target_file_system = file_systems[resolved.mount_index].file_system;
+                let relative_path = resolved.relative_path(&file_systems)?;
+                poll(|| target_file_system.create_file(relative_path, &attributes)).await?;
+            }
         } else {
             return Err(IoErrorKind::NotFound);
         }
 
         // Preserve previous timestamps while UTC is unavailable; never publish
         // uptime or wrap a signed epoch into unsigned filesystem metadata.
-        if exists && let Ok(time) = time {
-            if mode.contains(AccessFlags::Write) {
-                let attributes = Attributes::new().set_modification(time).set_access(time);
-                let mask = attributes.get_mask().intersection(
-                    file_systems[resolved.mount_index]
-                        .file_system
-                        .writable_attributes(),
-                );
-                Self::set_target_attributes(
-                    &file_systems,
-                    &mut resolved,
-                    &attributes.set_mask(mask),
-                )
-                .await?;
-            } else {
-                Self::update_target_read_access_time(&file_systems, &mut resolved, time).await?;
-            }
+        // Opening for writing changes no time by itself: the modification and
+        // status times follow the first write of more than zero bytes and any
+        // truncate, and the access time follows reads per the mount policy.
+        // Only read-only opens update the access time: reads through a
+        // read-write handle that writes nothing keep the previous access time,
+        // so an idle read-write open costs no metadata commit.
+        if exists
+            && !mode.contains(AccessFlags::Write)
+            && let Ok(time) = time
+        {
+            Self::update_target_read_access_time(&file_systems, &mut resolved, time).await?;
         }
 
         let mut attributes =
@@ -909,9 +950,12 @@ impl VirtualFileSystem {
                 File::new(self, ItemStatic::Pipe(pipe.pipe.clone()), flags, context)
             }
             Kind::File => {
+                // A file just created by this open is already empty: passing
+                // Truncate again would only cost an extra commit on close.
+                let truncate = flags.get_create().contains(CreateFlags::Truncate) && exists;
                 let lookup_flags = Flags::new(
                     flags.get_access(),
-                    Some(if flags.get_create().contains(CreateFlags::Truncate) {
+                    Some(if truncate {
                         CreateFlags::Truncate
                     } else {
                         CreateFlags::from_bits_truncate(0)
@@ -939,6 +983,16 @@ impl VirtualFileSystem {
                     .await?;
                 }
 
+                // O_TRUNC mutates the file: record the modification and status
+                // times on the handle. The backend commits them atomically with
+                // the truncation on sync or close.
+                if truncate && mode.contains(AccessFlags::Write) {
+                    let target_file_system = file_systems[resolved.mount_index].file_system;
+                    if let Ok(time) = time {
+                        Self::set_handle_times(target_file_system, &mut context, time)?;
+                    }
+                }
+
                 let internal_file_system = &mut file_systems[resolved.mount_index];
                 internal_file_system.reference_count += 1;
 
@@ -954,6 +1008,23 @@ impl VirtualFileSystem {
         };
 
         Ok(file.with_authority(authority))
+    }
+
+    /// Drop the device or pipe registration taken for a mount whose backing
+    /// entry creation failed. File system mounts register nothing.
+    async fn unregister_mounted_item(&self, item: &ItemStatic, inode: Inode) {
+        match item {
+            ItemStatic::BlockDevice(_) => {
+                self.block_device.write().await.remove(&inode);
+            }
+            ItemStatic::CharacterDevice(_) => {
+                self.character_device.write().await.remove(&inode);
+            }
+            ItemStatic::Pipe(_) => {
+                self.pipes.write().await.remove(&inode);
+            }
+            _ => {}
+        }
     }
 
     pub async fn mount_static(
@@ -1020,34 +1091,9 @@ impl VirtualFileSystem {
         )
         .await?;
 
-        // An existing mount point directory keeps its attributes, as on Linux:
-        // rewriting them at every boot would wear flash for nothing.
-        let mut existing_mount_point = false;
-        if let ItemStatic::FileSystem(_) = item {
-            match parent_file_system
-                .file_system
-                .create_directory(relative_path)
-            {
-                Ok(()) => {}
-                Err(IoErrorKind::AlreadyExists) => {
-                    existing_mount_point = true;
-                    let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
-                    Self::get_attributes(
-                        parent_file_system.file_system,
-                        relative_path,
-                        &mut attributes,
-                    )
-                    .await?;
-                    if attributes.get_kind() != Some(&Kind::Directory) {
-                        return Err(IoErrorKind::AlreadyExists);
-                    }
-                }
-                Err(error) => return Err(error),
-            }
-        } else {
-            parent_file_system.file_system.create_file(relative_path)?;
-        }
-
+        // The inode and kind are known before the entry is created, so the
+        // backend can persist the full attribute set with the new entry in
+        // one commit instead of rewriting it afterwards.
         let inode = match item {
             ItemStatic::BlockDevice(device) => {
                 let mut block_devices = self.block_device.write().await;
@@ -1109,9 +1155,41 @@ impl VirtualFileSystem {
             .get_mask()
             .intersection(parent_file_system.file_system.writable_attributes());
         let attributes = attributes.set_mask(mask);
-        if !existing_mount_point {
-            Self::set_attributes(parent_file_system.file_system, relative_path, &attributes)
-                .await?;
+
+        // An existing mount point directory keeps its attributes, as on Linux:
+        // rewriting them at every boot would wear flash for nothing. New
+        // entries are created with their final attributes in one commit.
+        if let ItemStatic::FileSystem(_) = item {
+            match parent_file_system
+                .file_system
+                .create_directory(relative_path, &attributes)
+            {
+                Ok(()) => {}
+                Err(IoErrorKind::AlreadyExists) => {
+                    let mut kind_attributes = Attributes::new().set_mask(AttributeFlags::Kind);
+                    Self::get_attributes(
+                        parent_file_system.file_system,
+                        relative_path,
+                        &mut kind_attributes,
+                    )
+                    .await?;
+                    if kind_attributes.get_kind() != Some(&Kind::Directory) {
+                        return Err(IoErrorKind::AlreadyExists);
+                    }
+                }
+                Err(error) => {
+                    self.unregister_mounted_item(&item, inode).await;
+                    return Err(error);
+                }
+            }
+        } else {
+            if let Err(error) = parent_file_system
+                .file_system
+                .create_file(relative_path, &attributes)
+            {
+                self.unregister_mounted_item(&item, inode).await;
+                return Err(error);
+            }
         }
 
         poll(|| {
@@ -1261,12 +1339,22 @@ impl VirtualFileSystem {
 
         let mut attributes =
             Attributes::new().set_mask(AttributeFlags::Kind | AttributeFlags::Inode);
-        Self::target_attributes(&file_systems, &mut resolved, &mut attributes).await?;
+        // An entry left without attributes by a power loss during creation is
+        // not a pipe (those are VFS-created and always carry attributes), so
+        // removal proceeds with a regular-file kind and inode 0. Backends that
+        // report the kind from the directory entry itself (LittleFS) answer
+        // this request directly.
+        let (inode, kind) =
+            match Self::target_attributes(&file_systems, &mut resolved, &mut attributes).await {
+                Ok(()) => (
+                    *attributes.get_inode().ok_or(IoErrorKind::InputOutput)?,
+                    *attributes.get_kind().ok_or(IoErrorKind::InputOutput)?,
+                ),
+                Err(IoErrorKind::MissingAttribute) => (0, Kind::File),
+                Err(error) => return Err(error),
+            };
 
-        let inode = *attributes.get_inode().ok_or(IoErrorKind::InputOutput)?;
-        let kind = attributes.get_kind().ok_or(IoErrorKind::InputOutput)?;
-
-        if kind == &Kind::Pipe {
+        if kind == Kind::Pipe {
             let mut named_pipes = self.pipes.write().await;
 
             named_pipes.remove(&inode);
@@ -1326,11 +1414,24 @@ impl VirtualFileSystem {
 
         // Like POSIX mkdir, an existing entry is reported before the parent
         // write check: resolution already required search permission on the
-        // parent, so this reveals nothing a lookup would not.
+        // parent, so this reveals nothing a lookup would not. An entry left
+        // without attributes by a power loss during creation is replaced
+        // after the parent write check instead of failing the name.
         let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
+        let mut replace_attribute_less = false;
         match Self::target_attributes(&file_systems, &mut resolved, &mut attributes).await {
-            Ok(()) => return Err(IoErrorKind::AlreadyExists),
+            Ok(()) => {
+                // Distinguish a complete entry from an attribute-less one:
+                // the former is reported as existing, the latter is replaced.
+                let mut probe = Attributes::new().set_mask(AttributeFlags::User);
+                match Self::target_attributes(&file_systems, &mut resolved, &mut probe).await {
+                    Ok(()) => return Err(IoErrorKind::AlreadyExists),
+                    Err(IoErrorKind::MissingAttribute) => replace_attribute_less = true,
+                    Err(error) => return Err(error),
+                }
+            }
             Err(IoErrorKind::NotFound) => {}
+            Err(IoErrorKind::MissingAttribute) => replace_attribute_less = true,
             Err(error) => return Err(error),
         }
 
@@ -1343,16 +1444,26 @@ impl VirtualFileSystem {
         )
         .await?;
 
-        let target_file_system = file_systems[resolved.mount_index].file_system;
-        if let Some(parent) = resolved.parent_directory.as_ref() {
-            let entry_name = resolved.entry_name(&file_systems)?;
-            poll(|| target_file_system.create_directory_entry(parent.context(), entry_name))
-                .await?;
-        } else {
-            let relative_path = resolved.relative_path(&file_systems)?;
-            poll(|| target_file_system.create_directory(relative_path)).await?;
+        if replace_attribute_less {
+            // Remove the attribute-less entry left by the interrupted
+            // creation; the create below replaces it. The sticky-bit check of
+            // a plain remove does not apply here: an attribute-less entry has
+            // no readable owner, so on a sticky parent the replace is allowed
+            // for anyone with write permission on the parent, exactly like
+            // the remove path for root and the parent owner.
+            let target_file_system = file_systems[resolved.mount_index].file_system;
+            if let Some(parent) = resolved.parent_directory.as_ref() {
+                let entry_name = resolved.entry_name(&file_systems)?;
+                poll(|| target_file_system.remove_entry(parent.context(), entry_name)).await?;
+            } else {
+                let relative_path = resolved.relative_path(&file_systems)?;
+                poll(|| target_file_system.remove(relative_path)).await?;
+            }
         }
 
+        let target_file_system = file_systems[resolved.mount_index].file_system;
+        // The backend persists these attributes with the new directory entry
+        // itself, so no separate metadata commit follows the creation.
         let attributes = Attributes::new()
             .set_inode(0)
             .set_links(1)
@@ -1369,7 +1480,16 @@ impl VirtualFileSystem {
             .intersection(target_file_system.writable_attributes());
         let attributes = attributes.set_mask(mask);
 
-        Self::set_target_attributes(&file_systems, &mut resolved, &attributes).await?;
+        if let Some(parent) = resolved.parent_directory.as_ref() {
+            let entry_name = resolved.entry_name(&file_systems)?;
+            poll(|| {
+                target_file_system.create_directory_entry(parent.context(), entry_name, &attributes)
+            })
+            .await?;
+        } else {
+            let relative_path = resolved.relative_path(&file_systems)?;
+            poll(|| target_file_system.create_directory(relative_path, &attributes)).await?;
+        }
 
         Ok(())
     }
@@ -1490,8 +1610,17 @@ impl VirtualFileSystem {
                 };
                 if let Some(parent) = resolved_link.parent_directory.as_ref() {
                     let entry_name = resolved_link.entry_name(&file_systems)?;
+                    let stage_attributes = attributes.clone().set_mask(
+                        attributes
+                            .get_mask()
+                            .intersection(target_file_system.writable_attributes()),
+                    );
                     match poll(|| {
-                        target_file_system.create_file_entry(parent.context(), &stage_name)
+                        target_file_system.create_file_entry(
+                            parent.context(),
+                            &stage_name,
+                            &stage_attributes,
+                        )
                     })
                     .await
                     {
@@ -1523,14 +1652,8 @@ impl VirtualFileSystem {
                         if written != target.get_length() {
                             return Err(IoErrorKind::InputOutput);
                         }
-                        poll(|| {
-                            target_file_system.set_entry_attributes(
-                                parent.context(),
-                                &stage_name,
-                                &attributes,
-                            )
-                        })
-                        .await?;
+                        // The stage entry was created with the final attributes
+                        // already persisted, so no second metadata commit here.
                         poll(|| {
                             target_file_system.rename_entry(
                                 parent.context(),
@@ -1561,7 +1684,14 @@ impl VirtualFileSystem {
                         .to_owned()
                         .join(Path::from_str(&stage_name))
                         .ok_or(IoErrorKind::InvalidPath)?;
-                    match poll(|| target_file_system.create_file(&stage_path)).await {
+                    let stage_attributes = attributes.clone().set_mask(
+                        attributes
+                            .get_mask()
+                            .intersection(target_file_system.writable_attributes()),
+                    );
+                    match poll(|| target_file_system.create_file(&stage_path, &stage_attributes))
+                        .await
+                    {
                         Ok(()) => {}
                         Err(IoErrorKind::AlreadyExists) => continue,
                         Err(error) => return Err(error),
@@ -1591,7 +1721,8 @@ impl VirtualFileSystem {
                             return Err(IoErrorKind::InputOutput);
                         }
 
-                        Self::set_attributes(target_file_system, &stage_path, &attributes).await?;
+                        // The stage entry was created with the final attributes
+                        // already persisted, so no second metadata commit here.
                         poll(|| target_file_system.rename(&stage_path, relative_link)).await
                     }
                     .await;
@@ -1644,6 +1775,17 @@ impl VirtualFileSystem {
                 .as_deref()
                 .map(Path::from_str)
                 .unwrap_or(target);
+            let symlink_attributes = Attributes::new()
+                .set_kind(Kind::SymbolicLink)
+                .set_user(user)
+                .set_group(self.task_manager.get_group(task).await.map_io_error()?)
+                .set_permissions(Permissions::ALL_FULL)
+                .set_mask(
+                    AttributeFlags::Kind
+                        | AttributeFlags::User
+                        | AttributeFlags::Group
+                        | AttributeFlags::Permissions,
+                );
             if let Some(parent) = resolved_link.parent_directory.as_ref() {
                 let entry_name = resolved_link.entry_name(&file_systems)?;
                 poll(|| {
@@ -1651,12 +1793,20 @@ impl VirtualFileSystem {
                         native_target,
                         parent.context(),
                         entry_name,
+                        &symlink_attributes,
                     )
                 })
                 .await?;
             } else {
                 let relative_link = resolved_link.relative_path(&file_systems)?;
-                poll(|| target_file_system.create_symlink(native_target, relative_link)).await?;
+                poll(|| {
+                    target_file_system.create_symlink(
+                        native_target,
+                        relative_link,
+                        &symlink_attributes,
+                    )
+                })
+                .await?;
             }
         }
         Ok(())
@@ -2236,6 +2386,55 @@ impl VirtualFileSystem {
                 .ok_or(IoErrorKind::Unsupported)?
                 .close(context)
         }
+    }
+
+    /// Record a mutation timestamp (modification and status change time) on an
+    /// open file handle.
+    ///
+    /// The backend stores the times in the handle's pending metadata, so they
+    /// are committed atomically with the file data on the next sync or close
+    /// of the handle instead of costing a separate metadata commit. A backend
+    /// that cannot persist times reports `Unsupported`, which is not an error
+    /// here.
+    pub(crate) fn set_handle_times(
+        file_system: &dyn FileSystemOperations,
+        context: &mut Context,
+        time: file_system::Time,
+    ) -> Result<()> {
+        let attributes = Attributes::new().set_modification(time).set_status(time);
+        let mask = attributes
+            .get_mask()
+            .intersection(file_system.writable_attributes());
+        if mask.is_empty() {
+            return Ok(());
+        }
+        match AttributeOperations::set_attributes(file_system, context, &attributes.set_mask(mask))
+        {
+            Err(IoErrorKind::Unsupported) => Ok(()),
+            result => result.map(|_| ()),
+        }
+    }
+
+    /// Current UTC time when the clock is synchronized.
+    pub(crate) fn current_time(&self) -> Result<file_system::Time> {
+        self.get_time()
+    }
+
+    /// Record a mutation timestamp on an open handle of a regular file, using
+    /// the current UTC time. When UTC is unavailable the previous timestamps
+    /// are kept, as on open.
+    pub(crate) fn touch_handle_modification_time(
+        &self,
+        item: &ItemStatic,
+        context: &mut Context,
+    ) -> Result<()> {
+        let ItemStatic::File(file_system) = item else {
+            return Ok(());
+        };
+        let Ok(time) = self.get_time() else {
+            return Ok(());
+        };
+        Self::set_handle_times(*file_system, context, time)
     }
 
     /// Single-attempt metadata adapter: never block an executor waiting for a

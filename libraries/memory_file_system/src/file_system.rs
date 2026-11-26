@@ -138,19 +138,26 @@ impl State {
         generation
     }
 
-    fn insert_node(&mut self, parent_index: usize, name: &str, kind: Kind) -> Result<usize> {
+    fn insert_node(
+        &mut self,
+        parent_index: usize,
+        name: &str,
+        kind: Kind,
+        attributes: &Attributes,
+    ) -> Result<usize> {
         let generation = self.allocate_generation();
         let permissions = if kind == Kind::Directory {
             Permissions::DIRECTORY_DEFAULT
         } else {
             Permissions::NONE
         };
-        let node = Node::new(
+        let mut node_attributes = NodeAttributes::new(kind, permissions);
+        node_attributes.apply_from(attributes)?;
+        let node = Node::with_attributes(
             Box::from(name),
             parent_index as u32,
             generation,
-            kind,
-            permissions,
+            node_attributes,
         );
 
         if let Some(free_index) = self
@@ -271,7 +278,7 @@ impl State {
         })
     }
 
-    fn create_directory(&mut self, path: &Path) -> Result<()> {
+    fn create_directory(&mut self, path: &Path, attributes: &Attributes) -> Result<()> {
         match self.resolve_target_path(path)? {
             TargetPath::Root | TargetPath::ExistingComponent(_) => Err(IoErrorKind::AlreadyExists),
             TargetPath::Child {
@@ -282,13 +289,13 @@ impl State {
                 if self.find_child(parent_index as u32, name).is_some() {
                     return Err(IoErrorKind::AlreadyExists);
                 }
-                self.insert_node(parent_index, name, Kind::Directory)?;
+                self.insert_node(parent_index, name, Kind::Directory, attributes)?;
                 Ok(())
             }
         }
     }
 
-    fn create_file(&mut self, path: &Path) -> Result<()> {
+    fn create_file(&mut self, path: &Path, attributes: &Attributes) -> Result<()> {
         match self.resolve_target_path(path)? {
             TargetPath::Root => Err(IoErrorKind::IsADirectory),
             TargetPath::ExistingComponent(existing_index) => {
@@ -312,7 +319,7 @@ impl State {
                 if trailing_slash {
                     return Err(IoErrorKind::InvalidPath);
                 }
-                self.insert_node(parent_index, name, Kind::File)?;
+                self.insert_node(parent_index, name, Kind::File, attributes)?;
                 Ok(())
             }
         }
@@ -508,12 +515,12 @@ impl FileSystemOperations for FileSystem {
         })
     }
 
-    fn create_directory(&self, path: &Path) -> Result<()> {
-        self.with_state(|state| state.create_directory(path))
+    fn create_directory(&self, path: &Path, attributes: &Attributes) -> Result<()> {
+        self.with_state(|state| state.create_directory(path, attributes))
     }
 
-    fn create_file(&self, path: &Path) -> Result<()> {
-        self.with_state(|state| state.create_file(path))
+    fn create_file(&self, path: &Path, attributes: &Attributes) -> Result<()> {
+        self.with_state(|state| state.create_file(path, attributes))
     }
 
     fn remove(&self, path: &Path) -> Result<()> {
@@ -791,7 +798,9 @@ mod tests {
     fn lookup_file_and_content_operations_return_unsupported_operation() {
         let file_system = FileSystem::new();
         let node_path = Path::new("/serial0");
-        file_system.create_file(node_path).unwrap();
+        file_system
+            .create_file(node_path, &Attributes::new())
+            .unwrap();
 
         let mut context = Context::new_empty();
         assert_eq!(
@@ -845,7 +854,9 @@ mod tests {
         assert_eq!(file_system.persistent_attributes(), AttributeFlags::empty());
 
         let node_path = Path::new("/tty0");
-        file_system.create_file(node_path).unwrap();
+        file_system
+            .create_file(node_path, &Attributes::new())
+            .unwrap();
 
         let updated = Attributes::new()
             .set_kind(Kind::CharacterDevice)
@@ -867,7 +878,11 @@ mod tests {
         assert_eq!(actual.get_links(), None);
 
         assert_eq!(
-            file_system.create_symlink(Path::new("/tty0"), Path::new("/tty_link")),
+            file_system.create_symlink(
+                Path::new("/tty0"),
+                Path::new("/tty_link"),
+                &Attributes::new()
+            ),
             Err(IoErrorKind::Unsupported)
         );
         assert_eq!(
@@ -884,10 +899,18 @@ mod tests {
     #[test]
     fn rename_and_move_semantics_match_little_fs() {
         let file_system = FileSystem::new();
-        file_system.create_directory(Path::new("/uart")).unwrap();
-        file_system.create_directory(Path::new("/serial")).unwrap();
-        file_system.create_file(Path::new("/uart/uart0")).unwrap();
-        file_system.create_file(Path::new("/uart/uart1")).unwrap();
+        file_system
+            .create_directory(Path::new("/uart"), &Attributes::new())
+            .unwrap();
+        file_system
+            .create_directory(Path::new("/serial"), &Attributes::new())
+            .unwrap();
+        file_system
+            .create_file(Path::new("/uart/uart0"), &Attributes::new())
+            .unwrap();
+        file_system
+            .create_file(Path::new("/uart/uart1"), &Attributes::new())
+            .unwrap();
 
         let uart0_attributes = Attributes::new()
             .set_kind(Kind::CharacterDevice)
@@ -925,7 +948,7 @@ mod tests {
 
         // Move across directories and overwrite existing target file.
         file_system
-            .create_file(Path::new("/serial/console"))
+            .create_file(Path::new("/serial/console"), &Attributes::new())
             .unwrap();
         file_system
             .rename(Path::new("/uart/console"), Path::new("/serial/console"))
@@ -940,7 +963,7 @@ mod tests {
 
         // Moving a directory beneath itself is rejected.
         file_system
-            .create_directory(Path::new("/uart/child"))
+            .create_directory(Path::new("/uart/child"), &Attributes::new())
             .unwrap();
         assert_eq!(
             file_system.rename(Path::new("/uart"), Path::new("/uart/child/nested")),
@@ -965,8 +988,12 @@ mod tests {
     #[test]
     fn directory_listing_includes_dot_and_dot_dot_and_attribute_context() {
         let file_system = FileSystem::new();
-        file_system.create_directory(Path::new("/uart")).unwrap();
-        file_system.create_file(Path::new("/uart/uart0")).unwrap();
+        file_system
+            .create_directory(Path::new("/uart"), &Attributes::new())
+            .unwrap();
+        file_system
+            .create_file(Path::new("/uart/uart0"), &Attributes::new())
+            .unwrap();
 
         let mut root_context = Context::new_empty();
         file_system
@@ -1010,7 +1037,7 @@ mod tests {
     fn unmount_clears_state_and_mount_reinitializes() {
         let file_system = FileSystem::new();
         file_system
-            .create_file(Path::new("/temporary_node"))
+            .create_file(Path::new("/temporary_node"), &Attributes::new())
             .unwrap();
 
         file_system.mount().unwrap();
@@ -1024,7 +1051,7 @@ mod tests {
 
         file_system.unmount().unwrap();
         assert_eq!(
-            file_system.create_file(Path::new("/after_unmount")),
+            file_system.create_file(Path::new("/after_unmount"), &Attributes::new()),
             Err(IoErrorKind::DeviceUnavailable)
         );
         assert_eq!(file_system.unmount(), Err(IoErrorKind::DeviceUnavailable));
@@ -1043,12 +1070,14 @@ mod tests {
     #[test]
     fn directory_position_and_stale_generation_after_remove() {
         let file_system = FileSystem::new();
-        file_system.create_directory(Path::new("/devices")).unwrap();
         file_system
-            .create_file(Path::new("/devices/first"))
+            .create_directory(Path::new("/devices"), &Attributes::new())
             .unwrap();
         file_system
-            .create_file(Path::new("/devices/second"))
+            .create_file(Path::new("/devices/first"), &Attributes::new())
+            .unwrap();
+        file_system
+            .create_file(Path::new("/devices/second"), &Attributes::new())
             .unwrap();
 
         let mut context = Context::new_empty();
@@ -1102,14 +1131,16 @@ mod tests {
 
         // Removing an empty directory invalidates open handles even if its slot is reused.
         file_system
-            .create_directory(Path::new("/transient"))
+            .create_directory(Path::new("/transient"), &Attributes::new())
             .unwrap();
         let mut stale_context = Context::new_empty();
         file_system
             .lookup_directory(&mut stale_context, Path::new("/transient"))
             .unwrap();
         file_system.remove(Path::new("/transient")).unwrap();
-        file_system.create_directory(Path::new("/reused")).unwrap();
+        file_system
+            .create_directory(Path::new("/reused"), &Attributes::new())
+            .unwrap();
         assert_eq!(
             DirectoryOperations::read(&file_system, &mut stale_context),
             Err(IoErrorKind::NotFound)
@@ -1119,8 +1150,12 @@ mod tests {
     #[test]
     fn set_attributes_validates_kind_transitions_and_path_errors() {
         let file_system = FileSystem::new();
-        file_system.create_directory(Path::new("/folder")).unwrap();
-        file_system.create_file(Path::new("/folder/node")).unwrap();
+        file_system
+            .create_directory(Path::new("/folder"), &Attributes::new())
+            .unwrap();
+        file_system
+            .create_file(Path::new("/folder/node"), &Attributes::new())
+            .unwrap();
 
         let mut attributes = Attributes::new().set_kind(Kind::File);
         assert_eq!(
@@ -1162,24 +1197,24 @@ mod tests {
             Err(IoErrorKind::NotADirectory)
         );
         assert_eq!(
-            file_system.create_file(Path::new("/missing/node")),
+            file_system.create_file(Path::new("/missing/node"), &Attributes::new()),
             Err(IoErrorKind::NotFound)
         );
         assert_eq!(
-            file_system.create_file(Path::new("/folder/node/child")),
+            file_system.create_file(Path::new("/folder/node/child"), &Attributes::new()),
             Err(IoErrorKind::NotADirectory)
         );
         // An empty path is the root, as for a mount point's own directory.
         assert_eq!(
-            file_system.create_file(Path::EMPTY),
+            file_system.create_file(Path::EMPTY, &Attributes::new()),
             Err(IoErrorKind::IsADirectory)
         );
         assert_eq!(
-            file_system.create_directory(Path::EMPTY),
+            file_system.create_directory(Path::EMPTY, &Attributes::new()),
             Err(IoErrorKind::AlreadyExists)
         );
         assert_eq!(
-            file_system.create_file(Path::new("/bad\0name")),
+            file_system.create_file(Path::new("/bad\0name"), &Attributes::new()),
             Err(IoErrorKind::InvalidArgument)
         );
     }
@@ -1197,14 +1232,18 @@ mod tests {
             &Attributes::new().set_inode(1).set_modification(root_mtime),
         )
         .unwrap();
-        file_system.create_directory(Path::new("/dir")).unwrap();
+        file_system
+            .create_directory(Path::new("/dir"), &Attributes::new())
+            .unwrap();
         FileSystemOperations::set_attributes(
             &file_system,
             Path::new("/dir"),
             &Attributes::new().set_inode(2).set_modification(dir_mtime),
         )
         .unwrap();
-        file_system.create_file(Path::new("/dir/item")).unwrap();
+        file_system
+            .create_file(Path::new("/dir/item"), &Attributes::new())
+            .unwrap();
         FileSystemOperations::set_attributes(
             &file_system,
             Path::new("/dir/item"),

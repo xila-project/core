@@ -145,7 +145,7 @@ async fn list_directory(
 }
 
 #[task::test]
-async fn access_time_policy_never_skips_read_writes_but_keeps_write_open_updates() {
+async fn access_time_policy_never_skips_read_atime_and_updates_mtime_on_write() {
     let (task, virtual_file_system, time_manager, device) =
         initialize_counting(AccessTimePolicy::Never, 1_000).await;
 
@@ -174,6 +174,27 @@ async fn access_time_policy_never_skips_read_writes_but_keeps_write_open_updates
     assert_eq!(statistics.access.as_u64(), 1_000);
     assert_eq!(statistics.modification.as_u64(), 1_000);
 
+    // Opening for writing alone changes no time and costs no flash write.
+    let file = File::open(
+        virtual_file_system,
+        task,
+        "/directory/file",
+        AccessFlags::Write.into(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(device.write_count(), 0);
+    file.close(virtual_file_system).await.unwrap();
+    assert_eq!(device.write_count(), 0);
+    let statistics = virtual_file_system
+        .get_statistics(&"/directory/file")
+        .await
+        .unwrap();
+    assert_eq!(statistics.access.as_u64(), 1_000);
+    assert_eq!(statistics.modification.as_u64(), 1_000);
+
+    // The first write of more than zero bytes updates the modification time,
+    // committed with the data: one flash write for write plus close.
     let mut file = File::open(
         virtual_file_system,
         task,
@@ -184,13 +205,14 @@ async fn access_time_policy_never_skips_read_writes_but_keeps_write_open_updates
     .unwrap();
     file.write(b"world").await.unwrap();
     file.close(virtual_file_system).await.unwrap();
-    assert!(device.write_count() > 0);
+    assert_eq!(device.write_count(), 1);
 
     let statistics = virtual_file_system
         .get_statistics(&"/directory/file")
         .await
         .unwrap();
-    assert_eq!(statistics.access.as_u64(), 2_000);
+    // AccessTimePolicy::Never never touches the access time, not even on writes.
+    assert_eq!(statistics.access.as_u64(), 1_000);
     assert_eq!(statistics.modification.as_u64(), 2_000);
 }
 

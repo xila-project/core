@@ -23,3 +23,10 @@ use flags::*;
 pub mod stubs;
 
 mod open_metadata;
+
+#[cfg(test)]
+#[allow(
+    clippy::disallowed_types,
+    reason = "host-only power-loss tests count device operations with std atomics"
+)]
+mod power_loss;

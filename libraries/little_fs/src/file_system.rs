@@ -3,7 +3,7 @@ use core::ptr::null_mut;
 use super::{Configuration, Directory, convert_result, littlefs};
 use crate::{
     File,
-    attributes::InternalAttributes,
+    attributes::{self, InternalAttributes},
     configuration::{self},
     constants,
 };
@@ -136,7 +136,7 @@ impl FileSystem {
 
             if let Err(IoErrorKind::MissingAttribute) = result {
                 // Set root attributes if not present
-                let mut internal_attributes = InternalAttributes::new_uninitialized().assume_init();
+                let mut internal_attributes = InternalAttributes::new();
                 internal_attributes.kind = Kind::Directory;
 
                 convert_result(littlefs::lfs_setattr(
@@ -172,7 +172,18 @@ impl FileSystem {
     ) -> Result<T> {
         let mut file_system = self.file_system.try_get()?;
 
-        operation(&mut file_system)
+        let result = operation(&mut file_system);
+        // A failed device read leaves the failed block's key in the read cache
+        // with stale bytes, and later operations could be served from it. Drop
+        // the cache after any I/O or corruption error so the next operation
+        // starts from the device.
+        if matches!(
+            result,
+            Err(IoErrorKind::InputOutput | IoErrorKind::CorruptData)
+        ) {
+            attributes::drop_read_cache(&mut file_system);
+        }
+        result
     }
 
     pub fn operation_with_context<I: 'static, T>(
@@ -186,7 +197,16 @@ impl FileSystem {
             .get_private_data_of_type::<SharedContext<I>>()
             .ok_or(IoErrorKind::InvalidArgument)?;
         let mut file = file.try_lock().map_err(|_| IoErrorKind::WouldBlock)?;
-        operation(&mut file_system, &mut file)
+        let result = operation(&mut file_system, &mut file);
+        // Same as `operation`: never let a failed read poison the cache for
+        // the next operation.
+        if matches!(
+            result,
+            Err(IoErrorKind::InputOutput | IoErrorKind::CorruptData)
+        ) {
+            attributes::drop_read_cache(&mut file_system);
+        }
+        result
     }
 }
 
@@ -279,9 +299,9 @@ impl FileSystemOperations for FileSystem {
         })
     }
 
-    fn create_directory(&self, path: &Path) -> Result<()> {
+    fn create_directory(&self, path: &Path, attributes: &Attributes) -> Result<()> {
         self.operation(|file_system| {
-            Directory::create(file_system, path)?;
+            Directory::create(file_system, path, attributes)?;
 
             Ok(())
         })
@@ -307,8 +327,8 @@ impl FileSystemOperations for FileSystem {
         })
     }
 
-    fn create_file(&self, path: &Path) -> Result<()> {
-        self.operation(|file_system| File::create(file_system, path))
+    fn create_file(&self, path: &Path, attributes: &Attributes) -> Result<()> {
+        self.operation(|file_system| File::create(file_system, path, attributes))
     }
 
     fn get_attributes(&self, path: &Path, attributes: &mut Attributes) -> Result<()> {
@@ -320,10 +340,9 @@ impl FileSystemOperations for FileSystem {
         self.operation(|file_system| {
             let path = CString::new(path.as_str()).map_err(|_| IoErrorKind::InvalidArgument)?;
 
-            let mut internal_attributes =
-                unsafe { InternalAttributes::new_uninitialized().assume_init() };
+            let mut internal_attributes = InternalAttributes::new();
 
-            convert_result(unsafe {
+            let result = unsafe {
                 littlefs::lfs_getattr(
                     file_system,
                     path.as_ptr(),
@@ -331,20 +350,63 @@ impl FileSystemOperations for FileSystem {
                     &mut internal_attributes as *mut _ as *mut _,
                     size_of::<InternalAttributes>() as u32,
                 )
-            })?;
+            };
+            match convert_result(result) {
+                Ok(_) => {
+                    internal_attributes.update_attributes(attributes)?;
 
-            internal_attributes.update_attributes(attributes)?;
+                    if requested.contains(AttributeFlags::Size)
+                        && matches!(internal_attributes.kind, Kind::File | Kind::SymbolicLink)
+                    {
+                        let mut info = littlefs::lfs_info::default();
 
-            if requested.contains(AttributeFlags::Size)
-                && matches!(internal_attributes.kind, Kind::File | Kind::SymbolicLink)
-            {
-                let mut info = littlefs::lfs_info::default();
+                        convert_result(unsafe {
+                            littlefs::lfs_stat(file_system, path.as_ptr(), &mut info)
+                        })?;
 
-                convert_result(unsafe {
-                    littlefs::lfs_stat(file_system, path.as_ptr(), &mut info)
-                })?;
-
-                *attributes = attributes.clone().set_size(info.size as Size);
+                        *attributes = attributes.clone().set_size(info.size as Size);
+                    }
+                }
+                // A power loss during creation can leave an entry without
+                // attributes. The name still exists: report the fields
+                // `lfs_stat` can provide (kind, size, inode 0) so it can be
+                // inspected and removed. Owner, permissions and times stay
+                // unavailable: requests for them fail closed with
+                // `MissingAttribute` instead of reporting root with no rights.
+                Err(IoErrorKind::MissingAttribute) => {
+                    const STAT_FIELDS: AttributeFlags = AttributeFlags::Kind
+                        .union(AttributeFlags::Inode)
+                        .union(AttributeFlags::Size);
+                    // Only requests fully answerable from `lfs_stat` fall back;
+                    // anything asking for stored metadata (owner, permissions,
+                    // times) still fails closed with `MissingAttribute`.
+                    if !requested.difference(STAT_FIELDS).is_empty() {
+                        return Err(IoErrorKind::MissingAttribute);
+                    }
+                    let stat_only = requested;
+                    let mut info = littlefs::lfs_info::default();
+                    convert_result(unsafe {
+                        littlefs::lfs_stat(file_system, path.as_ptr(), &mut info)
+                    })?;
+                    *attributes = attributes.clone().set_mask(stat_only);
+                    if stat_only.contains(AttributeFlags::Kind) {
+                        let kind = if info.type_ == constants::TYPE_DIRECTORY {
+                            Kind::Directory
+                        } else {
+                            Kind::File
+                        };
+                        *attributes = attributes.clone().set_kind(kind);
+                    }
+                    if stat_only.contains(AttributeFlags::Inode) {
+                        *attributes = attributes.clone().set_inode(0);
+                    }
+                    if stat_only.contains(AttributeFlags::Size)
+                        && info.type_ == constants::TYPE_REGULAR
+                    {
+                        *attributes = attributes.clone().set_size(info.size as Size);
+                    }
+                }
+                Err(error) => return Err(error),
             }
 
             Ok(())
@@ -361,8 +423,7 @@ impl FileSystemOperations for FileSystem {
         self.operation(|file_system| {
             let path = CString::new(path.as_str()).map_err(|_| IoErrorKind::InvalidArgument)?;
 
-            let mut internal_attributes =
-                unsafe { InternalAttributes::new_uninitialized().assume_init() };
+            let mut internal_attributes = InternalAttributes::new();
 
             if mask != InternalAttributes::PERSISTED_ATTRIBUTE_FLAGS {
                 convert_result(unsafe {
@@ -682,7 +743,7 @@ mod tests {
     fn littlefs_unsupported_attribute_masks_are_rejected_without_mutation() {
         let fs = initialize();
         let file = Path::new("/unsupported-attributes.txt");
-        FileSystemOperations::create_file(&fs, file).unwrap();
+        FileSystemOperations::create_file(&fs, file, &Attributes::new()).unwrap();
 
         let original_permissions = file_system::Permissions::ALL_READ_WRITE;
         FileSystemOperations::set_attributes(
@@ -740,7 +801,7 @@ mod tests {
         BaseOperations::close(&fs, &mut file_context).unwrap();
 
         let directory = Path::new("/unsupported-attributes-dir");
-        FileSystemOperations::create_directory(&fs, directory).unwrap();
+        FileSystemOperations::create_directory(&fs, directory, &Attributes::new()).unwrap();
         let mut path_directory_attributes = Attributes::new()
             .set_mask(AttributeFlags::Kind | AttributeFlags::Size | AttributeFlags::Links);
         FileSystemOperations::get_attributes(&fs, directory, &mut path_directory_attributes)
@@ -782,7 +843,7 @@ mod tests {
     fn littlefs_rejects_unsupported_attribute_all_mask_without_mutation() {
         let fs = initialize();
         let file = Path::new("/all-attributes.txt");
-        FileSystemOperations::create_file(&fs, file).unwrap();
+        FileSystemOperations::create_file(&fs, file, &Attributes::new()).unwrap();
         let original = file_system::Permissions::ALL_READ_WRITE;
         FileSystemOperations::set_attributes(
             &fs,
@@ -809,7 +870,7 @@ mod tests {
     fn path_ownership_updates_every_open_cache_and_survives_close() {
         let fs = initialize();
         let path = Path::new("/owners");
-        FileSystemOperations::create_file(&fs, path).unwrap();
+        FileSystemOperations::create_file(&fs, path, &Attributes::new()).unwrap();
         let mut first = Context::new_empty();
         let mut second = Context::new_empty();
         for context in [&mut first, &mut second] {
@@ -835,7 +896,7 @@ mod tests {
         let fs = initialize();
         let original = Path::new("/old");
         let moved = Path::new("/moved");
-        FileSystemOperations::create_file(&fs, original).unwrap();
+        FileSystemOperations::create_file(&fs, original, &Attributes::new()).unwrap();
         let mut open = Context::new_empty();
         fs.lookup_file(
             &mut open,
@@ -857,7 +918,7 @@ mod tests {
             file_system::AccessFlags::READ_WRITE.into(),
         )
         .unwrap();
-        FileSystemOperations::create_file(&fs, original).unwrap();
+        FileSystemOperations::create_file(&fs, original, &Attributes::new()).unwrap();
         let owner = users::UserIdentifier::new(123);
         FileSystemOperations::set_attributes(&fs, moved, &Attributes::new().set_user(owner))
             .unwrap();
@@ -871,7 +932,7 @@ mod tests {
         AttributeOperations::get_attributes(&fs, &mut open, &mut attributes).unwrap();
         assert_eq!(attributes.get_user(), Some(&owner));
         FileSystemOperations::remove(&fs, moved).unwrap();
-        FileSystemOperations::create_file(&fs, moved).unwrap();
+        FileSystemOperations::create_file(&fs, moved, &Attributes::new()).unwrap();
         FileSystemOperations::set_attributes(
             &fs,
             moved,
@@ -887,7 +948,7 @@ mod tests {
     fn handle_chmod_after_flush_is_persisted_and_visible_to_other_handles() {
         let fs = initialize();
         let path = Path::new("/chmod");
-        FileSystemOperations::create_file(&fs, path).unwrap();
+        FileSystemOperations::create_file(&fs, path, &Attributes::new()).unwrap();
         let mut first = Context::new_empty();
         let mut second = Context::new_empty();
         for context in [&mut first, &mut second] {
@@ -915,7 +976,7 @@ mod tests {
     fn stale_handle_chmod_cannot_overwrite_another_opens_data() {
         let fs = initialize();
         let path = Path::new("/stale-chmod");
-        FileSystemOperations::create_file(&fs, path).unwrap();
+        FileSystemOperations::create_file(&fs, path, &Attributes::new()).unwrap();
         let mut writer = Context::new_empty();
         let mut stale = Context::new_empty();
         for context in [&mut writer, &mut stale] {
@@ -956,8 +1017,9 @@ mod tests {
         let file_system = FileSystem::new(device, options).unwrap();
         let directory = Path::new("/persistent");
         let file = Path::new("/persistent/data");
-        FileSystemOperations::create_directory(&file_system, directory).unwrap();
-        FileSystemOperations::create_file(&file_system, file).unwrap();
+        FileSystemOperations::create_directory(&file_system, directory, &Attributes::new())
+            .unwrap();
+        FileSystemOperations::create_file(&file_system, file, &Attributes::new()).unwrap();
 
         let mut context = Context::new_empty();
         file_system
@@ -993,7 +1055,8 @@ mod tests {
 
         let file_system = FileSystem::new(device, Options::new(CACHE_SIZE)).unwrap();
         let directory = Path::new("/shared");
-        FileSystemOperations::create_directory(&file_system, directory).unwrap();
+        FileSystemOperations::create_directory(&file_system, directory, &Attributes::new())
+            .unwrap();
         FileSystemOperations::set_attributes(
             &file_system,
             directory,
@@ -1086,7 +1149,7 @@ mod tests {
     fn directory_listing_reports_file_inode_and_modification_time() {
         let fs = initialize();
         let path = Path::new("/note.txt");
-        FileSystemOperations::create_file(&fs, path).unwrap();
+        FileSystemOperations::create_file(&fs, path, &Attributes::new()).unwrap();
 
         let payload = b"hello littlefs";
         let mut file = Context::new_empty();
@@ -1142,7 +1205,7 @@ mod tests {
         .unwrap();
 
         let subdir = Path::new("/folder");
-        FileSystemOperations::create_directory(&fs, subdir).unwrap();
+        FileSystemOperations::create_directory(&fs, subdir, &Attributes::new()).unwrap();
 
         let initial_mtime = file_system::Time::new(1_700_000_200);
         FileSystemOperations::set_attributes(
@@ -1228,7 +1291,7 @@ mod symlink_tests {
         FileSystem::format(device, options).unwrap();
         let filesystem = FileSystem::new(device, options).unwrap();
         let link = Path::from_str("/link");
-        FileSystemOperations::create_file(&filesystem, link).unwrap();
+        FileSystemOperations::create_file(&filesystem, link, &Attributes::new()).unwrap();
 
         let target = b"../data/target";
         let mut context = Context::new_empty();
