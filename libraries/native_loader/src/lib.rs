@@ -43,6 +43,7 @@ pub enum Error {
     InvalidRelocationTarget,
     InvalidRelocationAddend,
     UnsupportedRelocation(u32),
+    UnsupportedSplitAddressSpace,
     SymbolRelocation,
     ImageTooLarge,
     AllocationFailed,
@@ -62,12 +63,27 @@ pub struct Region {
 ///
 /// # Safety
 /// Successful allocations supply an exclusive writable allocation of the given
-/// layout, with the same virtual addresses used for data access and execution.
+/// layout. On unified-address platforms, the same virtual addresses are used
+/// for data access and execution ([`Self::execution_base`] returns
+/// `allocation`). On split-bus (Harvard) platforms where instruction fetch
+/// uses a separate address alias of the same physical memory,
+/// [`Self::execution_base`] returns that alias with at least the same
+/// alignment and size as `allocation`, valid until [`Self::free`].
 /// Finalization must make written instructions visible to instruction fetch,
 /// apply permissions supported by the platform and preserve region contents.
 /// Memory must remain mapped until freed, including on finalization failure.
 pub unsafe trait ExecutableMemory: Sync {
     fn allocate(&self, layout: Layout) -> Result<NonNull<u8>, Error>;
+
+    /// Instruction-fetch base address aliasing `allocation`.
+    ///
+    /// Unified-address platforms inherit the default, which returns
+    /// `allocation`. Split-bus platforms (such as ESP32-S2/S3 internal D/IRAM)
+    /// override this to return the instruction-bus alias of the same physical
+    /// bytes.
+    fn execution_base(&self, allocation: NonNull<u8>) -> NonNull<u8> {
+        allocation
+    }
 
     /// Synchronize caches and apply final executable/data permissions.
     /// Return an error if the region layout cannot be supported.
@@ -94,6 +110,7 @@ pub unsafe trait ExecutableMemory: Sync {
 pub struct LoadedImage {
     memory: &'static dyn ExecutableMemory,
     allocation: NonNull<u8>,
+    execution_base: NonNull<u8>,
     layout: Layout,
     entry_offset: usize,
 }
@@ -112,19 +129,30 @@ impl LoadedImage {
             return Err(Error::ImageTooLarge);
         }
         let allocation = memory.allocate(elf.layout)?;
+        let execution_base = memory.execution_base(allocation);
         let loaded = Self {
             memory,
             allocation,
+            execution_base,
             layout: elf.layout,
             entry_offset: elf.entry_offset,
         };
-        let bias = allocation.as_ptr().addr().wrapping_sub(elf.start);
+        let data_addr = allocation.as_ptr().addr();
+        let exec_addr = execution_base.as_ptr().addr();
+        if exec_addr != data_addr
+            && (!exec_addr.is_multiple_of(elf.layout.align())
+                || exec_addr.checked_add(elf.layout.size()).is_none())
+        {
+            return Err(Error::AllocationFailed);
+        }
+        let data_bias = data_addr.wrapping_sub(elf.start);
+        let execution_bias = exec_addr.wrapping_sub(elf.start);
         // Initialize raw memory before constructing a byte slice.
         unsafe { allocation.as_ptr().write_bytes(0, elf.layout.size()) };
         let image =
             unsafe { core::slice::from_raw_parts_mut(allocation.as_ptr(), elf.layout.size()) };
         elf.copy_to(image);
-        elf.relocate(image, bias)?;
+        elf.relocate(image, data_bias, execution_bias)?;
         unsafe { memory.finish_writes(allocation, elf.layout, &mut elf.regions()) }?;
         Ok(loaded)
     }
@@ -133,9 +161,14 @@ impl LoadedImage {
         self.allocation
     }
 
+    pub fn execution_base(&self) -> NonNull<u8> {
+        self.execution_base
+    }
+
     pub fn entry_address(&self) -> NonNull<u8> {
-        // SAFETY: the ELF parser proved the entry lies in the allocation.
-        unsafe { self.allocation.add(self.entry_offset) }
+        // SAFETY: the ELF parser proved the entry lies in the allocation, and
+        // `execution_base` aliases the same layout on the instruction bus.
+        unsafe { self.execution_base.add(self.entry_offset) }
     }
 
     pub fn image_size(&self) -> usize {

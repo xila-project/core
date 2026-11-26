@@ -363,10 +363,16 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             packages: ci:packages-sdk
+          - target: aarch64-unknown-linux-gnu
+            packages: ci:packages-sdk
           - target: thumbv7em-none-eabihf
             packages: ci:packages-sdk-arm
           - target: riscv32imac-unknown-none-elf
             packages: ci:packages-sdk-riscv
+          - target: riscv32imafc-unknown-none-elf
+            packages: ci:packages-sdk-riscv
+          - target: xtensa-esp32s3-elf
+            packages: ci:packages-sdk-xtensa
     env:
       MISE_ENV: ci
       XILA_SDK_TARGET: ${{ matrix.target }}

@@ -126,6 +126,21 @@ class CheckElf(unittest.TestCase):
                 (0x6FFFFFF0, 0x700), (0x6FFFFFF9, 3), (0x6FFFFFFB, 1)]
         self.assertEqual(check(image(dynamic=tags, relocations=[(R_X86_64_RELATIVE, 0)]), "x86_64"), [])
 
+    def test_accepts_xtensa_gnu_ld_dynamic_tags_only_on_xtensa(self):
+        tags = [
+            (check_elf.DT_PLTGOT, 0x100),
+            (check_elf.DT_XTENSA_GOT_LOC_OFF, 0x58),
+            (check_elf.DT_XTENSA_GOT_LOC_SZ, 0),
+        ]
+        xtensa = image(machine=EM_XTENSA, wide=False, dynamic=tags,
+                       relocations=[(R_XTENSA_RELATIVE, 0)])
+        self.assertEqual(check(xtensa, "xtensa"), [])
+        # DT_JMPREL and DT_PLTRELSZ remain rejected even on Xtensa.
+        for bad_tag in (check_elf.DT_JMPREL, check_elf.DT_PLTRELSZ):
+            bad = image(machine=EM_XTENSA, wide=False, dynamic=[(bad_tag, 0x100)],
+                        relocations=[(R_XTENSA_RELATIVE, 0)])
+            self.assertTrue(any("PLT" in p for p in check(bad, "xtensa")), bad_tag)
+
     def test_rejects_a_fixed_executable(self):
         self.assertTrue(any("ET_DYN" in p for p in check(image(etype=2))))
 

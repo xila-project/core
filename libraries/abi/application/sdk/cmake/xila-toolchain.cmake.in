@@ -21,32 +21,35 @@ set(CMAKE_SYSTEM_PROCESSOR @XILA_CMAKE_PROCESSOR@)
 get_filename_component(XILA_SDK_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 
 if(NOT CMAKE_C_COMPILER)
-  find_program(XILA_CLANG clang REQUIRED)
-  set(CMAKE_C_COMPILER "${XILA_CLANG}")
+  find_program(XILA_CC @XILA_COMPILER@ REQUIRED)
+  set(CMAKE_C_COMPILER "${XILA_CC}")
 endif()
-# lld, wherever the distribution put it (next to clang when it is not on PATH).
+# Linker: lld (next to clang when not on PATH) or the target's GNU ld.
 execute_process(
-  COMMAND "${CMAKE_C_COMPILER}" -print-prog-name=ld.lld
-  OUTPUT_VARIABLE XILA_LLD
+  COMMAND "${CMAKE_C_COMPILER}" -print-prog-name=@XILA_LINKER@
+  OUTPUT_VARIABLE XILA_LD
   OUTPUT_STRIP_TRAILING_WHITESPACE)
-if(NOT IS_ABSOLUTE "${XILA_LLD}")
-  find_program(XILA_LLD ld.lld REQUIRED)
+if(NOT IS_ABSOLUTE "${XILA_LD}")
+  find_program(XILA_LD @XILA_LINKER@ REQUIRED)
 endif()
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 
 set(XILA_DATA_ALIGNMENT @XILA_DATA_ALIGNMENT@ CACHE STRING "Data segment alignment in bytes")
 
 # The compiler's own freestanding headers (stdarg.h, stddef.h...) come after the SDK's.
+set(XILA_INCLUDE_DIR_QUERY "@XILA_INCLUDE_DIR_QUERY@")
 execute_process(
-  COMMAND "${CMAKE_C_COMPILER}" --target=@XILA_CLANG_TRIPLE@ -print-resource-dir
-  OUTPUT_VARIABLE XILA_RESOURCE_DIR
+  COMMAND "${CMAKE_C_COMPILER}" ${XILA_INCLUDE_DIR_QUERY}
+  OUTPUT_VARIABLE XILA_COMPILER_DIR
   OUTPUT_STRIP_TRAILING_WHITESPACE)
+set(XILA_COMPILER_INCLUDE "${XILA_COMPILER_DIR}@XILA_INCLUDE_SUBDIR@")
 
+set(XILA_TARGET_FLAG "@XILA_TARGET_FLAG@")
 set(XILA_ARCH_FLAGS "@XILA_ARCH_FLAGS@")
 string(REPLACE ";" " " XILA_ARCH_FLAGS_TEXT "${XILA_ARCH_FLAGS}")
 
 # Search the SDK's stdlib.h wrapper before the picolibc headers.
-set(CMAKE_C_FLAGS_INIT "--target=@XILA_CLANG_TRIPLE@ ${XILA_ARCH_FLAGS_TEXT} -nostdinc -isystem ${XILA_SDK_ROOT}/include/posix -isystem ${XILA_SDK_ROOT}/include -isystem ${XILA_RESOURCE_DIR}/include -D_GNU_SOURCE -fPIE -ffunction-sections -fdata-sections -fno-stack-protector -fno-unwind-tables -fno-asynchronous-unwind-tables")
+set(CMAKE_C_FLAGS_INIT "${XILA_TARGET_FLAG} ${XILA_ARCH_FLAGS_TEXT} -nostdinc -isystem ${XILA_SDK_ROOT}/include/posix -isystem ${XILA_SDK_ROOT}/include -isystem ${XILA_COMPILER_INCLUDE} -D_GNU_SOURCE -fPIE -ffunction-sections -fdata-sections -fno-stack-protector -fno-unwind-tables -fno-asynchronous-unwind-tables")
 set(CMAKE_C_FLAGS_RELEASE_INIT "-Os")
 set(CMAKE_C_FLAGS_MINSIZEREL_INIT "-Os")
 set(CMAKE_EXECUTABLE_SUFFIX_C ".elf")
@@ -85,10 +88,10 @@ if(NOT XILA_PRINTF_FORMAT STREQUAL "integer")
   set(XILA_PRINTF_ALIASES "--defsym=vfprintf=__${XILA_PRINTF_LETTER_${XILA_PRINTF_FORMAT}}_vfprintf --defsym=vfscanf=__${XILA_PRINTF_LETTER_${XILA_PRINTF_FORMAT}}_vfscanf")
 endif()
 
-# One link rule for every executable, calling lld directly: the static-PIE flags and the
-# SDK linker script, crt0 first, then the objects, then the libraries as a group because
+# One link rule for every executable, calling the linker directly: the static-PIE flags and
+# the SDK linker script, crt0 first, then the objects, then the libraries as a group because
 # libc calls back into the POSIX layer (read, write, malloc, ...). These flags live in the
 # rule, not in CMAKE_EXE_LINKER_FLAGS, so that a user's own flags cannot replace them;
-# CMAKE_EXE_LINKER_FLAGS and target link options therefore take ld.lld flags (no -Wl,).
+# CMAKE_EXE_LINKER_FLAGS and target link options therefore take direct linker flags (no -Wl,).
 set(CMAKE_C_LINK_EXECUTABLE
-  "${XILA_LLD} -pie --no-dynamic-linker -Bsymbolic -z max-page-size=16 --gc-sections --build-id=none --defsym=XILA_DATA_ALIGN=${XILA_DATA_ALIGNMENT} ${XILA_PRINTF_ALIASES} -T ${XILA_SDK_ROOT}/lib/xila-static-pie.ld <CMAKE_C_LINK_FLAGS> <LINK_FLAGS> ${XILA_SDK_ROOT}/lib/crt0.o <OBJECTS> -o <TARGET> -L${XILA_SDK_ROOT}/lib --start-group <LINK_LIBRARIES> -lxila_posix -lxila -lc ${XILA_BUILTINS_LIBRARY} --end-group")
+  "${XILA_LD} -pie --no-dynamic-linker -Bsymbolic -z max-page-size=16 --gc-sections --build-id=none --defsym=XILA_DATA_ALIGN=${XILA_DATA_ALIGNMENT} ${XILA_PRINTF_ALIASES} -T ${XILA_SDK_ROOT}/lib/xila-static-pie.ld <CMAKE_C_LINK_FLAGS> <LINK_FLAGS> ${XILA_SDK_ROOT}/lib/crt0.o <OBJECTS> -o <TARGET> -L${XILA_SDK_ROOT}/lib --start-group <LINK_LIBRARIES> -lxila_posix -lxila -lc ${XILA_BUILTINS_LIBRARY} --end-group")
