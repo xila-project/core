@@ -156,8 +156,13 @@ python3 tools/ci/install_packages.py ci,sdk-arm
 """
 
 [tasks."ci:packages-sdk-riscv"]
-description = "Install the native software development kit build packages and the RISC-V ILP32 compiler runtime"
+description = "Install the native software development kit build packages and the RISC-V ILP32/ILP32F compiler runtime"
 run = "python3 tools/ci/install_packages.py ci,sdk,sdk-riscv"
+
+[tasks."ci:packages-sdk-xtensa"]
+description = "Install the native software development kit build packages and the pinned ESP32-S3 Xtensa GCC toolchain"
+depends = ["ci:toolchain-xtensa"]
+run = "python3 tools/ci/install_packages.py ci,sdk"
 
 [tasks."ci:packages-benchmark"]
 description = "Install benchmark packages before timed commands"
@@ -694,7 +699,7 @@ description = "Lint xila-sys with its link feature on the guest nightly"
 run = """
 set -eu
 xila_sys=libraries/abi/application/sdk/rust/xila-sys/Cargo.toml
-for target in x86_64-unknown-linux-gnu thumbv7em-none-eabihf riscv32imac-unknown-none-elf riscv32imafc-unknown-none-elf; do
+for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu thumbv7em-none-eabihf riscv32imac-unknown-none-elf riscv32imafc-unknown-none-elf; do
   cargo clippy --locked --manifest-path "$xila_sys" \
     --features link --target-dir target/sdk/rust-bindings-nightly --target "$target" -- -D warnings
 done
@@ -702,6 +707,7 @@ done
 tools.rust = { version = "{{ vars.nightly_version }}", profile = "minimal", components = [
   "clippy",
 ], targets = [
+  "aarch64-unknown-linux-gnu",
   "thumbv7em-none-eabihf",
   "riscv32imac-unknown-none-elf",
   "riscv32imafc-unknown-none-elf",

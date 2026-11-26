@@ -40,7 +40,14 @@ SDK_SOURCE = ROOT / "libraries/abi/application"
 RUST_CRATE = SDK_SOURCE / "sdk/rust/xila-sys"
 VERSION_CRATE = ROOT / "libraries/version"
 LINKER_SCRIPT = RUST_CRATE / "xila-static-pie.ld"
-RUST_CRATE_FILES = ("Cargo.toml", "Cargo.lock", "build.rs", LINKER_SCRIPT.name)
+SPLIT_LINKER_SCRIPT = RUST_CRATE / "xila-static-pie-split.ld"
+RUST_CRATE_FILES = (
+    "Cargo.toml",
+    "Cargo.lock",
+    "build.rs",
+    LINKER_SCRIPT.name,
+    SPLIT_LINKER_SCRIPT.name,
+)
 OUTPUT = ROOT / "target/sdk"
 
 HOST_TARGET = "x86_64-unknown-linux-gnu"
@@ -56,6 +63,18 @@ TARGETS = {
         "machine": "x86_64",
         "float_abi": None,
         # The Linux host test maps segments with mprotect: data must start on a page.
+        "data_alignment": 4096,
+        "builtins": None,
+    },
+    "aarch64-unknown-linux-gnu": {
+        "triple": "aarch64-unknown-none-elf",
+        "flags": [],
+        "meson_cpu_family": "aarch64",
+        "meson_cpu": "aarch64",
+        "processor": "aarch64",
+        "machine": "aarch64",
+        "float_abi": None,
+        # The Linux host maps segments with mprotect: data must start on a page.
         "data_alignment": 4096,
         "builtins": None,
     },
@@ -90,6 +109,46 @@ TARGETS = {
         # Bare-metal GCC supplies the RV32 ILP32 multilib without needing newlib.
         "builtins": ["riscv64-unknown-elf-gcc", "-march=rv32imac", "-mabi=ilp32",
                      "-print-libgcc-file-name"],
+        "builtins_fallbacks": [
+            ["riscv32-esp-elf-gcc", "-march=rv32imac", "-mabi=ilp32",
+             "-print-libgcc-file-name"],
+        ],
+    },
+    "riscv32imafc-unknown-none-elf": {
+        "triple": "riscv32-unknown-none-elf",
+        "flags": ["-march=rv32imafc", "-mabi=ilp32f"],
+        "meson_cpu_family": "riscv32",
+        "meson_cpu": "rv32imafc",
+        "processor": "riscv32",
+        "machine": "riscv32",
+        "data_alignment": 16,
+        "float_abi": "single",
+        # Bare-metal RISC-V GCC (or Espressif's riscv32-esp-elf-gcc) supplies the RV32
+        # single-float multilib without needing newlib.
+        "builtins": ["riscv64-unknown-elf-gcc", "-march=rv32imafc", "-mabi=ilp32f",
+                     "-print-libgcc-file-name"],
+        "builtins_fallbacks": [
+            ["riscv32-esp-elf-gcc", "-march=rv32imafc", "-mabi=ilp32f",
+             "-print-libgcc-file-name"],
+        ],
+    },
+    "xtensa-esp32s3-elf": {
+        "compiler": "xtensa-esp32s3-elf-gcc",
+        "tool_prefix": "xtensa-esp32s3-elf-",
+        "triple": None,
+        # -mlongcalls keeps calls in range when a localized archive is linked into a
+        # multi-megabyte firmware image. Static PIEs link with `-pie --no-dynamic-linker`
+        # directly via GNU ld because Xtensa GCC ignores `-static-pie` (core#701).
+        "flags": ["-mlongcalls"],
+        "meson_cpu_family": "xtensa",
+        "meson_cpu": "esp32s3",
+        "processor": "xtensa",
+        "machine": "xtensa",
+        "data_alignment": 16,
+        "float_abi": None,
+        "split_rodata": True,
+        "rust_example": False,
+        "builtins": ["xtensa-esp32s3-elf-gcc", "-print-libgcc-file-name"],
     },
 }
 
@@ -124,11 +183,62 @@ def find_tool(name):
     found = shutil.which(name)
     if found:
         return found
-    result = subprocess.run(["clang", f"-print-prog-name={name}"], capture_output=True, text=True)
-    candidate = result.stdout.strip()
-    if candidate and os.path.isabs(candidate) and os.path.exists(candidate):
-        return candidate
-    sys.exit(f"error: {name} not found; install LLVM (clang, lld, llvm-ar)")
+    if shutil.which("clang"):
+        result = subprocess.run(["clang", f"-print-prog-name={name}"],
+                                capture_output=True, text=True)
+        candidate = result.stdout.strip()
+        if candidate and os.path.isabs(candidate) and os.path.exists(candidate):
+            return candidate
+    sys.exit(f"error: {name} not found; install the required target toolchain")
+
+
+LLVM_TOOLS = {
+    "lld": "ld.lld",
+    "ar": "llvm-ar",
+    "strip": "llvm-strip",
+    "nm": "llvm-nm",
+    "objcopy": "llvm-objcopy",
+    "readelf": "llvm-readelf",
+    "readobj": "llvm-readobj",
+    "size": "llvm-size",
+}
+
+GNU_TOOLS = {
+    "lld": "ld",
+    "ar": "ar",
+    "strip": "strip",
+    "nm": "nm",
+    "objcopy": "objcopy",
+    "readelf": "readelf",
+    "readobj": "readelf",
+    "size": "size",
+}
+
+
+def find_target_tool(target, role):
+    """Find the target's binutils tool (LLVM for Clang targets, prefixed GNU binutils for GCC)."""
+    prefix = TARGETS.get(target, {}).get("tool_prefix")
+    if prefix:
+        return find_tool(prefix + GNU_TOOLS[role])
+    return find_tool(LLVM_TOOLS[role])
+
+
+def compiler_command(target):
+    """Compiler binary and target/architecture flags for `target`."""
+    config = TARGETS[target]
+    if config.get("compiler"):
+        return [find_tool(config["compiler"]), *config["flags"]]
+    return ["clang", f"--target={config['triple']}", *config["flags"]]
+
+
+def compiler_include_dir(target):
+    """The compiler's freestanding header directory (`stdarg.h`, `stddef.h`, `stdint.h`...)."""
+    config = TARGETS[target]
+    if config.get("compiler"):
+        out = subprocess.run([find_tool(config["compiler"]), "-print-file-name=include"],
+                             capture_output=True, text=True, check=True)
+        return out.stdout.strip()
+    return f"{resource_dir(target)}/include"
 
 
 def fetch_picolibc(pin):
@@ -165,13 +275,18 @@ def meson_list(items):
 
 def write_cross_file(target, path):
     config = TARGETS[target]
-    compiler = ["clang", f"--target={config['triple']}", *config["flags"], "-nostdlib"]
+    is_gcc = bool(config.get("compiler"))
+    compiler = [*compiler_command(target), "-nostdlib"]
+    c_ld = "bfd" if is_gcc else "lld"
+    c_args = ["-fPIE", "-Os", "-ffunction-sections", "-fdata-sections"]
+    if not is_gcc:
+        c_args.append("-Wno-unsupported-floating-point-opt")
     text = f"""[binaries]
 c = {meson_list(compiler)}
-c_ld = 'lld'
-ar = '{find_tool("llvm-ar")}'
-strip = '{find_tool("llvm-strip")}'
-nm = '{find_tool("llvm-nm")}'
+c_ld = '{c_ld}'
+ar = '{find_target_tool(target, "ar")}'
+strip = '{find_target_tool(target, "strip")}'
+nm = '{find_target_tool(target, "nm")}'
 
 [host_machine]
 system = 'none'
@@ -180,8 +295,7 @@ cpu = '{config["meson_cpu"]}'
 endian = 'little'
 
 [built-in options]
-c_args = {meson_list(["-fPIE", "-Os", "-ffunction-sections", "-fdata-sections",
-                      "-Wno-unsupported-floating-point-opt"])}
+c_args = {meson_list(c_args)}
 
 [properties]
 skip_sanity_check = true
@@ -257,8 +371,8 @@ def build_picolibc(source, target, work):
 #   libc_ssp_stack_protector.c.o: seeds __stack_chk_guard from a constructor. The POSIX
 #     layer defines __stack_chk_guard and __stack_chk_fail (posix/stack_protector.c) and
 #     seeds the guard from xila_posix_initialize.
-#   interrupt.c.o (x86_64 only): the interrupt descriptor table setup (__idt), a constructor
-#     that is only reachable from bare-metal x86 start-up code the SDK does not use. Arm's
+#   interrupt.c.o (x86_64 and aarch64): bare-metal interrupt/vector-table setup placed in
+#     `.init`, reachable only from bare-metal start-up code the SDK does not use. Arm's
 #     member of the same name (the vector table and default handlers) has no constructor
 #     and stays.
 # The POSIX layer provides the retarget locks and the nonblocking ftrylockfile.
@@ -278,16 +392,16 @@ DROPPED_MEMBERS = (
     ("libc_stdlib_unsetenv.c.o", None),
     ("libos_fallback_getpid.c.o", None),
     ("libc_ssp_stack_protector.c.o", None),
-    ("interrupt.c.o", ("x86_64-unknown-linux-gnu",)),
+    ("interrupt.c.o", ("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu")),
 )
 
 
 def drop_members(install, target):
-    """Remove DROPPED_MEMBERS from the installed libc.a (llvm-ar d), when present: a member
+    """Remove DROPPED_MEMBERS from the installed libc.a (ar d), when present: a member
     can be absent on a target or already removed by an earlier run on the same installed
     copy. The constructor scan fails the build if anything else with a constructor remains,
     and the link fails if a second __stdio_file_list appears."""
-    ar = find_tool("llvm-ar")
+    ar = find_target_tool(target, "ar")
     archive = install / "lib/libc.a"
     members = subprocess.run([ar, "t", archive], capture_output=True, text=True, check=True)
     names = [name for name, targets in DROPPED_MEMBERS if targets is None or target in targets]
@@ -295,7 +409,7 @@ def drop_members(install, target):
     if found:
         run([ar, "d", archive, *found])
     if "libc_stdio_bufio_exit_flush.c.o" not in found:
-        nm = subprocess.run([find_tool("llvm-nm"), "--defined-only", archive],
+        nm = subprocess.run([find_target_tool(target, "nm"), "--defined-only", archive],
                             capture_output=True, text=True, check=True).stdout
         if "_bufio_exit_register" in nm:
             sys.exit("error: picolibc's exit-flush constructor is still in libc.a; "
@@ -313,9 +427,9 @@ CONSTRUCTOR_SECTIONS = re.compile(
 CONSTRUCTOR_ALLOWLIST = {}
 
 
-def scan_constructors(libraries):
+def scan_constructors(libraries, target=HOST_TARGET):
     """Fail if any member of any archive (or crt0.o) holds a constructor section."""
-    readelf = find_tool("llvm-readelf")
+    readelf = find_target_tool(target, "readelf")
     offenders = []
     for path in sorted(libraries):
         output = subprocess.run([readelf, "--section-headers", "--wide", path],
@@ -340,7 +454,6 @@ def scan_constructors(libraries):
 
 
 def compile_sdk(target, install, work):
-    config = TARGETS[target]
     objects = work / "obj"
     objects.mkdir(exist_ok=True)
     include = [
@@ -348,13 +461,13 @@ def compile_sdk(target, install, work):
         f"-isystem{SDK_SOURCE / 'sdk/posix/include/posix'}",
         f"-isystem{SDK_SOURCE / 'sdk/posix/include'}",
         f"-isystem{install / 'include'}",
-        f"-isystem{resource_dir(target)}/include",
+        f"-isystem{compiler_include_dir(target)}",
         f"-I{SDK_SOURCE / 'include/xila'}",
         f"-I{SDK_SOURCE / 'include'}",
         f"-I{SDK_SOURCE / 'sdk'}",
         f"-I{SDK_SOURCE / 'sdk/posix'}",
     ]
-    base = ["clang", f"--target={config['triple']}", *config["flags"], *COMMON_FLAGS, *include]
+    base = [*compiler_command(target), *COMMON_FLAGS, *include]
 
     def compile_one(source, name, defines=()):
         output = objects / f"{name}.o"
@@ -370,7 +483,7 @@ def compile_sdk(target, install, work):
     stubs = compile_one(SDK_SOURCE / "sdk/stubs.c", "stubs")
     graphics = compile_one(SDK_SOURCE / "sdk/graphics.c", "graphics")
     posix = [compile_one(SDK_SOURCE / f"sdk/posix/{name}.c", name) for name in POSIX_SOURCES]
-    ar = find_tool("llvm-ar")
+    ar = find_target_tool(target, "ar")
     libraries = work / "lib"
     libraries.mkdir(exist_ok=True)
     for archive, members in (("libxila.a", [stubs, graphics]), ("libxila_posix.a", posix)):
@@ -421,6 +534,7 @@ def undefined_symbols(obj, nm):
 # PC-relative or PLT calls). Data references through a GOT (`*GOT*`) are safe.
 ZERO_UNSAFE_RELOC = re.compile(r"(?:PLT|PC32|PC24|CALL|JUMP|BRANCH)")
 RELOC_LINE = re.compile(r"^\s*0x[0-9a-fA-F]+\s+(\S+)\s+(\S+)")
+READELF_RELOC_LINE = re.compile(r"^\s*[0-9a-fA-F]+\s+[0-9a-fA-F]+\s+(\S+)\s+[0-9a-fA-F]+\s+(\S+)")
 
 
 def unsafe_zero_relocations(obj, weak_names, readobj):
@@ -431,11 +545,13 @@ def unsafe_zero_relocations(obj, weak_names, readobj):
     if not weak_names:
         return []
     weak_set = set(weak_names)
-    output = subprocess.run([readobj, "--relocs", str(obj)],
-                            capture_output=True, text=True, check=True).stdout
+    use_readelf = Path(readobj).name.endswith("readelf")
+    command = [readobj, "--relocs", "--wide", str(obj)] if use_readelf else [readobj, "--relocs", str(obj)]
+    pattern = READELF_RELOC_LINE if use_readelf else RELOC_LINE
+    output = subprocess.run(command, capture_output=True, text=True, check=True).stdout
     bad = set()
     for line in output.splitlines():
-        match = RELOC_LINE.match(line)
+        match = pattern.match(line)
         if not match:
             continue
         reloc, symbol = match.group(1), match.group(2)
@@ -462,10 +578,23 @@ def sdk_libraries(sdk):
     return archives
 
 
+def resolve_builtins_command(target):
+    """Return the first available builtins-query command for `target`, or its primary command."""
+    config = TARGETS.get(target, {})
+    primary = config.get("builtins")
+    if not primary:
+        return None
+    candidates = [primary, *config.get("builtins_fallbacks", ())]
+    for command in candidates:
+        if shutil.which(str(command[0])) is not None:
+            return command
+    return primary
+
+
 def sdk_builtins(sdk, extra):
     """The compiler runtime archives of the SDK's target, when it has one (Arm's libgcc,
-    RISC-V's libgcc), plus any --builtins paths. They join the link group like the SDK's
-    own archives; on the host target there is none.
+    RISC-V's libgcc, Xtensa's libgcc), plus any --builtins paths. They join the link group
+    like the SDK's own archives; on the host target there is none.
 
     When the target's cross compiler is not installed, its runtime is simply not bundled:
     a note goes to stderr and the caller (link-archive) proceeds without it, so the host
@@ -474,7 +603,7 @@ def sdk_builtins(sdk, extra):
     info = sdk / "sdk.json"
     if info.exists():
         target = json.loads(info.read_text()).get("target")
-        command = TARGETS.get(target, {}).get("builtins")
+        command = resolve_builtins_command(target)
         if command:
             if shutil.which(str(command[0])) is None:
                 print(f"note: {command[0]} not found: the compiler builtins of {target} are "
@@ -547,9 +676,17 @@ def link_archive(args):
     allow_undefined = FIRMWARE_DEFINED | set(args.allow_undefined)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    tools = {"lld": find_tool("ld.lld"), "objcopy": find_tool("llvm-objcopy"),
-             "ar": find_tool("llvm-ar"), "nm": find_tool("llvm-nm"),
-             "readobj": find_tool("llvm-readobj")}
+    sdk_target = HOST_TARGET
+    info = sdk / "sdk.json"
+    if info.exists():
+        sdk_target = json.loads(info.read_text()).get("target", HOST_TARGET)
+    tools = {
+        "lld": find_target_tool(sdk_target, "lld"),
+        "objcopy": find_target_tool(sdk_target, "objcopy"),
+        "ar": find_target_tool(sdk_target, "ar"),
+        "nm": find_target_tool(sdk_target, "nm"),
+        "readobj": find_target_tool(sdk_target, "readobj"),
+    }
     with tempfile.TemporaryDirectory(prefix=".link-archive-", dir=output.parent) as work:
         work = Path(work)
         run(link_archive_plan(archives, entry, output, inputs, builtins, work, tools)[0])
@@ -645,7 +782,8 @@ def assemble(target, pin, install, crt0, crt0_linked, libraries, work):
         shutil.copy(libraries / archive, root / "lib" / archive)
     shutil.copy(install / "lib/libc.a", root / "lib/libc.a")
     shutil.copy(install / "lib/libm.a", root / "lib/libm.a")  # empty: libm is inside libc.a
-    shutil.copy(LINKER_SCRIPT, root / "lib/xila-static-pie.ld")
+    linker_script = SPLIT_LINKER_SCRIPT if TARGETS[target].get("split_rodata") else LINKER_SCRIPT
+    shutil.copy(linker_script, root / "lib/xila-static-pie.ld")
     for example in ("hello", "hexdump"):
         for file in (SDK_SOURCE / "sdk/example" / example).iterdir():
             shutil.copy(file, root / "share/xila/example" / example / file.name)
@@ -656,14 +794,25 @@ def assemble(target, pin, install, crt0, crt0_linked, libraries, work):
         destination.write_bytes(contents)
 
     config = TARGETS[target]
+    is_gcc = bool(config.get("compiler"))
+    compiler_bin = config["compiler"] if is_gcc else "clang"
+    linker_bin = f"{config['tool_prefix']}ld" if config.get("tool_prefix") else "ld.lld"
+    target_flag = "" if is_gcc else f"--target={config['triple']}"
+    include_dir_query = "-print-file-name=include" if is_gcc else f"--target={config['triple']};-print-resource-dir"
+    include_subdir = "" if is_gcc else "/include"
+    builtins_command = resolve_builtins_command(target) or []
     template = (SDK_SOURCE / "sdk/cmake/xila-toolchain.cmake.in").read_text()
     replacements = {
         "@XILA_SDK_TARGET@": target,
-        "@XILA_CLANG_TRIPLE@": config["triple"],
+        "@XILA_COMPILER@": compiler_bin,
+        "@XILA_LINKER@": linker_bin,
+        "@XILA_TARGET_FLAG@": target_flag,
+        "@XILA_INCLUDE_DIR_QUERY@": include_dir_query,
+        "@XILA_INCLUDE_SUBDIR@": include_subdir,
         "@XILA_CMAKE_PROCESSOR@": config["processor"],
         "@XILA_ARCH_FLAGS@": ";".join(config["flags"]),
         "@XILA_DATA_ALIGNMENT@": str(config["data_alignment"]),
-        "@XILA_BUILTINS_COMMAND@": ";".join(config["builtins"] or []),
+        "@XILA_BUILTINS_COMMAND@": ";".join(builtins_command),
     }
     for key, value in replacements.items():
         template = template.replace(key, value)
@@ -673,7 +822,8 @@ def assemble(target, pin, install, crt0, crt0_linked, libraries, work):
     shutil.copy(pin_source(pin) / "COPYING.picolibc", root / "COPYING.picolibc")
     shutil.copy(ROOT / "license.md", root / "LICENSE-xila.md")
 
-    clang = subprocess.run(["clang", "--version"], capture_output=True, text=True, check=True)
+    compiler_version = subprocess.run([find_tool(compiler_bin), "--version"],
+                                      capture_output=True, text=True, check=True)
     (root / "sdk.json").write_text(json.dumps({
         "name": name,
         "target": target,
@@ -681,7 +831,7 @@ def assemble(target, pin, install, crt0, crt0_linked, libraries, work):
         "abi": xila_version,
         "picolibc": {"version": pin["version"], "sha256": pin["sha256"],
                      "options": PICOLIBC_OPTIONS},
-        "compiler": clang.stdout.splitlines()[0],
+        "compiler": compiler_version.stdout.splitlines()[0],
         "data_alignment": config["data_alignment"],
         "entry": "_xila_start -> xila_main -> main",
         "linked_entry": "xila_linked_start -> xila_main -> main",
@@ -732,7 +882,7 @@ def build(args):
     crt0, crt0_linked, libraries = compile_sdk(target, install, work)
     name, root = assemble(target, pin, install, crt0, crt0_linked, libraries, work)
     scan_constructors([root / "lib/crt0.o", root / "lib/crt0_linked.o",
-                       *sorted((root / "lib").glob("*.a"))])
+                       *sorted((root / "lib").glob("*.a"))], target=target)
     archive = pack(name, root)
     print(f"sdk directory: {root}")
     print(f"sdk archive:   {archive}")
@@ -820,16 +970,15 @@ def compile_packaged_example(target, sdk, name):
     """Compile an SDK example source exactly like the SDK compiles its own objects: the
     toolchain file's flags over the packaged headers, so the SDK directory alone suffices.
     Returns the object path, under target/<target>/example-<name>-linked."""
-    config = TARGETS[target]
     include = [
         "-nostdinc",
         f"-isystem{sdk / 'include/posix'}",
         f"-isystem{sdk / 'include'}",
-        f"-isystem{resource_dir(target)}/include",
+        f"-isystem{compiler_include_dir(target)}",
     ]
     output = OUTPUT / target / f"example-{name}-linked" / f"{name}.o"
     output.parent.mkdir(parents=True, exist_ok=True)
-    run(["clang", f"--target={config['triple']}", *config["flags"], *COMMON_FLAGS, *include,
+    run([*compiler_command(target), *COMMON_FLAGS, *include,
          "-c", sdk / "share/xila/example" / name / f"{name}.c", "-o", output])
     return output
 
@@ -871,14 +1020,14 @@ def verify_linked_example(target, sdk, name):
     archive = work / f"lib{name}.a"
     link_archive(argparse.Namespace(sdk=str(sdk), entry=entry, output=str(archive),
                                     builtins=[], allow_undefined=[], inputs=[str(obj)]))
-    defined, weak, strong = nm_archive_symbols(archive, find_tool("llvm-nm"))
+    defined, weak, strong = nm_archive_symbols(archive, find_target_tool(target, "nm"))
     if defined != {entry: "T"}:
         sys.exit(f"error: {archive}: global defined symbols are {defined}, expected only "
                  f"{entry} (T)")
     leftover = weak + sorted(symbol for symbol in strong if symbol not in FIRMWARE_DEFINED)
     if leftover:
         sys.exit(f"error: {archive}: undefined symbols remain: {', '.join(leftover)}")
-    run([find_tool("llvm-size"), archive])
+    run([find_target_tool(target, "size"), archive])
     print(f"{archive}: {archive.stat().st_size} bytes on disk; the only global defined symbol "
           f"is {entry} (T), no weak and no unexpected undefined symbol remains")
 
@@ -949,11 +1098,12 @@ def verify(args):
         verify_c_program(target, sdk, name, SDK_SOURCE / "sdk/test" / name)
     # The hexdump example, in both of its forms: the ELF the loader runs, and the
     # localized archive link-archive produces for a firmware that links it in.
+    size_tool = find_target_tool(target, "size")
     hexdump = verify_c_program(target, sdk, "hexdump", sdk / "share/xila/example/hexdump")
-    run([find_tool("llvm-size"), hexdump])
+    run([size_tool, hexdump])
     print(f"{hexdump}: ELF file {hexdump.stat().st_size} bytes")
     verify_linked_example(target, sdk, "hexdump")
-    run([find_tool("llvm-size"), image])
+    run([size_tool, image])
     print("\nBytes by origin (map):")
     sizes = map_sizes(map_file.read_text())
     print(f"{'origin':<18}{'.text':>8}{'.rodata':>9}{'.data+.got':>12}{'.bss':>7}")
@@ -961,7 +1111,7 @@ def verify(args):
         data = sections.get(".data", 0) + sections.get(".got", 0)
         print(f"{origin:<18}{sections.get('.text', 0):>8}{sections.get('.rodata', 0):>9}"
               f"{data:>12}{sections.get('.bss', 0):>7}")
-    run([find_tool("llvm-size"), "-t", "libxila_posix.a", "libxila.a", "crt0.o"], cwd=sdk / "lib")
+    run([size_tool, "-t", "libxila_posix.a", "libxila.a", "crt0.o"], cwd=sdk / "lib")
 
 
 def check_data_alignment(image, elf, alignment):
@@ -994,7 +1144,12 @@ def rust_example(args):
     # Pass the example's flags explicitly to override the host's mold driver option.
     config = tomllib.loads((example / ".cargo/config.toml").read_text())
     env = dict(os.environ, CARGO_ENCODED_RUSTFLAGS="\x1f".join(config["build"]["rustflags"]))
-    for target in (args.target,) if args.target else TARGETS:
+    selected = (
+        (args.target,)
+        if args.target
+        else [name for name, cfg in TARGETS.items() if cfg.get("rust_example", True)]
+    )
+    for target in selected:
         run(["rustup", "run", nightly, "cargo", "build", "--locked", "--release",
              "--target", target, "--target-dir", output], cwd=example, env=env)
         image = output / target / "release/xila-rust-hello"
@@ -1041,9 +1196,16 @@ def main():
     archive_parser.set_defaults(function=link_archive)
     args = parser.parse_args()
     if args.command != "rust-example":
-        # Put the versioned LLVM directory on PATH for Meson and Clang's linker probes.
-        lld = find_tool("ld.lld")
-        os.environ["PATH"] = os.path.dirname(lld) + os.pathsep + os.environ["PATH"]
+        # Put the versioned LLVM directory on PATH for Meson and Clang's linker probes,
+        # when lld is installed.
+        lld = shutil.which("ld.lld")
+        if not lld and shutil.which("clang"):
+            candidate = subprocess.run(["clang", "-print-prog-name=ld.lld"],
+                                       capture_output=True, text=True).stdout.strip()
+            if candidate and os.path.isabs(candidate) and os.path.exists(candidate):
+                lld = candidate
+        if lld:
+            os.environ["PATH"] = os.path.dirname(lld) + os.pathsep + os.environ["PATH"]
     args.function(args)
 
 

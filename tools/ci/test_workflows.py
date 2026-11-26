@@ -450,7 +450,14 @@ class WorkflowPolicy(unittest.TestCase):
 
     def test_sdk_job_builds_every_target_through_pinned_tasks_and_uploads_archives(self):
         sdk = job("ci.yml", "sdk")
-        for target in ["x86_64-unknown-linux-gnu", "thumbv7em-none-eabihf", "riscv32imac-unknown-none-elf"]:
+        for target in [
+            "x86_64-unknown-linux-gnu",
+            "aarch64-unknown-linux-gnu",
+            "thumbv7em-none-eabihf",
+            "riscv32imac-unknown-none-elf",
+            "riscv32imafc-unknown-none-elf",
+            "xtensa-esp32s3-elf",
+        ]:
             self.assertIn(f"target: {target}", sdk)
         self.assertNotIn("apt-get", sdk)
         steps = re.findall(r"run: (?:mise run )?(\S+)", sdk)

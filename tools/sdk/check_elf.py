@@ -60,6 +60,8 @@ LOADER_IGNORED = (
     set(range(4, 7)) | set(range(10, 17)) | {21, 22} | set(range(24, 31)) | {32, 33}
     | {0x6FFFFEF5, 0x6FFFFFF0} | set(range(0x6FFFFFF9, 0x6FFFFFFE))
 )
+DT_XTENSA_GOT_LOC_OFF, DT_XTENSA_GOT_LOC_SZ = 0x7000_0000, 0x7000_0001
+XTENSA_IGNORED_DYNAMIC = {DT_PLTGOT, DT_XTENSA_GOT_LOC_OFF, DT_XTENSA_GOT_LOC_SZ}
 # Ignored only while zero: a nonzero value means constructors or destructors.
 LOADER_CONSTRUCTOR_VALUES = {DT_INIT, DT_FINI, DT_INIT_ARRAYSZ, DT_FINI_ARRAYSZ, DT_PREINIT_ARRAYSZ}
 
@@ -382,8 +384,10 @@ def _check(data, machine, xila_version, float_abi, compressed, embedded):
             elif tag in LOADER_CONSTRUCTOR_VALUES and value != 0:
                 problems.append("constructor tag (DT_INIT/DT_FINI or a non-empty init/fini/preinit "
                                 "array): the loader runs no constructors")
-            elif tag in (DT_JMPREL, DT_PLTRELSZ, DT_PLTGOT):
+            elif tag in (DT_JMPREL, DT_PLTRELSZ) or (tag == DT_PLTGOT and elf.arch != "xtensa"):
                 problems.append("PLT relocations present: link with -Bsymbolic and no external symbols")
+            elif elf.arch == "xtensa" and tag in XTENSA_IGNORED_DYNAMIC:
+                continue
             elif tag == DT_TEXTREL:
                 if elf.arch != "xtensa":
                     problems.append("DT_TEXTREL present: text relocations are not supported")

@@ -1,11 +1,13 @@
 use std::{env, fs, path::PathBuf, process::Command};
 
 const SCRIPT: &str = "xila-static-pie.ld";
+const SPLIT_SCRIPT: &str = "xila-static-pie-split.ld";
 
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(xila_static_pie)");
     println!("cargo::rerun-if-changed=build.rs");
     println!("cargo::rerun-if-changed={SCRIPT}");
+    println!("cargo::rerun-if-changed={SPLIT_SCRIPT}");
 
     if env::var_os("CARGO_FEATURE_LINK").is_none() {
         // A bare-metal guest without `link` gets no entry point or linker script:
@@ -21,10 +23,11 @@ fn main() {
     }
     let target = env::var("TARGET").unwrap();
     let alignment = match target.as_str() {
-        "x86_64-unknown-linux-gnu" => 4096, // The host separates permissions with mprotect.
+        "x86_64-unknown-linux-gnu" | "aarch64-unknown-linux-gnu" => 4096, // The host separates permissions with mprotect.
         "thumbv7em-none-eabihf"
         | "riscv32imac-unknown-none-elf"
-        | "riscv32imafc-unknown-none-elf" => 16,
+        | "riscv32imafc-unknown-none-elf"
+        | "xtensa-esp32s3-none-elf" => 16,
         _ => {
             println!(
                 "cargo::warning=xila-sys: target {target} has no Xila static PIE link configuration"
@@ -51,8 +54,13 @@ fn main() {
     }
 
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
-    let script = out.join(SCRIPT);
-    fs::write(&script, include_str!("xila-static-pie.ld")).unwrap();
+    let (script_name, script_bytes) = if target.starts_with("xtensa-") {
+        (SPLIT_SCRIPT, include_str!("xila-static-pie-split.ld"))
+    } else {
+        (SCRIPT, include_str!("xila-static-pie.ld"))
+    };
+    let script = out.join(script_name);
+    fs::write(&script, script_bytes).unwrap();
     println!("cargo::rustc-cfg=xila_static_pie");
 
     // Cargo's rustc-link-arg instruction only affects this package's targets.

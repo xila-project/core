@@ -448,6 +448,10 @@ impl<'a, A: Abi> Elf<'a, A> {
                 // DT_INIT, DT_FINI and the init, fini and preinit arrays: the loader runs
                 // no constructors or destructors, so reject them instead of skipping them.
                 12 | 13 | 27 | 28 | 33 if value != 0 => return Err(Error::Constructors),
+                // Xtensa GNU ld emits DT_PLTGOT (pointing to .got even with no PLT) and the
+                // processor-specific GOT-location metadata tags (DT_XTENSA_GOT_LOC_OFF / _SZ)
+                // on `-pie --no-dynamic-linker` static PIEs.
+                3 | 0x7000_0000 | 0x7000_0001 if A::ARCH == Arch::Xtensa => continue,
                 // Hash/string/symbol metadata, version definitions, relative counts, flags,
                 // empty constructor metadata and the debugger rendezvous slot are not consumed.
                 4..=6
@@ -548,7 +552,60 @@ impl<'a, A: Abi> Elf<'a, A> {
         }
     }
 
-    pub(crate) fn relocate(&self, image: &mut [u8], bias: usize) -> Result<(), Error> {
+    /// Choose the relocation bias for an ELF virtual address on a split-bus
+    /// (Harvard) target: executable segments execute at `execution_bias`, while
+    /// read-only and writable data segments are accessed at `data_bias`.
+    fn split_bias_for(
+        &self,
+        address: usize,
+        data_bias: usize,
+        execution_bias: usize,
+    ) -> Result<usize, Error> {
+        if let Some(program) = self.loads().find(|program| {
+            address >= program.address && address < program.address + program.memory_size
+        }) {
+            return Ok(if program.flags & PF_X != 0 {
+                execution_bias
+            } else {
+                data_bias
+            });
+        }
+        // Allow one-past-the-end pointers (e.g. `&array[len]` or `__bss_end`).
+        if let Some(program) = self
+            .loads()
+            .find(|program| address == program.address + program.memory_size)
+        {
+            return Ok(if program.flags & PF_X != 0 {
+                execution_bias
+            } else {
+                data_bias
+            });
+        }
+        Err(Error::InvalidRelocationAddend)
+    }
+
+    pub(crate) fn relocate(
+        &self,
+        image: &mut [u8],
+        data_bias: usize,
+        execution_bias: usize,
+    ) -> Result<(), Error> {
+        let split = data_bias != execution_bias;
+        if split {
+            // Only Xtensa static PIEs address every cross-segment reference through
+            // relocated literals (`.literal` in `PF_X`, `.rodata`/`.data`/`.bss` in
+            // non-executable segments). Architectures that reach data PC-relatively
+            // (`auipc`, `adrp`, `rip`) require one unified address space.
+            if A::ARCH != Arch::Xtensa {
+                return Err(Error::UnsupportedSplitAddressSpace);
+            }
+            if self
+                .loads()
+                .any(|program| program.flags & (PF_X | PF_W) == (PF_X | PF_W))
+            {
+                return Err(Error::InvalidSegment);
+            }
+        }
         for (table, explicit) in [(self.rel, false), (self.rela, true)] {
             let stride = if explicit { 3 * A::WORD } else { 2 * A::WORD };
             for entry in table.chunks_exact(stride) {
@@ -585,6 +642,11 @@ impl<'a, A: Abi> Elf<'a, A> {
                     }
                 } else {
                     A::word_at(image, offset)
+                };
+                let bias = if split {
+                    self.split_bias_for(addend, data_bias, execution_bias)?
+                } else {
+                    data_bias
                 };
                 A::put_word(image, offset, bias.wrapping_add(addend));
             }

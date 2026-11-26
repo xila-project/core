@@ -34,6 +34,18 @@ impl Abi for Arm32 {
     }
 }
 
+struct Xtensa32;
+impl Abi for Xtensa32 {
+    const WORD: usize = 4;
+    const MACHINE: u16 = 94;
+    const RELATIVE: u32 = 5;
+    const ARCH: Arch = Arch::Xtensa;
+    const THUMB_ONLY: bool = false;
+    fn flags_supported(_flags: u32) -> bool {
+        true
+    }
+}
+
 /// Byte offsets of the fields the tests patch, for one ELF class.
 struct Fields {
     word: usize,
@@ -158,7 +170,7 @@ fn fixture<A: Abi>(rela: bool) -> [u8; FILE] {
 
 fn check<A: Abi>(bytes: &[u8]) -> Result<(), Error> {
     let elf = Elf::<A>::parse(bytes)?;
-    elf.relocate(&mut [0; FILE], 0)
+    elf.relocate(&mut [0; FILE], 0, 0)
 }
 
 fn rejects_malformed_elfs<A: Abi>() {
@@ -440,7 +452,7 @@ fn copies_and_relocates<A: Abi>(slot: impl Fn(&[u8], usize) -> usize) {
         let elf = Elf::<A>::parse(&file).unwrap();
         let mut image = [0; FILE];
         elf.copy_to(&mut image);
-        elf.relocate(&mut image, 0x5000).unwrap();
+        elf.relocate(&mut image, 0x5000, 0x5000).unwrap();
         assert_eq!(slot(&image, SLOT), 0x5100);
         assert_eq!(&image[0x110..0x120], &[0; 16]);
         assert_eq!(&image[0x1e0..], &[0; 32]);
@@ -477,7 +489,7 @@ fn byte_mutations_do_not_panic<A: Abi>() {
                 if elf.layout.size() <= file.len() {
                     let mut image = [0; FILE];
                     elf.copy_to(&mut image);
-                    let _ = elf.relocate(&mut image, 0x5000);
+                    let _ = elf.relocate(&mut image, 0x5000, 0x5000);
                 }
             }
         }
@@ -563,4 +575,84 @@ fn checks_the_xila_version_in_either_class() {
     checks_the_xila_version::<Native>();
     checks_the_xila_version::<Riscv32>();
     checks_the_xila_version::<Arm32>();
+    checks_the_xila_version::<Xtensa32>();
+}
+
+#[test]
+fn xtensa_accepts_gnu_ld_dynamic_tags_only_on_xtensa() {
+    for tag in [3usize, 0x7000_0000, 0x7000_0001] {
+        // Put the tag at dynamic entry 3 (before the trailing DT_NULL at entry 4).
+        let mut xtensa = fixture::<Xtensa32>(true);
+        put::<Xtensa32>(&mut xtensa, DYNAMIC + 3 * 8, tag);
+        put::<Xtensa32>(&mut xtensa, DYNAMIC + 3 * 8 + 4, 0x100);
+        Elf::<Xtensa32>::parse(&xtensa).unwrap();
+
+        // The same tags stay rejected on non-Xtensa targets.
+        let mut riscv = fixture::<Riscv32>(true);
+        put::<Riscv32>(&mut riscv, DYNAMIC + 3 * 8, tag);
+        put::<Riscv32>(&mut riscv, DYNAMIC + 3 * 8 + 4, 0x100);
+        assert_eq!(
+            Elf::<Riscv32>::parse(&riscv).map(|_| ()),
+            Err(Error::UnsupportedDynamicTag(tag))
+        );
+    }
+}
+
+#[test]
+fn split_bus_relocates_xtensa_by_segment_and_rejects_other_arches() {
+    let data_bias = 0x3FC8_8000usize;
+    let exec_bias = 0x4037_8000usize;
+
+    // Non-Xtensa architectures must reject a split address space.
+    let riscv_file = fixture::<Riscv32>(true);
+    let riscv = Elf::<Riscv32>::parse(&riscv_file).unwrap();
+    let mut image = [0; FILE];
+    riscv.copy_to(&mut image);
+    assert_eq!(
+        riscv.relocate(&mut image, data_bias, exec_bias),
+        Err(Error::UnsupportedSplitAddressSpace)
+    );
+
+    // Build an Xtensa fixture with two RELA entries:
+    // 1. SLOT      -> in-place addend 0x100 (inside PF_X text segment 0..0x110) -> exec_bias
+    // 2. SLOT + 4  -> in-place addend 0x140 (inside PF_RW data segment 0x120..0x200) -> data_bias
+    let mut file = fixture::<Xtensa32>(true);
+    // Clear the RELA explicit addend (Xtensa reads in-place) and set 2 RELA entries (24 bytes).
+    put::<Xtensa32>(&mut file, DYNAMIC + 8 + 4, 24); // DT_RELASZ = 24
+    put::<Xtensa32>(&mut file, RELOC, SLOT);
+    put::<Xtensa32>(&mut file, RELOC + 4, Xtensa32::RELATIVE as usize);
+    put::<Xtensa32>(&mut file, RELOC + 8, 0);
+    put::<Xtensa32>(&mut file, RELOC + 12, SLOT + 4);
+    put::<Xtensa32>(&mut file, RELOC + 16, Xtensa32::RELATIVE as usize);
+    put::<Xtensa32>(&mut file, RELOC + 20, 0);
+    // In-place addends in the image.
+    put::<Xtensa32>(&mut file, SLOT, 0x100);
+    put::<Xtensa32>(&mut file, SLOT + 4, 0x140);
+
+    let elf = Elf::<Xtensa32>::parse(&file).unwrap();
+    let mut image = [0; FILE];
+    elf.copy_to(&mut image);
+    elf.relocate(&mut image, data_bias, exec_bias).unwrap();
+    let read32 =
+        |buf: &[u8], at: usize| u32::from_le_bytes(buf[at..at + 4].try_into().unwrap()) as usize;
+    assert_eq!(read32(&image, SLOT), exec_bias + 0x100);
+    assert_eq!(read32(&image, SLOT + 4), data_bias + 0x140);
+
+    // One-past-the-end data pointer (0x120 + 0xe0 = 0x200) resolves against data_bias.
+    put::<Xtensa32>(&mut file, SLOT + 4, 0x200);
+    let elf = Elf::<Xtensa32>::parse(&file).unwrap();
+    let mut image = [0; FILE];
+    elf.copy_to(&mut image);
+    elf.relocate(&mut image, data_bias, exec_bias).unwrap();
+    assert_eq!(read32(&image, SLOT + 4), data_bias + 0x200);
+
+    // Out-of-segment addend is rejected on split bus.
+    put::<Xtensa32>(&mut file, SLOT + 4, 0x9999);
+    let elf = Elf::<Xtensa32>::parse(&file).unwrap();
+    let mut image = [0; FILE];
+    elf.copy_to(&mut image);
+    assert_eq!(
+        elf.relocate(&mut image, data_bias, exec_bias),
+        Err(Error::InvalidRelocationAddend)
+    );
 }

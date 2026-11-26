@@ -53,7 +53,7 @@ int clock_gettime(clockid_t clock, struct timespec *output) {
 }
 
 int clock_getres(clockid_t clock, struct timespec *output) {
-    uint32_t native;
+    uint32_t native = 0;
     if (clock_identifier(clock, &native) != 0)
         return -1;
     uint64_t nanoseconds = 0;
