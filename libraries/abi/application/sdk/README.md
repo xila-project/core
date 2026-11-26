@@ -50,6 +50,7 @@ xila-sdk-0.1-<target>/
     Cargo.toml, src/lib.rs
   cmake/xila-toolchain.cmake
   share/xila/example/hello  the example below
+  share/xila/example/hexdump  the hexdump utility (hex + ASCII dump and its -r reverse)
 ```
 
 ## Building an application
@@ -97,6 +98,17 @@ discards buffered output and skips exit handlers.
 clocks, `nanosleep`, `getentropy` and `getenv`. Core's test builds it with this
 toolchain file and runs it through the VFS, the executable dispatch table, the
 native loader and the ABI table (`libraries/executable/tests/sdk.rs`).
+
+`share/xila/example/hexdump/hexdump.c` is a small POSIX C11 utility:
+`hexdump [-n length] [-s skip] [-c columns] [-r] [-h] [file ...]` prints the
+canonical hex + ASCII dump of each file (or of stdin) and `-r` reverses it back
+to raw bytes. It uses only `getopt`, stdio, `strerror(errno)` and the heap, keeps
+no mutable statics of its own and fits a few hundred bytes of stack, so it also
+shows the footprint a real application has on a microcontroller. `sdk:verify`
+builds its `hexdump.elf` and its `link-archive` archive (`libhexdump.a`, entry
+`xila_linked_hexdump`) for every target and reports both sizes, and Core's test
+runs the same suite against the loaded ELF and the linked archive
+(`libraries/executable/tests/sdk.rs`, `test:native-loader`).
 
 ## Linked C programs: `link-archive`
 
