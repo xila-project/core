@@ -23,6 +23,14 @@ pub(crate) fn drop_read_cache(file_system: &mut littlefs::lfs_t) {
     file_system.rcache.block = BLOCK_NULL;
 }
 
+/// Empty the read cache of an open file. LittleFS reads the data of a file
+/// through the cache of that file, and a failed read leaves the key of the
+/// failed block in it with stale bytes: a retried read at the same position
+/// would return them.
+pub(crate) fn drop_file_cache(file: &mut littlefs::lfs_file_t) {
+    file.cache.block = BLOCK_NULL;
+}
+
 /// True when the entry exists but carries no Xila attributes: the signature of
 /// an entry whose creation was interrupted between the entry commit and the
 /// attribute commit. The read cache is emptied first, because a stale cache
@@ -31,6 +39,9 @@ pub(crate) fn drop_read_cache(file_system: &mut littlefs::lfs_t) {
 /// one a create call half-created, and an unreadable device reports neither,
 /// which leaves the entry in place for the caller to handle.
 pub(crate) fn entry_is_attribute_less(file_system: &mut littlefs::lfs_t, path: &CString) -> bool {
+    // Local drop, kept because the probe runs inside a create call whose own
+    // error return may not be an I/O error: the operation-level drop would not
+    // fire, and the cleanup remove right after must not read stale bytes.
     drop_read_cache(file_system);
     let mut buffer = InternalAttributes::new();
     unsafe {

@@ -42,7 +42,7 @@ use crate::{File, FileSystem, Options};
 /// a power loss. `fail_at` fails exactly one program operation and then recovers
 /// (a transient I/O error, not a power loss). `torn_at` applies half of that
 /// program's buffer and then fails like a power loss. `fail_read_at` with
-/// `fail_read_len` fails a window of consecutive reads starting at that read,
+/// `failing_read_length` fails a window of consecutive reads starting at that read,
 /// then the device recovers.
 struct FaultDevice {
     inner: MemoryDevice<512>,
@@ -53,7 +53,7 @@ struct FaultDevice {
     fail_at: AtomicUsize,
     torn_at: AtomicUsize,
     fail_read_at: AtomicUsize,
-    fail_read_len: AtomicUsize,
+    failing_read_length: AtomicUsize,
     failed: AtomicBool,
 }
 
@@ -68,7 +68,7 @@ impl FaultDevice {
             fail_at: AtomicUsize::new(usize::MAX),
             torn_at: AtomicUsize::new(usize::MAX),
             fail_read_at: AtomicUsize::new(usize::MAX),
-            fail_read_len: AtomicUsize::new(1),
+            failing_read_length: AtomicUsize::new(1),
             failed: AtomicBool::new(false),
         }))
     }
@@ -112,7 +112,7 @@ impl FaultDevice {
 
     fn fail_read_window(&self, count: usize, len: usize) {
         self.fail_read_at.store(count, Ordering::SeqCst);
-        self.fail_read_len.store(len, Ordering::SeqCst);
+        self.failing_read_length.store(len, Ordering::SeqCst);
     }
 
     fn allow_all(&self) {
@@ -120,7 +120,7 @@ impl FaultDevice {
         self.fail_at.store(usize::MAX, Ordering::SeqCst);
         self.torn_at.store(usize::MAX, Ordering::SeqCst);
         self.fail_read_at.store(usize::MAX, Ordering::SeqCst);
-        self.fail_read_len.store(1, Ordering::SeqCst);
+        self.failing_read_length.store(1, Ordering::SeqCst);
         self.failed.store(false, Ordering::SeqCst);
     }
 }
@@ -136,7 +136,7 @@ impl DirectBaseOperations for FaultDevice {
         let start = self.fail_read_at.load(Ordering::SeqCst);
         if start != usize::MAX
             && count >= start
-            && count - start < self.fail_read_len.load(Ordering::SeqCst)
+            && count - start < self.failing_read_length.load(Ordering::SeqCst)
         {
             // Transient read error: the device keeps working afterwards.
             return Poll::Ready(Err(IoErrorKind::InputOutput));
@@ -1599,5 +1599,252 @@ mod randomised_sweep {
         }
         std::println!("write-after sweep: {cases} faulted creates, {damaged} damaged volumes");
         assert_eq!(damaged, 0);
+    }
+
+    /// A failed device read leaves the key of the failed block in a read cache
+    /// with stale bytes. These tests check, for every kind of operation that
+    /// can fail, that nothing later reads from those bytes. The oracle is a
+    /// fresh mount of the same device: the live mount must show the same tree,
+    /// and a write on the live mount must give the same results and the same
+    /// tree as on a fresh mount.
+    mod stale_read_cache {
+        use super::*;
+        use file_system::{BaseOperations, Context, DirectBaseOperations, DirectoryOperations};
+
+        fn dump(device: &'static FaultDevice) -> Vec<u8> {
+            let mut image = alloc::vec![0u8; DEVICE_SIZE];
+            DirectBaseOperations::read_sync(&device.inner, &mut image, 0).unwrap();
+            image
+        }
+
+        fn restore(image: &[u8]) -> &'static FaultDevice {
+            let device = FaultDevice::new(DEVICE_SIZE);
+            DirectBaseOperations::write_sync(&device.inner, image, 0).unwrap();
+            device
+        }
+
+        /// Writes that read the metadata of the volume: a directory creation, a
+        /// write to an existing file and the removal of that file.
+        fn follow_up(fs: &FileSystem, existing: &str) -> Vec<String> {
+            let mut results = Vec::new();
+            results.push(alloc::format!(
+                "{:?}",
+                FileSystemOperations::create_directory(
+                    fs,
+                    Path::new("/zzd"),
+                    &sweep_dir_attributes(5)
+                )
+            ));
+            results.push(alloc::format!(
+                "{:?}",
+                fs.operation(|native| {
+                    let mut file =
+                        File::lookup(native, Path::new(existing), AccessFlags::READ_WRITE.into())?;
+                    file.write(native, &[0x5a; 40], 0)?;
+                    file.close(native)
+                })
+            ));
+            results.push(alloc::format!(
+                "{:?}",
+                FileSystemOperations::remove(fs, Path::new(existing))
+            ));
+            results
+        }
+
+        /// Run `operation` with a read error window at every read it performs.
+        fn sweep(name: &str, operation: impl Fn(&FileSystem, &[String], &[String])) {
+            let mut cases = 0usize;
+            let mut mismatches = 0usize;
+            // Seeds 1 and 2 already fail without the operation-level cache
+            // drop; seed 3 is trimmed to keep the debug run fast.
+            for seed in [1u64, 2] {
+                let cache = [128usize, 256, 512][(seed % 3) as usize];
+                let (device, fs, dirs, files) = build(seed, cache, true);
+                device.reset_reads();
+                operation(&fs, &dirs, &files);
+                let total = device.reads();
+                std::mem::forget(fs);
+                for window in [1usize, 2] {
+                    for fault in 1..=total {
+                        // The live mount shows the tree of the device.
+                        let (device, fs, dirs, files) = build(seed, cache, true);
+                        device.reset_reads();
+                        device.fail_read_window(fault, window);
+                        operation(&fs, &dirs, &files);
+                        device.allow_all();
+                        let mut live = Vec::new();
+                        walk(&fs, "/", &mut live);
+                        let fresh = snapshot(device, cache);
+                        std::mem::forget(fs);
+                        cases += 1;
+                        if live != fresh {
+                            mismatches += 1;
+                            std::println!(
+                                "{name}: LIVE MISMATCH seed {seed} window {window} fault {fault}/{total}"
+                            );
+                        }
+
+                        // A write on the live mount behaves as on a fresh mount.
+                        let (device, fs, dirs, files) = build(seed, cache, true);
+                        device.reset_reads();
+                        device.fail_read_window(fault, window);
+                        operation(&fs, &dirs, &files);
+                        device.allow_all();
+                        let image = dump(device);
+                        let live_results = follow_up(&fs, &files[0]);
+                        std::mem::forget(fs);
+                        let live_after = snapshot(device, cache);
+                        let reference_device = restore(&image);
+                        let reference_fs =
+                            FileSystem::new(reference_device, Options::new(cache)).unwrap();
+                        let reference_results = follow_up(&reference_fs, &files[0]);
+                        std::mem::forget(reference_fs);
+                        let reference_after = snapshot(reference_device, cache);
+                        cases += 1;
+                        if live_results != reference_results || live_after != reference_after {
+                            mismatches += 1;
+                            std::println!(
+                                "{name}: WRITE MISMATCH seed {seed} window {window} fault {fault}/{total}"
+                            );
+                        }
+                    }
+                }
+            }
+            std::println!("{name}: {cases} checks, {mismatches} mismatches");
+            assert_eq!(mismatches, 0, "{name}");
+        }
+
+        /// Operations that fail with an I/O error through the two entry points
+        /// of the file system: `operation` (path operations) and
+        /// `operation_with_context` (operations on an open handle).
+        #[test]
+        fn failed_operations_leave_no_stale_read_cache() {
+            sweep("stat", |fs, _, files| {
+                let mut attributes = Attributes::new().set_mask(owner_mask());
+                let _ =
+                    FileSystemOperations::get_attributes(fs, Path::new(&files[0]), &mut attributes);
+            });
+            sweep("remove", |fs, _, files| {
+                let _ = FileSystemOperations::remove(fs, Path::new(&files[0]));
+            });
+            sweep("directory read through a handle", |fs, _, _| {
+                let mut context = Context::new_empty();
+                if FileSystemOperations::lookup_directory(fs, &mut context, Path::new("/")).is_ok()
+                {
+                    while let Ok(Some(_)) = DirectoryOperations::read(fs, &mut context) {}
+                    let _ = DirectoryOperations::close(fs, &mut context);
+                }
+            });
+            sweep("write through a handle", |fs, _, files| {
+                let mut context = Context::new_empty();
+                if FileSystemOperations::lookup_file(
+                    fs,
+                    &mut context,
+                    Path::new(&files[0]),
+                    AccessFlags::READ_WRITE.into(),
+                )
+                .is_ok()
+                {
+                    let _ = BaseOperations::write_sync(fs, &mut context, &[0x33; 40], 0);
+                    let _ = BaseOperations::close(fs, &mut context);
+                }
+            });
+        }
+
+        /// A create fails with NotFound (the parent does not exist), so the
+        /// error is not an I/O error. The cleanup probe of the create can
+        /// still hit a read error and ignore it.
+        #[test]
+        fn failed_create_with_another_error_leaves_no_stale_read_cache() {
+            sweep("create in a missing directory", |fs, _, _| {
+                let _ = FileSystemOperations::create_file(
+                    fs,
+                    Path::new("/missing_parent/x"),
+                    &sweep_attributes(99),
+                );
+            });
+        }
+
+        fn read_at(
+            fs: &FileSystem,
+            context: &mut Context,
+            offset: u64,
+            length: usize,
+        ) -> Result<Vec<u8>> {
+            let mut buffer = alloc::vec![0u8; length];
+            let count = BaseOperations::read_sync(fs, context, &mut buffer, offset)?;
+            buffer.truncate(count);
+            Ok(buffer)
+        }
+
+        /// LittleFS reads the data of a file through the cache of the file. A
+        /// failed read must not make the retried read on the same handle
+        /// return stale bytes.
+        #[test]
+        fn failed_read_can_be_retried_on_the_same_handle() {
+            let mut checks = 0usize;
+            let mut wrong = 0usize;
+            for seed in [1u64, 2, 3, 4, 5, 6] {
+                let cache = [128usize, 256, 512][(seed % 3) as usize];
+                let (device, fs, _, files) = build(seed, cache, true);
+                let image = dump(device);
+                std::mem::forget(fs);
+                for path in files.iter().take(4) {
+                    for (offset, length) in [(0u64, 4096usize), (0, 16), (100, 16)] {
+                        let device = restore(&image);
+                        let fs = FileSystem::new(device, Options::new(cache)).unwrap();
+                        let mut context = Context::new_empty();
+                        device.reset_reads();
+                        FileSystemOperations::lookup_file(
+                            &fs,
+                            &mut context,
+                            Path::new(path),
+                            AccessFlags::Read.into(),
+                        )
+                        .unwrap();
+                        let expected = read_at(&fs, &mut context, offset, length).unwrap();
+                        let total = device.reads();
+                        BaseOperations::close(&fs, &mut context).unwrap();
+                        std::mem::forget(fs);
+                        if expected.is_empty() {
+                            continue;
+                        }
+                        for window in [1usize, 2] {
+                            for fault in 1..=total {
+                                let device = restore(&image);
+                                let fs = FileSystem::new(device, Options::new(cache)).unwrap();
+                                let mut context = Context::new_empty();
+                                device.reset_reads();
+                                device.fail_read_window(fault, window);
+                                let opened = FileSystemOperations::lookup_file(
+                                    &fs,
+                                    &mut context,
+                                    Path::new(path),
+                                    AccessFlags::Read.into(),
+                                );
+                                if opened.is_ok() {
+                                    let _ = read_at(&fs, &mut context, offset, length);
+                                    device.allow_all();
+                                    if let Ok(retried) = read_at(&fs, &mut context, offset, length)
+                                    {
+                                        checks += 1;
+                                        if retried != expected {
+                                            wrong += 1;
+                                            std::println!(
+                                                "retry: WRONG BYTES seed {seed} {path} offset {offset} length {length} window {window} fault {fault}/{total}"
+                                            );
+                                        }
+                                    }
+                                    let _ = BaseOperations::close(&fs, &mut context);
+                                }
+                                std::mem::forget(fs);
+                            }
+                        }
+                    }
+                }
+            }
+            std::println!("retry: {checks} retried reads, {wrong} with wrong bytes");
+            assert_eq!(wrong, 0);
+        }
     }
 }

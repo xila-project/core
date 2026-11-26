@@ -1,7 +1,7 @@
 use core::{ffi::CStr, mem::MaybeUninit};
 
 use crate::{
-    attributes::{InternalAttributes, entry_is_attribute_less},
+    attributes::{InternalAttributes, drop_read_cache, entry_is_attribute_less},
     constants,
     error::convert_result,
     littlefs,
@@ -77,13 +77,19 @@ impl Directory {
                 // unreadable device leaves the fail-closed entry for the
                 // caller to handle through the VFS.
                 if mkdir_result.is_ok() && entry_is_attribute_less(file_system, &path) {
-                    // No second cache drop before the remove: the probe only
-                    // answers from successful reads, so the cache can hold
-                    // fresh bytes only.
+                    // No cache drop before the remove: the probe only answers
+                    // from successful reads, so the cache can hold fresh bytes
+                    // only.
                     unsafe {
                         let _ = littlefs::lfs_remove(file_system, path.as_ptr());
                     }
                 }
+                // The probe and the remove ignore their own read errors, and
+                // the error returned here may not be an I/O error (for example
+                // NotFound for a missing parent directory), so the operation
+                // would not empty the read cache for it. A read that failed in
+                // the cleanup must not leave stale bytes behind.
+                drop_read_cache(file_system);
                 Err(error)
             }
         }

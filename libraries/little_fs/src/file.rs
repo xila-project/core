@@ -1,5 +1,7 @@
 use super::{convert_flags, convert_result, littlefs};
-use crate::attributes::{InternalAttributes, drop_read_cache, entry_is_attribute_less};
+use crate::attributes::{
+    InternalAttributes, drop_file_cache, drop_read_cache, entry_is_attribute_less,
+};
 use crate::constants;
 use alloc::{boxed::Box, ffi::CString};
 use core::ffi::c_void;
@@ -147,9 +149,10 @@ impl File {
                 return convert_result(status).map(|_| ());
             }
         }
-        // Empty the read cache before the create itself: a failed read during
-        // the lookup above can leave the failed block's key in the cache with
-        // stale bytes, and the create must not be served from them.
+        // Local drop, kept because a failed read during the lookup above can
+        // leave the failed block's key in the cache with stale bytes, and the
+        // create right after must not be served from them, even when the
+        // lookup error makes the operation-level drop not fire.
         drop_read_cache(file_system);
 
         let mut internal_attributes = InternalAttributes::from_attributes(attributes);
@@ -199,6 +202,12 @@ impl File {
                         let _ = littlefs::lfs_remove(file_system, path.as_ptr());
                     }
                 }
+                // The probe and the remove ignore their own read errors, and
+                // the error returned here may not be an I/O error (for example
+                // NotFound for a missing parent directory), so the operation
+                // would not empty the read cache for it. A read that failed in
+                // the cleanup must not leave stale bytes behind.
+                drop_read_cache(file_system);
                 Err(error)
             }
         }
@@ -319,23 +328,30 @@ impl File {
         absolute_position: Size,
     ) -> Result<usize> {
         let position = i32::try_from(absolute_position).map_err(|_| IoErrorKind::FileTooLarge)?;
-        let bytes_read = unsafe {
+        let result = unsafe {
             convert_result(littlefs::lfs_file_seek(
                 file_system,
                 &mut self.file,
                 position,
                 constants::SEEK_START,
-            ))?;
-
-            convert_result(littlefs::lfs_file_read(
-                file_system,
-                &mut self.file,
-                buffer.as_mut_ptr() as *mut _,
-                convert_length(buffer.len()),
-            ))?
+            ))
+            .and_then(|_| {
+                convert_result(littlefs::lfs_file_read(
+                    file_system,
+                    &mut self.file,
+                    buffer.as_mut_ptr() as *mut _,
+                    convert_length(buffer.len()),
+                ))
+            })
         };
+        if result.is_err() {
+            // The data of a file is read through the cache of the file. A
+            // failed read leaves stale bytes in it, and a retried read at the
+            // same position would return them.
+            drop_file_cache(&mut self.file);
+        }
 
-        Ok(bytes_read as _)
+        Ok(result? as _)
     }
 
     pub fn write(
