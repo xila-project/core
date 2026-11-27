@@ -19,7 +19,10 @@ use miniserde::{Deserialize, Serialize};
 use users::{GroupIdentifier, GroupIdentifierInner, UserIdentifier, UserIdentifierInner};
 use virtual_file_system::{Directory, File};
 
-use crate::{Context, Error, GROUP_FOLDER_PATH, Result};
+use crate::{
+    ACCOUNT_MUTATIONS, Context, Error, GROUP_FOLDER_PATH, Result, create_record,
+    remove_created_record,
+};
 
 /// Represents a user group with associated metadata and member list.
 ///
@@ -175,8 +178,8 @@ pub async fn read_group_file(
 ///
 /// This function creates a new group in the system by:
 /// 1. Generating a new group identifier (if not provided)
-/// 2. Adding the group to the Users manager
-/// 3. Creating the group file with the group data
+/// 2. Creating the group record
+/// 3. Adding the group to the Users manager
 ///
 /// The group is created with an empty user list initially.
 ///
@@ -202,6 +205,7 @@ pub async fn create_group(
     group_name: &str,
     group_identifier: Option<GroupIdentifier>,
 ) -> Result<GroupIdentifier> {
+    let _mutation = ACCOUNT_MUTATIONS.lock().await;
     let virtual_file_system = context.virtual_file_system;
     let users_manager = context.users_manager;
 
@@ -215,13 +219,19 @@ pub async fn create_group(
             .map_err(Error::FailedToGetNewGroupIdentifier)?
     };
 
-    // - Add it to the users manager.
-    users_manager
-        .add_group(group_identifier, group_name, &[])
+    if users_manager
+        .exists_group(group_identifier)
         .await
-        .map_err(Error::FailedToAddGroup)?;
+        .map_err(Error::FailedToAddGroup)?
+    {
+        return Err(Error::FailedToAddGroup(
+            users::Error::DuplicateGroupIdentifier,
+        ));
+    }
+    if users_manager.get_group_identifier(group_name).await.is_ok() {
+        return Err(Error::FailedToAddGroup(users::Error::DuplicateGroupName));
+    }
 
-    // - Write group file.
     let group = Group::new(group_identifier.as_u16(), group_name.to_string(), vec![]);
 
     let task = context.task;
@@ -235,14 +245,17 @@ pub async fn create_group(
 
     let group_json = miniserde::json::to_string(&group);
 
-    File::write_to_path(
-        virtual_file_system,
-        task,
-        &group_file_path,
-        group_json.as_bytes(),
-    )
-    .await
-    .map_err(Error::FailedToWriteGroupFile)?;
+    create_record(context, &group_file_path, group_json.as_bytes())
+        .await
+        .map_err(Error::FailedToWriteGroupFile)?;
+
+    if let Err(error) = users_manager
+        .add_group(group_identifier, group_name, &[])
+        .await
+    {
+        remove_created_record(context, &group_file_path).await;
+        return Err(Error::FailedToAddGroup(error));
+    }
 
     Ok(group_identifier)
 }

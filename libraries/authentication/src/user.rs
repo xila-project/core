@@ -22,8 +22,10 @@ use users::{GroupIdentifier, GroupIdentifierInner, UserIdentifier, UserIdentifie
 use virtual_file_system::{Directory, File};
 
 use crate::{
-    Context, Error, READ_CHUNK_SIZE, Result, USERS_FOLDER_PATH, atomic_write,
+    ACCOUNT_MUTATIONS, Context, Error, READ_CHUNK_SIZE, Result, USERS_FOLDER_PATH, atomic_write,
+    create_record,
     hash::{generate_salt, hash_password},
+    remove_created_record,
 };
 
 /// Version written to every account record.
@@ -34,8 +36,8 @@ pub const USER_RECORD_VERSION: u8 = 1;
 
 /// Temporary file used to replace an account record atomically.
 ///
-/// It is named after the account's identifier, so concurrent rewrites of
-/// different accounts never share it.
+/// Password changes and renames hold ACCOUNT_MUTATIONS until the replacement
+/// is complete, so they can reuse this path.
 fn temporary_record_path(identifier: UserIdentifier) -> String {
     format!("/system/accounts/.user-{}.tmp", identifier.as_u16())
 }
@@ -315,6 +317,7 @@ pub async fn create_user(
     let users_manager = context.users_manager;
 
     let home = new_user_home(user_name)?;
+    let _mutation = ACCOUNT_MUTATIONS.lock().await;
 
     // - New user identifier if not provided.
     let user_identifier = if let Some(user_identifier) = user_identifier {
@@ -351,11 +354,27 @@ pub async fn create_user(
         Err(error) => return Err(Error::FailedToReadUserFile(error)),
     }
 
-    // - Add it to the users manager.
-    users_manager
-        .add_user(user_identifier, user_name, primary_group, &home)
+    if users_manager
+        .exists_user(user_identifier)
         .await
-        .map_err(Error::FailedToCreateUser)?;
+        .map_err(Error::FailedToCreateUser)?
+    {
+        return Err(Error::FailedToCreateUser(
+            users::Error::DuplicateUserIdentifier,
+        ));
+    }
+    if users_manager.get_user_identifier(user_name).await.is_ok() {
+        return Err(Error::FailedToCreateUser(users::Error::DuplicateUserName));
+    }
+    if !users_manager
+        .exists_group(primary_group)
+        .await
+        .map_err(Error::FailedToCreateUser)?
+    {
+        return Err(Error::FailedToCreateUser(
+            users::Error::InvalidGroupIdentifier,
+        ));
+    }
 
     // - Hash password.
     let task = context.task;
@@ -381,14 +400,22 @@ pub async fn create_user(
 
     let user_json = miniserde::json::to_string(&user);
 
-    File::write_to_path(
-        virtual_file_system,
-        task,
-        &user_file_path,
-        user_json.as_bytes(),
-    )
-    .await
-    .map_err(Error::FailedToWriteUserFile)?;
+    create_record(context, &user_file_path, user_json.as_bytes())
+        .await
+        .map_err(|error| match error {
+            file_system::IoErrorKind::AlreadyExists => {
+                Error::FailedToCreateUser(users::Error::DuplicateUserName)
+            }
+            error => Error::FailedToWriteUserFile(error),
+        })?;
+
+    if let Err(error) = users_manager
+        .add_user(user_identifier, user_name, primary_group, user.get_home())
+        .await
+    {
+        remove_created_record(context, &user_file_path).await;
+        return Err(Error::FailedToCreateUser(error));
+    }
 
     Ok(user_identifier)
 }
@@ -409,6 +436,7 @@ pub async fn change_user_password(
     user_name: &str,
     new_password: &str,
 ) -> Result<()> {
+    let _mutation = ACCOUNT_MUTATIONS.lock().await;
     let virtual_file_system = context.virtual_file_system;
     let task = context.task;
 
@@ -448,10 +476,11 @@ pub async fn change_user_password(
 /// name `alice` cannot be given to a new account: `create_user` refuses it
 /// with `UserHomeAlreadyUsed`.
 ///
-/// The record file is moved to its new name first, which commits the rename,
-/// and the registry is updated right away. The record's contents are then
-/// replaced atomically with the new name (and, for a version 0 record,
-/// upgraded to version 1 with its `/users/<identifier>` home). That rewrite is
+/// The record file is moved to its new name before the registry is updated.
+/// If the registry update fails, the function attempts to move the file back.
+/// After a successful update, the function replaces the record's contents
+/// atomically. This saves the new name and upgrades version 0 records to
+/// version 1 with their `/users/<identifier>` home. That rewrite is
 /// best effort: the record's file name is authoritative, so if it fails, or
 /// power is lost before it, the account still loads under its new name. A
 /// failed rewrite is logged and the rename still succeeds.
@@ -475,6 +504,7 @@ pub async fn change_user_name(
         return Ok(());
     }
 
+    let _mutation = ACCOUNT_MUTATIONS.lock().await;
     let virtual_file_system = context.virtual_file_system;
     let task = context.task;
     let users_manager = context.users_manager;
@@ -511,12 +541,17 @@ pub async fn change_user_name(
         .await
         .map_err(Error::FailedToWriteUserFile)?;
 
-    // The rename is committed on disk: the registry must follow at once, so a
-    // failed rewrite below cannot leave the new name looking free.
-    users_manager
-        .rename_user(identifier, new_name)
-        .await
-        .map_err(Error::FailedToRenameUser)?;
+    if let Err(error) = users_manager.rename_user(identifier, new_name).await {
+        if let Err(rollback_error) = virtual_file_system
+            .rename(task, &new_path, &current_path)
+            .await
+        {
+            log::warning!(
+                "Failed to move an account record back after a rename failed: {rollback_error}"
+            );
+        }
+        return Err(Error::FailedToRenameUser(error));
+    }
 
     user.set_name(new_name.to_string());
 

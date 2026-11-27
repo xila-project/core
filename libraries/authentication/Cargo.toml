@@ -19,6 +19,7 @@ file_system = { workspace = true }
 device = { workspace = true }
 log = { workspace = true }
 
+embassy-sync = { workspace = true }
 miniserde = { workspace = true }
 embedded-i18n = { workspace = true }
 

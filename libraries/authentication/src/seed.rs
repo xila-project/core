@@ -1,5 +1,5 @@
 //! First-install account setup for explicitly marked reference images.
-use crate::{Context, Error, Result};
+use crate::{ACCOUNT_MUTATIONS, Context, Error, Result, load_account_records};
 /// Marker for an explicitly provisioned reference image. Not application metadata.
 pub const SEED_PENDING_PATH: &str = "/system/accounts/.seed-pending";
 pub const SEED_PENDING_CONTENT: &[u8] = b"xila-seed-v1\n";
@@ -11,6 +11,7 @@ use virtual_file_system::File;
 /// Load saved users and finish an explicitly pending seed installation.
 /// An unmarked disk never authorizes account creation or password replacement.
 pub async fn initialize_seeded(context: &Context<'_>) -> Result<()> {
+    let _mutation = ACCOUNT_MUTATIONS.lock().await;
     let vfs = context.virtual_file_system;
     let task = context.task;
     let pending = match File::open(vfs, task, SEED_PENDING_PATH, AccessFlags::Read.into()).await {
@@ -39,7 +40,7 @@ pub async fn initialize_seeded(context: &Context<'_>) -> Result<()> {
         Err(file_system::IoErrorKind::NotFound) => false,
         Err(error) => return Err(Error::FailedToReadUserFile(error)),
     };
-    crate::load_all_users_and_groups(context).await?;
+    load_account_records(context).await?;
     if !pending {
         return Ok(());
     }
