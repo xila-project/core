@@ -2084,6 +2084,7 @@ dependencies = [
  "xila-authentication",
  "xila-bluetooth",
  "xila-bootsplash",
+ "xila-crash",
  "xila-drivers-neural-network",
  "xila-executable",
  "xila-file-system",
@@ -2226,6 +2227,21 @@ dependencies = [
  "xila-synchronization",
  "xila-task",
  "xila-testing-support",
+]
+
+[[package]]
+name = "xila-crash"
+version = "0.1.0"
+dependencies = [
+ "xila-file-system",
+ "xila-little-fs",
+ "xila-log",
+ "xila-synchronization",
+ "xila-task",
+ "xila-testing-support",
+ "xila-time",
+ "xila-users",
+ "xila-virtual-file-system",
 ]
 
 [[package]]

@@ -1,0 +1,32 @@
+[package]
+name = "xila-crash"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+file_system = { workspace = true, optional = true }
+virtual_file_system = { workspace = true, optional = true }
+task = { workspace = true, optional = true }
+users = { workspace = true, optional = true }
+log = { workspace = true, optional = true }
+synchronization = { workspace = true, optional = true }
+
+[features]
+persistence = [
+  "dep:file_system",
+  "dep:virtual_file_system",
+  "dep:task",
+  "dep:users",
+  "dep:log",
+  "dep:synchronization",
+]
+
+[dev-dependencies]
+little_fs = { workspace = true }
+task = { workspace = true, features = ["test_harness"] }
+testing_support = { workspace = true }
+time = { workspace = true }
+
+[lib]
+name = "crash"

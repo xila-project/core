@@ -1420,7 +1420,18 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         path: &impl AsRef<Path>,
     ) -> Result<()> {
-        self.create_directory_with_root(task, path.as_ref(), None)
+        self.create_directory_with_permissions(task, path, Permissions::DIRECTORY_DEFAULT)
+            .await
+    }
+
+    /// Create a directory with the specified permissions from the start.
+    pub async fn create_directory_with_permissions(
+        &self,
+        task: TaskIdentifier,
+        path: &impl AsRef<Path>,
+        permissions: Permissions,
+    ) -> Result<()> {
+        self.create_directory_with_root(task, path.as_ref(), None, permissions)
             .await
     }
 
@@ -1431,8 +1442,13 @@ impl VirtualFileSystem {
         path: &impl AsRef<Path>,
         root: &Path,
     ) -> Result<()> {
-        self.create_directory_with_root(task, path.as_ref(), Some(root))
-            .await
+        self.create_directory_with_root(
+            task,
+            path.as_ref(),
+            Some(root),
+            Permissions::DIRECTORY_DEFAULT,
+        )
+        .await
     }
 
     async fn create_directory_with_root(
@@ -1440,6 +1456,7 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         path: &Path,
         root: Option<&Path>,
+        permissions: Permissions,
     ) -> Result<()> {
         let file_systems = self.file_systems.write().await; // Serialize path resolution with creation.
         let (time, user, group) = self.get_time_user_group(task).await?;
@@ -1517,7 +1534,7 @@ impl VirtualFileSystem {
             .set_access(time)
             .set_status(time)
             .set_kind(Kind::Directory)
-            .set_permissions(Permissions::DIRECTORY_DEFAULT);
+            .set_permissions(permissions);
         let mask = attributes
             .get_mask()
             .intersection(target_file_system.writable_attributes());

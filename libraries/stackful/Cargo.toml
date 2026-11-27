@@ -10,6 +10,9 @@ name = "stackful"
 [dependencies]
 critical-section = { workspace = true }
 
+[features]
+crash = []
+
 [dev-dependencies]
 embassy-sync = { workspace = true }
 embassy-futures = { workspace = true }

@@ -29,6 +29,8 @@ pub use neural_network;
 pub use authentication;
 #[cfg(feature = "bluetooth")]
 pub use bluetooth;
+#[cfg(feature = "crash")]
+pub use crash;
 pub use embedded_i18n as internationalization;
 pub use executable;
 pub use file_system;
