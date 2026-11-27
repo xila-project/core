@@ -235,6 +235,23 @@ impl<'a> Writer<'a> {
         stack: &[u8],
         snapshot_log: impl FnOnce(&mut [u8]) -> Option<usize>,
     ) -> &'a [u8] {
+        self.finish_with_stack(
+            message,
+            stack.len(),
+            |output| output.copy_from_slice(&stack[..output.len()]),
+            snapshot_log,
+        )
+    }
+
+    /// Like `finish`, but copies the stack directly into the output slot.
+    /// The callback must fill the supplied window starting at `stack_base`.
+    pub fn finish_with_stack(
+        self,
+        message: fmt::Arguments<'_>,
+        stack_length: usize,
+        copy_stack: impl FnOnce(&mut [u8]),
+        snapshot_log: impl FnOnce(&mut [u8]) -> Option<usize>,
+    ) -> &'a [u8] {
         use fmt::Write as _;
 
         let mut flags = self.flags;
@@ -252,15 +269,16 @@ impl<'a> Writer<'a> {
         let message_length = writer.length;
         end += message_length;
 
-        let stack_length = stack
-            .len()
+        let captured = stack_length
             .min(usize::from(self.limits.stack))
             .min(self.output.len() - end);
-        if stack_length < stack.len() {
+        if captured < stack_length {
             flags |= STACK_TRUNCATED;
         }
-        self.output[end..end + stack_length].copy_from_slice(&stack[..stack_length]);
-        end += stack_length;
+        let stack_output = &mut self.output[end..end + captured];
+        stack_output.fill(0);
+        copy_stack(stack_output);
+        end += captured;
 
         let log_capacity = (self.output.len() - end).min(usize::from(self.limits.log_tail));
         let log = &mut self.output[end..end + log_capacity];
@@ -278,7 +296,7 @@ impl<'a> Writer<'a> {
 
         self.output[219] = self.frame_count;
         put(self.output, 220, (message_length as u16).to_le_bytes());
-        put(self.output, 222, (stack_length as u16).to_le_bytes());
+        put(self.output, 222, (captured as u16).to_le_bytes());
         put(self.output, 224, (log_length as u16).to_le_bytes());
         put(self.output, 226, flags.to_le_bytes());
         commit(&mut self.output[..end]);

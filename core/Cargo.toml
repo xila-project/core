@@ -41,7 +41,7 @@ local_time = { workspace = true, optional = true }
 
 [features]
 default = ["network"]
-crash = ["dep:crash", "task/crash"]
+crash = ["dep:crash", "task/crash", "executable/crash"]
 
 executable_building = ["executable/building"]
 native-dev = ["executable/native-dev"]

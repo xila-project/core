@@ -48,6 +48,8 @@ struct Control {
     native: UnsafeCell<Native>,
     /// The stack's painted guard, which `native` owns.
     guard: NonNull<u8>,
+    #[cfg(all(feature = "crash", target_arch = "xtensa"))]
+    stack_bounds: StackBounds,
     /// Set when the entry starts; stays valid, on the coroutine stack, until it ends.
     yielder: Cell<*const Yielder>,
     pending: Cell<Option<Pending>>,
@@ -100,6 +102,14 @@ impl PerCoreCurrent {
     fn set(&self, value: *const Control) {
         let core = self.core_index();
         self.slots[core].set(value as usize);
+        #[cfg(all(feature = "crash", target_arch = "xtensa"))]
+        {
+            // SAFETY: A non-null current control block belongs to this core.
+            let bounds = unsafe { value.as_ref() }.map(|control| control.stack_bounds);
+            if let Some(slot) = PUBLISHED_STACKS.get(core) {
+                slot.set(bounds);
+            }
+        }
     }
 
     fn set_provider(&self, provider: CoreIdProvider) {
@@ -132,6 +142,54 @@ fn current() -> *const Control {
 #[cfg(not(target_os = "linux"))]
 fn set_current(value: *const Control) {
     critical_section::with(|cs| CURRENT.borrow(cs).set(value));
+}
+
+/// Address bounds of the usable coroutine stack.
+#[cfg(all(feature = "crash", target_arch = "xtensa"))]
+#[derive(Clone, Copy)]
+pub struct StackBounds {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[cfg(all(feature = "crash", target_arch = "xtensa"))]
+use core::sync::atomic::{AtomicUsize, Ordering};
+
+#[cfg(all(feature = "crash", target_arch = "xtensa"))]
+struct PublishedStack {
+    start: AtomicUsize,
+    end: AtomicUsize,
+}
+
+#[cfg(all(feature = "crash", target_arch = "xtensa"))]
+impl PublishedStack {
+    fn set(&self, bounds: Option<StackBounds>) {
+        self.end.store(0, Ordering::SeqCst);
+        if let Some(bounds) = bounds {
+            self.start.store(bounds.start, Ordering::Relaxed);
+            self.end.store(bounds.end, Ordering::SeqCst);
+        }
+    }
+}
+
+#[cfg(all(feature = "crash", target_arch = "xtensa"))]
+static PUBLISHED_STACKS: [PublishedStack; 2] = [const {
+    PublishedStack {
+        start: AtomicUsize::new(0),
+        end: AtomicUsize::new(0),
+    }
+}; 2];
+
+/// Get the bounds published by the calling core without taking a lock.
+/// Use the captured stack pointer to check whether the switch already occurred.
+#[cfg(all(feature = "crash", target_arch = "xtensa"))]
+pub fn current_stack_bounds(core: usize) -> Option<StackBounds> {
+    let slot = PUBLISHED_STACKS.get(core)?;
+    let end = slot.end.load(Ordering::SeqCst);
+    (end != 0).then(|| StackBounds {
+        start: slot.start.load(Ordering::Relaxed),
+        end,
+    })
 }
 
 /// Register the platform hook that identifies the calling CPU core on bare metal.
@@ -204,6 +262,11 @@ impl Coroutine {
             "entry leaves too little stack"
         );
         let guard = stack.guard();
+        #[cfg(all(feature = "crash", target_arch = "xtensa"))]
+        let stack_bounds = StackBounds {
+            start: stack.top() - stack.usable_size(),
+            end: stack.top(),
+        };
         let native = Native::with_stack(Backing(stack), move |yielder, ()| {
             // SAFETY: the driver set the current coroutine before entering.
             let control = unsafe { &*current() };
@@ -217,6 +280,8 @@ impl Coroutine {
             control: Rc::new(Control {
                 native: UnsafeCell::new(native),
                 guard,
+                #[cfg(all(feature = "crash", target_arch = "xtensa"))]
+                stack_bounds,
                 yielder: Cell::new(core::ptr::null()),
                 pending: Cell::new(None),
                 started: Cell::new(false),
