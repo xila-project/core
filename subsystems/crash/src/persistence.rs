@@ -75,7 +75,17 @@ pub async fn list(
     .await;
     let closed = directory.close(file_system).await;
     read.and(closed)?;
-    reports.sort_unstable();
+    // Rotation keeps this list short. Insertion sort avoids linking quicksort
+    // into the firmware and also handles directories with extra reports.
+    for index in 1..reports.len() {
+        let identifier = reports[index];
+        let mut position = index;
+        while position > 0 && reports[position - 1] > identifier {
+            reports[position] = reports[position - 1];
+            position -= 1;
+        }
+        reports[position] = identifier;
+    }
     Ok(reports)
 }
 
