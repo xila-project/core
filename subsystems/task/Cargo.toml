@@ -48,6 +48,7 @@ libc = { version = "0.2", optional = true }
 
 [features]
 default = []
+crash = []
 std = []
 # Test executor for `#[task::test]` (std; Embassy provides its std pender).
 test_harness = [

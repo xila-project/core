@@ -350,8 +350,8 @@ depends = ["ci:packages-host-sdk"]
 tools."github:nextest-rs/nextest" = "cargo-nextest-{{ vars.nextest_version }}"
 run = """
 set -eu
-cargo nextest run --locked --workspace --features xila/graphics_rendering_xrgb8888,xila-graphics/headless_screen,xila-io-error/std
-cargo test --locked --workspace --features xila/graphics_rendering_xrgb8888,xila-graphics/headless_screen,xila-io-error/std --doc
+cargo nextest run --locked --workspace --features xila/crash,xila/graphics_rendering_xrgb8888,xila-graphics/headless_screen,xila-io-error/std
+cargo test --locked --workspace --features xila/crash,xila/graphics_rendering_xrgb8888,xila-graphics/headless_screen,xila-io-error/std --doc
 cargo nextest run --locked -p xila-abi-application --no-default-features
 cargo test --locked -p xila-abi-application --no-default-features --doc
 # The IANA table features are not in the workspace feature list above: no
