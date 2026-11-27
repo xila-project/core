@@ -38,6 +38,7 @@ virtual_file_system = { workspace = true, features = ["test_harness"] }
 [features]
 default = []
 building = []
+crash = ["stackful?/crash"]
 native-dev = ["dep:abi_application", "dep:native_loader", "dep:stackful"]
 native-linked = ["dep:abi_application", "dep:stackful", "dep:portable-atomic"]
 graphics = ["dep:graphics", "abi_application?/graphics"]
