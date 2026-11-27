@@ -4,7 +4,7 @@ use core::{
 };
 
 use bt_hci::{
-    cmd::le::{LeSetAdvEnable, LeSetScanParams},
+    cmd::le::{LeSetAdvEnable, LeSetScanEnable, LeSetScanParams},
     controller::ControllerCmdSync,
     param::{AddrKind, BdAddr, FilterDuplicates, LeAdvReportsIter},
 };
@@ -211,9 +211,9 @@ async fn serve<C: Controller>(device: &BluetoothDevice, stack: &Host<'_, C>) {
         if let Some(scan) = scanning {
             scan.stop().await;
         }
-        if advertising.is_some() {
-            let _ = stack.command(LeSetAdvEnable::new(false)).await;
-        }
+        // A cancelled start can enable the controller before it returns a session handle.
+        let _ = stack.command(LeSetScanEnable::new(false, false)).await;
+        let _ = stack.command(LeSetAdvEnable::new(false)).await;
         drop(advertising);
         finish_link(link).await;
         device.finish_close();

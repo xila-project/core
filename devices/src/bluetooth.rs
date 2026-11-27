@@ -7,29 +7,97 @@
 
 use file_system::{ControlCommand, IoErrorKind, define_command};
 
-const KIND: u8 = crate::kind::BLUETOOTH;
-
-define_command!(GET_CAPABILITIES, Read, KIND, 0, (), Capabilities);
-define_command!(GET_STATE, Read, KIND, 1, (), State);
-define_command!(START_SCAN, Write, KIND, 2, ScanConfiguration, ());
-define_command!(STOP_SCAN, Write, KIND, 3, (), ());
-define_command!(CONNECT, Write, KIND, 4, ConnectionRequest, ());
-define_command!(DISCONNECT, Write, KIND, 5, ConnectionHandle, ());
-define_command!(DISCOVER_SERVICES, Write, KIND, 6, ConnectionHandle, ());
+define_command!(
+    GET_CAPABILITIES,
+    Read,
+    crate::kind::BLUETOOTH,
+    0,
+    (),
+    Capabilities
+);
+define_command!(GET_STATE, Read, crate::kind::BLUETOOTH, 1, (), State);
+define_command!(
+    START_SCAN,
+    Write,
+    crate::kind::BLUETOOTH,
+    2,
+    ScanConfiguration,
+    ()
+);
+define_command!(STOP_SCAN, Write, crate::kind::BLUETOOTH, 3, (), ());
+define_command!(
+    CONNECT,
+    Write,
+    crate::kind::BLUETOOTH,
+    4,
+    ConnectionRequest,
+    ()
+);
+define_command!(
+    DISCONNECT,
+    Write,
+    crate::kind::BLUETOOTH,
+    5,
+    ConnectionHandle,
+    ()
+);
+define_command!(
+    DISCOVER_SERVICES,
+    Write,
+    crate::kind::BLUETOOTH,
+    6,
+    ConnectionHandle,
+    ()
+);
 define_command!(
     DISCOVER_CHARACTERISTICS,
     Write,
-    KIND,
+    crate::kind::BLUETOOTH,
     7,
     AttributeRequest,
     ()
 );
-define_command!(DISCOVER_DESCRIPTORS, Write, KIND, 8, AttributeRequest, ());
-define_command!(READ_ATTRIBUTE, Write, KIND, 9, AttributeRequest, ());
-define_command!(WRITE_ATTRIBUTE, Write, KIND, 10, WriteRequest, ());
-define_command!(SET_NOTIFICATIONS, Write, KIND, 11, NotificationRequest, ());
-define_command!(START_ADVERTISING, Write, KIND, 12, AdvertisingData, ());
-define_command!(STOP_ADVERTISING, Write, KIND, 13, (), ());
+define_command!(
+    DISCOVER_DESCRIPTORS,
+    Write,
+    crate::kind::BLUETOOTH,
+    8,
+    AttributeRequest,
+    ()
+);
+define_command!(
+    READ_ATTRIBUTE,
+    Write,
+    crate::kind::BLUETOOTH,
+    9,
+    AttributeRequest,
+    ()
+);
+define_command!(
+    WRITE_ATTRIBUTE,
+    Write,
+    crate::kind::BLUETOOTH,
+    10,
+    WriteRequest,
+    ()
+);
+define_command!(
+    SET_NOTIFICATIONS,
+    Write,
+    crate::kind::BLUETOOTH,
+    11,
+    NotificationRequest,
+    ()
+);
+define_command!(
+    START_ADVERTISING,
+    Write,
+    crate::kind::BLUETOOTH,
+    12,
+    AdvertisingData,
+    ()
+);
+define_command!(STOP_ADVERTISING, Write, crate::kind::BLUETOOTH, 13, (), ());
 
 file_system::plain_data! {
     #[repr(C)]

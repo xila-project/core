@@ -87,6 +87,10 @@ pub struct Peripheral<'database> {
 }
 
 /// Simulated controller state shared by the test and the HCI transport.
+///
+/// Run the controller and the code that drives the simulation on one executor.
+/// The simulation uses `RefCell` and `NoopRawMutex` for single-threaded access.
+/// The controller borrows this state and cannot be sent to another thread.
 pub struct Simulation<'database> {
     state: RefCell<State<'database>>,
     changed: Signal<NoopRawMutex, ()>,
