@@ -654,7 +654,6 @@ mod tests {
             let mut file = ptr::null_mut();
             for (path, length) in [
                 (c"/outside".as_ptr(), 8),
-                (c"../outside".as_ptr(), 10),
                 (c"".as_ptr(), 0),
                 (c"nul".as_ptr(), 4),
             ] {
@@ -664,6 +663,11 @@ mod tests {
                 );
                 assert!(file.is_null());
             }
+            assert_eq!(
+                xila_file_open(directory, c"../outside".as_ptr(), 10, 1, &mut file),
+                Status::PathEscapesRoot
+            );
+            assert!(file.is_null());
             assert_eq!(
                 xila_file_open(directory, ptr::null(), 0, 1, &mut file),
                 Status::InvalidArgument
