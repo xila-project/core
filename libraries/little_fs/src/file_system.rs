@@ -56,7 +56,34 @@ impl Options {
 }
 
 pub struct FileSystem {
-    file_system: MutexMountWrapper<CriticalSectionRawMutex, littlefs::lfs_t>,
+    file_system: MutexMountWrapper<CriticalSectionRawMutex, MountedFileSystem>,
+}
+
+struct MountedFileSystem {
+    native: littlefs::lfs_t,
+    recovery_required: bool,
+}
+
+impl MountedFileSystem {
+    fn recover(&mut self) -> Result<()> {
+        if !self.recovery_required {
+            return Ok(());
+        }
+        if !self.native.mlist.is_null() {
+            return Err(IoErrorKind::InputOutput);
+        }
+
+        // Mount reads the committed move state from disk. Keep the old mount
+        // blocked if recovery fails, so the next operation can try again.
+        let mut recovered = littlefs::lfs_t::default();
+        unsafe {
+            convert_result(littlefs::lfs_mount(&mut recovered, self.native.cfg))?;
+            littlefs::lfs_unmount(&mut self.native);
+        }
+        self.native = recovered;
+        self.recovery_required = false;
+        Ok(())
+    }
 }
 
 impl FileSystem {
@@ -152,7 +179,10 @@ impl FileSystem {
         }
 
         Ok(Self {
-            file_system: MutexMountWrapper::new_mounted(file_system),
+            file_system: MutexMountWrapper::new_mounted(MountedFileSystem {
+                native: file_system,
+                recovery_required: false,
+            }),
         })
     }
 
@@ -170,20 +200,29 @@ impl FileSystem {
         &self,
         operation: impl FnOnce(&mut littlefs::lfs_t) -> Result<T>,
     ) -> Result<T> {
-        let mut file_system = self.file_system.try_get()?;
+        self.operation_with_mount(|mount| operation(&mut mount.native))
+    }
 
-        let result = operation(&mut file_system);
-        // A failed device read leaves the failed block's key in the read cache
-        // with stale bytes, and later operations could be served from it. Drop
-        // the cache after any I/O or corruption error so the next operation
-        // starts from the device.
+    fn operation_with_mount<T>(
+        &self,
+        operation: impl FnOnce(&mut MountedFileSystem) -> Result<T>,
+    ) -> Result<T> {
+        let mut mount = self.file_system.try_get()?;
+        mount.recover()?;
+        let result = operation(&mut mount);
+        Self::drop_read_cache_on_error(&mut mount.native, &result);
+        result
+    }
+
+    fn drop_read_cache_on_error<T>(file_system: &mut littlefs::lfs_t, result: &Result<T>) {
+        // A failed device read can leave stale bytes under the failed block's
+        // cache key. Invalidate the cache before another operation uses it.
         if matches!(
             result,
             Err(IoErrorKind::InputOutput | IoErrorKind::CorruptData)
         ) {
-            attributes::drop_read_cache(&mut file_system);
+            attributes::drop_read_cache(file_system);
         }
-        result
     }
 
     pub fn operation_with_context<I: 'static, T>(
@@ -191,22 +230,13 @@ impl FileSystem {
         context: &mut Context,
         operation: impl FnOnce(&mut littlefs::lfs_t, &mut I) -> Result<T>,
     ) -> Result<T> {
-        let mut file_system = self.file_system.try_get()?;
-
-        let file = context
-            .get_private_data_of_type::<SharedContext<I>>()
-            .ok_or(IoErrorKind::InvalidArgument)?;
-        let mut file = file.try_lock().map_err(|_| IoErrorKind::WouldBlock)?;
-        let result = operation(&mut file_system, &mut file);
-        // Same as `operation`: never let a failed read poison the cache for
-        // the next operation.
-        if matches!(
-            result,
-            Err(IoErrorKind::InputOutput | IoErrorKind::CorruptData)
-        ) {
-            attributes::drop_read_cache(&mut file_system);
-        }
-        result
+        self.operation(|file_system| {
+            let file = context
+                .get_private_data_of_type::<SharedContext<I>>()
+                .ok_or(IoErrorKind::InvalidArgument)?;
+            let mut file = file.try_lock().map_err(|_| IoErrorKind::WouldBlock)?;
+            operation(file_system, &mut file)
+        })
     }
 }
 
@@ -219,10 +249,9 @@ impl MountOperations for FileSystem {
     /// With open handles (a forced detach), only stop serving: their caches
     /// stay allocated and their unsynchronized data is not committed.
     fn unmount(&self) -> Result<()> {
-        self.operation(|file_system| {
-            if !file_system.mlist.is_null() {
-                return Ok(());
-            }
+        let mut mount = self.file_system.try_get()?;
+        let file_system = &mut mount.native;
+        if file_system.mlist.is_null() {
             // Directory updates are committed immediately; `lfs_unmount` only
             // frees caches, so the backing device is synced explicitly first.
             if unsafe { super::callbacks::flush_callback(file_system.cfg) } != 0 {
@@ -234,8 +263,8 @@ impl MountOperations for FileSystem {
             unsafe {
                 configuration::Context::take_from_configuration(&mut *configuration);
             }
-            Ok(())
-        })?;
+        }
+        drop(mount);
         self.file_system.unmount()
     }
 }
@@ -254,7 +283,8 @@ impl FileSystemOperations for FileSystem {
     }
 
     fn rename(&self, source: &Path, destination: &Path) -> Result<()> {
-        self.operation(|file_system| {
+        self.operation_with_mount(|mount| {
+            let file_system = &mut mount.native;
             let source = CString::new(source.as_str()).map_err(|_| IoErrorKind::InvalidArgument)?;
 
             let destination =
@@ -281,11 +311,18 @@ impl FileSystemOperations for FileSystem {
                 }
             }
 
-            convert_result(unsafe {
+            let result = convert_result(unsafe {
                 littlefs::lfs_rename(file_system, source.as_ptr(), destination.as_ptr())
-            })?;
-
-            Ok(())
+            });
+            if matches!(
+                result,
+                Err(IoErrorKind::InputOutput | IoErrorKind::CorruptData | IoErrorKind::NoSpace)
+            ) {
+                // A failed commit may already be on disk. Before any further
+                // operation, reload the move state. See littlefs-project/littlefs#1229.
+                mount.recovery_required = true;
+            }
+            result.map(|_| ())
         })
     }
 
@@ -592,19 +629,22 @@ impl BaseOperations for FileSystem {
     }
 
     fn close(&self, context: &mut Context) -> Result<()> {
-        self.operation(|file_system| {
-            let file = context
-                .get_private_data_of_type::<SharedContext<File>>()
-                .ok_or(IoErrorKind::InvalidArgument)?;
-            if Arc::strong_count(file) == 1 {
-                file.try_lock()
-                    .map_err(|_| IoErrorKind::WouldBlock)?
-                    .close(file_system)?;
-            }
-            context.take_private_data_of_type::<SharedContext<File>>();
-
-            Ok(())
-        })
+        let mut mount = self.file_system.try_get()?;
+        let file = context
+            .get_private_data_of_type::<SharedContext<File>>()
+            .ok_or(IoErrorKind::InvalidArgument)?;
+        let mut result = Ok(());
+        if Arc::strong_count(file) == 1 {
+            let mut file = file.try_lock().map_err(|_| IoErrorKind::WouldBlock)?;
+            result = if mount.recovery_required {
+                file.close_without_sync(&mut mount.native)
+            } else {
+                file.close(&mut mount.native)
+            };
+            Self::drop_read_cache_on_error(&mut mount.native, &result);
+        }
+        context.take_private_data_of_type::<SharedContext<File>>();
+        result
     }
 }
 
@@ -636,39 +676,33 @@ impl DirectoryOperations for FileSystem {
     }
 
     fn close(&self, context: &mut Context) -> Result<()> {
-        self.operation(|file_system| {
-            let directory = context
-                .get_private_data_of_type::<SharedContext<Directory>>()
-                .ok_or(IoErrorKind::InvalidArgument)?;
-            if Arc::strong_count(directory) == 1 {
-                directory
-                    .try_lock()
-                    .map_err(|_| IoErrorKind::WouldBlock)?
-                    .close(file_system)?;
-            }
-            context.take_private_data_of_type::<SharedContext<Directory>>();
+        let mut mount = self.file_system.try_get()?;
+        let directory = context
+            .get_private_data_of_type::<SharedContext<Directory>>()
+            .ok_or(IoErrorKind::InvalidArgument)?;
+        if Arc::strong_count(directory) == 1 {
+            directory
+                .try_lock()
+                .map_err(|_| IoErrorKind::WouldBlock)?
+                .close(&mut mount.native)?;
+        }
+        context.take_private_data_of_type::<SharedContext<Directory>>();
 
-            Ok(())
-        })
+        Ok(())
     }
 }
 
 impl Drop for FileSystem {
     fn drop(&mut self) {
-        let _ = self.operation(|file_system| {
+        if let Ok(mut mount) = self.file_system.try_get() {
+            let file_system = &mut mount.native;
             unsafe {
                 littlefs::lfs_unmount(file_system);
-            }
 
-            let mut configuration =
-                unsafe { Box::from_raw(file_system.cfg as *mut littlefs::lfs_config) };
-
-            unsafe {
+                let mut configuration = Box::from_raw(file_system.cfg as *mut littlefs::lfs_config);
                 configuration::Context::take_from_configuration(&mut *configuration);
             }
-
-            Ok(())
-        });
+        }
     }
 }
 

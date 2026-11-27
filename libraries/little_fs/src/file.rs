@@ -295,6 +295,18 @@ impl File {
         Ok(())
     }
 
+    pub(crate) fn close_without_sync(&mut self, file_system: &mut littlefs::lfs_t) -> Result<()> {
+        // Native handles can retain stale metadata after a failed rename.
+        // Close releases the handle when FILE_ERRORED prevents it from syncing.
+        let pending = self.file.flags & constants::FILE_PENDING != 0;
+        self.file.flags |= constants::FILE_ERRORED;
+        convert_result(unsafe { littlefs::lfs_file_close(file_system, &mut self.file) })?;
+        if pending {
+            return Err(IoErrorKind::InputOutput);
+        }
+        Ok(())
+    }
+
     pub fn close(&mut self, file_system: &mut littlefs::lfs_t) -> Result<()> {
         unsafe {
             // Publish this handle's metadata to the other open handles only
