@@ -74,8 +74,10 @@ quote = { version = "1.0" }
 proc-macro2 = { version = "1.0" }
 # Raw bindings and the safe layer come from the same lvgl-rust release: the
 # safe layer defines LVGL's OBJ_ID hooks for the bindings' library.
-lvgl_rust_sys = { version = "0.3.1", package = "lvgl-rust-sys", default-features = false }
-lvgl-rust = { version = "0.3.1", default-features = false }
+# Temporary pin for AlixANNERAUD/lvgl_rust#111 (-mlongcalls on Xtensa); switch
+# back to the crates.io release before merging out of draft.
+lvgl_rust_sys = { git = "https://github.com/AlixANNERAUD/lvgl_rust.git", rev = "4b2268ff3c040bb54ff5128cf345a91443634d36", package = "lvgl-rust-sys", default-features = false }
+lvgl-rust = { git = "https://github.com/AlixANNERAUD/lvgl_rust.git", rev = "4b2268ff3c040bb54ff5128cf345a91443634d36", default-features = false }
 # Fork branch `xila`: corosensei 0.3.4 with the Xtensa backend (proposed in the issue
 # Amanieu/corosensei#79) and the Cortex-M `d8`-`d15` clobber fix (Amanieu/corosensei#80). Drop the
 # fork once both are released.

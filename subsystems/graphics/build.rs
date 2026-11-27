@@ -193,8 +193,8 @@ fn lvgl_build() -> cc::Build {
 
     let mut build = cc::Build::new();
     build.target(&target).warnings(true);
-    // Architecture and calling convention flags (RISC-V `-march`/`-mabi`), so the
-    // font objects use the same floating-point calling convention as LVGL.
+    // Target compiler flags from lvgl-rust-sys (such as RISC-V `-march`/`-mabi`
+    // and Xtensa `-mlongcalls`), so font objects match LVGL.
     for flag in compiler_flags.split_whitespace() {
         build.flag(flag);
     }

@@ -1,5 +1,9 @@
 fn main() {
-    cc::Build::new()
+    let mut build = cc::Build::new();
+    if std::env::var("CARGO_CFG_TARGET_ARCH").is_ok_and(|arch| arch == "xtensa") {
+        build.flag("-mlongcalls");
+    }
+    build
         .file("src/clock_random.c")
         .file("src/process.c")
         .file("src/threads.c")
