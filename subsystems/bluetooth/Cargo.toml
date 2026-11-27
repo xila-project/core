@@ -1,0 +1,40 @@
+[package]
+name = "xila-bluetooth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bt-hci = { workspace = true }
+device = { workspace = true }
+embassy-futures = { workspace = true }
+embassy-time = { workspace = true }
+embedded-io = { workspace = true }
+file_system = { workspace = true }
+heapless = "0.9"
+shared = { workspace = true }
+synchronization = { workspace = true }
+task = { workspace = true }
+virtual_file_system = { workspace = true }
+trouble-host = { version = "0.8", default-features = false, features = [
+  "central",
+  "peripheral",
+  "scan",
+  "gatt",
+  "default-packet-pool-mtu-48",
+  "default-packet-pool-size-8",
+  "l2cap-rx-queue-size-2",
+  "l2cap-tx-queue-size-2",
+] }
+
+[dev-dependencies]
+drivers_core = { workspace = true, features = ["bluetooth_mock"] }
+log = { workspace = true }
+memory_file_system = { workspace = true }
+task = { workspace = true, features = ["test_harness"] }
+testing_support = { workspace = true }
+time = { workspace = true }
+users = { workspace = true }
+
+[lib]
+name = "bluetooth"
