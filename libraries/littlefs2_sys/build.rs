@@ -29,6 +29,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .expect("Failed to write lfs.h");
 
     let mut builder = cc::Build::new();
+    if env::var("CARGO_CFG_TARGET_ARCH").is_ok_and(|arch| arch == "xtensa") {
+        builder.flag("-mlongcalls");
+    }
     let builder = builder
         .flag("-std=c99")
         .flag("-DLFS_NO_DEBUG")

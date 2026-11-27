@@ -929,8 +929,7 @@ dependencies = [
 [[package]]
 name = "lvgl-rust"
 version = "0.3.1+lvgl.9.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad2ac7ea74569e528e0d43b3e93598d7cb476be2f2706b946622dc8687f90da2"
+source = "git+https://github.com/AlixANNERAUD/lvgl_rust.git?rev=4b2268ff3c040bb54ff5128cf345a91443634d36#4b2268ff3c040bb54ff5128cf345a91443634d36"
 dependencies = [
  "loom",
  "lvgl-rust-gen",
@@ -940,8 +939,7 @@ dependencies = [
 [[package]]
 name = "lvgl-rust-gen"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53ef75b49fbbe675fdfba14073aba0298d5e23a6b76929124059ffe6374424b2"
+source = "git+https://github.com/AlixANNERAUD/lvgl_rust.git?rev=4b2268ff3c040bb54ff5128cf345a91443634d36#4b2268ff3c040bb54ff5128cf345a91443634d36"
 dependencies = [
  "prettyplease 0.2.37",
  "proc-macro2",
@@ -954,8 +952,7 @@ dependencies = [
 [[package]]
 name = "lvgl-rust-sys"
 version = "0.3.1+lvgl.9.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c919899cae7f60177173633493293887db8a1e4a03f3109a9f8999681278823"
+source = "git+https://github.com/AlixANNERAUD/lvgl_rust.git?rev=4b2268ff3c040bb54ff5128cf345a91443634d36#4b2268ff3c040bb54ff5128cf345a91443634d36"
 dependencies = [
  "bindgen 0.72.1",
  "cc",
