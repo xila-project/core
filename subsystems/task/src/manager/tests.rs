@@ -1432,6 +1432,35 @@ async fn send_spawn_balances_executors_and_keeps_non_send_state_remote() {
     });
 }
 
+#[test(task_path = crate)]
+async fn explicit_send_spawn_stays_on_the_selected_executor() {
+    let manager = initialize();
+    let root = manager.get_current_task_identifier().await;
+    let primary = manager.get_spawner(root).await.unwrap();
+    let caller = std::thread::current().id();
+
+    let (handle, _) = manager
+        .spawn_on_executor(root, "primary", primary, |_| async {
+            std::thread::current().id()
+        })
+        .await
+        .unwrap();
+    assert_eq!(handle.join().await, caller);
+
+    let secondary = crate::test_executor::new_thread_executor(manager).await;
+    let (handle, _) = manager
+        .spawn_on_executor(root, "secondary", secondary, move |task| async move {
+            let first_poll = std::thread::current().id();
+            crate::yield_now().await;
+            assert_eq!(first_poll, std::thread::current().id());
+            assert_eq!(manager.get_spawner(task).await, Ok(secondary));
+            first_poll
+        })
+        .await
+        .unwrap();
+    assert_ne!(handle.join().await, caller);
+}
+
 #[cfg(not(feature = "metrics"))]
 #[test(task_path = crate)]
 async fn metrics_are_unavailable_without_the_feature() {

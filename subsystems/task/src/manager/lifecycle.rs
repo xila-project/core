@@ -106,6 +106,37 @@ impl Manager {
         })
     }
 
+    /// Spawn a Send future on a specific registered executor.
+    ///
+    /// The task stays on that executor until it exits. An invalid identifier
+    /// returns `InvalidSpawnerIdentifier`.
+    ///
+    /// ```compile_fail
+    /// async fn non_send_future(manager: &'static task::Manager, executor: task::SpawnerIdentifier) {
+    ///     let root = task::Manager::ROOT_TASK_IDENTIFIER;
+    ///     manager.spawn_on_executor(root, "", executor, |_| async {
+    ///         let local = std::rc::Rc::new(());
+    ///         task::yield_now().await;
+    ///         drop(local);
+    ///     }).await.unwrap();
+    /// }
+    /// ```
+    pub async fn spawn_on_executor<FunctionType, FutureType, ReturnType>(
+        &'static self,
+        parent_task: TaskIdentifier,
+        name: &str,
+        executor: SpawnerIdentifier,
+        function: FunctionType,
+    ) -> Result<(JoinHandle<ReturnType>, TaskIdentifier)>
+    where
+        FunctionType: FnOnce(TaskIdentifier) -> FutureType + Send + 'static,
+        FutureType: Future<Output = ReturnType> + Send + 'static,
+        ReturnType: Send + 'static,
+    {
+        self.spawn_send(parent_task, name, Some(executor), function)
+            .await
+    }
+
     /// Spawn on any registered executor: `spawner`, or the least-loaded one.
     /// Only the closure and the result cross threads. The closure runs on the
     /// target executor, so its future may be !Send, as with Embassy's tasks.

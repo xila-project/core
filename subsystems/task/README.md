@@ -9,6 +9,10 @@ registration also remembers a spawner in thread-local storage for synchronous
 use `spawn_on` with a caller-owned local `Spawner`. The `run` and `test` macros
 do this automatically.
 
+`spawn_on_executor` takes the registration identifier of a specific executor.
+The closure, future and result must implement `Send`. The task stays on that
+executor until it exits.
+
 `spawn_send` targets any registered executor: an explicit identifier, or the
 registration with the fewest live tasks (lowest identifier on ties). It needs
 neither an Embassy waker nor a local spawner, so it also works under `block_on`.
