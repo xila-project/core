@@ -248,7 +248,8 @@ impl Manager {
                     _ => ResolveError::NetworkDown,
                 })?;
 
-        resolve_queries(kind, stop_on_first_match, async |query_kind| {
+        let stack = &stack;
+        resolve_queries(kind, stop_on_first_match, |query_kind| async move {
             let handle = stack
                 .with_mutable(|s| s.start_dns_query(host, query_kind))
                 .await?;
@@ -369,10 +370,10 @@ impl Manager {
     }
 }
 
-async fn resolve_queries(
+async fn resolve_queries<F: core::future::Future<Output = ResolveResult<Vec<IpAddress>>>>(
     kind: DnsQueryKind,
     stop_on_first_match: bool,
-    mut query: impl AsyncFnMut(DnsQueryKind) -> ResolveResult<Vec<IpAddress>>,
+    mut query: impl FnMut(DnsQueryKind) -> F,
 ) -> ResolveResult<Vec<IpAddress>> {
     let query_types = [
         DnsQueryKind::A,
@@ -460,14 +461,13 @@ mod dns_tests {
         let result = block_on(resolve_queries(
             DnsQueryKind::A | DnsQueryKind::Aaaa,
             true,
-            async |kind| {
+            |kind| {
                 queries.push(kind);
-
-                match kind {
+                core::future::ready(match kind {
                     DnsQueryKind::A => Err(ResolveError::Failure),
                     DnsQueryKind::Aaaa => Ok(vec![ipv6.clone()]),
                     _ => panic!("unexpected query: {kind:?}"),
-                }
+                })
             },
         ));
 
