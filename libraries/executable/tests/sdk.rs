@@ -736,7 +736,9 @@ async fn graphics_calls_reach_the_executor_and_a_process_leaves_no_objects() {
     )
     .await;
 
-    let screen = manager.get_current_screen().unwrap();
+    let screen = manager
+        .with_lvgl_sync(|lv| manager.get_current_screen(lv))
+        .unwrap();
     let children = || {
         manager
             .lock_function_sync(|| Ok(unsafe { lvgl::lv_obj_get_child_count(screen) }))
@@ -766,7 +768,13 @@ async fn graphics_calls_reach_the_executor_and_a_process_leaves_no_objects() {
             task::sleep(core::time::Duration::from_millis(1)).await;
             waited += 1;
         }
-        assert_eq!(manager.get_window_count().await.unwrap(), 1);
+        assert_eq!(
+            manager
+                .with_lvgl(|lv| manager.get_window_count(lv))
+                .await
+                .unwrap(),
+            1
+        );
         assert_eq!(State::registered_state_count(manager), 1);
         assert_eq!(children(), before + 1);
         // Another task holds the graphics lock across an await. The program's next poll
@@ -777,7 +785,10 @@ async fn graphics_calls_reach_the_executor_and_a_process_leaves_no_objects() {
             task::sleep(core::time::Duration::from_millis(20)).await;
         }
         // The window's first child is the program's button.
-        let window = manager.get_window_identifier(0).await.unwrap() as *mut lvgl::lv_obj_t;
+        let window = manager
+            .with_lvgl(|lv| manager.get_window_identifier(lv, 0))
+            .await
+            .unwrap() as *mut lvgl::lv_obj_t;
         manager
             .lock_function(|| {
                 // SAFETY: the graphics lock is held and the window is alive.
@@ -803,7 +814,14 @@ async fn graphics_calls_reach_the_executor_and_a_process_leaves_no_objects() {
             String::from_utf8_lossy(&read_all(vfs, parent, &format!("/{label}.err")).await)
         );
         // The process ended with its objects alive: the host deleted them.
-        assert_eq!(manager.get_window_count().await.unwrap(), 0, "{mode}");
+        assert_eq!(
+            manager
+                .with_lvgl(|lv| manager.get_window_count(lv))
+                .await
+                .unwrap(),
+            0,
+            "{mode}"
+        );
         assert_eq!(State::registered_state_count(manager), 0, "{mode}");
         assert_eq!(children(), before, "{mode}");
     }
@@ -853,7 +871,13 @@ async fn exit_from_a_worker_waits_for_the_graphics_lock(
         task::sleep(core::time::Duration::from_millis(1)).await;
         waited += 1;
     }
-    assert_eq!(manager.get_window_count().await.unwrap(), 1);
+    assert_eq!(
+        manager
+            .with_lvgl(|lv| manager.get_window_count(lv))
+            .await
+            .unwrap(),
+        1
+    );
     assert_eq!(State::registered_state_count(manager), 1);
 
     {
@@ -871,7 +895,13 @@ async fn exit_from_a_worker_waits_for_the_graphics_lock(
 
     assert_eq!(handle.join().await, 9);
     assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
-    assert_eq!(manager.get_window_count().await.unwrap(), 0);
+    assert_eq!(
+        manager
+            .with_lvgl(|lv| manager.get_window_count(lv))
+            .await
+            .unwrap(),
+        0
+    );
     assert_eq!(State::registered_state_count(manager), 0);
 }
 

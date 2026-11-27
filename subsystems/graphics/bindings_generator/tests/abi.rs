@@ -51,7 +51,7 @@ fn constructors_are_generated_and_the_rest_name_a_handler_or_the_manual_match() 
     );
     assert_eq!(
         registry.adapter_for("window_create"),
-        Some(AdapterPolicy::Custom("dispatch_window_create"))
+        Some(AdapterPolicy::Manual)
     );
     assert_eq!(
         registry.adapter_for("object_set_flex_flow"),

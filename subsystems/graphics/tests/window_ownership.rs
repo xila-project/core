@@ -5,12 +5,16 @@
 
 testing_support::instantiate_global_allocator!();
 
-use core::task::{Context, Poll};
+use core::{
+    future::Future,
+    pin::pin,
+    task::{Context, Poll, Waker},
+};
 use file_system::{
     ControlCommand, ControlCommandIdentifier, DirectBaseOperations, DirectCharacterDevice,
     MountOperations, Size,
 };
-use graphics::lvgl_rust::{self, Obj, ScreenAnim, ScreenLoadAnim};
+use graphics::lvgl_rust::{self, Obj, ScreenAnim, ScreenLoadAnim, WidgetExt};
 use graphics::{EventKind, GET_RESOLUTION, Manager, Point, SET_DRAWING_AREA, WAS_RESIZED, lvgl};
 use shared::AnyByLayout;
 
@@ -88,13 +92,38 @@ fn safe_code_cannot_delete_an_owned_window() {
     let manager: &'static Manager = Box::leak(Box::new(task::block_on(
         graphics::initialize_with_input_devices(time, &Screen, &[], 1024, false),
     )));
-    // `OwnedWindow::drop` takes the graphics lock through the FFI manager.
-    graphics::set_ffi_manager(manager);
-    let screen = manager.get_current_screen().unwrap();
+    // Input registration waits for the same guard as the LVGL loop.
+    let guard = manager.synchronous_lock();
+    let mut register_input = pin!(manager.add_input_device(&Screen, graphics::InputKind::Keypad));
+    let mut context = Context::from_waker(Waker::noop());
+    assert!(register_input.as_mut().poll(&mut context).is_pending());
+    drop(guard);
+    task::block_on(register_input).unwrap();
+
+    // The default parent follows the active screen after a safe screen load.
+    let _active_screen = manager
+        .with_lvgl_sync(|lv| {
+            let old = lv.screen_active().unwrap().handle()?;
+            let screen = lv.create_screen()?;
+            lv.load_screen(
+                screen.handle(),
+                ScreenAnim::new(ScreenLoadAnim::NONE, 0, 0, true),
+            )?;
+            lv.timer_handler();
+            assert!(old.get(lv).is_err());
+            Ok(screen)
+        })
+        .unwrap();
+
+    let screen = manager
+        .with_lvgl_sync(|lv| manager.get_current_screen(lv))
+        .unwrap();
 
     // A top-level window: its only ancestor is the screen, a plain object.
-    let mut window = task::block_on(manager.create_window()).unwrap();
-    let window_object = window.as_object_mutable();
+    let mut window = manager
+        .with_lvgl_sync(|lv| manager.create_window(lv))
+        .unwrap();
+    let window_object = window.as_object();
     assert_eq!(child_count(manager, screen), 1);
     for (operation, result) in ["delete", "delete later", "move", "reparent", "clean"]
         .into_iter()
@@ -134,7 +163,12 @@ fn safe_code_cannot_delete_an_owned_window() {
     assert_eq!(child_count(manager, window_object), 1);
 
     // An event for the child is queued, then safe code deletes the child.
-    while window.pop_event().is_some() {}
+    manager
+        .with_lvgl_sync(|lv| {
+            while window.pop_event(lv).is_some() {}
+            Ok(())
+        })
+        .unwrap();
     manager
         .lock_function_sync(|| {
             unsafe {
@@ -147,7 +181,10 @@ fn safe_code_cannot_delete_an_owned_window() {
             Ok(())
         })
         .unwrap();
-    let event = window.pop_event().expect("the click bubbles to the window");
+    let event = manager
+        .with_lvgl_sync(|lv| Ok(window.pop_event(lv)))
+        .unwrap()
+        .expect("the click bubbles to the window");
     assert_eq!(event.code, EventKind::Clicked);
     assert!(event.is_target(child));
     assert!(!event.is_target(window_object));
@@ -178,8 +215,16 @@ fn safe_code_cannot_delete_an_owned_window() {
         .lock_function_sync(|| Ok(unsafe { lvgl::lv_obj_create(screen) }))
         .unwrap();
     // SAFETY: `body` stays alive until the window inside it is deleted.
-    task::block_on(unsafe { manager.set_window_parent(body) }).unwrap();
-    let nested = task::block_on(manager.create_window()).unwrap();
+    manager
+        .with_lvgl_sync(|lv| {
+            // SAFETY: body stays live while it is the window parent.
+            unsafe { manager.set_window_parent(lv, body) };
+            Ok(())
+        })
+        .unwrap();
+    let nested = manager
+        .with_lvgl_sync(|lv| manager.create_window(lv))
+        .unwrap();
     assert_eq!(child_count(manager, body), 1);
     let deleted_body = manager
         .with_lvgl_sync(|lv| Ok(lv.edit(|lv| lv.screen_active()?.child(1)).unwrap().delete()))
@@ -203,6 +248,8 @@ fn safe_code_cannot_delete_an_owned_window() {
     // Without windows, the parent is an ordinary object again.
     manager
         .with_lvgl_sync(|lv| {
+            // SAFETY: the manager keeps the screen live.
+            unsafe { manager.set_window_parent(lv, screen) };
             lv.edit(|lv| lv.screen_active()?.child(0))
                 .unwrap()
                 .delete()?;
@@ -210,4 +257,35 @@ fn safe_code_cannot_delete_an_owned_window() {
         })
         .unwrap();
     assert_eq!(child_count(manager, screen), 0);
+
+    // The public close request uses the lock for lookup and dispatch.
+    let mut window = manager
+        .with_lvgl_sync(|lv| manager.create_window(lv))
+        .unwrap();
+    let id = window.get_identifier();
+    window.register_waker(core::task::Waker::noop());
+    window.wake_up();
+    let mut guard = manager.synchronous_lock();
+    guard
+        .with_lvgl(|lv| {
+            while window.pop_event(lv).is_some() {}
+            manager.send_window_close_request(lv, id).unwrap();
+            assert_eq!(
+                window.pop_event(lv).unwrap().code,
+                EventKind::CloseRequested
+            );
+            drop(window);
+        })
+        .unwrap();
+    // A drop during a session queues deletion instead of blocking. A
+    // subsequent session drains it before it can resolve this identifier.
+    guard
+        .with_lvgl(|lv| {
+            assert_eq!(manager.get_window_count(lv).unwrap(), 0);
+            assert_eq!(
+                manager.send_window_close_request(lv, id),
+                Err(graphics::Error::InvalidWindowIdentifier),
+            );
+        })
+        .unwrap();
 }

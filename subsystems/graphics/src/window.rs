@@ -6,9 +6,9 @@ use crate::{
 };
 use core::{
     mem::ManuallyDrop,
-    ops::{Deref, DerefMut},
     ptr::{self, NonNull},
 };
+use lvgl_rust::{DeferredClass, DeferredLink, Lvgl};
 use synchronization::{once_lock::OnceLock, waitqueue::AtomicWaker};
 
 #[repr(transparent)]
@@ -35,7 +35,7 @@ fn lvgl_rust_external_class_policy(
     }
 }
 
-pub fn get_window_class() -> &'static lvgl::lv_obj_class_t {
+pub(crate) fn get_window_class() -> &'static lvgl::lv_obj_class_t {
     let class_ref = WINDOW_CLASS.get_or_init(|| {
         let mut cls = lvgl::lv_obj_class_t {
             base_class: unsafe { &lvgl::lv_obj_class },
@@ -90,27 +90,32 @@ pub struct Window {
     icon_text: IconText,
     icon_color: Color,
     waker: AtomicWaker,
+    deferred_delete: DeferredLink,
 }
+
+// SAFETY: only Window instances use this class. Each destructor removes its
+// link. Window operations project individual fields through raw pointers.
+static WINDOWS: DeferredClass =
+    unsafe { DeferredClass::new(core::mem::offset_of!(Window, deferred_delete)) };
 
 unsafe extern "C" fn window_constructor(
     _class_p: *const lvgl::lv_obj_class_t,
     object: *mut lvgl::lv_obj_t,
 ) {
+    // SAFETY: LVGL holds the graphics lock and supplied a new Window allocation.
     unsafe {
-        let window = object as *mut Window;
+        let window = object.cast::<Window>();
 
-        ptr::write(&mut (*window).event_queue, EventQueue::new());
-        ptr::write(&mut (*window).icon_text, IconText::new("Wi"));
-        ptr::write(&mut (*window).icon_color, Color::BLACK);
-        ptr::write(&mut (*window).waker, AtomicWaker::new());
+        ptr::write(&raw mut (*window).event_queue, EventQueue::new());
+        ptr::write(&raw mut (*window).icon_text, IconText::new("Wi"));
+        ptr::write(&raw mut (*window).icon_color, Color::BLACK);
+        ptr::write(&raw mut (*window).waker, AtomicWaker::new());
+        ptr::write(&raw mut (*window).deferred_delete, DeferredLink::new());
 
-        lvgl::lv_obj_add_flag(
-            &mut (*window).object,
-            lvgl::lv_obj_flag_t_LV_OBJ_FLAG_EVENT_BUBBLE,
-        );
-        lvgl::lv_obj_set_style_border_width(&mut (*window).object, 0, lvgl::LV_STATE_DEFAULT);
-        lvgl::lv_obj_set_style_radius(&mut (*window).object, 0, lvgl::LV_STATE_DEFAULT);
-        crate::theme::set_surface(&mut (*window).object, crate::theme::Surface::Background);
+        lvgl::lv_obj_add_flag(object, lvgl::lv_obj_flag_t_LV_OBJ_FLAG_EVENT_BUBBLE);
+        lvgl::lv_obj_set_style_border_width(object, 0, lvgl::LV_STATE_DEFAULT);
+        lvgl::lv_obj_set_style_radius(object, 0, lvgl::LV_STATE_DEFAULT);
+        crate::theme::set_surface(object, crate::theme::Surface::Background);
     }
 }
 
@@ -118,10 +123,11 @@ unsafe extern "C" fn window_destructor(
     _class_p: *const lvgl::lv_obj_class_t,
     obj: *mut lvgl::lv_obj_t,
 ) {
+    // SAFETY: LVGL holds the graphics lock and supplied the live Window it
+    // is destroying. No owner can still access this instance.
     unsafe {
-        let window = obj as *mut Window;
-        // Appelle explicitement Drop sur l'ensemble des champs Rust de Window
-        core::ptr::drop_in_place(window);
+        WINDOWS.forget(NonNull::new_unchecked(obj));
+        ptr::drop_in_place(&raw mut (*obj.cast::<Window>()).waker);
     }
 }
 
@@ -202,6 +208,8 @@ unsafe extern "C" fn window_event_callback(
     _class_p: *const lvgl::lv_obj_class_t,
     event: *mut lvgl::lv_event_t,
 ) {
+    // SAFETY: LVGL invokes this callback under the graphics lock, with a live
+    // event and Window. The callback borrows only the fields it accesses.
     unsafe {
         let res = lvgl::lv_obj_event_base(get_window_class(), event);
 
@@ -330,92 +338,82 @@ impl Window {
     /// `parent` must be a live LVGL object, and the caller must hold the
     /// graphics lock.
     pub unsafe fn new(parent: *mut lvgl::lv_obj_t) -> Result<NonNull<Self>> {
-        let obj = unsafe { lvgl::lv_obj_class_create_obj(get_window_class(), parent) };
+        // SAFETY: the caller holds the graphics lock and keeps the parent live.
+        let object = unsafe { lvgl::lv_obj_class_create_obj(get_window_class(), parent) };
+        let window = NonNull::new(object.cast()).ok_or(Error::FailedToCreateObject)?;
+        // SAFETY: the object was allocated above and the lock remains held.
+        unsafe { lvgl::lv_obj_class_init_obj(object) };
+        Ok(window)
+    }
 
+    /// Take the oldest queued event. See [`Window`] for the queue policy.
+    ///
+    /// # Safety
+    ///
+    /// The caller holds the graphics lock and `window` points to a live Window.
+    pub unsafe fn pop_event(window: NonNull<Self>) -> Option<Event> {
+        // SAFETY: the caller keeps this queue alive and excludes its writers.
+        let queue = unsafe { &mut (*window.as_ptr()).event_queue };
+        if queue.has_unreported_losses() {
+            report_losses(queue);
+        }
+        forget_ended_presses(queue);
+        queue.pop_front()
+    }
+
+    /// Count events lost to queue overflow since the window was created.
+    ///
+    /// # Safety
+    ///
+    /// The caller holds the graphics lock and `window` points to a live Window.
+    pub unsafe fn dropped_event_count(window: NonNull<Self>) -> u32 {
+        // SAFETY: the caller keeps this queue alive and excludes its writers.
+        unsafe { (*window.as_ptr()).event_queue.dropped() }
+    }
+
+    /// Forget queued targets before LVGL can reuse their addresses.
+    /// Retain press events with a null target so the press stays paired.
+    ///
+    /// # Safety
+    ///
+    /// The caller holds the graphics lock and `window` points to a live Window.
+    pub unsafe fn discard_events_for_target(window: NonNull<Self>, target: *mut lvgl::lv_obj_t) {
+        // SAFETY: the caller keeps this queue alive and excludes its writers.
+        unsafe { (*window.as_ptr()).event_queue.discard_target(target) };
+    }
+
+    /// Preserve event codes when a recycled address gets a new capability.
+    ///
+    /// # Safety
+    ///
+    /// The caller holds the graphics lock and `window` points to a live Window.
+    pub(crate) unsafe fn clear_event_targets_for(
+        window: NonNull<Self>,
+        target: *mut lvgl::lv_obj_t,
+    ) {
+        // SAFETY: the caller keeps this queue alive and excludes its writers.
+        unsafe { (*window.as_ptr()).event_queue.clear_target(target) };
+    }
+
+    /// Copy the icon while the window is live and the lock is held.
+    ///
+    /// # Safety
+    ///
+    /// The caller holds the graphics lock and `window` points to a live Window.
+    pub(crate) unsafe fn icon(window: NonNull<Self>) -> (IconText, Color) {
+        // SAFETY: the caller keeps these fields alive and excludes their writers.
+        unsafe { ((*window.as_ptr()).icon_text, (*window.as_ptr()).icon_color) }
+    }
+
+    /// # Safety
+    ///
+    /// The caller holds the graphics lock and `window` points to a live Window.
+    pub(crate) unsafe fn set_icon(window: NonNull<Self>, text: &str, color: Color) {
+        // SAFETY: the caller keeps these fields alive and excludes other accesses.
         unsafe {
-            lvgl::lv_obj_class_init_obj(obj);
+            (*window.as_ptr()).icon_text = IconText::new(text);
+            (*window.as_ptr()).icon_color = color;
         }
-
-        match NonNull::new(obj as *mut Self) {
-            Some(window) => Ok(window),
-            None => Err(Error::FailedToCreateObject),
-        }
-    }
-
-    pub fn get_identifier(&self) -> usize {
-        self as *const Self as usize
-    }
-
-    pub fn peek_event(&self) -> Option<Event> {
-        self.event_queue.front().cloned()
-    }
-
-    /// Take the oldest queued event. Events arrive in order, except that a
-    /// newer "latest wins" event (`Pressing`, `LongPressedRepeat`,
-    /// `ValueChanged`, `SizeChanged`, `StyleChanged`) replaces the queued one
-    /// for the same target and takes its place at the back; see
-    /// [`Window`] for what is dropped when the queue is full.
-    ///
-    /// Call it with the graphics lock held: it also forgets the presses of
-    /// input devices that LVGL reports as released or deleted.
-    pub fn pop_event(&mut self) -> Option<Event> {
-        if self.event_queue.has_unreported_losses() {
-            report_losses(&mut self.event_queue);
-        }
-        forget_ended_presses(&mut self.event_queue);
-        self.event_queue.pop_front()
-    }
-
-    /// Number of events lost to queue overflow since the window was created.
-    pub fn dropped_event_count(&self) -> u32 {
-        self.event_queue.dropped()
-    }
-
-    /// Forget queued targets before their LVGL storage can be reused. This only
-    /// compares addresses; it never dereferences the potentially deleted target.
-    /// Press events of the target, except moves and repeats, are kept with a
-    /// null target, so that the end of a press never arrives without its
-    /// `Pressed` event.
-    ///
-    /// Not needed for widgets below the window that LVGL deletes or moves
-    /// away: the window clears those targets itself when LVGL reports the
-    /// deletion.
-    pub fn discard_events_for_target(&mut self, target: *mut lvgl::lv_obj_t) {
-        self.event_queue.discard_target(target);
-    }
-
-    /// Preserve event codes while preventing queued addresses from acquiring a
-    /// newly registered capability when native object storage is recycled.
-    /// Only compares addresses; it does not dereference event targets.
-    pub fn clear_event_targets_for(&mut self, target: *mut lvgl::lv_obj_t) {
-        self.event_queue.clear_target(target);
-    }
-
-    pub fn as_object(&self) -> &lvgl::lv_obj_t {
-        &self.object
-    }
-
-    pub fn as_object_mutable(&mut self) -> &mut lvgl::lv_obj_t {
-        &mut self.object
-    }
-
-    pub fn get_icon(&self) -> (&str, Color) {
-        (self.icon_text.as_str(), self.icon_color)
-    }
-
-    /// Set the legacy icon using up to two Unicode scalar values.
-    /// Text after a NUL is ignored; shorter strings replace the previous text.
-    pub fn set_icon(&mut self, icon_string: &str, icon_color: Color) {
-        self.icon_text = IconText::new(icon_string);
-        self.icon_color = icon_color;
-    }
-
-    pub fn wake_up(&mut self) {
-        self.waker.wake();
-    }
-
-    pub fn register_waker(&mut self, waker: &core::task::Waker) {
-        self.waker.register(waker);
     }
 
     /// Convert a raw pointer to a window object.
@@ -426,13 +424,14 @@ impl Window {
     ///
     /// # Safety
     ///
-    /// `window` must be null or point to a live LVGL object.
-    ///
+    /// The caller holds the graphics lock. `window` is null or points to a
+    /// live LVGL object with the provenance of its full instance.
     pub unsafe fn from_raw(window: *mut lvgl::lv_obj_t) -> Option<NonNull<Self>> {
         if window.is_null() {
             return None;
         }
 
+        // SAFETY: the caller holds the graphics lock and the object is live.
         let class = unsafe { lvgl::lv_obj_get_class(window) };
 
         if class != get_window_class() {
@@ -440,36 +439,6 @@ impl Window {
         }
 
         NonNull::new(window as *mut Self)
-    }
-}
-
-impl AsRef<lvgl::lv_obj_t> for Window {
-    #[inline]
-    fn as_ref(&self) -> &lvgl::lv_obj_t {
-        &self.object
-    }
-}
-
-impl AsMut<lvgl::lv_obj_t> for Window {
-    #[inline]
-    fn as_mut(&mut self) -> &mut lvgl::lv_obj_t {
-        &mut self.object
-    }
-}
-
-impl Deref for Window {
-    type Target = lvgl::lv_obj_t;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.object
-    }
-}
-
-impl DerefMut for Window {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.object
     }
 }
 
@@ -481,9 +450,9 @@ impl DerefMut for Window {
 /// [`Window`] has no public delete. A window therefore lives exactly as long
 /// as its owner, which deletes it once.
 ///
-/// Safe code gets shared access through [`Deref`] and the mutating methods
-/// below, never `&mut Window`: with it, [`core::mem::swap`] could exchange
-/// two windows' LVGL objects behind LVGL's back.
+/// LVGL can update a window while its owner waits for events. The owner
+/// exposes raw pointers for interoperation and uses a session for access.
+/// The waker is atomic and needs no session.
 ///
 /// Taking ownership of a raw window requires `unsafe`:
 ///
@@ -493,19 +462,17 @@ impl DerefMut for Window {
 /// }
 /// ```
 ///
-/// Safe code cannot borrow the window mutably:
+/// Safe code cannot borrow the window or read events without a session.
 ///
-/// ```compile_fail,E0596
-/// fn exchange(first: &mut graphics::OwnedWindow, second: &mut graphics::OwnedWindow) {
-///     core::mem::swap::<graphics::Window>(&mut *first, &mut *second);
+/// ```compile_fail,E0614
+/// fn borrow(window: &graphics::OwnedWindow) {
+///     let _ = &**window;
 /// }
 /// ```
 ///
-/// Nor delete it behind its owner's back:
-///
-/// ```compile_fail,E0599
-/// fn delete(window: &graphics::Window) {
-///     window.delete();
+/// ```compile_fail,E0061
+/// fn read(window: &graphics::OwnedWindow) {
+///     window.peek_event();
 /// }
 /// ```
 pub struct OwnedWindow(NonNull<Window>);
@@ -516,8 +483,8 @@ impl OwnedWindow {
     /// # Safety
     ///
     /// `window` must point to a live window (see [`Window::new`]) that
-    /// nothing else owns or deletes: the result deletes it when dropped. Every
-    /// window created inside it must be deleted first.
+    /// nothing else owns or deletes. LVGL must stay initialized while the owner
+    /// exists. Every window created inside it must be deleted first.
     pub unsafe fn from_raw(window: NonNull<Window>) -> Self {
         Self(window)
     }
@@ -529,53 +496,86 @@ impl OwnedWindow {
         ManuallyDrop::new(self).0
     }
 
-    /// Delete the window now, from a session of the safe API, where dropping
-    /// it would deadlock on the graphics lock the session already holds.
-    pub fn delete(self, _lvgl: &mut lvgl_rust::Lvgl) {
+    /// Delete the window in the current session.
+    pub fn delete(self, _lvgl: &mut Lvgl) {
         let window = self.into_raw();
-        // SAFETY: `&mut Lvgl` proves exclusive access to LVGL (the graphics
-        // lock), and this value owned the window.
-        unsafe { delete(window) };
+        // SAFETY: the session holds the graphics lock and this value owned the window.
+        unsafe { lvgl::lv_obj_delete(window.as_ptr().cast()) };
+    }
+
+    /// Wait for the graphics lock and delete the window.
+    pub async fn close(self) -> Result<()> {
+        crate::manager::lock_graphics()
+            .await
+            .with_lvgl(|lvgl| self.delete(lvgl))
+    }
+
+    /// The window's LVGL object, for the raw bindings.
+    pub fn as_object(&self) -> *mut lvgl::lv_obj_t {
+        self.0.as_ptr().cast()
     }
 
     /// The window's LVGL object, for the raw bindings.
     pub fn as_object_mutable(&mut self) -> *mut lvgl::lv_obj_t {
-        self.0.as_ptr().cast()
+        self.as_object()
+    }
+
+    pub fn get_identifier(&self) -> usize {
+        self.as_object() as usize
+    }
+
+    pub fn peek_event(&self, _lvgl: &Lvgl) -> Option<Event> {
+        // SAFETY: the owner keeps the window live and the session excludes writers.
+        unsafe { (*self.0.as_ptr()).event_queue.front().cloned() }
     }
 
     /// See [`Window::pop_event`].
-    pub fn pop_event(&mut self) -> Option<Event> {
-        self.window_mut().pop_event()
+    pub fn pop_event(&mut self, _lvgl: &mut Lvgl) -> Option<Event> {
+        // SAFETY: the owner keeps the window live and the session holds the lock.
+        unsafe { Window::pop_event(self.0) }
+    }
+
+    /// See [`Window::dropped_event_count`].
+    pub fn dropped_event_count(&self, _lvgl: &Lvgl) -> u32 {
+        // SAFETY: the owner keeps the window live and the session holds the lock.
+        unsafe { Window::dropped_event_count(self.0) }
     }
 
     /// See [`Window::discard_events_for_target`].
-    pub fn discard_events_for_target(&mut self, target: *mut lvgl::lv_obj_t) {
-        self.window_mut().discard_events_for_target(target);
+    pub fn discard_events_for_target(&mut self, _lvgl: &mut Lvgl, target: *mut lvgl::lv_obj_t) {
+        // SAFETY: the owner keeps the window live and the session holds the lock.
+        let queue = unsafe { &mut (*self.0.as_ptr()).event_queue };
+        queue.discard_target(target);
     }
 
-    /// See [`Window::clear_event_targets_for`].
-    pub fn clear_event_targets_for(&mut self, target: *mut lvgl::lv_obj_t) {
-        self.window_mut().clear_event_targets_for(target);
+    pub fn get_icon<'a>(&'a self, _lvgl: &'a Lvgl) -> (&'a str, Color) {
+        // SAFETY: the owner keeps the window live. The session holds the lock,
+        // and the borrow of the owner prevents updates to its icon.
+        unsafe {
+            let window = self.0.as_ptr();
+            ((*window).icon_text.as_str(), (*window).icon_color)
+        }
     }
 
-    /// See [`Window::set_icon`].
-    pub fn set_icon(&mut self, icon_string: &str, icon_color: Color) {
-        self.window_mut().set_icon(icon_string, icon_color);
+    /// Set the icon using up to two Unicode scalar values.
+    /// Text after a NUL is ignored.
+    pub fn set_icon(&mut self, _lvgl: &mut Lvgl, icon_string: &str, icon_color: Color) {
+        // SAFETY: the owner keeps the window live and the session holds the lock.
+        unsafe { Window::set_icon(self.0, icon_string, icon_color) };
     }
 
-    pub fn wake_up(&mut self) {
-        self.window_mut().wake_up();
+    pub fn wake_up(&self) {
+        self.waker().wake();
     }
 
-    pub fn register_waker(&mut self, waker: &core::task::Waker) {
-        self.window_mut().register_waker(waker);
+    pub fn register_waker(&self, waker: &core::task::Waker) {
+        self.waker().register(waker);
     }
 
-    /// Private: callers outside this module could swap the window away.
-    fn window_mut(&mut self) -> &mut Window {
-        // SAFETY: this value owns the live window, and `&mut self` makes the
-        // borrow unique.
-        unsafe { self.0.as_mut() }
+    fn waker(&self) -> &AtomicWaker {
+        // SAFETY: the owner keeps the Window live. Only the atomic waker field
+        // is borrowed, so LVGL can write the queue and its other fields.
+        unsafe { &(*self.0.as_ptr()).waker }
     }
 }
 
@@ -587,34 +587,20 @@ impl From<OwnedWindow> for NonNull<Window> {
 
 impl Drop for OwnedWindow {
     fn drop(&mut self) {
-        let window = self.0;
-        crate::ffi_manager()
-            .lock_function_sync(|| {
-                // SAFETY: the graphics lock is held, and this value owns the
-                // window.
-                unsafe { delete(window) };
-                Ok(())
-            })
-            .expect("Failed to delete window");
+        let object = self.0.cast();
+        let deleted = crate::manager::try_lock_graphics().is_some_and(|mut guard| {
+            guard
+                .with_lvgl(|_lvgl| {
+                    // SAFETY: the session holds the graphics lock. This owner
+                    // keeps the object live until it deletes it.
+                    unsafe { lvgl::lv_obj_delete(object.as_ptr()) };
+                })
+                .is_ok()
+        });
+        if !deleted {
+            // SAFETY: the Window stays live until its owner requests deletion.
+            // The destructor unlinks it if LVGL deletes it before the drain.
+            unsafe { WINDOWS.request_delete(object) };
+        }
     }
-}
-
-impl Deref for OwnedWindow {
-    type Target = Window;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        // SAFETY: this value owns the live window.
-        unsafe { self.0.as_ref() }
-    }
-}
-
-/// Delete `window` and everything it contains.
-///
-/// # Safety
-///
-/// The caller holds the graphics lock and owns `window`, which it does not
-/// use afterwards.
-unsafe fn delete(window: NonNull<Window>) {
-    unsafe { lvgl::lv_obj_delete(window.as_ptr().cast()) };
 }

@@ -5,6 +5,7 @@ use alloc::{
     vec::Vec,
 };
 use file_system::DirectCharacterDevice;
+use lvgl_rust::Lvgl;
 use synchronization::blocking_mutex::raw::CriticalSectionRawMutex;
 use synchronization::mutex::{Mutex, MutexGuard};
 use synchronization::rwlock::RwLock;
@@ -25,6 +26,7 @@ use crate::{Display, OwnedWindow};
 use crate::{Error, Result};
 use crate::{Input, InputKind, Key, State};
 
+static GRAPHICS_LOCK: Mutex<CriticalSectionRawMutex, ()> = Mutex::new(());
 static TICK_TIME_MANAGER: AtomicPtr<time::Manager<'static>> = AtomicPtr::new(core::ptr::null_mut());
 static FFI_GRAPHICS_MANAGER: AtomicPtr<Manager> = AtomicPtr::new(core::ptr::null_mut());
 
@@ -78,7 +80,6 @@ pub async fn initialize_with_input_devices(
     buffer_size: usize,
     double_buffered: bool,
 ) -> Manager {
-    TICK_TIME_MANAGER.store(time_manager as *const _ as *mut _, Ordering::Release);
     Manager::new(
         time_manager,
         screen_device,
@@ -92,14 +93,13 @@ pub async fn initialize_with_input_devices(
 struct Inner {
     _inputs: Vec<Input>,
     displays: Vec<Display>,
-    window_parent: *mut lvgl::lv_obj_t,
     // Drop displays first because LVGL callbacks borrow the keyboard state.
     on_screen_keyboard: Option<Box<OnScreenKeyboard>>,
 }
 
 pub struct Manager {
     inner: RwLock<CriticalSectionRawMutex, Inner>,
-    global_lock: Mutex<CriticalSectionRawMutex, ()>,
+    window_parent: AtomicPtr<lvgl::lv_obj_t>,
     injected_inputs: synchronization::Arc<InputQueue>,
 }
 
@@ -123,7 +123,7 @@ impl Manager {
     ) -> Result<UiTreeSnapshot> {
         validate_ui_tree_limits(max_elements, max_depth)?;
 
-        let _lock = self.global_lock.lock().await;
+        let _lock = self.lock().await;
         let inner = self.inner.read().await;
         if inner.displays.is_empty() {
             return Err(Error::NotAvailable);
@@ -131,6 +131,7 @@ impl Manager {
 
         let mut elements = Vec::with_capacity(max_elements);
         let mut truncated = false;
+        // SAFETY: the lock covers traversal and the manager owns the display.
         unsafe {
             let screen = inner.displays[0].get_object();
             let display = lvgl::lv_obj_get_display(screen);
@@ -169,9 +170,11 @@ impl Manager {
         if [role, name, text, button].iter().all(Option::is_none) {
             return Err("invalid_selector");
         }
-        let _lock = self.global_lock.lock().await;
+        let _lock = self.lock().await;
         let inner = self.inner.read().await;
-        let screen = inner.displays.first().ok_or("not_available")?.get_object();
+        let display = inner.displays.first().ok_or("not_available")?;
+        // SAFETY: the graphics lock is held and the manager owns the display.
+        let screen = unsafe { display.get_object() };
         let display = unsafe { lvgl::lv_obj_get_display(screen) };
         let roots = unsafe {
             [
@@ -305,7 +308,8 @@ impl Manager {
             i16::try_from(x).map_err(|_| "invalid_coordinates")?,
             i16::try_from(y).map_err(|_| "invalid_coordinates")?,
         );
-        validate_pointer_point(point, inner.displays[0].get_resolution())
+        // SAFETY: the graphics lock is held and the manager owns the display.
+        validate_pointer_point(point, unsafe { inner.displays[0].get_resolution() })
             .map_err(|_| "invalid_coordinates")?;
         self.injected_inputs
             .pointer_click(point)
@@ -315,24 +319,20 @@ impl Manager {
 
     /// Capture the active LVGL screen into an owned, bounded RGBA8888 buffer.
     pub async fn capture_screen(&self) -> Result<crate::ScreenSnapshot> {
-        let _lock = self.global_lock.lock().await;
+        let _lock = self.lock().await;
         let inner = self.inner.read().await;
-        inner
-            .displays
-            .first()
-            .ok_or(Error::NotAvailable)?
-            .capture_screen()
+        let display = inner.displays.first().ok_or(Error::NotAvailable)?;
+        // SAFETY: the graphics lock is held and the manager owns the display.
+        unsafe { display.capture_screen() }
     }
 
     /// Return the current active LVGL display resolution.
     pub async fn get_resolution(&self) -> Result<crate::Point> {
-        let _lock = self.global_lock.lock().await;
+        let _lock = self.lock().await;
         let inner = self.inner.read().await;
-        inner
-            .displays
-            .first()
-            .map(Display::get_resolution)
-            .ok_or(Error::NotAvailable)
+        let display = inner.displays.first().ok_or(Error::NotAvailable)?;
+        // SAFETY: the graphics lock is held and the manager owns the display.
+        Ok(unsafe { display.get_resolution() })
     }
 
     /// Read the backlight brightness of the main screen, from
@@ -365,58 +365,54 @@ impl Manager {
 
     /// Queue a pointer move for the graphics-owned LVGL pointer input.
     pub async fn inject_pointer_move(&self, point: crate::Point) -> Result<()> {
-        let _lock = self.global_lock.lock().await;
+        let _lock = self.lock().await;
         let inner = self.inner.read().await;
-        let resolution = inner
-            .displays
-            .first()
-            .map(Display::get_resolution)
-            .ok_or(Error::NotAvailable)?;
+        let display = inner.displays.first().ok_or(Error::NotAvailable)?;
+        // SAFETY: the graphics lock is held and the manager owns the display.
+        let resolution = unsafe { display.get_resolution() };
         validate_pointer_point(point, resolution)?;
         self.injected_inputs.pointer_move(point)
     }
 
     /// Atomically queue a pointer move and complete click at a valid display point.
     pub async fn inject_pointer_click(&self, point: crate::Point) -> Result<()> {
-        let _lock = self.global_lock.lock().await;
+        let _lock = self.lock().await;
         let inner = self.inner.read().await;
-        let resolution = inner
-            .displays
-            .first()
-            .map(Display::get_resolution)
-            .ok_or(Error::NotAvailable)?;
+        let display = inner.displays.first().ok_or(Error::NotAvailable)?;
+        // SAFETY: the graphics lock is held and the manager owns the display.
+        let resolution = unsafe { display.get_resolution() };
         validate_pointer_point(point, resolution)?;
         self.injected_inputs.pointer_click(point)
     }
 
     /// Queue a pointer button state at the most recently injected pointer point.
     pub async fn inject_pointer_button(&self, state: State) -> Result<()> {
-        let _lock = self.global_lock.lock().await;
+        let _lock = self.lock().await;
         self.injected_inputs.pointer_button(state)
     }
 
     /// Queue one keyboard key transition for the graphics-owned LVGL keypad.
     pub async fn inject_key(&self, key: Key, state: State) -> Result<()> {
-        let _lock = self.global_lock.lock().await;
+        let _lock = self.lock().await;
         self.injected_inputs.key(key, state)
     }
 
     /// Queue a complete key press and release, or leave the queue unchanged.
     pub async fn inject_key_press(&self, key: Key) -> Result<()> {
-        let _lock = self.global_lock.lock().await;
+        let _lock = self.lock().await;
         self.injected_inputs.key_press(key)
     }
 
     /// Queue printable ASCII text as ordered key press and release events.
     pub async fn inject_text(&self, text: &str) -> Result<usize> {
-        let _lock = self.global_lock.lock().await;
+        let _lock = self.lock().await;
         self.injected_inputs.text(text)
     }
 
     /// Queue a bounded prefix of printable Unicode text, returning the accepted byte count.
     /// A queue-full error never enqueues a partial press/release pair.
     pub async fn inject_text_chunk(&self, text: &str) -> Result<usize> {
-        let _lock = self.global_lock.lock().await;
+        let _lock = self.lock().await;
         self.injected_inputs.text_chunk(text)
     }
 
@@ -504,48 +500,64 @@ mod injected_input_tests {
 
 impl Drop for Manager {
     fn drop(&mut self) {
-        // `Lvgl::deinit` also tells the safe layer that LVGL is gone.
-        let deinitialized = self.try_lock_lvgl().is_some_and(|mut guard| {
-            lvgl_rust::Lvgl::enter(&mut guard)
-                .and_then(lvgl_rust::Lvgl::deinit)
-                .is_ok()
-        });
-        if !deinitialized {
-            unsafe {
-                lvgl::lv_deinit();
-            }
-        }
+        let mut guard = block_on(lock_graphics());
+        let inner = self.inner.get_mut();
+        inner._inputs.clear();
+        inner.displays.clear();
+        let _ = guard
+            .0
+            .session()
+            .and_then(|session| Lvgl::deinit(session).map_err(Error::from));
     }
 }
 
-/// The graphics lock, held for the safe `lvgl_rust` API: proof of exclusive
-/// access to LVGL ([`lvgl_rust::LvglAccess`]). Private: values live on the
-/// stack of the manager's methods, so none can be leaked for `'static`.
-struct LvglGuard<'a>(#[allow(dead_code)] MutexGuard<'a, CriticalSectionRawMutex, ()>);
+/// Holds the process-wide graphics lock. Use [`Self::with_lvgl`] to run
+/// operations that need a session.
+#[must_use = "Dropping the guard releases the graphics lock"]
+pub struct GraphicsGuard<'a>(LvglGuard<'a>);
 
-// SAFETY: built only from the manager's `global_lock`, the mutex that
-// serializes every LVGL call, and dedicated to it. Releasing the mutex
-// synchronizes-with the next acquisition on any thread. Values never leave
-// the manager's methods, so no session can be borrowed for `'static`.
+impl GraphicsGuard<'_> {
+    /// Run a synchronous operation in an LVGL session. The session token
+    /// cannot escape the operation.
+    ///
+    /// ```compile_fail
+    /// fn escape(guard: &mut graphics::GraphicsGuard<'_>) {
+    ///     let _ = guard.with_lvgl(|lvgl| lvgl);
+    /// }
+    /// ```
+    pub fn with_lvgl<T>(&mut self, function: impl FnOnce(&mut Lvgl) -> T) -> Result<T> {
+        let mut session = self.0.session()?;
+        Ok(function(&mut session))
+    }
+}
+
+struct LvglGuard<'a> {
+    _lock: MutexGuard<'a, CriticalSectionRawMutex, ()>,
+}
+
+// SAFETY: constructed only from GRAPHICS_LOCK, which serializes LVGL access
+// and orders it between threads. The private guard is borrowed for sessions
+// within this module. No borrow can escape with a 'static lifetime.
 unsafe impl lvgl_rust::LvglAccess for LvglGuard<'_> {}
 
 impl LvglGuard<'_> {
-    /// Starts a session of the safe API ([`lvgl_rust::Lvgl::enter`]): fails
-    /// if LVGL was not initialized through the manager, or if a session or
-    /// a Rust callback is active.
     fn session(&mut self) -> Result<lvgl_rust::Session<'_>> {
-        lvgl_rust::Lvgl::enter(self).map_err(Error::from)
+        Lvgl::enter(self).map_err(Error::from)
     }
 }
 
-/// Proof that the caller of [`Manager::with_lvgl_locked`] holds the graphics
-/// lock. `!Send`, and local to that method.
-struct Held(core::marker::PhantomData<*mut ()>);
+pub(crate) async fn lock_graphics() -> GraphicsGuard<'static> {
+    GraphicsGuard(LvglGuard {
+        _lock: GRAPHICS_LOCK.lock().await,
+    })
+}
 
-// SAFETY: `with_lvgl_locked`'s contract: the caller holds `global_lock` while
-// the value exists, so the mutex orders successive holders. The value is a
-// local of that method and is never borrowed for `'static`.
-unsafe impl lvgl_rust::LvglAccess for Held {}
+pub(crate) fn try_lock_graphics() -> Option<GraphicsGuard<'static>> {
+    GRAPHICS_LOCK
+        .try_lock()
+        .ok()
+        .map(|lock| GraphicsGuard(LvglGuard { _lock: lock }))
+}
 
 extern "C" fn binding_tick_callback_function() -> u32 {
     let manager = TICK_TIME_MANAGER.load(Ordering::Acquire);
@@ -553,39 +565,32 @@ extern "C" fn binding_tick_callback_function() -> u32 {
     unsafe { &*manager }.monotonic_milliseconds_wrapping()
 }
 
+// SAFETY: Manager owns its devices, and all access is through synchronized fields.
 unsafe impl Send for Manager {}
 
+// SAFETY: LVGL calls use GRAPHICS_LOCK, and Inner uses the reader-writer lock.
 unsafe impl Sync for Manager {}
 
 impl Manager {
     fn new(
-        _: &time::Manager,
+        time_manager: &'static time::Manager<'static>,
         screen_device: &'static dyn DirectCharacterDevice,
         input_devices: &[(&'static dyn DirectCharacterDevice, InputKind)],
         buffer_size: usize,
         double_buffered: bool,
     ) -> Result<Self> {
         let injected_inputs = InputQueue::new()?;
-        let global_lock = Mutex::new(());
-        {
-            // `lvgl_rust::init` runs `lv_init` and starts the safe layer's
-            // registry; nothing else can reach LVGL before `Self` exists.
-            let mut guard = LvglGuard(
-                global_lock
-                    .try_lock()
-                    .map_err(|_| Error::AlreadyInitialized)?,
-            );
-            let mut session = lvgl_rust::init(&mut guard).map_err(Error::from)?;
-            session.set_tick_cb(binding_tick_callback_function);
-            // Initialize the Window descriptor before any class policy lookup.
-            crate::window::get_window_class();
-            unsafe {
-                // LVGL assigns newly created keypads to the default group.
-                // Create it before display creation also creates the
-                // virtual keypad.
-                let group = lvgl::lv_group_create();
-                lvgl::lv_group_set_default(group);
-            }
+        // Keep the lock until initialization and device registration complete.
+        let mut guard = try_lock_graphics().ok_or(Error::AlreadyInitialized)?;
+        let mut session = lvgl_rust::init(&mut guard.0).map_err(Error::from)?;
+        TICK_TIME_MANAGER.store(time_manager as *const _ as *mut _, Ordering::Release);
+        session.set_tick_cb(binding_tick_callback_function);
+        crate::window::get_window_class();
+        // SAFETY: the session holds the lock. The default group must exist
+        // before input registration so keypads can join it.
+        unsafe {
+            let group = lvgl::lv_group_create();
+            lvgl::lv_group_set_default(group);
         }
 
         let (display, inputs) = Self::create_display(
@@ -595,19 +600,15 @@ impl Manager {
             double_buffered,
             injected_inputs.clone(),
         )?;
-
-        let screen = display.get_object();
-
         theme::initialize(&display)?;
 
         Ok(Self {
             inner: RwLock::new(Inner {
                 _inputs: inputs,
                 displays: vec![display],
-                window_parent: screen,
                 on_screen_keyboard: None,
             }),
-            global_lock,
+            window_parent: AtomicPtr::new(core::ptr::null_mut()),
             injected_inputs,
         })
     }
@@ -618,7 +619,7 @@ impl Manager {
     /// file pickers. A picker chooses its keyboard when it is created.
     /// Tapping a text area on the active screen opens the keyboard.
     pub async fn enable_on_screen_keyboard(&self) {
-        let _guard = self.lock_lvgl().await;
+        let _guard = self.lock().await;
         let mut inner = self.inner.write().await;
         if inner.on_screen_keyboard.is_none() {
             let keyboard = Box::new(OnScreenKeyboard::new());
@@ -635,7 +636,7 @@ impl Manager {
 
         loop {
             let time_until_next = {
-                let mut guard = self.lock_lvgl().await;
+                let mut guard = self.lock().await;
                 let inner = self.inner.read().await;
 
                 // Through the session: requests recorded by the safe layer
@@ -643,14 +644,15 @@ impl Manager {
                 // One timer handler can drain up to 512 events per input device.
                 // Draining a large paste therefore holds `global_lock` longer than an
                 // ordinary frame; how long has not been measured on ESP32.
-                let time_until_next = guard.session()?.timer_handler();
+                let time_until_next = guard.with_lvgl(Lvgl::timer_handler)?;
                 if let Some(keyboard) = &inner.on_screen_keyboard {
                     unsafe { keyboard.update(inner.displays[0].get_lvgl_display()) };
                 }
 
                 if call_count >= 30 {
                     for display in &inner.displays {
-                        display.check_for_resizing();
+                        // SAFETY: the graphics guard is still held.
+                        unsafe { display.check_for_resizing() };
                     }
                     call_count = 0;
                 }
@@ -668,42 +670,51 @@ impl Manager {
     /// # Safety
     ///
     /// `window_parent` must be a live LVGL object that stays alive while it
-    /// is the window parent and holds windows: their owners delete them, so
-    /// deleting it with a window inside would free that window under its
-    /// owner. It must not be inside a window.
-    ///
-    /// ```compile_fail,E0133
-    /// async fn mount(manager: &graphics::Manager, body: *mut graphics::lvgl::lv_obj_t) {
-    ///     let _ = manager.set_window_parent(body).await;
-    /// }
-    /// ```
-    pub async unsafe fn set_window_parent(&self, window_parent: *mut lvgl::lv_obj_t) -> Result<()> {
-        self.inner.write().await.window_parent = window_parent;
-
-        Ok(())
+    /// is the window parent and holds windows. It must not be inside a window.
+    pub unsafe fn set_window_parent(&self, _lvgl: &mut Lvgl, window_parent: *mut lvgl::lv_obj_t) {
+        self.window_parent.store(window_parent, Ordering::Relaxed);
     }
 
-    /// Create a window inside the window parent. Its owner, the result,
-    /// deletes it.
-    pub async fn create_window(&self) -> Result<OwnedWindow> {
-        let parent_object = self.inner.write().await.window_parent;
+    fn window_parent(&self, lvgl: &Lvgl) -> Result<*mut lvgl::lv_obj_t> {
+        let parent = self.window_parent.load(Ordering::Relaxed);
+        if parent.is_null() {
+            // The safe API can replace and delete the screen between sessions.
+            self.get_current_screen(lvgl)
+        } else {
+            Ok(parent)
+        }
+    }
 
-        let window = unsafe { Window::new(parent_object)? };
-
-        // SAFETY: the window was just created, and nothing else holds it.
+    /// Create a window inside the window parent. By default this is the
+    /// active screen. The manager must outlive
+    /// the owner so its window stays valid until deletion.
+    ///
+    /// ```compile_fail,E0061
+    /// fn create(manager: &'static graphics::Manager) {
+    ///     let _ = manager.create_window();
+    /// }
+    /// ```
+    pub fn create_window(&'static self, lvgl: &mut Lvgl) -> Result<OwnedWindow> {
+        let parent = self.window_parent(lvgl)?;
+        // SAFETY: the session holds the graphics lock. The parent remains live
+        // under the set_window_parent contract.
+        let window = unsafe { Window::new(parent)? };
+        // SAFETY: the window was just created and the static manager keeps LVGL live.
         Ok(unsafe { OwnedWindow::from_raw(window) })
     }
 
+    /// Register a physical input device under the graphics lock.
     pub async fn add_input_device(
         &self,
-
         input_device: &'static dyn DirectCharacterDevice,
         input_type: InputKind,
     ) -> Result<()> {
-        let input = Input::new(input_device, input_type)?;
-
-        self.inner.write().await._inputs.push(input);
-
+        let _guard = self.lock().await;
+        let mut inner = self.inner.write().await;
+        // SAFETY: LVGL is initialized and the lock covers registration.
+        // The manager also holds the lock when it drops the input.
+        let input = unsafe { Input::new(input_device, input_type)? };
+        inner._inputs.push(input);
         Ok(())
     }
 
@@ -714,158 +725,116 @@ impl Manager {
         double_buffered: bool,
         injected_inputs: synchronization::Arc<InputQueue>,
     ) -> Result<(Display, Vec<Input>)> {
-        let display = Display::new(screen_device, buffer_size, double_buffered)?;
-        let mut inputs = vec![
-            Input::new_virtual(injected_inputs.clone(), InputKind::Pointer)?,
-            Input::new_virtual(injected_inputs, InputKind::Keypad)?,
-        ];
+        // SAFETY: initialization holds the lock and the manager drops the
+        // display under the lock before deinitializing LVGL.
+        let display = unsafe { Display::new(screen_device, buffer_size, double_buffered)? };
+        // SAFETY: initialization holds the graphics lock, including on
+        // failure. The manager holds it when dropping the returned inputs.
+        let mut inputs = unsafe {
+            vec![
+                Input::new_virtual(injected_inputs.clone(), InputKind::Pointer)?,
+                Input::new_virtual(injected_inputs, InputKind::Keypad)?,
+            ]
+        };
         for (device, kind) in input_devices {
-            inputs.push(Input::new(*device, *kind)?);
+            // SAFETY: initialization holds the graphics lock and the manager
+            // also holds it when dropping inputs.
+            inputs.push(unsafe { Input::new(*device, *kind)? });
         }
         Ok((display, inputs))
     }
 
-    pub async fn get_window_count(&self) -> Result<usize> {
-        let window_parent = self.inner.read().await.window_parent;
-        unsafe { Ok(lvgl::lv_obj_get_child_count(window_parent) as usize) }
+    pub fn get_window_count(&self, lvgl: &Lvgl) -> Result<usize> {
+        let parent = self.window_parent(lvgl)?;
+        // SAFETY: the parent stays live and the session holds the lock.
+        Ok(unsafe { lvgl::lv_obj_get_child_count(parent) } as usize)
     }
 
-    pub async fn get_window_icon(&self, index: usize) -> Result<(String, Color)> {
-        let window_parent = self.inner.read().await.window_parent;
-
-        let window = unsafe {
-            let child = lvgl::lv_obj_get_child(window_parent, index as i32);
-
-            Window::from_raw(child).ok_or(Error::InvalidWindowIdentifier)?
+    pub fn get_window_icon(&self, lvgl: &Lvgl, index: usize) -> Result<(String, Color)> {
+        let parent = self.window_parent(lvgl)?;
+        // SAFETY: the parent stays live and the session excludes changes to
+        // the tree and icon fields throughout this operation.
+        let (text, color) = unsafe {
+            let child = lvgl::lv_obj_get_child(parent, index as i32);
+            let window = Window::from_raw(child).ok_or(Error::InvalidWindowIdentifier)?;
+            Window::icon(window)
         };
-
-        let icon = unsafe { window.as_ref().get_icon() };
-
-        let icon = (icon.0.to_string(), icon.1);
-
-        Ok(icon)
+        Ok((text.as_str().to_string(), color))
     }
 
-    pub async fn get_window_identifier(&self, index: usize) -> Result<usize> {
-        let window_parent = self.inner.read().await.window_parent;
-
-        let window = unsafe { lvgl::lv_obj_get_child(window_parent, index as i32) as usize };
-
-        Ok(window)
+    pub fn get_window_identifier(&self, lvgl: &Lvgl, index: usize) -> Result<usize> {
+        let parent = self.window_parent(lvgl)?;
+        // SAFETY: the parent stays live and the session holds the lock.
+        Ok(unsafe { lvgl::lv_obj_get_child(parent, index as i32) } as usize)
     }
 
-    pub async fn maximize_window(&self, identifier: usize) -> Result<()> {
-        let window_count = self.get_window_count().await?;
-
-        let window_parent = self.inner.read().await.window_parent;
-
-        let found = (0..window_count).find(|index| unsafe {
-            let child = lvgl::lv_obj_get_child(window_parent, *index as i32);
-
-            child == identifier as *mut lvgl::lv_obj_t
-        });
-
-        if found.is_some() {
-            unsafe {
-                lvgl::lv_obj_move_foreground(identifier as *mut lvgl::lv_obj_t);
-            }
-
-            Ok(())
-        } else {
-            Err(Error::InvalidWindowIdentifier)
+    fn find_window(&self, lvgl: &Lvgl, identifier: usize) -> Result<*mut lvgl::lv_obj_t> {
+        let parent = self.window_parent(lvgl)?;
+        // SAFETY: the parent stays live and the session excludes changes to its children.
+        unsafe {
+            (0..lvgl::lv_obj_get_child_count(parent) as i32)
+                .map(|index| lvgl::lv_obj_get_child(parent, index))
+                .find(|child| *child as usize == identifier)
+                .ok_or(Error::InvalidWindowIdentifier)
         }
     }
 
-    pub async fn send_window_close_request(&self, identifier: usize) -> Result<()> {
-        let window_count = self.get_window_count().await?;
+    pub fn maximize_window(&self, lvgl: &mut Lvgl, identifier: usize) -> Result<()> {
+        let window = self.find_window(lvgl, identifier)?;
+        // SAFETY: find_window resolved a live child and the session still
+        // holds the graphics lock.
+        unsafe { lvgl::lv_obj_move_foreground(window) };
+        Ok(())
+    }
 
-        let window_parent = self.inner.read().await.window_parent;
-
-        let found = (0..window_count).any(|index| unsafe {
-            let child = lvgl::lv_obj_get_child(window_parent, index as i32);
-
-            child == identifier as *mut lvgl::lv_obj_t
-        });
-
-        if !found {
-            return Err(Error::InvalidWindowIdentifier);
-        }
-
+    pub fn send_window_close_request(&self, lvgl: &mut Lvgl, identifier: usize) -> Result<()> {
+        let window = self.find_window(lvgl, identifier)?;
+        // SAFETY: find_window resolved a live child. The same session excludes
+        // deletion by another task through the entire event dispatch.
         unsafe {
             lvgl::lv_obj_send_event(
-                identifier as *mut lvgl::lv_obj_t,
+                window,
                 crate::EventKind::CloseRequested.into_lvgl_code(),
                 core::ptr::null_mut(),
             );
         }
-
         Ok(())
     }
 
     pub async fn lock_function<T>(&self, function: impl FnOnce() -> Result<T>) -> Result<T> {
-        let _lock = self.global_lock.lock().await;
-
+        let _lock = self.lock().await;
         function()
     }
 
-    pub async fn lock(&self) -> MutexGuard<'_, CriticalSectionRawMutex, ()> {
-        self.global_lock.lock().await
+    pub async fn lock(&self) -> GraphicsGuard<'_> {
+        lock_graphics().await
     }
 
-    pub fn synchronous_lock(&self) -> MutexGuard<'_, CriticalSectionRawMutex, ()> {
+    pub fn synchronous_lock(&self) -> GraphicsGuard<'_> {
         block_on(self.lock())
     }
 
-    pub fn try_lock(&self) -> Option<MutexGuard<'_, CriticalSectionRawMutex, ()>> {
-        self.global_lock.try_lock().ok()
+    pub fn try_lock(&self) -> Option<GraphicsGuard<'_>> {
+        try_lock_graphics()
     }
 
-    async fn lock_lvgl(&self) -> LvglGuard<'_> {
-        LvglGuard(self.global_lock.lock().await)
-    }
-
-    fn try_lock_lvgl(&self) -> Option<LvglGuard<'_>> {
-        self.global_lock.try_lock().ok().map(LvglGuard)
-    }
-
-    /// Runs `function` with the safe LVGL API ([`lvgl_rust`]), under the
-    /// graphics lock (the one [`Manager::lock`] takes). Do not call from
-    /// callbacks or while holding that lock: acquiring it again would deadlock.
-    pub async fn with_lvgl<T>(
-        &self,
-        function: impl FnOnce(&mut lvgl_rust::Lvgl) -> Result<T>,
-    ) -> Result<T> {
-        let mut guard = self.lock_lvgl().await;
-        let mut session = guard.session()?;
-        function(&mut session)
+    /// Run a synchronous operation under the graphics lock, in an LVGL
+    /// session. Use the existing guard if the lock is already held.
+    pub async fn with_lvgl<T>(&self, function: impl FnOnce(&mut Lvgl) -> Result<T>) -> Result<T> {
+        self.lock().await.with_lvgl(function)?
     }
 
     /// [`Manager::with_lvgl`] from synchronous code.
-    pub fn with_lvgl_sync<T>(
-        &self,
-        function: impl FnOnce(&mut lvgl_rust::Lvgl) -> Result<T>,
-    ) -> Result<T> {
+    pub fn with_lvgl_sync<T>(&self, function: impl FnOnce(&mut Lvgl) -> Result<T>) -> Result<T> {
         block_on(self.with_lvgl(function))
     }
 
-    /// [`Manager::with_lvgl`] for code that already holds the graphics lock
-    /// (a guard of [`Manager::lock`]), such as a dispatcher that mixes raw
-    /// calls and the safe API.
-    ///
-    /// # Safety
-    ///
-    /// The caller must hold this manager's graphics lock for the whole call.
-    pub unsafe fn with_lvgl_locked<T>(
-        &self,
-        function: impl FnOnce(&mut lvgl_rust::Lvgl) -> Result<T>,
-    ) -> Result<T> {
-        let mut held = Held(core::marker::PhantomData);
-        let mut session = lvgl_rust::Lvgl::enter(&mut held).map_err(Error::from)?;
-        function(&mut session)
-    }
-
-    pub fn get_current_screen(&self) -> Result<*mut lvgl::lv_obj_t> {
-        Ok(unsafe { lvgl::lv_screen_active() })
+    pub fn get_current_screen(&self, _lvgl: &Lvgl) -> Result<*mut lvgl::lv_obj_t> {
+        // SAFETY: the session holds the graphics lock.
+        let screen = unsafe { lvgl::lv_screen_active() };
+        core::ptr::NonNull::new(screen)
+            .map(|screen| screen.as_ptr())
+            .ok_or(Error::NotAvailable)
     }
 
     pub async fn update_theme(
@@ -874,14 +843,14 @@ impl Manager {
         secondary_color: Color,
         is_dark: bool,
     ) -> Result<()> {
-        let _lock = self.global_lock.lock().await;
-        self.update_theme_locked(primary_color, secondary_color, is_dark)
+        let guard = self.lock().await;
+        self.update_theme_locked(&guard, primary_color, secondary_color, is_dark)
             .await
     }
 
-    /// Apply a palette when the caller already holds the global LVGL lock.
     pub(crate) async fn update_theme_locked(
         &self,
+        _guard: &GraphicsGuard<'_>,
         primary_color: Color,
         secondary_color: Color,
         is_dark: bool,
@@ -900,7 +869,7 @@ impl Manager {
     /// The mode is [`theme::RenderingMode::Default`] until a platform selects
     /// another one for a slow display, ideally before it creates the interface.
     pub async fn set_rendering_mode(&self, mode: theme::RenderingMode) -> Result<()> {
-        let _lock = self.global_lock.lock().await;
+        let _lock = self.lock().await;
         for display in &self.inner.read().await.displays {
             theme::set_rendering_mode(display, mode)?;
         }

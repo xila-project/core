@@ -53,7 +53,11 @@ fn snapshot_describes_widget_roles_labels_and_explicit_state() {
     graphics::set_ffi_manager(manager);
     // The safe session and raw compatibility API share one LVGL and lock.
     use graphics::lvgl_rust::{Error, Obj, WidgetExt};
-    let window = core::mem::ManuallyDrop::new(task::block_on(manager.create_window()).unwrap());
+    let window = core::mem::ManuallyDrop::new(
+        manager
+            .with_lvgl_sync(|lv| manager.create_window(lv))
+            .unwrap(),
+    );
     manager
         .with_lvgl_sync(|lv| {
             assert_eq!(
@@ -79,7 +83,9 @@ fn snapshot_describes_widget_roles_labels_and_explicit_state() {
             Ok(())
         })
         .unwrap();
-    let screen = manager.get_current_screen().unwrap();
+    let screen = manager
+        .with_lvgl_sync(|lv| manager.get_current_screen(lv))
+        .unwrap();
     unsafe {
         let button = lvgl::lv_button_create(screen);
         let label = lvgl::lv_label_create(button);
@@ -164,7 +170,13 @@ fn snapshot_describes_widget_roles_labels_and_explicit_state() {
     // Shell mounting must not hide screen siblings or overlay roots from Debug.
     let body = unsafe { lvgl::lv_obj_create(screen) };
     // SAFETY: `body` lives as long as the test, and no window is created in it.
-    task::block_on(unsafe { manager.set_window_parent(body) }).unwrap();
+    manager
+        .with_lvgl_sync(|lv| {
+            // SAFETY: body stays live while it is the window parent.
+            unsafe { manager.set_window_parent(lv, body) };
+            Ok(())
+        })
+        .unwrap();
     let snapshot = task::block_on(manager.inspect_ui_tree(64, 16)).unwrap();
     let overlay = unsafe {
         let overlay = lvgl::lv_obj_create(lvgl::lv_layer_top());

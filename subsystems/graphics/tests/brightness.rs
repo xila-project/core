@@ -93,19 +93,19 @@ fn brightness_reaches_the_screen_and_appearances_keep_a_visible_minimum() {
             brightness: 200,
             ..Appearance::default()
         };
-        let _lock = manager.lock().await;
-        appearance.apply(manager).await.unwrap();
+        {
+            let guard = manager.lock().await;
+            appearance.apply(manager, &guard).await.unwrap();
+        }
         assert_eq!(SCREEN.level.load(Ordering::Relaxed), 200);
-        drop(_lock);
 
         // Screens without brightness control report it, and appearances
         // still apply on them.
         SCREEN.supported.store(false, Ordering::Relaxed);
         assert_eq!(manager.get_brightness().await, Err(Error::Unsupported));
         assert_eq!(manager.set_brightness(50).await, Err(Error::Unsupported));
-        let _lock = manager.lock().await;
-        Appearance::default().apply(manager).await.unwrap();
-        drop(_lock);
+        let guard = manager.lock().await;
+        Appearance::default().apply(manager, &guard).await.unwrap();
         assert_eq!(SCREEN.level.load(Ordering::Relaxed), 200);
     });
 }

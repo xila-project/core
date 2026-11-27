@@ -65,38 +65,39 @@ include!(concat!(env!("OUT_DIR"), "/call_table.rs"));
 /// effects it cannot report.
 pub fn execute(state: &mut State, transport: &mut dyn Transport, call: &Call) -> Result<()> {
     let (function, manager) = begin(state, transport, call)?;
-    manager
-        .with_lvgl_sync(|lv| {
-            Ok(state
-                .initialize(lv)
-                .and_then(|()| run(state, transport, call, function)))
-        })
-        .map_err(|_| Error::NativeFailure)?
+    execute_in_session(
+        &mut manager.synchronous_lock(),
+        state,
+        transport,
+        call,
+        function,
+    )
 }
 
-/// [`execute`] for a caller that already holds the manager's graphics lock,
-/// taken with [`Manager::lock`](crate::Manager::lock). Waiting for that lock can suspend the caller
-/// instead of blocking its thread.
-///
-/// # Safety
-///
-/// The caller holds the lock of `state`'s manager for the whole call and
-/// uses no LVGL session in it.
-pub unsafe fn execute_locked(
+/// Run a call after the caller has acquired the graphics lock.
+pub fn execute_locked(
+    guard: &mut crate::GraphicsGuard<'_>,
     state: &mut State,
     transport: &mut dyn Transport,
     call: &Call,
 ) -> Result<()> {
-    let (function, manager) = begin(state, transport, call)?;
-    // SAFETY: the caller holds the lock.
-    unsafe {
-        manager.with_lvgl_locked(|lv| {
-            Ok(state
-                .initialize(lv)
-                .and_then(|()| run(state, transport, call, function)))
+    let (function, _) = begin(state, transport, call)?;
+    execute_in_session(guard, state, transport, call, function)
+}
+
+fn execute_in_session(
+    guard: &mut crate::GraphicsGuard<'_>,
+    state: &mut State,
+    transport: &mut dyn Transport,
+    call: &Call,
+    function: Function,
+) -> Result<()> {
+    guard
+        .with_lvgl(|lv| {
+            state.initialize(lv)?;
+            run(state, transport, call, function, lv)
         })
-    }
-    .map_err(|_| Error::NativeFailure)?
+        .map_err(|_| Error::NativeFailure)?
 }
 
 /// Check the call and find the manager it runs on.

@@ -16,6 +16,8 @@ pub struct Input {
 
 impl Drop for Input {
     fn drop(&mut self) {
+        // SAFETY: construction requires the owner to drop this live input
+        // under the graphics lock, before LVGL deinitializes.
         unsafe {
             let _ = Box::from_raw(lvgl::lv_indev_get_user_data(self.input_device) as *mut UserData);
 
@@ -31,15 +33,23 @@ unsafe impl Send for Input {}
 unsafe impl Sync for Input {}
 
 impl Input {
-    pub fn new(device: &'static dyn DirectCharacterDevice, kind: InputKind) -> Result<Self> {
-        Self::create(Some(device), None, kind)
+    /// Register a physical input device.
+    ///
+    /// # Safety
+    ///
+    /// LVGL must be initialized. Hold its lock during registration and
+    /// while dropping the returned input. Drop it before LVGL deinitializes.
+    pub unsafe fn new(device: &'static dyn DirectCharacterDevice, kind: InputKind) -> Result<Self> {
+        // SAFETY: the caller supplies the initialization and lock guarantees.
+        unsafe { Self::create(Some(device), None, kind) }
     }
 
-    pub(crate) fn new_virtual(queue: Arc<InputQueue>, kind: InputKind) -> Result<Self> {
-        Self::create(None, Some(queue), kind)
+    pub(crate) unsafe fn new_virtual(queue: Arc<InputQueue>, kind: InputKind) -> Result<Self> {
+        // SAFETY: the caller supplies the initialization and lock guarantees.
+        unsafe { Self::create(None, Some(queue), kind) }
     }
 
-    fn create(
+    unsafe fn create(
         device: Option<&'static dyn DirectCharacterDevice>,
         injected: Option<Arc<InputQueue>>,
         kind: InputKind,
@@ -52,6 +62,7 @@ impl Input {
             kind,
         });
 
+        // SAFETY: LVGL is initialized and the caller holds the graphics lock.
         let input_device = unsafe {
             let input_device = lvgl::lv_indev_create();
             lvgl::lv_indev_set_type(input_device, kind.into());

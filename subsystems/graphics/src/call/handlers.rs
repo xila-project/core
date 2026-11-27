@@ -764,22 +764,6 @@ pub(super) fn object_get_i32(
     Ok(())
 }
 
-/// The parent-less constructor: windows belong to the manager, not to an
-/// object tree of the caller.
-pub(super) fn dispatch_window_create(
-    state: &mut State,
-    memory: &mut dyn Transport,
-    call: &Call,
-) -> Result<()> {
-    state.ensure_capacity()?;
-    let manager = state.manager.ok_or(Error::Unavailable)?;
-    let window = task::block_on(manager.create_window()).map_err(|_| Error::NativeFailure)?;
-    let window: NonNull<Window> = window.into();
-    let handle = state.insert(window.as_ptr().cast(), Kind::Window, None)?;
-    memory.put_word(call.result, handle);
-    Ok(())
-}
-
 /// A `(parent) -> object` constructor, registered under `kind`.
 pub(super) fn create(
     state: &mut State,
@@ -804,10 +788,21 @@ pub(super) fn manual(
     memory: &mut dyn Transport,
     call: &Call,
     function: Function,
+    lvgl: &mut crate::lvgl_rust::Lvgl,
 ) -> Result<()> {
     let [a, b, c, ..] = call.arguments;
     let bits = memory.word_bits();
     match function {
+        Function::WindowCreate => {
+            state.ensure_capacity()?;
+            let manager = state.manager.ok_or(Error::Unavailable)?;
+            let window = manager
+                .create_window(lvgl)
+                .map_err(|_| Error::NativeFailure)?;
+            let window = window.into_raw();
+            let handle = state.insert(window.as_ptr().cast(), Kind::Window, None)?;
+            memory.put_word(call.result, handle);
+        }
         Function::FilePickerCreate => {
             state.ensure_capacity()?;
             let parent = state.object(a, None)?;
@@ -1215,12 +1210,11 @@ pub(super) fn manual(
                 green: (color >> 8) as u8,
                 blue: color as u8,
             };
-            let mut window = unsafe { Window::from_raw(pointer) }.ok_or(Error::InvalidHandle)?;
+            // SAFETY: the session holds the lock and the handle resolved a live window.
             unsafe {
-                window
-                    .as_mut()
-                    .set_icon(text, Color::from_lvgl_color(color))
-            };
+                let window = Window::from_raw(pointer).ok_or(Error::InvalidHandle)?;
+                Window::set_icon(window, text, Color::from_lvgl_color(color));
+            }
         }
         Function::WindowPopEvent | Function::WindowPopPointerEvent => {
             let pointer = state.object(a, Some(Kind::Window))?;
@@ -1231,8 +1225,11 @@ pub(super) fn manual(
                     memory.validate(address, size_of::<i32>())?;
                 }
             }
-            let mut window = unsafe { Window::from_raw(pointer) }.ok_or(Error::InvalidHandle)?;
-            let event = unsafe { window.as_mut().pop_event() };
+            // SAFETY: the session holds the lock and the handle resolved a live window.
+            let event = unsafe {
+                let window = Window::from_raw(pointer).ok_or(Error::InvalidHandle)?;
+                Window::pop_event(window)
+            };
             if function == Function::WindowPopPointerEvent {
                 let point = event.as_ref().and_then(|event| event.pointer).unwrap_or([
                     i32::MIN,

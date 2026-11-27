@@ -163,7 +163,9 @@ fn executor_runs_calls_for_independent_processes() {
 }
 
 fn system_keyboard_enable_is_idempotent(manager: &Manager) {
-    let screen = manager.get_current_screen().unwrap();
+    let screen = manager
+        .with_lvgl_sync(|lv| manager.get_current_screen(lv))
+        .unwrap();
     let observer_count = || {
         manager
             .lock_function_sync(|| {
@@ -335,7 +337,12 @@ fn handles_belong_to_one_process(manager: &'static Manager) {
     );
     drop(first);
     drop(second);
-    assert_eq!(task::block_on(manager.get_window_count()).unwrap(), 0);
+    assert_eq!(
+        manager
+            .with_lvgl_sync(|lv| manager.get_window_count(lv))
+            .unwrap(),
+        0
+    );
 }
 
 fn generated_adapters_and_kinds(manager: &'static Manager) {
@@ -659,8 +666,9 @@ fn events_come_from_the_process_window(manager: &'static Manager) {
     let mut state = State::new(Some(manager));
     let window = word(&mut state, &mut memory, Function::WindowCreate, &[]);
     let button = word(&mut state, &mut memory, Function::ButtonCreate, &[window]);
-    let window_pointer =
-        task::block_on(manager.get_window_identifier(0)).unwrap() as *mut lvgl::lv_obj_t;
+    let window_pointer = manager
+        .with_lvgl_sync(|lv| manager.get_window_identifier(lv, 0))
+        .unwrap() as *mut lvgl::lv_obj_t;
     let button_pointer = manager
         .lock_function_sync(|| Ok(unsafe { lvgl::lv_obj_get_child(window_pointer, 0) }))
         .unwrap();
@@ -726,7 +734,9 @@ fn events_come_from_the_process_window(manager: &'static Manager) {
 }
 
 fn a_process_that_exits_leaves_nothing(manager: &'static Manager) {
-    let screen = manager.get_current_screen().unwrap();
+    let screen = manager
+        .with_lvgl_sync(|lv| manager.get_current_screen(lv))
+        .unwrap();
     let before = child_count(manager, screen);
     let mut bytes = [0; 64];
     let mut memory = LinearMemory::new(&mut bytes, 32);
@@ -745,5 +755,10 @@ fn a_process_that_exits_leaves_nothing(manager: &'static Manager) {
         assert_eq!(State::registered_state_count(manager), 0);
         assert_eq!(child_count(manager, screen), before);
     }
-    assert_eq!(task::block_on(manager.get_window_count()).unwrap(), 0);
+    assert_eq!(
+        manager
+            .with_lvgl_sync(|lv| manager.get_window_count(lv))
+            .unwrap(),
+        0
+    );
 }

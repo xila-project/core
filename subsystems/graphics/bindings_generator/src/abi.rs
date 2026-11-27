@@ -166,7 +166,7 @@ pub const EXTRA: &[Declaration] = &[
 ];
 
 /// Constructors with the `(parent) -> object` shape. Each registers its new
-/// object under the given kind; `window_create` has no parent and is custom.
+/// object under the given kind; `window_create` has no parent.
 const CREATE: &[(&str, &str)] = &[
     ("object_create", "Object"),
     ("label_create", "Label"),
@@ -411,7 +411,6 @@ pub fn adapter_rules() -> Vec<AdapterRule> {
     );
     rules.extend(
         [
-            ("window_create", "dispatch_window_create"),
             ("object_set_grid_dsc_array", "dispatch_grid_tracks"),
             ("calendar_set_today", "dispatch_calendar_set_today"),
             (

@@ -536,8 +536,7 @@ fn light_mode_overrides_theme_styles_and_can_be_left() {
 
         // And existing objects enter it, including a window, whose class
         // derives from the plain object.
-        let window = crate::Window::new(scene.screen).unwrap().as_ptr();
-        let window = (*window).as_object_mutable();
+        let window = crate::Window::new(scene.screen).unwrap().as_ptr().cast();
         assert_ne!(transition(window), instant);
         set_display_rendering_mode(scene.display, RenderingMode::Light).unwrap();
         assert_eq!(transition(button), instant);

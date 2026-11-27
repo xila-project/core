@@ -111,6 +111,7 @@ struct ChartSeries {
 }
 
 enum Resource {
+    Window(NonNull<Window>),
     Map(#[allow(dead_code)] ButtonMap),
     Grid(GridTracks),
     Canvas(IndexedCanvas),
@@ -159,10 +160,6 @@ impl Entries {
     fn iter(&self) -> impl Iterator<Item = (&u32, &Entry)> {
         self.0.iter().map(|(handle, entry)| (handle, entry))
     }
-
-    fn len(&self) -> usize {
-        self.0.len()
-    }
 }
 
 #[derive(Default)]
@@ -174,6 +171,13 @@ struct Entry {
 }
 
 impl Entry {
+    fn window(&self) -> Option<NonNull<Window>> {
+        match self.inner_resource()? {
+            Resource::Window(window) => Some(*window),
+            _ => None,
+        }
+    }
+
     fn grid(&self) -> Option<&GridTracks> {
         match self.resource.as_ref()? {
             Resource::Grid(grid) | Resource::GridWith { grid, .. } => Some(grid),
@@ -365,7 +369,15 @@ impl State {
         }
         let handle = safe::Handle::<safe::Obj>::from_raw(raw).ok_or(Error::InvalidHandle)?;
         let object = handle.get(self.lv()).map_err(|_| Error::InvalidHandle)?;
-        Ok((raw, object.as_ptr()))
+        // The allocation pointer retained for a window covers its Rust
+        // fields. The pointer from an LVGL view cannot access those fields.
+        let pointer = self
+            .side()
+            .entries
+            .get(&raw)
+            .and_then(Entry::window)
+            .map_or_else(|| object.as_ptr(), |window| window.as_ptr().cast());
+        Ok((raw, pointer))
     }
 
     fn kind_of(&self, raw: u32, pointer: *mut lvgl::lv_obj_t) -> Result<Kind> {
@@ -494,8 +506,10 @@ impl State {
         // including a recycled native address. Shared screens are never tagged.
         let mut root = pointer.as_ptr();
         while !root.is_null() {
-            if let Some(mut window) = unsafe { Window::from_raw(root) } {
-                unsafe { window.as_mut().clear_event_targets_for(pointer.as_ptr()) };
+            // SAFETY: the dispatcher holds the lock and walks live ancestors.
+            if let Some(window) = unsafe { Window::from_raw(root) } {
+                // SAFETY: the window is live and the lock still covers the queue.
+                unsafe { Window::clear_event_targets_for(window, pointer.as_ptr()) };
                 break;
             }
             root = unsafe { lvgl::lv_obj_get_parent(root) };
@@ -505,7 +519,11 @@ impl State {
             return Err(Error::ResourceLimit);
         };
         // SAFETY: graphics lock held; no borrow spans LVGL deletion.
-        if unsafe { &mut *side.get() }.handles.try_reserve(1).is_err() {
+        let side = unsafe { &mut *side.get() };
+        if side.handles.try_reserve(1).is_err()
+            || (kind == Kind::Window && side.entries.0.try_reserve(1).is_err())
+        {
+            // SAFETY: the new object is live and the graphics lock is held.
             unsafe { lvgl::lv_obj_delete(pointer.as_ptr()) };
             return Err(Error::ResourceLimit);
         }
@@ -521,7 +539,11 @@ impl State {
         if let Err(pos) = side.handles.binary_search(&handle) {
             side.handles.insert(pos, handle);
         }
-        if matches!(
+        if kind == Kind::Window {
+            let entry = side.entries.or_default(handle);
+            entry.kind = Some(kind);
+            entry.set_inner_resource(Resource::Window(pointer.cast()));
+        } else if matches!(
             kind,
             Kind::IndexedCanvas
                 | Kind::ListText
@@ -856,7 +878,16 @@ impl State {
         self.side
             .as_ref()
             // SAFETY: graphics lock held when manager is present.
-            .map_or(0, |side| unsafe { &*side.get() }.entries.len())
+            .map_or(0, |side| {
+                unsafe { &*side.get() }
+                    .entries
+                    .iter()
+                    .filter(|(_, entry)| {
+                        // A pointer alone does not count as a retained resource.
+                        !matches!(entry.resource, Some(Resource::Window(_)))
+                    })
+                    .count()
+            })
     }
 
     #[doc(hidden)]
@@ -908,11 +939,12 @@ impl State {
             // The host owns the guest's windows: safe structural calls
             // refuse them (Core registers them as host objects), so a
             // window goes through its owner.
-            let window = handle
-                .get(lv)
-                .ok()
-                // SAFETY: the session lock is held and the object is live.
-                .and_then(|object| unsafe { Window::from_raw(object.as_ptr()) });
+            let window = self
+                .side()
+                .entries
+                .get(&raw)
+                .and_then(Entry::window)
+                .filter(|_| handle.get(lv).is_ok());
             if let Some(window) = window {
                 // SAFETY: this VM created the window (`WindowCreate`) and
                 // took it from its `OwnedWindow`; nothing else owns or
@@ -929,26 +961,12 @@ impl State {
         unregister_side(self.side.take());
     }
 
-    /// Delete the process's objects now, for a caller that already holds the
-    /// manager's graphics lock (taken with [`Manager::lock`], so a cooperative
-    /// caller waits for it without blocking its thread). Afterwards the state
-    /// owns nothing and dropping it is free. It is safe to call twice.
-    ///
-    /// # Safety
-    ///
-    /// The caller holds the lock of this state's manager for the whole call.
-    pub unsafe fn release_locked(&mut self) {
-        let Some(manager) = self.manager else { return };
-        if self.side.is_none() {
-            return;
+    /// Delete the process's objects under the graphics lock. Afterwards the
+    /// state owns nothing and dropping it is free. It is safe to call twice.
+    pub fn release_locked(&mut self, guard: &mut crate::GraphicsGuard<'_>) {
+        if self.side.is_some() {
+            let _ = guard.with_lvgl(|lv| self.delete_objects(lv));
         }
-        // SAFETY: the caller holds the lock.
-        let _ = unsafe {
-            manager.with_lvgl_locked(|lv| {
-                self.delete_objects(lv);
-                Ok(())
-            })
-        };
     }
 }
 
@@ -1005,7 +1023,7 @@ mod tests {
         for handle in [40, 7, 900, 12, 7] {
             entries.or_default(handle).option_bytes += 1;
         }
-        assert_eq!(entries.len(), 4);
+        assert_eq!(entries.0.len(), 4);
         assert_eq!(
             entries
                 .iter()
@@ -1019,7 +1037,7 @@ mod tests {
         entries.get_mut(&40).unwrap().option_bytes = 9;
         assert_eq!(entries.remove(&40).map(|entry| entry.option_bytes), Some(9));
         assert!(entries.remove(&40).is_none());
-        assert_eq!(entries.len(), 3);
+        assert_eq!(entries.0.len(), 3);
     }
 
     #[test]
