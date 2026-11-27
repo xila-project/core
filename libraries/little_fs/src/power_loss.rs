@@ -1623,6 +1623,139 @@ mod randomised_sweep {
             device
         }
 
+        fn rename_fixture() -> (&'static FaultDevice, FileSystem) {
+            let device = FaultDevice::new(DEVICE_SIZE);
+            let fs = format_and_mount(device);
+            mkdir(&fs, "/directory");
+            put(&fs, "/source", &[0x42; 700]);
+            put(&fs, "/untouched", b"keep");
+            drop(fs);
+            (device, FileSystem::new(device, options()).unwrap())
+        }
+
+        fn rename_source(fs: &FileSystem) -> Result<()> {
+            fs.rename(Path::new("/source"), Path::new("/directory/destination"))
+        }
+
+        #[test]
+        fn create_after_failed_rename_preserves_the_file() {
+            let (device, fs) = rename_fixture();
+            let image = dump(device);
+            device.reset_reads();
+            device.reset_progs();
+            rename_source(&fs).unwrap();
+            let programs = device.progs();
+            let reads = device.reads();
+            assert!(reads > 0 && programs >= 2);
+
+            let fault_types = [
+                (
+                    "read",
+                    reads,
+                    FaultDevice::fail_read_at as fn(&FaultDevice, usize),
+                ),
+                ("program", programs, FaultDevice::fail_at),
+            ];
+            for (operation, count, inject) in fault_types {
+                let mut failures = 0;
+                for fault in 1..=count {
+                    let device = restore(&image);
+                    let fs = FileSystem::new(device, options()).unwrap();
+                    device.reset_reads();
+                    device.reset_progs();
+                    inject(device, fault);
+                    let result = rename_source(&fs);
+                    device.allow_all();
+                    if result.is_ok() {
+                        continue;
+                    }
+                    assert_eq!(result, Err(IoErrorKind::InputOutput));
+                    failures += 1;
+
+                    let reference_device = restore(&dump(device));
+                    let reference = FileSystem::new(reference_device, options()).unwrap();
+                    let follow_up = |fs: &FileSystem| {
+                        fs.create_file(Path::new("/created"), &sweep_attributes(7))
+                    };
+                    follow_up(&fs).unwrap();
+                    follow_up(&reference).unwrap();
+                    drop(reference);
+
+                    let mut live = Vec::new();
+                    walk(&fs, "/", &mut live);
+                    drop(fs);
+                    let fresh = snapshot(device, CACHE_SIZE);
+                    let expected = snapshot(reference_device, CACHE_SIZE);
+                    assert_eq!(live, fresh, "{operation} fault {fault}/{count}");
+                    assert_eq!(fresh, expected, "{operation} fault {fault}/{count}");
+
+                    let mut moved = live.iter().filter(|entry| {
+                        entry.starts_with("/source ")
+                            || entry.starts_with("/directory/destination ")
+                    });
+                    assert!(
+                        moved
+                            .next()
+                            .is_some_and(|entry| entry.ends_with("content=700:46200"))
+                            && moved.next().is_none(),
+                        "{operation} fault {fault}/{count}: {live:?}"
+                    );
+                }
+                assert!(failures > 0, "{operation}");
+            }
+        }
+
+        #[test]
+        fn failed_rename_recovery_waits_for_open_handles_and_retries_mount() {
+            let (device, fs) = rename_fixture();
+            let mut directory = Context::new_empty();
+            let mut file = Context::new_empty();
+            fs.lookup_directory(&mut directory, Path::new("/")).unwrap();
+            fs.lookup_file(
+                &mut file,
+                Path::new("/untouched"),
+                AccessFlags::READ_WRITE.into(),
+            )
+            .unwrap();
+            BaseOperations::write_sync(&fs, &mut file, b"uncommitted", 0).unwrap();
+
+            device.reset_progs();
+            device.fail_at(1);
+            assert_eq!(rename_source(&fs), Err(IoErrorKind::InputOutput));
+            device.allow_all();
+            device.reset_progs();
+
+            let create = || fs.create_file(Path::new("/created"), &sweep_attributes(7));
+            assert_eq!(create(), Err(IoErrorKind::InputOutput));
+            assert_eq!(
+                DirectoryOperations::read(&fs, &mut directory).map(|_| ()),
+                Err(IoErrorKind::InputOutput)
+            );
+            assert_eq!(
+                BaseOperations::close(&fs, &mut file),
+                Err(IoErrorKind::InputOutput)
+            );
+            assert_eq!(create(), Err(IoErrorKind::InputOutput));
+            DirectoryOperations::close(&fs, &mut directory).unwrap();
+
+            device.reset_reads();
+            device.fail_read_at(1);
+            assert_eq!(create(), Err(IoErrorKind::InputOutput));
+            assert_eq!(device.progs(), 0);
+            device.allow_all();
+            create().unwrap();
+
+            let mut tree = Vec::new();
+            walk(&fs, "/", &mut tree);
+            assert!(
+                tree.iter().any(|entry| {
+                    entry.starts_with("/untouched ") && entry.ends_with("content=4:421")
+                }),
+                "{tree:?}"
+            );
+            assert_eq!(tree, snapshot(device, CACHE_SIZE));
+        }
+
         /// Writes that read the metadata of the volume: a directory creation, a
         /// write to an existing file and the removal of that file.
         fn follow_up(fs: &FileSystem, existing: &str) -> Vec<String> {
