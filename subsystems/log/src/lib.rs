@@ -376,3 +376,11 @@ fn install(log: &'static Logger) -> Result<(), log_external::SetLoggerError> {
 pub fn is_initialized() -> bool {
     LOGGER_INSTANCE.try_get().is_some()
 }
+
+/// Copy the most recent complete log lines into the caller's buffer without
+/// blocking. Returns zero when no ring buffer is installed or a write is in
+/// progress.
+pub fn snapshot_tail(_output: &mut [u8]) -> usize {
+    // The log ring buffer is tracked in xila-project/core#840.
+    0
+}

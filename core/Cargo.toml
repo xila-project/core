@@ -30,6 +30,7 @@ executable = { workspace = true }
 file_system = { workspace = true }
 authentication = { workspace = true }
 log = { workspace = true }
+crash = { workspace = true, optional = true, features = ["persistence"] }
 shared = { workspace = true }
 synchronization = { workspace = true }
 bootsplash = { workspace = true, optional = true }
@@ -39,6 +40,7 @@ local_time = { workspace = true, optional = true }
 
 [features]
 default = ["network"]
+crash = ["dep:crash", "task/crash"]
 
 executable_building = ["executable/building"]
 native-dev = ["executable/native-dev"]

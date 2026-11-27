@@ -42,6 +42,7 @@ file_system = { package = "xila-file-system", path = "libraries/file_system" }
 io_error = { package = "xila-io-error", path = "libraries/io_error" }
 authentication = { package = "xila-authentication", path = "libraries/authentication" }
 log = { package = "xila-log", path = "subsystems/log" }
+crash = { package = "xila-crash", path = "subsystems/crash" }
 shared = { package = "xila-shared", path = "libraries/shared" }
 synchronization = { package = "xila-synchronization", path = "libraries/synchronization" }
 network = { package = "xila-network", path = "subsystems/network" }
@@ -144,6 +145,7 @@ members = [
   "libraries/synchronization",
   "subsystems/task/task_macros",
   "subsystems/log",
+  "subsystems/crash",
   "subsystems/lifecycle",
   "libraries/bootsplash",
   "libraries/time_zone",

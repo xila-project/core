@@ -67,6 +67,7 @@ impl Path {
     /// Mutable persistent state.
     pub const DATA: &'static Path = Self::from_str("/data");
     pub const SYSTEM_DATA: &'static Path = Self::from_str("/data/system");
+    pub const SYSTEM_CRASHES: &'static Path = Self::from_str("/system/crashes");
     pub const SYSTEM_LOGS: &'static Path = Self::from_str("/data/system/logs");
     pub const APPLICATION_DATA: &'static Path = Self::from_str("/data/applications");
     pub const SHARED_DATA: &'static Path = Self::from_str("/data/shared");

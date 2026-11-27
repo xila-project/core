@@ -30,6 +30,8 @@ fn embassy_vtable() -> *const RawWakerVTable {
 /// This avoids relying on TaskRef's layout or private executor symbols.
 pub(super) struct TaskFuture {
     future: Pin<Box<dyn Future<Output = ()>>>,
+    #[cfg(feature = "crash")]
+    active_task: crate::active_task::ActiveTask,
     #[cfg(feature = "metrics")]
     instrumentation: crate::metrics::TaskInstrumentation,
 }
@@ -47,6 +49,8 @@ impl Future for TaskFuture {
     type Output = ();
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         remember_vtable(cx.waker().vtable());
+        #[cfg(feature = "crash")]
+        let _active_task = self.active_task.enter();
         #[cfg(feature = "metrics")]
         {
             // Both times are read inside the executor's write sections, so
@@ -220,6 +224,8 @@ impl Manager {
                         let _ = index;
                         let token = available.initialize(move || TaskFuture {
                             future: future(),
+                            #[cfg(feature = "crash")]
+                            active_task: crate::active_task::ActiveTask::new(identifier, name),
                             #[cfg(feature = "metrics")]
                             instrumentation,
                         });

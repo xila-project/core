@@ -20,6 +20,9 @@ pub mod profiling;
 #[cfg(any(test, feature = "test_harness"))]
 pub mod test_executor;
 
+#[cfg(feature = "crash")]
+pub mod active_task;
+
 pub mod metrics;
 
 mod environment_variable;
