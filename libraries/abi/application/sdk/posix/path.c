@@ -1,12 +1,8 @@
 /* Path resolution: POSIX strings to capability + pointer/length.
  *
- * The Core ABI has no ambient authority: every path is relative to a directory
- * capability and Core rejects "..", absolute paths and NULs. The layer therefore
- * keeps the current directory as a normalized absolute string, normalizes lexically
- * ("." and ".." never reach Core) and resolves absolute paths against the root
- * capability, which is today the startup `home` directory.
- *
- * Normalization is lexical: ".." does not look through symbolic links. */
+ * The startup home directory provides the root capability. Absolute paths and
+ * AT_FDCWD use the SDK's lexical current directory. Paths relative to an open
+ * directory reach the Core resolver with their components intact. */
 #include <fcntl.h>
 #include <string.h>
 
@@ -82,28 +78,36 @@ int xila_path_resolve(int dirfd, const char *path, char *buffer, struct xila_pat
         return xila_fail_errno(ENOENT);
     const XilaDirectory *directory;
     const char *base;
-    int allow_escape;
     if (path[0] == '/') {
         directory = root();
         base = "/";
-        allow_escape = 1;
     } else if (dirfd == AT_FDCWD) {
         directory = root();
         base = xila_cwd();
-        allow_escape = 1;
     } else {
         struct xila_fd *entry = xila_fd_get(dirfd);
         if (entry == NULL)
             return -1;
         if (entry->kind != XILA_FD_DIRECTORY)
             return xila_fail_errno(ENOTDIR);
-        directory = entry->object;
-        base = "/";
-        allow_escape = 0;
+        while (path[0] == '.' && path[1] == '/') {
+            path += 2;
+            while (*path == '/')
+                ++path;
+        }
+        if (path[0] == '.' && path[1] == '\0')
+            ++path;
+        size_t length = strlen(path);
+        if (length >= XILA_PATH_MAX)
+            return xila_fail_errno(ENAMETOOLONG);
+        output->directory = entry->object;
+        output->relative = path;
+        output->length = length;
+        return 0;
     }
     if (directory == NULL)
         return xila_fail_errno(EACCES); /* the host granted no filesystem capability */
-    int error = xila_path_normalize(base, path, buffer, allow_escape);
+    int error = xila_path_normalize(base, path, buffer, 1);
     if (error != 0)
         return xila_fail_errno(error);
     output->directory = directory;

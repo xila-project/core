@@ -70,7 +70,8 @@ int application_c_file_system(const XilaApi *api, const XilaDirectory *directory
     CHECK(api->file_close(file) == XILA_STATUS_OK);
     CHECK(api->directory_create(directory, "entries/beta", 12) == XILA_STATUS_OK);
     CHECK(api->directory_remove(directory, "entries", 7, 0) == XILA_STATUS_IS_A_DIRECTORY);
-    CHECK(api->directory_remove(directory, "entries", 7, XILA_REMOVE_DIRECTORY) == XILA_STATUS_DIRECTORY_NOT_EMPTY);
+    /* LittleFS keeps the directory name pinned while either capability is open. */
+    CHECK(api->directory_remove(directory, "entries", 7, XILA_REMOVE_DIRECTORY) == XILA_STATUS_RESOURCE_BUSY);
     CHECK(api->directory_iterator_open(read_only, "", 0, &iterator) == XILA_STATUS_OK);
     kind = 99;
     CHECK(api->directory_iterator_next(iterator, NULL, 0, &length, &kind) == XILA_STATUS_BUFFER_TOO_SMALL && length == 5 && kind == 99);

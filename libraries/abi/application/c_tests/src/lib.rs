@@ -53,6 +53,202 @@ mod tests {
         unsafe { sdk_test_versions() };
     }
 
+    #[task::test]
+    async fn directory_capabilities_use_confined_lookup() {
+        use file_system::{AccessFlags, CreateFlags, Flags, Path};
+
+        let time = Box::leak(Box::new(time::Manager::new(&testing::TimeDevice).unwrap()));
+        let tasks = task::test_manager();
+        let users = Box::leak(Box::new(users::Manager::new()));
+        let task = tasks.get_current_task_identifier().await;
+        let device = file_system::MemoryDevice::<512>::new_static(1024 * 512);
+        let filesystem =
+            little_fs::FileSystem::new_format(device, little_fs::Options::new(256)).unwrap();
+        let vfs = Box::leak(Box::new(
+            virtual_file_system::initialize(tasks, users, time, filesystem).unwrap(),
+        ));
+        vfs.create_directory(task, &"/grant").await.unwrap();
+        vfs.create_directory(task, &"/grant/child").await.unwrap();
+        let file = vfs
+            .open(
+                &"/grant/value",
+                Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
+                task,
+            )
+            .await
+            .unwrap();
+        file.close(vfs).await.unwrap();
+
+        for (name, target) in [
+            ("alias", "child"),
+            ("child/relative", "../value"),
+            ("absolute", "/grant"),
+            ("parent", ".."),
+        ] {
+            let path = format!("/grant/{name}");
+            vfs.create_symlink(task, Path::new(target), Path::new(&path))
+                .await
+                .unwrap();
+        }
+        for index in 1..=41 {
+            let path = format!("/grant/link{index:02}");
+            let target = if index == 1 {
+                String::from("value")
+            } else {
+                format!("link{:02}", index - 1)
+            };
+            vfs.create_symlink(task, Path::new(&target), Path::new(&path))
+                .await
+                .unwrap();
+        }
+
+        let grant =
+            Directory::new(vfs, task, "/grant", XILA_RIGHT_READ | XILA_RIGHT_WRITE).unwrap();
+        let open = |path: &str, flags| {
+            let mut file = ptr::null_mut();
+            let status = unsafe {
+                xila_file_open(&grant, path.as_ptr().cast(), path.len(), flags, &mut file)
+            };
+            if status == Status::Ok {
+                assert_eq!(unsafe { xila_file_close(file) }, Status::Ok);
+            } else {
+                assert!(file.is_null());
+            }
+            status
+        };
+        for path in ["alias/relative", "alias/../value", "link40"] {
+            assert_eq!(open(path, XILA_OPEN_READ), Status::Ok, "{path}");
+        }
+        for path in ["absolute/value", "parent/value", "child/../../value"] {
+            assert_eq!(
+                open(path, XILA_OPEN_READ),
+                Status::PathEscapesRoot,
+                "{path}"
+            );
+        }
+        assert_eq!(open("link41", XILA_OPEN_READ), Status::SymlinkLoop);
+        assert_eq!(
+            open("link01", XILA_OPEN_READ | XILA_OPEN_NO_FOLLOW),
+            Status::SymlinkLoop
+        );
+        assert_eq!(
+            open("alias/../value", XILA_OPEN_READ | XILA_OPEN_NO_FOLLOW),
+            Status::Ok
+        );
+
+        // SAFETY: the directory and every buffer remain live for these serial calls.
+        unsafe {
+            let mut child = ptr::null_mut();
+            let mut iterator = ptr::null_mut();
+            let mut statistics = Statistics {
+                size: core::mem::size_of::<Statistics>() as u32,
+                ..Statistics::default()
+            };
+            assert_eq!(
+                xila_directory_open(
+                    &grant,
+                    c"alias".as_ptr(),
+                    5,
+                    XILA_RIGHT_READ | XILA_DIRECTORY_NO_FOLLOW,
+                    &mut child,
+                ),
+                Status::SymlinkLoop
+            );
+            assert_eq!(
+                xila_directory_open(&grant, c"alias".as_ptr(), 5, XILA_RIGHT_READ, &mut child,),
+                Status::Ok
+            );
+            assert_eq!(
+                xila_file_open(
+                    child,
+                    c"relative".as_ptr(),
+                    8,
+                    XILA_OPEN_READ,
+                    &mut ptr::null_mut()
+                ),
+                Status::PathEscapesRoot
+            );
+            assert_eq!(xila_directory_close(child), Status::Ok);
+
+            assert_eq!(
+                xila_directory_iterator_open(&grant, c"alias".as_ptr(), 5, &mut iterator),
+                Status::Ok
+            );
+            assert_eq!(xila_directory_iterator_close(iterator), Status::Ok);
+            assert_eq!(
+                xila_directory_iterator_open(&grant, c"absolute".as_ptr(), 8, &mut iterator),
+                Status::PathEscapesRoot
+            );
+            assert_eq!(
+                xila_directory_get_statistics(&grant, c"absolute".as_ptr(), 8, 0, &mut statistics),
+                Status::PathEscapesRoot
+            );
+            assert_eq!(
+                xila_directory_get_statistics(
+                    &grant,
+                    c"absolute".as_ptr(),
+                    8,
+                    XILA_STATISTICS_NO_FOLLOW,
+                    &mut statistics,
+                ),
+                Status::Ok
+            );
+            assert_eq!(statistics.kind, XILA_KIND_SYMLINK);
+            assert_eq!(
+                xila_directory_create(&grant, c"alias/created".as_ptr(), 13),
+                Status::Ok
+            );
+            assert_eq!(
+                xila_directory_create(&grant, c"absolute/blocked".as_ptr(), 16),
+                Status::PathEscapesRoot
+            );
+            assert_eq!(
+                xila_directory_rename(
+                    &grant,
+                    c"alias/created".as_ptr(),
+                    13,
+                    &grant,
+                    c"absolute/blocked".as_ptr(),
+                    16,
+                ),
+                Status::PathEscapesRoot
+            );
+            assert_eq!(
+                xila_directory_rename(
+                    &grant,
+                    c"alias/created".as_ptr(),
+                    13,
+                    &grant,
+                    c"renamed".as_ptr(),
+                    7,
+                ),
+                Status::Ok
+            );
+            assert_eq!(
+                xila_directory_remove(
+                    &grant,
+                    c"absolute/renamed".as_ptr(),
+                    16,
+                    XILA_REMOVE_DIRECTORY
+                ),
+                Status::PathEscapesRoot
+            );
+            assert_eq!(
+                xila_directory_remove(&grant, c"renamed".as_ptr(), 7, XILA_REMOVE_DIRECTORY),
+                Status::Ok
+            );
+        }
+
+        // LittleFS uses paths for entry operations. The open capability pins its root name.
+        assert_eq!(
+            vfs.rename(task, &"/grant", &"/renamed").await,
+            Err(file_system::IoErrorKind::ResourceBusy)
+        );
+        assert_eq!(open("value", XILA_OPEN_READ), Status::Ok);
+        drop(grant);
+        vfs.rename(task, &"/grant", &"/renamed").await.unwrap();
+    }
+
     type ChildEntry = unsafe extern "C" fn(*const XilaStartup) -> i32;
 
     /// Starts the C children of `process.c` as coroutine tasks of the caller's executor,
@@ -79,13 +275,7 @@ mod tests {
         }
         fn spawn(&'static self, request: SpawnRequest) -> SpawnFuture {
             Box::pin(async move {
-                let name = request
-                    .path
-                    .as_str()
-                    .rsplit('/')
-                    .next()
-                    .unwrap()
-                    .to_string();
+                let name = request.name.clone();
                 // SAFETY: the C table only reads the name.
                 let entry = unsafe { process_test_entry(name.as_ptr().cast(), name.len()) }
                     .ok_or(Status::NotFound)?;
@@ -1155,6 +1345,23 @@ mod tests {
         virtual_file_system::create_default_hierarchy(vfs, task)
             .await
             .unwrap();
+        for program in [
+            "inherit", "exit", "identify", "explicit", "empty", "negative", "slow", "steal",
+        ] {
+            let path = format!("/{program}");
+            let file = vfs
+                .open(
+                    &Path::new(&path),
+                    Flags::new(AccessFlags::Write, Some(CreateFlags::Create), None),
+                    task,
+                )
+                .await
+                .unwrap();
+            file.close(vfs).await.unwrap();
+        }
+        vfs.create_symlink(task, Path::new("/exit"), Path::new("/absolute-program"))
+            .await
+            .unwrap();
         let host: &'static TestHost = Box::leak(Box::new(TestHost { tasks, vfs }));
         let open = || {
             File::new(
@@ -1170,7 +1377,7 @@ mod tests {
         let launch = ProcessLaunch {
             host,
             environment: Some(vec![task::EnvironmentVariable::new("SHARED", "parent")]),
-            home: Some(HomeGrant {
+            home: Some(HomeGrant::Path {
                 path: PathOwned::new("/".into()).unwrap(),
                 rights: 3,
             }),
@@ -1528,7 +1735,7 @@ mod tests {
         }
 
         fn home() -> Option<HomeGrant> {
-            Some(HomeGrant {
+            Some(HomeGrant::Path {
                 path: file_system::PathOwned::new("/".into()).unwrap(),
                 rights: 3,
             })

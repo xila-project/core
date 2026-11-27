@@ -1,3 +1,4 @@
+use super::DirectoryCapability;
 use crate::{
     AccessTimePolicy, IoErrorKind, Result, ResultExt, VirtualFileSystem, pipe::Pipe, poll,
 };
@@ -21,6 +22,21 @@ pub(super) struct InternalFileSystem {
     pub mount_point: PathOwned,
     pub access_time_policy: AccessTimePolicy,
     pub file_system: &'static dyn FileSystemOperations,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum LookupRoot<'a> {
+    Path(&'a Path),
+    Pinned(&'a DirectoryCapability<'a>),
+}
+
+impl<'a> LookupRoot<'a> {
+    pub fn path(self) -> &'a Path {
+        match self {
+            Self::Path(path) => path,
+            Self::Pinned(directory) => &directory.path,
+        }
+    }
 }
 
 pub(super) struct InternalBlockDevice {
@@ -526,7 +542,7 @@ impl VirtualFileSystem {
         allow_missing_final: bool,
         user: UserIdentifier,
         task: TaskIdentifier,
-        root: Option<&Path>,
+        root: Option<LookupRoot<'_>>,
     ) -> Result<ResolvedTarget<'a>> {
         let Some(root) = root else {
             return self
@@ -543,9 +559,48 @@ impl VirtualFileSystem {
         if path.is_absolute() {
             return Err(IoErrorKind::PathEscapesRoot);
         }
-        let confined_root = self
-            .validate_confined_root(file_systems, root, user, task)
+        let mut confined_root = match root {
+            LookupRoot::Path(path) => {
+                self.validate_confined_root(file_systems, path, user, task)
+                    .await?
+            }
+            LookupRoot::Pinned(directory) => {
+                if !core::ptr::eq(self, directory.virtual_file_system) {
+                    return Err(IoErrorKind::InvalidArgument);
+                }
+                let (mount, _, mount_index) =
+                    Self::get_file_system_from_path(file_systems, &directory.path)?;
+                let handle = &directory.directory;
+                if !core::ptr::eq(mount.file_system, handle.directory) {
+                    return Err(IoErrorKind::StaleHandle);
+                }
+                let current = if mount.file_system.supports_directory_entry_operations() {
+                    Some(OpenDirectoryHandle {
+                        file_system: mount.file_system,
+                        context: mount.file_system.clone_context(&handle.context)?,
+                        closed: false,
+                    })
+                } else {
+                    None
+                };
+                ConfinedRoot {
+                    path: directory.path.as_ref().clone(),
+                    mount_index,
+                    directory: current,
+                }
+            }
+        };
+        if matches!(root, LookupRoot::Pinned(_)) {
+            self.check_directory_execute_permission(
+                file_systems,
+                confined_root.mount_index,
+                &confined_root.path,
+                confined_root.directory.as_mut(),
+                user,
+                task,
+            )
             .await?;
+        }
 
         let require_directory = path.as_str().ends_with('/');
         let trimmed_path = path.as_str().trim_end_matches('/');

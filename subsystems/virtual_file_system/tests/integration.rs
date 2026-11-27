@@ -4137,6 +4137,13 @@ mod symlink_confinement_regression_tests {
                 .unwrap_err(),
             IoErrorKind::PathEscapesRoot
         );
+        assert_eq!(
+            virtual_file_system
+                .pin_directory(task, Path::new("/unconfined_mount"))
+                .await
+                .err(),
+            Some(IoErrorKind::PathEscapesRoot)
+        );
         assert!(
             virtual_file_system
                 .open_directory_beneath(task, &"nested//", Path::from_str("/real_preopen"))
@@ -4917,6 +4924,60 @@ mod symlink_confinement_regression_tests {
                 .unwrap_err(),
             IoErrorKind::SymlinkLoop
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[task::test]
+    async fn pinned_directory_root_survives_rename_during_lookup() {
+        let (task, virtual_file_system) = initialize().await;
+        let simulated = SimulatedDirectoryEntryFileSystem::new();
+        let directory = simulated.populate_directory(1, "granted").unwrap();
+        let child = simulated.populate_directory(directory, "child").unwrap();
+        simulated.populate_file(child, "first", b"first").unwrap();
+        simulated
+            .populate_file(directory, "second", b"second")
+            .unwrap();
+        virtual_file_system
+            .mount_file_system(simulated, &"/host", task)
+            .await
+            .unwrap();
+
+        let capability = virtual_file_system
+            .pin_directory(task, Path::new("/host/granted"))
+            .await
+            .unwrap();
+        simulated.schedule_hook_on_entry_check(
+            "first",
+            EntrySwapAction::RenameDirectoryAndReplaceWithSymlink {
+                parent_inode: 1,
+                old_name: String::from("granted"),
+                new_name: String::from("renamed"),
+                symlink_target: String::from("."),
+            },
+            true,
+        );
+        let mut first = capability
+            .open_file(
+                task,
+                Path::new("child/first"),
+                AccessFlags::Read.into(),
+                true,
+            )
+            .await
+            .unwrap();
+        assert_eq!(read_to_vec(&mut first).await, b"first");
+
+        // A later lookup and a rewalk to the root both start from the same handle.
+        let mut second = capability
+            .open_file(
+                task,
+                Path::new("child/../second"),
+                AccessFlags::Read.into(),
+                true,
+            )
+            .await
+            .unwrap();
+        assert_eq!(read_to_vec(&mut second).await, b"second");
     }
 
     #[cfg(target_os = "linux")]

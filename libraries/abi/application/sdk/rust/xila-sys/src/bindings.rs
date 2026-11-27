@@ -377,6 +377,8 @@ pub struct XilaApi {
 }
 pub const XILA_RIGHT_READ: u32 = 1;
 pub const XILA_RIGHT_WRITE: u32 = 2;
+/// Pass with directory open rights to reject a final symbolic link.
+pub const XILA_DIRECTORY_NO_FOLLOW: u32 = 4;
 /// Opaque path capability. Native callers must serialize access and preserve ownership.
 #[repr(C)]
 pub struct Directory {
@@ -392,6 +394,8 @@ pub const XILA_OPEN_EXCLUSIVE: u32 = 8;
 pub const XILA_OPEN_TRUNCATE: u32 = 16;
 pub const XILA_OPEN_APPEND: u32 = 32;
 pub const XILA_OPEN_NON_BLOCKING: u32 = 64;
+/// Reject a final symbolic link. Intermediate links stay confined to the directory.
+pub const XILA_OPEN_NO_FOLLOW: u32 = 128;
 pub const XILA_SEEK_START: u32 = 0;
 pub const XILA_SEEK_CURRENT: u32 = 1;
 pub const XILA_SEEK_END: u32 = 2;

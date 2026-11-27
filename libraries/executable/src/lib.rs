@@ -227,15 +227,50 @@ pub async fn execute_with(
     spawner: Option<SpawnerIdentifier>,
     launch: Launch,
 ) -> Result<JoinHandle<isize>> {
-    let (handle, _) =
-        execute_inner(context, path.as_ref(), inputs, standard, spawner, launch).await?;
+    let (handle, _) = execute_inner(
+        context,
+        ExecutableSource::Path(path.as_ref()),
+        inputs,
+        standard,
+        spawner,
+        launch,
+    )
+    .await?;
     Ok(handle)
+}
+
+enum ExecutableSource<'a> {
+    Path(&'a Path),
+    #[cfg(all(
+        any(feature = "native-dev", feature = "native-linked"),
+        any(
+            all(
+                any(target_arch = "x86_64", target_arch = "aarch64"),
+                target_os = "linux"
+            ),
+            all(
+                any(
+                    target_arch = "x86_64",
+                    target_arch = "aarch64",
+                    target_arch = "arm",
+                    target_arch = "riscv32",
+                    target_arch = "xtensa",
+                ),
+                target_os = "none"
+            )
+        )
+    ))]
+    Opened {
+        name: &'a str,
+        file: File<'static>,
+        statistics: Statistics,
+    },
 }
 
 /// Like [`execute_with`], also returning the new task's identifier.
 async fn execute_inner(
     context: &'static ExecutableContext,
-    path: &Path,
+    source: ExecutableSource<'_>,
     inputs: Vec<String>,
     standard: Standard<'static>,
     spawner: Option<SpawnerIdentifier>,
@@ -250,29 +285,58 @@ async fn execute_inner(
 
     let task = task_instance.try_get_current_task_identifier().await?;
 
-    let virtual_file_system = &context.virtual_file_system;
-
-    // Query by path: mounted executables do not implement attribute operations on their handles.
-    let statistics = virtual_file_system.get_statistics(&path).await?;
-
-    // The program runs as the requested identity, if any, so it is the one that
-    // needs the execute permission.
     let identity = launch.identity;
+    // The program runs as the requested identity, so check its execute permission.
     let user = match identity {
         Some(identity) => identity.user,
         None => task_instance.get_user(task).await?,
     };
 
-    // - Check the executable bit
-    if !is_execute_allowed(context.users_manager, &statistics, user).await {
-        return Err(Error::PermissionDenied);
-    }
-
-    let mut file = File::open(virtual_file_system, task, path, AccessFlags::Read.into()).await?;
-
-    let file_name = path
-        .get_file_name()
-        .ok_or(virtual_file_system::IoErrorKind::InvalidPath)?;
+    let (file_name, mut file, statistics) = match source {
+        ExecutableSource::Path(path) => {
+            let virtual_file_system = &context.virtual_file_system;
+            // Mounted executables only provide metadata through their namespace entries.
+            let statistics = virtual_file_system.get_statistics(&path).await?;
+            if !is_execute_allowed(context.users_manager, &statistics, user).await {
+                return Err(Error::PermissionDenied);
+            }
+            let file =
+                File::open(virtual_file_system, task, path, AccessFlags::Read.into()).await?;
+            let name = path
+                .get_file_name()
+                .ok_or(virtual_file_system::IoErrorKind::InvalidPath)?;
+            (name, file, statistics)
+        }
+        #[cfg(all(
+            any(feature = "native-dev", feature = "native-linked"),
+            any(
+                all(
+                    any(target_arch = "x86_64", target_arch = "aarch64"),
+                    target_os = "linux"
+                ),
+                all(
+                    any(
+                        target_arch = "x86_64",
+                        target_arch = "aarch64",
+                        target_arch = "arm",
+                        target_arch = "riscv32",
+                        target_arch = "xtensa",
+                    ),
+                    target_os = "none"
+                )
+            )
+        ))]
+        ExecutableSource::Opened {
+            name,
+            file,
+            statistics,
+        } => {
+            if !is_execute_allowed(context.users_manager, &statistics, user).await {
+                return Err(Error::PermissionDenied);
+            }
+            (name, file, statistics)
+        }
+    };
 
     if statistics.kind == Kind::File {
         let mut magic = [0; 4];

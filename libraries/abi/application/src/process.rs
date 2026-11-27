@@ -5,8 +5,8 @@
 //! and the environment. This module adds no process table: it reads and writes
 //! the task manager, and starts children through the host's executable path.
 use crate::{
-    Directory, File, Heap, HostState, Resources, Status, XILA_RIGHT_READ, XilaString, canonical,
-    enter, is_in_coroutine, path_input,
+    Directory, File, Heap, HostState, Resources, Status, XILA_RIGHT_READ, XilaString, enter,
+    is_in_coroutine, path_input,
     registry::{self, Handle},
     suspend_dynamic, suspend_on_cancellable,
 };
@@ -18,7 +18,7 @@ use core::{
     ptr::{self, NonNull},
     slice, str,
 };
-use file_system::{IntoIoErrorKind, PathOwned};
+use file_system::{IntoIoErrorKind, PathOwned, Statistics};
 use task::{EnvironmentVariable, JoinHandle, TaskIdentifier};
 use virtual_file_system::{File as VfsFile, VirtualFileSystem};
 
@@ -50,9 +50,11 @@ fn task_status(error: task::Error) -> Status {
 }
 
 /// A directory capability granted to a child as its home.
-pub struct HomeGrant {
-    pub path: PathOwned,
-    pub rights: u8,
+pub enum HomeGrant {
+    /// The host grants a directory by absolute path.
+    Path { path: PathOwned, rights: u8 },
+    /// A parent passes on a directory it already holds.
+    Open(Directory),
 }
 
 /// What the host needs to start a child: the validated, owned result of
@@ -60,8 +62,12 @@ pub struct HomeGrant {
 /// parent's, owned by the request.
 #[non_exhaustive]
 pub struct SpawnRequest {
-    /// Absolute, canonical VFS path of the executable, inside the caller's directory capability.
-    pub path: PathOwned,
+    /// File name supplied by the caller, used as the task name.
+    pub name: String,
+    /// An executable opened within the caller's directory capability.
+    pub executable: VfsFile<'static>,
+    /// Metadata for the opened executable, including its execute permissions.
+    pub statistics: Statistics,
     pub arguments: Vec<String>,
     /// The child's whole environment, already validated, or `None` to give it a copy
     /// of the parent's. A later variable overrides an earlier one of the same name.
@@ -127,13 +133,11 @@ impl ProcessLaunch {
     ///
     /// Every resource the process owns is held by `state`, which belongs to the
     /// host side of the task, not to this coroutine's stack: the call keeps only
-    /// pointers to it. The home grant moves into the state before the first
-    /// suspension, and the environment is owned by that suspended future, which a
-    /// cancellation drops in place. Returning from the entry, a failed setup and
-    /// `xila_process_exit` each release the state's resources once, before the
-    /// process ends; a cancellation leaves them for the host to release with
-    /// [`HostState::release`]. A worker that exits the process discards the main
-    /// coroutine's frames, which own nothing for the same reason.
+    /// pointers to it. The setup future owns the home grant and environment
+    /// until the process starts. A cancellation drops that future in place.
+    /// Returning from the entry, a failed setup and `xila_process_exit` release
+    /// the state's resources once before the process ends. After cancellation,
+    /// the host releases those resources with [`HostState::release`].
     ///
     /// # Safety
     /// Same contract as [`crate::run_main`], and `state` and `heap` stay at their
@@ -153,34 +157,38 @@ impl ProcessLaunch {
         } = self;
         let manager = host.task_manager();
         let resources = unsafe { &raw mut (*state.as_ptr()).resources };
-        // SAFETY: the caller guarantees the state is live; nothing else uses it yet.
-        // The capability belongs to the root task until the process learns its own, below.
-        unsafe {
-            (*resources).home = home.map(|grant| {
-                Directory::granted(
-                    host.virtual_file_system(),
-                    task::Manager::ROOT_TASK_IDENTIFIER,
-                    grant.path,
-                    grant.rights,
-                )
-            });
-        }
-        // `environment` is consumed here, by a future that owns it: nothing owned remains
-        // live in a frame when C starts.
+        // The future owns the environment and home grant while it waits.
         let identity = suspend_on_cancellable(async {
-            async {
-                let task = manager.try_get_current_task_identifier().await?;
-                if let Some(environment) = environment {
-                    manager
-                        .replace_environment_variables(task, environment)
-                        .await?;
-                }
-                Ok::<_, task::Error>((task, manager.get_name(task).await?))
+            let task = manager
+                .try_get_current_task_identifier()
+                .await
+                .map_err(task_status)?;
+            let program_name = manager.get_name(task).await.map_err(task_status)?;
+            if let Some(environment) = environment {
+                manager
+                    .replace_environment_variables(task, environment)
+                    .await
+                    .map_err(task_status)?;
             }
-            .await
-            .map_err(task_status)
+            let home = match home {
+                Some(HomeGrant::Open(mut directory)) => {
+                    directory.task = task;
+                    Some(directory)
+                }
+                Some(HomeGrant::Path { path, rights }) => Some(
+                    Directory::new_async(
+                        host.virtual_file_system(),
+                        task,
+                        path.as_str(),
+                        u32::from(rights),
+                    )
+                    .await?,
+                ),
+                None => None,
+            };
+            Ok::<_, Status>((task, program_name, home))
         });
-        let Ok((task, program_name)) = identity else {
+        let Ok((task, program_name, home)) = identity else {
             // SAFETY: nothing has started that could use the resources.
             unsafe { Resources::release(resources) };
             return START_FAILURE;
@@ -188,9 +196,7 @@ impl ProcessLaunch {
         // SAFETY: the caller guarantees the state is live; nothing else uses it yet.
         unsafe {
             (*resources).program_name = program_name;
-            if let Some(home) = (*resources).home.as_mut() {
-                home.task = task;
-            }
+            (*resources).home = home;
             // Only an explicit grant gives the process network authority.
             #[cfg(feature = "network")]
             if network != 0
@@ -645,29 +651,29 @@ pub unsafe extern "C" fn xila_process_spawn(
         {
             return Err(Status::InvalidArgument);
         }
-        if u32::from(directory.rights) & XILA_RIGHT_READ == 0 {
-            return Err(Status::PermissionDenied);
+        if directory.task != process.task
+            || !core::ptr::eq(directory.vfs, process.host.virtual_file_system())
+        {
+            return Err(Status::InvalidArgument);
         }
+        let path = unsafe { directory.relative_path(path, path_length, XILA_RIGHT_READ, true)? };
         // A parent can pass on only network rights it holds itself.
         let network = spawn.flags & SPAWN_NETWORK;
         if network & !process.network_rights() != 0 {
             return Err(Status::PermissionDenied);
         }
-        let path = canonical(
-            directory.path.as_str(),
-            unsafe { path_input(path, path_length)? },
-            true,
-        )?;
         let arguments = unsafe { arguments(spawn.arguments, spawn.argument_count)? };
         let environment = if spawn.environment.is_null() {
             None
         } else {
             Some(unsafe { environment(spawn.environment, spawn.environment_count)? })
         };
-        let home = unsafe { spawn.home.as_ref() }.map(|home| HomeGrant {
-            path: home.path.clone(),
-            rights: home.rights,
-        });
+        let home = unsafe { spawn.home.as_ref() };
+        if home.is_some_and(|home| {
+            home.task != process.task || !core::ptr::eq(home.vfs, directory.vfs)
+        }) {
+            return Err(Status::InvalidArgument);
+        }
         // SAFETY: the caller guarantees the three streams are live files.
         let streams = unsafe {
             [
@@ -687,8 +693,12 @@ pub unsafe extern "C" fn xila_process_spawn(
         });
         // The future owns the duplicated streams and the request, which a cancellation
         // drops in place.
-        let started = suspend_on_cancellable(async {
+        let started = suspend_on_cancellable(async move {
             is_current(process).await?;
+            let (executable, statistics) =
+                directory.root.open_executable(directory.task, path).await?;
+            let name = String::from(path.get_file_name().ok_or(Status::InvalidArgument)?);
+            let home = home.map(|home| HomeGrant::Open(home.duplicate()));
             // One duplication site for the three streams. A failure drops, and so
             // closes, the duplicates already made.
             let mut duplicates = [None, None, None];
@@ -704,7 +714,9 @@ pub unsafe extern "C" fn xila_process_spawn(
                 return Err(Status::InvalidState);
             };
             host.spawn(SpawnRequest {
-                path,
+                name,
+                executable,
+                statistics,
                 arguments,
                 environment,
                 standard_input,

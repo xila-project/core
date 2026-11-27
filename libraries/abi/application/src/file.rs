@@ -1,6 +1,7 @@
 use crate::{
-    Directory, Process, Status, XILA_RIGHT_READ, XILA_RIGHT_WRITE, canonical, path_input,
+    Directory, Process, Status, XILA_RIGHT_READ, XILA_RIGHT_WRITE, path_input,
     registry::{self, Handle},
+    relative_path,
 };
 use core::{
     ffi::{c_char, c_void},
@@ -16,6 +17,8 @@ pub const XILA_OPEN_EXCLUSIVE: u32 = 8;
 pub const XILA_OPEN_TRUNCATE: u32 = 16;
 pub const XILA_OPEN_APPEND: u32 = 32;
 pub const XILA_OPEN_NON_BLOCKING: u32 = 64;
+/// Reject a final symbolic link. Intermediate links stay confined to the directory.
+pub const XILA_OPEN_NO_FOLLOW: u32 = 128;
 pub const XILA_SEEK_START: u32 = 0;
 pub const XILA_SEEK_CURRENT: u32 = 1;
 pub const XILA_SEEK_END: u32 = 2;
@@ -59,7 +62,8 @@ const XILA_OPEN_ALL: u32 = XILA_OPEN_READ
     | XILA_OPEN_EXCLUSIVE
     | XILA_OPEN_TRUNCATE
     | XILA_OPEN_APPEND
-    | XILA_OPEN_NON_BLOCKING;
+    | XILA_OPEN_NON_BLOCKING
+    | XILA_OPEN_NO_FOLLOW;
 /// Flags that modify file contents and therefore need the WRITE right.
 const XILA_OPEN_MODIFYING: u32 =
     XILA_OPEN_WRITE | XILA_OPEN_CREATE | XILA_OPEN_TRUNCATE | XILA_OPEN_APPEND;
@@ -110,16 +114,16 @@ pub unsafe extern "C" fn xila_file_open(
     // SAFETY: checked non-null above; the caller guarantees the object is live.
     let directory = unsafe { &*directory };
     let result = (|| {
+        let follow_final = flags & XILA_OPEN_NO_FOLLOW == 0;
         let flags = open_flags(flags, directory.rights)?;
-        let path = canonical(
-            directory.path.as_str(),
-            unsafe { path_input(path, path_length)? },
-            true,
-        )?;
-        // Passed by value: the open owns the path, so a cancellation drops it.
-        SynchronousFile::open(directory.vfs, directory.task, path, flags)
-            .map(File::new)
-            .map_err(Status::from)
+        let path = relative_path(unsafe { path_input(path, path_length)? }, true)?;
+        let inner = crate::suspend_on_cancellable(directory.root.open_file(
+            directory.task,
+            path,
+            flags,
+            follow_final,
+        ))?;
+        Ok(File::new(inner.into_synchronous_file()))
     })();
     match result {
         Ok(value) => {

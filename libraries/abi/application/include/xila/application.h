@@ -21,6 +21,11 @@
 #define XILA_RIGHT_WRITE 2
 
 /**
+ * Pass with directory open rights to reject a final symbolic link.
+ */
+#define XILA_DIRECTORY_NO_FOLLOW 4
+
+/**
  * Allow removing directories as well as files. Removal never follows the final link.
  */
 #define XILA_REMOVE_DIRECTORY 1
@@ -38,6 +43,11 @@
 #define XILA_OPEN_APPEND 32
 
 #define XILA_OPEN_NON_BLOCKING 64
+
+/**
+ * Reject a final symbolic link. Intermediate links stay confined to the directory.
+ */
+#define XILA_OPEN_NO_FOLLOW 128
 
 #define XILA_SEEK_START 0
 

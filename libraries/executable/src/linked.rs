@@ -184,7 +184,7 @@ pub unsafe fn run_linked(
             LinkedHome::Path(home) => Some(home),
             LinkedHome::User => user_home(context).await,
         }
-        .map(|home| HomeGrant {
+        .map(|home| HomeGrant::Path {
             path: home.path,
             rights: home.rights,
         });

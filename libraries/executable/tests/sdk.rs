@@ -421,6 +421,21 @@ async fn runs_sdk_c_program_through_the_posix_layer() {
         b"g1g2"
     );
 
+    vfs.create_symlink(
+        parent,
+        file_system::Path::new("input"),
+        file_system::Path::new("/file-link"),
+    )
+    .await
+    .unwrap();
+    vfs.create_symlink(
+        parent,
+        file_system::Path::new("."),
+        file_system::Path::new("/directory-link"),
+    )
+    .await
+    .unwrap();
+
     // The root directory, directory entries and errno values.
     let (status, stdout, stderr) = launch(context, parent, "/probe", "root", &["root"]).await;
     assert_eq!(status, 0, "{}", String::from_utf8_lossy(&stderr));
