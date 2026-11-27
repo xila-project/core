@@ -69,7 +69,7 @@ impl Appearance {
     pub async fn apply(
         self,
         manager: &graphics::Manager,
-        guard: &graphics::GraphicsGuard<'_>,
+        guard: &mut graphics::GraphicsGuard<'_>,
     ) -> graphics::Result<()> {
         let (primary, secondary) = self.colors();
         manager
@@ -228,8 +228,8 @@ pub async fn restore_appearance(
     }
     match Appearance::load(vfs, task).await {
         Ok(appearance) => {
-            let guard = manager.lock().await;
-            if let Err(error) = appearance.apply(manager, &guard).await {
+            let mut guard = manager.lock().await;
+            if let Err(error) = appearance.apply(manager, &mut guard).await {
                 log::warning!("Could not restore appearance: {}", error);
             }
         }

@@ -148,6 +148,7 @@ this closure. Store a `Handle<W>` across calls and resolve it in each session.
 Code that already holds a `GraphicsGuard` can use `guard.with_lvgl(|lv| ...)`.
 Create windows and look up, move or close them inside the session. Use the
 same session for a lookup and any raw operation on the returned object.
+Retry window creation after a screen transition if it returns `AlreadyInUse`.
 Raw calls that delete or move objects must never overlap safe views.
 Do not call raw `lv_init`, `lv_deinit`, or change object IDs.
 
@@ -165,7 +166,7 @@ Do not call raw `lv_init`, `lv_deinit`, or change object IDs.
 
 **Transport.** Only pointer, string and buffer words differ between callers. A `Transport` borrows bytes at an address, mutably or not, and a NUL-terminated string. Wasm guests pass offsets into their linear memory: `LinearMemory` translates and bounds-checks them, with a 32-bit or 64-bit word as the guest has. Native code passes host pointers, since native code is trusted. Values behind an address are little-endian. A call word is a `usize`, so a call costs no double-word arithmetic on a 32-bit target (a 64-bit guest only runs on a 64-bit host).
 
-**State.** Each process owns a `State`: the sorted array of its live handles (the ID LVGL keeps in each object's own `id` field) and a sorted side table for what LVGL borrows from the host (button maps, grid descriptors, canvas buffers). A handle from another process, or of a deleted object, fails as `InvalidHandle`. Dropping the `State` deletes everything the process still owns, under the lock; the free observer releases side data when LVGL deletes an object by itself, such as the children of a deleted parent.
+**State.** Each process owns a `State`: the sorted array of its live handles (the ID LVGL keeps in each object's own `id` field) and a sorted side table for what LVGL borrows from the host (button maps, grid descriptors, canvas buffers). A handle from another process, or of a deleted object, fails as `InvalidHandle`. Dropping the `State` deletes what the process still owns while holding the graphics lock. If the lock is busy, the next session deletes the objects and releases the side table. The free observer releases side data when LVGL deletes an object, such as the children of a deleted parent.
 
 **The call table is generated.** `build.rs` runs `graphics_bindgen::executor` over the catalog and the ABI declaration in `graphics_bindgen::abi`, the same declaration that generates the guest bindings. The catalog is parsed from the bindings `lvgl_rust_sys` already generated for the build target (its `BINDINGS` build metadata), so building graphics runs no second LVGL bindgen pass and builds no host copy of LVGL. The output is the `Function` enum, a packed table of IDs, argument counts and result kinds, and one `match` on the call. Constructors and scalar setters and getters expand into calls of a few shared helpers; custom adapters call a named handler; everything else falls through to the handwritten match in `call/handlers.rs`. To add a call, declare it in `abi.rs` and write a handler only if no generated shape fits.
 

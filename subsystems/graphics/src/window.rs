@@ -346,6 +346,16 @@ impl Window {
         Ok(window)
     }
 
+    /// Read the oldest queued event without removing it.
+    ///
+    /// # Safety
+    ///
+    /// The caller holds the graphics lock and `window` points to a live Window.
+    pub unsafe fn peek_event(window: NonNull<Self>) -> Option<Event> {
+        // SAFETY: the caller keeps this queue alive and excludes its writers.
+        unsafe { (*window.as_ptr()).event_queue.front().cloned() }
+    }
+
     /// Take the oldest queued event. See [`Window`] for the queue policy.
     ///
     /// # Safety
@@ -526,7 +536,7 @@ impl OwnedWindow {
 
     pub fn peek_event(&self, _lvgl: &Lvgl) -> Option<Event> {
         // SAFETY: the owner keeps the window live and the session excludes writers.
-        unsafe { (*self.0.as_ptr()).event_queue.front().cloned() }
+        unsafe { Window::peek_event(self.0) }
     }
 
     /// See [`Window::pop_event`].

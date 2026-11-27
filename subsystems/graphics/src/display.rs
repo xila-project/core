@@ -124,6 +124,10 @@ impl Display {
             lvgl::lv_display_create(resolution.get_x() as i32, resolution.get_y() as i32)
         };
 
+        if lvgl_display.is_null() {
+            return Err(Error::OutOfMemory);
+        }
+
         // Set the buffer(s) and the render mode.
         let mut buffer_1 = Buffer::new(buffer_size);
 
@@ -134,6 +138,8 @@ impl Display {
         };
         debug_assert_eq!(buffer_1.size_in_bytes(), buffer_size_bytes as usize);
 
+        // SAFETY: the display is live under the graphics lock. The buffers
+        // have the specified size and stay allocated until display deletion.
         unsafe {
             lvgl::lv_display_set_buffers(
                 lvgl_display,
@@ -149,11 +155,13 @@ impl Display {
         // LVGL checks the buffers, for example their alignment, and returns
         // without registering them when a check fails: make sure it took
         // them, rather than return a display that cannot render.
+        // SAFETY: the graphics lock protects the live display and its active buffer.
         let registered = unsafe {
             let active = lvgl::lv_display_get_buf_active(lvgl_display);
             !active.is_null() && (*active).data == buffer_1.as_mutable_pointer() as *mut u8
         };
         if !registered {
+            // SAFETY: the new display is live and the caller still holds the lock.
             unsafe { lvgl::lv_display_delete(lvgl_display) };
             return Err(Error::FailedToRegister);
         }
@@ -163,7 +171,8 @@ impl Display {
         // SAFETY: the display owns this allocation until after deletion.
         unsafe { lvgl::lv_display_set_user_data(lvgl_display, user_data.as_ptr().cast()) };
 
-        // Set the flush callback.
+        // SAFETY: the display is live under the lock. Its buffers and user
+        // data stay allocated until after the last callback.
         unsafe { lvgl::lv_display_set_flush_cb(lvgl_display, Some(binding_callback_function)) }
 
         Ok(Self {

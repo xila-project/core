@@ -94,8 +94,8 @@ fn brightness_reaches_the_screen_and_appearances_keep_a_visible_minimum() {
             ..Appearance::default()
         };
         {
-            let guard = manager.lock().await;
-            appearance.apply(manager, &guard).await.unwrap();
+            let mut guard = manager.lock().await;
+            appearance.apply(manager, &mut guard).await.unwrap();
         }
         assert_eq!(SCREEN.level.load(Ordering::Relaxed), 200);
 
@@ -104,8 +104,11 @@ fn brightness_reaches_the_screen_and_appearances_keep_a_visible_minimum() {
         SCREEN.supported.store(false, Ordering::Relaxed);
         assert_eq!(manager.get_brightness().await, Err(Error::Unsupported));
         assert_eq!(manager.set_brightness(50).await, Err(Error::Unsupported));
-        let guard = manager.lock().await;
-        Appearance::default().apply(manager, &guard).await.unwrap();
+        let mut guard = manager.lock().await;
+        Appearance::default()
+            .apply(manager, &mut guard)
+            .await
+            .unwrap();
         assert_eq!(SCREEN.level.load(Ordering::Relaxed), 200);
     });
 }

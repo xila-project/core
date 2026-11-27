@@ -79,7 +79,7 @@ fn stop_deletes_the_logo_under_the_graphics_lock() {
         {
             let mut guard = manager.lock().await;
             let screen = guard
-                .with_lvgl(|lv| manager.get_current_screen(lv))
+                .with_lvgl(|access| manager.get_current_screen(access))
                 .unwrap()
                 .unwrap();
             // SAFETY: the guard keeps the screen and logo live.

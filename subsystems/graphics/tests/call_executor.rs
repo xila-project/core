@@ -164,7 +164,7 @@ fn executor_runs_calls_for_independent_processes() {
 
 fn system_keyboard_enable_is_idempotent(manager: &Manager) {
     let screen = manager
-        .with_lvgl_sync(|lv| manager.get_current_screen(lv))
+        .with_lvgl_sync(|access| manager.get_current_screen(access))
         .unwrap();
     let observer_count = || {
         manager
@@ -339,7 +339,7 @@ fn handles_belong_to_one_process(manager: &'static Manager) {
     drop(second);
     assert_eq!(
         manager
-            .with_lvgl_sync(|lv| manager.get_window_count(lv))
+            .with_lvgl_sync(|access| manager.get_window_count(access))
             .unwrap(),
         0
     );
@@ -667,7 +667,7 @@ fn events_come_from_the_process_window(manager: &'static Manager) {
     let window = word(&mut state, &mut memory, Function::WindowCreate, &[]);
     let button = word(&mut state, &mut memory, Function::ButtonCreate, &[window]);
     let window_pointer = manager
-        .with_lvgl_sync(|lv| manager.get_window_identifier(lv, 0))
+        .with_lvgl_sync(|access| manager.get_window_identifier(access, 0))
         .unwrap() as *mut lvgl::lv_obj_t;
     let button_pointer = manager
         .lock_function_sync(|| Ok(unsafe { lvgl::lv_obj_get_child(window_pointer, 0) }))
@@ -735,7 +735,7 @@ fn events_come_from_the_process_window(manager: &'static Manager) {
 
 fn a_process_that_exits_leaves_nothing(manager: &'static Manager) {
     let screen = manager
-        .with_lvgl_sync(|lv| manager.get_current_screen(lv))
+        .with_lvgl_sync(|access| manager.get_current_screen(access))
         .unwrap();
     let before = child_count(manager, screen);
     let mut bytes = [0; 64];
@@ -755,9 +755,22 @@ fn a_process_that_exits_leaves_nothing(manager: &'static Manager) {
         assert_eq!(State::registered_state_count(manager), 0);
         assert_eq!(child_count(manager, screen), before);
     }
+    let mut state = State::new(Some(manager));
+    let window = word(&mut state, &mut memory, Function::WindowCreate, &[]);
+    word(&mut state, &mut memory, Function::LabelCreate, &[window]);
+    let mut guard = manager.synchronous_lock();
+    guard.with_lvgl(|_| drop(state)).unwrap();
+    guard
+        .with_lvgl(|access| {
+            assert_eq!(manager.get_window_count(access).unwrap(), before as usize);
+        })
+        .unwrap();
+    drop(guard);
+    assert_eq!(State::registered_state_count(manager), 0);
+
     assert_eq!(
         manager
-            .with_lvgl_sync(|lv| manager.get_window_count(lv))
+            .with_lvgl_sync(|access| manager.get_window_count(access))
             .unwrap(),
         0
     );

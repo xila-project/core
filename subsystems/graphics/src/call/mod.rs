@@ -35,6 +35,7 @@ pub use state::State;
 pub use transport::{LinearMemory, Transport, Word};
 
 use state::Kind;
+pub(crate) use state::drain_retired_states;
 
 /// How a call reports its result: nothing, a pointer-sized handle, or a
 /// 32-bit value, written at the call's `result` address.
@@ -93,9 +94,9 @@ fn execute_in_session(
     function: Function,
 ) -> Result<()> {
     guard
-        .with_lvgl(|lv| {
-            state.initialize(lv)?;
-            run(state, transport, call, function, lv)
+        .with_lvgl(|access| {
+            state.initialize(access)?;
+            run(state, transport, call, function, access)
         })
         .map_err(|_| Error::NativeFailure)?
 }

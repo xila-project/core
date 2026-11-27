@@ -50,6 +50,7 @@ fn event_bursts_do_not_allocate_and_keep_clicks() {
     unsafe { lvgl::lv_init() };
     unsafe { lvgl::lv_display_create(320, 240) };
     let screen = unsafe { lvgl::lv_obj_create(core::ptr::null_mut()) };
+    // SAFETY: the test holds LVGL and keeps the screen live.
     let window = unsafe { TestWindow::new(screen) };
     let child = unsafe { lvgl::lv_obj_create(window.object()) };
     let send = |code| unsafe {
@@ -145,6 +146,7 @@ fn queued_events_never_match_widgets_created_after_a_rebuild() {
     unsafe { lvgl::lv_init() };
     unsafe { lvgl::lv_display_create(320, 240) };
     let screen = unsafe { lvgl::lv_obj_create(core::ptr::null_mut()) };
+    // SAFETY: the test holds LVGL and keeps the screen live.
     let window = unsafe { TestWindow::new(screen) };
     let list = unsafe { lvgl::lv_obj_create(window.object()) };
     let click = |target| unsafe {
@@ -210,6 +212,7 @@ fn tree_and_hover_notifications_are_never_queued() {
     unsafe { lvgl::lv_init() };
     unsafe { lvgl::lv_display_create(320, 240) };
     let screen = unsafe { lvgl::lv_obj_create(core::ptr::null_mut()) };
+    // SAFETY: the test holds LVGL and keeps the screen live.
     let window = unsafe { TestWindow::new(screen) };
     while window.pop_event().is_some() {}
 
@@ -268,6 +271,7 @@ fn a_press_survives_a_burst_bubbled_from_child_widgets() {
     unsafe { lvgl::lv_init() };
     unsafe { lvgl::lv_display_create(320, 240) };
     let screen = unsafe { lvgl::lv_obj_create(core::ptr::null_mut()) };
+    // SAFETY: the test holds LVGL and keeps the screen live.
     let window = unsafe { TestWindow::new(screen) };
     let page = unsafe { lvgl::lv_obj_create(window.object()) };
     let slider = unsafe { lvgl::lv_obj_create(page) };
@@ -391,6 +395,7 @@ fn rendering_notifications_are_never_queued() {
         display
     };
     let screen = unsafe { lvgl::lv_display_get_screen_active(display) };
+    // SAFETY: the test holds LVGL and keeps the screen live.
     let window = unsafe { TestWindow::new(screen) };
     let page = unsafe { lvgl::lv_obj_create(window.object()) };
     for _ in 0..8 {
@@ -446,6 +451,7 @@ fn a_scroll_burst_keeps_the_window_resize() {
     unsafe { lvgl::lv_init() };
     unsafe { lvgl::lv_display_create(320, 240) };
     let screen = unsafe { lvgl::lv_obj_create(core::ptr::null_mut()) };
+    // SAFETY: the test holds LVGL and keeps the screen live.
     let window = unsafe { TestWindow::new(screen) };
     let list = unsafe { lvgl::lv_obj_create(window.object()) };
     unsafe { lvgl::lv_obj_update_layout(window.object()) };
@@ -518,6 +524,7 @@ unsafe fn window_with_widget(
 ) -> (TestWindow, *mut lvgl::lv_obj_t) {
     unsafe {
         let screen = lvgl::lv_display_get_screen_active(display);
+        // SAFETY: the caller holds LVGL and the display keeps the screen live.
         let window = TestWindow::new(screen);
         let widget = lvgl::lv_obj_create(window.object());
         lvgl::lv_obj_set_pos(widget, 10, 10);

@@ -737,7 +737,7 @@ async fn graphics_calls_reach_the_executor_and_a_process_leaves_no_objects() {
     .await;
 
     let screen = manager
-        .with_lvgl_sync(|lv| manager.get_current_screen(lv))
+        .with_lvgl_sync(|access| manager.get_current_screen(access))
         .unwrap();
     let children = || {
         manager
@@ -770,7 +770,7 @@ async fn graphics_calls_reach_the_executor_and_a_process_leaves_no_objects() {
         }
         assert_eq!(
             manager
-                .with_lvgl(|lv| manager.get_window_count(lv))
+                .with_lvgl(|access| manager.get_window_count(access))
                 .await
                 .unwrap(),
             1
@@ -786,7 +786,7 @@ async fn graphics_calls_reach_the_executor_and_a_process_leaves_no_objects() {
         }
         // The window's first child is the program's button.
         let window = manager
-            .with_lvgl(|lv| manager.get_window_identifier(lv, 0))
+            .with_lvgl(|access| manager.get_window_identifier(access, 0))
             .await
             .unwrap() as *mut lvgl::lv_obj_t;
         manager
@@ -816,7 +816,7 @@ async fn graphics_calls_reach_the_executor_and_a_process_leaves_no_objects() {
         // The process ended with its objects alive: the host deleted them.
         assert_eq!(
             manager
-                .with_lvgl(|lv| manager.get_window_count(lv))
+                .with_lvgl(|access| manager.get_window_count(access))
                 .await
                 .unwrap(),
             0,
@@ -873,7 +873,7 @@ async fn exit_from_a_worker_waits_for_the_graphics_lock(
     }
     assert_eq!(
         manager
-            .with_lvgl(|lv| manager.get_window_count(lv))
+            .with_lvgl(|access| manager.get_window_count(access))
             .await
             .unwrap(),
         1
@@ -897,7 +897,7 @@ async fn exit_from_a_worker_waits_for_the_graphics_lock(
     assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
     assert_eq!(
         manager
-            .with_lvgl(|lv| manager.get_window_count(lv))
+            .with_lvgl(|access| manager.get_window_count(access))
             .await
             .unwrap(),
         0

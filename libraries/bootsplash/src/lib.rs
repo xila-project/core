@@ -231,7 +231,8 @@ pub struct Bootsplash {
 impl Bootsplash {
     pub async fn new(graphics_manager: &'static graphics::Manager) -> Result<Self> {
         let mut guard = graphics_manager.lock().await;
-        let current_screen = guard.with_lvgl(|lv| graphics_manager.get_current_screen(lv))??;
+        let current_screen =
+            guard.with_lvgl(|access| graphics_manager.get_current_screen(access))??;
 
         // SAFETY: the guard keeps the active screen live for the raw setup.
         unsafe {
