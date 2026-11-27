@@ -1461,6 +1461,34 @@ async fn explicit_send_spawn_stays_on_the_selected_executor() {
     assert_ne!(handle.join().await, caller);
 }
 
+#[test(task_path = crate)]
+async fn static_slots_back_every_task_storage_header() {
+    static SLOTS: [TaskSlot; 2] = [const { TaskSlot::new() }; 2];
+    static MANAGER: Manager = Manager::with_static_slots(&SLOTS);
+    let local = unsafe { embassy_executor::Spawner::for_current_executor().await };
+    MANAGER.register_spawner(local).unwrap();
+    let root = MANAGER.get_current_task_identifier().await;
+    let (release, wait) = JoinHandle::new();
+    let (handle, identifier) = MANAGER
+        .spawn(
+            root,
+            "held",
+            None,
+            move |_| async move { wait.join().await },
+        )
+        .await
+        .unwrap();
+    let inner = MANAGER.0.read().await;
+    assert_eq!(
+        inner.tasks[&identifier].internal_identifier,
+        &raw const SLOTS[0].0 as usize
+    );
+    assert!(core::ptr::eq(inner.slots[1], &SLOTS[1].0));
+    drop(inner);
+    release.signal(());
+    handle.join().await;
+}
+
 #[cfg(not(feature = "metrics"))]
 #[test(task_path = crate)]
 async fn metrics_are_unavailable_without_the_feature() {

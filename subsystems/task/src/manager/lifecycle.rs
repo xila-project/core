@@ -275,12 +275,21 @@ impl Manager {
                     return Err(Error::TooManyTasks);
                 }
                 // Two slots per allocation, capped exactly at the configured limit.
-                let count = (inner.maximum_tasks - inner.slots.len()).min(2);
-                let chunk = (0..count)
-                    .map(|_| TaskStorage::<TaskFuture>::new())
-                    .collect::<alloc::vec::Vec<_>>()
-                    .into_boxed_slice();
-                inner.slots.extend(Box::leak(chunk).iter());
+                let first = inner.slots.len();
+                let count = (inner.maximum_tasks - first).min(2);
+                if inner.static_slots.is_empty() {
+                    let chunk = (0..count)
+                        .map(|_| TaskStorage::<TaskFuture>::new())
+                        .collect::<alloc::vec::Vec<_>>()
+                        .into_boxed_slice();
+                    inner.slots.extend(Box::leak(chunk).iter());
+                } else {
+                    inner.slots.extend(
+                        inner.static_slots[first..first + count]
+                            .iter()
+                            .map(|slot| &slot.0),
+                    );
+                }
                 #[cfg(feature = "metrics")]
                 {
                     let counters = (0..count)

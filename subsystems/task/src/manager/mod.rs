@@ -28,12 +28,29 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use synchronization::{blocking_mutex::raw::CriticalSectionRawMutex, rwlock::RwLock};
 
+/// Backing storage for a task and its scheduler and timer queue links.
+/// A platform can place these slots in RAM that supports atomic operations.
+pub struct TaskSlot(embassy_executor::raw::TaskStorage<lifecycle::TaskFuture>);
+
+impl Default for TaskSlot {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TaskSlot {
+    pub const fn new() -> Self {
+        Self(embassy_executor::raw::TaskStorage::new())
+    }
+}
+
 pub(crate) struct Inner {
     next_generation: u64,
     root_established: bool,
     pub(crate) tasks: BTreeMap<TaskIdentifier, Metadata>,
     pub(crate) identifiers: BTreeMap<usize, TaskIdentifier>,
     slots: alloc::vec::Vec<&'static embassy_executor::raw::TaskStorage<lifecycle::TaskFuture>>,
+    static_slots: &'static [TaskSlot],
     /// Poll counters of each slot, at the same index.
     #[cfg(feature = "metrics")]
     counters: alloc::vec::Vec<&'static crate::metrics::TaskCounters>,
@@ -107,6 +124,17 @@ impl Manager {
 
     /// Bound retained Embassy storage by peak concurrency (including the root).
     pub const fn with_maximum_tasks(maximum_tasks: usize) -> Self {
+        Self::with_slots(maximum_tasks, &[])
+    }
+
+    /// Use the platform's slots instead of allocating scheduler storage on
+    /// the heap. The number of slots limits peak concurrency, including the
+    /// root task. Use a distinct array for each manager.
+    pub const fn with_static_slots(slots: &'static [TaskSlot]) -> Self {
+        Self::with_slots(slots.len(), slots)
+    }
+
+    const fn with_slots(maximum_tasks: usize, static_slots: &'static [TaskSlot]) -> Self {
         Manager(
             RwLock::new(Inner {
                 next_generation: 0,
@@ -114,6 +142,7 @@ impl Manager {
                 tasks: BTreeMap::new(),
                 identifiers: BTreeMap::new(),
                 slots: alloc::vec::Vec::new(),
+                static_slots,
                 #[cfg(feature = "metrics")]
                 counters: alloc::vec::Vec::new(),
                 maximum_tasks,
