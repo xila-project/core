@@ -2089,6 +2089,7 @@ dependencies = [
 name = "xila-authentication"
 version = "0.1.0"
 dependencies = [
+ "embassy-sync",
  "embedded-i18n",
  "miniserde",
  "xila-device",

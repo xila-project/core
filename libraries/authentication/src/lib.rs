@@ -63,12 +63,16 @@ mod hash;
 mod user;
 
 use alloc::{vec, vec::Vec};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 pub use error::*;
-use file_system::{AccessFlags, CreateFlags, Entry, Flags, Kind, Permissions};
+use file_system::{AccessFlags, CreateFlags, Entry, Flags, IoErrorKind, Kind, Path, Permissions};
 pub use group::*;
 use task::TaskIdentifier;
 pub use user::*;
-use virtual_file_system::VirtualFileSystem;
+use virtual_file_system::{File, VirtualFileSystem};
+
+// Keep the file system and users manager in step across asynchronous operations.
+static ACCOUNT_MUTATIONS: Mutex<CriticalSectionRawMutex, ()> = Mutex::new(());
 
 const READ_CHUNK_SIZE: usize = 32;
 
@@ -122,6 +126,12 @@ pub struct Context<'a> {
 /// }
 /// ```
 pub async fn load_all_users_and_groups(context: &Context<'_>) -> Result<()> {
+    let _mutation = ACCOUNT_MUTATIONS.lock().await;
+    load_account_records(context).await
+}
+
+// The caller must hold ACCOUNT_MUTATIONS.
+async fn load_account_records(context: &Context<'_>) -> Result<()> {
     use group::read_group_file;
     use user::read_user_file;
     use virtual_file_system::Directory;
@@ -195,42 +205,86 @@ fn is_record(entry: &Entry) -> bool {
     entry.kind == Kind::File && !matches!(entry.name.as_str(), "." | "..")
 }
 
+/// Create a new record without replacing an existing entry.
+async fn create_record(
+    context: &Context<'_>,
+    path: &Path,
+    contents: &[u8],
+) -> core::result::Result<(), IoErrorKind> {
+    let virtual_file_system = context.virtual_file_system;
+    let mut file = File::open(
+        virtual_file_system,
+        context.task,
+        path,
+        Flags::new(
+            AccessFlags::Write,
+            Some(CreateFlags::CREATE_EXCLUSIVE),
+            None,
+        ),
+    )
+    .await?;
+
+    let write = write_record(&mut file, contents).await;
+    let close = file.close(virtual_file_system).await;
+    let result = write.and(close);
+    if result.is_err() {
+        remove_created_record(context, path).await;
+    }
+    result
+}
+
+async fn remove_created_record(context: &Context<'_>, path: &Path) {
+    if let Err(error) = context
+        .virtual_file_system
+        .remove(context.task, &path)
+        .await
+    {
+        log::warning!("Failed to remove a record after creation failed: {error}");
+    }
+}
+
+async fn write_record(
+    file: &mut File<'_>,
+    mut contents: &[u8],
+) -> core::result::Result<(), IoErrorKind> {
+    while !contents.is_empty() {
+        let count = file.write(contents).await?;
+        if count == 0 {
+            return Err(IoErrorKind::WriteZero);
+        }
+        contents = &contents[count..];
+    }
+    file.flush().await
+}
+
 /// Write `contents` to `temporary`, then rename it over `destination`, so the
 /// destination holds either its previous or its new contents.
-pub(crate) async fn atomic_write(
+async fn atomic_write(
     context: &Context<'_>,
     temporary: &str,
     destination: &str,
     contents: &[u8],
 ) -> Result<()> {
-    use virtual_file_system::File;
-
-    let vfs = context.virtual_file_system;
+    let virtual_file_system = context.virtual_file_system;
     let mut file = File::open(
-        vfs,
+        virtual_file_system,
         context.task,
         temporary,
         Flags::new(AccessFlags::Write, Some(CreateFlags::CREATE_TRUNCATE), None),
     )
     .await
     .map_err(Error::FailedToWriteUserFile)?;
-    file.set_permissions(Permissions::USER_READ_WRITE)
-        .await
-        .map_err(Error::FailedToWriteUserFile)?;
-    let mut offset = 0;
-    while offset < contents.len() {
-        let count = file
-            .write(&contents[offset..])
-            .await
-            .map_err(Error::FailedToWriteUserFile)?;
-        if count == 0 {
-            return Err(seed::invalid());
-        }
-        offset += count;
+
+    let write = async {
+        file.set_permissions(Permissions::USER_READ_WRITE).await?;
+        write_record(&mut file, contents).await
     }
-    file.flush().await.map_err(Error::FailedToWriteUserFile)?;
-    file.close(vfs).await.map_err(Error::FailedToCloseFile)?;
-    vfs.rename(context.task, &temporary, &destination)
+    .await;
+    let close = file.close(virtual_file_system).await;
+    write.map_err(Error::FailedToWriteUserFile)?;
+    close.map_err(Error::FailedToCloseFile)?;
+    virtual_file_system
+        .rename(context.task, &temporary, &destination)
         .await
         .map_err(Error::FailedToWriteUserFile)
 }

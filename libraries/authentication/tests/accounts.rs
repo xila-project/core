@@ -1,11 +1,23 @@
 #![cfg(target_os = "linux")]
 use authentication::{Context, Error};
-use file_system::Kind;
+use core::{
+    future::{Future, poll_fn},
+    pin::{Pin, pin},
+    task::{Context as PollContext, Poll},
+};
+use file_system::{
+    CharacterDevice, DirectBaseOperations, DirectCharacterDevice, Kind, MountOperations, Size,
+};
+use std::sync::Mutex;
 use users::{GroupIdentifier, UserIdentifier};
 use virtual_file_system::{File, ItemStatic};
 testing_support::instantiate_global_allocator!();
 
 async fn fixture() -> Context<'static> {
+    fixture_with_random(&testing_support::RandomDevice).await
+}
+
+async fn fixture_with_random(random: &'static dyn CharacterDevice) -> Context<'static> {
     let task_manager = task::test_manager();
     let users_manager = Box::leak(Box::new(users::Manager::new()));
     let time = Box::leak(Box::new(
@@ -26,7 +38,7 @@ async fn fixture() -> Context<'static> {
     for (path, device) in [
         (
             "/devices/random/source",
-            ItemStatic::CharacterDevice(&testing_support::RandomDevice),
+            ItemStatic::CharacterDevice(random),
         ),
         (
             "/devices/compute/hasher",
@@ -45,6 +57,45 @@ async fn fixture() -> Context<'static> {
         .await
         .unwrap();
     context
+}
+
+/// Suspend the next salt read for one poll.
+#[derive(Default)]
+struct PausingRandomDevice(Mutex<bool>);
+
+impl DirectBaseOperations for PausingRandomDevice {
+    fn read(
+        &self,
+        context: &mut PollContext<'_>,
+        buffer: &mut [u8],
+        position: Size,
+    ) -> Poll<file_system::Result<usize>> {
+        if core::mem::take(&mut *self.0.lock().unwrap()) {
+            context.waker().wake_by_ref();
+            return Poll::Pending;
+        }
+        testing_support::RandomDevice.read(context, buffer, position)
+    }
+
+    fn write(
+        &self,
+        context: &mut PollContext<'_>,
+        buffer: &[u8],
+        position: Size,
+    ) -> Poll<file_system::Result<usize>> {
+        testing_support::RandomDevice.write(context, buffer, position)
+    }
+}
+
+impl MountOperations for PausingRandomDevice {}
+impl DirectCharacterDevice for PausingRandomDevice {}
+
+async fn assert_pending<F: Future>(mut operation: Pin<&mut F>) {
+    poll_fn(|context| {
+        assert!(operation.as_mut().poll(context).is_pending());
+        Poll::Ready(())
+    })
+    .await;
 }
 
 async fn random_password(context: &Context<'_>) -> String {
@@ -538,5 +589,146 @@ async fn an_explicit_version_zero_is_read_like_a_missing_version() {
             .await
             .unwrap(),
         "/users/43"
+    );
+}
+
+#[task::test]
+async fn renaming_waits_for_a_creation_with_the_same_destination() {
+    let random = Box::leak(Box::<PausingRandomDevice>::default());
+    let context = fixture_with_random(random).await;
+    let group = GroupIdentifier::new(1000);
+    let original_password = random_password(&context).await;
+    let new_password = random_password(&context).await;
+    let original = authentication::create_user(&context, "alice", &original_password, group, None)
+        .await
+        .unwrap();
+
+    // Pause creation after the destination check, while it prepares the record.
+    *random.0.lock().unwrap() = true;
+    let mut create = pin!(authentication::create_user(
+        &context,
+        "alicia",
+        &new_password,
+        group,
+        None
+    ));
+    assert_pending(create.as_mut()).await;
+    assert!(!*random.0.lock().unwrap());
+
+    let mut rename = pin!(authentication::change_user_name(
+        &context, "alice", "alicia"
+    ));
+    assert_pending(rename.as_mut()).await;
+
+    let created = create.await.unwrap();
+    assert!(matches!(
+        rename.await,
+        Err(Error::FailedToRenameUser(users::Error::DuplicateUserName))
+    ));
+    assert_ne!(original, created);
+    assert_eq!(
+        authentication::authenticate_user(&context, "alice", &original_password)
+            .await
+            .unwrap(),
+        original
+    );
+    assert_eq!(
+        authentication::authenticate_user(&context, "alicia", &new_password)
+            .await
+            .unwrap(),
+        created
+    );
+
+    let users_manager = reload(&context).await;
+    assert_eq!(
+        users_manager.get_user_name(original).await.unwrap(),
+        "alice"
+    );
+    assert_eq!(
+        users_manager.get_user_name(created).await.unwrap(),
+        "alicia"
+    );
+}
+
+#[task::test]
+async fn password_changes_take_turns_using_the_temporary_record() {
+    let random = Box::leak(Box::<PausingRandomDevice>::default());
+    let context = fixture_with_random(random).await;
+    let group = GroupIdentifier::new(1000);
+    let original_password = random_password(&context).await;
+    let first_password = random_password(&context).await;
+    let second_password = random_password(&context).await;
+    let user = authentication::create_user(&context, "alice", &original_password, group, None)
+        .await
+        .unwrap();
+    let temporary = format!("/system/accounts/.user-{}.tmp", user.as_u16());
+
+    *random.0.lock().unwrap() = true;
+    let mut first = pin!(authentication::change_user_password(
+        &context,
+        "alice",
+        &first_password
+    ));
+    assert_pending(first.as_mut()).await;
+    assert!(!*random.0.lock().unwrap());
+
+    let mut second = pin!(authentication::change_user_password(
+        &context,
+        "alice",
+        &second_password
+    ));
+    assert_pending(second.as_mut()).await;
+
+    first.await.unwrap();
+    assert!(!exists(&context, &temporary).await);
+    assert_eq!(
+        authentication::authenticate_user(&context, "alice", &first_password)
+            .await
+            .unwrap(),
+        user
+    );
+
+    second.await.unwrap();
+    assert!(!exists(&context, &temporary).await);
+    assert_eq!(
+        authentication::authenticate_user(&context, "alice", &second_password)
+            .await
+            .unwrap(),
+        user
+    );
+    assert!(matches!(
+        authentication::authenticate_user(&context, "alice", &first_password).await,
+        Err(Error::InvalidPassword)
+    ));
+}
+
+#[task::test]
+async fn an_existing_group_record_is_never_overwritten() {
+    let context = fixture().await;
+    let path = "/system/accounts/groups/unloaded";
+    let record = "unloadable group record";
+    File::write_to_path(
+        context.virtual_file_system,
+        context.task,
+        path,
+        record.as_bytes(),
+    )
+    .await
+    .unwrap();
+
+    let identifier = GroupIdentifier::new(1001);
+    assert!(matches!(
+        authentication::create_group(&context, "unloaded", Some(identifier)).await,
+        Err(Error::FailedToWriteGroupFile(
+            file_system::IoErrorKind::AlreadyExists
+        ))
+    ));
+    assert_eq!(read(&context, path).await, record);
+    assert!(
+        !context
+            .users_manager
+            .exists_group(identifier)
+            .await
+            .unwrap()
     );
 }
