@@ -2,6 +2,7 @@
 
 pub mod adc;
 pub mod audio;
+pub mod bluetooth;
 pub mod gpio;
 pub mod hash;
 pub mod human_interface;

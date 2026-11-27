@@ -6,6 +6,7 @@ rust-version.workspace = true
 
 [dependencies]
 file_system = { workspace = true }
+shared = { workspace = true }
 
 [lib]
 name = "device"

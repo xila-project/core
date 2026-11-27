@@ -45,6 +45,7 @@ log = { package = "xila-log", path = "subsystems/log" }
 shared = { package = "xila-shared", path = "libraries/shared" }
 synchronization = { package = "xila-synchronization", path = "libraries/synchronization" }
 network = { package = "xila-network", path = "subsystems/network" }
+bluetooth = { package = "xila-bluetooth", path = "subsystems/bluetooth" }
 debug_protocol = { package = "xila-debug-protocol", path = "libraries/debug_protocol" }
 peripherals = { package = "xila-peripherals", path = "libraries/peripherals" }
 bootsplash = { package = "xila-bootsplash", path = "libraries/bootsplash" }
@@ -83,6 +84,7 @@ corosensei = { git = "https://github.com/AlixANNERAUD/corosensei.git", rev = "99
 embassy-executor = { version = "0.10", default-features = false }
 embassy-futures = { version = "0.1" }
 embassy-sync = { version = "0.8" }
+bt-hci = { version = "0.10.1", default-features = false }
 embassy-time = { version = "0.5" }
 critical-section = { version = "1.2" }
 # Compare-and-swap for targets without it (ESP32-C2/C3/S2). Libraries never
@@ -140,6 +142,7 @@ members = [
   "libraries/executable",
   "libraries/authentication",
   "subsystems/network",
+  "subsystems/bluetooth",
   "libraries/debug_protocol",
   "libraries/synchronization",
   "subsystems/task/task_macros",

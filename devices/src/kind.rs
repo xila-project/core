@@ -15,6 +15,7 @@
 //! | `b'N'`    | `0x4E` | Neural network      | `device::neural_network` / `drivers_neural_network` |
 //! | `b'P'`    | `0x50` | System power        | `device::power` / `drivers_peripherals::power` |
 //! | `b'T'`    | `0x54` | Terminal / character| `file_system::character_device`          |
+//! | `b'L'`    | `0x4C` | Bluetooth LE        | `device::bluetooth` / `bluetooth`       |
 //! | `b'a'`    | `0x61` | ADC                 | `device::adc` / `drivers_peripherals::adc`|
 //! | `b'g'`    | `0x67` | GPIO                | `device::gpio` / `drivers_peripherals::gpio` |
 //! | `b'h'`    | `0x68` | Human interface emulation | `device::human_interface` / `drivers_peripherals::human_interface` |
@@ -46,6 +47,9 @@ pub const FIRMWARE_UPDATE: u8 = b'F';
 
 /// Hardware or software cryptographic hash device (`b'H'`).
 pub const HASH: u8 = b'H';
+
+/// Bluetooth Low Energy host.
+pub const BLUETOOTH: u8 = b'L';
 
 /// Neural network inference device (`b'N'`).
 pub const NEURAL_NETWORK: u8 = b'N';
@@ -99,6 +103,7 @@ pub const ALL: &[u8] = &[
     EXECUTABLE,
     FIRMWARE_UPDATE,
     HASH,
+    BLUETOOTH,
     NEURAL_NETWORK,
     POWER,
     TERMINAL,

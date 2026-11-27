@@ -16,6 +16,7 @@ embedded-i18n = { workspace = true }
 # - Host
 audio = { workspace = true, optional = true }
 drivers_neural_network = { workspace = true, optional = true }
+bluetooth = { workspace = true, optional = true }
 neural_network = { workspace = true, optional = true }
 little_fs = { workspace = true }
 memory_file_system = { workspace = true }
@@ -46,6 +47,7 @@ native-linked = ["executable/native-linked"]
 audio = ["dep:audio"]
 neural_network = ["dep:neural_network", "dep:drivers_neural_network"]
 network = ["dep:network", "executable/network"]
+bluetooth = ["dep:bluetooth"]
 bootsplash = ["dep:bootsplash"]
 time_zone = ["dep:time_zone", "dep:local_time"]
 graphics = ["dep:graphics", "executable/graphics"]

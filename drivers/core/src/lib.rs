@@ -8,3 +8,6 @@ pub use null::*;
 
 #[cfg(feature = "wifi_mock")]
 pub mod wifi;
+
+#[cfg(feature = "bluetooth_mock")]
+pub mod bluetooth;

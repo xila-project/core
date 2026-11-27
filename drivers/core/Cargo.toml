@@ -6,6 +6,12 @@ rust-version.workspace = true
 
 [dependencies]
 file_system = { workspace = true }
+# `bluetooth_mock`
+bt-hci = { workspace = true, optional = true }
+bt-hci-transport = { version = "0.1", optional = true }
+device = { workspace = true, optional = true }
+embedded-io = { workspace = true, optional = true }
+heapless = { version = "0.9", optional = true }
 # `wifi_mock`
 embassy-futures = { workspace = true, optional = true }
 network = { workspace = true, optional = true }
@@ -15,6 +21,14 @@ task = { workspace = true, optional = true }
 
 [features]
 default = []
+bluetooth_mock = [
+  "dep:bt-hci",
+  "dep:bt-hci-transport",
+  "dep:device",
+  "dep:embedded-io",
+  "dep:heapless",
+  "dep:synchronization",
+]
 # Deterministic Wi-Fi control-plane mock (demos and tests); never touches host Wi-Fi.
 wifi_mock = [
   "dep:embassy-futures",
