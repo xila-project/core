@@ -6,10 +6,39 @@ testing_support::instantiate_global_allocator!();
 use graphics::{
     EventKind, InputData, Key, Point, State, WINDOW_EVENT_QUEUE_CAPACITY, Window, lvgl,
 };
-use std::{ptr, sync::Mutex};
+use std::{
+    ptr::{self, NonNull},
+    sync::Mutex,
+};
 
 /// LVGL is not thread safe and the tests share its global state.
 static LVGL: Mutex<()> = Mutex::new(());
+
+/// Access a raw window while the test holds LVGL.
+#[derive(Clone, Copy)]
+struct TestWindow(NonNull<Window>);
+
+impl TestWindow {
+    /// The test holds LVGL and deletes this window only after its last use.
+    unsafe fn new(screen: *mut lvgl::lv_obj_t) -> Self {
+        // SAFETY: the caller holds LVGL and supplies a live screen.
+        Self(unsafe { Window::new(screen).unwrap() })
+    }
+
+    fn object(self) -> *mut lvgl::lv_obj_t {
+        self.0.as_ptr().cast()
+    }
+
+    fn pop_event(self) -> Option<graphics::Event> {
+        // SAFETY: the test keeps the window live and holds LVGL.
+        unsafe { Window::pop_event(self.0) }
+    }
+
+    fn dropped_event_count(self) -> u32 {
+        // SAFETY: the test keeps the window live and holds LVGL.
+        unsafe { Window::dropped_event_count(self.0) }
+    }
+}
 
 fn thread_allocated_bytes() -> usize {
     testing_support::MemoryManager::thread_allocations().allocated_bytes()
@@ -21,9 +50,9 @@ fn event_bursts_do_not_allocate_and_keep_clicks() {
     unsafe { lvgl::lv_init() };
     unsafe { lvgl::lv_display_create(320, 240) };
     let screen = unsafe { lvgl::lv_obj_create(core::ptr::null_mut()) };
-    let mut window = unsafe { Window::new(screen).unwrap() };
-    let window = unsafe { window.as_mut() };
-    let child = unsafe { lvgl::lv_obj_create(window.as_object_mutable()) };
+    // SAFETY: the test holds LVGL and keeps the screen live.
+    let window = unsafe { TestWindow::new(screen) };
+    let child = unsafe { lvgl::lv_obj_create(window.object()) };
     let send = |code| unsafe {
         lvgl::lv_obj_send_event(child, code, core::ptr::null_mut());
     };
@@ -104,8 +133,9 @@ fn event_bursts_do_not_allocate_and_keep_clicks() {
         ]
     );
 
-    window.discard_events_for_target(child);
-    unsafe { lvgl::lv_obj_delete(window.as_object_mutable()) };
+    // SAFETY: the test keeps the window live and holds LVGL.
+    unsafe { Window::discard_events_for_target(window.0, child) };
+    unsafe { lvgl::lv_obj_delete(window.object()) };
 }
 
 /// A double tap queues two clicks on a button; handling the first one rebuilds
@@ -116,9 +146,9 @@ fn queued_events_never_match_widgets_created_after_a_rebuild() {
     unsafe { lvgl::lv_init() };
     unsafe { lvgl::lv_display_create(320, 240) };
     let screen = unsafe { lvgl::lv_obj_create(core::ptr::null_mut()) };
-    let mut window = unsafe { Window::new(screen).unwrap() };
-    let window = unsafe { window.as_mut() };
-    let list = unsafe { lvgl::lv_obj_create(window.as_object_mutable()) };
+    // SAFETY: the test holds LVGL and keeps the screen live.
+    let window = unsafe { TestWindow::new(screen) };
+    let list = unsafe { lvgl::lv_obj_create(window.object()) };
     let click = |target| unsafe {
         lvgl::lv_obj_send_event(
             target,
@@ -126,7 +156,7 @@ fn queued_events_never_match_widgets_created_after_a_rebuild() {
             core::ptr::null_mut(),
         );
     };
-    let clicks = |window: &mut Window| {
+    let clicks = |window: TestWindow| {
         let mut targets = Vec::new();
         while let Some(event) = window.pop_event() {
             if event.code == EventKind::Clicked {
@@ -171,7 +201,7 @@ fn queued_events_never_match_widgets_created_after_a_rebuild() {
     assert!(queued.iter().all(|e| !e.is_target(after)));
     assert!(queued.iter().all(|e| !e.is_target(moved_out)));
 
-    unsafe { lvgl::lv_obj_delete(window.as_object_mutable()) };
+    unsafe { lvgl::lv_obj_delete(window.object()) };
 }
 
 /// Building a page creates a widget per label and button without draining the
@@ -182,19 +212,19 @@ fn tree_and_hover_notifications_are_never_queued() {
     unsafe { lvgl::lv_init() };
     unsafe { lvgl::lv_display_create(320, 240) };
     let screen = unsafe { lvgl::lv_obj_create(core::ptr::null_mut()) };
-    let mut window = unsafe { Window::new(screen).unwrap() };
-    let window = unsafe { window.as_mut() };
+    // SAFETY: the test holds LVGL and keeps the screen live.
+    let window = unsafe { TestWindow::new(screen) };
     while window.pop_event().is_some() {}
 
-    let page = unsafe { lvgl::lv_obj_create(window.as_object_mutable()) };
+    let page = unsafe { lvgl::lv_obj_create(window.object()) };
     // Both directly under the window and nested deeper.
     let mut children: Vec<_> = (0..40)
         .map(|_| unsafe { lvgl::lv_obj_create(page) })
         .collect();
-    children.extend((0..40).map(|_| unsafe { lvgl::lv_obj_create(window.as_object_mutable()) }));
+    children.extend((0..40).map(|_| unsafe { lvgl::lv_obj_create(window.object()) }));
     let button = children[79];
     let nested = children[0];
-    let window_object = window.as_object_mutable();
+    let window_object = window.object();
     unsafe {
         // Hover and layout notifications bubble up from the widgets and are
         // filtered by the window.
@@ -225,11 +255,11 @@ fn tree_and_hover_notifications_are_never_queued() {
 
     // Deleting the widgets queues nothing either.
     unsafe { lvgl::lv_obj_clean(page) };
-    unsafe { lvgl::lv_obj_clean(window.as_object_mutable()) };
+    unsafe { lvgl::lv_obj_clean(window.object()) };
     assert!(window.pop_event().is_none());
     assert_eq!(window.dropped_event_count(), 0);
 
-    unsafe { lvgl::lv_obj_delete(window.as_object_mutable()) };
+    unsafe { lvgl::lv_obj_delete(window.object()) };
 }
 
 /// A drag or a held button inside one LVGL poll: hundreds of moves and value
@@ -241,12 +271,12 @@ fn a_press_survives_a_burst_bubbled_from_child_widgets() {
     unsafe { lvgl::lv_init() };
     unsafe { lvgl::lv_display_create(320, 240) };
     let screen = unsafe { lvgl::lv_obj_create(core::ptr::null_mut()) };
-    let mut window = unsafe { Window::new(screen).unwrap() };
-    let window = unsafe { window.as_mut() };
-    let page = unsafe { lvgl::lv_obj_create(window.as_object_mutable()) };
+    // SAFETY: the test holds LVGL and keeps the screen live.
+    let window = unsafe { TestWindow::new(screen) };
+    let page = unsafe { lvgl::lv_obj_create(window.object()) };
     let slider = unsafe { lvgl::lv_obj_create(page) };
     let text = unsafe { lvgl::lv_obj_create(page) };
-    let other = unsafe { lvgl::lv_obj_create(window.as_object_mutable()) };
+    let other = unsafe { lvgl::lv_obj_create(window.object()) };
     let send = |target, code| unsafe {
         lvgl::lv_obj_send_event(target, code, core::ptr::null_mut());
     };
@@ -328,7 +358,7 @@ fn a_press_survives_a_burst_bubbled_from_child_widgets() {
     );
 
     unsafe { held.delete() };
-    unsafe { lvgl::lv_obj_delete(window.as_object_mutable()) };
+    unsafe { lvgl::lv_obj_delete(window.object()) };
 }
 
 /// Rendering a window and its widgets sends drawing, cover check and layout
@@ -365,9 +395,9 @@ fn rendering_notifications_are_never_queued() {
         display
     };
     let screen = unsafe { lvgl::lv_display_get_screen_active(display) };
-    let mut window = unsafe { Window::new(screen).unwrap() };
-    let window = unsafe { window.as_mut() };
-    let page = unsafe { lvgl::lv_obj_create(window.as_object_mutable()) };
+    // SAFETY: the test holds LVGL and keeps the screen live.
+    let window = unsafe { TestWindow::new(screen) };
+    let page = unsafe { lvgl::lv_obj_create(window.object()) };
     for _ in 0..8 {
         let child = unsafe { lvgl::lv_obj_create(page) };
         unsafe { lvgl::lv_obj_set_size(child, 20, 10) };
@@ -377,7 +407,7 @@ fn rendering_notifications_are_never_queued() {
 
     for _ in 0..3 {
         unsafe {
-            lvgl::lv_obj_invalidate(window.as_object_mutable());
+            lvgl::lv_obj_invalidate(window.object());
             lvgl::lv_obj_set_width(page, lvgl::lv_obj_get_width(page) - 4);
             lvgl::lv_refr_now(display);
         }
@@ -410,7 +440,7 @@ fn rendering_notifications_are_never_queued() {
     }
     assert_eq!(window.dropped_event_count(), 0);
 
-    unsafe { lvgl::lv_obj_delete(window.as_object_mutable()) };
+    unsafe { lvgl::lv_obj_delete(window.object()) };
 }
 
 /// The window is resized while a list inside it is flung and the consumer is
@@ -421,15 +451,15 @@ fn a_scroll_burst_keeps_the_window_resize() {
     unsafe { lvgl::lv_init() };
     unsafe { lvgl::lv_display_create(320, 240) };
     let screen = unsafe { lvgl::lv_obj_create(core::ptr::null_mut()) };
-    let mut window = unsafe { Window::new(screen).unwrap() };
-    let window = unsafe { window.as_mut() };
-    let list = unsafe { lvgl::lv_obj_create(window.as_object_mutable()) };
-    unsafe { lvgl::lv_obj_update_layout(window.as_object_mutable()) };
+    // SAFETY: the test holds LVGL and keeps the screen live.
+    let window = unsafe { TestWindow::new(screen) };
+    let list = unsafe { lvgl::lv_obj_create(window.object()) };
+    unsafe { lvgl::lv_obj_update_layout(window.object()) };
     while window.pop_event().is_some() {}
 
     unsafe {
-        lvgl::lv_obj_set_size(window.as_object_mutable(), 200, 120);
-        lvgl::lv_obj_update_layout(window.as_object_mutable());
+        lvgl::lv_obj_set_size(window.object(), 200, 120);
+        lvgl::lv_obj_update_layout(window.object());
     }
     for step in 0..500 {
         let code = match step % 50 {
@@ -441,13 +471,13 @@ fn a_scroll_burst_keeps_the_window_resize() {
     }
     assert!(window.dropped_event_count() > 0, "the burst overflows");
 
-    let window_object = window.as_object_mutable() as *mut lvgl::lv_obj_t;
+    let window_object = window.object();
     let resizes = core::iter::from_fn(|| window.pop_event())
         .filter(|event| event.code == EventKind::SizeChanged && event.is_target(window_object))
         .count();
     assert_eq!(resizes, 1, "the latest resize reaches the consumer");
 
-    unsafe { lvgl::lv_obj_delete(window.as_object_mutable()) };
+    unsafe { lvgl::lv_obj_delete(window.object()) };
 }
 
 /// An LVGL input device that reports `held` on every read.
@@ -491,22 +521,23 @@ impl HeldDevice {
 /// A window on the active screen with one widget at (10, 10), 40 by 40.
 unsafe fn window_with_widget(
     display: *mut lvgl::lv_display_t,
-) -> (*mut Window, *mut lvgl::lv_obj_t) {
+) -> (TestWindow, *mut lvgl::lv_obj_t) {
     unsafe {
         let screen = lvgl::lv_display_get_screen_active(display);
-        let window = Window::new(screen).unwrap().as_ptr();
-        let widget = lvgl::lv_obj_create((*window).as_object_mutable());
+        // SAFETY: the caller holds LVGL and the display keeps the screen live.
+        let window = TestWindow::new(screen);
+        let widget = lvgl::lv_obj_create(window.object());
         lvgl::lv_obj_set_pos(widget, 10, 10);
         lvgl::lv_obj_set_size(widget, 40, 40);
         lvgl::lv_obj_update_layout(screen);
-        while (*window).pop_event().is_some() {}
+        while window.pop_event().is_some() {}
         (window, widget)
     }
 }
 
 /// Send `count` clicks by code to `target`, and return how many the window
 /// rejected.
-unsafe fn rejected_clicks(window: &Window, target: *mut lvgl::lv_obj_t, count: usize) -> u32 {
+unsafe fn rejected_clicks(window: TestWindow, target: *mut lvgl::lv_obj_t, count: usize) -> u32 {
     let before = window.dropped_event_count();
     for _ in 0..count {
         unsafe {
@@ -529,7 +560,6 @@ fn a_press_whose_device_is_deleted_or_reset_gives_its_reservation_back() {
         lvgl::lv_init();
         let display = lvgl::lv_display_create(320, 240);
         let (window, widget) = window_with_widget(display);
-        let window = &mut *window;
 
         for reset in [false, true] {
             let pointer = HeldDevice::new(lvgl::lv_indev_type_t_LV_INDEV_TYPE_POINTER, display);
@@ -570,7 +600,7 @@ fn a_press_whose_device_is_deleted_or_reset_gives_its_reservation_back() {
             while window.pop_event().is_some() {}
         }
 
-        lvgl::lv_obj_delete(window.as_object_mutable());
+        lvgl::lv_obj_delete(window.object());
         lvgl::lv_display_delete(display);
     }
 }
@@ -585,9 +615,7 @@ fn a_keypad_press_ended_in_another_window_gives_its_reservation_back() {
         lvgl::lv_init();
         let display = lvgl::lv_display_create(320, 240);
         let (window, inside) = window_with_widget(display);
-        let window = &mut *window;
         let (other_window, outside) = window_with_widget(display);
-        let other_window = &mut *other_window;
         let group = lvgl::lv_group_create();
         lvgl::lv_group_add_obj(group, inside);
         lvgl::lv_group_add_obj(group, outside);
@@ -601,7 +629,7 @@ fn a_keypad_press_ended_in_another_window_gives_its_reservation_back() {
         lvgl::lv_group_focus_obj(outside);
         keypad.read(Point::default(), State::Released, Key::Enter);
 
-        let codes = |window: &mut Window| -> Vec<_> {
+        let codes = |window: TestWindow| -> Vec<_> {
             core::iter::from_fn(|| window.pop_event())
                 .filter(|event| {
                     !matches!(
@@ -627,8 +655,8 @@ fn a_keypad_press_ended_in_another_window_gives_its_reservation_back() {
 
         keypad.delete();
         lvgl::lv_group_delete(group);
-        lvgl::lv_obj_delete(other_window.as_object_mutable());
-        lvgl::lv_obj_delete(window.as_object_mutable());
+        lvgl::lv_obj_delete(other_window.object());
+        lvgl::lv_obj_delete(window.object());
         lvgl::lv_display_delete(display);
     }
 }

@@ -285,10 +285,11 @@ pub fn generate(registry: &GraphicsRegistry<'_>) -> Result<TokenStream, Generato
             memory: &mut dyn Transport,
             call: &Call,
             function: Function,
+            lvgl: &mut crate::lvgl_rust::Lvgl,
         ) -> Result<()> {
             match function {
                 #(#arms,)*
-                _ => handlers::manual(state, memory, call, function),
+                _ => handlers::manual(state, memory, call, function, lvgl),
             }
         }
     })

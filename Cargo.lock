@@ -932,6 +932,7 @@ version = "0.3.1+lvgl.9.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad2ac7ea74569e528e0d43b3e93598d7cb476be2f2706b946622dc8687f90da2"
 dependencies = [
+ "critical-section",
  "loom",
  "lvgl-rust-gen",
  "lvgl-rust-sys",

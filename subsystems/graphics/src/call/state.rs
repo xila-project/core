@@ -17,16 +17,44 @@ use super::{
 };
 use crate::{Event, Manager, OwnedWindow, Window, lvgl};
 use alloc::{boxed::Box, vec::Vec};
-use core::{cell::UnsafeCell, ptr::NonNull};
+use core::{
+    cell::{Cell, UnsafeCell},
+    ptr::NonNull,
+};
 use lvgl_rust::{self as safe, WidgetExt};
+use synchronization::blocking_mutex::{Mutex, raw::CriticalSectionRawMutex};
 
 pub const MAX_GRID_TRACKS_PER_VM: usize = 512;
 
 // Accessed only under Manager's process-wide graphics lock. Boxes keep these
 // addresses stable when State moves. The observer never calls LVGL.
-struct Sides(UnsafeCell<Vec<*mut Side>>);
+struct Sides(UnsafeCell<Vec<NonNull<RegisteredSide>>>);
+
+// SAFETY: the graphics lock protects the registry and the registered object
+// tables. The retirement queue has its own critical section.
 unsafe impl Sync for Sides {}
+
 static SIDES: Sides = Sides(UnsafeCell::new(Vec::new()));
+struct RetiredSides(Option<NonNull<RegisteredSide>>);
+
+// SAFETY: this list transfers ownership of the tables. The critical section
+// protects its links until the graphics session takes ownership of the list.
+unsafe impl Send for RetiredSides {}
+
+static RETIRED_SIDES: Mutex<CriticalSectionRawMutex, Cell<RetiredSides>> =
+    Mutex::new(Cell::new(RetiredSides(None)));
+
+#[derive(Default)]
+struct RegisteredSide {
+    contents: UnsafeCell<Side>,
+    next_retired: Cell<Option<NonNull<RegisteredSide>>>,
+}
+
+impl RegisteredSide {
+    fn get(&self) -> *mut Side {
+        self.contents.get()
+    }
+}
 
 fn freed(event: safe::Freed) {
     let raw = event.handle().into_raw();
@@ -36,7 +64,7 @@ fn freed(event: safe::Freed) {
     for &side_ptr in sides {
         // SAFETY: every pointer in SIDES points to a live, Box-allocated Side
         // that is unregistered before being freed.
-        let side = unsafe { &mut *side_ptr };
+        let side = unsafe { &mut *side_ptr.as_ref().get() };
         if let Ok(index) = side.handles.binary_search(&raw) {
             side.handles.remove(index);
             // The OBJ_ID hook runs at the END of the destructor, after LVGL has
@@ -111,6 +139,7 @@ struct ChartSeries {
 }
 
 enum Resource {
+    Window(NonNull<Window>),
     Map(#[allow(dead_code)] ButtonMap),
     Grid(GridTracks),
     Canvas(IndexedCanvas),
@@ -159,10 +188,6 @@ impl Entries {
     fn iter(&self) -> impl Iterator<Item = (&u32, &Entry)> {
         self.0.iter().map(|(handle, entry)| (handle, entry))
     }
-
-    fn len(&self) -> usize {
-        self.0.len()
-    }
 }
 
 #[derive(Default)]
@@ -174,6 +199,13 @@ struct Entry {
 }
 
 impl Entry {
+    fn window(&self) -> Option<NonNull<Window>> {
+        match self.inner_resource()? {
+            Resource::Window(window) => Some(*window),
+            _ => None,
+        }
+    }
+
     fn grid(&self) -> Option<&GridTracks> {
         match self.resource.as_ref()? {
             Resource::Grid(grid) | Resource::GridWith { grid, .. } => Some(grid),
@@ -255,11 +287,11 @@ impl Entry {
 
 /// One process's graphics identity table and the resources behind it.
 ///
-/// Dropping it deletes every object the process still owns, under the
-/// graphics lock, so an exited or cancelled process leaves nothing behind.
+/// Dropping it deletes the remaining objects under the graphics lock.
+/// If the lock is busy, the next graphics session deletes them.
 pub struct State {
     pub(crate) manager: Option<&'static Manager>,
-    side: Option<Box<UnsafeCell<Side>>>,
+    side: Option<NonNull<RegisteredSide>>,
     /// Trusted native context of the calling process: the file system and task
     /// that file pickers use. The transport refreshes it before each call.
     pub(crate) file_system: Option<(
@@ -309,24 +341,24 @@ impl State {
         self.file_system = Some((vfs, task));
     }
 
-    pub(crate) fn initialize(&mut self, lv: &mut safe::Lvgl) -> Result<()> {
+    pub(crate) fn initialize(&mut self, access: &mut safe::Lvgl) -> Result<()> {
         if self.side.is_some() {
             return Ok(());
         }
         // The free observer is process-wide and every VM's state installs the
         // same function: `Busy` means an earlier VM already did. Install it
         // before registering this VM's side table so a failure leaves no state.
-        match lv.set_free_observer(freed) {
+        match access.set_free_observer(freed) {
             Ok(()) | Err(safe::Error::Busy) => {}
             Err(_) => return Err(Error::NativeFailure),
         }
-        let side = Box::new(UnsafeCell::new(Side::default()));
         // SAFETY: called only inside the manager session under the graphics lock.
         let sides = unsafe { &mut *SIDES.0.get() };
         if sides.try_reserve(1).is_err() {
             return Err(Error::ResourceLimit);
         }
-        sides.push(side.get());
+        let side = NonNull::from(Box::leak(Box::<RegisteredSide>::default()));
+        sides.push(side);
         self.side = Some(side);
         Ok(())
     }
@@ -337,16 +369,18 @@ impl State {
 
     fn side(&self) -> &Side {
         // SAFETY: dispatcher holds the graphics lock; no borrow spans deletion.
-        unsafe { &*self.side.as_ref().expect("initialized graphics").get() }
+        let side = self.side.expect("initialized graphics");
+        unsafe { &*side.as_ref().get() }
     }
 
     fn side_mut(&mut self) -> &mut Side {
         // SAFETY: as above. UnsafeCell permits the free observer to access the
         // stable allocation when no host resource borrow is outstanding.
-        unsafe { &mut *self.side.as_ref().expect("initialized graphics").get() }
+        let side = self.side.expect("initialized graphics");
+        unsafe { &mut *side.as_ref().get() }
     }
 
-    fn lv(&self) -> &safe::Lvgl {
+    fn access(&self) -> &safe::Lvgl {
         // SAFETY: all dispatcher helpers run inside the manager's session.
         unsafe { safe::Lvgl::assume() }
     }
@@ -360,12 +394,26 @@ impl State {
         let side = self.side.as_ref().ok_or(Error::InvalidHandle)?;
         let raw = Self::raw(handle)?;
         // SAFETY: dispatcher holds the graphics lock; no borrow spans deletion.
-        if unsafe { &*side.get() }.handles.binary_search(&raw).is_err() {
+        if unsafe { &*side.as_ref().get() }
+            .handles
+            .binary_search(&raw)
+            .is_err()
+        {
             return Err(Error::InvalidHandle);
         }
         let handle = safe::Handle::<safe::Obj>::from_raw(raw).ok_or(Error::InvalidHandle)?;
-        let object = handle.get(self.lv()).map_err(|_| Error::InvalidHandle)?;
-        Ok((raw, object.as_ptr()))
+        let object = handle
+            .get(self.access())
+            .map_err(|_| Error::InvalidHandle)?;
+        // The allocation pointer retained for a window covers its Rust
+        // fields. The pointer from an LVGL view cannot access those fields.
+        let pointer = self
+            .side()
+            .entries
+            .get(&raw)
+            .and_then(Entry::window)
+            .map_or_else(|| object.as_ptr(), |window| window.as_ptr().cast());
+        Ok((raw, pointer))
     }
 
     fn kind_of(&self, raw: u32, pointer: *mut lvgl::lv_obj_t) -> Result<Kind> {
@@ -475,11 +523,16 @@ impl State {
         let Some(side) = self.side.as_ref() else {
             return 0;
         };
-        let obj = unsafe { safe::Obj::from_raw(self.lv(), non_null) };
+        let obj = unsafe { safe::Obj::from_raw(self.access(), non_null) };
         obj.find_handle()
             .map(safe::Handle::into_raw)
             // SAFETY: dispatcher holds the graphics lock; no borrow spans deletion.
-            .filter(|raw| unsafe { &*side.get() }.handles.binary_search(raw).is_ok())
+            .filter(|raw| {
+                unsafe { &*side.as_ref().get() }
+                    .handles
+                    .binary_search(raw)
+                    .is_ok()
+            })
             .map_or(0, |raw| raw as Word)
     }
 
@@ -494,8 +547,10 @@ impl State {
         // including a recycled native address. Shared screens are never tagged.
         let mut root = pointer.as_ptr();
         while !root.is_null() {
-            if let Some(mut window) = unsafe { Window::from_raw(root) } {
-                unsafe { window.as_mut().clear_event_targets_for(pointer.as_ptr()) };
+            // SAFETY: the dispatcher holds the lock and walks live ancestors.
+            if let Some(window) = unsafe { Window::from_raw(root) } {
+                // SAFETY: the window is live and the lock still covers the queue.
+                unsafe { Window::clear_event_targets_for(window, pointer.as_ptr()) };
                 break;
             }
             root = unsafe { lvgl::lv_obj_get_parent(root) };
@@ -505,11 +560,15 @@ impl State {
             return Err(Error::ResourceLimit);
         };
         // SAFETY: graphics lock held; no borrow spans LVGL deletion.
-        if unsafe { &mut *side.get() }.handles.try_reserve(1).is_err() {
+        let side = unsafe { &mut *side.as_ref().get() };
+        if side.handles.try_reserve(1).is_err()
+            || (kind == Kind::Window && side.entries.0.try_reserve(1).is_err())
+        {
+            // SAFETY: the new object is live and the graphics lock is held.
             unsafe { lvgl::lv_obj_delete(pointer.as_ptr()) };
             return Err(Error::ResourceLimit);
         }
-        let obj = unsafe { safe::Obj::from_raw(self.lv(), pointer) };
+        let obj = unsafe { safe::Obj::from_raw(self.access(), pointer) };
         let handle = match obj.handle() {
             Ok(h) => h.into_raw(),
             Err(_) => {
@@ -521,7 +580,11 @@ impl State {
         if let Err(pos) = side.handles.binary_search(&handle) {
             side.handles.insert(pos, handle);
         }
-        if matches!(
+        if kind == Kind::Window {
+            let entry = side.entries.or_default(handle);
+            entry.kind = Some(kind);
+            entry.set_inner_resource(Resource::Window(pointer.cast()));
+        } else if matches!(
             kind,
             Kind::IndexedCanvas
                 | Kind::ListText
@@ -847,7 +910,7 @@ impl State {
         self.side
             .as_ref()
             // SAFETY: graphics lock held when manager is present.
-            .map_or(0, |side| unsafe { &*side.get() }.handles.len())
+            .map_or(0, |side| unsafe { &*side.as_ref().get() }.handles.len())
     }
 
     #[doc(hidden)]
@@ -856,7 +919,16 @@ impl State {
         self.side
             .as_ref()
             // SAFETY: graphics lock held when manager is present.
-            .map_or(0, |side| unsafe { &*side.get() }.entries.len())
+            .map_or(0, |side| {
+                unsafe { &*side.as_ref().get() }
+                    .entries
+                    .iter()
+                    .filter(|(_, entry)| {
+                        // A pointer alone does not count as a retained resource.
+                        !matches!(entry.resource, Some(Resource::Window(_)))
+                    })
+                    .count()
+            })
     }
 
     #[doc(hidden)]
@@ -864,7 +936,7 @@ impl State {
         let _lock = self.manager.map(Manager::synchronous_lock);
         self.side.as_ref().map_or((0, 0, 0), |side| {
             // SAFETY: graphics lock held when manager is present.
-            let side = unsafe { &*side.get() };
+            let side = unsafe { &*side.as_ref().get() };
             (
                 side.grid_tracks,
                 side.widget_options_bytes,
@@ -881,102 +953,82 @@ impl State {
     }
 }
 
-fn unregister_side(side: Option<Box<UnsafeCell<Side>>>) {
-    let Some(side) = side else {
-        return;
-    };
-    let target = side.get();
-    // SAFETY: called only while holding the graphics lock.
+/// Remove every object in the table and then release its retained memory.
+fn delete_objects(registration: NonNull<RegisteredSide>, access: &mut safe::Lvgl) {
+    // SAFETY: the live table belongs to this session. Release the borrow
+    // before LVGL can call the deletion observer.
+    let contents = unsafe { registration.as_ref().get() };
+    // SAFETY: the session has exclusive access to the handles here.
+    let handles = unsafe { core::mem::take(&mut (*contents).handles) };
+    for raw in handles {
+        let Some(handle) = safe::Handle::<safe::Obj>::from_raw(raw) else {
+            continue;
+        };
+        // SAFETY: the live table is protected by this session. Copy the
+        // pointer so no table borrow can overlap an LVGL deletion callback.
+        let window = unsafe { (*contents).entries.get(&raw).and_then(Entry::window) }
+            .filter(|_| handle.get(access).is_ok());
+        if let Some(window) = window {
+            // SAFETY: the process owns the live window, and this session holds the lock.
+            unsafe { OwnedWindow::from_raw(window) }.delete(access);
+        } else if let Ok(object) = handle.get_mut(access) {
+            let _ = object.delete();
+        }
+    }
+    // SAFETY: the session holds the lock and no deletion callback is running.
     let sides = unsafe { &mut *SIDES.0.get() };
-    if let Some(pos) = sides.iter().position(|&ptr| ptr == target) {
-        sides.swap_remove(pos);
+    if let Some(position) = sides.iter().position(|&pointer| pointer == registration) {
+        sides.swap_remove(position);
         if sides.is_empty() {
             *sides = Vec::new();
         }
     }
-    drop(side);
+
+    // SAFETY: this is the original allocation pointer. The table is no
+    // longer registered and the session owns it.
+    drop(unsafe { Box::from_raw(registration.as_ptr()) });
+}
+
+/// Take back the tables whose owners dropped while the graphics lock was busy.
+pub(crate) fn drain_retired_states(access: &mut safe::Lvgl) {
+    let RetiredSides(mut current) = RETIRED_SIDES.lock(|queue| queue.replace(RetiredSides(None)));
+    while let Some(side) = current {
+        // SAFETY: this session owns the detached list and keeps each node
+        // live until it unregisters and deletes that node.
+        current = unsafe { side.as_ref().next_retired.get() };
+        delete_objects(side, access);
+    }
 }
 
 impl State {
-    /// Delete every object this process still owns, inside a session.
-    fn delete_objects(&mut self, lv: &mut safe::Lvgl) {
-        let handles = core::mem::take(&mut self.side_mut().handles);
-        for raw in handles {
-            let Some(handle) = safe::Handle::<safe::Obj>::from_raw(raw) else {
-                continue;
-            };
-            // The host owns the guest's windows: safe structural calls
-            // refuse them (Core registers them as host objects), so a
-            // window goes through its owner.
-            let window = handle
-                .get(lv)
-                .ok()
-                // SAFETY: the session lock is held and the object is live.
-                .and_then(|object| unsafe { Window::from_raw(object.as_ptr()) });
-            if let Some(window) = window {
-                // SAFETY: this VM created the window (`WindowCreate`) and
-                // took it from its `OwnedWindow`; nothing else owns or
-                // deletes it.
-                unsafe { OwnedWindow::from_raw(window) }.delete(lv);
-                continue;
-            }
-            if let Ok(object) = handle.get_mut(lv) {
-                let _ = object.delete();
-            }
+    /// Delete the process's objects under the graphics lock. Afterwards the
+    /// state owns nothing and dropping it is free. It is safe to call twice.
+    pub fn release_locked(&mut self, guard: &mut crate::GraphicsGuard<'_>) {
+        if self.side.is_some() {
+            let _ = guard.with_lvgl(|access| {
+                if let Some(side) = self.side.take() {
+                    delete_objects(side, access);
+                }
+            });
         }
-        // Private window roots ensure structural deletion cannot leave a
-        // retained resource attached to an untracked shared object.
-        unregister_side(self.side.take());
-    }
-
-    /// Delete the process's objects now, for a caller that already holds the
-    /// manager's graphics lock (taken with [`Manager::lock`], so a cooperative
-    /// caller waits for it without blocking its thread). Afterwards the state
-    /// owns nothing and dropping it is free. It is safe to call twice.
-    ///
-    /// # Safety
-    ///
-    /// The caller holds the lock of this state's manager for the whole call.
-    pub unsafe fn release_locked(&mut self) {
-        let Some(manager) = self.manager else { return };
-        if self.side.is_none() {
-            return;
-        }
-        // SAFETY: the caller holds the lock.
-        let _ = unsafe {
-            manager.with_lvgl_locked(|lv| {
-                self.delete_objects(lv);
-                Ok(())
-            })
-        };
     }
 }
 
 impl Drop for State {
     fn drop(&mut self) {
-        let Some(manager) = self.manager else {
-            return;
-        };
         if self.side.is_none() {
             return;
         }
-        let _ = manager.with_lvgl_sync(|lv| {
-            self.delete_objects(lv);
-            Ok(())
-        });
+        if let Some(mut guard) = crate::manager::try_lock_graphics() {
+            self.release_locked(&mut guard);
+        }
         if let Some(side) = self.side.take() {
-            // No session (re-entrant drop or LVGL gone): the VM's objects may
-            // still be alive and LVGL may still read their maps, grid tracks or
-            // canvas buffers when it deletes them. Stop observing, and leak the
-            // side table rather than free memory LVGL can still reach.
-            let _lock = manager.synchronous_lock();
-            let target = side.get();
-            // SAFETY: graphics lock held.
-            let sides = unsafe { &mut *SIDES.0.get() };
-            if let Some(position) = sides.iter().position(|&pointer| pointer == target) {
-                sides.swap_remove(position);
-            }
-            Box::leak(side);
+            RETIRED_SIDES.lock(|queue| {
+                let old = queue.replace(RetiredSides(Some(side)));
+                // SAFETY: the table stays live until the graphics session takes
+                // it from this queue. The critical section protects the link.
+                unsafe { side.as_ref().next_retired.set(old.0) };
+            });
         }
     }
 }
@@ -1005,7 +1057,7 @@ mod tests {
         for handle in [40, 7, 900, 12, 7] {
             entries.or_default(handle).option_bytes += 1;
         }
-        assert_eq!(entries.len(), 4);
+        assert_eq!(entries.0.len(), 4);
         assert_eq!(
             entries
                 .iter()
@@ -1019,7 +1071,7 @@ mod tests {
         entries.get_mut(&40).unwrap().option_bytes = 9;
         assert_eq!(entries.remove(&40).map(|entry| entry.option_bytes), Some(9));
         assert!(entries.remove(&40).is_none());
-        assert_eq!(entries.len(), 3);
+        assert_eq!(entries.0.len(), 3);
     }
 
     #[test]

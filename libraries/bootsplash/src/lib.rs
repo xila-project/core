@@ -230,11 +230,12 @@ pub struct Bootsplash {
 
 impl Bootsplash {
     pub async fn new(graphics_manager: &'static graphics::Manager) -> Result<Self> {
-        let _lock = graphics_manager.lock().await;
+        let mut guard = graphics_manager.lock().await;
+        let current_screen =
+            guard.with_lvgl(|access| graphics_manager.get_current_screen(access))??;
 
+        // SAFETY: the guard keeps the active screen live for the raw setup.
         unsafe {
-            let current_screen = graphics_manager.get_current_screen()?;
-
             let screen_size = lv_obj_get_size(current_screen);
             let factor = Logo::get_factor(screen_size.scale(0.3)).max(1);
 

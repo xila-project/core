@@ -22,6 +22,7 @@ struct UserData {
 
 pub struct Display {
     display: *mut lvgl::lv_display_t,
+    user_data: core::ptr::NonNull<UserData>,
     _buffer_1: Buffer,
     _buffer_2: Option<Buffer>,
 }
@@ -82,14 +83,23 @@ static FLUSH_ERROR_REPORTED: AtomicBool = AtomicBool::new(false);
 
 impl Drop for Display {
     fn drop(&mut self) {
+        // SAFETY: construction requires this display to be dropped under the
+        // graphics lock, before LVGL deinitializes.
         unsafe {
             lvgl::lv_display_delete(self.display);
+            drop(Box::from_raw(self.user_data.as_ptr()));
         }
     }
 }
 
 impl Display {
-    pub fn new(
+    /// Create a display and attach its drawing buffers.
+    ///
+    /// # Safety
+    ///
+    /// LVGL must be initialized. Hold the graphics lock during creation and
+    /// while dropping the display. Drop it before LVGL deinitializes.
+    pub unsafe fn new(
         device: &'static dyn DirectCharacterDevice,
         buffer_size: usize,
         double_buffered: bool,
@@ -109,9 +119,14 @@ impl Display {
             .expect("Error getting resolution");
 
         // Create the display.
+        // SAFETY: the caller holds the lock and LVGL is initialized.
         let lvgl_display: *mut lvgl_rust_sys::_lv_display_t = unsafe {
             lvgl::lv_display_create(resolution.get_x() as i32, resolution.get_y() as i32)
         };
+
+        if lvgl_display.is_null() {
+            return Err(Error::OutOfMemory);
+        }
 
         // Set the buffer(s) and the render mode.
         let mut buffer_1 = Buffer::new(buffer_size);
@@ -123,6 +138,8 @@ impl Display {
         };
         debug_assert_eq!(buffer_1.size_in_bytes(), buffer_size_bytes as usize);
 
+        // SAFETY: the display is live under the graphics lock. The buffers
+        // have the specified size and stay allocated until display deletion.
         unsafe {
             lvgl::lv_display_set_buffers(
                 lvgl_display,
@@ -138,40 +155,43 @@ impl Display {
         // LVGL checks the buffers, for example their alignment, and returns
         // without registering them when a check fails: make sure it took
         // them, rather than return a display that cannot render.
+        // SAFETY: the graphics lock protects the live display and its active buffer.
         let registered = unsafe {
             let active = lvgl::lv_display_get_buf_active(lvgl_display);
             !active.is_null() && (*active).data == buffer_1.as_mutable_pointer() as *mut u8
         };
         if !registered {
+            // SAFETY: the new display is live and the caller still holds the lock.
             unsafe { lvgl::lv_display_delete(lvgl_display) };
             return Err(Error::FailedToRegister);
         }
 
-        // Set the user data.
-        let user_data = Box::new(UserData { device });
+        let user_data = core::ptr::NonNull::from(Box::leak(Box::new(UserData { device })));
 
-        unsafe {
-            lvgl::lv_display_set_user_data(lvgl_display, Box::into_raw(user_data) as *mut c_void)
-        };
+        // SAFETY: the display owns this allocation until after deletion.
+        unsafe { lvgl::lv_display_set_user_data(lvgl_display, user_data.as_ptr().cast()) };
 
-        // Set the flush callback.
+        // SAFETY: the display is live under the lock. Its buffers and user
+        // data stay allocated until after the last callback.
         unsafe { lvgl::lv_display_set_flush_cb(lvgl_display, Some(binding_callback_function)) }
 
         Ok(Self {
             display: lvgl_display,
+            user_data,
             _buffer_1: buffer_1,
             _buffer_2: buffer_2,
         })
     }
 
-    pub fn check_for_resizing(&self) {
-        let user_data =
-            unsafe { &*(lvgl::lv_display_get_user_data(self.display) as *const UserData) };
-
+    /// Resize the LVGL display when the screen device reports a change.
+    ///
+    /// # Safety
+    ///
+    /// Hold the graphics lock.
+    pub(crate) unsafe fn check_for_resizing(&self) {
         let mut was_resize = 0u8;
 
-        user_data
-            .device
+        self.device()
             .control_sync(
                 WAS_RESIZED::IDENTIFIER,
                 AnyByLayout::NONE,
@@ -186,8 +206,7 @@ impl Display {
 
         let mut resolution = Point::new(0, 0);
 
-        user_data
-            .device
+        self.device()
             .control_sync(
                 GET_RESOLUTION::IDENTIFIER,
                 AnyByLayout::NONE,
@@ -195,6 +214,7 @@ impl Display {
             )
             .expect("Error getting resolution");
 
+        // SAFETY: the caller holds the lock and this display is live.
         unsafe {
             lvgl::lv_display_set_resolution(
                 self.display,
@@ -205,9 +225,8 @@ impl Display {
     }
 
     fn device(&self) -> &'static dyn DirectCharacterDevice {
-        let user_data =
-            unsafe { &*(lvgl::lv_display_get_user_data(self.display) as *const UserData) };
-        user_data.device
+        // SAFETY: the display owns this allocation and the device never changes.
+        unsafe { self.user_data.as_ref().device }
     }
 
     /// Read the screen's backlight brightness, from
@@ -245,11 +264,23 @@ impl Display {
         self.display
     }
 
-    pub fn get_object(&self) -> *mut lvgl::lv_obj_t {
+    /// Get the active screen.
+    ///
+    /// # Safety
+    ///
+    /// Hold the graphics lock.
+    pub unsafe fn get_object(&self) -> *mut lvgl::lv_obj_t {
+        // SAFETY: the caller holds the lock and this display is live.
         unsafe { lvgl::lv_display_get_screen_active(self.display) }
     }
 
-    pub fn get_resolution(&self) -> Point {
+    /// Get the current display resolution.
+    ///
+    /// # Safety
+    ///
+    /// Hold the graphics lock.
+    pub unsafe fn get_resolution(&self) -> Point {
+        // SAFETY: the caller holds the lock and this display is live.
         unsafe {
             Point::new(
                 lvgl::lv_display_get_horizontal_resolution(self.display) as i16,
@@ -258,8 +289,10 @@ impl Display {
         }
     }
 
-    pub(crate) fn capture_screen(&self) -> Result<crate::ScreenSnapshot> {
-        let resolution = self.get_resolution();
+    /// The caller holds the graphics lock.
+    pub(crate) unsafe fn capture_screen(&self) -> Result<crate::ScreenSnapshot> {
+        // SAFETY: the caller holds the lock.
+        let resolution = unsafe { self.get_resolution() };
         if resolution.get_x() <= 0
             || resolution.get_y() <= 0
             || (resolution.get_x() as usize)
@@ -268,7 +301,9 @@ impl Display {
         {
             return Err(crate::Error::InvalidParameter);
         }
-        let mut capture = crate::screenshot::capture_screen(self.get_object())?;
+        // SAFETY: the caller holds the lock and the display keeps the screen live.
+        let mut capture = crate::screenshot::capture_screen(unsafe { self.get_object() })?;
+        // SAFETY: the caller holds the lock and the display keeps the layers live.
         unsafe {
             for layer in [
                 lvgl::lv_display_get_layer_top(self.display),

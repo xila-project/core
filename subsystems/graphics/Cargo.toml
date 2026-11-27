@@ -17,6 +17,7 @@ lvgl-rust = { workspace = true, features = [
   "growable-registry",
   "free-observer",
   "external-class-policy",
+  "deferred-delete",
 ] }
 time = { workspace = true }
 shared = { workspace = true }

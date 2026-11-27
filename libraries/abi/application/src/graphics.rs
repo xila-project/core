@@ -142,7 +142,7 @@ pub unsafe extern "C" fn xila_graphics_call(
 
     let mut outcome = Err(Error::Unavailable);
     suspend_dynamic(pin!(async {
-        let _lock = manager.lock().await;
+        let mut guard = manager.lock().await;
         // SAFETY: `resources` is the host-owned state of this process, which
         // the loader keeps live while the process runs. The graphics lock is
         // held and nothing below awaits, so this is the only reference into
@@ -152,8 +152,7 @@ pub unsafe extern "C" fn xila_graphics_call(
         let slot = unsafe { &mut (*process.resources).graphics };
         let state = slot.get_or_insert_with(|| Box::new(State::new(Some(manager))));
         state.set_file_system(process.host.virtual_file_system(), process.task);
-        // SAFETY: the graphics lock is held, and it is `manager`'s.
-        outcome = unsafe { execute_locked(state, &mut HostMemory, &call) };
+        outcome = execute_locked(&mut guard, state, &mut HostMemory, &call);
     }));
     outcome.map_or_else(status, |()| Status::Ok)
 }
@@ -169,8 +168,8 @@ pub(crate) unsafe fn release(state: *mut State) {
         return;
     };
     suspend_dynamic(pin!(async {
-        let _lock = manager.lock().await;
+        let mut guard = manager.lock().await;
         // SAFETY: the lock is held and nothing below awaits.
-        unsafe { (*state).release_locked() };
+        unsafe { (*state).release_locked(&mut guard) };
     }));
 }

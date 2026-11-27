@@ -77,9 +77,13 @@ fn stop_deletes_the_logo_under_the_graphics_lock() {
     task::block_on(async {
         let bootsplash = bootsplash::Bootsplash::new(manager).await.unwrap();
         {
-            let _lock = manager.lock().await;
+            let mut guard = manager.lock().await;
+            let screen = guard
+                .with_lvgl(|access| manager.get_current_screen(access))
+                .unwrap()
+                .unwrap();
+            // SAFETY: the guard keeps the screen and logo live.
             unsafe {
-                let screen = manager.get_current_screen().unwrap();
                 let logo = lvgl::lv_obj_get_child(screen, -1);
                 assert!(!logo.is_null());
                 lvgl::lv_obj_add_event_cb(

@@ -53,33 +53,52 @@ fn snapshot_describes_widget_roles_labels_and_explicit_state() {
     graphics::set_ffi_manager(manager);
     // The safe session and raw compatibility API share one LVGL and lock.
     use graphics::lvgl_rust::{Error, Obj, WidgetExt};
-    let window = core::mem::ManuallyDrop::new(task::block_on(manager.create_window()).unwrap());
+    let window = manager
+        .with_lvgl_sync(|access| manager.create_window(access))
+        .unwrap();
     manager
-        .with_lvgl_sync(|lv| {
+        .with_lvgl_sync(|access| {
             assert_eq!(
-                lv.edit(|lv| lv.screen_active()?.child(0)).unwrap().delete(),
+                access
+                    .edit(|access| access.screen_active()?.child(0))
+                    .unwrap()
+                    .delete(),
                 Err(Error::Internal),
             );
+            // SAFETY: the session and the owner keep the window and label live.
+            unsafe {
+                let label = lvgl::lv_label_create(window.as_object());
+                lvgl::lv_label_set_text(label, c"Closed window".as_ptr());
+            }
+            drop(window);
             Ok(())
         })
         .unwrap();
-    drop(core::mem::ManuallyDrop::into_inner(window));
+    let snapshot = task::block_on(manager.inspect_ui_tree(64, 16)).unwrap();
+    assert!(
+        !snapshot
+            .elements
+            .iter()
+            .any(|element| element.text.as_deref() == Some("Closed window"))
+    );
 
     let handle = manager
-        .with_lvgl_sync(|lv| {
-            let mut screen = lv.screen_active_mut().unwrap();
+        .with_lvgl_sync(|access| {
+            let mut screen = access.screen_active_mut().unwrap();
             Ok(Obj::create(&mut screen)?.handle()?)
         })
         .unwrap();
     manager
-        .with_lvgl_sync(|lv| {
-            assert!(handle.get_mut(lv).is_ok());
-            handle.get_mut(lv)?.delete()?;
-            assert!(handle.get_mut(lv).is_err());
+        .with_lvgl_sync(|access| {
+            assert!(handle.get_mut(access).is_ok());
+            handle.get_mut(access)?.delete()?;
+            assert!(handle.get_mut(access).is_err());
             Ok(())
         })
         .unwrap();
-    let screen = manager.get_current_screen().unwrap();
+    let screen = manager
+        .with_lvgl_sync(|access| manager.get_current_screen(access))
+        .unwrap();
     unsafe {
         let button = lvgl::lv_button_create(screen);
         let label = lvgl::lv_label_create(button);
@@ -164,7 +183,13 @@ fn snapshot_describes_widget_roles_labels_and_explicit_state() {
     // Shell mounting must not hide screen siblings or overlay roots from Debug.
     let body = unsafe { lvgl::lv_obj_create(screen) };
     // SAFETY: `body` lives as long as the test, and no window is created in it.
-    task::block_on(unsafe { manager.set_window_parent(body) }).unwrap();
+    manager
+        .with_lvgl_sync(|access| {
+            // SAFETY: body stays live while it is the window parent.
+            unsafe { manager.set_window_parent(access, body) };
+            Ok(())
+        })
+        .unwrap();
     let snapshot = task::block_on(manager.inspect_ui_tree(64, 16)).unwrap();
     let overlay = unsafe {
         let overlay = lvgl::lv_obj_create(lvgl::lv_layer_top());

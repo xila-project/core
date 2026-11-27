@@ -65,12 +65,15 @@ impl Appearance {
     }
 
     /// Apply the theme and the screen brightness. Screens without brightness
-    /// control keep their level. The caller holds the graphics manager's LVGL
-    /// lock.
-    pub async fn apply(self, manager: &graphics::Manager) -> graphics::Result<()> {
+    /// control keep their level.
+    pub async fn apply(
+        self,
+        manager: &graphics::Manager,
+        guard: &mut graphics::GraphicsGuard<'_>,
+    ) -> graphics::Result<()> {
         let (primary, secondary) = self.colors();
         manager
-            .update_theme_locked(primary, secondary, self.is_dark)
+            .update_theme_locked(guard, primary, secondary, self.is_dark)
             .await?;
         self.apply_brightness(manager).await
     }
@@ -225,8 +228,8 @@ pub async fn restore_appearance(
     }
     match Appearance::load(vfs, task).await {
         Ok(appearance) => {
-            let _lock = manager.lock().await;
-            if let Err(error) = appearance.apply(manager).await {
+            let mut guard = manager.lock().await;
+            if let Err(error) = appearance.apply(manager, &mut guard).await {
                 log::warning!("Could not restore appearance: {}", error);
             }
         }

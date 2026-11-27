@@ -108,7 +108,7 @@ Overflow policy, applied when an event is pushed:
 4. The reservation is given back as the press ends: at `Clicked` or `PressLost`, or else when LVGL never ends the press. Such presses are ordinary: an encoder long press that leaves edit mode, a keypad whose focus moved to another window during the press, a widget disabled while pressed, an input device reset or deleted mid-press. Each would keep four slots, so the window forgets a press as soon as LVGL shows it is over: when its device is released (and not being read), deleted or reset, checked whenever a `Pressed` event arrives and whenever the consumer pops an event; at the next press of the same device; at the next press of any device after a release without a click (a scroll); and when the pressed widget is deleted. Forgetting a rejected press is safe too: a released device has already sent the end that the queue dropped. `Window::discard_events_for_target` removes a widget's events but keeps its press events, except moves and repeats, with a null target, so that the end of a press never arrives without its `Pressed`. Press events sent by code, without an input device, are queued by tier only.
 5. Up to four devices are followed at once. A fifth pressing at the same time makes the queue forget the oldest accepted press (only its reservation is lost), or else the oldest rejected press, whose end could then get through.
 
-`Window::dropped_event_count()` counts every evicted or rejected event. Losses are logged at most once per second (`LOSS_REPORT_INTERVAL`, in LVGL ticks) with the number lost since the previous report, both when events are pushed and when the consumer pops them, so a consumer that never empties the queue keeps getting periodic summaries.
+`OwnedWindow::dropped_event_count` counts every evicted or rejected event. Losses are logged at most once per second (`LOSS_REPORT_INTERVAL`, in LVGL ticks) with the number lost since the previous report, both when events are pushed and when the consumer pops them, so a consumer that never empties the queue keeps getting periodic summaries.
 
 RAM budget (excluding allocator bookkeeping): on x86_64, `Event` is 32 bytes,
 so the old queue started at 32 bytes inline plus a 320-byte allocation, and
@@ -122,10 +122,11 @@ blocks.
 
 ## Window ownership
 
-A window has exactly one owner, its `OwnedWindow`, which deletes it when dropped (or with `OwnedWindow::delete` from inside a safe session, where dropping would deadlock on the graphics lock). Nothing else may delete it:
+A window has one owner, its `OwnedWindow`. Drop takes the graphics lock if it is free. If the lock is busy, drop queues the window for deletion when a session next drains deferred work. `OwnedWindow::close().await` waits for the lock and deletes the window before returning. `OwnedWindow::delete(lv)` deletes it during a session.
 
 - The window class is `ChildrenOnly` in lvgl-rust's external class policy: safe code can build and delete a window's content, but the safe layer refuses to delete, clean away, own, reparent or reorder a window or anything that contains one. Core's other classes (the file picker) are fully protected.
-- Safe code gets `&Window` and the owner's methods, never `&mut Window`. Taking ownership of a raw window (`OwnedWindow::from_raw`) and moving the window parent (`Manager::set_window_parent`) are `unsafe`; `Window` has no public delete.
+- The owner's event and icon methods require the session token. The owner does not expose references to the window or its LVGL object. `register_waker` and `wake_up` access only the atomic waker and can run without a session.
+- Taking ownership of a raw window (`OwnedWindow::from_raw`) and changing the window parent (`Manager::set_window_parent`) require `unsafe`.
 
 Code that takes a window out of its owner (`OwnedWindow::into_raw`, as the Wasm host does) becomes its owner and deletes it once, under the graphics lock.
 
@@ -144,14 +145,16 @@ Use `manager.with_lvgl(|lv| { /* safe LVGL calls */ Ok(()) }).await?`,
 or `with_lvgl_sync` in synchronous code. The private guard implements
 `LvglAccess` using the same mutex as `Manager::lock`; views cannot escape
 this closure. Store a `Handle<W>` across calls and resolve it in each session.
-Code already holding the graphics lock can use unsafe `with_lvgl_locked`:
-it must hold that lock throughout and must not overlap another session.
+Code that already holds a `GraphicsGuard` can use `guard.with_lvgl(|lv| ...)`.
+Create windows and look up, move or close them inside the session. Use the
+same session for a lookup and any raw operation on the returned object.
+Retry window creation after a screen transition if it returns `AlreadyInUse`.
 Raw calls that delete or move objects must never overlap safe views.
 Do not call raw `lv_init`, `lv_deinit`, or change object IDs.
 
 ### Call executor
 
-`graphics::call` is the one service behind every way a program reaches the UI. A caller names a call by its catalog ID (`call::Function`; IDs come from `bindings_generator`'s `CallCatalog`, extensions from `0xf000`) and passes up to seven words. `call::execute(&mut State, &mut dyn Transport, &Call)` checks the call, takes the graphics lock for that one call, runs it on LVGL and writes the result back. A caller on a cooperative executor waits for the lock itself, by suspending, and runs the call with `call::execute_locked` (unsafe: the caller holds `Manager::lock`); `State::release_locked` deletes a process's objects the same way.
+`graphics::call` is the one service behind every way a program reaches the UI. A caller names a call by its catalog ID (`call::Function`; IDs come from `bindings_generator`'s `CallCatalog`, extensions from `0xf000`) and passes up to seven words. `call::execute(&mut State, &mut dyn Transport, &Call)` checks the call, takes the graphics lock for that one call, runs it on LVGL and writes the result back. A caller on a cooperative executor waits for the lock itself, by suspending, and runs the call with `call::execute_locked(&mut guard, ...)`. `State::release_locked` takes the same guard and deletes the process's objects.
 
 | Piece | Owner |
 | --- | --- |
@@ -163,7 +166,7 @@ Do not call raw `lv_init`, `lv_deinit`, or change object IDs.
 
 **Transport.** Only pointer, string and buffer words differ between callers. A `Transport` borrows bytes at an address, mutably or not, and a NUL-terminated string. Wasm guests pass offsets into their linear memory: `LinearMemory` translates and bounds-checks them, with a 32-bit or 64-bit word as the guest has. Native code passes host pointers, since native code is trusted. Values behind an address are little-endian. A call word is a `usize`, so a call costs no double-word arithmetic on a 32-bit target (a 64-bit guest only runs on a 64-bit host).
 
-**State.** Each process owns a `State`: the sorted array of its live handles (the ID LVGL keeps in each object's own `id` field) and a sorted side table for what LVGL borrows from the host (button maps, grid descriptors, canvas buffers). A handle from another process, or of a deleted object, fails as `InvalidHandle`. Dropping the `State` deletes everything the process still owns, under the lock; the free observer releases side data when LVGL deletes an object by itself, such as the children of a deleted parent.
+**State.** Each process owns a `State`: the sorted array of its live handles (the ID LVGL keeps in each object's own `id` field) and a sorted side table for what LVGL borrows from the host (button maps, grid descriptors, canvas buffers). A handle from another process, or of a deleted object, fails as `InvalidHandle`. Dropping the `State` deletes what the process still owns while holding the graphics lock. If the lock is busy, the next session deletes the objects and releases the side table. The free observer releases side data when LVGL deletes an object, such as the children of a deleted parent.
 
 **The call table is generated.** `build.rs` runs `graphics_bindgen::executor` over the catalog and the ABI declaration in `graphics_bindgen::abi`, the same declaration that generates the guest bindings. The catalog is parsed from the bindings `lvgl_rust_sys` already generated for the build target (its `BINDINGS` build metadata), so building graphics runs no second LVGL bindgen pass and builds no host copy of LVGL. The output is the `Function` enum, a packed table of IDs, argument counts and result kinds, and one `match` on the call. Constructors and scalar setters and getters expand into calls of a few shared helpers; custom adapters call a named handler; everything else falls through to the handwritten match in `call/handlers.rs`. To add a call, declare it in `abi.rs` and write a handler only if no generated shape fits.
 
