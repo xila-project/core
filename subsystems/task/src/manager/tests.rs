@@ -1432,6 +1432,63 @@ async fn send_spawn_balances_executors_and_keeps_non_send_state_remote() {
     });
 }
 
+#[test(task_path = crate)]
+async fn explicit_send_spawn_stays_on_the_selected_executor() {
+    let manager = initialize();
+    let root = manager.get_current_task_identifier().await;
+    let primary = manager.get_spawner(root).await.unwrap();
+    let caller = std::thread::current().id();
+
+    let (handle, _) = manager
+        .spawn_on_executor(root, "primary", primary, |_| async {
+            std::thread::current().id()
+        })
+        .await
+        .unwrap();
+    assert_eq!(handle.join().await, caller);
+
+    let secondary = crate::test_executor::new_thread_executor(manager).await;
+    let (handle, _) = manager
+        .spawn_on_executor(root, "secondary", secondary, move |task| async move {
+            let first_poll = std::thread::current().id();
+            crate::yield_now().await;
+            assert_eq!(first_poll, std::thread::current().id());
+            assert_eq!(manager.get_spawner(task).await, Ok(secondary));
+            first_poll
+        })
+        .await
+        .unwrap();
+    assert_ne!(handle.join().await, caller);
+}
+
+#[test(task_path = crate)]
+async fn static_slots_back_every_task_storage_header() {
+    static SLOTS: [TaskSlot; 2] = [const { TaskSlot::new() }; 2];
+    static MANAGER: Manager = Manager::with_static_slots(&SLOTS);
+    let local = unsafe { embassy_executor::Spawner::for_current_executor().await };
+    MANAGER.register_spawner(local).unwrap();
+    let root = MANAGER.get_current_task_identifier().await;
+    let (release, wait) = JoinHandle::new();
+    let (handle, identifier) = MANAGER
+        .spawn(
+            root,
+            "held",
+            None,
+            move |_| async move { wait.join().await },
+        )
+        .await
+        .unwrap();
+    let inner = MANAGER.0.read().await;
+    assert_eq!(
+        inner.tasks[&identifier].internal_identifier,
+        &raw const SLOTS[0].0 as usize
+    );
+    assert!(core::ptr::eq(inner.slots[1], &SLOTS[1].0));
+    drop(inner);
+    release.signal(());
+    handle.join().await;
+}
+
 #[cfg(not(feature = "metrics"))]
 #[test(task_path = crate)]
 async fn metrics_are_unavailable_without_the_feature() {

@@ -326,6 +326,16 @@ impl Service {
     /// Load the configuration and spawn the service task. The task runs until
     /// the system stops; its identifier is returned.
     pub async fn start(self, task: TaskIdentifier) -> Result<TaskIdentifier> {
+        self.start_on(task, None).await
+    }
+
+    /// Start the service on a selected executor. With no selection, use the
+    /// executor that calls this method.
+    pub async fn start_on(
+        self,
+        task: TaskIdentifier,
+        executor: Option<task::SpawnerIdentifier>,
+    ) -> Result<TaskIdentifier> {
         // The configuration is allocated once, outside the task stack.
         let configuration: &'static Configuration = Box::leak(Box::new(
             configuration::load(self.virtual_file_system, task).await,
@@ -333,13 +343,20 @@ impl Service {
         let network = self.network;
         let time = self.time;
         let minimum_timestamp = self.minimum_timestamp;
-        self.task_manager
-            .spawn(task, "SNTP synchronization", None, move |_| async move {
-                run(network, time, configuration, minimum_timestamp).await;
-            })
-            .await
-            .map(|(_, identifier)| identifier)
-            .map_err(|error| error.into_io_error_kind())
+        let service = move |_| async move {
+            run(network, time, configuration, minimum_timestamp).await;
+        };
+        let name = "SNTP synchronization";
+        match executor {
+            Some(executor) => {
+                self.task_manager
+                    .spawn_on_executor(task, name, executor, service)
+                    .await
+            }
+            None => self.task_manager.spawn(task, name, None, service).await,
+        }
+        .map(|(_, identifier)| identifier)
+        .map_err(|error| error.into_io_error_kind())
     }
 }
 
@@ -472,11 +489,10 @@ async fn attempt(
                 continue;
             }
         };
-        let result = async {
-            let socket = client.ensure_socket(adapter).await.map_err(Failure::Io)?;
-            client.exchange_addresses(&addresses, socket).await
-        }
-        .await;
+        let result = match client.ensure_socket(adapter).await {
+            Ok(socket) => client.exchange_addresses(&addresses, socket).await,
+            Err(error) => Err(Failure::Io(error)),
+        };
         match result {
             Ok(exchange) => {
                 let candidate = match client.candidate(&exchange) {
