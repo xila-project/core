@@ -15,7 +15,10 @@ use file_system::{
     MountOperations, Size,
 };
 use graphics::lvgl_rust::{self, Obj, ScreenAnim, ScreenLoadAnim, WidgetExt};
-use graphics::{EventKind, GET_RESOLUTION, Manager, Point, SET_DRAWING_AREA, WAS_RESIZED, lvgl};
+use graphics::{
+    EventKind, GET_RESOLUTION, Manager, Point, SET_DRAWING_AREA, WAS_RESIZED,
+    WINDOW_EVENT_QUEUE_CAPACITY, lvgl,
+};
 use portable_atomic::{AtomicU32, Ordering};
 use shared::AnyByLayout;
 
@@ -319,6 +322,75 @@ fn safe_code_cannot_delete_an_owned_window() {
                 window.pop_event(access).unwrap().code,
                 EventKind::CloseRequested
             );
+
+            // SAFETY: the session holds the lock and the owner keeps the window live.
+            let child = unsafe { lvgl::lv_obj_create(window.as_object()) };
+            while window.pop_event(access).is_some() {}
+            let dropped = window.dropped_event_count(access);
+            for _ in 0..WINDOW_EVENT_QUEUE_CAPACITY {
+                // SAFETY: the session holds the lock and the child is live.
+                unsafe {
+                    lvgl::lv_obj_send_event(
+                        child,
+                        EventKind::Clicked.into_lvgl_code(),
+                        core::ptr::null_mut(),
+                    );
+                }
+            }
+            for _ in 0..2 {
+                manager
+                    .send_window_close_request(access, identifier)
+                    .unwrap();
+            }
+
+            for _ in 0..WINDOW_EVENT_QUEUE_CAPACITY {
+                assert_eq!(window.pop_event(access).unwrap().code, EventKind::Clicked);
+            }
+            let close = window.pop_event(access).unwrap();
+            assert_eq!(close.code, EventKind::CloseRequested);
+            assert!(close.is_target(window.as_object()));
+            assert!(window.pop_event(access).is_none());
+            assert_eq!(window.dropped_event_count(access), dropped);
+
+            manager
+                .send_window_close_request(access, identifier)
+                .unwrap();
+            assert_eq!(
+                window.pop_event(access).unwrap().code,
+                EventKind::CloseRequested
+            );
+            assert!(window.pop_event(access).is_none());
+
+            unsafe extern "C" fn stop_event(event: *mut lvgl::lv_event_t) {
+                // SAFETY: LVGL supplies the active event.
+                unsafe { lvgl::lv_event_stop_processing(event) };
+            }
+            // SAFETY: the owner and the session keep the window live.
+            unsafe {
+                let handler = lvgl::lv_obj_add_event_cb(
+                    window.as_object(),
+                    Some(stop_event),
+                    EventKind::CloseRequested.into_lvgl_code()
+                        | lvgl::lv_event_code_t_LV_EVENT_PREPROCESS,
+                    core::ptr::null_mut(),
+                );
+                assert!(!handler.is_null());
+            }
+            assert_eq!(
+                manager.send_window_close_request(access, identifier),
+                Err(graphics::Error::NotAvailable),
+            );
+            assert!(window.pop_event(access).is_none());
+
+            // An identifier for a live object outside the window class is invalid.
+            // SAFETY: the session holds the lock and the screen stays live.
+            let object = unsafe { lvgl::lv_obj_create(screen) };
+            assert_eq!(
+                manager.send_window_close_request(access, object as usize),
+                Err(graphics::Error::InvalidWindowIdentifier),
+            );
+            // SAFETY: the session holds the lock and the object still exists.
+            unsafe { lvgl::lv_obj_delete(object) };
             drop(window);
         })
         .unwrap();

@@ -138,6 +138,39 @@ fn event_bursts_do_not_allocate_and_keep_clicks() {
     unsafe { lvgl::lv_obj_delete(window.object()) };
 }
 
+#[test]
+fn long_text_insertion_keeps_lifecycle_events() {
+    let _lvgl = LVGL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    unsafe { lvgl::lv_init() };
+    unsafe { lvgl::lv_display_create(320, 240) };
+    let screen = unsafe { lvgl::lv_obj_create(ptr::null_mut()) };
+    // SAFETY: the test holds LVGL and keeps the screen live.
+    let window = unsafe { TestWindow::new(screen) };
+    let field = unsafe { lvgl::lv_textarea_create(window.object()) };
+    unsafe { lvgl::lv_textarea_set_max_length(field, 64) };
+    while window.pop_event().is_some() {}
+
+    let send = |kind: EventKind| unsafe {
+        lvgl::lv_obj_send_event(field, kind.into_lvgl_code(), ptr::null_mut());
+    };
+    send(EventKind::Focused);
+    unsafe {
+        lvgl::lv_textarea_set_text(field, c"https://home-assistant.local:8123".as_ptr());
+    }
+    send(EventKind::Ready);
+
+    assert!(
+        window.dropped_event_count() > 0,
+        "the text must fill the queue"
+    );
+    let lifecycle: Vec<_> = core::iter::from_fn(|| window.pop_event())
+        .map(|event| event.code)
+        .filter(|kind| matches!(kind, EventKind::Focused | EventKind::Ready))
+        .collect();
+    assert_eq!(lifecycle, [EventKind::Focused, EventKind::Ready]);
+    unsafe { lvgl::lv_obj_delete(window.object()) };
+}
+
 /// A double tap queues two clicks on a button; handling the first one rebuilds
 /// the list, and LVGL may give a new button the freed button's address.
 #[test]

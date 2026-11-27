@@ -7,8 +7,11 @@
 use crate::{Event, EventKind, lvgl};
 use core::ptr;
 
-/// Number of events a window can hold before its overflow policy applies.
+/// Regular event slots. A pending close request uses a separate slot.
 pub const WINDOW_EVENT_QUEUE_CAPACITY: usize = 16;
+
+// One extra slot belongs to the pending close request.
+const RING_CAPACITY: usize = WINDOW_EVENT_QUEUE_CAPACITY + 1;
 
 /// Slots kept for the rest of each accepted press. A short press ends with
 /// `Released`, `ShortClicked`, one of `SingleClicked`, `DoubleClicked` or
@@ -24,8 +27,7 @@ const PRESS_TRACKING_CAPACITY: usize = 4;
 pub const LOSS_REPORT_INTERVAL: u32 = 1000;
 
 // Indices are stored as `u8`.
-const _: () =
-    assert!(WINDOW_EVENT_QUEUE_CAPACITY > 0 && WINDOW_EVENT_QUEUE_CAPACITY <= u8::MAX as usize);
+const _: () = assert!(WINDOW_EVENT_QUEUE_CAPACITY > 0 && RING_CAPACITY <= u8::MAX as usize);
 // A pointer press and a keypad press fit with their whole ends, and room
 // remains for other events.
 const _: () = assert!(2 * (PRESS_END_RESERVATION as usize + 1) < WINDOW_EVENT_QUEUE_CAPACITY);
@@ -39,8 +41,7 @@ pub type InputDevice = *const lvgl::lv_indev_t;
 pub enum PushOutcome {
     /// The event was appended.
     Queued,
-    /// The event replaced the queued event of the same kind and target that
-    /// it supersedes, and moved to the back of the queue.
+    /// The event merged with a queued event.
     Coalesced,
     /// The event was appended after evicting the oldest evictable event.
     EvictedOldest,
@@ -111,7 +112,9 @@ const fn tier(kind: EventKind) -> Tier {
         | EventKind::DrawTaskAdded
         | EventKind::InvalidateArea
         | EventKind::Refresh
-        | EventKind::Create => Tier::Low,
+        | EventKind::Create
+        | EventKind::Insert
+        | EventKind::Delete => Tier::Low,
         EventKind::Pressing | EventKind::LongPressedRepeat => Tier::Transient,
         EventKind::ValueChanged | EventKind::SizeChanged | EventKind::StyleChanged => Tier::State,
         _ => Tier::Lifecycle,
@@ -187,14 +190,18 @@ impl PressGroup {
 
 /// Bounded queue of window events in arrival order.
 ///
-/// Events fall in four tiers, from the least to the most important:
+/// Regular events fall in four tiers, from the least to the most important:
 ///
-/// - low: the scroll family, layout changes, hover, hit tests and drawing
-///   notifications;
+/// - low: the scroll family, layout changes, hover, hit tests, drawing
+///   notifications, `Insert` and `Delete`;
 /// - transient: `Pressing` and `LongPressedRepeat`;
 /// - state: `ValueChanged`, `SizeChanged` and `StyleChanged`;
 /// - lifecycle: everything else, such as presses, releases, clicks, keys,
-///   focus changes, `Ready`, `Cancel`, `Delete` and `CloseRequested`.
+///   focus changes, `Ready` and `Cancel`.
+///
+/// One slot is reserved for `CloseRequested`. It keeps its place in arrival
+/// order. Further close requests merge into the pending request until it is
+/// popped.
 ///
 /// Transient and state events are "latest wins": a newer one replaces the
 /// queued event of the same kind and target and moves to the back, unless a
@@ -223,9 +230,10 @@ impl PressGroup {
 /// [`EventQueue::take_loss_report`] summarizes the losses at most once per
 /// [`LOSS_REPORT_INTERVAL`].
 pub struct EventQueue {
-    slots: [Option<Event>; WINDOW_EVENT_QUEUE_CAPACITY],
+    slots: [Option<Event>; RING_CAPACITY],
     head: u8,
     length: u8,
+    close_requested: bool,
     /// Number of valid entries at the start of `presses`, oldest first.
     press_count: u8,
     presses: [PressGroup; PRESS_TRACKING_CAPACITY],
@@ -237,9 +245,10 @@ pub struct EventQueue {
 impl EventQueue {
     pub const fn new() -> Self {
         Self {
-            slots: [const { None }; WINDOW_EVENT_QUEUE_CAPACITY],
+            slots: [const { None }; RING_CAPACITY],
             head: 0,
             length: 0,
+            close_requested: false,
             press_count: 0,
             presses: [PressGroup::EMPTY; PRESS_TRACKING_CAPACITY],
             dropped: 0,
@@ -256,8 +265,12 @@ impl EventQueue {
         self.length == 0
     }
 
-    pub const fn is_full(&self) -> bool {
-        self.length as usize == WINDOW_EVENT_QUEUE_CAPACITY
+    fn is_full(&self) -> bool {
+        self.len() - usize::from(self.close_requested) == WINDOW_EVENT_QUEUE_CAPACITY
+    }
+
+    pub const fn has_close_request(&self) -> bool {
+        self.close_requested
     }
 
     /// Whether a press is followed: its target must be forgotten when it dies.
@@ -300,6 +313,14 @@ impl EventQueue {
     /// [`carries_input_device`]). Press events sent by code, without a device,
     /// are queued by tier only: nothing ends such a press reliably.
     pub fn push(&mut self, event: Event, device: InputDevice) -> PushOutcome {
+        if event.code == EventKind::CloseRequested {
+            if self.close_requested {
+                return PushOutcome::Coalesced;
+            }
+            self.append(event);
+            self.close_requested = true;
+            return PushOutcome::Queued;
+        }
         if event.code == EventKind::InputDeviceReset && !device.is_null() {
             // LVGL forgot the widget the device pressed: it never ends that
             // press, and a new press starts if the device is still held.
@@ -408,8 +429,14 @@ impl EventQueue {
             return None;
         }
         let event = self.slots[self.head as usize].take();
-        self.head = ((self.head as usize + 1) % WINDOW_EVENT_QUEUE_CAPACITY) as u8;
+        self.head = self.physical(1) as u8;
         self.length -= 1;
+        if event
+            .as_ref()
+            .is_some_and(|event| event.code == EventKind::CloseRequested)
+        {
+            self.close_requested = false;
+        }
         event
     }
 
@@ -426,10 +453,10 @@ impl EventQueue {
 
     /// Remove every event aimed at `target`, preserving the order of the rest,
     /// and give up the reservation of an accepted press of `target`. Press
-    /// events other than moves and repeats are kept with a null target
-    /// instead: removing a `Pressed` event would let the end of its press
-    /// reach the consumer alone, since a keypad ends its press on another
-    /// widget. Only compares addresses; never dereferences `target`.
+    /// boundaries and close requests keep a null target. This preserves the
+    /// close request and keeps the start and end of a press paired when a
+    /// keypad ends its press on another widget. This method only compares
+    /// addresses.
     pub fn discard_target(&mut self, target: *mut lvgl::lv_obj_t) {
         let mut kept = 0;
         for index in 0..self.len() {
@@ -441,7 +468,10 @@ impl EventQueue {
             if discarded {
                 event.target = ptr::null_mut();
             }
-            if !discarded || is_press_boundary(event.code) {
+            if !discarded
+                || is_press_boundary(event.code)
+                || event.code == EventKind::CloseRequested
+            {
                 let destination = self.physical(kept);
                 self.slots[destination] = Some(event);
                 kept += 1;
@@ -525,8 +555,9 @@ impl EventQueue {
     fn lifecycle_count(&self) -> usize {
         (0..self.len())
             .filter(|&index| {
-                self.get(index)
-                    .is_some_and(|event| tier(event.code) == Tier::Lifecycle)
+                self.get(index).is_some_and(|event| {
+                    event.code != EventKind::CloseRequested && tier(event.code) == Tier::Lifecycle
+                })
             })
             .count()
     }
@@ -584,7 +615,7 @@ impl EventQueue {
     }
 
     fn physical(&self, index: usize) -> usize {
-        (self.head as usize + index) % WINDOW_EVENT_QUEUE_CAPACITY
+        (self.head as usize + index) % RING_CAPACITY
     }
 
     fn get(&self, index: usize) -> Option<&Event> {
@@ -595,7 +626,7 @@ impl EventQueue {
         }
     }
 
-    /// Append to a queue that is not full.
+    /// Append to the ring. The caller checks whether the event has room.
     fn append(&mut self, event: Event) {
         let slot = self.physical(self.len());
         self.slots[slot] = Some(event);
@@ -883,7 +914,6 @@ mod tests {
             EventKind::Pressing,
             EventKind::ValueChanged,
             EventKind::Scroll,
-            EventKind::CloseRequested,
         ] {
             assert_eq!(queue.send(event(code, 99)), PushOutcome::Dropped);
         }
@@ -893,7 +923,7 @@ mod tests {
                 .map(|address| (EventKind::Clicked, address))
                 .collect::<Vec<_>>()
         );
-        assert_eq!(queue.dropped(), 5);
+        assert_eq!(queue.dropped(), 4);
     }
 
     #[test]
@@ -921,6 +951,8 @@ mod tests {
             EventKind::InvalidateArea,
             EventKind::HitTest,
             EventKind::Create,
+            EventKind::Insert,
+            EventKind::Delete,
         ] {
             assert_eq!(tier(code), Tier::Low, "{code:?}");
         }
@@ -935,7 +967,6 @@ mod tests {
             EventKind::Focused,
             EventKind::Defocused,
             EventKind::CloseRequested,
-            EventKind::Delete,
             EventKind::Ready,
             EventKind::Cancel,
             EventKind::Custom1,
@@ -1085,6 +1116,10 @@ mod tests {
     fn an_accepted_press_reserves_room_for_its_end() {
         let mut queue = EventQueue::new();
         queue.send(event(EventKind::Pressed, 1));
+        assert_eq!(
+            queue.send_by_code(event(EventKind::CloseRequested, 2)),
+            PushOutcome::Queued
+        );
         let room = flood(&mut queue, EventKind::Key, 9);
         assert_eq!(
             room,
@@ -1097,6 +1132,7 @@ mod tests {
         assert!(!queue.follows_presses(), "the click ends the press");
         let drained = drain(&mut queue);
         assert_eq!(drained[0], (EventKind::Pressed, 1));
+        assert_eq!(drained[1], (EventKind::CloseRequested, 2));
         assert_eq!(only(&drained, 1)[1..], SHORT_PRESS_END);
     }
 
@@ -2089,7 +2125,7 @@ mod tests {
         assert!(size_of::<crate::Window>() < 65536);
         assert!(
             size_of::<EventQueue>()
-                <= WINDOW_EVENT_QUEUE_CAPACITY * size_of::<Option<Event>>()
+                <= RING_CAPACITY * size_of::<Option<Event>>()
                     + PRESS_TRACKING_CAPACITY * size_of::<PressGroup>()
                     + 24
         );
