@@ -543,9 +543,10 @@ whether the program returned or called `exit`.
   reports no inode; it is not `st_ino`). `open` of `/` or `.` read-only gives a directory
   descriptor (`fstat`, `openat` base); with write access, or `O_DIRECTORY` with write
   access, it fails with `EISDIR`.
-* **Path escapes.** `openat` with a directory descriptor cannot leave that directory;
-  the error is the errno of Core's `PATH_ESCAPES_ROOT` status (`EACCES`, as the
-  `io_error` catalog projects it).
+* **Path escapes.** Relative `openat` lookup follows links and parent components
+  within the open directory. An absolute link target or a lookup that leaves
+  the directory fails with `EACCES`. Use `O_NOFOLLOW` to reject a final symbolic
+  link with `ELOOP`. This flag also applies with `O_DIRECTORY`.
 
 ## POSIX subset
 

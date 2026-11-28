@@ -3,8 +3,8 @@ mod utilities;
 use crate::pipe::Pipe;
 use crate::{Directory, File, IoErrorKind, ItemStatic, Result, ResultExt, poll};
 use alloc::borrow::ToOwned;
-use alloc::vec;
 use alloc::{boxed::Box, collections::BTreeMap};
+use alloc::{vec, vec::Vec};
 use core::cell::RefCell;
 use core::ptr;
 use exported_file_system::{BlockDevice, CharacterDevice, CreateFlags, Permission, Permissions};
@@ -13,6 +13,7 @@ use file_system::{
     FileSystemOperations, Flags, Inode, Kind, Path, PathOwned, StateFlags, Statistics,
 };
 use synchronization::{
+    Arc,
     blocking_mutex::{Mutex as BlockingMutex, raw::CriticalSectionRawMutex},
     rwlock::RwLock,
 };
@@ -99,6 +100,9 @@ pub struct VirtualFileSystem {
     time_manager: &'static time::Manager<'static>,
     /// Mounted file systems.
     file_systems: RwLock<CriticalSectionRawMutex, FileSystemsArray>,
+    /// Roots on backends that use paths. The namespace lock serializes registration
+    /// with mutations. The blocking lock also lets a dropped capability release its pin.
+    path_pins: BlockingMutex<CriticalSectionRawMutex, RefCell<Vec<DirectoryPathPin>>>,
     /// Character devices.
     character_device: RwLock<CriticalSectionRawMutex, CharacterDevicesMap>,
     /// Block devices.
@@ -111,6 +115,158 @@ pub struct VirtualFileSystem {
     /// [`Self::close_without_waiting`]). Given back by whoever takes that lock next to
     /// look at the counts. The mutex is never held across a wait.
     owed: BlockingMutex<CriticalSectionRawMutex, RefCell<alloc::vec::Vec<Owed>>>,
+}
+
+struct DirectoryPathPin {
+    file_system: &'static dyn FileSystemOperations,
+    path: Arc<PathOwned>,
+}
+
+/// An open directory used as the root of confined path lookups.
+pub struct DirectoryCapability<'a> {
+    virtual_file_system: &'a VirtualFileSystem,
+    path: Arc<PathOwned>,
+    directory: crate::SynchronousDirectory<'a>,
+    pins_path: bool,
+}
+
+impl<'a> DirectoryCapability<'a> {
+    /// Open a child directory and make it the root of a new capability.
+    pub async fn pin_directory(
+        &self,
+        task: TaskIdentifier,
+        path: &Path,
+        follow_final: bool,
+    ) -> Result<Self> {
+        self.virtual_file_system
+            .pin_directory_with_root(task, path, Some(LookupRoot::Pinned(self)), follow_final)
+            .await
+    }
+
+    /// List a directory reached through this capability.
+    pub async fn open_directory(
+        &self,
+        task: TaskIdentifier,
+        path: &Path,
+    ) -> Result<crate::SynchronousDirectory<'a>> {
+        self.virtual_file_system
+            .open_directory_with_root(task, path, Some(LookupRoot::Pinned(self)), true)
+            .await
+            .map(Directory::into_blocking_directory)
+    }
+
+    /// Open a file reached through this capability.
+    pub async fn open_file(
+        &self,
+        task: TaskIdentifier,
+        path: &Path,
+        flags: Flags,
+        follow_final: bool,
+    ) -> Result<File<'a>> {
+        self.virtual_file_system
+            .open_with_root(
+                path,
+                flags,
+                task,
+                Some(LookupRoot::Pinned(self)),
+                follow_final,
+                Permissions::FILE_DEFAULT,
+                false,
+            )
+            .await
+            .map(|(file, _)| file)
+    }
+
+    /// Open an executable for reading and return metadata from the same lookup.
+    pub async fn open_executable(
+        &self,
+        task: TaskIdentifier,
+        path: &Path,
+    ) -> Result<(File<'a>, Statistics)> {
+        let (file, statistics) = self
+            .virtual_file_system
+            .open_with_root(
+                path,
+                AccessFlags::Read.into(),
+                task,
+                Some(LookupRoot::Pinned(self)),
+                true,
+                Permissions::FILE_DEFAULT,
+                true,
+            )
+            .await?;
+        Ok((file, statistics.ok_or(IoErrorKind::InputOutput)?))
+    }
+
+    pub async fn create_directory(&self, task: TaskIdentifier, path: &Path) -> Result<()> {
+        self.virtual_file_system
+            .create_directory_with_root(
+                task,
+                path,
+                Some(LookupRoot::Pinned(self)),
+                Permissions::DIRECTORY_DEFAULT,
+            )
+            .await
+    }
+
+    pub async fn remove(
+        &self,
+        task: TaskIdentifier,
+        path: &Path,
+        allow_directory: bool,
+    ) -> Result<()> {
+        self.virtual_file_system
+            .remove_with_root(task, path, Some(LookupRoot::Pinned(self)), allow_directory)
+            .await
+    }
+
+    pub async fn rename(
+        &self,
+        task: TaskIdentifier,
+        from: &Path,
+        to: &Self,
+        destination: &Path,
+    ) -> Result<()> {
+        self.virtual_file_system
+            .rename_with_root(
+                task,
+                from,
+                destination,
+                Some(LookupRoot::Pinned(self)),
+                Some(LookupRoot::Pinned(to)),
+            )
+            .await
+    }
+
+    pub async fn get_statistics(
+        &self,
+        task: TaskIdentifier,
+        path: &Path,
+        follow_final: bool,
+    ) -> Result<Statistics> {
+        self.virtual_file_system
+            .get_statistics_for_task_with_follow_with_root(
+                task,
+                path,
+                follow_final,
+                Some(LookupRoot::Pinned(self)),
+            )
+            .await
+    }
+}
+
+impl Drop for DirectoryCapability<'_> {
+    fn drop(&mut self) {
+        if self.pins_path {
+            self.virtual_file_system.path_pins.lock(|pins| {
+                let mut pins = pins.borrow_mut();
+                pins.retain(|pin| !Arc::ptr_eq(&pin.path, &self.path));
+                if pins.is_empty() {
+                    *pins = Vec::new();
+                }
+            });
+        }
+    }
 }
 
 /// One reference a close gave back without its lock: a file system by address, as
@@ -212,6 +368,7 @@ impl VirtualFileSystem {
             users_manager,
             time_manager,
             file_systems: RwLock::new(file_systems),
+            path_pins: BlockingMutex::new(RefCell::new(Vec::new())),
             character_device: RwLock::new(BTreeMap::new()),
             block_device: RwLock::new(BTreeMap::new()),
             pipes: RwLock::new(BTreeMap::new()),
@@ -495,6 +652,84 @@ impl VirtualFileSystem {
         let mut resolved = self
             .resolve_path(&file_systems, path.as_ref(), true, false, user, task)
             .await?;
+        self.check_capability_root(&file_systems, &mut resolved, user, Permission::Execute)
+            .await?;
+        self.validate_confined_root(&file_systems, &resolved.path, user, task)
+            .await?;
+        Ok(resolved.path.as_ref().to_owned())
+    }
+
+    /// Grant an absolute directory and pin it for later relative lookups.
+    pub async fn pin_directory<'a>(
+        &'a self,
+        task: TaskIdentifier,
+        path: &Path,
+    ) -> Result<DirectoryCapability<'a>> {
+        self.pin_directory_with_root(task, path, None, true).await
+    }
+
+    async fn pin_directory_with_root<'a>(
+        &'a self,
+        task: TaskIdentifier,
+        path: &Path,
+        root: Option<LookupRoot<'_>>,
+        follow_final: bool,
+    ) -> Result<DirectoryCapability<'a>> {
+        let mut file_systems = self.file_systems.write().await;
+        let user = self.task_manager.get_user(task).await.map_io_error()?;
+        let mut resolved = self
+            .resolve_path_with_root(&file_systems, path, follow_final, false, user, task, root)
+            .await?;
+        self.check_capability_root(
+            &file_systems,
+            &mut resolved,
+            user,
+            Permission::Read | Permission::Execute,
+        )
+        .await?;
+        let path = Arc::new(resolved.path.as_ref().to_owned());
+        let context = Self::open_resolved_directory_context(&file_systems, &mut resolved).await?;
+        let mount = &mut file_systems[resolved.mount_index];
+        let pins_path = !mount.file_system.supports_directory_entry_operations();
+        if pins_path {
+            self.path_pins.lock(|pins| {
+                pins.borrow_mut().push(DirectoryPathPin {
+                    file_system: mount.file_system,
+                    path: path.clone(),
+                });
+            });
+        }
+        Ok(DirectoryCapability {
+            virtual_file_system: self,
+            path,
+            directory: self
+                .directory_from_context(mount, context)
+                .into_synchronous_directory(),
+            pins_path,
+        })
+    }
+
+    fn protects_pinned_path(&self, mount: &InternalFileSystem, path: &Path) -> bool {
+        let path = path.as_str().trim_end_matches('/');
+        self.path_pins.lock(|pins| {
+            pins.borrow().iter().any(|pin| {
+                ptr::eq(pin.file_system, mount.file_system)
+                    && pin
+                        .path
+                        .as_str()
+                        .strip_prefix(path)
+                        .is_some_and(|suffix| suffix.is_empty() || suffix.starts_with('/'))
+            })
+        })
+    }
+
+    async fn check_capability_root(
+        &self,
+        file_systems: &FileSystemsArray,
+        resolved: &mut ResolvedTarget<'_>,
+        user: UserIdentifier,
+        permission: Permission,
+    ) -> Result<()> {
         if !file_systems[resolved.mount_index]
             .file_system
             .supports_confined_namespace()
@@ -507,15 +742,14 @@ impl VirtualFileSystem {
                 | AttributeFlags::Group
                 | AttributeFlags::Permissions,
         );
-        Self::target_attributes(&file_systems, &mut resolved, &mut attributes).await?;
-        if attributes.get_kind() != Some(&Kind::Directory) {
-            return Err(IoErrorKind::NotADirectory);
+        Self::target_attributes(file_systems, resolved, &mut attributes).await?;
+        match attributes.get_kind() {
+            Some(Kind::Directory) => {}
+            Some(Kind::SymbolicLink) => return Err(IoErrorKind::SymlinkLoop),
+            _ => return Err(IoErrorKind::NotADirectory),
         }
-        self.check_attributes_permissions(&attributes, Permission::Execute, user)
-            .await?;
-        self.validate_confined_root(&file_systems, &resolved.path, user, task)
-            .await?;
-        Ok(resolved.path.as_ref().to_owned())
+        self.check_attributes_permissions(&attributes, permission, user)
+            .await
     }
 
     pub async fn open_directory<'a>(
@@ -545,7 +779,7 @@ impl VirtualFileSystem {
         path: &impl AsRef<Path>,
         root: &Path,
     ) -> Result<Directory<'a>> {
-        self.open_directory_with_root(task, path.as_ref(), Some(root), true)
+        self.open_directory_with_root(task, path.as_ref(), Some(LookupRoot::Path(root)), true)
             .await
     }
 
@@ -558,15 +792,20 @@ impl VirtualFileSystem {
         root: &Path,
         follow_final: bool,
     ) -> Result<Directory<'a>> {
-        self.open_directory_with_root(task, path.as_ref(), Some(root), follow_final)
-            .await
+        self.open_directory_with_root(
+            task,
+            path.as_ref(),
+            Some(LookupRoot::Path(root)),
+            follow_final,
+        )
+        .await
     }
 
     async fn open_directory_with_root<'a>(
         &'a self,
         task: TaskIdentifier,
         path: &Path,
-        root: Option<&Path>,
+        root: Option<LookupRoot<'_>>,
         follow_final: bool,
     ) -> Result<Directory<'a>> {
         let mut file_systems = self.file_systems.write().await;
@@ -592,7 +831,10 @@ impl VirtualFileSystem {
             return Err(IoErrorKind::NotADirectory);
         }
 
-        if !resolved.path.is_root() {
+        if !resolved.path.is_root()
+            && !matches!(root, Some(LookupRoot::Pinned(root))
+                if resolved.path.as_str() == root.path.as_str())
+        {
             self.check_target_parent_permissions(
                 &file_systems,
                 &mut resolved,
@@ -624,39 +866,42 @@ impl VirtualFileSystem {
             }
         }
 
-        let context = if let Some(directory_handle) = resolved.current_directory.take() {
-            directory_handle.into_context()
-        } else if let Some(parent) = resolved.parent_directory.as_ref() {
-            let entry_name = resolved.entry_name(&file_systems)?;
-            let mut context = Context::new_empty();
-            poll(|| {
-                file_systems[resolved.mount_index]
-                    .file_system
-                    .lookup_directory_entry(parent.context(), entry_name, &mut context)
-            })
-            .await?;
-            context
+        let context = Self::open_resolved_directory_context(&file_systems, &mut resolved).await?;
+        Ok(self.directory_from_context(&mut file_systems[resolved.mount_index], context))
+    }
+
+    async fn open_resolved_directory_context(
+        file_systems: &FileSystemsArray,
+        resolved: &mut ResolvedTarget<'_>,
+    ) -> Result<Context> {
+        let backend = file_systems[resolved.mount_index].file_system;
+        if let Some(directory_handle) = resolved.current_directory.take() {
+            return Ok(directory_handle.into_context());
+        }
+        let mut context = Context::new_empty();
+        if let Some(parent) = resolved.parent_directory.as_ref() {
+            let entry_name = resolved.entry_name(file_systems)?;
+            poll(|| backend.lookup_directory_entry(parent.context(), entry_name, &mut context))
+                .await?;
         } else {
-            let mut context = Context::new_empty();
-            let relative_path = resolved.relative_path(&file_systems)?;
-            poll(|| {
-                file_systems[resolved.mount_index]
-                    .file_system
-                    .lookup_directory(&mut context, relative_path)
-            })
-            .await?;
-            context
-        };
+            let relative_path = resolved.relative_path(file_systems)?;
+            poll(|| backend.lookup_directory(&mut context, relative_path)).await?;
+        }
+        Ok(context)
+    }
 
-        let internal_file_system = &mut file_systems[resolved.mount_index];
-        internal_file_system.reference_count += 1;
-
-        Ok(Directory::new(
+    fn directory_from_context<'a>(
+        &'a self,
+        mount: &mut InternalFileSystem,
+        context: Context,
+    ) -> Directory<'a> {
+        mount.reference_count += 1;
+        Directory::new(
             self,
-            internal_file_system.file_system,
+            mount.file_system,
             Flags::new(AccessFlags::Read, None, None),
             context,
-        ))
+        )
     }
 
     /// Check the caller's parent-directory authorization for creating a file.
@@ -708,8 +953,10 @@ impl VirtualFileSystem {
             None,
             true,
             Permissions::FILE_DEFAULT,
+            false,
         )
         .await
+        .map(|(file, _)| file)
     }
 
     /// Open a file; a file that the call creates gets `permissions` instead of
@@ -722,8 +969,9 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         permissions: Permissions,
     ) -> Result<File<'a>> {
-        self.open_with_root(path.as_ref(), flags, task, None, true, permissions)
+        self.open_with_root(path.as_ref(), flags, task, None, true, permissions, false)
             .await
+            .map(|(file, _)| file)
     }
 
     /// Open a file, controlling whether a final symbolic link is followed.
@@ -741,8 +989,10 @@ impl VirtualFileSystem {
             None,
             follow_final,
             Permissions::FILE_DEFAULT,
+            false,
         )
         .await
+        .map(|(file, _)| file)
     }
 
     /// Resolve relative paths beneath the supplied root directory.
@@ -757,11 +1007,13 @@ impl VirtualFileSystem {
             path.as_ref(),
             flags,
             task,
-            Some(root),
+            Some(LookupRoot::Path(root)),
             true,
             Permissions::FILE_DEFAULT,
+            false,
         )
         .await
+        .map(|(file, _)| file)
     }
 
     /// Resolve relative paths beneath the supplied root directory, atomically
@@ -778,22 +1030,26 @@ impl VirtualFileSystem {
             path.as_ref(),
             flags,
             task,
-            Some(root),
+            Some(LookupRoot::Path(root)),
             follow_final,
             Permissions::FILE_DEFAULT,
+            false,
         )
         .await
+        .map(|(file, _)| file)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn open_with_root<'a>(
         &'a self,
         requested_path: &Path,
         flags: Flags,
         task: TaskIdentifier,
-        root: Option<&Path>,
+        root: Option<LookupRoot<'_>>,
         follow_final: bool,
         create_permissions: Permissions,
-    ) -> Result<File<'a>> {
+        include_statistics: bool,
+    ) -> Result<(File<'a>, Option<Statistics>)> {
         let authority = self.task_manager.authority(task).await.map_io_error()?;
 
         let mut file_systems = self.file_systems.write().await;
@@ -856,8 +1112,12 @@ impl VirtualFileSystem {
             }
         }
         if exists {
-            if attributes.get_kind() == Some(&Kind::SymbolicLink) {
-                return Err(IoErrorKind::SymlinkLoop);
+            match attributes.get_kind() {
+                Some(Kind::SymbolicLink) => return Err(IoErrorKind::SymlinkLoop),
+                Some(Kind::Directory) if matches!(root, Some(LookupRoot::Pinned(_))) => {
+                    return Err(IoErrorKind::IsADirectory);
+                }
+                _ => {}
             }
             self.check_target_permissions_with_parent(
                 &file_systems,
@@ -882,6 +1142,9 @@ impl VirtualFileSystem {
             )
             .await?;
             if replace_attribute_less {
+                if self.protects_pinned_path(&file_systems[resolved.mount_index], &resolved.path) {
+                    return Err(IoErrorKind::ResourceBusy);
+                }
                 // Remove the attribute-less entry left by the interrupted
                 // creation; the create below replaces it. The sticky-bit check
                 // of a plain remove does not apply here: an attribute-less
@@ -952,8 +1215,16 @@ impl VirtualFileSystem {
             Attributes::new().set_mask(AttributeFlags::Inode | AttributeFlags::Kind);
         Self::target_attributes(&file_systems, &mut resolved, &mut attributes).await?;
 
-        let kind = attributes.get_kind().ok_or(IoErrorKind::InputOutput)?;
+        let kind = *attributes.get_kind().ok_or(IoErrorKind::InputOutput)?;
         let inode = *attributes.get_inode().ok_or(IoErrorKind::InputOutput)?;
+        let statistics = if include_statistics && kind != Kind::File {
+            // Mounted executables expose their metadata on the namespace entry.
+            let mut attributes = Attributes::new().set_mask(AttributeFlags::all());
+            Self::target_attributes(&file_systems, &mut resolved, &mut attributes).await?;
+            Some(Statistics::from_attributes(&attributes).ok_or(IoErrorKind::InputOutput)?)
+        } else {
+            None
+        };
 
         let mut context = Context::new_empty();
 
@@ -1050,7 +1321,13 @@ impl VirtualFileSystem {
             _ => Err(IoErrorKind::Unsupported)?,
         };
 
-        Ok(file.with_authority(authority))
+        let mut file = file.with_authority(authority);
+        let statistics = if include_statistics && kind == Kind::File {
+            Some(file.get_statistics().await?)
+        } else {
+            statistics
+        };
+        Ok((file, statistics))
     }
 
     /// Drop the device or pipe registration taken for a mount whose backing
@@ -1338,7 +1615,7 @@ impl VirtualFileSystem {
     }
 
     pub async fn remove(&self, task: TaskIdentifier, path: impl AsRef<Path>) -> Result<()> {
-        self.remove_with_root(task, path.as_ref(), None).await
+        self.remove_with_root(task, path.as_ref(), None, true).await
     }
 
     /// Resolve relative paths beneath the supplied root directory.
@@ -1348,21 +1625,24 @@ impl VirtualFileSystem {
         path: impl AsRef<Path>,
         root: &Path,
     ) -> Result<()> {
-        self.remove_with_root(task, path.as_ref(), Some(root)).await
+        self.remove_with_root(task, path.as_ref(), Some(LookupRoot::Path(root)), true)
+            .await
     }
 
     async fn remove_with_root(
         &self,
         task: TaskIdentifier,
         path: &Path,
-        root: Option<&Path>,
+        root: Option<LookupRoot<'_>>,
+        allow_directory: bool,
     ) -> Result<()> {
         let file_systems = self.file_systems.write().await; // Serialize path resolution with removal.
         let user = self.task_manager.get_user(task).await.map_io_error()?;
         let mut resolved = self
             .resolve_path_with_root(&file_systems, path, false, false, user, task, root)
             .await?;
-        if root.is_some_and(|root| resolved.path.as_str() == root.as_str())
+        // Protect the mount table conservatively if an open directory has moved.
+        if root.is_some_and(|root| resolved.path.as_str() == root.path().as_str())
             || Self::protects_mount(&file_systems, &resolved.path, true)
         {
             return Err(IoErrorKind::ResourceBusy);
@@ -1396,6 +1676,13 @@ impl VirtualFileSystem {
                 Err(IoErrorKind::MissingAttribute) => (0, Kind::File),
                 Err(error) => return Err(error),
             };
+
+        if !allow_directory && kind == Kind::Directory {
+            return Err(IoErrorKind::IsADirectory);
+        }
+        if self.protects_pinned_path(&file_systems[resolved.mount_index], &resolved.path) {
+            return Err(IoErrorKind::ResourceBusy);
+        }
 
         if kind == Kind::Pipe {
             let mut named_pipes = self.pipes.write().await;
@@ -1445,7 +1732,7 @@ impl VirtualFileSystem {
         self.create_directory_with_root(
             task,
             path.as_ref(),
-            Some(root),
+            Some(LookupRoot::Path(root)),
             Permissions::DIRECTORY_DEFAULT,
         )
         .await
@@ -1455,7 +1742,7 @@ impl VirtualFileSystem {
         &self,
         task: TaskIdentifier,
         path: &Path,
-        root: Option<&Path>,
+        root: Option<LookupRoot<'_>>,
         permissions: Permissions,
     ) -> Result<()> {
         let file_systems = self.file_systems.write().await; // Serialize path resolution with creation.
@@ -1466,7 +1753,7 @@ impl VirtualFileSystem {
 
         // A mount point or confinement root always exists.
         if resolved.path.is_root()
-            || root.is_some_and(|root| resolved.path.as_str() == root.as_str())
+            || root.is_some_and(|root| resolved.path.as_str() == root.path().as_str())
             || resolved.relative_path(&file_systems)?.is_root()
         {
             return Err(IoErrorKind::AlreadyExists);
@@ -1505,6 +1792,9 @@ impl VirtualFileSystem {
         .await?;
 
         if replace_attribute_less {
+            if self.protects_pinned_path(&file_systems[resolved.mount_index], &resolved.path) {
+                return Err(IoErrorKind::ResourceBusy);
+            }
             // Remove the attribute-less entry left by the interrupted
             // creation; the create below replaces it. The sticky-bit check of
             // a plain remove does not apply here: an attribute-less entry has
@@ -1578,7 +1868,7 @@ impl VirtualFileSystem {
         link: &Path,
         root: &Path,
     ) -> Result<()> {
-        self.create_symlink_with_root(task, target, link, Some(root))
+        self.create_symlink_with_root(task, target, link, Some(LookupRoot::Path(root)))
             .await
     }
 
@@ -1587,7 +1877,7 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         target: &Path,
         link: &Path,
-        root: Option<&Path>,
+        root: Option<LookupRoot<'_>>,
     ) -> Result<()> {
         // Caller input is validated first and reported with the kind that
         // describes the argument; `CorruptData` is reserved for stored link
@@ -1618,7 +1908,7 @@ impl VirtualFileSystem {
         if resolved_link.path.is_root() || resolved_link.relative_path(&file_systems)?.is_root() {
             return Err(IoErrorKind::InvalidPath);
         }
-        if root.is_some_and(|root| resolved_link.path.as_str() == root.as_str()) {
+        if root.is_some_and(|root| resolved_link.path.as_str() == root.path().as_str()) {
             return Err(IoErrorKind::AlreadyExists);
         }
         self.check_target_parent_permissions(
@@ -1891,7 +2181,7 @@ impl VirtualFileSystem {
         buffer: &mut [u8],
         root: &Path,
     ) -> Result<usize> {
-        self.read_symlink_with_root(task, link, buffer, Some(root))
+        self.read_symlink_with_root(task, link, buffer, Some(LookupRoot::Path(root)))
             .await
     }
 
@@ -1900,7 +2190,7 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         link: &Path,
         buffer: &mut [u8],
-        root: Option<&Path>,
+        root: Option<LookupRoot<'_>>,
     ) -> Result<usize> {
         if !link.is_valid() || (root.is_none() && !link.is_absolute()) || link.is_root() {
             return Err(IoErrorKind::InvalidPath);
@@ -2015,8 +2305,8 @@ impl VirtualFileSystem {
             task,
             old_path.as_ref(),
             new_path.as_ref(),
-            Some(old_root),
-            Some(new_root),
+            Some(LookupRoot::Path(old_root)),
+            Some(LookupRoot::Path(new_root)),
         )
         .await
     }
@@ -2026,8 +2316,8 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         old_path: &Path,
         new_path: &Path,
-        old_root: Option<&Path>,
-        new_root: Option<&Path>,
+        old_root: Option<LookupRoot<'_>>,
+        new_root: Option<LookupRoot<'_>>,
     ) -> Result<()> {
         let file_systems = self.file_systems.write().await; // Serialize source/destination resolution with rename.
         let user = self.task_manager.get_user(task).await.map_io_error()?;
@@ -2037,21 +2327,26 @@ impl VirtualFileSystem {
         let mut new_resolved = self
             .resolve_path_with_root(&file_systems, new_path, false, true, user, task, new_root)
             .await?;
-        if old_root.is_some_and(|root| old_resolved.path.as_str() == root.as_str())
-            || new_root.is_some_and(|root| new_resolved.path.as_str() == root.as_str())
+        // Protect the mount table conservatively if an open directory has moved.
+        if old_root.is_some_and(|root| old_resolved.path.as_str() == root.path().as_str())
+            || new_root.is_some_and(|root| new_resolved.path.as_str() == root.path().as_str())
             || Self::protects_mount(&file_systems, &old_resolved.path, true)
             || Self::protects_mount(&file_systems, &new_resolved.path, true)
         {
             return Err(IoErrorKind::ResourceBusy);
         }
-        // A directory cannot move beneath itself. The backends do not check:
-        // LittleFS would detach the whole subtree from the hierarchy.
-        let source = old_resolved.path.as_str().trim_end_matches('/');
-        if new_resolved.path.as_str().len() > source.len()
-            && new_resolved.path.as_str().starts_with(source)
-            && new_resolved.path.as_str().as_bytes()[source.len()] == b'/'
+        // The backend checks actual ancestry for an open directory that can move.
+        // Path-based backends such as LittleFS need the VFS check.
+        if !old_root.is_some_and(LookupRoot::is_handle_relative)
+            && !new_root.is_some_and(LookupRoot::is_handle_relative)
         {
-            return Err(IoErrorKind::InvalidArgument);
+            let source = old_resolved.path.as_str().trim_end_matches('/');
+            if new_resolved.path.as_str().len() > source.len()
+                && new_resolved.path.as_str().starts_with(source)
+                && new_resolved.path.as_str().as_bytes()[source.len()] == b'/'
+            {
+                return Err(IoErrorKind::InvalidArgument);
+            }
         }
 
         if old_resolved.mount_index != new_resolved.mount_index {
@@ -2086,7 +2381,14 @@ impl VirtualFileSystem {
             Err(error) => return Err(error),
         }
 
-        let target_file_system = file_systems[old_resolved.mount_index].file_system;
+        let mount = &file_systems[old_resolved.mount_index];
+        if old_resolved.path.as_str() != new_resolved.path.as_str()
+            && (self.protects_pinned_path(mount, &old_resolved.path)
+                || self.protects_pinned_path(mount, &new_resolved.path))
+        {
+            return Err(IoErrorKind::ResourceBusy);
+        }
+        let target_file_system = mount.file_system;
         if let (Some(old_parent), Some(new_parent)) = (
             old_resolved.parent_directory.as_ref(),
             new_resolved.parent_directory.as_ref(),
@@ -2145,8 +2447,8 @@ impl VirtualFileSystem {
             existing.as_ref(),
             follow_existing,
             new_path.as_ref(),
-            Some(existing_root),
-            Some(new_root),
+            Some(LookupRoot::Path(existing_root)),
+            Some(LookupRoot::Path(new_root)),
         )
         .await
     }
@@ -2157,8 +2459,8 @@ impl VirtualFileSystem {
         existing: &Path,
         follow_existing: bool,
         new_path: &Path,
-        existing_root: Option<&Path>,
-        new_root: Option<&Path>,
+        existing_root: Option<LookupRoot<'_>>,
+        new_root: Option<LookupRoot<'_>>,
     ) -> Result<()> {
         let file_systems = self.file_systems.write().await; // Serialize source/destination resolution with the link.
         let user = self.task_manager.get_user(task).await.map_io_error()?;
@@ -2279,7 +2581,7 @@ impl VirtualFileSystem {
             task,
             path.as_ref(),
             follow_final,
-            Some(root),
+            Some(LookupRoot::Path(root)),
         )
         .await
     }
@@ -2289,7 +2591,7 @@ impl VirtualFileSystem {
         task: TaskIdentifier,
         path: &Path,
         follow_final: bool,
-        root: Option<&Path>,
+        root: Option<LookupRoot<'_>>,
     ) -> Result<Statistics> {
         let file_systems = self.file_systems.read().await;
         let user = self.task_manager.get_user(task).await.map_io_error()?;
@@ -2582,7 +2884,7 @@ impl VirtualFileSystem {
                 false,
                 user,
                 task,
-                Some(root),
+                Some(LookupRoot::Path(root)),
             )
             .await?;
         let mut attributes = Attributes::new();

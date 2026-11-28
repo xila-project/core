@@ -39,14 +39,19 @@ static uint32_t open_flags(int flags) {
         native |= XILA_OPEN_APPEND;
     if (flags & O_NONBLOCK)
         native |= XILA_OPEN_NON_BLOCKING;
+    if (flags & O_NOFOLLOW)
+        native |= XILA_OPEN_NO_FOLLOW;
     return native;
 }
 
 /* A directory descriptor is read-only: callers have rejected every write access mode. */
-static int open_directory(const struct xila_path *path, uint8_t flags) {
+static int open_directory(const struct xila_path *path, uint8_t flags, int open_flags) {
     XilaDirectory *directory = NULL;
+    uint32_t rights = XILA_RIGHT_READ;
+    if (open_flags & O_NOFOLLOW)
+        rights |= XILA_DIRECTORY_NO_FOLLOW;
     XilaStatus status = xila_directory_open(path->directory, path->relative, path->length,
-                                            XILA_RIGHT_READ, &directory);
+                                            rights, &directory);
     if (status != XILA_STATUS_OK)
         return xila_fail(status);
     int fd = xila_fd_allocate(directory, XILA_FD_DIRECTORY, flags);
@@ -63,7 +68,7 @@ int openat(int dirfd, const char *path, int flags, ...) {
     uint8_t descriptor_flags = (flags & O_CLOEXEC) ? XILA_FD_CLOEXEC : 0;
     int read_only = (flags & O_ACCMODE) == O_RDONLY && !(flags & (O_CREAT | O_TRUNC));
     if (flags & O_DIRECTORY)
-        return (flags & O_ACCMODE) == O_RDONLY ? open_directory(&resolved, descriptor_flags)
+        return (flags & O_ACCMODE) == O_RDONLY ? open_directory(&resolved, descriptor_flags, flags)
                                                : xila_fail_errno(EISDIR);
 
     XilaFile *file = NULL;
@@ -73,7 +78,7 @@ int openat(int dirfd, const char *path, int flags, ...) {
        which a file open rejects as an invalid argument. */
     if (read_only && (status == XILA_STATUS_IS_A_DIRECTORY ||
                       (status == XILA_STATUS_INVALID_ARGUMENT && resolved.length == 0)))
-        return open_directory(&resolved, descriptor_flags);
+        return open_directory(&resolved, descriptor_flags, flags);
     if (status == XILA_STATUS_INVALID_ARGUMENT && resolved.length == 0)
         return xila_fail_errno(EISDIR); /* the root opened for writing */
     if (status != XILA_STATUS_OK)

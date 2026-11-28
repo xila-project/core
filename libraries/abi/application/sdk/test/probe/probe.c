@@ -82,6 +82,14 @@ static int root(void) {
     CHECK("O_DIRECTORY for writing", open("/", O_WRONLY | O_DIRECTORY) == -1 && errno == EISDIR);
     CHECK("O_DIRECTORY read-write", open("/", O_RDWR | O_DIRECTORY) == -1 && errno == EISDIR);
 
+    fd = open("/file-link", O_RDONLY);
+    CHECK("follow file link", fd >= 0 && close(fd) == 0);
+    CHECK("no follow file link", open("/file-link", O_RDONLY | O_NOFOLLOW) == -1 && errno == ELOOP);
+    fd = open("/directory-link", O_RDONLY | O_DIRECTORY);
+    CHECK("follow directory link", fd >= 0 && close(fd) == 0);
+    CHECK("no follow directory link",
+          open("/directory-link", O_RDONLY | O_DIRECTORY | O_NOFOLLOW) == -1 && errno == ELOOP);
+
     /* A directory entry has a nonzero inode, the same one on every pass. */
     CHECK("mkdir", mkdir("/probe-dir", 0755) == 0);
     int made = open("/probe-dir/a", O_WRONLY | O_CREAT, 0644);
@@ -109,6 +117,8 @@ static int root(void) {
     int inside = open("/probe-dir", O_RDONLY | O_DIRECTORY);
     CHECK("open dir", inside >= 0);
     CHECK("openat escape", openat(inside, "../probe-dir/a", O_RDONLY) == -1 && errno == EACCES);
+    int same = openat(inside, "./.", O_RDONLY);
+    CHECK("openat dot", same >= 0 && close(same) == 0);
     int ok = openat(inside, "a", O_RDONLY);
     CHECK("openat inside", ok >= 0 && close(ok) == 0);
     CHECK("close dir", close(inside) == 0);

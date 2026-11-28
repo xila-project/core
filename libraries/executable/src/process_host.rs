@@ -3,7 +3,9 @@ use alloc::boxed::Box;
 use file_system::IntoIoErrorKind;
 use virtual_file_system::VirtualFileSystem;
 
-use crate::{Error, ExecutableContext, Home, Launch, NetworkRights, Standard, execute_inner};
+use crate::{
+    Error, ExecutableContext, ExecutableSource, Launch, NetworkRights, Standard, execute_inner,
+};
 
 /// The status a failed spawn reports to the native caller.
 fn status(error: Error) -> Status {
@@ -51,7 +53,9 @@ impl ProcessHost for ExecutableContext {
     fn spawn(&'static self, request: SpawnRequest) -> SpawnFuture {
         Box::pin(async move {
             let SpawnRequest {
-                path,
+                name,
+                executable,
+                statistics,
                 arguments,
                 environment,
                 standard_input,
@@ -62,12 +66,13 @@ impl ProcessHost for ExecutableContext {
                 ..
             } = request;
             let standard = Standard::new(self, standard_input, standard_output, standard_error);
+            #[cfg(not(feature = "native-dev"))]
+            let _ = home;
             let launch = Launch {
                 environment,
-                home: home.map(|grant| Home {
-                    path: grant.path,
-                    rights: grant.rights,
-                }),
+                home: None,
+                #[cfg(feature = "native-dev")]
+                pinned_home: home,
                 identity: None,
                 // Checked against the parent's rights by `xila_process_spawn`.
                 network: u8::try_from(network)
@@ -76,9 +81,20 @@ impl ProcessHost for ExecutableContext {
                     .ok_or(Status::InvalidArgument)?,
             };
             // The child's coroutine must stay on the spawner's executor.
-            execute_inner(self, &path, arguments, standard, None, launch)
-                .await
-                .map_err(status)
+            execute_inner(
+                self,
+                ExecutableSource::Opened {
+                    name: &name,
+                    file: executable,
+                    statistics,
+                },
+                arguments,
+                standard,
+                None,
+                launch,
+            )
+            .await
+            .map_err(status)
         })
     }
 }

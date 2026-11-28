@@ -78,6 +78,11 @@ impl<'a> Directory<'a> {
         result
     }
 
+    pub(crate) fn into_blocking_directory(mut self) -> SynchronousDirectory<'a> {
+        self.0.flags = self.0.flags.set_status(StateFlags::empty());
+        self.0
+    }
+
     pub fn into_synchronous_directory(self) -> SynchronousDirectory<'a> {
         self.0
     }

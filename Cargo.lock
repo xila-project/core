@@ -2120,6 +2120,7 @@ dependencies = [
  "xila-file-system",
  "xila-graphics",
  "xila-io-error",
+ "xila-log",
  "xila-memory-file-system",
  "xila-network",
  "xila-stackful",

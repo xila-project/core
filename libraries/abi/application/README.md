@@ -4,13 +4,10 @@
 on Xila. It is `no_std` with `alloc`; Wasm guests keep their separate WASI
 implementation. The facade does not enable this crate by default.
 
-The interface prioritizes RAM, flash and CPU footprint. Files wrap an owned
-VFS file handle, and directories retain only a VFS reference, task identity,
-canonical absolute path and one byte of rights. There is no global handle table,
-lookup or ambient context. Distinct opaque `XilaFile` and `XilaDirectory` pointer
-types catch accidental type confusion in C. Read and write use caller buffers
-directly, without temporary allocations or hot-path logging. Opening allocates
-only the joined path and returned object, in addition to underlying VFS costs.
+Files wrap an owned virtual file system handle. Directory capabilities retain an
+open root directory, a task identity and the granted rights. The C types
+`XilaFile` and `XilaDirectory` are opaque. Reads and writes use caller buffers
+directly.
 
 ## Cooperative async bridging
 
@@ -26,16 +23,32 @@ keep their single-poll behavior outside a coroutine. Nonblocking file I/O
 keeps that behavior inside coroutines as well. A pending file operation or
 an unavailable UDP datagram returns `WouldBlock` on these probe paths.
 
-Directory capabilities bound filesystem authority: paths are UTF-8 pointer/length
-pairs, relative to the supplied capability. Absolute paths, parent components,
-embedded NUL and invalid UTF-8 are rejected; dot and empty components are
-canonicalized. Where an entry is required (file open, create, remove, rename), a path naming the capability itself (`""`, `"."`) is invalid. Child rights can only decrease.
-Read needs the READ right; write, create, truncate and append need the WRITE
-right, and truncate or append are only valid with `XILA_OPEN_WRITE`. Native code remains trusted: pointers must be live, calls on each object serialized,
-and a path capability does not pin an inode against concurrent namespace changes.
-VFS symbolic links are followed, including absolute targets: the lexical checks
-are not a symlink sandbox. Strict subtree confinement needs a future VFS
-root-constrained resolver; loaders must control the namespace they hand out.
+Directory capability paths are UTF-8 pointer and length pairs relative to the
+open directory. Absolute paths, embedded NUL bytes and invalid UTF-8 fail.
+Lookup follows relative symbolic links within the directory. It resolves
+parent components after link substitution. An absolute link target or a
+parent component that leaves the directory returns `PathEscapesRoot`. A lookup
+that follows more than 40 links returns `SymlinkLoop`.
+
+The directory stays pinned until the last capability that shares it closes.
+On backends with directory entry operations, lookup starts from the open
+directory handle after a rename. A lookup from that handle returns
+`PathEscapesRoot` if the mount table would send it to another file system.
+The mount table uses paths and cannot verify that the mount is beneath the
+open handle. The mount table can conservatively reject a rename or removal
+with `ResourceBusy` if the original path now names a mount or its ancestor.
+In-process backends that use paths, such as
+LittleFS, reject rename or removal of a pinned directory or its ancestors
+with `ResourceBusy`. Host file systems that cannot confine lookup, including
+HostFS on macOS and Windows, return `PathEscapesRoot`.
+
+Read needs the READ right. Write, create, truncate and append need the WRITE
+right. Truncate and append also require `XILA_OPEN_WRITE`. Use
+`XILA_OPEN_NO_FOLLOW` to reject a final symbolic link when opening a file.
+Include `XILA_DIRECTORY_NO_FOLLOW` with the requested rights to do the same
+when opening a child directory. Child rights can only decrease. Native code
+remains trusted. Pointers must be live and callers must serialize access to
+each object.
 
 Errors are explicit `XilaStatus` values with no errno or implicit task state.
 Required null pointers fail with InvalidArgument; zero-sized I/O permits a null
@@ -432,8 +445,8 @@ refer to the supplied directory. Symlink creation is deliberately not exposed.
 `XILA_REMOVE_DIRECTORY` permits directories in addition to files; without it,
 directory removal returns IsADirectory. Removal does not follow the final link.
 Rename requires the same VFS and task for both capabilities and follows backend
-replacement semantics. Namespace capabilities remain subject to the concurrent
-namespace and symlink limitations described above.
+replacement semantics. Rename operates on the final entries without following
+their symbolic links.
 
 `XilaStatistics` is a 72-byte `repr(C)` struct. Its fields in order are six
 `uint32_t` values (`size`, `kind`, `permissions`, `owner_user`, `owner_group`,
@@ -559,9 +572,12 @@ panic handler. For the same reasons `xila-sys` does not compile `ProcessAllocato
 
 `LinkedOptions` has three settings. `stack_size` is the usable coroutine stack, 4 KiB by
 default. `network` is the set of network rights, none by default. `home` is the home
-directory capability: `LinkedHome::User` (the default) is the home that the account of the
-task's user records, `LinkedHome::None` grants none, and `LinkedHome::Path` grants a
-directory.
+directory capability. `LinkedHome::User` (the default) opens the directory recorded in the
+user's account. If the directory cannot be found (it is missing or is a dangling symbolic
+link), the host logs a warning with the account identifier and starts the program without a
+home capability. An invalid account home or any other directory open error stops
+the launch. `LinkedHome::None` grants no capability. `LinkedHome::Path` grants a specified
+directory and requires a successful open.
 
 Several linked programs can run on one executor at the same time, so a program must not keep
 its startup block in a global. `__xila_current_startup()` returns the block of the process that

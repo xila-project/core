@@ -113,6 +113,8 @@ pub struct Launch {
     pub environment: Option<Vec<EnvironmentVariable>>,
     /// Home directory capability for programs that take one (native executables).
     pub home: Option<Home>,
+    #[cfg(feature = "native-dev")]
+    pub(crate) pinned_home: Option<abi_application::HomeGrant>,
     /// The user and group of the new task, replacing the ones it inherits from its
     /// parent. Deciding who may run a program as another user is the caller's job
     /// (see [`Launch::with_identity`]).

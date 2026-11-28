@@ -325,12 +325,14 @@ int32_t process_parent_main(const XilaStartup *startup) {
     child = NULL;
     CHECK(api->process_spawn(me, startup->home, "missing", 7, &spawn, &child) == XILA_STATUS_NOT_FOUND);
     CHECK(api->process_spawn(NULL, startup->home, "exit", 4, &spawn, &child) == XILA_STATUS_INVALID_ARGUMENT);
+    CHECK(api->process_spawn(me, startup->home, "absolute-program", 16, &spawn, &child) ==
+          XILA_STATUS_PATH_ESCAPES_ROOT);
     CHECK(api->process_spawn(me, NULL, "exit", 4, &spawn, &child) == XILA_STATUS_INVALID_ARGUMENT);
     CHECK(api->process_spawn(me, startup->home, "exit", 4, NULL, &child) == XILA_STATUS_INVALID_ARGUMENT);
     CHECK(api->process_spawn(me, startup->home, "exit", 4, &spawn, NULL) == XILA_STATUS_INVALID_ARGUMENT);
     CHECK(api->process_spawn(me, startup->home, "", 0, &spawn, &child) == XILA_STATUS_INVALID_ARGUMENT);
     CHECK(api->process_spawn(me, startup->home, "/exit", 5, &spawn, &child) == XILA_STATUS_INVALID_ARGUMENT);
-    CHECK(api->process_spawn(me, startup->home, "../exit", 7, &spawn, &child) == XILA_STATUS_INVALID_ARGUMENT);
+    CHECK(api->process_spawn(me, startup->home, "../exit", 7, &spawn, &child) == XILA_STATUS_PATH_ESCAPES_ROOT);
     XilaSpawn bad = spawn;
     bad.size = sizeof(bad) - 1;
     CHECK(api->process_spawn(me, startup->home, "exit", 4, &bad, &child) == XILA_STATUS_INVALID_ARGUMENT);

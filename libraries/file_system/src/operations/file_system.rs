@@ -79,7 +79,8 @@ pub trait FileSystemOperations: FileOperations + DirectoryOperations + MountOper
     }
 
     /// Rename `source_name` inside `source_parent` to `destination_name` inside
-    /// `destination_parent` without following symbolic links.
+    /// `destination_parent` without following symbolic links. Reject a move
+    /// into the source directory or one of its descendants.
     fn rename_entry(
         &self,
         _source_parent: &Context,

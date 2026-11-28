@@ -101,9 +101,11 @@ impl FormatHandler for NativeFormat {
                 process: Some(ProcessLaunch {
                     host: context,
                     environment: launch.environment,
-                    home: launch.home.map(|home| HomeGrant {
-                        path: home.path,
-                        rights: home.rights,
+                    home: launch.pinned_home.or_else(|| {
+                        launch.home.map(|home| HomeGrant::Path {
+                            path: home.path,
+                            rights: home.rights,
+                        })
                     }),
                     network: u32::from(launch.network.bits()),
                 }),

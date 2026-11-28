@@ -2,24 +2,35 @@ use crate::{
     Status,
     registry::{self, Handle},
 };
-use alloc::string::String;
 use core::{ffi::c_char, slice, str};
-use file_system::PathOwned;
-use virtual_file_system::VirtualFileSystem;
+use file_system::Path;
+use synchronization::Arc;
+use virtual_file_system::{DirectoryCapability, VirtualFileSystem};
 
 pub const XILA_RIGHT_READ: u32 = 1;
 pub const XILA_RIGHT_WRITE: u32 = 2;
+/// Pass with directory open rights to reject a final symbolic link.
+pub const XILA_DIRECTORY_NO_FOLLOW: u32 = 4;
 
 /// Opaque path capability. Native callers must serialize access and preserve ownership.
 pub struct Directory {
     pub(crate) vfs: &'static VirtualFileSystem,
     pub(crate) task: task::TaskIdentifier,
-    pub(crate) path: PathOwned,
+    pub(crate) root: Arc<DirectoryCapability<'static>>,
     pub(crate) rights: u8,
 }
 impl Directory {
-    /// Validate an absolute directory and retain its canonical path and authority.
+    /// Validate an absolute directory and pin it for confined lookups.
     pub fn new(
+        vfs: &'static VirtualFileSystem,
+        task: task::TaskIdentifier,
+        path: &str,
+        rights: u32,
+    ) -> Result<Self, Status> {
+        crate::suspend_on_cancellable(Self::new_async(vfs, task, path, rights))
+    }
+
+    pub(crate) async fn new_async(
         vfs: &'static VirtualFileSystem,
         task: task::TaskIdentifier,
         path: &str,
@@ -29,41 +40,31 @@ impl Directory {
         if !path.starts_with('/') {
             return Err(Status::InvalidArgument);
         }
-        let path = canonical("/", &path[1..], false)?;
-        Self::validated(vfs, task, path, rights as u8)
-    }
-    fn validated(
-        vfs: &'static VirtualFileSystem,
-        task: task::TaskIdentifier,
-        path: PathOwned,
-        rights: u8,
-    ) -> Result<Self, Status> {
-        // Open and close in one suspension: the listing and the path exist only inside the
-        // future, which a cancellation drops in place, so neither sits in the program's
-        // frames. The future gives the path back once the directory is validated.
-        let path = crate::suspend_on_cancellable(async move {
-            virtual_file_system::Directory::open(vfs, task, &path)
-                .await?
-                .close(vfs)
-                .await
-                .map(|()| path)
-        })
-        .map_err(Status::from)?;
-        Ok(Self::granted(vfs, task, path, rights))
-    }
-    /// A capability a process was granted for a directory the granter holds already,
-    /// bound to the process's own task. The granter validated it, so this does not.
-    pub(crate) fn granted(
-        vfs: &'static VirtualFileSystem,
-        task: task::TaskIdentifier,
-        path: PathOwned,
-        rights: u8,
-    ) -> Self {
-        Self {
+        let trimmed = path.trim_end_matches('/');
+        let path = if trimmed.is_empty() {
+            Path::ROOT
+        } else {
+            Path::new(trimmed)
+        };
+        if !path.is_valid() {
+            return Err(Status::InvalidArgument);
+        }
+        let root = Arc::new(vfs.pin_directory(task, path).await?);
+        Ok(Self {
             vfs,
             task,
-            path,
-            rights,
+            root,
+            rights: rights as u8,
+        })
+    }
+
+    /// Grant the same directory to a child, which will use its own task authority.
+    pub(crate) fn duplicate(&self) -> Self {
+        Self {
+            vfs: self.vfs,
+            task: self.task,
+            root: self.root.clone(),
+            rights: self.rights,
         }
     }
     /// Hand the capability to a program as an owned pointer. Inside a native process it is
@@ -93,29 +94,20 @@ pub(crate) fn validate_rights(rights: u32) -> Result<(), Status> {
         Ok(())
     }
 }
-/// Join `path` below `base`. With `entry`, the path must name an entry below the
-/// capability, never the capability itself (`""`, `"."`, `"./"`), so that it cannot
-/// be opened as a file, removed or renamed.
-pub(crate) fn canonical(base: &str, path: &str, entry: bool) -> Result<PathOwned, Status> {
-    if path.starts_with('/')
-        || path.contains('\0')
-        || path.split('/').any(|part| part == "..")
-        || (entry && path.split('/').all(|part| part.is_empty() || part == "."))
+/// Validate syntax and leave all components for the confined resolver.
+pub(crate) fn relative_path(path: &str, entry: bool) -> Result<&Path, Status> {
+    let path = Path::new(path);
+    if path.is_absolute()
+        || !Path::new(path.as_str().trim_end_matches('/')).is_valid()
+        || (entry
+            && path
+                .as_str()
+                .split('/')
+                .all(|part| part.is_empty() || part == "."))
     {
         return Err(Status::InvalidArgument);
     }
-    let mut joined = String::with_capacity(base.len() + path.len() + 1);
-    joined.push_str(base);
-    for part in path
-        .split('/')
-        .filter(|part| !part.is_empty() && *part != ".")
-    {
-        if !joined.ends_with('/') {
-            joined.push('/');
-        }
-        joined.push_str(part);
-    }
-    PathOwned::new(joined).ok_or(Status::InvalidArgument)
+    Ok(path)
 }
 #[inline]
 pub(crate) unsafe fn path_input<'a>(path: *const c_char, length: usize) -> Result<&'a str, Status> {
@@ -126,7 +118,8 @@ pub(crate) unsafe fn path_input<'a>(path: *const c_char, length: usize) -> Resul
         .map_err(|_| Status::InvalidArgument)
 }
 
-/// Open a relative directory; requested rights must be a subset of the parent's.
+/// Open a relative directory. Requested rights must be a subset of the parent's.
+/// Include XILA_DIRECTORY_NO_FOLLOW to reject a final symbolic link.
 /// # Safety
 /// Non-null objects must be live. Path must be readable for its length and output
 /// writable and aligned. Outputs must not overlap inputs. Calls must be serialized.
@@ -143,16 +136,28 @@ pub unsafe extern "C" fn xila_directory_open(
     // SAFETY: checked non-null above; the caller guarantees the object is live.
     let parent = unsafe { &*parent };
     let result = (|| {
+        let follow_final = rights & XILA_DIRECTORY_NO_FOLLOW == 0;
+        let rights = rights & !XILA_DIRECTORY_NO_FOLLOW;
         validate_rights(rights)?;
-        if rights & !(parent.rights as u32) != 0 {
+        if rights & !u32::from(parent.rights) != 0 {
             return Err(Status::PermissionDenied);
         }
-        let path = canonical(
-            parent.path.as_str(),
-            unsafe { path_input(path, path_length)? },
-            false,
-        )?;
-        Directory::validated(parent.vfs, parent.task, path, rights as u8)
+        // SAFETY: The caller supplies readable path bytes for path_length.
+        let path = relative_path(unsafe { path_input(path, path_length)? }, false)?;
+        crate::suspend_on_cancellable(async {
+            let root = Arc::new(
+                parent
+                    .root
+                    .pin_directory(parent.task, path, follow_final)
+                    .await?,
+            );
+            Ok(Directory {
+                vfs: parent.vfs,
+                task: parent.task,
+                root,
+                rights: rights as u8,
+            })
+        })
     })();
     match result {
         Ok(value) => {
@@ -173,24 +178,24 @@ pub unsafe extern "C" fn xila_directory_close(directory: *mut Directory) -> Stat
 }
 
 impl Directory {
-    pub(crate) unsafe fn resolve(
+    /// # Safety
+    /// Keep non-null path bytes readable for `length` and for the returned borrow.
+    /// Calls are serialized, and cancellation drops the waiting future before the process memory is released.
+    pub(crate) unsafe fn relative_path<'a>(
         &self,
         path: *const c_char,
         length: usize,
         right: u32,
         nonempty: bool,
-    ) -> Result<PathOwned, Status> {
+    ) -> Result<&'a Path, Status> {
         if path.is_null() {
             return Err(Status::InvalidArgument);
         }
         if u32::from(self.rights) & right == 0 {
             return Err(Status::PermissionDenied);
         }
-        canonical(
-            self.path.as_str(),
-            unsafe { path_input(path, length)? },
-            nonempty,
-        )
+        // SAFETY: The caller keeps the path bytes readable for the returned borrow.
+        relative_path(unsafe { path_input(path, length)? }, nonempty)
     }
 }
 
@@ -208,9 +213,9 @@ pub unsafe extern "C" fn xila_directory_create(
     // SAFETY: checked non-null above; the caller guarantees the object is live.
     let directory = unsafe { &*directory };
     let result = (|| {
-        let path = unsafe { directory.resolve(path, length, XILA_RIGHT_WRITE, true)? };
-        let (vfs, task) = (directory.vfs, directory.task);
-        crate::suspend_on_cancellable(async move { vfs.create_directory(task, &path).await })
+        // SAFETY: The caller supplies readable path bytes for length.
+        let path = unsafe { directory.relative_path(path, length, XILA_RIGHT_WRITE, true)? };
+        crate::suspend_on_cancellable(directory.root.create_directory(directory.task, path))
             .map_err(Status::from)
     })();
     result.map_or_else(|error| error, |()| Status::Ok)
@@ -234,19 +239,14 @@ pub unsafe extern "C" fn xila_directory_remove(
     // SAFETY: checked non-null above; the caller guarantees the object is live.
     let directory = unsafe { &*directory };
     let result = (|| {
-        let path = unsafe { directory.resolve(path, length, XILA_RIGHT_WRITE, true)? };
-        let (vfs, task) = (directory.vfs, directory.task);
-        crate::suspend_on_cancellable(async move {
-            // The VFS has a single remove primitive. A caller must explicitly permit
-            // directories.
-            if flags & XILA_REMOVE_DIRECTORY == 0
-                && vfs.get_link_statistics_for_task(task, &path).await?.kind
-                    == file_system::Kind::Directory
-            {
-                return Err(Status::IsADirectory);
-            }
-            vfs.remove(task, &path).await.map_err(Status::from)
-        })
+        // SAFETY: The caller supplies readable path bytes for length.
+        let path = unsafe { directory.relative_path(path, length, XILA_RIGHT_WRITE, true)? };
+        crate::suspend_on_cancellable(directory.root.remove(
+            directory.task,
+            path,
+            flags & XILA_REMOVE_DIRECTORY != 0,
+        ))
+        .map_err(Status::from)
     })();
     result.map_or_else(|error| error, |()| Status::Ok)
 }
@@ -269,13 +269,15 @@ pub unsafe extern "C" fn xila_directory_rename(
     // SAFETY: checked non-null above; the caller guarantees the objects are live.
     let (from, to) = unsafe { (&*from, &*to) };
     let result = (|| {
-        let from_path = unsafe { from.resolve(from_path, from_length, XILA_RIGHT_WRITE, true)? };
-        let to_path = unsafe { to.resolve(to_path, to_length, XILA_RIGHT_WRITE, true)? };
+        // SAFETY: The caller supplies readable source path bytes for from_length.
+        let from_path =
+            unsafe { from.relative_path(from_path, from_length, XILA_RIGHT_WRITE, true)? };
+        // SAFETY: The caller supplies readable destination path bytes for to_length.
+        let to_path = unsafe { to.relative_path(to_path, to_length, XILA_RIGHT_WRITE, true)? };
         if !core::ptr::eq(from.vfs, to.vfs) || from.task != to.task {
             return Err(Status::InvalidArgument);
         }
-        let (vfs, task) = (from.vfs, from.task);
-        crate::suspend_on_cancellable(async move { vfs.rename(task, &from_path, &to_path).await })
+        crate::suspend_on_cancellable(from.root.rename(from.task, from_path, &to.root, to_path))
             .map_err(Status::from)
     })();
     result.map_or_else(|error| error, |()| Status::Ok)

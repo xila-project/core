@@ -294,27 +294,12 @@ mod tests {
     }
     #[test]
     fn validation() {
-        for path in [
-            "/absolute",
-            "..",
-            "a/../b",
-            "x\0y",
-            "",
-            ".",
-            "./",
-            "./.",
-            "//",
-        ] {
-            assert_eq!(canonical("/root", path, true), Err(Status::InvalidArgument));
+        for path in ["/absolute", "x\0y", "", ".", "./", "./.", "//"] {
+            assert_eq!(relative_path(path, true), Err(Status::InvalidArgument));
         }
-        // Without `entry`, the capability itself may be named (directory open, statistics).
-        for path in ["", ".", "./"] {
-            assert_eq!(canonical("/root", path, false).unwrap().as_str(), "/root");
+        for path in ["", ".", "./", "..", "a/../b", "./a//./b/"] {
+            assert_eq!(relative_path(path, false).unwrap().as_str(), path);
         }
-        assert_eq!(
-            canonical("/root", "./a//./b/", true).unwrap().as_str(),
-            "/root/a/b"
-        );
         assert_eq!(validate_rights(4), Err(Status::InvalidArgument));
         for flags in [0, 8, 9, 128, u32::MAX, 1 | 16, 1 | 32] {
             assert_eq!(open_flags(flags, 3), Err(Status::InvalidArgument));

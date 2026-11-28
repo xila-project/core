@@ -1,3 +1,4 @@
+use super::DirectoryCapability;
 use crate::{
     AccessTimePolicy, IoErrorKind, Result, ResultExt, VirtualFileSystem, pipe::Pipe, poll,
 };
@@ -21,6 +22,25 @@ pub(super) struct InternalFileSystem {
     pub mount_point: PathOwned,
     pub access_time_policy: AccessTimePolicy,
     pub file_system: &'static dyn FileSystemOperations,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum LookupRoot<'a> {
+    Path(&'a Path),
+    Pinned(&'a DirectoryCapability<'a>),
+}
+
+impl<'a> LookupRoot<'a> {
+    pub fn is_handle_relative(self) -> bool {
+        matches!(self, Self::Pinned(directory) if !directory.pins_path)
+    }
+
+    pub fn path(self) -> &'a Path {
+        match self {
+            Self::Path(path) => path,
+            Self::Pinned(directory) => &directory.path,
+        }
+    }
 }
 
 pub(super) struct InternalBlockDevice {
@@ -145,6 +165,7 @@ struct ResolutionOptions<'a> {
     user: UserIdentifier,
     task: TaskIdentifier,
     root: Option<&'a Path>,
+    pinned_mount: Option<usize>,
 }
 
 pub(super) struct ConfinedRoot {
@@ -299,6 +320,7 @@ impl VirtualFileSystem {
                         user,
                         task,
                         root: None,
+                        pinned_mount: None,
                     },
                     None,
                 )
@@ -321,6 +343,7 @@ impl VirtualFileSystem {
                     user,
                     task,
                     root: None,
+                    pinned_mount: None,
                 },
                 None,
             )
@@ -526,7 +549,7 @@ impl VirtualFileSystem {
         allow_missing_final: bool,
         user: UserIdentifier,
         task: TaskIdentifier,
-        root: Option<&Path>,
+        root: Option<LookupRoot<'_>>,
     ) -> Result<ResolvedTarget<'a>> {
         let Some(root) = root else {
             return self
@@ -543,9 +566,48 @@ impl VirtualFileSystem {
         if path.is_absolute() {
             return Err(IoErrorKind::PathEscapesRoot);
         }
-        let confined_root = self
-            .validate_confined_root(file_systems, root, user, task)
+        let mut confined_root = match root {
+            LookupRoot::Path(path) => {
+                self.validate_confined_root(file_systems, path, user, task)
+                    .await?
+            }
+            LookupRoot::Pinned(directory) => {
+                if !core::ptr::eq(self, directory.virtual_file_system) {
+                    return Err(IoErrorKind::InvalidArgument);
+                }
+                let (mount, _, mount_index) =
+                    Self::get_file_system_from_path(file_systems, &directory.path)?;
+                let handle = &directory.directory;
+                if !core::ptr::eq(mount.file_system, handle.directory) {
+                    return Err(IoErrorKind::StaleHandle);
+                }
+                let current = if mount.file_system.supports_directory_entry_operations() {
+                    Some(OpenDirectoryHandle {
+                        file_system: mount.file_system,
+                        context: mount.file_system.clone_context(&handle.context)?,
+                        closed: false,
+                    })
+                } else {
+                    None
+                };
+                ConfinedRoot {
+                    path: directory.path.as_ref().clone(),
+                    mount_index,
+                    directory: current,
+                }
+            }
+        };
+        if matches!(root, LookupRoot::Pinned(_)) {
+            self.check_directory_execute_permission(
+                file_systems,
+                confined_root.mount_index,
+                &confined_root.path,
+                confined_root.directory.as_mut(),
+                user,
+                task,
+            )
             .await?;
+        }
 
         let require_directory = path.as_str().ends_with('/');
         let trimmed_path = path.as_str().trim_end_matches('/');
@@ -560,6 +622,9 @@ impl VirtualFileSystem {
         }
         let joined = PathOwned::try_from(joined).map_err(|_| IoErrorKind::InvalidPath)?;
         let root_path = confined_root.path.clone();
+        let pinned_mount = root
+            .is_handle_relative()
+            .then_some(confined_root.mount_index);
         let target = self
             .resolve_path_inner(
                 file_systems,
@@ -570,6 +635,7 @@ impl VirtualFileSystem {
                     user,
                     task,
                     root: Some(&root_path),
+                    pinned_mount,
                 },
                 Some(confined_root),
             )
@@ -636,6 +702,20 @@ impl VirtualFileSystem {
             task,
         )
         .await
+    }
+
+    fn get_lookup_mount<'mount, 'path>(
+        file_systems: &'mount FileSystemsArray,
+        path: &'path Path,
+        pinned_mount: Option<usize>,
+    ) -> Result<(&'mount InternalFileSystem, &'path Path, usize)> {
+        let selected = Self::get_file_system_from_path(file_systems, path)?;
+        // The mount table identifies entries by path. An open directory can move,
+        // so the table cannot establish that a mount lies under its handle.
+        if pinned_mount.is_some_and(|pinned| pinned != selected.2) {
+            return Err(IoErrorKind::PathEscapesRoot);
+        }
+        Ok(selected)
     }
 
     async fn resolve_path_inner<'a>(
@@ -728,7 +808,7 @@ impl VirtualFileSystem {
 
             let candidate_path = Path::from_str(&text[..component_end]);
             let (candidate_file_system, candidate_relative, candidate_mount_index) =
-                Self::get_file_system_from_path(file_systems, candidate_path)?;
+                Self::get_lookup_mount(file_systems, candidate_path, options.pinned_mount)?;
             if options.root.is_some()
                 && !candidate_file_system
                     .file_system
@@ -833,7 +913,13 @@ impl VirtualFileSystem {
                     return Err(IoErrorKind::PathEscapesRoot);
                 }
 
-                let (resolved, mount_index, current_directory) = if target.starts_with('/') {
+                // A relative target continues from the link's containing directory,
+                // so keep its open handle and parent handle: a later permission
+                // check must not re-resolve the recorded path by name, which can
+                // name a different directory after a rename.
+                let (resolved, mount_index, current_directory, parent_directory) = if target
+                    .starts_with('/')
+                {
                     let (root_file_system, _, root_mount) =
                         Self::get_file_system_from_path(file_systems, Path::ROOT)?;
                     let root_directory = if root_file_system
@@ -844,12 +930,13 @@ impl VirtualFileSystem {
                     } else {
                         None
                     };
-                    (String::from("/"), root_mount, root_directory)
+                    (String::from("/"), root_mount, root_directory, None)
                 } else {
                     (
                         String::from(&text[..parent_end]),
                         mount_index,
                         current_directory,
+                        parent_directory,
                     )
                 };
 
@@ -879,7 +966,7 @@ impl VirtualFileSystem {
                             target_buffer,
                             mount_index,
                             current_directory,
-                            parent_directory: None,
+                            parent_directory,
                             root_mount_index,
                             root_directory,
                         },
@@ -952,11 +1039,11 @@ impl VirtualFileSystem {
     async fn rewalk_handles_to_resolved(
         file_systems: &FileSystemsArray,
         state: &mut ResolutionState,
-        root: Option<&Path>,
+        options: ResolutionOptions<'_>,
     ) -> Result<()> {
         let resolved_path = Path::from_str(&state.resolved);
         let (target_file_system, relative_path, mount_index) =
-            Self::get_file_system_from_path(file_systems, resolved_path)?;
+            Self::get_lookup_mount(file_systems, resolved_path, options.pinned_mount)?;
         state.mount_index = mount_index;
         if !target_file_system
             .file_system
@@ -970,7 +1057,7 @@ impl VirtualFileSystem {
         let (mut current, walk_relative) = if let Some(root_directory) =
             state.root_directory.as_ref()
             && mount_index == state.root_mount_index
-            && let Some(root_path) = root
+            && let Some(root_path) = options.root
         {
             let suffix = resolved_path.strip_prefix(root_path).unwrap_or(Path::EMPTY);
             (root_directory.duplicate()?, suffix)
@@ -1041,7 +1128,7 @@ impl VirtualFileSystem {
                     }
                 }
                 state.pending.drain(..consumed.max(1));
-                Self::rewalk_handles_to_resolved(file_systems, &mut state, options.root).await?;
+                Self::rewalk_handles_to_resolved(file_systems, &mut state, options).await?;
                 continue;
             }
 
@@ -1056,8 +1143,11 @@ impl VirtualFileSystem {
                 return Err(IoErrorKind::InvalidPath);
             }
 
-            let (file_system, relative_path, candidate_mount_index) =
-                Self::get_file_system_from_path(file_systems, Path::from_str(&state.candidate))?;
+            let (file_system, relative_path, candidate_mount_index) = Self::get_lookup_mount(
+                file_systems,
+                Path::from_str(&state.candidate),
+                options.pinned_mount,
+            )?;
             if options.root.is_some() && !file_system.file_system.supports_confined_namespace() {
                 return Err(IoErrorKind::PathEscapesRoot);
             }
@@ -1834,6 +1924,39 @@ mod tests {
     use file_system::{DummyFileSystem, PathOwned};
 
     use super::*;
+
+    #[test]
+    fn pinned_lookup_rejects_submounts() {
+        let file_systems = ["/", "/host", "/host/grant/submount"]
+            .into_iter()
+            .map(|path| InternalFileSystem {
+                reference_count: 1,
+                is_mounted: true,
+                mount_point: PathOwned::try_from(path).unwrap(),
+                access_time_policy: AccessTimePolicy::default(),
+                file_system: Box::leak(Box::new(DummyFileSystem)),
+            })
+            .collect();
+        let path = Path::new("/host/grant/submount");
+        assert_eq!(
+            VirtualFileSystem::get_lookup_mount(&file_systems, path, None)
+                .unwrap()
+                .2,
+            2
+        );
+        assert_eq!(
+            VirtualFileSystem::get_lookup_mount(&file_systems, path, Some(1)).err(),
+            Some(IoErrorKind::PathEscapesRoot)
+        );
+
+        let path = Path::new("/host/grant/ordinary");
+        assert_eq!(
+            VirtualFileSystem::get_lookup_mount(&file_systems, path, Some(1))
+                .unwrap()
+                .2,
+            1
+        );
+    }
 
     #[test]
     fn test_get_file_system_from_path() {
