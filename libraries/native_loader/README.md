@@ -147,16 +147,86 @@ that one UDP socket: see the ABI README's *Ownership and cancellation*.
 The platform implements `ExecutableMemory`, including cache synchronization
 and executable permissions appropriate to its hardware
 ([Platforms #115](https://github.com/xila-project/platforms/issues/115)).
-The current trait requires one contiguous address range for both instruction
-fetches and data access. The loader recognizes Xtensa ELF images and builds its
-coroutine backend for Xtensa; running them on hardware is tracked in
+The loader recognizes Xtensa ELF images and builds its coroutine backend for
+Xtensa. Test progress for Xtensa hardware is tracked in
 [Core #795](https://github.com/xila-project/core/issues/795).
 
-The loader does not log. Read the allocation base with `LoadedImage::base()`
-and pass it to GDB as `add-symbol-file <elf> -o <base>`: the provided linker
-script links at address zero. Automatic GDB registration is tracked in
-[Core #722](https://github.com/xila-project/core/issues/722). Image size is the contiguous virtual span including BSS,
-gaps and alignment padding. The raw-file handler holds the original file buffer
-until installation finishes. Running adds the configurable coroutine stack and
-64-byte guard, the stackful control allocation, and the normal task and
-startup allocations.
+Image size is the contiguous virtual span including BSS, gaps and alignment
+padding. The raw-file handler holds the original file buffer until installation
+finishes. Running adds the configurable coroutine stack and 64-byte guard,
+the stackful control allocation, and the normal task and startup allocations.
+
+## GDB symbol registration
+
+Enable the `gdb-jit` Cargo feature on `xila` or `xila-executable`. It also
+enables `native-dev`. Direct users can enable `gdb-jit` on
+`xila-native-loader`. The feature is off by default. The platform must supply
+a `critical-section` implementation that excludes other cores when applicable.
+
+Use a firmware ELF that retains `__jit_debug_descriptor` and
+`__jit_debug_register_code` and an application ELF that retains `.symtab`.
+Load the firmware ELF in GDB and connect to the target through the GDB server.
+Set `set breakpoint pending on`, then use `tbreak <function>` before you
+launch the application. For a bare-metal target, the server must support
+breakpoints at the firmware notification hook and reads of the descriptor,
+the entries, and their symbol files. Software breakpoints in loaded code
+require writable code memory. If you attach after a load, GDB can read the
+entries for images that are still mapped.
+
+After relocation and memory finalization, the loader builds a compact symbol
+file from the original ELF. It keeps sections that map into the image and
+sized function and object symbols defined in them. It rewrites symbol section
+indices and copies only the names of retained symbols into the symbol string
+table. It sets runtime addresses from the instruction or data alias of the
+mapped segment. The symbol file uses ELF sections without file contents to
+describe the mapped image. It omits mapping symbols, source lines and unwind
+information. If the loader cannot produce or allocate a symbol file, the
+image still loads.
+
+The image owns the registration and symbol file. The loader removes the entry
+and notifies GDB before it frees the symbol file and releases the executable
+mapping. Registration and removal use the same critical section. See the
+[GDB JIT interface](https://sourceware.org/gdb/current/onlinedocs/gdb.html/JIT-Interface.html).
+
+To load symbols manually on a unified-address target, read the allocation
+base with `LoadedImage::base()` and run `add-symbol-file <elf> -o <base>`.
+The supplied linker script links at address zero. On split-bus platforms,
+the instruction and data aliases have separate addresses for the same
+allocation. Pass the runtime section addresses with
+`add-symbol-file <elf> <text-address> -s <section> <address> ...`.
+
+### Measurement on `thumbv7em-none-eabihf`
+
+On Rust 1.97.0, a release link that calls `LoadedImage::load` and drops the
+result used 5,147 more bytes of flash with the feature enabled. This is the
+change in the combined `.text`, `.rodata`, `.ARM.exidx`, and initialized
+`.data` sections in a minimal link without link-time optimization. The
+descriptor uses 16 bytes of static RAM. The image handle increases from
+56 to 60 bytes. Each registration uses one allocation for a 24-byte entry
+and the symbol file.
+
+These Thumb SDK programs were built with CMake `MinSizeRel` and Clang 22.1.8.
+The registration heap includes the 24-byte entry and excludes allocator
+overhead. The loader copies no executable or data section contents into it.
+
+| Program | Symbol file (bytes) | Registration heap (bytes) |
+|---|---:|---:|
+| `hello.elf` | 10,610 | 10,634 |
+| `graphics.elf` | 9,562 | 9,586 |
+| `threads.elf` | 13,548 | 13,572 |
+
+### Linux batch test
+
+Run `mise run test:native-loader` to build the SDK, run the normal loader
+tests with the feature off, and run the registration test with the feature
+on. The registration test checks symbol addresses and the descriptor through
+return, explicit exit and cancellation.
+
+The debugger check ran on Linux x86-64 with GDB 16.3. OpenOCD, probe-rs and
+Cortex-M, RISC-V and Xtensa hardware sessions remain unverified. Run the
+ignored test to check GDB on Linux. It reports a skip if GDB is absent.
+
+```sh
+cargo test --locked -p xila-executable --features gdb-jit --test sdk \
+  -- stops_in_sdk_image_with_gdb --ignored --exact --nocapture
+```
