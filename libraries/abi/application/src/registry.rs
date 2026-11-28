@@ -23,11 +23,10 @@ use core::{cell::Cell, ptr};
 
 use kind::{Kind, release};
 
-// Store one tag bit in the aligned next pointer and two in the aligned
-// previous pointer. Clear these bits before using either pointer.
-const NEXT_TAG_MASK: usize = 0b1;
-const PREVIOUS_TAG_MASK: usize = 0b11;
+const POINTER_TAG_BITS: usize = 2;
+const POINTER_TAG_MASK: usize = (1 << POINTER_TAG_BITS) - 1;
 
+/// The next link pointer. Its low bits hold the low bits of the handle kind.
 struct Next(Cell<*const Link>);
 
 impl Next {
@@ -36,30 +35,35 @@ impl Next {
     }
 
     fn get(&self) -> *const Link {
-        self.0.get().map_addr(|address| address & !NEXT_TAG_MASK)
+        self.0.get().map_addr(|address| address & !POINTER_TAG_MASK)
     }
 
     fn set(&self, link: *const Link) {
+        debug_assert_eq!(link.addr() & POINTER_TAG_MASK, 0);
         // Relinking must preserve the tag of the link that owns this pointer.
         let tag = self.tag();
         self.0.set(link.map_addr(|address| address | tag));
     }
 
     fn tag(&self) -> usize {
-        self.0.get().addr() & NEXT_TAG_MASK
+        self.0.get().addr() & POINTER_TAG_MASK
     }
 }
 
 /// The node a registered object embeds. It stays at one address from [`Link::register`] to
 /// [`Link::unlink`]: the objects are boxed before they are registered.
+///
+/// The next pointer holds the low two bits of the handle kind. The previous pointer
+/// holds the high two bits. An unlinked node has null addresses and retains its tag.
 struct Link {
     next: Next,
     /// Points to the registry's `first` or the previous link's `next`.
+    /// The address is null while the link is not in a registry.
     previous: Cell<*const Next>,
 }
 
-const _: () = assert!(core::mem::align_of::<Link>() > NEXT_TAG_MASK);
-const _: () = assert!(core::mem::align_of::<Next>() > PREVIOUS_TAG_MASK);
+const _: () = assert!(core::mem::align_of::<Link>() > POINTER_TAG_MASK);
+const _: () = assert!(core::mem::align_of::<Next>() > POINTER_TAG_MASK);
 #[cfg(target_pointer_width = "32")]
 const _: () = assert!(core::mem::size_of::<Link>() == 8);
 
@@ -67,17 +71,18 @@ impl Link {
     fn new(kind: Kind) -> Self {
         let tag = kind as usize;
         Self {
-            next: Next::new(tag & NEXT_TAG_MASK),
-            previous: Cell::new(ptr::without_provenance(tag >> 1)),
+            next: Next::new(tag & POINTER_TAG_MASK),
+            previous: Cell::new(ptr::without_provenance(tag >> POINTER_TAG_BITS)),
         }
     }
 
     fn tag(&self) -> usize {
-        ((self.previous.get().addr() & PREVIOUS_TAG_MASK) << 1) | self.next.tag()
+        ((self.previous.get().addr() & POINTER_TAG_MASK) << POINTER_TAG_BITS) | self.next.tag()
     }
 
     fn set_previous(&self, previous: *const Next) {
-        let tag = self.previous.get().addr() & PREVIOUS_TAG_MASK;
+        debug_assert_eq!(previous.addr() & POINTER_TAG_MASK, 0);
+        let tag = self.previous.get().addr() & POINTER_TAG_MASK;
         self.previous
             .set(previous.map_addr(|address| address | tag));
     }
@@ -86,7 +91,8 @@ impl Link {
     /// Outside a native process there is none, and the object stays the caller's own.
     ///
     /// # Safety
-    /// `link` must point to the first field of a live `Registered` allocation.
+    /// `link` must point to the first field of a live `Registered` allocation and
+    /// retain provenance for the entire allocation.
     /// The allocation must stay at its address until the link is unlinked.
     unsafe fn register(link: *const Self) {
         // SAFETY: the registry belongs to the host state of the running process, which
@@ -112,7 +118,7 @@ impl Link {
         let previous = self
             .previous
             .get()
-            .map_addr(|address| address & !PREVIOUS_TAG_MASK);
+            .map_addr(|address| address & !POINTER_TAG_MASK);
         if previous.is_null() {
             return;
         }
@@ -177,6 +183,19 @@ impl Registry {
 /// The registry of the process the calling coroutine belongs to, if it belongs to one.
 ///
 /// # Safety
+/// The reference must not be used after the registry is released.
+unsafe fn current<'a>() -> Option<&'a Registry> {
+    #[cfg(test)]
+    if let Some(registry) = tests::current() {
+        // SAFETY: the test keeps the registry alive until it clears the pointer.
+        return Some(unsafe { &*registry.as_ptr() });
+    }
+
+    // SAFETY: the caller's contract also applies to the process registry.
+    unsafe { current_process_registry() }
+}
+
+/// # Safety
 /// The reference must not be used after the process's host state is released.
 #[cfg(any(
     all(
@@ -194,7 +213,7 @@ impl Registry {
         target_os = "none"
     )
 ))]
-unsafe fn current<'a>() -> Option<&'a Registry> {
+unsafe fn current_process_registry<'a>() -> Option<&'a Registry> {
     // SAFETY: the caller's contract is this function's.
     unsafe { crate::threads::registry() }
 }
@@ -217,7 +236,7 @@ unsafe fn current<'a>() -> Option<&'a Registry> {
         target_os = "none"
     )
 )))]
-unsafe fn current<'a>() -> Option<&'a Registry> {
+unsafe fn current_process_registry<'a>() -> Option<&'a Registry> {
     None
 }
 
@@ -240,8 +259,16 @@ struct Registered<T> {
 /// Box `value` and list it in the calling process's registry, if it is in one. The pointer
 /// addresses the object; [`reclaim`] takes it back.
 pub(crate) fn register<T: Handle>(value: T) -> *mut T {
+    // SAFETY: the sealed trait maps T to its release tag.
+    unsafe { register_with_kind(value, T::KIND) }
+}
+
+/// # Safety
+/// `kind` must dispatch to the release function for `T`.
+/// A test can register `MaybeUninit<T>` while its release hook is active.
+unsafe fn register_with_kind<T>(value: T, kind: Kind) -> *mut T {
     let registered = Box::into_raw(Box::new(Registered {
-        link: Link::new(T::KIND),
+        link: Link::new(kind),
         value,
     }));
     // SAFETY: the box was just allocated and stays where it is until it is reclaimed.
@@ -254,9 +281,9 @@ pub(crate) fn register<T: Handle>(value: T) -> *mut T {
 /// Unlink the object and free its allocation, returning the object.
 ///
 /// # Safety
-/// `raw` came from [`register`], and is reclaimed exactly once.
-pub(crate) unsafe fn reclaim<T: Handle>(raw: *mut T) -> T {
-    // SAFETY: the object is the `value` field of the allocation `register` made.
+/// `raw` came from [`register`] or the test registration hook, and is reclaimed exactly once.
+pub(crate) unsafe fn reclaim<T>(raw: *mut T) -> T {
+    // SAFETY: the object is the `value` field of the registered allocation.
     let registered = unsafe {
         raw.byte_sub(core::mem::offset_of!(Registered<T>, value))
             .cast::<Registered<T>>()
@@ -268,15 +295,26 @@ pub(crate) unsafe fn reclaim<T: Handle>(raw: *mut T) -> T {
 }
 
 /// Close an object the registry still holds. The link is the first field of its allocation.
+///
+/// # Safety
+/// `link` must point to a live allocation for `T` and retain provenance for the
+/// entire allocation. No other code may reclaim it.
 unsafe fn release_handle<T: Handle>(link: *const Link) {
     let registered = link.cast::<Registered<T>>().cast_mut();
+    // SAFETY: the caller guarantees this field belongs to the live allocation.
+    let value = unsafe { &raw mut (*registered).value };
+    #[cfg(test)]
+    // SAFETY: the test checks the type and pointer before reclaiming its probe.
+    if unsafe { tests::release(value) } {
+        return;
+    }
     // SAFETY: the tag identifies the type of the live allocation that `register` made.
-    unsafe { T::close(&raw mut (*registered).value) }
+    unsafe { T::close(value) }
 }
 
 // This private module seals the mapping from handle types to tags.
 mod kind {
-    use super::{Link, NEXT_TAG_MASK, PREVIOUS_TAG_MASK, release_handle};
+    use super::{Link, POINTER_TAG_BITS, release_handle};
     use crate::{Child, Directory, DirectoryIterator, File};
     #[cfg(feature = "network")]
     use crate::{Tcp, TcpListener, Udp};
@@ -300,10 +338,13 @@ mod kind {
 
                 $(#[$attribute])*
                 const _: () = assert!(
-                    Kind::$handle as usize & !((PREVIOUS_TAG_MASK << 1) | NEXT_TAG_MASK) == 0
+                    (Kind::$handle as usize) >> (2 * POINTER_TAG_BITS) == 0
                 );
             )+
 
+            /// # Safety
+            /// `link` must point to a live registered allocation and retain provenance
+            /// for the entire allocation. No other code may reclaim it.
             pub(super) unsafe fn release(link: *const Link) {
                 // SAFETY: the registry head points to a live link.
                 let tag = unsafe { (*link).tag() };
@@ -329,5 +370,109 @@ mod kind {
         TcpListener = 5,
         #[cfg(feature = "network")]
         Udp = 6,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use super::{Handle, Registry, reclaim, register_with_kind};
+    use crate::{Child, Directory, DirectoryIterator, File};
+    #[cfg(feature = "network")]
+    use crate::{Tcp, TcpListener, Udp};
+    use alloc::vec::Vec;
+    use core::{
+        any::type_name,
+        cell::{Cell, RefCell},
+        mem::MaybeUninit,
+        ptr::NonNull,
+    };
+
+    struct Probe {
+        kind: &'static str,
+        address: *mut u8,
+        marker: u8,
+    }
+
+    std::thread_local! {
+        static CURRENT: Cell<Option<NonNull<Registry>>> = const { Cell::new(None) };
+        static EXPECTED: RefCell<Vec<Probe>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub(super) fn current() -> Option<NonNull<Registry>> {
+        CURRENT.get()
+    }
+
+    fn register_probe<T: Handle>(marker: u8) {
+        assert!(core::mem::size_of::<T>() > 0);
+        // SAFETY: the active hook reads the marker and reclaims this as `MaybeUninit<T>`.
+        let address = unsafe { register_with_kind(MaybeUninit::<T>::uninit(), T::KIND) };
+        let address = address.cast::<u8>();
+        // SAFETY: this handle has at least one byte of storage.
+        unsafe { address.write(marker) };
+        EXPECTED.with_borrow_mut(|expected| {
+            expected.push(Probe {
+                kind: type_name::<T>(),
+                address,
+                marker,
+            });
+        });
+    }
+
+    /// # Safety
+    /// While the test registry is active, `value` must come from release dispatch
+    /// for a live probe. The hook checks its type, address and release order.
+    pub(super) unsafe fn release<T: Handle>(value: *mut T) -> bool {
+        if current().is_none() {
+            return false;
+        }
+
+        let Some(probe) = EXPECTED.with_borrow_mut(Vec::pop) else {
+            panic!("unexpected release");
+        };
+        assert_eq!(type_name::<T>(), probe.kind);
+        assert_eq!(value.cast::<u8>(), probe.address);
+        // SAFETY: the probe initialized this byte. The release pointer must
+        // retain enough provenance to read it.
+        assert_eq!(unsafe { value.cast::<u8>().read() }, probe.marker);
+        // SAFETY: the probe registered a `MaybeUninit<T>`. This is its only reclaim.
+        unsafe { reclaim(value.cast::<MaybeUninit<T>>()) };
+        true
+    }
+
+    #[test]
+    fn releases_every_handle_kind_once_in_reverse_order() {
+        let registry = Registry::new();
+        CURRENT.set(Some(NonNull::from(&registry)));
+        struct ResetRegistry;
+        impl Drop for ResetRegistry {
+            fn drop(&mut self) {
+                CURRENT.set(None);
+            }
+        }
+        let _reset = ResetRegistry;
+
+        register_probe::<File>(1);
+        register_probe::<Directory>(2);
+        register_probe::<DirectoryIterator>(3);
+        register_probe::<Child>(4);
+        #[cfg(feature = "network")]
+        {
+            register_probe::<Tcp>(5);
+            register_probe::<TcpListener>(6);
+            register_probe::<Udp>(7);
+        }
+        assert_eq!(
+            registry.len(),
+            if cfg!(feature = "network") { 7 } else { 4 }
+        );
+
+        // SAFETY: the registry stays in place and only this thread can access it.
+        unsafe { registry.release_all() };
+        assert_eq!(registry.len(), 0);
+        assert!(EXPECTED.with_borrow(Vec::is_empty));
+        // SAFETY: the same registry still belongs only to this thread.
+        unsafe { registry.release_all() };
     }
 }
