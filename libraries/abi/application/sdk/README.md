@@ -4,23 +4,35 @@ Compile C against picolibc and a POSIX layer, or Rust against the raw
 `xila-sys` bindings. Link a static PIE and run it on Xila without rebuilding
 the firmware.
 
-Select the `vX.Y.Z` release that matches your Xila installation on the
-[Platforms releases page](https://github.com/xila-project/platforms/releases).
-Download `xila-sdk-<major>.<minor>-<target>.tar.zst` for your target and
-`SHA256SUMS` from that release. For example, Xila `v0.1.0` uses
-`xila-sdk-0.1-thumbv7em-none-eabihf.tar.zst` for Cortex-M4F. From the download
-directory, run `sha256sum --check --ignore-missing SHA256SUMS` before extracting
-the archive. Each archive includes `COPYING.picolibc` and `LICENSE-xila.md`.
+To get the SDK for a Xila release:
 
-Core CI also offers SDK workflow artifacts for individual builds.
+1. Open the `vX.Y.Z` release that matches your Xila installation on the
+   [Platforms releases page](https://github.com/xila-project/platforms/releases).
+2. Download `SHA256SUMS` and `xila-sdk-<xila_version>-<target>.tar.zst` for
+   your target. `<xila_version>` is the major and minor version of the release.
+   For example, Xila `v0.1.0` uses `xila-sdk-0.1-thumbv7em-none-eabihf.tar.zst`
+   for Cortex-M4F. All patch releases of a minor version use the same archive
+   name, so keep the release tag with the archive.
+3. From the download directory, run
+   `sha256sum --check --ignore-missing SHA256SUMS` (GNU coreutils). The check
+   finds a damaged download. It does not prove who made the release, because
+   `SHA256SUMS` comes from the same release as the archive.
+4. Extract the archive. Each archive includes `COPYING.picolibc` and
+   `LICENSE-xila.md`.
+
+Core CI also uploads each build as a workflow artifact named
+`xila-sdk-<target>`. Workflow artifacts expire and need a GitHub sign-in, so
+use the release assets for application builds.
 
 | Target | Class | Float ABI | Compiler runtime |
 |---|---|---|---|
-| `x86_64-unknown-linux-gnu` | the host Platforms runs on Linux | none | none needed |
+| `x86_64-unknown-linux-gnu` | the host Platforms runs on Linux, x86-64 | none | none needed |
+| `aarch64-unknown-linux-gnu` | the host Platforms runs on Linux, AArch64 | none | none needed |
 | `thumbv7em-none-eabihf` | Cortex-M4F | hard | Arm GNU toolchain's `libgcc.a` |
 | `riscv32imac-unknown-none-elf` | ESP32-C6 class RV32IMAC | soft (`ilp32`) | bare-metal RISC-V GCC's `libgcc.a` |
+| `riscv32imafc-unknown-none-elf` | ESP32-P4 class RV32IMAFC | single (`ilp32f`) | bare-metal RISC-V GCC's `libgcc.a` |
+| `xtensa-esp32s3-elf` | ESP32-S3 | toolchain default | Espressif `xtensa-esp32s3-elf-gcc`'s `libgcc.a` |
 
-Xtensa (`xtensa-esp32s3`) is an addition to the build tables, not a redesign.
 The RISC-V images do no gp relaxation: the link defines no `__global_pointer$`
 (and never passes `--relax-gp`), and `check_elf.py` rejects an image that defines
 it, because the image's gp is not the firmware's. Call relaxation (pc-relative
