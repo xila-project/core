@@ -17,7 +17,7 @@ static const char *volatile expected = answer; /* Force a RELATIVE relocation. *
 static volatile unsigned int calls;           /* Exercise writable, zeroed BSS. */
 
 #ifdef XILA_FIXTURE_CONSTRUCTOR
-/* The loader runs no constructors, so it must reject the image. */
+/* This entry does not run constructors. The image has no lifecycle note. */
 __attribute__((constructor)) static void construct(void) { calls = 0; }
 #endif
 

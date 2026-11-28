@@ -42,6 +42,7 @@ pub enum Error {
     IncompatibleRiscvArchitecture,
     InvalidLifecycleArray,
     InvalidLifecycleEntry,
+    MissingLifecycleNote,
     /// Legacy DT_INIT or DT_FINI function.
     Constructors,
     DynamicDependency,

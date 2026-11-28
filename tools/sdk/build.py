@@ -949,12 +949,35 @@ def check_target(data, target):
     return check(data, config["machine"], float_abi=config["float_abi"])
 
 
+def verify_riscv_architecture(image, target):
+    """Compare the linker-merged architecture with the firmware's extension set."""
+    readelf = find_target_tool(target, "readelf")
+    output = subprocess.check_output([readelf, "--arch-specific", image], text=True)
+    architecture = re.search(r"Value:\s+(rv32\S+)", output)
+    if not architecture:
+        sys.exit(f"{image}: missing RISC-V architecture attribute")
+    extensions = set()
+    for extension in architecture[1].removeprefix("rv32").split("_"):
+        match = re.fullmatch(r"([a-z][a-z0-9]*?)[0-9]+p[0-9]+", extension)
+        if not match:
+            sys.exit(f"{image}: invalid RISC-V extension {extension}")
+        extensions.add(match[1])
+    # Keep this in step with the firmware targets and native_loader/build.rs.
+    supported = set("i m a c zmmul zaamo zalrsc zca zicsr zifencei".split())
+    if TARGETS[target]["float_abi"] == "single":
+        supported.update(("f", "zcf"))
+    if unsupported := extensions - supported:
+        sys.exit(f"{image}: RISC-V firmware lacks {', '.join(sorted(unsupported))}")
+
+
 def verify_image(image, target):
     problems = check_target(image.read_bytes(), target)
     for problem in problems:
         print(f"{image}: {problem}", file=sys.stderr)
     if problems:
         sys.exit(1)
+    if TARGETS[target]["machine"] == "riscv32":
+        verify_riscv_architecture(image, target)
     print(f"{image}: ELF checks passed")
 
 
@@ -1112,6 +1135,7 @@ def verify(args):
         print(f"{name}.elf: environ builder {'present' if links_builder else 'absent'}")
     for name in ("threads", "ssp", "graphics", "lifecycle"):
         verify_c_program(target, sdk, name, SDK_SOURCE / "sdk/test" / name)
+    verify_c_program(target, sdk, "lifecycle-direct", SDK_SOURCE / "sdk/test/lifecycle")
     # The hexdump example, in both of its forms: the ELF the loader runs, and the
     # localized archive link-archive produces for a firmware that links it in.
     size_tool = find_target_tool(target, "size")
@@ -1178,6 +1202,15 @@ def rust_example(args):
         check_data_alignment(image, elf, TARGETS[target]["data_alignment"])
         run([find_tool("llvm-size"), image])
         print(f"ELF file: {image.stat().st_size} bytes")
+
+    if HOST_TARGET in selected:
+        lifecycle_output = OUTPUT / "rust-lifecycle"
+        run(["rustup", "run", nightly, "cargo", "build", "--locked", "--release",
+             "--target", HOST_TARGET, "--target-dir", lifecycle_output,
+             "--features", "lifecycle-test"], cwd=example, env=env)
+        image = lifecycle_output / HOST_TARGET / "release/xila-rust-hello"
+        verify_image(image, HOST_TARGET)
+        check_data_alignment(image, Elf(image.read_bytes()), TARGETS[HOST_TARGET]["data_alignment"])
 
 
 def main():

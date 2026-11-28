@@ -164,6 +164,11 @@ __attribute__((no_stack_protector)) void xila_posix_shutdown(void) {
     xila_process.cwd = NULL;
 }
 
+/* Run the arrays with initialized POSIX state and the exit jump target. */
+__attribute__((visibility("hidden"))) bool xila_posix_owns_lifecycle(void) {
+    return true;
+}
+
 int32_t xila_main(const XilaStartup *startup) {
     /* A relaunch of the same linked program starts from pristine runtime state, even when
        the previous run was cancelled mid-call and cleaned up nothing. */

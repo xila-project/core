@@ -54,6 +54,9 @@ fn target_extensions(abi: &str) -> String {
         .collect();
     let embedded = env::var("CARGO_CFG_TARGET_ABI").is_ok_and(|abi| abi == "ilp32e");
     features.insert(if embedded { "e" } else { "i" });
+    // Xila's firmware targets support CSR access and instruction-fetch fences.
+    // The Rust target can omit them even when the hardware implements them.
+    features.extend(["zicsr", "zifencei"]);
     if abi == "single" || abi == "double" {
         features.insert("f");
     }

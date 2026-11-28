@@ -21,29 +21,37 @@ It rejects malformed attributes and extensions that the firmware target does
 not enable. It checks extension names independently of their version numbers.
 For example, an image that requires atomics cannot run on `rv32imc`. If the
 section is absent, the loader checks only the ELF header and its architecture
-flags as before.
+flags as before. The Xila firmware baseline includes `zicsr` and `zifencei`.
 
 ### Constructors and destructors
 
 The loader accepts preinitialization, initialization and finalization arrays
 from the dynamic table or the corresponding ELF sections. When both are
-present, they must describe the same array. The loader checks each relocated
-function pointer against the executable segments. It still rejects the
-legacy `DT_INIT` and `DT_FINI` functions.
+present, they must describe the same array. Each relocated function pointer
+must be nonzero and point into an executable segment. A zero entry gives
+`Error::InvalidLifecycleEntry`. The loader rejects legacy `DT_INIT` and
+`DT_FINI` functions. When removing the section header table, set both
+`e_shoff` and `e_shnum` to zero. Inconsistent table metadata gives
+`Error::InvalidSectionHeaders`.
 
-The C SDK runs preinitialization and initialization in ascending order on the
-process coroutine. It first installs the ABI and initializes the POSIX state.
-It then calls the arrays before `main`. A normal return from `main` or a call
+The SDK entries install the ABI on the process coroutine, then run
+preinitialization and initialization in ascending order. The POSIX entry
+also initializes the POSIX state first. A normal return from `main` or a call
 to `exit` runs registered exit handlers, then finalization in reverse order,
-then flushes standard I/O. As with registered exit handlers, finalization
-requires that no worker threads are live. `_exit`, abort and cancellation
-skip finalization.
+then flushes standard I/O. A call to `exit` from a constructor runs the whole
+finalization array, even if some constructors have not run. With live worker
+threads the POSIX entry skips exit handlers and finalization. `_exit`,
+abort and cancellation skip finalization.
 
-A custom entry point that uses these arrays must drive the same lifecycle.
-Check `XilaStartup.size` before reading `lifecycle`. A non-null value provides
-a `run` callback. Call it with the lifecycle pointer and `false` after
-setting up the runtime and with `true` on normal exit. Call each phase at
-most once.
+The direct C shim and Rust entry run finalizers after the application function
+returns. A Rust panic in `panic_abort` skips finalization.
+
+A custom `_xila_start` that supports these arrays must emit an empty `PT_NOTE`
+record named `XILA\0` of type 2. Without this record, non-empty arrays give
+`Error::MissingLifecycleNote`. Check `XilaStartup.size` before reading
+`lifecycle`. When present, call its `run` callback with the lifecycle pointer
+and `false` after runtime initialization and with `true` on normal exit.
+Call each phase at most once.
 
 `link-archive` rejects lifecycle sections in applications linked into the
 firmware with `native-linked`. Those sections could run at firmware startup
@@ -111,9 +119,11 @@ capability and the launch name, arguments and startup streams they point into, a
 registry of the files, directories, listings, children and sockets the program opened.
 The image bytes stay in the platform's `ExecutableMemory`, which the handle releases, and
 the C heap's blocks are separate allocations the `XilaHeap` tracks: neither is
-part of it. On 32-bit targets, the state includes a 4-byte lifecycle pointer. The image
-handle stores three array ranges and a callback. The launch-name bytes are allocated
-separately, like the argument strings. The coroutine entry receives only a
+part of it. On `thumbv7em-none-eabihf`, the default loader features use
+512 bytes for the process record. The lifecycle record adds 28 bytes to the
+image handle and a 4-byte pointer to the host state. The measured process
+allocation grows by 24 bytes after padding. The launch name and argument
+strings are allocated separately. The coroutine entry receives only a
 pointer to it, so a program that overruns its own frames cannot damage the state
 `xila_process_exit` and the SDK's heap and standard error access depend on, and
 the host can reach everything the program holds whatever the coroutine was doing.

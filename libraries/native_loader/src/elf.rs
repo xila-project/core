@@ -22,6 +22,7 @@ fn instruction<A: Abi>(address: usize) -> Option<(usize, usize)> {
     let alignment = match A::ARCH {
         Arch::Arm if thumb => 2,
         Arch::Aarch64 | Arch::Arm => 4,
+        Arch::Riscv32 if !A::RISCV_COMPRESSED => 4,
         Arch::Riscv32 => 2,
         _ => 1,
     };
@@ -55,6 +56,7 @@ pub(crate) trait Abi: 'static {
     const ARCH: Arch;
     /// Bare-metal Arm cores run Thumb only, so the entry must select Thumb.
     const THUMB_ONLY: bool;
+    const RISCV_COMPRESSED: bool = false;
     #[cfg(any(target_arch = "riscv32", test))]
     const RISCV_FEATURES: &'static str = "";
     const HEADER: usize = if Self::WORD == 8 { 64 } else { 52 };
@@ -237,6 +239,7 @@ impl Abi for Native {
     };
     #[cfg(target_arch = "riscv32")]
     const RISCV_FEATURES: &'static str = env!("NATIVE_LOADER_RISCV_FEATURES");
+    const RISCV_COMPRESSED: bool = cfg!(any(target_feature = "c", target_feature = "zca"));
     const THUMB_ONLY: bool = cfg!(all(target_arch = "arm", target_os = "none"));
 
     fn flags_supported(flags: u32) -> bool {
@@ -244,7 +247,7 @@ impl Abi for Native {
             Arch::Arm => arm_flags_supported(flags, cfg!(target_abi = "eabihf")),
             Arch::Riscv32 => riscv_flags_supported(
                 flags,
-                cfg!(target_feature = "c"),
+                Self::RISCV_COMPRESSED,
                 RISCV_FLOAT_ABI,
                 RISCV_EMBEDDED,
             ),
@@ -580,8 +583,10 @@ impl<'a, A: Abi> Elf<'a, A> {
         for range in &self.arrays {
             let array = &image[range.clone()];
             for entry in array.chunks_exact(A::WORD) {
-                let (code, size) =
-                    instruction::<A>(A::word_at(entry, 0)).ok_or(Error::InvalidLifecycleEntry)?;
+                let pointer = A::word_at(entry, 0);
+                let (code, size) = instruction::<A>(pointer)
+                    .filter(|_| pointer != 0)
+                    .ok_or(Error::InvalidLifecycleEntry)?;
                 let address = code
                     .checked_sub(execution)
                     .and_then(|offset| self.start.checked_add(offset))
@@ -604,6 +609,7 @@ impl<'a, A: Abi> Elf<'a, A> {
 
     pub(crate) fn check_abi(&self) -> Result<(), Error> {
         let mut version = None;
+        let mut lifecycle = false;
         for note in programs::<A>(self.headers).filter(|program| program.kind == PT_NOTE) {
             let mut bytes =
                 subrange(self.bytes, note.offset, note.file_size).ok_or(Error::InvalidAbiNote)?;
@@ -623,11 +629,16 @@ impl<'a, A: Abi> Elf<'a, A> {
                 let (desc, rest) = rest
                     .split_at_checked(desc_end)
                     .ok_or(Error::InvalidAbiNote)?;
-                if u32_at(header, 8) == 1
-                    && &name[..name_size] == b"XILA\0"
-                    && (desc_size != 4 || version.replace(u32_at(desc, 0)).is_some())
-                {
-                    return Err(Error::InvalidAbiNote);
+                if &name[..name_size] == b"XILA\0" {
+                    match u32_at(header, 8) {
+                        1 if desc_size != 4 || version.replace(u32_at(desc, 0)).is_some() => {
+                            return Err(Error::InvalidAbiNote);
+                        }
+                        2 if desc_size != 0 || core::mem::replace(&mut lifecycle, true) => {
+                            return Err(Error::InvalidAbiNote);
+                        }
+                        _ => {}
+                    }
                 }
                 bytes = rest;
             }
@@ -635,6 +646,9 @@ impl<'a, A: Abi> Elf<'a, A> {
         // The descriptor is the Xila version the image was built for, packed as
         // `(major << 16) | minor`.
         let declared = Version::from_packed(version.ok_or(Error::MissingAbiNote)?);
+        if !lifecycle && self.arrays.iter().any(|array| !array.is_empty()) {
+            return Err(Error::MissingLifecycleNote);
+        }
         let running = xila_version::RUNNING;
         if !xila_version::compatible(declared, running) {
             return Err(Error::IncompatibleXilaVersion { declared, running });

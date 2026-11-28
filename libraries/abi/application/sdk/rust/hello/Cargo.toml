@@ -7,6 +7,9 @@ publish = false
 
 [workspace]
 
+[features]
+lifecycle-test = []
+
 [dependencies]
 xila-sys = { path = "../xila-sys", features = ["link"] }
 

@@ -24,7 +24,7 @@ SECTIONS
      outside the ABI note segment. */
   .note.gnu.build-id : { *(.note.gnu.build-id) } :text
   .note.gnu.property : { *(.note.gnu.property) } :text
-  .note.xila.abi : ALIGN(4) { KEEP(*(.note.xila.abi)) } :text :abi
+  .note.xila.abi : ALIGN(4) { KEEP(*(.note.xila.abi .note.xila.abi.lifecycle)) } :text :abi
   /* Any other note (.note.package, custom notes) would otherwise follow the ABI
      note and inherit its segments; the explicit :text keeps it out of :abi. */
   .note.other : { *(.note .note.*) } :text

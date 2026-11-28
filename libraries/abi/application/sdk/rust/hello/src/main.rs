@@ -20,8 +20,15 @@ fn panic(_: &PanicInfo<'_>) -> ! {
     runtime::panic_abort()
 }
 
+#[cfg(feature = "lifecycle-test")]
+mod lifecycle;
+
 /// Called by the entry shim with validated, host-owned startup data.
 unsafe fn main(startup: *const XilaStartup) -> i32 {
+    #[cfg(feature = "lifecycle-test")]
+    if lifecycle::INITIALIZED.load(core::sync::atomic::Ordering::Relaxed) != 2 {
+        return 1;
+    }
     let Some(api) = runtime::api() else {
         return 1;
     };
@@ -64,16 +71,31 @@ unsafe fn main(startup: *const XilaStartup) -> i32 {
         panic!("requested by the host test");
     }
 
-    let output = unsafe { (*startup).standard_output };
-    let mut text: &[u8] = b"Hello from Rust on Xila!\n";
+    if write_output(b"Hello from Rust on Xila!\n") {
+        73
+    } else {
+        3
+    }
+}
+
+fn write_output(mut text: &[u8]) -> bool {
+    let (Some(api), Some(startup)) = (runtime::api(), runtime::startup()) else {
+        return false;
+    };
     while !text.is_empty() {
         let mut written = 0;
-        let result =
-            unsafe { (api.file_write)(output, text.as_ptr().cast(), text.len(), &mut written) };
+        let result = unsafe {
+            (api.file_write)(
+                startup.standard_output,
+                text.as_ptr().cast(),
+                text.len(),
+                &mut written,
+            )
+        };
         if result != Status::Ok || written == 0 || written > text.len() {
-            return 3;
+            return false;
         }
         text = &text[written..];
     }
-    73
+    true
 }

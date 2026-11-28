@@ -16,7 +16,8 @@ impl Abi for Riscv32 {
     const MACHINE: u16 = 243;
     const RELATIVE: u32 = 3;
     const ARCH: Arch = Arch::Riscv32;
-    const RISCV_FEATURES: &'static str = "i,m,c,zca,zmmul";
+    const RISCV_FEATURES: &'static str = "i,m,c,zca,zicsr,zifencei,zmmul";
+    const RISCV_COMPRESSED: bool = true;
     const THUMB_ONLY: bool = false;
     fn flags_supported(flags: u32) -> bool {
         riscv_flags_supported(flags, true, 0, false)
@@ -352,10 +353,10 @@ fn reads_an_initialization_section_without_dynamic_array_tags() {
     assert_eq!(check::<Arm32>(&file), Err(Error::InvalidLifecycleArray));
 }
 
-fn attributes_section(architecture: &[u8]) -> ([u8; FILE + 160], usize) {
+fn attributes_section(architecture: &[u8]) -> ([u8; FILE + 200], usize) {
     const SECTION: usize = FILE + 40;
-    const ATTRIBUTES: usize = SECTION + 40;
-    let mut file = [0; FILE + 160];
+    const ATTRIBUTES: usize = SECTION + 80;
+    let mut file = [0; FILE + 200];
     file[..FILE].copy_from_slice(&fixture::<Riscv32>(true));
     put::<Riscv32>(&mut file, 32, FILE);
     write(&mut file, 46, &40u16.to_le_bytes());
@@ -379,6 +380,7 @@ fn checks_riscv_architecture_attributes() {
     check::<Riscv32>(&fixture::<Riscv32>(true)).unwrap();
     for (architecture, result) in [
         (&b"rv32i2p1_m2p0_c2p0_zmmul1p0"[..], Ok(())),
+        (&b"rv32i2p1_zicsr2p0_zifencei2p0"[..], Ok(())),
         (
             &b"rv32i2p1_m2p0_a2p1_c2p0"[..],
             Err(Error::IncompatibleRiscvArchitecture),
@@ -595,18 +597,19 @@ fn for_32_bit(slot: impl Fn(&[u8], usize) -> usize + Copy) {
     copies_and_relocates::<Arm32>(slot);
 }
 
-fn byte_mutations_do_not_panic<A: Abi>() {
-    let file = fixture::<A>(true);
+fn byte_mutations_do_not_panic<A: Abi, const LENGTH: usize>(file: [u8; LENGTH]) {
     for index in 0..file.len() {
         for byte in [0, 0x55, 0xff] {
             let mut mutated = file;
             mutated[index] = byte;
             if let Ok(elf) = Elf::<A>::parse(&mutated) {
                 let _ = elf.check_abi();
-                if elf.layout.size() <= file.len() {
-                    let mut image = [0; FILE];
-                    elf.copy_to(&mut image);
-                    let _ = elf.relocate(&mut image, 0x5000, 0x5000);
+                let mut image = [0; LENGTH];
+                if let Some(image) = image.get_mut(..elf.layout.size()) {
+                    elf.copy_to(image);
+                    if elf.relocate(image, 0x5000, 0x5000).is_ok() {
+                        let _ = elf.check_array_entries(image, 0x5000);
+                    }
                 }
             }
         }
@@ -615,9 +618,22 @@ fn byte_mutations_do_not_panic<A: Abi>() {
 
 #[test]
 fn byte_mutations_do_not_panic_in_either_class() {
-    byte_mutations_do_not_panic::<Native>();
-    byte_mutations_do_not_panic::<Riscv32>();
-    byte_mutations_do_not_panic::<Arm32>();
+    byte_mutations_do_not_panic::<Native, FILE>(fixture::<Native>(true));
+    byte_mutations_do_not_panic::<Arm32, FILE>(fixture::<Arm32>(true));
+
+    const ARRAY_SECTION: usize = FILE + 80;
+    let (mut file, _) = attributes_section(b"rv32i2p1_m2p0_c2p0_zicsr2p0_zifencei2p0");
+    write(&mut file, 48, &3u16.to_le_bytes());
+    for (offset, value) in [(4, 14), (8, 2), (12, SLOT), (16, SLOT), (20, 4)] {
+        put::<Riscv32>(&mut file, ARRAY_SECTION + offset, value);
+    }
+    let elf = Elf::<Riscv32>::parse(&file).unwrap();
+    assert_eq!(elf.arrays[1], SLOT..SLOT + 4);
+    let mut image = [0; FILE];
+    elf.copy_to(&mut image);
+    elf.relocate(&mut image, 0x5000, 0x5000).unwrap();
+    elf.check_array_entries(&image, 0x5000).unwrap();
+    byte_mutations_do_not_panic::<Riscv32, _>(file);
 }
 
 const NOTE: usize = 0x1c0;

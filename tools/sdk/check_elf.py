@@ -13,7 +13,7 @@ The checks mirror the loader (libraries/native_loader) and the SDK contract:
   AArch64 (Xtensa flags are not checked, as in the loader);
 * exactly one PT_NOTE record "XILA" type 1 with a four-byte Xila version,
   `(major << 16) | minor`, that the host loader accepts (every note of every PT_NOTE is
-  read, as the loader does);
+  read, as the loader does). Images with lifecycle arrays also need an empty "XILA" type 2 note;
 * only the dynamic tags the loader consumes or ignores (libraries/native_loader/src/elf.rs):
   anything else, such as DT_RELR from -z pack-relative-relocs, fails the load; no DT_NEEDED,
   or legacy DT_INIT and DT_FINI functions; init, fini and preinit arrays must be file-backed;
@@ -40,6 +40,7 @@ PF_X, PF_W = 1, 2
 MAX_ALIGNMENT = 64 * 1024
 MAX_PROGRAM_HEADERS = 16
 SHT_REL, SHT_RELA = 9, 4
+SHT_LIFECYCLE_ARRAYS = {14, 15, 16}
 SHT_SYMTAB, SHT_DYNSYM, SHT_STRTAB = 2, 11, 3
 SHN_UNDEF = 0
 GLOBAL_POINTER = b"__global_pointer$"
@@ -268,12 +269,14 @@ def flags_problem(elf, float_abi, compressed, embedded):
     return None
 
 
-def instruction_alignment(elf):
+def instruction_alignment(elf, compressed):
     if elf.arch == "aarch64":
         return 4
     if elf.arch == "arm":
         return 4 if elf.entry & 1 == 0 else 2
-    return 2 if elf.arch == "riscv" else 1
+    if elf.arch == "riscv":
+        return 2 if compressed else 4
+    return 1
 
 
 def check(data, machine=None, xila_version=None, float_abi=None, compressed=True, embedded=False):
@@ -341,7 +344,7 @@ def _check(data, machine, xila_version, float_abi, compressed, embedded):
         return None
 
     code = elf.entry & ~1 if elf.arch == "arm" else elf.entry
-    ialign = instruction_alignment(elf)
+    ialign = instruction_alignment(elf, compressed)
     if elf.arch == "arm" and elf.entry & 1 == 0:
         problems.append("the entry point is not a Thumb address (bit 0 clear): "
                         "the SDK's Arm targets run Thumb only")
@@ -350,6 +353,7 @@ def _check(data, machine, xila_version, float_abi, compressed, embedded):
         problems.append("the entry point is not an aligned address inside an executable PT_LOAD segment")
 
     versions = []
+    lifecycle_notes = 0
     for note in (segment for segment in segments if segment["type"] == PT_NOTE):
         try:
             for name, kind, descriptor in elf.notes(note):
@@ -358,6 +362,10 @@ def _check(data, machine, xila_version, float_abi, compressed, embedded):
                         problems.append('the "XILA" note must carry a 4-byte version')
                     else:
                         versions.append(struct.unpack("<I", descriptor)[0])
+                elif kind == 2 and name == XILA_NOTE_NAME:
+                    lifecycle_notes += 1
+                    if descriptor or lifecycle_notes > 1:
+                        problems.append('the "XILA" lifecycle note must be empty and unique')
         except ElfError as error:
             problems.append(str(error))
     if not versions:
@@ -370,6 +378,7 @@ def _check(data, machine, xila_version, float_abi, compressed, embedded):
             problems.append(f"built for Xila {versions[0] >> 16}.{versions[0] & 0xFFFF}, which is "
                             f"not accepted by the Xila {host[0]}.{host[1]} loader")
 
+    needs_lifecycle = False
     relocation = RELATIVE.get(elf.arch)
     if dynamic:
         word = 8 if elf.is64 else 4
@@ -418,6 +427,7 @@ def _check(data, machine, xila_version, float_abi, compressed, embedded):
 
         for name, address_tag, size_tag in LIFECYCLE_ARRAYS:
             address, size = tables.get(address_tag), tables.get(size_tag)
+            needs_lifecycle |= bool(size)
             if address is None and size in (None, 0):
                 continue
             if (address is None or size is None or (size != 0 and
@@ -426,6 +436,8 @@ def _check(data, machine, xila_version, float_abi, compressed, embedded):
                                 "inside a file-backed PT_LOAD segment")
 
     for section in elf.sections():
+        if section["type"] in SHT_LIFECYCLE_ARRAYS:
+            needs_lifecycle |= bool(section["size"])
         if section["type"] not in (SHT_REL, SHT_RELA):
             continue
         for kind, symbol in elf.relocations(section):
@@ -433,6 +445,8 @@ def _check(data, machine, xila_version, float_abi, compressed, embedded):
                 problems.append(f"relocation type {kind} is not RELATIVE ({relocation})")
             elif symbol != 0:
                 problems.append("a relocation refers to a symbol: the image has external references")
+    if needs_lifecycle and not lifecycle_notes:
+        problems.append('lifecycle arrays require a "XILA" note of type 2')
     if elf.arch == "riscv" and GLOBAL_POINTER in set(elf.defined_symbols()):
         problems.append("__global_pointer$ is defined: lld would relax gp-relative accesses "
                         "against a gp the firmware does not share (no gp relaxation)")

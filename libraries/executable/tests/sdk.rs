@@ -272,29 +272,49 @@ async fn setup_with(
 #[task::test]
 #[ignore = "run with mise run sdk:rust-example"]
 async fn runs_sdk_rust_hello() {
-    let path = std::env::var_os("XILA_RUST_HELLO").expect("set by sdk:rust-example");
-    let bytes = std::fs::read(path).unwrap();
     let (context, parent) = setup().await;
+    for (variable, program, startup_output, normal_output) in [
+        (
+            "XILA_RUST_HELLO",
+            "/rust-hello",
+            &b""[..],
+            &b"Hello from Rust on Xila!\n"[..],
+        ),
+        (
+            "XILA_RUST_LIFECYCLE",
+            "/rust-lifecycle",
+            &b"Rust preinit\nRust init\n"[..],
+            &b"Rust preinit\nRust init\nHello from Rust on Xila!\nRust fini\n"[..],
+        ),
+    ] {
+        let path = std::env::var_os(variable).expect("set by sdk:rust-example");
+        let bytes = std::fs::read(path).unwrap();
+        install(context.virtual_file_system, parent, program, &bytes).await;
+        runs_rust_image(context, parent, program, startup_output, normal_output).await;
+    }
+}
+
+async fn runs_rust_image(
+    context: &'static ExecutableContext,
+    parent: TaskIdentifier,
+    program: &str,
+    startup_output: &[u8],
+    normal_output: &[u8],
+) {
     let vfs = context.virtual_file_system;
-    install(vfs, parent, "/rust-hello", &bytes).await;
     let create = Flags::new(AccessFlags::READ_WRITE, Some(CreateFlags::Create), None);
 
     for (arguments, status, stdout, stderr) in [
-        (
-            vec![],
-            73,
-            b"Hello from Rust on Xila!\n".as_slice(),
-            b"".as_slice(),
-        ),
+        (vec![], 73, normal_output, b"".as_slice()),
         (
             vec!["panic".into()],
             134,
-            b"".as_slice(),
+            startup_output,
             b"panicked\n".as_slice(),
         ),
     ] {
-        let output_path = format!("/rust-{status}.out");
-        let error_path = format!("/rust-{status}.err");
+        let output_path = format!("{program}-{status}.out");
+        let error_path = format!("{program}-{status}.err");
         let input = File::open(vfs, parent, "/input", create).await.unwrap();
         let output = File::open(vfs, parent, output_path.as_str(), create)
             .await
@@ -304,7 +324,7 @@ async fn runs_sdk_rust_hello() {
             .unwrap();
         let handle = execute(
             context,
-            "/rust-hello",
+            program,
             arguments,
             Standard::new(context, input, output, error),
             None,
@@ -342,12 +362,49 @@ async fn runs_sdk_lifecycle_in_the_process() {
             &["_exit"][..],
             &b"preinit\nconstructor\nmain\n"[..],
         ),
+        (
+            "workers",
+            &["workers"][..],
+            &b"preinit\nconstructor\nmain\n"[..],
+        ),
     ] {
         let (status, stdout, stderr) =
             launch(context, parent, "/lifecycle", label, arguments).await;
         assert_eq!(status, 23, "{stderr:?}");
         assert_eq!(stdout, expected, "{label}");
     }
+
+    context
+        .task_manager
+        .set_environment_variable(parent, "XILA_CONSTRUCTOR_EXIT", "1")
+        .await
+        .unwrap();
+    let (status, stdout, stderr) =
+        launch(context, parent, "/lifecycle", "constructor-exit", &[]).await;
+    assert_eq!(status, 23, "{stderr:?}");
+    assert_eq!(
+        stdout,
+        b"preinit\nconstructor\ndestructor 2\ndestructor 1\n"
+    );
+}
+
+#[task::test]
+async fn runs_sdk_lifecycle_with_a_direct_c_entry() {
+    let (context, parent) = setup().await;
+    let source =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../abi/application/sdk/test/lifecycle");
+    let bytes = build_sdk_program(&source, "lifecycle-direct", "integer");
+    install(
+        context.virtual_file_system,
+        parent,
+        "/lifecycle-direct",
+        &bytes,
+    )
+    .await;
+    let (status, stdout, stderr) =
+        launch(context, parent, "/lifecycle-direct", "direct", &[]).await;
+    assert_eq!(status, 23, "{stderr:?}");
+    assert_eq!(stdout, b"direct fini\n");
 }
 
 #[task::test]

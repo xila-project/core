@@ -180,6 +180,15 @@ fn section_names(bytes: &[u8]) -> Vec<String> {
         .collect()
 }
 
+#[test]
+fn rejects_lifecycle_arrays_without_entry_opt_in() {
+    let bytes = build_fixture("xila-constructor.elf", "-DXILA_FIXTURE_CONSTRUCTOR");
+    assert!(matches!(
+        LoadedImage::load(&bytes, &Mmap, 32 * 1024),
+        Err(LoaderError::MissingLifecycleNote)
+    ));
+}
+
 #[task::test]
 async fn executes_c_elf_from_vfs_with_host_services() {
     let bytes = build_fixture("xila-start.elf", "");

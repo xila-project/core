@@ -141,6 +141,12 @@ class CheckElf(unittest.TestCase):
                         relocations=[(R_XTENSA_RELATIVE, 0)])
             self.assertTrue(any("PLT" in p for p in check(bad, "xtensa")), bad_tag)
 
+    def test_requires_word_aligned_riscv_entry_without_compressed_instructions(self):
+        data = image(machine=EM_RISCV, wide=False, entry=54)
+        self.assertEqual(check(data, "riscv32"), [])
+        self.assertTrue(any("aligned address" in problem
+                            for problem in check(data, "riscv32", compressed=False)))
+
     def test_rejects_a_fixed_executable(self):
         self.assertTrue(any("ET_DYN" in p for p in check(image(etype=2))))
 
@@ -446,9 +452,9 @@ class RealImages(unittest.TestCase):
         problems = check_elf.check(self.link("relr.elf", "-Wl,-z,pack-relative-relocs"), "x86_64")
         self.assertTrue(any("pack-relative-relocs" in p for p in problems), problems)
 
-    def test_accepts_a_constructor(self):
+    def test_rejects_a_constructor_without_lifecycle_opt_in(self):
         problems = check_elf.check(self.link("constructor.elf", "-DXILA_FIXTURE_CONSTRUCTOR"), "x86_64")
-        self.assertEqual(problems, [])
+        self.assertEqual(problems, ['lifecycle arrays require a "XILA" note of type 2'])
 
 
 if __name__ == "__main__":

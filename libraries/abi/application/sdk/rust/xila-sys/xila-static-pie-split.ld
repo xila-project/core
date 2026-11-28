@@ -28,7 +28,7 @@ SECTIONS
      outside the ABI note segment. */
   .note.gnu.build-id : { *(.note.gnu.build-id) } :rodata
   .note.gnu.property : { *(.note.gnu.property) } :rodata
-  .note.xila.abi : ALIGN(4) { KEEP(*(.note.xila.abi)) } :rodata :abi
+  .note.xila.abi : ALIGN(4) { KEEP(*(.note.xila.abi .note.xila.abi.lifecycle)) } :rodata :abi
   /* Any other note (.note.package, custom notes) would otherwise follow the ABI
      note and inherit its segments; the explicit :rodata keeps it out of :abi. */
   .note.other : { *(.note .note.*) } :rodata
