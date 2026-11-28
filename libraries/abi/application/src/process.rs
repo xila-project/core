@@ -180,10 +180,10 @@ impl ProcessLaunch {
                         Ok(directory) => Some(directory),
                         // Account creation can leave the recorded home absent. See #919.
                         Err(Status::NotFound) => {
+                            // Log the account identifier only: the home path holds the account name.
                             log::warning!(
-                                "No home capability for user {}. Directory {} is absent.",
-                                user.as_u16(),
-                                path.as_str()
+                                "No home capability for account {}: home directory cannot be found",
+                                user.as_u16()
                             );
                             None
                         }

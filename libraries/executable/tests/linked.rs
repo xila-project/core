@@ -405,6 +405,12 @@ unsafe extern "C" fn check_no_home(startup: *const XilaStartup) -> i32 {
 #[task::test]
 async fn linked_program_starts_without_a_missing_home() {
     let (context, parent) = setup().await;
+    // The parent of the home exists, as on a device where the account home was never created (#919).
+    context
+        .virtual_file_system
+        .create_directory(parent, &"/users")
+        .await
+        .unwrap();
     let standard = streams(context, parent, "missing-home").await;
     // SAFETY: The entry reads only the startup block and returns without unwinding.
     let result = unsafe {

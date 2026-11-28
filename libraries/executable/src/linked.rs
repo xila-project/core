@@ -83,7 +83,8 @@ pub enum LinkedHome {
     /// No home capability.
     None,
     /// The home that the account of the task's user records, with read and write rights.
-    /// If the directory is absent, the program starts without a home capability.
+    /// If the directory cannot be found (it is missing or is a dangling symbolic link), the
+    /// program starts without a home capability.
     /// An invalid account home or any other directory open error stops the launch.
     User,
     /// This directory, with these rights.
