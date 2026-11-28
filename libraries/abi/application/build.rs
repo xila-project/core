@@ -74,6 +74,10 @@ fn main() {
         .unwrap()
         .write_to_file(out.join("application.h"));
     println!("cargo:include={}", out.display());
+    let sdk_build = root.join("../../../tools/sdk/build.py");
+    if sdk_build.is_file() {
+        println!("cargo:sdk_build={}", sdk_build.display());
+    }
     println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-changed=Cargo.toml");
 }

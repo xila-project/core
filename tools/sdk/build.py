@@ -689,7 +689,8 @@ def link_archive(args):
     }
     with tempfile.TemporaryDirectory(prefix=".link-archive-", dir=output.parent) as work:
         work = Path(work)
-        run(link_archive_plan(archives, entry, output, inputs, builtins, work, tools)[0])
+        archive = work / "program.a"
+        run(link_archive_plan(archives, entry, archive, inputs, builtins, work, tools)[0])
         weak, strong = undefined_symbols(work / "combined.o", tools["nm"])
         unexpected = sorted(name for name in strong if name not in allow_undefined)
         if unexpected:
@@ -702,7 +703,7 @@ def link_archive(args):
             sys.exit("error: weak undefined symbol(s) have direct call/PC-relative relocations "
                      "that cannot resolve to absolute 0 in a PIE link: " + details +
                      " (provide a weak hidden default definition instead)")
-        plan = link_archive_plan(archives, entry, output, inputs, builtins, work, tools,
+        plan = link_archive_plan(archives, entry, archive, inputs, builtins, work, tools,
                                  weak_undefined=weak)
         for command in plan[1:]:
             run(command)
@@ -711,6 +712,8 @@ def link_archive(args):
         if leftover:
             sys.exit("error: localization left undefined symbols in the archive: " +
                      ", ".join(leftover))
+        # Replace the output so a different entry cannot leave an old archive member.
+        archive.replace(output)
     print(f"linked archive: {output} (entry: {entry})")
 
 
@@ -966,21 +969,34 @@ def verify_c_program(target, sdk, name, source, *options):
     return image
 
 
-def compile_packaged_example(target, sdk, name):
-    """Compile an SDK example source exactly like the SDK compiles its own objects: the
-    toolchain file's flags over the packaged headers, so the SDK directory alone suffices.
-    Returns the object path, under target/<target>/example-<name>-linked."""
+def link_packaged_example(target, sdk, name, archive):
+    """Compile and localize an example from the SDK directory."""
+    manifest = sdk / "sdk.json"
+    try:
+        metadata = json.loads(manifest.read_text())
+    except (OSError, ValueError) as error:
+        sys.exit(f"error: cannot read the SDK manifest at {manifest}: {error}. "
+                 "Pass a built SDK directory to --sdk.")
+    actual_target = metadata.get("target") if isinstance(metadata, dict) else None
+    if not isinstance(actual_target, str) or not actual_target:
+        sys.exit(f"error: SDK manifest {manifest} must contain a non-empty 'target' string. "
+                 "Pass a built SDK directory to --sdk.")
+    if actual_target != target:
+        sys.exit(f"error: {sdk} targets {actual_target}, expected {target}")
     include = [
         "-nostdinc",
         f"-isystem{sdk / 'include/posix'}",
         f"-isystem{sdk / 'include'}",
         f"-isystem{compiler_include_dir(target)}",
     ]
-    output = OUTPUT / target / f"example-{name}-linked" / f"{name}.o"
-    output.parent.mkdir(parents=True, exist_ok=True)
-    run([*compiler_command(target), *COMMON_FLAGS, *include,
-         "-c", sdk / "share/xila/example" / name / f"{name}.c", "-o", output])
-    return output
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".link-example-", dir=archive.parent) as work:
+        obj = Path(work) / f"{name}.o"
+        run([*compiler_command(target), *COMMON_FLAGS, *include,
+             "-c", sdk / "share/xila/example" / name / f"{name}.c", "-o", obj])
+        link_archive(argparse.Namespace(sdk=str(sdk), entry=f"xila_linked_{name}",
+                                        output=str(archive), builtins=[],
+                                        allow_undefined=[], inputs=[str(obj)]))
 
 
 def parse_nm_defined(text):
@@ -1016,10 +1032,8 @@ def verify_linked_example(target, sdk, name):
     no weak or unexpected undefined symbol remains, and report the localized size."""
     entry = f"xila_linked_{name}"
     work = OUTPUT / target / f"example-{name}-linked"
-    obj = compile_packaged_example(target, sdk, name)
     archive = work / f"lib{name}.a"
-    link_archive(argparse.Namespace(sdk=str(sdk), entry=entry, output=str(archive),
-                                    builtins=[], allow_undefined=[], inputs=[str(obj)]))
+    link_packaged_example(target, sdk, name, archive)
     defined, weak, strong = nm_archive_symbols(archive, find_target_tool(target, "nm"))
     if defined != {entry: "T"}:
         sys.exit(f"error: {archive}: global defined symbols are {defined}, expected only "
@@ -1194,6 +1208,13 @@ def main():
     archive_parser.add_argument("inputs", nargs="+", metavar="OBJECT",
                                 help="the program's object files or archives")
     archive_parser.set_defaults(function=link_archive)
+    example_parser = commands.add_parser("link-example", help="build a linked SDK example archive")
+    example_parser.add_argument("--target", required=True, choices=sorted(TARGETS))
+    example_parser.add_argument("--sdk", required=True, type=Path)
+    example_parser.add_argument("--output", required=True, type=Path)
+    example_parser.add_argument("name", choices=("hello", "hexdump"))
+    example_parser.set_defaults(function=lambda args: link_packaged_example(
+        args.target, args.sdk, args.name, args.output))
     args = parser.parse_args()
     if args.command != "rust-example":
         # Put the versioned LLVM directory on PATH for Meson and Clang's linker probes,

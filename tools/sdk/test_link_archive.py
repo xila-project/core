@@ -386,6 +386,13 @@ int main(int argc, char **argv) {{ (void)argc; (void)argv; return helper(counter
         self.link(entry, output, [self.root / f"prog_{name}.o"])
         self.entries[name] = (entry, output, base, op)
 
+    def test_rebuilding_an_archive_replaces_the_old_entry(self):
+        _, output, _, _ = self.entries["alpha"]
+        entry, _, _, _ = self.entries["beta"]
+        self.link(entry, output, [self.root / "prog_beta.o"])
+        defined, _, _ = build.nm_archive_symbols(output, tool("llvm-nm"))
+        self.assertEqual(defined, {entry: "T"})
+
     def test_each_archive_exposes_only_its_own_entry_as_a_global_t_symbol(self):
         for name, (entry, output, _base, _op) in self.entries.items():
             symbols = nm_symbols(output)

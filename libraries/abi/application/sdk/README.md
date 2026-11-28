@@ -138,6 +138,17 @@ builds its `hexdump.elf` and its `link-archive` archive (`libhexdump.a`, entry
 runs the same suite against the loaded ELF and the linked archive
 (`libraries/executable/tests/sdk.rs`, `test:native-loader`).
 
+## Link an SDK example
+
+Use `link-example` to create a linked archive for `hello` or `hexdump` from a
+built SDK. Use the same target as the SDK. The entry symbol is
+`xila_linked_<name>`.
+
+```sh
+python3 tools/sdk/build.py link-example --target thumbv7em-none-eabihf \
+  --sdk <sdk> --output libhexdump.a hexdump
+```
+
 ## Linked C programs: `link-archive`
 
 A C program can also be linked into the firmware itself, instead of being loaded as an
