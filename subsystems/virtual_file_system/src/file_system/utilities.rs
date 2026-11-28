@@ -2,7 +2,7 @@ use super::DirectoryCapability;
 use crate::{
     AccessTimePolicy, IoErrorKind, Result, ResultExt, VirtualFileSystem, pipe::Pipe, poll,
 };
-use alloc::{borrow::ToOwned, collections::btree_map::BTreeMap, string::String, vec::Vec};
+use alloc::{borrow::ToOwned, string::String, vec::Vec};
 use exported_file_system::{
     AccessFlags, AttributeFlags, AttributeOperations, Attributes, BaseOperations, BlockDevice,
     CharacterDevice, Context, DirectoryOperations, FileSystemOperations, Flags, Inode, Kind, Path,
@@ -13,6 +13,65 @@ use users::{GroupIdentifier, UserIdentifier};
 
 const MAX_PATH_LENGTH: usize = 4096;
 const MAX_SYMLINKS: usize = 40;
+
+/// Registry of mounted devices or pipes, sorted by inode.
+///
+/// A device mounts once and its entry stays until it unmounts, so a sorted
+/// vector is sufficient. A `BTreeMap` for each of the three value types costs
+/// about 6 KB of flash on a Cortex-M4 target, because each map instantiates
+/// the node split, merge and rebalance code.
+pub(super) struct InodeMap<T>(Vec<(Inode, T)>);
+
+impl<T> InodeMap<T> {
+    pub const fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    fn position(&self, inode: Inode) -> core::result::Result<usize, usize> {
+        self.0.binary_search_by_key(&inode, |&(key, _)| key)
+    }
+
+    /// Return the lowest inode above 0 that has no entry.
+    pub fn allocate_inode(&self) -> Option<Inode> {
+        let mut candidate: Inode = 1;
+        for &(inode, _) in &self.0 {
+            if inode > candidate {
+                break;
+            }
+            if inode == candidate {
+                candidate = candidate.checked_add(1)?;
+            }
+        }
+        (candidate < Inode::MAX).then_some(candidate)
+    }
+
+    /// Add the entry, or replace the value of an entry with the same inode.
+    pub fn insert(&mut self, inode: Inode, value: T) {
+        match self.position(inode) {
+            Ok(index) => self.0[index].1 = value,
+            Err(index) => self.0.insert(index, (inode, value)),
+        }
+    }
+
+    pub fn get_mut(&mut self, inode: &Inode) -> Option<&mut T> {
+        let index = self.position(*inode).ok()?;
+        Some(&mut self.0[index].1)
+    }
+
+    pub fn remove(&mut self, inode: &Inode) -> Option<T> {
+        let index = self.position(*inode).ok()?;
+        Some(self.0.remove(index).1)
+    }
+
+    /// Iterate over the values in ascending inode order.
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        self.0.iter_mut().map(|(_, value)| value)
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+}
 
 pub(super) struct InternalFileSystem {
     pub reference_count: usize,
@@ -58,9 +117,9 @@ pub(super) struct InternalPipe {
 }
 
 pub(super) type FileSystemsArray = Vec<InternalFileSystem>;
-pub(super) type CharacterDevicesMap = BTreeMap<Inode, InternalCharacterDevice>;
-pub(super) type BlockDevicesMap = BTreeMap<Inode, InternalBlockDevice>;
-pub(super) type PipeMap = BTreeMap<Inode, InternalPipe>;
+pub(super) type CharacterDevicesMap = InodeMap<InternalCharacterDevice>;
+pub(super) type BlockDevicesMap = InodeMap<InternalBlockDevice>;
+pub(super) type PipeMap = InodeMap<InternalPipe>;
 
 pub(super) enum ResolvedPath<'a> {
     Borrowed(&'a Path),
@@ -1788,10 +1847,6 @@ impl VirtualFileSystem {
         Ok((time, user, group))
     }
 
-    pub(super) fn get_new_inode<T>(devices: &BTreeMap<Inode, T>) -> Option<Inode> {
-        (1..Inode::MAX).find(|&inode| !devices.contains_key(&inode))
-    }
-
     pub(super) async fn get_attributes(
         file_system: &dyn FileSystemOperations,
         path: &Path,
@@ -1924,6 +1979,46 @@ mod tests {
     use file_system::{DummyFileSystem, PathOwned};
 
     use super::*;
+
+    #[test]
+    fn inode_map_allocates_the_lowest_free_inode() {
+        let mut map = InodeMap::new();
+        assert_eq!(map.allocate_inode(), Some(1));
+        for inode in [3, 1, 2] {
+            map.insert(inode, inode * 10);
+        }
+        assert_eq!(map.allocate_inode(), Some(4));
+
+        assert_eq!(map.remove(&2), Some(20));
+        assert_eq!(map.remove(&2), None);
+        assert_eq!(map.allocate_inode(), Some(2));
+
+        // Inode 0 is never allocated and does not hide inode 1.
+        map.insert(0, 0);
+        assert_eq!(map.remove(&1), Some(10));
+        assert_eq!(map.allocate_inode(), Some(1));
+    }
+
+    #[test]
+    fn inode_map_keeps_one_sorted_entry_for_each_inode() {
+        let mut map = InodeMap::new();
+        for inode in [5, 2, 9, 2] {
+            map.insert(inode, inode);
+        }
+        map.insert(9, 90);
+        assert_eq!(
+            map.values_mut().map(|value| *value).collect::<Vec<_>>(),
+            [2, 5, 90]
+        );
+
+        *map.get_mut(&5).unwrap() = 50;
+        assert_eq!(map.get_mut(&5), Some(&mut 50));
+        assert_eq!(map.get_mut(&4), None);
+
+        map.clear();
+        assert_eq!(map.values_mut().count(), 0);
+        assert_eq!(map.allocate_inode(), Some(1));
+    }
 
     #[test]
     fn pinned_lookup_rejects_submounts() {

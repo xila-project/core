@@ -3,7 +3,7 @@ mod utilities;
 use crate::pipe::Pipe;
 use crate::{Directory, File, IoErrorKind, ItemStatic, Result, ResultExt, poll};
 use alloc::borrow::ToOwned;
-use alloc::{boxed::Box, collections::BTreeMap};
+use alloc::boxed::Box;
 use alloc::{vec, vec::Vec};
 use core::cell::RefCell;
 use core::ptr;
@@ -369,9 +369,9 @@ impl VirtualFileSystem {
             time_manager,
             file_systems: RwLock::new(file_systems),
             path_pins: BlockingMutex::new(RefCell::new(Vec::new())),
-            character_device: RwLock::new(BTreeMap::new()),
-            block_device: RwLock::new(BTreeMap::new()),
-            pipes: RwLock::new(BTreeMap::new()),
+            character_device: RwLock::new(InodeMap::new()),
+            block_device: RwLock::new(InodeMap::new()),
+            pipes: RwLock::new(InodeMap::new()),
             writes_frozen: portable_atomic::AtomicBool::new(false),
             owed: BlockingMutex::new(RefCell::new(alloc::vec::Vec::new())),
         }
@@ -1417,7 +1417,7 @@ impl VirtualFileSystem {
         let inode = match item {
             ItemStatic::BlockDevice(device) => {
                 let mut block_devices = self.block_device.write().await;
-                let inode = Self::get_new_inode(&*block_devices).ok_or(IoErrorKind::NoSpace)?;
+                let inode = block_devices.allocate_inode().ok_or(IoErrorKind::NoSpace)?;
                 block_devices.insert(
                     inode,
                     InternalBlockDevice {
@@ -1429,7 +1429,9 @@ impl VirtualFileSystem {
             }
             ItemStatic::CharacterDevice(device) => {
                 let mut character_devices = self.character_device.write().await;
-                let inode = Self::get_new_inode(&*character_devices).ok_or(IoErrorKind::NoSpace)?;
+                let inode = character_devices
+                    .allocate_inode()
+                    .ok_or(IoErrorKind::NoSpace)?;
                 character_devices.insert(
                     inode,
                     InternalCharacterDevice {
@@ -1442,7 +1444,7 @@ impl VirtualFileSystem {
             ItemStatic::FileSystem(_) => 0,
             ItemStatic::Pipe(ref pipe) => {
                 let mut pipes = self.pipes.write().await;
-                let inode = Self::get_new_inode(&*pipes).ok_or(IoErrorKind::NoSpace)?;
+                let inode = pipes.allocate_inode().ok_or(IoErrorKind::NoSpace)?;
                 pipes.insert(inode, InternalPipe { pipe: pipe.clone() });
                 inode
             }
