@@ -159,11 +159,11 @@ class CheckElf(unittest.TestCase):
         problems = check(image(relocations=[(R_X86_64_RELATIVE, 3)]))
         self.assertTrue(any("symbol" in p for p in problems))
 
-    def test_rejects_constructors_and_dependencies(self):
+    def test_rejects_legacy_functions_and_dependencies(self):
         for tag in (check_elf.DT_NEEDED, check_elf.DT_INIT, check_elf.DT_FINI):
             self.assertTrue(check(image(dynamic=[(tag, 1)])), tag)
         problems = check(image(dynamic=[(check_elf.DT_INIT_ARRAYSZ, 8)]))
-        self.assertTrue(any("init/fini" in p for p in problems))
+        self.assertTrue(any("DT_INIT_ARRAY" in p for p in problems))
 
     def test_rejects_every_dynamic_tag_the_loader_rejects(self):
         # DT_RELR and friends come from -z pack-relative-relocs: the loader does not
@@ -446,9 +446,9 @@ class RealImages(unittest.TestCase):
         problems = check_elf.check(self.link("relr.elf", "-Wl,-z,pack-relative-relocs"), "x86_64")
         self.assertTrue(any("pack-relative-relocs" in p for p in problems), problems)
 
-    def test_rejects_a_constructor(self):
+    def test_accepts_a_constructor(self):
         problems = check_elf.check(self.link("constructor.elf", "-DXILA_FIXTURE_CONSTRUCTOR"), "x86_64")
-        self.assertTrue(any("constructor" in p for p in problems), problems)
+        self.assertEqual(problems, [])
 
 
 if __name__ == "__main__":

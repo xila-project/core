@@ -2,6 +2,9 @@
 #![no_std]
 
 mod elf;
+mod lifecycle;
+#[cfg(any(target_arch = "riscv32", test))]
+mod riscv;
 
 use core::{alloc::Layout, ptr::NonNull};
 use elf::{Elf, Native};
@@ -34,8 +37,12 @@ pub enum Error {
         running: Version,
     },
     InvalidDynamic,
-    /// DT_INIT, DT_FINI or an init, fini or preinit array: the loader runs no
-    /// constructors or destructors.
+    InvalidSectionHeaders,
+    InvalidRiscvAttributes,
+    IncompatibleRiscvArchitecture,
+    InvalidLifecycleArray,
+    InvalidLifecycleEntry,
+    /// Legacy DT_INIT or DT_FINI function.
     Constructors,
     DynamicDependency,
     UnsupportedDynamicTag(usize),
@@ -113,6 +120,7 @@ pub struct LoadedImage {
     execution_base: NonNull<u8>,
     layout: Layout,
     entry_offset: usize,
+    lifecycle: lifecycle::Lifecycle,
 }
 
 impl LoadedImage {
@@ -136,6 +144,7 @@ impl LoadedImage {
             execution_base,
             layout: elf.layout,
             entry_offset: elf.entry_offset,
+            lifecycle: lifecycle::Lifecycle::new(allocation, &elf.arrays),
         };
         let data_addr = allocation.as_ptr().addr();
         let exec_addr = execution_base.as_ptr().addr();
@@ -153,6 +162,7 @@ impl LoadedImage {
             unsafe { core::slice::from_raw_parts_mut(allocation.as_ptr(), elf.layout.size()) };
         elf.copy_to(image);
         elf.relocate(image, data_bias, execution_bias)?;
+        elf.check_array_entries(image, exec_addr)?;
         unsafe { memory.finish_writes(allocation, elf.layout, &mut elf.regions()) }?;
         Ok(loaded)
     }

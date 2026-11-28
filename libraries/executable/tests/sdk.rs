@@ -319,6 +319,38 @@ async fn runs_sdk_rust_hello() {
 }
 
 #[task::test]
+async fn runs_sdk_lifecycle_in_the_process() {
+    let (context, parent) = setup().await;
+    let source =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../abi/application/sdk/test/lifecycle");
+    let bytes = build_sdk_program(&source, "lifecycle", "integer");
+    install(context.virtual_file_system, parent, "/lifecycle", &bytes).await;
+
+    for (label, arguments, expected) in [
+        (
+            "return",
+            &[][..],
+            &b"preinit\nconstructor\nmain\natexit\ndestructor 2\ndestructor 1\n"[..],
+        ),
+        (
+            "exit",
+            &["exit"][..],
+            &b"preinit\nconstructor\nmain\natexit\ndestructor 2\ndestructor 1\n"[..],
+        ),
+        (
+            "early-exit",
+            &["_exit"][..],
+            &b"preinit\nconstructor\nmain\n"[..],
+        ),
+    ] {
+        let (status, stdout, stderr) =
+            launch(context, parent, "/lifecycle", label, arguments).await;
+        assert_eq!(status, 23, "{stderr:?}");
+        assert_eq!(stdout, expected, "{label}");
+    }
+}
+
+#[task::test]
 async fn runs_sdk_c_program_through_the_posix_layer() {
     let (context, parent) = setup().await;
     let vfs = context.virtual_file_system;

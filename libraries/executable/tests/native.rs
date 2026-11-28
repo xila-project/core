@@ -1,10 +1,6 @@
 #![cfg(all(feature = "native-dev", target_os = "linux", target_arch = "x86_64"))]
 
-use core::{
-    alloc::Layout,
-    ptr::NonNull,
-    task::{Context, Poll, Waker},
-};
+use core::task::{Context, Poll, Waker};
 use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::{process::Command, sync::Mutex};
 
@@ -15,7 +11,7 @@ use file_system::{
     DirectBaseOperations, DirectCharacterDevice, Flags, MountOperations, Permissions, Position,
     Size, Special,
 };
-use native_loader::{Error as LoaderError, ExecutableMemory, LoadedImage, Region, Startup};
+use native_loader::{Error as LoaderError, LoadedImage, Startup};
 use stackful::Stack;
 use virtual_file_system::{File, VirtualFileSystem};
 
@@ -182,36 +178,6 @@ fn section_names(bytes: &[u8]) -> Vec<String> {
             String::from_utf8_lossy(&bytes[start..end]).into_owned()
         })
         .collect()
-}
-
-/// Memory backend that fails the test if the loader allocates.
-struct NoMemory;
-
-// SAFETY: it never hands out memory.
-unsafe impl ExecutableMemory for NoMemory {
-    fn allocate(&self, _: Layout) -> Result<NonNull<u8>, LoaderError> {
-        panic!("the loader allocated for a rejected image");
-    }
-    unsafe fn finish_writes(
-        &self,
-        _: NonNull<u8>,
-        _: Layout,
-        _: &mut dyn Iterator<Item = Region>,
-    ) -> Result<(), LoaderError> {
-        unreachable!()
-    }
-    unsafe fn free(&self, _: NonNull<u8>, _: Layout) {
-        unreachable!()
-    }
-}
-
-#[test]
-fn rejects_c_images_with_constructors_before_allocating() {
-    let bytes = build_fixture("xila-constructor.elf", "-DXILA_FIXTURE_CONSTRUCTOR");
-    assert!(matches!(
-        LoadedImage::load(&bytes, &NoMemory, 32 * 1024),
-        Err(LoaderError::Constructors)
-    ));
 }
 
 #[task::test]

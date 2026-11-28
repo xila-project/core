@@ -23,8 +23,11 @@ extern int32_t xila_main(const XilaStartup *startup);
 
 #ifndef XILA_SDK_LINKED
 
+/* C++ objects use this identifier when they register an exit handler. */
+__attribute__((visibility("hidden"))) void *__dso_handle = &__dso_handle;
+
 int32_t _xila_start(const XilaStartup *startup) {
-    if (startup == NULL || startup->size < sizeof(*startup) || startup->api == NULL ||
+    if (startup == NULL || startup->size < offsetof(XilaStartup, lifecycle) || startup->api == NULL ||
         startup->api->size < sizeof(XilaApi) ||
         !xila_version_compatible(xila_abi_note.version, startup->api->version)) {
         return -1;
@@ -51,7 +54,7 @@ int32_t xila_linked_start(const XilaStartup *startup) {
        before anything can read them. */
     xila_sdk_api = &xila_sdk_fallback_api;
     xila_sdk_process = NULL;
-    if (startup == NULL || startup->size < sizeof(*startup) || startup->api == NULL ||
+    if (startup == NULL || startup->size < offsetof(XilaStartup, lifecycle) || startup->api == NULL ||
         startup->api->size < sizeof(XilaApi) ||
         !xila_version_compatible((XILA_VERSION_MAJOR << 16) | XILA_VERSION_MINOR,
                                  startup->api->version)) {

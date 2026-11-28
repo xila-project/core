@@ -1,8 +1,8 @@
 /* Exit handlers for atexit(), on_exit() and __cxa_atexit().
  *
  * picolibc keeps these in a table of its own and runs it from a .fini_array entry: it
- * assumes the C runtime walks the fini array at exit. The loader runs no destructors, so
- * with picolibc's table a handler registered by an application would never be called.
+ * assumes the C runtime walks the fini array at exit. Linked programs cannot contain
+ * fini arrays, so both linked and loaded programs use this replacement.
  * This file provides picolibc's _on_exit (the function atexit.c, onexit.c and
  * cxa-atexit.c call) and the function exit() uses to run the table, in one archive
  * member: a program that registers no handler links neither the table nor this code, and

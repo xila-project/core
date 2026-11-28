@@ -48,7 +48,7 @@ fn main() {
     config
         .export
         .include
-        .extend(["XilaString".into(), "XilaStartup".into(), "XilaApi".into()]);
+        .extend(["XilaString", "XilaStartup", "XilaLifecycle", "XilaApi"].map(String::from));
     for name in ["Network", "NetworkAddress", "Tcp", "TcpListener", "Udp"] {
         config
             .export

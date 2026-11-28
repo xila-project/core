@@ -32,7 +32,7 @@ struct Record<K> {
     state: UnsafeCell<HostState>,
     /// Declared last, so it is dropped after the heap and the state: a kept image holds the
     /// code of the program, so it stays mapped until nothing can run it any more.
-    _keep: K,
+    keep: K,
 }
 
 /// The owner of a leaked `Record` allocation, freeing it on drop.
@@ -57,7 +57,7 @@ impl<K> ProcessOwner<K> {
             pointer.write(Record {
                 heap: UnsafeCell::new(Heap::new()),
                 state: UnsafeCell::new(state),
-                _keep: keep,
+                keep,
             });
         }
         Ok(Self(pointer))
@@ -76,6 +76,12 @@ impl<K> ProcessOwner<K> {
             keep,
             HostState::new(arguments, standard_input, standard_output, standard_error),
         )
+    }
+
+    /// The value kept alive until the process ends.
+    pub fn keep(&self) -> &K {
+        // SAFETY: the pointer refers to an initialized record owned by self.
+        unsafe { &(*self.0.as_ptr()).keep }
     }
 
     /// The heap of the process. It stays valid until `self` is dropped.

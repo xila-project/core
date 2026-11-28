@@ -393,6 +393,19 @@ int main(int argc, char **argv) {{ (void)argc; (void)argv; return helper(counter
         defined, _, _ = build.nm_archive_symbols(output, tool("llvm-nm"))
         self.assertEqual(defined, {entry: "T"})
 
+    def test_rejects_lifecycle_sections_in_linked_programs(self):
+        source = self.root / "lifecycle.c"
+        source.write_text("""
+__attribute__((constructor)) static void initialize(void) {}
+int main(void) { return 0; }
+""")
+        program = self.root / "lifecycle.o"
+        self.compile(source, program, extra=["-O0", "-fPIE"])
+        with contextlib.redirect_stderr(io.StringIO()) as diagnostics:
+            with self.assertRaises(SystemExit):
+                self.link("xila_lifecycle_entry", self.root / "liblifecycle.a", [program])
+        self.assertIn("linked programs cannot use lifecycle sections", diagnostics.getvalue())
+
     def test_each_archive_exposes_only_its_own_entry_as_a_global_t_symbol(self):
         for name, (entry, output, _base, _op) in self.entries.items():
             symbols = nm_symbols(output)

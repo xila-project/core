@@ -526,10 +526,11 @@ whether the program returned or called `exit`.
   (`DROPPED_MEMBERS` in `tools/sdk/build.py`) and the layer defines the replacements
   (`posix/onexit.c`, `posix/exit_flush.c`). Members are named exactly, per target:
   Arm's `interrupt.c.o` (vector table, no constructor) stays, x86-64's (an interrupt
-  descriptor table set up by a constructor) goes. The build also scans every member of every
-  SDK archive and fails on any `.init_array`, `.fini_array`, `.preinit_array`, `.ctors`
-  or `.dtors` section, so no future picolibc update can hand an application a
-  constructor.
+  descriptor table set up by a constructor) goes. The SDK uses the same archives for
+  loaded and linked applications. It checks their members for lifecycle sections such as
+  `.init_array` and `.fini_array`. Loaded applications can provide their own lifecycle
+  functions. The [loader README](../../../native_loader/README.md) describes when they run.
+  `link-archive` rejects those sections in linked applications.
 * **Stack protector.** The toolchain file builds without it, to save flash and RAM;
   objects compiled with `-fstack-protector`, `-fstack-protector-strong` or
   `-fstack-protector-all` link against `posix/stack_protector.c`, which defines

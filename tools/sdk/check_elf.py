@@ -16,7 +16,7 @@ The checks mirror the loader (libraries/native_loader) and the SDK contract:
   read, as the loader does);
 * only the dynamic tags the loader consumes or ignores (libraries/native_loader/src/elf.rs):
   anything else, such as DT_RELR from -z pack-relative-relocs, fails the load; no DT_NEEDED,
-  DT_INIT, DT_FINI or non-empty init/fini/preinit arrays (the loader runs no constructors);
+  or legacy DT_INIT and DT_FINI functions; init, fini and preinit arrays must be file-backed;
 * DT_REL/DT_RELA tables that are complete, with the entry size the loader expects;
 * every dynamic relocation is the machine's RELATIVE type (no symbols);
 * no gp relaxation on RISC-V: an image must not define `__global_pointer$`. lld relaxes
@@ -55,15 +55,19 @@ DT_RELA_ENTRY, DT_REL_ENTRY = 9, 19  # DT_RELAENT, DT_RELENT
 
 # The loader's dynamic-tag table (Elf::parse_dynamic in libraries/native_loader/src/elf.rs).
 # Keep it identical: a tag outside it makes the loader fail the whole image.
+LIFECYCLE_ARRAYS = (
+    ("DT_PREINIT_ARRAY", DT_PREINIT_ARRAY, DT_PREINIT_ARRAYSZ),
+    ("DT_INIT_ARRAY", DT_INIT_ARRAY, DT_INIT_ARRAYSZ),
+    ("DT_FINI_ARRAY", DT_FINI_ARRAY, DT_FINI_ARRAYSZ),
+)
 LOADER_CONSUMED = {DT_RELA, DT_RELASZ, DT_RELA_ENTRY, DT_REL, DT_RELSZ, DT_REL_ENTRY}
+LOADER_CONSUMED.update(tag for _, address, size in LIFECYCLE_ARRAYS for tag in (address, size))
 LOADER_IGNORED = (
-    set(range(4, 7)) | set(range(10, 17)) | {21, 22} | set(range(24, 31)) | {32, 33}
+    set(range(4, 7)) | set(range(10, 17)) | {21, 22} | {24, 29, 30}
     | {0x6FFFFEF5, 0x6FFFFFF0} | set(range(0x6FFFFFF9, 0x6FFFFFFE))
 )
 DT_XTENSA_GOT_LOC_OFF, DT_XTENSA_GOT_LOC_SZ = 0x7000_0000, 0x7000_0001
 XTENSA_IGNORED_DYNAMIC = {DT_PLTGOT, DT_XTENSA_GOT_LOC_OFF, DT_XTENSA_GOT_LOC_SZ}
-# Ignored only while zero: a nonzero value means constructors or destructors.
-LOADER_CONSTRUCTOR_VALUES = {DT_INIT, DT_FINI, DT_INIT_ARRAYSZ, DT_FINI_ARRAYSZ, DT_PREINIT_ARRAYSZ}
 
 EM = {3: "i386", 40: "arm", 62: "x86_64", 94: "xtensa", 183: "aarch64", 243: "riscv"}
 RELATIVE = {"arm": 23, "x86_64": 8, "aarch64": 1027, "riscv": 3, "xtensa": 5}
@@ -381,9 +385,8 @@ def _check(data, machine, xila_version, float_abi, compressed, embedded):
         for tag, value in elf.dynamic(segment):
             if tag == DT_NEEDED:
                 problems.append("DT_NEEDED present: the image must be self-contained")
-            elif tag in LOADER_CONSTRUCTOR_VALUES and value != 0:
-                problems.append("constructor tag (DT_INIT/DT_FINI or a non-empty init/fini/preinit "
-                                "array): the loader runs no constructors")
+            elif tag in (DT_INIT, DT_FINI) and value != 0:
+                problems.append("legacy DT_INIT and DT_FINI functions are not supported")
             elif tag in (DT_JMPREL, DT_PLTRELSZ) or (tag == DT_PLTGOT and elf.arch != "xtensa"):
                 problems.append("PLT relocations present: link with -Bsymbolic and no external symbols")
             elif elf.arch == "xtensa" and tag in XTENSA_IGNORED_DYNAMIC:
@@ -412,6 +415,15 @@ def _check(data, machine, xila_version, float_abi, compressed, embedded):
                 problems.append(f"{name} table is incomplete, has an entry size other than "
                                 f"{stride}, a size that is not a whole number of entries, or lies "
                                 "outside every PT_LOAD segment")
+
+        for name, address_tag, size_tag in LIFECYCLE_ARRAYS:
+            address, size = tables.get(address_tag), tables.get(size_tag)
+            if address is None and size in (None, 0):
+                continue
+            if (address is None or size is None or (size != 0 and
+                    (address % word != 0 or size % word != 0 or load_for(address, size) is None))):
+                problems.append(f"{name} must have a matching size and whole pointer slots "
+                                "inside a file-backed PT_LOAD segment")
 
     for section in elf.sections():
         if section["type"] not in (SHT_REL, SHT_RELA):

@@ -47,7 +47,15 @@ impl LoadedImage {
             standard_error,
         )
         .map_err(|_| Error::AllocationFailed)?;
-        let run = unsafe { owner.entry(entry, launch) };
+        // SAFETY: the owner keeps the validated arrays and their callback alive
+        // until the coroutine and its workers can no longer run.
+        let run = unsafe {
+            owner
+                .state()
+                .as_mut()
+                .set_lifecycle(owner.keep().lifecycle.interface());
+            owner.entry(entry, launch)
+        };
         Ok((run, owner))
     }
 

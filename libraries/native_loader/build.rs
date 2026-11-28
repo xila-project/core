@@ -5,7 +5,7 @@
 //! images and accept soft-float ones. The ABI is recovered from the target name instead.
 //! Unlike `stackful`, which cares which float registers exist, the loader needs the
 //! calling convention, which `-C target-feature` flags do not change.
-use std::env;
+use std::{collections::BTreeSet, env};
 
 /// The floating-point ABI selected by `target`: `soft`, `single` or `double`.
 fn target_float_abi(target: &str) -> &'static str {
@@ -38,4 +38,70 @@ fn main() {
     // soft-float. Feature flags therefore never change the expected ABI.
     let abi = target_float_abi(&target);
     println!("cargo:rustc-cfg=native_loader_float_abi=\"{abi}\"");
+    if arch == "riscv32" {
+        let features = target_extensions(abi);
+        println!("cargo:rustc-env=NATIVE_LOADER_RISCV_FEATURES={features}");
+    }
+}
+
+// Cargo supplies stable target features after Rust applies the target defaults and flags.
+// On stable Rust, F and D are absent from that list even when they are enabled.
+fn target_extensions(abi: &str) -> String {
+    let configured = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
+    let mut features: BTreeSet<_> = configured
+        .split(',')
+        .filter(|name| !name.is_empty())
+        .collect();
+    let embedded = env::var("CARGO_CFG_TARGET_ABI").is_ok_and(|abi| abi == "ilp32e");
+    features.insert(if embedded { "e" } else { "i" });
+    if abi == "single" || abi == "double" {
+        features.insert("f");
+    }
+    if abi == "double" {
+        features.insert("d");
+    }
+    let flags = env::var("CARGO_ENCODED_RUSTFLAGS").unwrap_or_default();
+    for flag in flags.split('\x1f').filter_map(|flag| {
+        flag.trim_start_matches("-C")
+            .trim_start()
+            .strip_prefix("target-feature=")
+    }) {
+        for feature in flag.split(',') {
+            match feature {
+                "+f" => {
+                    features.insert("f");
+                }
+                "+d" => {
+                    features.extend(["d", "f"]);
+                }
+                "-f" => {
+                    features.remove("f");
+                    features.remove("d");
+                }
+                "-d" => {
+                    features.remove("d");
+                }
+                _ => {}
+            }
+        }
+    }
+    // Toolchains may name the component extensions as well as their parent.
+    for (parent, child) in [
+        ("m", "zmmul"),
+        ("a", "zaamo"),
+        ("a", "zalrsc"),
+        ("c", "zca"),
+    ] {
+        if features.contains(parent) {
+            features.insert(child);
+        }
+    }
+    if features.contains("c") {
+        for (float, compressed) in [("f", "zcf"), ("d", "zcd")] {
+            if features.contains(float) {
+                features.insert(compressed);
+            }
+        }
+    }
+    features.into_iter().collect::<Vec<_>>().join(",")
 }

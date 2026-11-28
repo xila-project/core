@@ -162,7 +162,9 @@ pub unsafe fn start(
     main: unsafe fn(*const XilaStartup) -> i32,
 ) -> i32 {
     // Read only the prefixes until both structures are known to be large enough.
-    if startup.is_null() || (unsafe { (*startup).size } as usize) < size_of::<XilaStartup>() {
+    if startup.is_null()
+        || (unsafe { (*startup).size } as usize) < core::mem::offset_of!(XilaStartup, lifecycle)
+    {
         return -1;
     }
     let api = unsafe { (*startup).api };

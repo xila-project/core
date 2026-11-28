@@ -16,6 +16,7 @@ impl Abi for Riscv32 {
     const MACHINE: u16 = 243;
     const RELATIVE: u32 = 3;
     const ARCH: Arch = Arch::Riscv32;
+    const RISCV_FEATURES: &'static str = "i,m,c,zca,zmmul";
     const THUMB_ONLY: bool = false;
     fn flags_supported(flags: u32) -> bool {
         riscv_flags_supported(flags, true, 0, false)
@@ -275,35 +276,151 @@ fn bounds_segment_alignment() {
     alignment_is_bounded::<Riscv32>();
 }
 
-fn rejects_constructors<A: Abi>() {
-    let w = A::WORD;
-    let file = fixture::<A>(true);
-    // DT_INIT, DT_FINI, DT_INIT_ARRAYSZ, DT_FINI_ARRAYSZ and DT_PREINIT_ARRAYSZ.
-    for tag in [12, 13, 27, 28, 33] {
-        let mut image = file;
-        put::<A>(&mut image, DYNAMIC + 3 * 2 * w, tag);
-        put::<A>(&mut image, DYNAMIC + 3 * 2 * w + w, 0x100);
-        assert!(
-            matches!(check::<A>(&image), Err(Error::Constructors)),
-            "tag {tag}"
-        );
-        // An empty array is harmless; so is the array address alone.
-        put::<A>(&mut image, DYNAMIC + 3 * 2 * w + w, 0);
-        check::<A>(&image).unwrap();
+fn lifecycle_arrays<A: Abi>() {
+    let mut file = fixture::<A>(true);
+    let fields = Fields::of::<A>();
+    let dynamic_size = 6 * 2 * A::WORD;
+    for field in [fields.size, fields.memory] {
+        put::<A>(&mut file, fields.program_field(2, field), dynamic_size);
     }
-    for tag in [25, 26, 32] {
-        let mut image = file;
-        put::<A>(&mut image, DYNAMIC + 3 * 2 * w, tag);
-        put::<A>(&mut image, DYNAMIC + 3 * 2 * w + w, 0x100);
-        check::<A>(&image).unwrap();
+    let address_tag = DYNAMIC + 6 * A::WORD;
+    let size_tag = DYNAMIC + 8 * A::WORD;
+    for tag in [12, 13] {
+        put::<A>(&mut file, address_tag, tag);
+        put::<A>(&mut file, address_tag + A::WORD, 1);
+        assert_eq!(check::<A>(&file), Err(Error::Constructors));
+    }
+
+    let base = 0x1000;
+    for (address, size) in [(32, 33), (25, 27), (26, 28)] {
+        put::<A>(&mut file, address_tag, address);
+        assert_eq!(check::<A>(&file), Err(Error::InvalidLifecycleArray));
+        put::<A>(&mut file, size_tag, size);
+        put::<A>(&mut file, size_tag + A::WORD, A::WORD);
+        for invalid in [SLOT + 1, FILE - A::WORD] {
+            put::<A>(&mut file, address_tag + A::WORD, invalid);
+            assert_eq!(check::<A>(&file), Err(Error::InvalidLifecycleArray));
+        }
+        put::<A>(&mut file, address_tag + A::WORD, SLOT);
+        let entry = 0x100 | usize::from(A::THUMB_ONLY);
+        for target in [entry, SLOT, 0x110] {
+            put::<A>(&mut file, RELOC + 2 * A::WORD, target);
+            let elf = Elf::<A>::parse(&file).unwrap();
+            let mut image = [0; FILE];
+            elf.copy_to(&mut image);
+            elf.relocate(&mut image, base, base).unwrap();
+            assert_eq!(
+                elf.check_array_entries(&image, base),
+                if target == entry {
+                    Ok(())
+                } else {
+                    Err(Error::InvalidLifecycleEntry)
+                },
+            );
+        }
+        put::<A>(&mut file, size_tag, 0);
     }
 }
 
 #[test]
-fn rejects_images_with_constructors_or_destructors() {
-    rejects_constructors::<Native>();
-    rejects_constructors::<Riscv32>();
-    rejects_constructors::<Arm32>();
+fn checks_lifecycle_arrays_and_relocated_entries() {
+    lifecycle_arrays::<Native>();
+    lifecycle_arrays::<Arm32>();
+    lifecycle_arrays::<Riscv32>();
+}
+
+#[test]
+fn reads_an_initialization_section_without_dynamic_array_tags() {
+    const SECTION: usize = FILE + 40;
+    let mut file = [0; FILE + 80];
+    file[..FILE].copy_from_slice(&fixture::<Arm32>(true));
+    put::<Arm32>(&mut file, 32, FILE);
+    write(&mut file, 46, &40u16.to_le_bytes());
+    write(&mut file, 48, &2u16.to_le_bytes());
+    for (offset, value) in [(4, 14), (8, 2), (12, SLOT), (16, SLOT), (20, 4)] {
+        put::<Arm32>(&mut file, SECTION + offset, value);
+    }
+    put::<Arm32>(&mut file, RELOC + 8, 0x101);
+    let elf = Elf::<Arm32>::parse(&file).unwrap();
+    assert_eq!(elf.arrays[1], SLOT..SLOT + 4);
+    let mut image = [0; FILE];
+    elf.copy_to(&mut image);
+    elf.relocate(&mut image, 0x1000, 0x1000).unwrap();
+    elf.check_array_entries(&image, 0x1000).unwrap();
+
+    put::<Arm32>(&mut file, SECTION + 16, SLOT + 4);
+    assert_eq!(check::<Arm32>(&file), Err(Error::InvalidLifecycleArray));
+}
+
+fn attributes_section(architecture: &[u8]) -> ([u8; FILE + 160], usize) {
+    const SECTION: usize = FILE + 40;
+    const ATTRIBUTES: usize = SECTION + 40;
+    let mut file = [0; FILE + 160];
+    file[..FILE].copy_from_slice(&fixture::<Riscv32>(true));
+    put::<Riscv32>(&mut file, 32, FILE);
+    write(&mut file, 46, &40u16.to_le_bytes());
+    write(&mut file, 48, &2u16.to_le_bytes());
+    put::<Riscv32>(&mut file, SECTION + 4, 0x7000_0003);
+    put::<Riscv32>(&mut file, SECTION + 16, ATTRIBUTES);
+    let size = 20 + architecture.len();
+    put::<Riscv32>(&mut file, SECTION + 20, size);
+    file[ATTRIBUTES] = b'A';
+    put::<Riscv32>(&mut file, ATTRIBUTES + 1, size - 1);
+    write(&mut file, ATTRIBUTES + 5, b"riscv\0");
+    file[ATTRIBUTES + 11] = 1;
+    put::<Riscv32>(&mut file, ATTRIBUTES + 12, size - 11);
+    write(&mut file, ATTRIBUTES + 16, &[4, 16, 5]);
+    write(&mut file, ATTRIBUTES + 19, architecture);
+    (file, ATTRIBUTES)
+}
+
+#[test]
+fn checks_riscv_architecture_attributes() {
+    check::<Riscv32>(&fixture::<Riscv32>(true)).unwrap();
+    for (architecture, result) in [
+        (&b"rv32i2p1_m2p0_c2p0_zmmul1p0"[..], Ok(())),
+        (
+            &b"rv32i2p1_m2p0_a2p1_c2p0"[..],
+            Err(Error::IncompatibleRiscvArchitecture),
+        ),
+        (
+            &b"rv32i2p1_zalrsc1p0"[..],
+            Err(Error::IncompatibleRiscvArchitecture),
+        ),
+        (
+            &b"rv32i2p1_f2p2"[..],
+            Err(Error::IncompatibleRiscvArchitecture),
+        ),
+        (
+            &b"rv32i2p1_d2p2"[..],
+            Err(Error::IncompatibleRiscvArchitecture),
+        ),
+        (&b"rv64i2p1"[..], Err(Error::IncompatibleRiscvArchitecture)),
+        (&b"rv32e2p0"[..], Err(Error::IncompatibleRiscvArchitecture)),
+        (
+            &b"rv32i2p1_zve32x1p0"[..],
+            Err(Error::IncompatibleRiscvArchitecture),
+        ),
+        (&b"rv32i_m2p0"[..], Err(Error::InvalidRiscvAttributes)),
+    ] {
+        let (file, _) = attributes_section(architecture);
+        assert_eq!(check::<Riscv32>(&file), result, "{architecture:?}");
+    }
+
+    let (file, at) = attributes_section(b"rv32i2p1");
+    for (offset, byte) in [(0, b'B'), (1, 0), (12, 1), (16, 0xff), (18, 7), (27, b'!')] {
+        let mut malformed = file;
+        malformed[at + offset] = byte;
+        assert_eq!(
+            check::<Riscv32>(&malformed),
+            Err(Error::InvalidRiscvAttributes)
+        );
+    }
+    assert_eq!(
+        check::<Riscv32>(&file[..at + 19]),
+        Err(Error::InvalidRiscvAttributes)
+    );
+    crate::riscv::check(&file[at..at + 28], "i").unwrap();
 }
 
 #[test]

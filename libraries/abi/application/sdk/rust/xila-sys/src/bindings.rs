@@ -562,6 +562,11 @@ pub struct XilaString {
     pub data: *const c_char,
     pub length: usize,
 }
+/// Callback that runs the loaded image's initialization or finalization functions.
+#[repr(C)]
+pub struct XilaLifecycle {
+    pub run: unsafe extern "C" fn(lifecycle: *const XilaLifecycle, finalize: bool),
+}
 /// Host-owned startup data, valid only for the duration of the entry call.
 /// The API is always present. Capability pointers may be null when not granted;
 /// the process capability is null for an application that is not a process, such
@@ -591,6 +596,8 @@ pub struct XilaStartup {
     /// default. Appended after `program_name`, so images built before it existed still
     /// start.
     pub network: *const Network,
+    /// Lifecycle functions of a loaded image, or null if none are present.
+    pub lifecycle: *const XilaLifecycle,
 }
 /// A native worker entry. Null is rejected.
 pub type ThreadEntry = Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>;
