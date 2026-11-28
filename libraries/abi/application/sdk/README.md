@@ -112,8 +112,8 @@ runs the same suite against the loaded ELF and the linked archive
 
 ## Link an SDK example
 
-Use `link-example` to compile an example from a built SDK and create its
-linked archive. Use the same target as the SDK. The entry symbol is
+Use `link-example` to create a linked archive for `hello` or `hexdump` from a
+built SDK. Use the same target as the SDK. The entry symbol is
 `xila_linked_<name>`.
 
 ```sh

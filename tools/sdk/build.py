@@ -971,7 +971,12 @@ def verify_c_program(target, sdk, name, source, *options):
 
 def link_packaged_example(target, sdk, name, archive):
     """Compile and localize an example from the SDK directory."""
-    actual_target = json.loads((sdk / "sdk.json").read_text())["target"]
+    manifest = sdk / "sdk.json"
+    try:
+        actual_target = json.loads(manifest.read_text())["target"]
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        sys.exit(f"error: cannot read the SDK target from {manifest}: {error}. "
+                 "Set XILA_SDK_DIRECTORY to a built SDK directory.")
     if actual_target != target:
         sys.exit(f"error: {sdk} targets {actual_target}, expected {target}")
     include = [
