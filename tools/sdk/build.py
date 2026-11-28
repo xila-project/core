@@ -689,7 +689,8 @@ def link_archive(args):
     }
     with tempfile.TemporaryDirectory(prefix=".link-archive-", dir=output.parent) as work:
         work = Path(work)
-        run(link_archive_plan(archives, entry, output, inputs, builtins, work, tools)[0])
+        archive = work / "program.a"
+        run(link_archive_plan(archives, entry, archive, inputs, builtins, work, tools)[0])
         weak, strong = undefined_symbols(work / "combined.o", tools["nm"])
         unexpected = sorted(name for name in strong if name not in allow_undefined)
         if unexpected:
@@ -702,7 +703,7 @@ def link_archive(args):
             sys.exit("error: weak undefined symbol(s) have direct call/PC-relative relocations "
                      "that cannot resolve to absolute 0 in a PIE link: " + details +
                      " (provide a weak hidden default definition instead)")
-        plan = link_archive_plan(archives, entry, output, inputs, builtins, work, tools,
+        plan = link_archive_plan(archives, entry, archive, inputs, builtins, work, tools,
                                  weak_undefined=weak)
         for command in plan[1:]:
             run(command)
@@ -711,6 +712,8 @@ def link_archive(args):
         if leftover:
             sys.exit("error: localization left undefined symbols in the archive: " +
                      ", ".join(leftover))
+        # Replace the output so a different entry cannot leave an old archive member.
+        archive.replace(output)
     print(f"linked archive: {output} (entry: {entry})")
 
 
