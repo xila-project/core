@@ -483,10 +483,11 @@ impl<'a> Writer<'a> {
 
 /// Raw writer for a slot the writer does not exclusively own, for example
 /// the retained slot of a core that panicked first and still holds the
-/// claim: creating a Rust reference to that slot here would be undefined
-/// behavior. Every access goes through the raw cursor with volatile reads
-/// and writes, and the magic is committed last between fences, so a record
-/// torn by the concurrent writer fails the checksum on the next boot.
+/// claim and may have a live reference to it: this writer never creates a
+/// Rust reference to the slot. Every access goes through the raw cursor
+/// with volatile reads and writes, and the magic is committed last between
+/// fences, so a record torn by the concurrent writer fails the checksum on
+/// the next boot.
 pub struct RawWriter {
     core: WriterCore,
 }
@@ -495,17 +496,25 @@ impl RawWriter {
     /// Returns `None` if the slot cannot hold the fixed header.
     ///
     /// # Safety
-    /// `pointer..pointer.add(length)` must be valid for reads and writes for
-    /// the lifetime of the returned writer, and no Rust reference (in
-    /// particular no second `&mut`) to that range may exist on any core while
-    /// the writer is alive.
+    /// The caller guarantees that `pointer..pointer.add(length)` is valid for
+    /// reads and writes of `length` bytes for the lifetime of the returned
+    /// writer (the range is byte-aligned). The writer never creates a Rust
+    /// reference to that range. Concurrent unsynchronized access from other
+    /// cores, including through the claim holder's reference, is the
+    /// condition this type exists for and is tolerated: every access of the
+    /// writer is volatile, and the record is validated by its checksum and
+    /// the magic written last. A concurrent write that lands before the
+    /// checksum read-back can produce a merged record that still validates
+    /// (for example the header fields of one core with the stack bytes of
+    /// the other); that is the accepted tradeoff of a single shared slot.
     pub unsafe fn new(
         pointer: *mut u8,
         length: usize,
         header: &Header<'_>,
         limits: Limits,
     ) -> Option<Self> {
-        // SAFETY: The caller guarantees the range is valid and unreferenced.
+        // SAFETY: The caller guarantees the range is valid for reads and
+        // writes for the lifetime of the writer.
         unsafe { WriterCore::new(Cursor { pointer, length }, header, limits) }
             .map(|core| Self { core })
     }

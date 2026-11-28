@@ -387,7 +387,8 @@ pub fn snapshot_tail(output: &mut [u8]) -> usize {
 
 /// Raw variant of [`snapshot_tail`] for callers that must not create a Rust
 /// reference to the destination, for example the retained crash slot of
-/// another core.
+/// another core. It runs in the panic path, so the ring buffer
+/// implementation must stay lock-free and non-blocking.
 ///
 /// # Safety
 /// `output..output.add(capacity)` must be valid for writes.
