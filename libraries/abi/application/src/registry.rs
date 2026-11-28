@@ -58,7 +58,7 @@ impl Next {
 struct Link {
     next: Next,
     /// Points to the registry's `first` or the previous link's `next`.
-    /// The address is null while the link is not in a registry.
+    /// The address without the tag bits is null while the link is not in a registry.
     previous: Cell<*const Next>,
 }
 
@@ -474,5 +474,35 @@ mod tests {
         assert!(EXPECTED.with_borrow(Vec::is_empty));
         // SAFETY: the same registry still belongs only to this thread.
         unsafe { registry.release_all() };
+    }
+
+    #[test]
+    fn unlinks_a_middle_handle_then_releases_the_rest() {
+        let registry = Registry::new();
+        CURRENT.set(Some(NonNull::from(&registry)));
+        struct ResetRegistry;
+        impl Drop for ResetRegistry {
+            fn drop(&mut self) {
+                CURRENT.set(None);
+            }
+        }
+        let _reset = ResetRegistry;
+
+        register_probe::<File>(1);
+        register_probe::<Child>(4);
+        register_probe::<Directory>(2);
+        register_probe::<DirectoryIterator>(3);
+        // The middle handle's link is preceded by another link's `next` field, not by the head.
+        let middle = EXPECTED.with_borrow_mut(|expected| {
+            let index = expected.iter().position(|probe| probe.marker == 4).unwrap();
+            expected.remove(index)
+        });
+        // SAFETY: the probe registered a `MaybeUninit<Child>`, and this is its only reclaim.
+        unsafe { reclaim(middle.address.cast::<MaybeUninit<Child>>()) };
+        assert_eq!(registry.len(), 3);
+        // SAFETY: the registry stays in place and only this thread can access it.
+        unsafe { registry.release_all() };
+        assert_eq!(registry.len(), 0);
+        assert!(EXPECTED.with_borrow(Vec::is_empty));
     }
 }

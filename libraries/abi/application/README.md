@@ -720,23 +720,23 @@ cancellation that lands while a close waits for a lock leaves the object to the 
 which closes it again.
 
 **Cost.** The registry uses one pointer per process. Each registered handle has a
-two-pointer link that uses 8 bytes on 32-bit targets. The link shares the handle's
-allocation. The standard streams and home directory carry no link. On Arm and RV32
-the registry increases the process state from 384 to 392 bytes.
+two-pointer link that uses 8 bytes on 32-bit targets. The link is the first field of
+the handle's allocation. The standard streams and home directory carry no link. On Arm
+and RV32 the registry increases the process state from 384 to 392 bytes.
 
-On `thumbv7em-none-eabihf`, the allocation sizes include the link, the handle and
-any alignment padding. The two-pointer link saves 4 bytes on allocations aligned
-to 4 bytes and 8 bytes on allocations aligned to 8 bytes.
+On `thumbv7em-none-eabihf`, the allocation sizes include the link, the handle and any
+alignment padding. The TCP socket, UDP socket and TCP listener exist only with the
+`network` feature.
 
-| Handle | Previous size (bytes) | Current size (bytes) |
-| --- | ---: | ---: |
-| Child | 24 | 20 |
-| Directory | 32 | 28 |
-| TCP socket | 32 | 28 |
-| UDP socket | 40 | 36 |
-| File | 120 | 112 |
-| Directory iterator | 80 | 72 |
-| TCP listener | 80 | 72 |
+| Handle | Size (bytes) |
+| --- | ---: |
+| Child | 20 |
+| Directory | 28 |
+| TCP socket | 28 |
+| UDP socket | 36 |
+| File | 112 |
+| Directory iterator | 72 |
+| TCP listener | 72 |
 
 **Rules for the ABI.** A call that opens an object registers it before it can suspend
 again, or keeps it inside the future it suspends on and passes that future to
