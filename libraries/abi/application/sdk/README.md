@@ -2,10 +2,17 @@
 
 Compile C against picolibc and a POSIX layer, or Rust against the raw
 `xila-sys` bindings. Link a static PIE and run it on Xila without rebuilding
-the firmware. Core's CI builds one archive per target
-and uploads it as a workflow artifact:
+the firmware.
 
-    xila-sdk-<xila_version>-<target>.tar.zst      for example xila-sdk-0.1-thumbv7em-none-eabihf.tar.zst
+Select the `vX.Y.Z` release that matches your Xila installation on the
+[Platforms releases page](https://github.com/xila-project/platforms/releases).
+Download `xila-sdk-<major>.<minor>-<target>.tar.zst` for your target and
+`SHA256SUMS` from that release. For example, Xila `v0.1.0` uses
+`xila-sdk-0.1-thumbv7em-none-eabihf.tar.zst` for Cortex-M4F. From the download
+directory, run `sha256sum --check --ignore-missing SHA256SUMS` before extracting
+the archive. Each archive includes `COPYING.picolibc` and `LICENSE-xila.md`.
+
+Core CI also offers SDK workflow artifacts for individual builds.
 
 | Target | Class | Float ABI | Compiler runtime |
 |---|---|---|---|
