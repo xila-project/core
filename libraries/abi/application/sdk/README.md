@@ -647,9 +647,9 @@ semaphore calls `sem_open`, `sem_close` and `sem_unlink`.
 returned process identifier is the one the child reports with `getpid`
 (`xila_process_child_id`).
 
-- A full task table on the host is the out-of-memory case of a spawn: the ABI call
-  returns `XILA_STATUS_OUT_OF_MEMORY` then, and `posix_spawn` and `posix_spawnp` fail
-  with `ENOMEM`.
+- A task table that cannot take another task makes the spawn fail with
+  `XILA_STATUS_OUT_OF_MEMORY`, and `posix_spawn` and `posix_spawnp` then return
+  `ENOMEM`. Other allocation failures report the same status.
 - `posix_spawnp` searches `PATH` and has no default search path: without `PATH`, only a
   name containing a slash runs. An empty entry is the current directory.
 - A child gets exactly three descriptors, its standard streams. File actions edit that

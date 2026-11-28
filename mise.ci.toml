@@ -659,7 +659,7 @@ description = "Check the SDK examples' (hello, hexdump, probe, threads, ssp) ELF
 run = "mise run sdk:verify"
 
 [tasks."ci:sdk-test"]
-description = "Test the SDK's ELF checker"
+description = "Run the SDK tools' Python tests (ELF checker, link-archive, picolibc setup guard)"
 run = "mise run sdk:test"
 
 [tasks."ci:native-loader-targets"]

@@ -231,6 +231,14 @@ def compiler_command(target):
     return ["clang", f"--target={config['triple']}", *config["flags"]]
 
 
+def compiler_identity(target):
+    """The compiler's version output: the cross file names the compiler's path, but a
+    compiler replaced at the same path must redo the setup."""
+    result = subprocess.run([compiler_command(target)[0], "--version"],
+                            capture_output=True, text=True, check=True)
+    return result.stdout
+
+
 def compiler_include_dir(target):
     """The compiler's freestanding header directory (`stdarg.h`, `stddef.h`, `stdint.h`...)."""
     config = TARGETS[target]
@@ -303,12 +311,9 @@ needs_exe_wrapper = true
 """
     # Rewriting an identical file would make meson regenerate (and uv's throwaway
     # environment, which build.ninja remembers, is gone by the next run). The stamp in
-    # build_picolibc decides whether the setup is redone: meson keeps the old compiler
-    # flags across --reconfigure.
-    changed = path.exists() and path.read_text() != text
-    if not path.exists() or changed:
+    # build_picolibc decides whether the setup is redone.
+    if not path.exists() or path.read_text() != text:
         path.write_text(text)
-    return changed
 
 
 # picolibc configuration. TLS is off and errno is a function so the loader never sees PT_TLS
@@ -335,15 +340,33 @@ PICOLIBC_OPTIONS = {
 }
 
 
-def setup_inputs(cross, install, options):
-    """Hash of the inputs `meson setup` reads: the cross file, the prefix and the picolibc
-    options. build_picolibc records it only after a successful setup."""
+# Environment variables meson reads only on the first setup of a build directory.
+MESON_ENVIRONMENT = ("CC", "CFLAGS", "LDFLAGS", "CPPFLAGS")
+
+
+def setup_inputs(source, target, cross, install, options):
+    """Hash of every input `meson setup` reads: the picolibc source directory, the compiler
+    identity, the cross file, the prefix, the picolibc options and the environment meson
+    reads on the first setup. build_picolibc records it only after a successful setup."""
     digest = hashlib.sha256()
+    digest.update(str(source).encode())
+    digest.update(b"\0")
+    digest.update(compiler_identity(target).encode())
+    digest.update(b"\0")
     digest.update(cross.read_bytes())
     digest.update(f"\0--prefix={install}".encode())
     for option in options:
         digest.update(f"\0{option}".encode())
+    for name in MESON_ENVIRONMENT:
+        digest.update(f"\0{name}={os.environ.get(name, '')}".encode())
     return digest.hexdigest()
+
+
+def write_stamp(stamp, inputs):
+    """Write the stamp atomically: a temporary file in the same directory, then replace."""
+    temporary = stamp.with_name(stamp.name + ".tmp")
+    temporary.write_text(inputs + "\n")
+    os.replace(temporary, stamp)
 
 
 def build_picolibc(source, target, work):
@@ -353,25 +376,28 @@ def build_picolibc(source, target, work):
     stamp = work / "picolibc-setup.stamp"
     write_cross_file(target, cross)
     options = [f"-D{key}={value}" for key, value in PICOLIBC_OPTIONS.items()]
-    inputs = setup_inputs(cross, install, options)
+    inputs = setup_inputs(source, target, cross, install, options)
     recorded = stamp.read_text().strip() if stamp.exists() else None
-    setup = ["meson", "setup", build, source, "--cross-file", cross, f"--prefix={install}",
-             *options]
     if recorded == inputs and (build / "build.ninja").exists():
         # build.ninja remembers the meson that configured it, which may be gone.
         run(["meson", "setup", "--reconfigure", build, source, *options])
     else:
-        # A fresh build directory, or recorded inputs that are missing or different: an
-        # interrupted setup leaves no stamp, and --reconfigure keeps the compiler and
-        # flags of the original cross file, so a changed cross file (a new -march or -m
-        # flag) would silently not apply. --wipe empties the build directory and
-        # configures it again from the cross file as it is now.
+        # A fresh build directory, or recorded inputs that are missing or different. Drop
+        # the stamp before the redo: an interrupted setup leaves the previous stamp behind,
+        # and --reconfigure keeps the compiler and flags of the original cross file, so a
+        # changed cross file (a new -march or -m flag) would silently not apply. --wipe
+        # empties the build directory and configures it again from the cross file as it is
+        # now.
+        stamp.unlink(missing_ok=True)
+        setup = ["meson", "setup", build, source, "--cross-file", cross, f"--prefix={install}",
+                 *options]
         if build.exists():
-            setup.insert(2, "--wipe")
+            setup = ["meson", "setup", "--wipe", build, source, "--cross-file", cross,
+                     f"--prefix={install}", *options]
         run(setup)
     # Record the inputs only now that the setup succeeded: a later run whose recorded
     # inputs are missing or different configures again instead of reusing stale flags.
-    stamp.write_text(inputs + "\n")
+    write_stamp(stamp, inputs)
     run(["ninja", "-C", build])
     run(["meson", "install", "-C", build, "--quiet"])
     return install

@@ -254,8 +254,8 @@ parent keeps its own, and the child gets a copy of the home capability bound to 
 child's own task. The call suspends the caller while the host reads the file, then
 writes the owned `XilaChild` handle. Failures use the usual statuses: NotFound,
 PermissionDenied, ExecFormat for a file that is no image the host can run, and
-OutOfMemory when the task table is full: a full task table is the out-of-memory
-case during spawn. Task manager errors use the canonical I/O
+OutOfMemory when the task table cannot take another task; other allocation failures
+report the same status. Task manager errors use the canonical I/O
 kind mapping: a full task table or no free spawner slot is OutOfMemory, no spawner
 available is Unavailable, an unknown spawner is InvalidArgument and a task or thread
 that is gone is NoSuchTask. Native children run on the same

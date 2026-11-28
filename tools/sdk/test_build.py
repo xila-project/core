@@ -1,7 +1,8 @@
-"""build.py's picolibc setup guard: the cross-file inputs are stamped only after a
-successful `meson setup`, so an interrupted setup is redone with --wipe instead of being
-reconfigured with the stale flags of the original cross file."""
+"""build.py's picolibc setup guard: the setup inputs are stamped only after a successful
+`meson setup`, so an interrupted setup is redone with --wipe instead of being reconfigured
+with the stale flags of the original cross file."""
 
+import os
 import subprocess
 import tempfile
 import unittest
@@ -34,7 +35,7 @@ class FakeMeson:
         self.setups += 1
         build_dir = self.work / "picolibc-build"
         if self.setups in self.interrupt_setups:
-            # Killed after meson wrote build.ninja but before the setup returned.
+            # The setup fails after meson wrote build.ninja, as a run interrupted there.
             build_dir.mkdir(parents=True, exist_ok=True)
             (build_dir / "build.ninja").write_text("# interrupted setup\n")
             raise subprocess.CalledProcessError(1, command)
@@ -57,11 +58,13 @@ class SetupGuardTests(unittest.TestCase):
         self.source = Path(self.temporary.name) / "picolibc"
         self.source.mkdir()
         (self.source / "meson.build").write_text("# fake picolibc\n")
-        # The cross file names tools and compiler flags without needing them installed.
+        # The cross file and the stamp name tools and a compiler without needing them.
         patches = [
             mock.patch.object(build, "find_target_tool", lambda target, role: f"fake-{role}"),
             mock.patch.object(build, "compiler_command",
                               lambda target: ["fake-clang", f"--target={target}"]),
+            mock.patch.object(build, "compiler_identity",
+                              lambda target: f"fake-clang {target} version 1"),
             mock.patch.object(build, "run", FakeMeson(self.work)),
         ]
         for patch in patches:
@@ -69,8 +72,8 @@ class SetupGuardTests(unittest.TestCase):
             self.addCleanup(patch.stop)
         self.meson = build.run
 
-    def build_picolibc(self, target=TARGET):
-        return build.build_picolibc(self.source, target, self.work)
+    def build_picolibc(self, target=TARGET, source=None):
+        return build.build_picolibc(source or self.source, target, self.work)
 
     def stamp(self):
         return self.work / "picolibc-setup.stamp"
@@ -78,12 +81,15 @@ class SetupGuardTests(unittest.TestCase):
     def configured_cross(self):
         return (self.work / "picolibc-build" / ".configured-cross").read_text()
 
+    def inputs(self, install=None, source=None):
+        options = [f"-D{key}={value}" for key, value in build.PICOLIBC_OPTIONS.items()]
+        return build.setup_inputs(source or self.source, TARGET, self.work / "picolibc.cross",
+                                  install or self.work / "picolibc", options)
+
     def test_successful_setup_stamps_its_inputs_and_later_runs_reconfigure(self):
         self.build_picolibc()
-        cross = self.work / "picolibc.cross"
-        options = [f"-D{key}={value}" for key, value in build.PICOLIBC_OPTIONS.items()]
-        self.assertEqual(self.stamp().read_text().strip(),
-                         build.setup_inputs(cross, self.work / "picolibc", options))
+        self.assertEqual(self.stamp().read_text().strip(), self.inputs())
+        self.assertFalse(self.stamp().with_name(self.stamp().name + ".tmp").exists())
         self.build_picolibc()
         setups = self.meson.setup_commands()
         self.assertEqual(len(setups), 2)
@@ -108,6 +114,24 @@ class SetupGuardTests(unittest.TestCase):
         self.assertEqual(self.configured_cross(), (self.work / "picolibc.cross").read_text())
         self.assertTrue(self.stamp().exists())
 
+    def test_interrupted_redo_of_new_inputs_keeps_no_stale_stamp(self):
+        # Configure with cross file A, start a redo for B and interrupt it after meson
+        # wrote build.ninja, then revert to A: the stamp must not survive the redo, so
+        # the reverted run wipes instead of reconfiguring with B's flags.
+        self.build_picolibc(TARGET)
+        self.meson.interrupt_setups.add(2)
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.build_picolibc(OTHER_TARGET)
+        self.assertFalse(self.stamp().exists())
+        self.build_picolibc(TARGET)
+        setups = self.meson.setup_commands()
+        self.assertEqual(len(setups), 3)
+        self.assertIn("--wipe", setups[1])
+        self.assertIn("--wipe", setups[2])
+        self.assertNotIn("--reconfigure", setups[2])
+        self.assertEqual(self.configured_cross(), (self.work / "picolibc.cross").read_text())
+        self.assertEqual(self.stamp().read_text().strip(), self.inputs())
+
     def test_changed_cross_file_redoes_the_setup(self):
         self.build_picolibc(TARGET)
         self.build_picolibc(OTHER_TARGET)
@@ -120,6 +144,48 @@ class SetupGuardTests(unittest.TestCase):
         self.build_picolibc()
         self.stamp().write_text("stale inputs\n")
         self.build_picolibc()
+        setups = self.meson.setup_commands()
+        self.assertEqual(len(setups), 2)
+        self.assertIn("--wipe", setups[1])
+
+    def test_changed_source_directory_redoes_the_setup(self):
+        self.build_picolibc()
+        other_source = self.source.parent / "picolibc-copy"
+        other_source.mkdir()
+        (other_source / "meson.build").write_text("# fake picolibc copy\n")
+        self.build_picolibc(source=other_source)
+        setups = self.meson.setup_commands()
+        self.assertEqual(len(setups), 2)
+        self.assertIn("--wipe", setups[1])
+
+    def test_changed_picolibc_option_redoes_the_setup(self):
+        self.build_picolibc()
+        with mock.patch.dict(build.PICOLIBC_OPTIONS, {"multilib": "true"}):
+            self.build_picolibc()
+        setups = self.meson.setup_commands()
+        self.assertEqual(len(setups), 2)
+        self.assertIn("--wipe", setups[1])
+
+    def test_changed_prefix_redoes_the_setup(self):
+        self.build_picolibc()
+        self.stamp().write_text(self.inputs(install=self.work / "other-prefix") + "\n")
+        self.build_picolibc()
+        setups = self.meson.setup_commands()
+        self.assertEqual(len(setups), 2)
+        self.assertIn("--wipe", setups[1])
+
+    def test_changed_compiler_identity_redoes_the_setup(self):
+        self.build_picolibc()
+        with mock.patch.object(build, "compiler_identity", lambda target: "fake-clang 2.0"):
+            self.build_picolibc()
+        setups = self.meson.setup_commands()
+        self.assertEqual(len(setups), 2)
+        self.assertIn("--wipe", setups[1])
+
+    def test_changed_meson_environment_redoes_the_setup(self):
+        self.build_picolibc()
+        with mock.patch.dict(os.environ, {"CFLAGS": "-O0"}):
+            self.build_picolibc()
         setups = self.meson.setup_commands()
         self.assertEqual(len(setups), 2)
         self.assertIn("--wipe", setups[1])
