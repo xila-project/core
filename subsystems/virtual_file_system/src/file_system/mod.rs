@@ -1,7 +1,7 @@
 mod utilities;
 
 use crate::pipe::Pipe;
-use crate::{Directory, File, IoErrorKind, ItemStatic, Result, ResultExt, poll};
+use crate::{Directory, File, IoErrorKind, ItemStatic, Result, ResultExt};
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::{vec, vec::Vec};
@@ -546,8 +546,7 @@ impl VirtualFileSystem {
             underlying_file_system.file_system,
             relative_path,
             &mut attributes,
-        )
-        .await?;
+        )?;
 
         let kind = attributes.get_kind().ok_or(IoErrorKind::InputOutput)?;
         let inode = *attributes.get_inode().ok_or(IoErrorKind::InputOutput)?;
@@ -691,7 +690,7 @@ impl VirtualFileSystem {
         )
         .await?;
         let path = Arc::new(resolved.path.as_ref().to_owned());
-        let context = Self::open_resolved_directory_context(&file_systems, &mut resolved).await?;
+        let context = Self::open_resolved_directory_context(&file_systems, &mut resolved)?;
         let mount = &mut file_systems[resolved.mount_index];
         let pins_path = !mount.file_system.supports_directory_entry_operations();
         if pins_path {
@@ -745,7 +744,7 @@ impl VirtualFileSystem {
                 | AttributeFlags::Group
                 | AttributeFlags::Permissions,
         );
-        Self::target_attributes(file_systems, resolved, &mut attributes).await?;
+        Self::target_attributes(file_systems, resolved, &mut attributes)?;
         match attributes.get_kind() {
             Some(Kind::Directory) => {}
             Some(Kind::SymbolicLink) => return Err(IoErrorKind::SymlinkLoop),
@@ -824,7 +823,7 @@ impl VirtualFileSystem {
                 | AttributeFlags::Group
                 | AttributeFlags::Permissions,
         );
-        Self::target_attributes(&file_systems, &mut resolved, &mut attributes).await?;
+        Self::target_attributes(&file_systems, &mut resolved, &mut attributes)?;
         let kind = *attributes.get_kind().ok_or(IoErrorKind::InputOutput)?;
 
         if kind == Kind::SymbolicLink {
@@ -864,16 +863,15 @@ impl VirtualFileSystem {
                     &file_systems,
                     &mut resolved,
                     &attributes.set_mask(mask),
-                )
-                .await?;
+                )?;
             }
         }
 
-        let context = Self::open_resolved_directory_context(&file_systems, &mut resolved).await?;
+        let context = Self::open_resolved_directory_context(&file_systems, &mut resolved)?;
         Ok(self.directory_from_context(&mut file_systems[resolved.mount_index], context))
     }
 
-    async fn open_resolved_directory_context(
+    fn open_resolved_directory_context(
         file_systems: &FileSystemsArray,
         resolved: &mut ResolvedTarget<'_>,
     ) -> Result<Context> {
@@ -884,11 +882,10 @@ impl VirtualFileSystem {
         let mut context = Context::new_empty();
         if let Some(parent) = resolved.parent_directory.as_ref() {
             let entry_name = resolved.entry_name(file_systems)?;
-            poll(|| backend.lookup_directory_entry(parent.context(), entry_name, &mut context))
-                .await?;
+            backend.lookup_directory_entry(parent.context(), entry_name, &mut context)?;
         } else {
             let relative_path = resolved.relative_path(file_systems)?;
-            poll(|| backend.lookup_directory(&mut context, relative_path)).await?;
+            backend.lookup_directory(&mut context, relative_path)?;
         }
         Ok(context)
     }
@@ -1091,7 +1088,7 @@ impl VirtualFileSystem {
         // instead of failing the name until a reformat.
         let mut replace_attribute_less = false;
         let mut exists =
-            match Self::target_attributes(&file_systems, &mut resolved, &mut attributes).await {
+            match Self::target_attributes(&file_systems, &mut resolved, &mut attributes) {
                 Ok(()) => true,
                 Err(IoErrorKind::NotFound) => false,
                 Err(IoErrorKind::MissingAttribute) if open.contains(CreateFlags::Create) => {
@@ -1105,7 +1102,7 @@ impl VirtualFileSystem {
             // kind the backend can still report from the directory entry):
             // the former is reported as existing, the latter is replaced.
             let mut probe = Attributes::new().set_mask(AttributeFlags::User);
-            match Self::target_attributes(&file_systems, &mut resolved, &mut probe).await {
+            match Self::target_attributes(&file_systems, &mut resolved, &mut probe) {
                 Ok(()) => return Err(IoErrorKind::AlreadyExists),
                 Err(IoErrorKind::MissingAttribute) => {
                     replace_attribute_less = true;
@@ -1158,10 +1155,10 @@ impl VirtualFileSystem {
                 let target_file_system = file_systems[resolved.mount_index].file_system;
                 if let Some(parent) = resolved.parent_directory.as_ref() {
                     let entry_name = resolved.entry_name(&file_systems)?;
-                    poll(|| target_file_system.remove_entry(parent.context(), entry_name)).await?;
+                    target_file_system.remove_entry(parent.context(), entry_name)?;
                 } else {
                     let relative_path = resolved.relative_path(&file_systems)?;
-                    poll(|| target_file_system.remove(relative_path)).await?;
+                    target_file_system.remove(relative_path)?;
                 }
             }
             let time = time?;
@@ -1186,14 +1183,11 @@ impl VirtualFileSystem {
             if let Some(parent) = resolved.parent_directory.as_ref() {
                 let entry_name = resolved.entry_name(&file_systems)?;
                 let target_file_system = file_systems[resolved.mount_index].file_system;
-                poll(|| {
-                    target_file_system.create_file_entry(parent.context(), entry_name, &attributes)
-                })
-                .await?;
+                target_file_system.create_file_entry(parent.context(), entry_name, &attributes)?;
             } else {
                 let target_file_system = file_systems[resolved.mount_index].file_system;
                 let relative_path = resolved.relative_path(&file_systems)?;
-                poll(|| target_file_system.create_file(relative_path, &attributes)).await?;
+                target_file_system.create_file(relative_path, &attributes)?;
             }
         } else {
             return Err(IoErrorKind::NotFound);
@@ -1211,19 +1205,19 @@ impl VirtualFileSystem {
             && !mode.contains(AccessFlags::Write)
             && let Ok(time) = time
         {
-            Self::update_target_read_access_time(&file_systems, &mut resolved, time).await?;
+            Self::update_target_read_access_time(&file_systems, &mut resolved, time)?;
         }
 
         let mut attributes =
             Attributes::new().set_mask(AttributeFlags::Inode | AttributeFlags::Kind);
-        Self::target_attributes(&file_systems, &mut resolved, &mut attributes).await?;
+        Self::target_attributes(&file_systems, &mut resolved, &mut attributes)?;
 
         let kind = *attributes.get_kind().ok_or(IoErrorKind::InputOutput)?;
         let inode = *attributes.get_inode().ok_or(IoErrorKind::InputOutput)?;
         let statistics = if include_statistics && kind != Kind::File {
             // Mounted executables expose their metadata on the namespace entry.
             let mut attributes = Attributes::new().set_mask(AttributeFlags::all());
-            Self::target_attributes(&file_systems, &mut resolved, &mut attributes).await?;
+            Self::target_attributes(&file_systems, &mut resolved, &mut attributes)?;
             Some(Statistics::from_attributes(&attributes).ok_or(IoErrorKind::InputOutput)?)
         } else {
             None
@@ -1237,7 +1231,7 @@ impl VirtualFileSystem {
 
                 let device = devices.get_mut(&inode).ok_or(IoErrorKind::StaleHandle)?;
 
-                poll(|| device.device.open(&mut context)).await?;
+                device.device.open(&mut context)?;
                 device.reference_count += 1;
 
                 File::new(
@@ -1253,7 +1247,7 @@ impl VirtualFileSystem {
 
                 let device = devices.get_mut(&inode).ok_or(IoErrorKind::StaleHandle)?;
 
-                poll(|| device.device.open(&mut context)).await?;
+                device.device.open(&mut context)?;
                 device.reference_count += 1;
 
                 File::new(self, ItemStatic::BlockDevice(device.device), flags, context)
@@ -1282,22 +1276,16 @@ impl VirtualFileSystem {
                 if let Some(parent) = resolved.parent_directory.as_ref() {
                     let entry_name = resolved.entry_name(&file_systems)?;
                     let target_file_system = file_systems[resolved.mount_index].file_system;
-                    poll(|| {
-                        target_file_system.lookup_file_entry(
-                            parent.context(),
-                            entry_name,
-                            &mut context,
-                            lookup_flags,
-                        )
-                    })
-                    .await?;
+                    target_file_system.lookup_file_entry(
+                        parent.context(),
+                        entry_name,
+                        &mut context,
+                        lookup_flags,
+                    )?;
                 } else {
                     let target_file_system = file_systems[resolved.mount_index].file_system;
                     let relative_path = resolved.relative_path(&file_systems)?;
-                    poll(|| {
-                        target_file_system.lookup_file(&mut context, relative_path, lookup_flags)
-                    })
-                    .await?;
+                    target_file_system.lookup_file(&mut context, relative_path, lookup_flags)?;
                 }
 
                 // O_TRUNC mutates the file: record the modification and status
@@ -1496,8 +1484,7 @@ impl VirtualFileSystem {
                         parent_file_system.file_system,
                         relative_path,
                         &mut kind_attributes,
-                    )
-                    .await?;
+                    )?;
                     if kind_attributes.get_kind() != Some(&Kind::Directory) {
                         return Err(IoErrorKind::AlreadyExists);
                     }
@@ -1517,12 +1504,9 @@ impl VirtualFileSystem {
             }
         }
 
-        poll(|| {
-            item.as_mount_operations()
-                .ok_or(IoErrorKind::Unsupported)?
-                .mount()
-        })
-        .await?;
+        item.as_mount_operations()
+            .ok_or(IoErrorKind::Unsupported)?
+            .mount()?;
 
         if let ItemStatic::FileSystem(file_system) = item {
             file_systems.push(InternalFileSystem {
@@ -1662,8 +1646,7 @@ impl VirtualFileSystem {
         )
         .await?;
 
-        self.check_target_sticky_permissions(&file_systems, &mut resolved, user)
-            .await?;
+        self.check_target_sticky_permissions(&file_systems, &mut resolved, user)?;
 
         let mut attributes =
             Attributes::new().set_mask(AttributeFlags::Kind | AttributeFlags::Inode);
@@ -1673,7 +1656,7 @@ impl VirtualFileSystem {
         // report the kind from the directory entry itself (LittleFS) answer
         // this request directly.
         let (inode, kind) =
-            match Self::target_attributes(&file_systems, &mut resolved, &mut attributes).await {
+            match Self::target_attributes(&file_systems, &mut resolved, &mut attributes) {
                 Ok(()) => (
                     *attributes.get_inode().ok_or(IoErrorKind::InputOutput)?,
                     *attributes.get_kind().ok_or(IoErrorKind::InputOutput)?,
@@ -1698,10 +1681,10 @@ impl VirtualFileSystem {
         let target_file_system = file_systems[resolved.mount_index].file_system;
         if let Some(parent) = resolved.parent_directory.as_ref() {
             let entry_name = resolved.entry_name(&file_systems)?;
-            poll(|| target_file_system.remove_entry(parent.context(), entry_name)).await?;
+            target_file_system.remove_entry(parent.context(), entry_name)?;
         } else {
             let relative_path = resolved.relative_path(&file_systems)?;
-            poll(|| target_file_system.remove(relative_path)).await?;
+            target_file_system.remove(relative_path)?;
         }
 
         Ok(())
@@ -1771,12 +1754,12 @@ impl VirtualFileSystem {
         // after the parent write check instead of failing the name.
         let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
         let mut replace_attribute_less = false;
-        match Self::target_attributes(&file_systems, &mut resolved, &mut attributes).await {
+        match Self::target_attributes(&file_systems, &mut resolved, &mut attributes) {
             Ok(()) => {
                 // Distinguish a complete entry from an attribute-less one:
                 // the former is reported as existing, the latter is replaced.
                 let mut probe = Attributes::new().set_mask(AttributeFlags::User);
-                match Self::target_attributes(&file_systems, &mut resolved, &mut probe).await {
+                match Self::target_attributes(&file_systems, &mut resolved, &mut probe) {
                     Ok(()) => return Err(IoErrorKind::AlreadyExists),
                     Err(IoErrorKind::MissingAttribute) => replace_attribute_less = true,
                     Err(error) => return Err(error),
@@ -1809,10 +1792,10 @@ impl VirtualFileSystem {
             let target_file_system = file_systems[resolved.mount_index].file_system;
             if let Some(parent) = resolved.parent_directory.as_ref() {
                 let entry_name = resolved.entry_name(&file_systems)?;
-                poll(|| target_file_system.remove_entry(parent.context(), entry_name)).await?;
+                target_file_system.remove_entry(parent.context(), entry_name)?;
             } else {
                 let relative_path = resolved.relative_path(&file_systems)?;
-                poll(|| target_file_system.remove(relative_path)).await?;
+                target_file_system.remove(relative_path)?;
             }
         }
 
@@ -1837,13 +1820,10 @@ impl VirtualFileSystem {
 
         if let Some(parent) = resolved.parent_directory.as_ref() {
             let entry_name = resolved.entry_name(&file_systems)?;
-            poll(|| {
-                target_file_system.create_directory_entry(parent.context(), entry_name, &attributes)
-            })
-            .await?;
+            target_file_system.create_directory_entry(parent.context(), entry_name, &attributes)?;
         } else {
             let relative_path = resolved.relative_path(&file_systems)?;
-            poll(|| target_file_system.create_directory(relative_path, &attributes)).await?;
+            target_file_system.create_directory(relative_path, &attributes)?;
         }
 
         Ok(())
@@ -1931,7 +1911,7 @@ impl VirtualFileSystem {
             .contains(AttributeFlags::Kind)
         {
             let mut existing = Attributes::new().set_mask(AttributeFlags::Kind);
-            match Self::target_attributes(&file_systems, &mut resolved_link, &mut existing).await {
+            match Self::target_attributes(&file_systems, &mut resolved_link, &mut existing) {
                 Ok(()) => return Err(IoErrorKind::AlreadyExists),
                 Err(IoErrorKind::NotFound) => {}
                 Err(error) => return Err(error),
@@ -1970,30 +1950,23 @@ impl VirtualFileSystem {
                             .get_mask()
                             .intersection(target_file_system.writable_attributes()),
                     );
-                    match poll(|| {
-                        target_file_system.create_file_entry(
-                            parent.context(),
-                            &stage_name,
-                            &stage_attributes,
-                        )
-                    })
-                    .await
-                    {
+                    match target_file_system.create_file_entry(
+                        parent.context(),
+                        &stage_name,
+                        &stage_attributes,
+                    ) {
                         Ok(()) => {}
                         Err(IoErrorKind::AlreadyExists) => continue,
                         Err(error) => return Err(error),
                     }
                     let result = async {
                         let mut context = Context::new_empty();
-                        poll(|| {
-                            target_file_system.lookup_file_entry(
-                                parent.context(),
-                                &stage_name,
-                                &mut context,
-                                Flags::from(AccessFlags::Write),
-                            )
-                        })
-                        .await?;
+                        target_file_system.lookup_file_entry(
+                            parent.context(),
+                            &stage_name,
+                            &mut context,
+                            Flags::from(AccessFlags::Write),
+                        )?;
                         let write = target_file_system.write_sync(
                             &mut context,
                             target.as_str().as_bytes(),
@@ -2009,15 +1982,12 @@ impl VirtualFileSystem {
                         }
                         // The stage entry was created with the final attributes
                         // already persisted, so no second metadata commit here.
-                        poll(|| {
-                            target_file_system.rename_entry(
-                                parent.context(),
-                                &stage_name,
-                                parent.context(),
-                                entry_name,
-                            )
-                        })
-                        .await
+                        target_file_system.rename_entry(
+                            parent.context(),
+                            &stage_name,
+                            parent.context(),
+                            entry_name,
+                        )
                     }
                     .await;
                     match result {
@@ -2027,10 +1997,7 @@ impl VirtualFileSystem {
                         }
                         Err(error) => {
                             last_error = error;
-                            let _ = poll(|| {
-                                target_file_system.remove_entry(parent.context(), &stage_name)
-                            })
-                            .await;
+                            let _ = target_file_system.remove_entry(parent.context(), &stage_name);
                             break;
                         }
                     }
@@ -2044,9 +2011,7 @@ impl VirtualFileSystem {
                             .get_mask()
                             .intersection(target_file_system.writable_attributes()),
                     );
-                    match poll(|| target_file_system.create_file(&stage_path, &stage_attributes))
-                        .await
-                    {
+                    match target_file_system.create_file(&stage_path, &stage_attributes) {
                         Ok(()) => {}
                         Err(IoErrorKind::AlreadyExists) => continue,
                         Err(error) => return Err(error),
@@ -2054,14 +2019,11 @@ impl VirtualFileSystem {
 
                     let result = async {
                         let mut context = Context::new_empty();
-                        poll(|| {
-                            target_file_system.lookup_file(
-                                &mut context,
-                                &stage_path,
-                                Flags::from(AccessFlags::Write),
-                            )
-                        })
-                        .await?;
+                        target_file_system.lookup_file(
+                            &mut context,
+                            &stage_path,
+                            Flags::from(AccessFlags::Write),
+                        )?;
                         let write = target_file_system.write_sync(
                             &mut context,
                             target.as_str().as_bytes(),
@@ -2078,7 +2040,7 @@ impl VirtualFileSystem {
 
                         // The stage entry was created with the final attributes
                         // already persisted, so no second metadata commit here.
-                        poll(|| target_file_system.rename(&stage_path, relative_link)).await
+                        target_file_system.rename(&stage_path, relative_link)
                     }
                     .await;
 
@@ -2089,7 +2051,7 @@ impl VirtualFileSystem {
                         }
                         Err(error) => {
                             last_error = error;
-                            let _ = poll(|| target_file_system.remove(&stage_path)).await;
+                            let _ = target_file_system.remove(&stage_path);
                             break;
                         }
                     }
@@ -2143,25 +2105,19 @@ impl VirtualFileSystem {
                 );
             if let Some(parent) = resolved_link.parent_directory.as_ref() {
                 let entry_name = resolved_link.entry_name(&file_systems)?;
-                poll(|| {
-                    target_file_system.create_symlink_entry(
-                        native_target,
-                        parent.context(),
-                        entry_name,
-                        &symlink_attributes,
-                    )
-                })
-                .await?;
+                target_file_system.create_symlink_entry(
+                    native_target,
+                    parent.context(),
+                    entry_name,
+                    &symlink_attributes,
+                )?;
             } else {
                 let relative_link = resolved_link.relative_path(&file_systems)?;
-                poll(|| {
-                    target_file_system.create_symlink(
-                        native_target,
-                        relative_link,
-                        &symlink_attributes,
-                    )
-                })
-                .await?;
+                target_file_system.create_symlink(
+                    native_target,
+                    relative_link,
+                    &symlink_attributes,
+                )?;
             }
         }
         Ok(())
@@ -2219,7 +2175,7 @@ impl VirtualFileSystem {
         .await?;
         let mut attributes =
             Attributes::new().set_mask(AttributeFlags::Kind | AttributeFlags::Size);
-        Self::target_attributes(&file_systems, &mut resolved_link, &mut attributes).await?;
+        Self::target_attributes(&file_systems, &mut resolved_link, &mut attributes)?;
         if attributes.get_kind() != Some(&Kind::SymbolicLink) {
             // POSIX `readlink` on something that is not a link: EINVAL.
             return Err(IoErrorKind::InvalidArgument);
@@ -2231,23 +2187,16 @@ impl VirtualFileSystem {
         let target_file_system = file_systems[resolved_link.mount_index].file_system;
         if let Some(parent) = resolved_link.parent_directory.as_ref() {
             let entry_name = resolved_link.entry_name(&file_systems)?;
-            match poll(|| {
-                target_file_system.read_symlink_entry(parent.context(), entry_name, buffer)
-            })
-            .await
-            {
+            match target_file_system.read_symlink_entry(parent.context(), entry_name, buffer) {
                 Ok(read) => Ok(read),
                 Err(IoErrorKind::Unsupported) => {
                     let mut context = Context::new_empty();
-                    poll(|| {
-                        target_file_system.lookup_file_entry(
-                            parent.context(),
-                            entry_name,
-                            &mut context,
-                            Flags::from(AccessFlags::Read),
-                        )
-                    })
-                    .await?;
+                    target_file_system.lookup_file_entry(
+                        parent.context(),
+                        entry_name,
+                        &mut context,
+                        Flags::from(AccessFlags::Read),
+                    )?;
                     let read = target_file_system.read_sync(&mut context, &mut buffer[..size], 0);
                     let close = BaseOperations::close(target_file_system, &mut context);
                     let read = read?;
@@ -2261,18 +2210,15 @@ impl VirtualFileSystem {
             }
         } else {
             let relative_link = resolved_link.relative_path(&file_systems)?;
-            match poll(|| target_file_system.read_symlink(relative_link, buffer)).await {
+            match target_file_system.read_symlink(relative_link, buffer) {
                 Ok(read) => Ok(read),
                 Err(IoErrorKind::Unsupported) => {
                     let mut context = Context::new_empty();
-                    poll(|| {
-                        target_file_system.lookup_file(
-                            &mut context,
-                            relative_link,
-                            Flags::from(AccessFlags::Read),
-                        )
-                    })
-                    .await?;
+                    target_file_system.lookup_file(
+                        &mut context,
+                        relative_link,
+                        Flags::from(AccessFlags::Read),
+                    )?;
                     let read = target_file_system.read_sync(&mut context, &mut buffer[..size], 0);
                     let close = BaseOperations::close(target_file_system, &mut context);
                     let read = read?;
@@ -2375,13 +2321,9 @@ impl VirtualFileSystem {
         )
         .await?;
 
-        self.check_target_sticky_permissions(&file_systems, &mut old_resolved, user)
-            .await?;
+        self.check_target_sticky_permissions(&file_systems, &mut old_resolved, user)?;
 
-        match self
-            .check_target_sticky_permissions(&file_systems, &mut new_resolved, user)
-            .await
-        {
+        match self.check_target_sticky_permissions(&file_systems, &mut new_resolved, user) {
             Ok(()) | Err(IoErrorKind::NotFound) => {}
             Err(error) => return Err(error),
         }
@@ -2400,19 +2342,16 @@ impl VirtualFileSystem {
         ) {
             let old_name = old_resolved.entry_name(&file_systems)?;
             let new_name = new_resolved.entry_name(&file_systems)?;
-            poll(|| {
-                target_file_system.rename_entry(
-                    old_parent.context(),
-                    old_name,
-                    new_parent.context(),
-                    new_name,
-                )
-            })
-            .await?;
+            target_file_system.rename_entry(
+                old_parent.context(),
+                old_name,
+                new_parent.context(),
+                new_name,
+            )?;
         } else {
             let old_relative = old_resolved.relative_path(&file_systems)?;
             let new_relative = new_resolved.relative_path(&file_systems)?;
-            poll(|| target_file_system.rename(old_relative, new_relative)).await?;
+            target_file_system.rename(old_relative, new_relative)?;
         }
 
         Ok(())
@@ -2492,12 +2431,12 @@ impl VirtualFileSystem {
         }
 
         let mut kind = Attributes::new().set_mask(AttributeFlags::Kind);
-        Self::target_attributes(&file_systems, &mut existing_resolved, &mut kind).await?;
+        Self::target_attributes(&file_systems, &mut existing_resolved, &mut kind)?;
         if kind.get_kind() == Some(&Kind::Directory) {
             return Err(IoErrorKind::IsADirectory);
         }
         let mut destination = Attributes::new().set_mask(AttributeFlags::Kind);
-        match Self::target_attributes(&file_systems, &mut new_resolved, &mut destination).await {
+        match Self::target_attributes(&file_systems, &mut new_resolved, &mut destination) {
             Ok(()) => return Err(IoErrorKind::AlreadyExists),
             Err(IoErrorKind::NotFound) => {}
             Err(error) => return Err(error),
@@ -2518,19 +2457,16 @@ impl VirtualFileSystem {
         ) {
             let existing_name = existing_resolved.entry_name(&file_systems)?;
             let new_name = new_resolved.entry_name(&file_systems)?;
-            poll(|| {
-                target_file_system.link_entry(
-                    existing_parent.context(),
-                    existing_name,
-                    new_parent.context(),
-                    new_name,
-                )
-            })
-            .await
+            target_file_system.link_entry(
+                existing_parent.context(),
+                existing_name,
+                new_parent.context(),
+                new_name,
+            )
         } else {
             let existing_relative = existing_resolved.relative_path(&file_systems)?;
             let new_relative = new_resolved.relative_path(&file_systems)?;
-            poll(|| target_file_system.link(existing_relative, new_relative)).await
+            target_file_system.link(existing_relative, new_relative)
         }
     }
 
@@ -2605,7 +2541,7 @@ impl VirtualFileSystem {
             .await?;
 
         let mut attributes = Attributes::new().set_mask(AttributeFlags::all());
-        Self::target_attributes(&file_systems, &mut resolved, &mut attributes).await?;
+        Self::target_attributes(&file_systems, &mut resolved, &mut attributes)?;
         Statistics::from_attributes(&attributes).ok_or(IoErrorKind::InputOutput)
     }
 
@@ -2900,13 +2836,13 @@ impl VirtualFileSystem {
             attributes = attributes.set_modification(time);
         }
         let mut owner = Attributes::new().set_mask(AttributeFlags::User);
-        Self::target_attributes(&file_systems, &mut resolved, &mut owner).await?;
+        Self::target_attributes(&file_systems, &mut resolved, &mut owner)?;
         Self::authorize_metadata_change(
             user,
             *owner.get_user().ok_or(IoErrorKind::InputOutput)?,
             &attributes,
         )?;
-        Self::set_target_attributes(&file_systems, &mut resolved, &attributes).await
+        Self::set_target_attributes(&file_systems, &mut resolved, &attributes)
     }
 
     pub async fn set_ownership(
@@ -2941,13 +2877,13 @@ impl VirtualFileSystem {
             attributes = attributes.set_group(group);
         }
         let mut owner = Attributes::new().set_mask(AttributeFlags::User);
-        Self::target_attributes(&file_systems, &mut resolved, &mut owner).await?;
+        Self::target_attributes(&file_systems, &mut resolved, &mut owner)?;
         Self::authorize_metadata_change(
             current_user,
             *owner.get_user().ok_or(IoErrorKind::InputOutput)?,
             &attributes,
         )?;
-        Self::set_target_attributes(&file_systems, &mut resolved, &attributes).await
+        Self::set_target_attributes(&file_systems, &mut resolved, &attributes)
     }
 
     pub async fn set_permissions(
@@ -2974,12 +2910,12 @@ impl VirtualFileSystem {
 
         let attributes = Attributes::new().set_permissions(permissions);
         let mut owner = Attributes::new().set_mask(AttributeFlags::User);
-        Self::target_attributes(&file_systems, &mut resolved, &mut owner).await?;
+        Self::target_attributes(&file_systems, &mut resolved, &mut owner)?;
         Self::authorize_metadata_change(
             current_user,
             *owner.get_user().ok_or(IoErrorKind::InputOutput)?,
             &attributes,
         )?;
-        Self::set_target_attributes(&file_systems, &mut resolved, &attributes).await
+        Self::set_target_attributes(&file_systems, &mut resolved, &attributes)
     }
 }

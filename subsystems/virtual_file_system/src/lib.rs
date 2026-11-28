@@ -31,11 +31,6 @@ pub use synchronous_file::*;
 
 pub extern crate file_system as exported_file_system;
 
-/// Run synchronous metadata once. Busy is an error, not an implicit wait.
-pub async fn poll<O>(operation: impl FnOnce() -> Result<O>) -> Result<O> {
-    operation()
-}
-
 pub fn blocking_operation<O>(_flags: Flags, operation: impl FnOnce() -> Result<O>) -> Result<O> {
     operation()
 }

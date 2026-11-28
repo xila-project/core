@@ -1,5 +1,5 @@
 use super::VirtualFileSystem;
-use crate::{IoErrorKind, ItemStatic, Result, SynchronousFile, poll, suspend_on};
+use crate::{IoErrorKind, ItemStatic, Result, SynchronousFile, suspend_on};
 use alloc::{vec, vec::Vec};
 use embedded_io_async::ErrorType;
 use exported_file_system::{AccessFlags, ControlCommand, CreateFlags, Permissions};
@@ -115,7 +115,7 @@ impl<'a> File<'a> {
     }
 
     pub async fn set_position(&mut self, position: &Position) -> Result<Size> {
-        poll(|| self.0.set_position(position)).await
+        self.0.set_position(position)
     }
 
     // - Operations
@@ -382,11 +382,11 @@ impl<'a> File<'a> {
     }
 
     pub async fn duplicate(&self) -> Result<Self> {
-        Ok(Self(poll(|| self.0.duplicate()).await?))
+        Ok(Self(self.0.duplicate()?))
     }
 
     pub async fn get_statistics(&mut self) -> Result<Statistics> {
-        poll(|| self.0.get_statistics()).await
+        self.0.get_statistics()
     }
 
     pub async fn set_owner(
@@ -394,11 +394,11 @@ impl<'a> File<'a> {
         user: Option<UserIdentifier>,
         group: Option<GroupIdentifier>,
     ) -> Result<()> {
-        poll(|| self.0.set_owner(user, group)).await
+        self.0.set_owner(user, group)
     }
 
     pub async fn set_permissions(&mut self, permissions: Permissions) -> Result<()> {
-        poll(|| self.0.set_permissions(permissions)).await
+        self.0.set_permissions(permissions)
     }
 
     pub async fn control<C>(&mut self, command: C, argument: &C::Input) -> Result<C::Output>
