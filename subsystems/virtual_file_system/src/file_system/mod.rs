@@ -465,22 +465,25 @@ impl VirtualFileSystem {
         self.writes_frozen
             .store(true, portable_atomic::Ordering::Release);
         // A nested mount point is always longer than the mount containing it.
-        let mut order: alloc::vec::Vec<usize> = (0..file_systems.len()).collect();
-        // Keep mount order for equal lengths so a failure leaves the same mounts readable.
-        order.sort_unstable_by_key(|&index| {
-            (
-                core::cmp::Reverse(file_systems[index].mount_point.as_str().len()),
-                index,
-            )
-        });
-        for index in order {
-            let file_system = &mut file_systems[index];
-            if file_system.is_mounted {
-                file_system.file_system.unmount()?;
-                file_system.is_mounted = false;
+        // Each pass unmounts the mounted entry with the longest mount point.
+        // The first entry wins for equal lengths, so a failure leaves the same
+        // mounts readable. The mount table is small: a selection loop avoids
+        // an index vector and the slice sort code.
+        loop {
+            let mut deepest: Option<(usize, usize)> = None;
+            for (index, file_system) in file_systems.iter().enumerate() {
+                let length = file_system.mount_point.as_str().len();
+                if file_system.is_mounted && deepest.is_none_or(|(_, longest)| length > longest) {
+                    deepest = Some((index, length));
+                }
             }
+            let Some((index, _)) = deepest else {
+                return Ok(());
+            };
+            let file_system = &mut file_systems[index];
+            file_system.file_system.unmount()?;
+            file_system.is_mounted = false;
         }
-        Ok(())
     }
 
     /// Mount a file system at a given mount point.
