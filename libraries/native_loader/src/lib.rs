@@ -1,7 +1,12 @@
 //! Load trusted, statically linked position-independent native applications.
 #![no_std]
 
+#[cfg(feature = "gdb-jit")]
+extern crate alloc;
+
 mod elf;
+#[cfg(feature = "gdb-jit")]
+mod gdb_jit;
 mod lifecycle;
 #[cfg(any(target_arch = "riscv32", test))]
 mod riscv;
@@ -122,6 +127,8 @@ pub struct LoadedImage {
     layout: Layout,
     entry_offset: usize,
     lifecycle: lifecycle::Lifecycle,
+    #[cfg(feature = "gdb-jit")]
+    registration: Option<gdb_jit::Registration>,
 }
 
 impl LoadedImage {
@@ -146,6 +153,8 @@ impl LoadedImage {
             layout: elf.layout,
             entry_offset: elf.entry_offset,
             lifecycle: lifecycle::Lifecycle::new(allocation, &elf.arrays),
+            #[cfg(feature = "gdb-jit")]
+            registration: None,
         };
         let data_addr = allocation.as_ptr().addr();
         let exec_addr = execution_base.as_ptr().addr();
@@ -165,6 +174,12 @@ impl LoadedImage {
         elf.relocate(image, data_bias, execution_bias)?;
         elf.check_array_entries(image, exec_addr)?;
         unsafe { memory.finish_writes(allocation, elf.layout, &mut elf.regions()) }?;
+        #[cfg(feature = "gdb-jit")]
+        let loaded = {
+            let mut loaded = loaded;
+            loaded.registration = gdb_jit::Registration::new(&elf, data_addr, exec_addr);
+            loaded
+        };
         Ok(loaded)
     }
 
@@ -189,6 +204,8 @@ impl LoadedImage {
 
 impl Drop for LoadedImage {
     fn drop(&mut self) {
+        #[cfg(feature = "gdb-jit")]
+        drop(self.registration.take());
         unsafe { self.memory.free(self.allocation, self.layout) };
     }
 }

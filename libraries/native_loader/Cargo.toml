@@ -7,7 +7,11 @@ rust-version.workspace = true
 [lib]
 name = "native_loader"
 
+[features]
+gdb-jit = ["dep:critical-section"]
+
 [dependencies]
+critical-section = { workspace = true, optional = true }
 abi_application.workspace = true
 xila_version.workspace = true
 

@@ -45,6 +45,7 @@ crash = ["dep:crash", "task/crash", "executable/crash"]
 
 executable_building = ["executable/building"]
 native-dev = ["executable/native-dev"]
+gdb-jit = ["native-dev", "executable/gdb-jit"]
 native-linked = ["executable/native-linked"]
 audio = ["dep:audio"]
 neural_network = ["dep:neural_network", "dep:drivers_neural_network"]

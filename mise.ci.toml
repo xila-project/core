@@ -668,7 +668,7 @@ depends = ["ci:packages-host"]
 run = """
 set -eu
 for target in thumbv7em-none-eabihf riscv32imac-unknown-none-elf riscv32imafc-unknown-none-elf; do
-  cargo check --locked -p xila-executable --features native-dev --target "$target"
+  cargo check --locked -p xila-executable --features gdb-jit --target "$target"
   cargo build --locked --release -p xila-executable --features native-dev --target "$target"
 done
 cargo check --locked -p xila-abi-application --target aarch64-unknown-linux-gnu

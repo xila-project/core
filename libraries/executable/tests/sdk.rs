@@ -269,6 +269,117 @@ async fn setup_with(
     (context, parent)
 }
 
+#[cfg(feature = "gdb-jit")]
+#[task::test]
+async fn registers_sdk_image_symbols() {
+    use core::{future::poll_fn, ptr, task::Poll};
+    use native_loader::{LoadedImage, Startup};
+
+    #[repr(C)]
+    struct Entry {
+        next: *const Entry,
+        previous: *const Entry,
+        symbol_file: *const u8,
+        symbol_file_size: u64,
+    }
+
+    #[repr(C)]
+    struct Descriptor {
+        version: u32,
+        action: u32,
+        relevant: *const Entry,
+        first: *const Entry,
+    }
+
+    unsafe extern "C" {
+        static mut __jit_debug_descriptor: Descriptor;
+    }
+
+    fn entries() -> Vec<*const Entry> {
+        // The test harness serializes SDK tests. This test polls the loaded
+        // image on the same thread and only inspects the list between polls.
+        unsafe {
+            let descriptor = &raw const __jit_debug_descriptor;
+            assert_eq!((*descriptor).version, 1);
+            assert_eq!((*descriptor).action, 0);
+            assert!((*descriptor).relevant.is_null());
+            let mut current = (*descriptor).first;
+            let mut previous = ptr::null();
+            let mut entries = Vec::new();
+            while let Some(entry) = current.as_ref() {
+                assert_eq!(entry.previous, previous);
+                assert!(!entries.contains(&current));
+                assert!(entry.symbol_file_size >= 64);
+                assert_eq!(
+                    core::slice::from_raw_parts(entry.symbol_file, 4),
+                    native_loader::ELF_MAGIC,
+                );
+                entries.push(current);
+                previous = current;
+                current = entry.next;
+            }
+            entries
+        }
+    }
+
+    let bytes = build_posix_probe("jit-probe");
+    let (context, _) = setup().await;
+    let vfs = context.virtual_file_system;
+    let load = || LoadedImage::load(&bytes, &Mmap, 64 * 1024).unwrap();
+
+    assert!(entries().is_empty());
+    for outcome in [Some((b'r', 7)), Some((b'e', 8)), None] {
+        let (reader, mut writer) = vfs
+            .create_unnamed_pipe(512, file_system::StateFlags::empty())
+            .await
+            .unwrap();
+        let startup = Startup {
+            arguments: vec!["jit-probe".into()],
+            standard_input: Some(abi_application::File::new(reader.into_synchronous_file())),
+            process: Some(abi_application::ProcessLaunch {
+                host: context,
+                environment: None,
+                home: None,
+                network: 0,
+            }),
+            ..Default::default()
+        };
+        let image = load();
+        let registered = entries();
+        assert_eq!(registered.len(), 1);
+        let program = unsafe { image.start(stackful::Stack::new(64 * 1024), startup) }.unwrap();
+        let mut program = Box::pin(program);
+        assert!(
+            poll_fn(|cx| Poll::Ready(program.as_mut().poll(cx)))
+                .await
+                .is_pending()
+        );
+        assert_eq!(entries(), registered);
+        if let Some((byte, status)) = outcome {
+            assert_eq!(writer.write(&[byte]).await.unwrap(), 1);
+            assert_eq!(program.as_mut().await, status);
+            assert!(entries().is_empty());
+        }
+        drop(program);
+        assert!(entries().is_empty());
+        assert_eq!(MAPPINGS.load(Ordering::Relaxed), 0);
+        writer.close(vfs).await.unwrap();
+    }
+
+    assert!(entries().is_empty());
+    let first = load();
+    let first_entry = entries();
+    assert_eq!(first_entry.len(), 1);
+    let second = load();
+    let two_entries = entries();
+    assert_eq!(two_entries.len(), 2);
+    assert_eq!(two_entries[1], first_entry[0]);
+    drop(first);
+    assert_eq!(entries(), two_entries[..1]);
+    drop(second);
+    assert!(entries().is_empty());
+}
+
 #[task::test]
 #[ignore = "run with mise run sdk:rust-example"]
 async fn runs_sdk_rust_hello() {

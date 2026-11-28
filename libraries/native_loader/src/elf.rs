@@ -4,7 +4,7 @@ use core::{alloc::Layout, marker::PhantomData, ops::Range};
 const SHT_INIT_ARRAY: u32 = 14;
 const SHT_FINI_ARRAY: u32 = 15;
 const SHT_PREINIT_ARRAY: u32 = 16;
-const SHF_ALLOC: usize = 2;
+pub(crate) const SHF_ALLOC: usize = 2;
 
 const PREINITIALIZE: usize = 0;
 const INITIALIZE: usize = 1;
@@ -682,6 +682,13 @@ impl<'a, A: Abi> Elf<'a, A> {
         })
     }
 
+    #[cfg(feature = "gdb-jit")]
+    pub(crate) fn symbol_file_input(&self) -> Option<(&'a [u8], &'a [u8])> {
+        let header = &self.bytes[..A::HEADER];
+        let sections = sections::<A>(self.bytes, header, 28 + 3 * A::WORD).ok()?;
+        Some((self.bytes, sections))
+    }
+
     pub(crate) fn copy_to(&self, image: &mut [u8]) {
         for program in self.loads() {
             let offset = program.address - self.start;
@@ -824,7 +831,7 @@ fn programs<A: Abi>(headers: &[u8]) -> impl Iterator<Item = Program> {
         .map(Program::read::<A>)
 }
 
-const fn section_header_size<A: Abi>() -> usize {
+pub(crate) const fn section_header_size<A: Abi>() -> usize {
     if A::WORD == 8 { 64 } else { 40 }
 }
 
@@ -850,14 +857,14 @@ fn sections<'a, A: Abi>(bytes: &'a [u8], header: &[u8], sizes: usize) -> Result<
     subrange(bytes, offset, length).ok_or(Error::InvalidSectionHeaders)
 }
 
-fn subrange(bytes: &[u8], offset: usize, size: usize) -> Option<&[u8]> {
+pub(crate) fn subrange(bytes: &[u8], offset: usize, size: usize) -> Option<&[u8]> {
     bytes.get(offset..offset.checked_add(size)?)
 }
 
-fn u16_at(bytes: &[u8], offset: usize) -> u16 {
+pub(crate) fn u16_at(bytes: &[u8], offset: usize) -> u16 {
     u16::from_ne_bytes(bytes[offset..offset + 2].try_into().unwrap())
 }
 
-fn u32_at(bytes: &[u8], offset: usize) -> u32 {
+pub(crate) fn u32_at(bytes: &[u8], offset: usize) -> u32 {
     u32::from_ne_bytes(bytes[offset..offset + 4].try_into().unwrap())
 }
