@@ -572,9 +572,11 @@ panic handler. For the same reasons `xila-sys` does not compile `ProcessAllocato
 
 `LinkedOptions` has three settings. `stack_size` is the usable coroutine stack, 4 KiB by
 default. `network` is the set of network rights, none by default. `home` is the home
-directory capability. `LinkedHome::User` (the default) grants the home directory recorded
-in the user's account if the directory exists. `LinkedHome::None` grants no capability.
-`LinkedHome::Path` grants a specified directory.
+directory capability. `LinkedHome::User` (the default) opens the directory recorded in the
+user's account. If the directory is absent, the host logs a warning and starts the program
+without a home capability. An invalid account home or any other directory open error stops
+the launch. `LinkedHome::None` grants no capability. `LinkedHome::Path` grants a specified
+directory and requires a successful open.
 
 Several linked programs can run on one executor at the same time, so a program must not keep
 its startup block in a global. `__xila_current_startup()` returns the block of the process that

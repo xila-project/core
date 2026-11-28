@@ -51,7 +51,7 @@ fn task_status(error: task::Error) -> Status {
 
 /// A directory capability granted to a child as its home.
 pub enum HomeGrant {
-    /// Grant the user's recorded home if it exists.
+    /// Open the user's recorded home. An absent directory grants no capability.
     User { rights: u8 },
     /// The host grants a directory by absolute path.
     Path { path: PathOwned, rights: u8 },
@@ -175,16 +175,19 @@ impl ProcessLaunch {
                 Some(HomeGrant::User { rights }) => {
                     let user = manager.get_user(task).await.map_err(task_status)?;
                     let vfs = host.virtual_file_system();
-                    if let Ok(path) = vfs.get_user_home(user).await {
-                        match Directory::new_async(vfs, task, path.as_str(), u32::from(rights))
-                            .await
-                        {
-                            Ok(directory) => Some(directory),
-                            Err(Status::NotFound) => None,
-                            Err(error) => return Err(error),
+                    let path = vfs.get_user_home(user).await.map_err(Status::from)?;
+                    match Directory::new_async(vfs, task, path.as_str(), u32::from(rights)).await {
+                        Ok(directory) => Some(directory),
+                        // Account creation can leave the recorded home absent. See #919.
+                        Err(Status::NotFound) => {
+                            log::warning!(
+                                "No home capability for user {}. Directory {} is absent.",
+                                user.as_u16(),
+                                path.as_str()
+                            );
+                            None
                         }
-                    } else {
-                        None
+                        Err(error) => return Err(error),
                     }
                 }
                 Some(HomeGrant::Open(mut directory)) => {

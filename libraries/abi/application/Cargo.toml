@@ -20,6 +20,7 @@ smoltcp = { workspace = true, optional = true }
 embassy-futures = { workspace = true, optional = true }
 virtual_file_system.workspace = true
 file_system.workspace = true
+log.workspace = true
 task.workspace = true
 time.workspace = true
 synchronization.workspace = true

@@ -8,8 +8,8 @@ use std::{future::poll_fn, sync::Mutex};
 
 use abi_application::{File as NativeFile, XilaStartup};
 use executable::{
-    BUSY_FAILURE, ExecutableContext, Launch, LinkedHome, LinkedOptions, Standard, execute,
-    execute_with, linked_executable, mount_executables, run_linked, run_linked_exclusive,
+    BUSY_FAILURE, ExecutableContext, Launch, LinkedHome, LinkedOptions, START_FAILURE, Standard,
+    execute, execute_with, linked_executable, mount_executables, run_linked, run_linked_exclusive,
 };
 use file_system::{
     AccessFlags, CreateFlags, DirectBaseOperations, DirectCharacterDevice, Flags, MountOperations,
@@ -395,6 +395,107 @@ async fn read_all(vfs: &'static VirtualFileSystem, parent: TaskIdentifier, path:
 // ---------------------------------------------------------------------------------------
 // Tests.
 // ---------------------------------------------------------------------------------------
+
+/// Return success only when startup has no home capability.
+unsafe extern "C" fn check_no_home(startup: *const XilaStartup) -> i32 {
+    // SAFETY: The host passes a live startup block to the entry.
+    i32::from(!unsafe { (*startup).home }.is_null())
+}
+
+#[task::test]
+async fn linked_program_starts_without_a_missing_home() {
+    let (context, parent) = setup().await;
+    let standard = streams(context, parent, "missing-home").await;
+    // SAFETY: The entry reads only the startup block and returns without unwinding.
+    let result = unsafe {
+        run_linked(
+            check_no_home,
+            LinkedOptions::new().stack_size(STACK),
+            standard,
+            vec![],
+        )
+    }
+    .await;
+    assert_eq!(result, Ok(()));
+}
+
+async fn assert_linked_start_failure(standard: Standard<'static>) {
+    // SAFETY: The entry returns immediately without unwinding.
+    let result = unsafe {
+        run_linked(
+            quick,
+            LinkedOptions::new().stack_size(STACK),
+            standard,
+            vec![],
+        )
+    }
+    .await;
+    assert_eq!(result, Err(START_FAILURE));
+}
+
+#[task::test]
+async fn linked_program_rejects_a_file_as_its_home() {
+    let (context, parent) = setup().await;
+    let vfs = context.virtual_file_system;
+    vfs.create_directory(parent, &"/users").await.unwrap();
+    let create = Flags::new(AccessFlags::Read, Some(CreateFlags::Create), None);
+    File::open(vfs, parent, users::ROOT_HOME, create)
+        .await
+        .unwrap()
+        .close(vfs)
+        .await
+        .unwrap();
+
+    assert_linked_start_failure(streams(context, parent, "file-home").await).await;
+}
+
+#[task::test]
+async fn linked_program_rejects_a_home_it_cannot_access() {
+    let (context, parent) = setup().await;
+    let vfs = context.virtual_file_system;
+    let standard = streams(context, parent, "denied-home").await;
+    let user = users::UserIdentifier::new(1000);
+    let group = users::GroupIdentifier::new(1000);
+    let path = "/users/reader";
+    context
+        .users_manager
+        .add_group(group, "staff", &[])
+        .await
+        .unwrap();
+    context
+        .users_manager
+        .add_user(user, "reader", group, path)
+        .await
+        .unwrap();
+    vfs.create_directory(parent, &"/users").await.unwrap();
+    for ancestor in ["/", "/users"] {
+        vfs.set_permissions(parent, ancestor, Permissions::from_octal(0o755).unwrap())
+            .await
+            .unwrap();
+    }
+    vfs.create_directory(parent, &path).await.unwrap();
+    vfs.set_permissions(parent, path, Permissions::USER_FULL)
+        .await
+        .unwrap();
+    context.task_manager.set_user(parent, user).await.unwrap();
+
+    assert_linked_start_failure(standard).await;
+}
+
+#[task::test]
+async fn linked_program_rejects_an_invalid_recorded_home() {
+    let (context, parent) = setup().await;
+    let standard = streams(context, parent, "invalid-home").await;
+    let user = users::UserIdentifier::new(1000);
+    context
+        .users_manager
+        .add_user(user, "reader", users::GroupIdentifier::ROOT, "/invalid")
+        .await
+        .unwrap();
+    context.task_manager.set_user(parent, user).await.unwrap();
+
+    assert_linked_start_failure(standard).await;
+}
 
 #[task::test]
 async fn c_abi_entry_runs_as_a_full_process() {

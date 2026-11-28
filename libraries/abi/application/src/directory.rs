@@ -180,6 +180,7 @@ pub unsafe extern "C" fn xila_directory_close(directory: *mut Directory) -> Stat
 impl Directory {
     /// # Safety
     /// Keep non-null path bytes readable for `length` and for the returned borrow.
+    /// Calls are serialized, and cancellation drops the waiting future before the process memory is released.
     pub(crate) unsafe fn relative_path<'a>(
         &self,
         path: *const c_char,
