@@ -83,7 +83,8 @@ xila-sdk-0.1-<target>/
 
 ## Building an application
 
-Needs `clang`, `lld` and CMake. On Cortex-M and RISC-V the 64-bit and soft-float
+Needs `clang`, `lld` and CMake 3.20 or newer (the shipped examples set
+`cmake_minimum_required(VERSION 3.20)`). On Cortex-M and RISC-V the 64-bit and soft-float
 helpers come from a compiler runtime: install the Arm GNU toolchain
 (`gcc-arm-none-eabi`) or the bare-metal RISC-V GCC (`gcc-riscv64-unknown-elf`,
 which provides the `rv32imac`/`ilp32` `libgcc.a`; it does not need newlib), or pass
@@ -646,6 +647,9 @@ semaphore calls `sem_open`, `sem_close` and `sem_unlink`.
 returned process identifier is the one the child reports with `getpid`
 (`xila_process_child_id`).
 
+- A full task table on the host is the out-of-memory case of a spawn: the ABI call
+  returns `XILA_STATUS_OUT_OF_MEMORY` then, and `posix_spawn` and `posix_spawnp` fail
+  with `ENOMEM`.
 - `posix_spawnp` searches `PATH` and has no default search path: without `PATH`, only a
   name containing a slash runs. An empty entry is the current directory.
 - A child gets exactly three descriptors, its standard streams. File actions edit that
@@ -769,7 +773,10 @@ machine's `RELATIVE` dynamic relocations, and (on RISC-V) defines no
 Xtensa the link will use `-pie --no-dynamic-linker`, never `-static-pie`. The
 build needs `clang`, `lld`, `llvm-ar`, `cmake`, `zstd` and, for Cortex-M and RISC-V,
 the Arm GNU toolchain or `gcc-riscv64-unknown-elf`; CI installs them through mise
-bootstrap packages. The SDK only takes `libgcc.a` from the Arm package, but apt installs the
+bootstrap packages. Only `sdk:verify` needs a recent CMake: it configures the examples
+with `cmake --fresh`, a CMake 3.24 option, so `sdk:verify` needs CMake 3.24 or newer,
+while CMake 3.20 is still enough to build applications with the shipped toolchain file.
+The SDK only takes `libgcc.a` from the Arm package, but apt installs the
 recommended newlib packages with `gcc-arm-none-eabi`: on a GitHub runner, the Arm part is then about a
 607 MB download, instead of about 70.6 MB (about 568 MB on disk) for the two packages without them.
 `mise run ci:packages-sdk-arm` therefore skips them on GitHub Actions runners only: when

@@ -302,8 +302,9 @@ skip_sanity_check = true
 needs_exe_wrapper = true
 """
     # Rewriting an identical file would make meson regenerate (and uv's throwaway
-    # environment, which build.ninja remembers, is gone by the next run). Report a change to
-    # an existing file: meson keeps the old compiler flags across --reconfigure.
+    # environment, which build.ninja remembers, is gone by the next run). The stamp in
+    # build_picolibc decides whether the setup is redone: meson keeps the old compiler
+    # flags across --reconfigure.
     changed = path.exists() and path.read_text() != text
     if not path.exists() or changed:
         path.write_text(text)
@@ -334,24 +335,43 @@ PICOLIBC_OPTIONS = {
 }
 
 
+def setup_inputs(cross, install, options):
+    """Hash of the inputs `meson setup` reads: the cross file, the prefix and the picolibc
+    options. build_picolibc records it only after a successful setup."""
+    digest = hashlib.sha256()
+    digest.update(cross.read_bytes())
+    digest.update(f"\0--prefix={install}".encode())
+    for option in options:
+        digest.update(f"\0{option}".encode())
+    return digest.hexdigest()
+
+
 def build_picolibc(source, target, work):
     build = work / "picolibc-build"
     install = work / "picolibc"
     cross = work / "picolibc.cross"
-    cross_changed = write_cross_file(target, cross)
+    stamp = work / "picolibc-setup.stamp"
+    write_cross_file(target, cross)
     options = [f"-D{key}={value}" for key, value in PICOLIBC_OPTIONS.items()]
-    if not (build / "build.ninja").exists():
-        run(["meson", "setup", build, source, "--cross-file", cross, f"--prefix={install}",
-             *options])
-    elif cross_changed:
-        # --reconfigure keeps the compiler and flags of the original cross file, so a changed
-        # cross file (a new -march or -m flag) would silently not apply. --wipe empties the
-        # build directory and configures it again from the cross file as it is now.
-        run(["meson", "setup", "--wipe", build, source, "--cross-file", cross,
-             f"--prefix={install}", *options])
-    else:
+    inputs = setup_inputs(cross, install, options)
+    recorded = stamp.read_text().strip() if stamp.exists() else None
+    setup = ["meson", "setup", build, source, "--cross-file", cross, f"--prefix={install}",
+             *options]
+    if recorded == inputs and (build / "build.ninja").exists():
         # build.ninja remembers the meson that configured it, which may be gone.
         run(["meson", "setup", "--reconfigure", build, source, *options])
+    else:
+        # A fresh build directory, or recorded inputs that are missing or different: an
+        # interrupted setup leaves no stamp, and --reconfigure keeps the compiler and
+        # flags of the original cross file, so a changed cross file (a new -march or -m
+        # flag) would silently not apply. --wipe empties the build directory and
+        # configures it again from the cross file as it is now.
+        if build.exists():
+            setup.insert(2, "--wipe")
+        run(setup)
+    # Record the inputs only now that the setup succeeded: a later run whose recorded
+    # inputs are missing or different configures again instead of reusing stale flags.
+    stamp.write_text(inputs + "\n")
     run(["ninja", "-C", build])
     run(["meson", "install", "-C", build, "--quiet"])
     return install
