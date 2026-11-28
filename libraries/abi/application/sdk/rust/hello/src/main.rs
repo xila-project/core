@@ -66,7 +66,12 @@ unsafe fn main(startup: *const XilaStartup) -> i32 {
         return 2;
     }
 
-    // The host test passes one argument to exercise the panic handler.
+    #[cfg(feature = "lifecycle-test")]
+    if unsafe { lifecycle::worker_requested(startup) } {
+        return if lifecycle::start_worker() { 73 } else { 1 };
+    }
+
+    // The host test passes an argument to exercise the panic handler.
     if unsafe { (*startup).argument_count } != 0 {
         panic!("requested by the host test");
     }

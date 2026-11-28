@@ -46,6 +46,8 @@ impl Lifecycle {
 }
 
 unsafe extern "C" fn run_arrays(lifecycle: *const XilaLifecycle, finalize: bool) {
+    // POSIX exit can longjmp from a constructor or finalizer. Keep this frame free of
+    // values that need Drop.
     // SAFETY: the callback lives at offset zero in the loader's lifecycle record.
     let [preinitialize, initialize, finalize_array] =
         unsafe { (*lifecycle.cast::<Lifecycle>()).arrays };

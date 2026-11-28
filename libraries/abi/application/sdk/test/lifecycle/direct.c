@@ -17,7 +17,20 @@ static void finalize(void) {
     }
 }
 
+static void *worker(void *argument) {
+    return argument;
+}
+
 int32_t xila_main(const XilaStartup *startup) {
     started = startup;
-    return initialized == 1 ? 23 : 1;
+    if (initialized != 1)
+        return 1;
+    if (startup->argument_count != 0) {
+        size_t thread;
+        bool live = false;
+        if (startup->api->thread_spawn(startup->process, 0, worker, NULL, &thread) != XILA_STATUS_OK ||
+            startup->api->thread_has_workers(&live) != XILA_STATUS_OK || !live)
+            return 2;
+    }
+    return 23;
 }

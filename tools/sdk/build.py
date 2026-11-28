@@ -962,10 +962,14 @@ def verify_riscv_architecture(image, target):
         if not match:
             sys.exit(f"{image}: invalid RISC-V extension {extension}")
         extensions.add(match[1])
-    # Keep this in step with the firmware targets and native_loader/build.rs.
-    supported = set("i m a c zmmul zaamo zalrsc zca zicsr zifencei".split())
+    supported = set("imac")
     if TARGETS[target]["float_abi"] == "single":
-        supported.update(("f", "zcf"))
+        supported.add("f")
+    policy = ROOT / "libraries/native_loader/riscv_extensions.txt"
+    for rule in policy.read_text().splitlines():
+        extension, *requirements = rule.split()
+        if supported.issuperset(requirements):
+            supported.add(extension)
     if unsupported := extensions - supported:
         sys.exit(f"{image}: RISC-V firmware lacks {', '.join(sorted(unsupported))}")
 
@@ -1136,6 +1140,8 @@ def verify(args):
     for name in ("threads", "ssp", "graphics", "lifecycle"):
         verify_c_program(target, sdk, name, SDK_SOURCE / "sdk/test" / name)
     verify_c_program(target, sdk, "lifecycle-direct", SDK_SOURCE / "sdk/test/lifecycle")
+    if target == HOST_TARGET:
+        verify_c_program(target, sdk, "lifecycle-cxx", SDK_SOURCE / "sdk/test/lifecycle")
     # The hexdump example, in both of its forms: the ELF the loader runs, and the
     # localized archive link-archive produces for a firmware that links it in.
     size_tool = find_target_tool(target, "size")

@@ -213,7 +213,11 @@ pub unsafe fn start(
     let result = unsafe { main(startup) };
     #[cfg(not(feature = "linked"))]
     if let Some(lifecycle) = lifecycle {
-        unsafe { (lifecycle.run)(lifecycle, true) };
+        let mut live = false;
+        unsafe { ((*api).thread_has_workers)(&mut live) };
+        if !live {
+            unsafe { (lifecycle.run)(lifecycle, true) };
+        }
     }
     #[cfg(all(not(test), not(feature = "linked")))]
     STARTUP.store(ptr::null_mut(), Ordering::Release);

@@ -1,0 +1,8 @@
+zicsr
+zifencei
+zmmul m
+zaamo a
+zalrsc a
+zca c
+zcf c f
+zcd c d

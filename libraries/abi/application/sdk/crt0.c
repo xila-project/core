@@ -37,7 +37,7 @@ __attribute__((weak, visibility("hidden"), noinline)) bool xila_posix_owns_lifec
 }
 
 int32_t _xila_start(const XilaStartup *startup) {
-    if (startup == NULL || startup->size < offsetof(XilaStartup, lifecycle) || startup->api == NULL ||
+    if (startup == NULL || startup->size < sizeof(*startup) || startup->api == NULL ||
         startup->api->size < sizeof(XilaApi) ||
         !xila_version_compatible(xila_abi_note.version, startup->api->version)) {
         return -1;
@@ -47,14 +47,18 @@ int32_t _xila_start(const XilaStartup *startup) {
        the fallback table. */
     xila_sdk_api = startup->api;
     xila_sdk_process = startup->process;
-    const XilaLifecycle *lifecycle = startup->size >= sizeof(*startup) ? startup->lifecycle : NULL;
+    const XilaLifecycle *lifecycle = startup->lifecycle;
     if (lifecycle != NULL && xila_posix_owns_lifecycle())
         lifecycle = NULL;
     if (lifecycle != NULL)
         lifecycle->run(lifecycle, false);
     int32_t result = xila_main(startup);
-    if (lifecycle != NULL)
-        lifecycle->run(lifecycle, true);
+    if (lifecycle != NULL) {
+        bool live = false;
+        (void)startup->api->thread_has_workers(&live);
+        if (!live)
+            lifecycle->run(lifecycle, true);
+    }
     xila_sdk_process = NULL;
     xila_sdk_api = &xila_sdk_fallback_api;
     return result;
@@ -71,7 +75,7 @@ int32_t xila_linked_start(const XilaStartup *startup) {
        before anything can read them. */
     xila_sdk_api = &xila_sdk_fallback_api;
     xila_sdk_process = NULL;
-    if (startup == NULL || startup->size < offsetof(XilaStartup, lifecycle) || startup->api == NULL ||
+    if (startup == NULL || startup->size < sizeof(*startup) || startup->api == NULL ||
         startup->api->size < sizeof(XilaApi) ||
         !xila_version_compatible((XILA_VERSION_MAJOR << 16) | XILA_VERSION_MINOR,
                                  startup->api->version)) {

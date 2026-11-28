@@ -292,6 +292,16 @@ async fn runs_sdk_rust_hello() {
         install(context.virtual_file_system, parent, program, &bytes).await;
         runs_rust_image(context, parent, program, startup_output, normal_output).await;
     }
+    let (status, stdout, stderr) = launch(
+        context,
+        parent,
+        "/rust-lifecycle",
+        "rust-workers",
+        &["workers"],
+    )
+    .await;
+    assert_eq!(status, 73, "{stderr:?}");
+    assert_eq!(stdout, b"Rust preinit\nRust init\n");
 }
 
 async fn runs_rust_image(
@@ -405,6 +415,34 @@ async fn runs_sdk_lifecycle_with_a_direct_c_entry() {
         launch(context, parent, "/lifecycle-direct", "direct", &[]).await;
     assert_eq!(status, 23, "{stderr:?}");
     assert_eq!(stdout, b"direct fini\n");
+    let (status, stdout, stderr) = launch(
+        context,
+        parent,
+        "/lifecycle-direct",
+        "direct-workers",
+        &["workers"],
+    )
+    .await;
+    assert_eq!(status, 23, "{stderr:?}");
+    assert!(stdout.is_empty());
+}
+
+#[task::test]
+async fn runs_sdk_cxx_lifecycle() {
+    let (context, parent) = setup().await;
+    let source =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../abi/application/sdk/test/lifecycle");
+    let bytes = build_sdk_program(&source, "lifecycle-cxx", "integer");
+    install(
+        context.virtual_file_system,
+        parent,
+        "/lifecycle-cxx",
+        &bytes,
+    )
+    .await;
+    let (status, stdout, stderr) = launch(context, parent, "/lifecycle-cxx", "cxx", &[]).await;
+    assert_eq!(status, 23, "{stderr:?}");
+    assert_eq!(stdout, b"C++ constructor\nC++ main\nC++ destructor\n");
 }
 
 #[task::test]

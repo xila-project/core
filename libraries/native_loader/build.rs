@@ -26,6 +26,7 @@ fn main() {
         "cargo:rustc-check-cfg=cfg(native_loader_float_abi, values(\"soft\", \"single\", \"double\"))"
     );
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=riscv_extensions.txt");
     // The target name, for the const assertions that pin the detection per target.
     let target = env::var("TARGET").unwrap();
     println!("cargo:rustc-env=NATIVE_LOADER_TARGET={target}");
@@ -54,9 +55,6 @@ fn target_extensions(abi: &str) -> String {
         .collect();
     let embedded = env::var("CARGO_CFG_TARGET_ABI").is_ok_and(|abi| abi == "ilp32e");
     features.insert(if embedded { "e" } else { "i" });
-    // Xila's firmware targets support CSR access and instruction-fetch fences.
-    // The Rust target can omit them even when the hardware implements them.
-    features.extend(["zicsr", "zifencei"]);
     if abi == "single" || abi == "double" {
         features.insert("f");
     }
@@ -88,22 +86,12 @@ fn target_extensions(abi: &str) -> String {
             }
         }
     }
-    // Toolchains may name the component extensions as well as their parent.
-    for (parent, child) in [
-        ("m", "zmmul"),
-        ("a", "zaamo"),
-        ("a", "zalrsc"),
-        ("c", "zca"),
-    ] {
-        if features.contains(parent) {
-            features.insert(child);
-        }
-    }
-    if features.contains("c") {
-        for (float, compressed) in [("f", "zcf"), ("d", "zcd")] {
-            if features.contains(float) {
-                features.insert(compressed);
-            }
+    // Apply the baseline extensions and component names shared with SDK verification.
+    for rule in include_str!("riscv_extensions.txt").lines() {
+        let mut names = rule.split_ascii_whitespace();
+        let extension = names.next().expect("an extension name");
+        if names.all(|required| features.contains(required)) {
+            features.insert(extension);
         }
     }
     features.into_iter().collect::<Vec<_>>().join(",")

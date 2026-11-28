@@ -44,7 +44,9 @@ threads the POSIX entry skips exit handlers and finalization. `_exit`,
 abort and cancellation skip finalization.
 
 The direct C shim and Rust entry run finalizers after the application function
-returns. A Rust panic in `panic_abort` skips finalization.
+returns if no worker threads are live. A direct call to `xila_process_exit`
+or a Rust panic in `panic_abort` skips finalization. The SDK entries require
+the full `XilaStartup` layout.
 
 A custom `_xila_start` that supports these arrays must emit an empty `PT_NOTE`
 record named `XILA\0` of type 2. Without this record, non-empty arrays give
