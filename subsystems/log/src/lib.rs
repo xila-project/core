@@ -380,7 +380,19 @@ pub fn is_initialized() -> bool {
 /// Copy the most recent complete log lines into the caller's buffer without
 /// blocking. Returns zero when no ring buffer is installed or a write is in
 /// progress.
-pub fn snapshot_tail(_output: &mut [u8]) -> usize {
+pub fn snapshot_tail(output: &mut [u8]) -> usize {
+    // SAFETY: The slice is valid for writes for its lifetime.
+    unsafe { snapshot_tail_raw(output.as_mut_ptr(), output.len()) }
+}
+
+/// Raw variant of [`snapshot_tail`] for callers that must not create a Rust
+/// reference to the destination, for example the retained crash slot of
+/// another core. It runs in the panic path, so the ring buffer
+/// implementation must stay lock-free and non-blocking.
+///
+/// # Safety
+/// `output..output.add(capacity)` must be valid for writes.
+pub unsafe fn snapshot_tail_raw(_output: *mut u8, _capacity: usize) -> usize {
     // The log ring buffer is tracked in xila-project/core#840.
     0
 }
