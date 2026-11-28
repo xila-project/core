@@ -4,7 +4,7 @@ use exported_file_system::{FileSystemOperations, StateFlags};
 use file_system::{Context, Entry, Flags, Path, Size};
 use task::TaskIdentifier;
 
-use crate::{ItemStatic, Result, SynchronousDirectory, VirtualFileSystem, poll, suspend_on};
+use crate::{ItemStatic, Result, SynchronousDirectory, VirtualFileSystem, suspend_on};
 
 pub struct Directory<'a>(SynchronousDirectory<'a>);
 
@@ -50,19 +50,19 @@ impl<'a> Directory<'a> {
     }
 
     pub async fn read(&mut self) -> Result<Option<Entry>> {
-        poll(|| self.0.read()).await
+        self.0.read()
     }
 
     pub async fn get_position(&mut self) -> Result<Size> {
-        poll(|| self.0.get_position()).await
+        self.0.get_position()
     }
 
     pub async fn set_position(&mut self, position: Size) -> Result<()> {
-        poll(|| self.0.set_position(position)).await
+        self.0.set_position(position)
     }
 
     pub async fn rewind(&mut self) -> Result<()> {
-        poll(|| self.0.set_position(0)).await
+        self.0.set_position(0)
     }
 
     pub async fn close(mut self, virtual_file_system: &VirtualFileSystem) -> Result<()> {

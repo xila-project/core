@@ -1,8 +1,6 @@
 use super::DirectoryCapability;
-use crate::{
-    AccessTimePolicy, IoErrorKind, Result, ResultExt, VirtualFileSystem, pipe::Pipe, poll,
-};
-use alloc::{borrow::ToOwned, collections::btree_map::BTreeMap, string::String, vec::Vec};
+use crate::{AccessTimePolicy, IoErrorKind, Result, ResultExt, VirtualFileSystem, pipe::Pipe};
+use alloc::{borrow::ToOwned, string::String, vec::Vec};
 use exported_file_system::{
     AccessFlags, AttributeFlags, AttributeOperations, Attributes, BaseOperations, BlockDevice,
     CharacterDevice, Context, DirectoryOperations, FileSystemOperations, Flags, Inode, Kind, Path,
@@ -13,6 +11,65 @@ use users::{GroupIdentifier, UserIdentifier};
 
 const MAX_PATH_LENGTH: usize = 4096;
 const MAX_SYMLINKS: usize = 40;
+
+/// Registry of mounted devices or pipes, sorted by inode.
+///
+/// A device mounts once and its entry stays until it unmounts, so a sorted
+/// vector is sufficient. A `BTreeMap` for each of the three value types costs
+/// about 6 KB of flash on a Cortex-M4 target, because each map instantiates
+/// the node split, merge and rebalance code.
+pub(super) struct InodeMap<T>(Vec<(Inode, T)>);
+
+impl<T> InodeMap<T> {
+    pub const fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    fn position(&self, inode: Inode) -> core::result::Result<usize, usize> {
+        self.0.binary_search_by_key(&inode, |&(key, _)| key)
+    }
+
+    /// Return the lowest inode above 0 that has no entry.
+    pub fn allocate_inode(&self) -> Option<Inode> {
+        let mut candidate: Inode = 1;
+        for &(inode, _) in &self.0 {
+            if inode > candidate {
+                break;
+            }
+            if inode == candidate {
+                candidate = candidate.checked_add(1)?;
+            }
+        }
+        (candidate < Inode::MAX).then_some(candidate)
+    }
+
+    /// Add the entry, or replace the value of an entry with the same inode.
+    pub fn insert(&mut self, inode: Inode, value: T) {
+        match self.position(inode) {
+            Ok(index) => self.0[index].1 = value,
+            Err(index) => self.0.insert(index, (inode, value)),
+        }
+    }
+
+    pub fn get_mut(&mut self, inode: &Inode) -> Option<&mut T> {
+        let index = self.position(*inode).ok()?;
+        Some(&mut self.0[index].1)
+    }
+
+    pub fn remove(&mut self, inode: &Inode) -> Option<T> {
+        let index = self.position(*inode).ok()?;
+        Some(self.0.remove(index).1)
+    }
+
+    /// Iterate over the values in ascending inode order.
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        self.0.iter_mut().map(|(_, value)| value)
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+}
 
 pub(super) struct InternalFileSystem {
     pub reference_count: usize,
@@ -58,9 +115,9 @@ pub(super) struct InternalPipe {
 }
 
 pub(super) type FileSystemsArray = Vec<InternalFileSystem>;
-pub(super) type CharacterDevicesMap = BTreeMap<Inode, InternalCharacterDevice>;
-pub(super) type BlockDevicesMap = BTreeMap<Inode, InternalBlockDevice>;
-pub(super) type PipeMap = BTreeMap<Inode, InternalPipe>;
+pub(super) type CharacterDevicesMap = InodeMap<InternalCharacterDevice>;
+pub(super) type BlockDevicesMap = InodeMap<InternalBlockDevice>;
+pub(super) type PipeMap = InodeMap<InternalPipe>;
 
 pub(super) enum ResolvedPath<'a> {
     Borrowed(&'a Path),
@@ -76,9 +133,9 @@ pub(super) struct OpenDirectoryHandle {
 }
 
 impl OpenDirectoryHandle {
-    pub async fn open_root(file_system: &'static dyn FileSystemOperations) -> Result<Self> {
+    pub fn open_root(file_system: &'static dyn FileSystemOperations) -> Result<Self> {
         let mut context = Context::new_empty();
-        poll(|| file_system.lookup_directory(&mut context, Path::ROOT)).await?;
+        file_system.lookup_directory(&mut context, Path::ROOT)?;
         Ok(Self {
             file_system,
             context,
@@ -86,13 +143,10 @@ impl OpenDirectoryHandle {
         })
     }
 
-    pub async fn open_child(&self, name: &str) -> Result<Self> {
+    pub fn open_child(&self, name: &str) -> Result<Self> {
         let mut context = Context::new_empty();
-        poll(|| {
-            self.file_system
-                .lookup_directory_entry(&self.context, name, &mut context)
-        })
-        .await?;
+        self.file_system
+            .lookup_directory_entry(&self.context, name, &mut context)?;
         Ok(Self {
             file_system: self.file_system,
             context,
@@ -207,20 +261,20 @@ impl AsRef<Path> for ResolvedPath<'_> {
 impl VirtualFileSystem {
     /// Read persisted link payloads through ordinary file operations, falling
     /// back to a backend adapter only for native host links.
-    pub(super) async fn read_link_payload(
+    pub(super) fn read_link_payload(
         file_system: &dyn FileSystemOperations,
         path: &Path,
         buffer: &mut Vec<u8>,
     ) -> Result<usize> {
         let mut attributes = Attributes::new().set_mask(AttributeFlags::Size);
-        Self::get_attributes(file_system, path, &mut attributes).await?;
+        Self::get_attributes(file_system, path, &mut attributes)?;
         let size = *attributes.get_size().ok_or(IoErrorKind::InputOutput)? as usize;
         if size == 0 || size > MAX_PATH_LENGTH {
             return Err(IoErrorKind::CorruptData);
         }
 
         buffer.resize(size, 0);
-        match poll(|| file_system.read_symlink(path, buffer.as_mut_slice())).await {
+        match file_system.read_symlink(path, buffer.as_mut_slice()) {
             Ok(read) => {
                 if read != size {
                     return Err(IoErrorKind::CorruptData);
@@ -232,8 +286,7 @@ impl VirtualFileSystem {
         }
 
         let mut context = Context::new_empty();
-        poll(|| file_system.lookup_file(&mut context, path, Flags::from(AccessFlags::Read)))
-            .await?;
+        file_system.lookup_file(&mut context, path, Flags::from(AccessFlags::Read))?;
         let read = file_system.read_sync(&mut context, buffer.as_mut_slice(), 0);
         let close = BaseOperations::close(file_system, &mut context);
         let read = read?;
@@ -244,21 +297,21 @@ impl VirtualFileSystem {
         Ok(read)
     }
 
-    pub(super) async fn read_entry_link_payload(
+    pub(super) fn read_entry_link_payload(
         file_system: &dyn FileSystemOperations,
         parent: &Context,
         name: &str,
         buffer: &mut Vec<u8>,
     ) -> Result<usize> {
         let mut attributes = Attributes::new().set_mask(AttributeFlags::Size);
-        poll(|| file_system.get_entry_attributes(parent, name, &mut attributes)).await?;
+        file_system.get_entry_attributes(parent, name, &mut attributes)?;
         let size = *attributes.get_size().ok_or(IoErrorKind::InputOutput)? as usize;
         if size == 0 || size > MAX_PATH_LENGTH {
             return Err(IoErrorKind::CorruptData);
         }
 
         buffer.resize(size, 0);
-        match poll(|| file_system.read_symlink_entry(parent, name, buffer.as_mut_slice())).await {
+        match file_system.read_symlink_entry(parent, name, buffer.as_mut_slice()) {
             Ok(read) => {
                 if read != size {
                     return Err(IoErrorKind::CorruptData);
@@ -270,15 +323,12 @@ impl VirtualFileSystem {
         }
 
         let mut context = Context::new_empty();
-        poll(|| {
-            file_system.lookup_file_entry(
-                parent,
-                name,
-                &mut context,
-                Flags::from(AccessFlags::Read),
-            )
-        })
-        .await?;
+        file_system.lookup_file_entry(
+            parent,
+            name,
+            &mut context,
+            Flags::from(AccessFlags::Read),
+        )?;
         let read = file_system.read_sync(&mut context, buffer.as_mut_slice(), 0);
         let close = BaseOperations::close(file_system, &mut context);
         let read = read?;
@@ -350,19 +400,18 @@ impl VirtualFileSystem {
             .await?
         };
         if require_directory {
-            Self::verify_resolved_directory(file_systems, &mut resolved, allow_missing_final)
-                .await?;
+            Self::verify_resolved_directory(file_systems, &mut resolved, allow_missing_final)?;
         }
         Ok(resolved)
     }
 
-    async fn verify_resolved_directory(
+    fn verify_resolved_directory(
         file_systems: &FileSystemsArray,
         resolved: &mut ResolvedTarget<'_>,
         allow_missing_final: bool,
     ) -> Result<()> {
         let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
-        match Self::target_attributes(file_systems, resolved, &mut attributes).await {
+        match Self::target_attributes(file_systems, resolved, &mut attributes) {
             Ok(()) => {}
             Err(IoErrorKind::NotFound) if allow_missing_final => {
                 return Ok(());
@@ -397,7 +446,9 @@ impl VirtualFileSystem {
             .file_system
             .supports_directory_entry_operations()
         {
-            Some(OpenDirectoryHandle::open_root(root_file_system.file_system).await?)
+            Some(OpenDirectoryHandle::open_root(
+                root_file_system.file_system,
+            )?)
         } else {
             None
         };
@@ -405,17 +456,13 @@ impl VirtualFileSystem {
         if root.is_root() {
             let mut attributes = Attributes::new().set_mask(AttributeFlags::Kind);
             if let Some(directory) = current_directory.as_mut() {
-                poll(|| {
-                    AttributeOperations::get_attributes(
-                        root_file_system.file_system,
-                        directory.context_mutable(),
-                        &mut attributes,
-                    )
-                })
-                .await?;
+                AttributeOperations::get_attributes(
+                    root_file_system.file_system,
+                    directory.context_mutable(),
+                    &mut attributes,
+                )?;
             } else {
-                Self::get_attributes(root_file_system.file_system, Path::ROOT, &mut attributes)
-                    .await?;
+                Self::get_attributes(root_file_system.file_system, Path::ROOT, &mut attributes)?;
             }
             if attributes.get_kind() != Some(&Kind::Directory) {
                 return Err(IoErrorKind::NotADirectory);
@@ -466,26 +513,24 @@ impl VirtualFileSystem {
                     .file_system
                     .supports_directory_entry_operations()
                 {
-                    Some(OpenDirectoryHandle::open_root(candidate_file_system.file_system).await?)
+                    Some(OpenDirectoryHandle::open_root(
+                        candidate_file_system.file_system,
+                    )?)
                 } else {
                     None
                 };
                 if let Some(directory) = new_directory.as_mut() {
-                    poll(|| {
-                        AttributeOperations::get_attributes(
-                            candidate_file_system.file_system,
-                            directory.context_mutable(),
-                            &mut attributes,
-                        )
-                    })
-                    .await?;
+                    AttributeOperations::get_attributes(
+                        candidate_file_system.file_system,
+                        directory.context_mutable(),
+                        &mut attributes,
+                    )?;
                 } else {
                     Self::get_attributes(
                         candidate_file_system.file_system,
                         Path::ROOT,
                         &mut attributes,
-                    )
-                    .await?;
+                    )?;
                 }
                 let kind = *attributes.get_kind().ok_or(IoErrorKind::InputOutput)?;
                 if kind == Kind::SymbolicLink {
@@ -498,21 +543,17 @@ impl VirtualFileSystem {
                 mount_index = candidate_mount_index;
             } else {
                 if let Some(directory) = current_directory.as_ref() {
-                    poll(|| {
-                        candidate_file_system.file_system.get_entry_attributes(
-                            directory.context(),
-                            component,
-                            &mut attributes,
-                        )
-                    })
-                    .await?;
+                    candidate_file_system.file_system.get_entry_attributes(
+                        directory.context(),
+                        component,
+                        &mut attributes,
+                    )?;
                 } else {
                     Self::get_attributes(
                         candidate_file_system.file_system,
                         candidate_relative,
                         &mut attributes,
-                    )
-                    .await?;
+                    )?;
                 }
                 let kind = *attributes.get_kind().ok_or(IoErrorKind::InputOutput)?;
                 if kind == Kind::SymbolicLink {
@@ -522,7 +563,7 @@ impl VirtualFileSystem {
                     return Err(IoErrorKind::NotADirectory);
                 }
                 if let Some(directory) = current_directory.as_ref() {
-                    current_directory = Some(directory.open_child(component).await?);
+                    current_directory = Some(directory.open_child(component)?);
                 }
             }
 
@@ -659,8 +700,7 @@ impl VirtualFileSystem {
             parent_directory,
         };
         if require_directory {
-            Self::verify_resolved_directory(file_systems, &mut owned_target, allow_missing_final)
-                .await?;
+            Self::verify_resolved_directory(file_systems, &mut owned_target, allow_missing_final)?;
         }
         Ok(owned_target)
     }
@@ -679,14 +719,11 @@ impl VirtualFileSystem {
             let mut attributes = Attributes::default().set_mask(
                 AttributeFlags::User | AttributeFlags::Group | AttributeFlags::Permissions,
             );
-            poll(|| {
-                AttributeOperations::get_attributes(
-                    internal_file_system.file_system,
-                    directory.context_mutable(),
-                    &mut attributes,
-                )
-            })
-            .await?;
+            AttributeOperations::get_attributes(
+                internal_file_system.file_system,
+                directory.context_mutable(),
+                &mut attributes,
+            )?;
             return self
                 .check_attributes_permissions(&attributes, Permission::Execute, user)
                 .await;
@@ -767,7 +804,9 @@ impl VirtualFileSystem {
                 .file_system
                 .supports_directory_entry_operations()
             {
-                Some(OpenDirectoryHandle::open_root(root_file_system.file_system).await?)
+                Some(OpenDirectoryHandle::open_root(
+                    root_file_system.file_system,
+                )?)
             } else {
                 None
             };
@@ -826,15 +865,12 @@ impl VirtualFileSystem {
                     .supports_directory_entry_operations()
                 {
                     let mut new_directory =
-                        OpenDirectoryHandle::open_root(candidate_file_system.file_system).await?;
-                    let result = poll(|| {
-                        AttributeOperations::get_attributes(
-                            candidate_file_system.file_system,
-                            new_directory.context_mutable(),
-                            &mut attributes,
-                        )
-                    })
-                    .await;
+                        OpenDirectoryHandle::open_root(candidate_file_system.file_system)?;
+                    let result = AttributeOperations::get_attributes(
+                        candidate_file_system.file_system,
+                        new_directory.context_mutable(),
+                        &mut attributes,
+                    );
                     entered_mount_directory = Some(new_directory);
                     result
                 } else {
@@ -843,24 +879,19 @@ impl VirtualFileSystem {
                         Path::ROOT,
                         &mut attributes,
                     )
-                    .await
                 }
             } else if let Some(directory) = current_directory.as_ref() {
-                poll(|| {
-                    candidate_file_system.file_system.get_entry_attributes(
-                        directory.context(),
-                        component,
-                        &mut attributes,
-                    )
-                })
-                .await
+                candidate_file_system.file_system.get_entry_attributes(
+                    directory.context(),
+                    component,
+                    &mut attributes,
+                )
             } else {
                 Self::get_attributes(
                     candidate_file_system.file_system,
                     candidate_relative,
                     &mut attributes,
                 )
-                .await
             };
 
             match found {
@@ -894,15 +925,13 @@ impl VirtualFileSystem {
                         directory.context(),
                         component,
                         &mut target_buffer,
-                    )
-                    .await?
+                    )?
                 } else {
                     Self::read_link_payload(
                         candidate_file_system.file_system,
                         candidate_relative,
                         &mut target_buffer,
-                    )
-                    .await?
+                    )?
                 };
                 let target = core::str::from_utf8(&target_buffer[..length])
                     .map_err(|_| IoErrorKind::CorruptData)?;
@@ -917,28 +946,29 @@ impl VirtualFileSystem {
                 // so keep its open handle and parent handle: a later permission
                 // check must not re-resolve the recorded path by name, which can
                 // name a different directory after a rename.
-                let (resolved, mount_index, current_directory, parent_directory) = if target
-                    .starts_with('/')
-                {
-                    let (root_file_system, _, root_mount) =
-                        Self::get_file_system_from_path(file_systems, Path::ROOT)?;
-                    let root_directory = if root_file_system
-                        .file_system
-                        .supports_directory_entry_operations()
-                    {
-                        Some(OpenDirectoryHandle::open_root(root_file_system.file_system).await?)
+                let (resolved, mount_index, current_directory, parent_directory) =
+                    if target.starts_with('/') {
+                        let (root_file_system, _, root_mount) =
+                            Self::get_file_system_from_path(file_systems, Path::ROOT)?;
+                        let root_directory = if root_file_system
+                            .file_system
+                            .supports_directory_entry_operations()
+                        {
+                            Some(OpenDirectoryHandle::open_root(
+                                root_file_system.file_system,
+                            )?)
+                        } else {
+                            None
+                        };
+                        (String::from("/"), root_mount, root_directory, None)
                     } else {
-                        None
+                        (
+                            String::from(&text[..parent_end]),
+                            mount_index,
+                            current_directory,
+                            parent_directory,
+                        )
                     };
-                    (String::from("/"), root_mount, root_directory, None)
-                } else {
-                    (
-                        String::from(&text[..parent_end]),
-                        mount_index,
-                        current_directory,
-                        parent_directory,
-                    )
-                };
 
                 let target_trimmed = target.trim_start_matches('/');
                 let suffix = text[component_end..].trim_start_matches('/');
@@ -991,8 +1021,7 @@ impl VirtualFileSystem {
                     let next_directory = current_directory
                         .as_ref()
                         .ok_or(IoErrorKind::InvalidState)?
-                        .open_child(component)
-                        .await?;
+                        .open_child(component)?;
                     parent_directory = current_directory.take();
                     current_directory = Some(next_directory);
                 } else {
@@ -1036,7 +1065,7 @@ impl VirtualFileSystem {
         .await
     }
 
-    async fn rewalk_handles_to_resolved(
+    fn rewalk_handles_to_resolved(
         file_systems: &FileSystemsArray,
         state: &mut ResolutionState,
         options: ResolutionOptions<'_>,
@@ -1063,7 +1092,7 @@ impl VirtualFileSystem {
             (root_directory.duplicate()?, suffix)
         } else {
             (
-                OpenDirectoryHandle::open_root(target_file_system.file_system).await?,
+                OpenDirectoryHandle::open_root(target_file_system.file_system)?,
                 relative_path,
             )
         };
@@ -1074,7 +1103,7 @@ impl VirtualFileSystem {
             .split('/')
             .filter(|part| !part.is_empty())
         {
-            let next = current.open_child(part).await?;
+            let next = current.open_child(part)?;
             parent = Some(current);
             current = next;
         }
@@ -1128,7 +1157,7 @@ impl VirtualFileSystem {
                     }
                 }
                 state.pending.drain(..consumed.max(1));
-                Self::rewalk_handles_to_resolved(file_systems, &mut state, options).await?;
+                Self::rewalk_handles_to_resolved(file_systems, &mut state, options)?;
                 continue;
             }
 
@@ -1161,31 +1190,25 @@ impl VirtualFileSystem {
                     .supports_directory_entry_operations()
                 {
                     let mut new_directory =
-                        OpenDirectoryHandle::open_root(file_system.file_system).await?;
-                    let result = poll(|| {
-                        AttributeOperations::get_attributes(
-                            file_system.file_system,
-                            new_directory.context_mutable(),
-                            &mut attributes,
-                        )
-                    })
-                    .await;
+                        OpenDirectoryHandle::open_root(file_system.file_system)?;
+                    let result = AttributeOperations::get_attributes(
+                        file_system.file_system,
+                        new_directory.context_mutable(),
+                        &mut attributes,
+                    );
                     entered_mount_directory = Some(new_directory);
                     result
                 } else {
-                    Self::get_attributes(file_system.file_system, Path::ROOT, &mut attributes).await
+                    Self::get_attributes(file_system.file_system, Path::ROOT, &mut attributes)
                 }
             } else if let Some(directory) = state.current_directory.as_ref() {
-                poll(|| {
-                    file_system.file_system.get_entry_attributes(
-                        directory.context(),
-                        component,
-                        &mut attributes,
-                    )
-                })
-                .await
+                file_system.file_system.get_entry_attributes(
+                    directory.context(),
+                    component,
+                    &mut attributes,
+                )
             } else {
-                Self::get_attributes(file_system.file_system, relative_path, &mut attributes).await
+                Self::get_attributes(file_system.file_system, relative_path, &mut attributes)
             };
 
             match found {
@@ -1225,15 +1248,13 @@ impl VirtualFileSystem {
                         directory.context(),
                         component,
                         &mut state.target_buffer,
-                    )
-                    .await?
+                    )?
                 } else {
                     Self::read_link_payload(
                         file_system.file_system,
                         relative_path,
                         &mut state.target_buffer,
-                    )
-                    .await?
+                    )?
                 };
                 let target = core::str::from_utf8(&state.target_buffer[..target_length])
                     .map_err(|_| IoErrorKind::CorruptData)?;
@@ -1258,7 +1279,9 @@ impl VirtualFileSystem {
                         .file_system
                         .supports_directory_entry_operations()
                     {
-                        Some(OpenDirectoryHandle::open_root(root_file_system.file_system).await?)
+                        Some(OpenDirectoryHandle::open_root(
+                            root_file_system.file_system,
+                        )?)
                     } else {
                         None
                     };
@@ -1298,8 +1321,7 @@ impl VirtualFileSystem {
                         .current_directory
                         .as_ref()
                         .ok_or(IoErrorKind::InvalidState)?
-                        .open_child(component)
-                        .await?;
+                        .open_child(component)?;
                     state.parent_directory = state.current_directory.take();
                     state.current_directory = Some(next_directory);
                 } else {
@@ -1322,7 +1344,7 @@ impl VirtualFileSystem {
         })
     }
 
-    pub(super) async fn target_attributes(
+    pub(super) fn target_attributes(
         file_systems: &FileSystemsArray,
         target: &mut ResolvedTarget<'_>,
         attributes: &mut Attributes,
@@ -1332,25 +1354,21 @@ impl VirtualFileSystem {
         }
         let file_system = file_systems[target.mount_index].file_system;
         if let Some(directory) = target.current_directory.as_mut() {
-            poll(|| {
-                AttributeOperations::get_attributes(
-                    file_system,
-                    directory.context_mutable(),
-                    attributes,
-                )
-            })
-            .await
+            AttributeOperations::get_attributes(
+                file_system,
+                directory.context_mutable(),
+                attributes,
+            )
         } else if let Some(parent) = target.parent_directory.as_ref() {
             let entry_name = target.entry_name(file_systems)?;
-            poll(|| file_system.get_entry_attributes(parent.context(), entry_name, attributes))
-                .await
+            file_system.get_entry_attributes(parent.context(), entry_name, attributes)
         } else {
             let relative_path = target.relative_path(file_systems)?;
-            Self::get_attributes(file_system, relative_path, attributes).await
+            Self::get_attributes(file_system, relative_path, attributes)
         }
     }
 
-    pub(super) async fn set_target_attributes(
+    pub(super) fn set_target_attributes(
         file_systems: &FileSystemsArray,
         target: &mut ResolvedTarget<'_>,
         attributes: &Attributes,
@@ -1360,32 +1378,27 @@ impl VirtualFileSystem {
             return Ok(());
         }
         let mut current = Attributes::new().set_mask(mask);
-        Self::target_attributes(file_systems, target, &mut current).await?;
+        Self::target_attributes(file_systems, target, &mut current)?;
         if attributes_equal(&current, attributes) {
             return Ok(());
         }
         let file_system = file_systems[target.mount_index].file_system;
         if let Some(directory) = target.current_directory.as_mut() {
-            poll(|| {
-                AttributeOperations::set_attributes(
-                    file_system,
-                    directory.context_mutable(),
-                    attributes,
-                )
-            })
-            .await
+            AttributeOperations::set_attributes(
+                file_system,
+                directory.context_mutable(),
+                attributes,
+            )
         } else if let Some(parent) = target.parent_directory.as_ref() {
             let entry_name = target.entry_name(file_systems)?;
-            poll(|| file_system.set_entry_attributes(parent.context(), entry_name, attributes))
-                .await
+            file_system.set_entry_attributes(parent.context(), entry_name, attributes)
         } else {
             let relative_path = target.relative_path(file_systems)?;
-            poll(|| FileSystemOperations::set_attributes(file_system, relative_path, attributes))
-                .await
+            FileSystemOperations::set_attributes(file_system, relative_path, attributes)
         }
     }
 
-    pub(super) async fn update_target_read_access_time(
+    pub(super) fn update_target_read_access_time(
         file_systems: &FileSystemsArray,
         target: &mut ResolvedTarget<'_>,
         time: Time,
@@ -1409,7 +1422,7 @@ impl VirtualFileSystem {
                         | AttributeFlags::ModificationTime
                         | AttributeFlags::StatusTime,
                 );
-                Self::target_attributes(file_systems, target, &mut current).await?;
+                Self::target_attributes(file_systems, target, &mut current)?;
                 if let Some(&access) = current.get_access() {
                     let older_than_modification = current
                         .get_modification()
@@ -1427,7 +1440,7 @@ impl VirtualFileSystem {
 
         if should_update {
             let attributes = Attributes::new().set_access(time);
-            Self::set_target_attributes(file_systems, target, &attributes).await?;
+            Self::set_target_attributes(file_systems, target, &attributes)?;
         }
         Ok(())
     }
@@ -1487,14 +1500,11 @@ impl VirtualFileSystem {
             let mut attributes = Attributes::default().set_mask(
                 AttributeFlags::User | AttributeFlags::Group | AttributeFlags::Permissions,
             );
-            poll(|| {
-                AttributeOperations::get_attributes(
-                    file_system,
-                    parent.context_mutable(),
-                    &mut attributes,
-                )
-            })
-            .await?;
+            AttributeOperations::get_attributes(
+                file_system,
+                parent.context_mutable(),
+                &mut attributes,
+            )?;
             return self
                 .check_attributes_permissions(&attributes, asked_permissions, user)
                 .await;
@@ -1506,26 +1516,22 @@ impl VirtualFileSystem {
             .file_system
             .supports_directory_entry_operations()
         {
-            let mut directory =
-                OpenDirectoryHandle::open_root(parent_file_system.file_system).await?;
+            let mut directory = OpenDirectoryHandle::open_root(parent_file_system.file_system)?;
             for component in relative_path
                 .as_str()
                 .split('/')
                 .filter(|component| !component.is_empty())
             {
-                directory = directory.open_child(component).await?;
+                directory = directory.open_child(component)?;
             }
             let mut attributes = Attributes::default().set_mask(
                 AttributeFlags::User | AttributeFlags::Group | AttributeFlags::Permissions,
             );
-            poll(|| {
-                AttributeOperations::get_attributes(
-                    parent_file_system.file_system,
-                    directory.context_mutable(),
-                    &mut attributes,
-                )
-            })
-            .await?;
+            AttributeOperations::get_attributes(
+                parent_file_system.file_system,
+                directory.context_mutable(),
+                &mut attributes,
+            )?;
             return self
                 .check_attributes_permissions(&attributes, asked_permissions, user)
                 .await;
@@ -1561,12 +1567,12 @@ impl VirtualFileSystem {
         }
         let mut attributes = Attributes::default()
             .set_mask(AttributeFlags::User | AttributeFlags::Group | AttributeFlags::Permissions);
-        Self::target_attributes(file_systems, target, &mut attributes).await?;
+        Self::target_attributes(file_systems, target, &mut attributes)?;
         self.check_attributes_permissions(&attributes, current_permission, user)
             .await
     }
 
-    pub(super) async fn check_target_sticky_permissions(
+    pub(super) fn check_target_sticky_permissions(
         &self,
         file_systems: &FileSystemsArray,
         target: &mut ResolvedTarget<'_>,
@@ -1580,14 +1586,11 @@ impl VirtualFileSystem {
             let mut parent_attributes = Attributes::default().set_mask(
                 AttributeFlags::User | AttributeFlags::Group | AttributeFlags::Permissions,
             );
-            poll(|| {
-                AttributeOperations::get_attributes(
-                    file_system,
-                    parent.context_mutable(),
-                    &mut parent_attributes,
-                )
-            })
-            .await?;
+            AttributeOperations::get_attributes(
+                file_system,
+                parent.context_mutable(),
+                &mut parent_attributes,
+            )?;
             let parent_owner = *parent_attributes
                 .get_user()
                 .ok_or(IoErrorKind::InputOutput)?;
@@ -1603,14 +1606,11 @@ impl VirtualFileSystem {
                 .and_then(|relative| relative.get_file_name())
                 .ok_or(IoErrorKind::InvalidPath)?;
             let mut entry_attributes = Attributes::default().set_mask(AttributeFlags::User);
-            poll(|| {
-                file_system.get_entry_attributes(
-                    parent.context(),
-                    entry_name,
-                    &mut entry_attributes,
-                )
-            })
-            .await?;
+            file_system.get_entry_attributes(
+                parent.context(),
+                entry_name,
+                &mut entry_attributes,
+            )?;
             let entry_owner = *entry_attributes
                 .get_user()
                 .ok_or(IoErrorKind::InputOutput)?;
@@ -1622,7 +1622,6 @@ impl VirtualFileSystem {
         let relative_path = target.relative_path(file_systems)?;
         let parent_path = relative_path.go_parent().ok_or(IoErrorKind::InvalidPath)?;
         self.check_sticky_permissions(file_system, parent_path, relative_path, current_user)
-            .await
     }
 
     pub(super) async fn has_permissions(
@@ -1788,16 +1787,12 @@ impl VirtualFileSystem {
         Ok((time, user, group))
     }
 
-    pub(super) fn get_new_inode<T>(devices: &BTreeMap<Inode, T>) -> Option<Inode> {
-        (1..Inode::MAX).find(|&inode| !devices.contains_key(&inode))
-    }
-
-    pub(super) async fn get_attributes(
+    pub(super) fn get_attributes(
         file_system: &dyn FileSystemOperations,
         path: &Path,
         attributes: &mut Attributes,
     ) -> Result<()> {
-        poll(|| FileSystemOperations::get_attributes(file_system, path, attributes)).await
+        FileSystemOperations::get_attributes(file_system, path, attributes)
     }
 
     pub(super) async fn check_permissions(
@@ -1816,7 +1811,7 @@ impl VirtualFileSystem {
         let mut attributes = Attributes::default()
             .set_mask(AttributeFlags::User | AttributeFlags::Group | AttributeFlags::Permissions);
 
-        Self::get_attributes(file_system, path, &mut attributes).await?;
+        Self::get_attributes(file_system, path, &mut attributes)?;
 
         let owner_user = *attributes.get_user().ok_or(IoErrorKind::InputOutput)?;
         let owner_group = *attributes.get_group().ok_or(IoErrorKind::InputOutput)?;
@@ -1848,7 +1843,7 @@ impl VirtualFileSystem {
         Ok(())
     }
 
-    pub(super) async fn check_sticky_permissions(
+    pub(super) fn check_sticky_permissions(
         &self,
         file_system: &dyn FileSystemOperations,
         parent_path: &Path,
@@ -1861,7 +1856,7 @@ impl VirtualFileSystem {
 
         let mut parent_attributes = Attributes::default()
             .set_mask(AttributeFlags::User | AttributeFlags::Group | AttributeFlags::Permissions);
-        Self::get_attributes(file_system, parent_path, &mut parent_attributes).await?;
+        Self::get_attributes(file_system, parent_path, &mut parent_attributes)?;
 
         let parent_owner = *parent_attributes
             .get_user()
@@ -1875,7 +1870,7 @@ impl VirtualFileSystem {
         }
 
         let mut entry_attributes = Attributes::default().set_mask(AttributeFlags::User);
-        Self::get_attributes(file_system, entry_path, &mut entry_attributes).await?;
+        Self::get_attributes(file_system, entry_path, &mut entry_attributes)?;
         let entry_owner = *entry_attributes
             .get_user()
             .ok_or(IoErrorKind::InputOutput)?;
@@ -1924,6 +1919,46 @@ mod tests {
     use file_system::{DummyFileSystem, PathOwned};
 
     use super::*;
+
+    #[test]
+    fn inode_map_allocates_the_lowest_free_inode() {
+        let mut map = InodeMap::new();
+        assert_eq!(map.allocate_inode(), Some(1));
+        for inode in [3, 1, 2] {
+            map.insert(inode, inode * 10);
+        }
+        assert_eq!(map.allocate_inode(), Some(4));
+
+        assert_eq!(map.remove(&2), Some(20));
+        assert_eq!(map.remove(&2), None);
+        assert_eq!(map.allocate_inode(), Some(2));
+
+        // Inode 0 is never allocated and does not hide inode 1.
+        map.insert(0, 0);
+        assert_eq!(map.remove(&1), Some(10));
+        assert_eq!(map.allocate_inode(), Some(1));
+    }
+
+    #[test]
+    fn inode_map_keeps_one_sorted_entry_for_each_inode() {
+        let mut map = InodeMap::new();
+        for inode in [5, 2, 9, 2] {
+            map.insert(inode, inode);
+        }
+        map.insert(9, 90);
+        assert_eq!(
+            map.values_mut().map(|value| *value).collect::<Vec<_>>(),
+            [2, 5, 90]
+        );
+
+        *map.get_mut(&5).unwrap() = 50;
+        assert_eq!(map.get_mut(&5), Some(&mut 50));
+        assert_eq!(map.get_mut(&4), None);
+
+        map.clear();
+        assert_eq!(map.values_mut().count(), 0);
+        assert_eq!(map.allocate_inode(), Some(1));
+    }
 
     #[test]
     fn pinned_lookup_rejects_submounts() {

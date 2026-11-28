@@ -2217,6 +2217,169 @@ async fn storage_shutdown_requires_closed_handles_and_freezes_io() {
     assert!(vfs.shutdown_storage().await.is_ok());
 }
 
+/// A file system that only records its unmount calls. The first call can fail.
+mod recording_file_system {
+    use file_system::{
+        AttributeOperations, Attributes, BaseOperations, Context, DirectoryOperations, Entry,
+        FileOperations, FileSystemOperations, Flags, IoErrorKind, MountOperations, Path, Result,
+        Size,
+    };
+    use std::sync::{Mutex, atomic::AtomicBool, atomic::Ordering};
+
+    pub struct FileSystem {
+        pub name: &'static str,
+        pub unmounted: &'static Mutex<Vec<&'static str>>,
+        pub fail_next_unmount: AtomicBool,
+    }
+
+    impl MountOperations for FileSystem {
+        fn unmount(&self) -> Result<()> {
+            if self.fail_next_unmount.swap(false, Ordering::SeqCst) {
+                return Err(IoErrorKind::InputOutput);
+            }
+            self.unmounted.lock().unwrap().push(self.name);
+            Ok(())
+        }
+    }
+
+    impl BaseOperations for FileSystem {
+        fn read(
+            &self,
+            _: &mut Context,
+            _: &mut core::task::Context<'_>,
+            _: &mut [u8],
+            _: Size,
+        ) -> core::task::Poll<Result<usize>> {
+            unreachable!()
+        }
+
+        fn write(
+            &self,
+            _: &mut Context,
+            _: &mut core::task::Context<'_>,
+            _: &[u8],
+            _: Size,
+        ) -> core::task::Poll<Result<usize>> {
+            unreachable!()
+        }
+
+        fn clone_context(&self, _: &Context) -> Result<Context> {
+            unreachable!()
+        }
+    }
+
+    impl AttributeOperations for FileSystem {
+        fn get_attributes(&self, _: &mut Context, _: &mut Attributes) -> Result<()> {
+            unreachable!()
+        }
+
+        fn set_attributes(&self, _: &mut Context, _: &Attributes) -> Result<()> {
+            unreachable!()
+        }
+    }
+
+    impl FileOperations for FileSystem {}
+
+    impl DirectoryOperations for FileSystem {
+        fn read(&self, _: &mut Context) -> Result<Option<Entry>> {
+            unreachable!()
+        }
+
+        fn set_position(&self, _: &mut Context, _: Size) -> Result<()> {
+            unreachable!()
+        }
+
+        fn get_position(&self, _: &mut Context) -> Result<Size> {
+            unreachable!()
+        }
+
+        fn rewind(&self, _: &mut Context) -> Result<()> {
+            unreachable!()
+        }
+
+        fn close(&self, _: &mut Context) -> Result<()> {
+            unreachable!()
+        }
+    }
+
+    impl FileSystemOperations for FileSystem {
+        fn lookup_directory(&self, _: &mut Context, _: &Path) -> Result<()> {
+            unreachable!()
+        }
+
+        fn lookup_file(&self, _: &mut Context, _: &Path, _: Flags) -> Result<()> {
+            unreachable!()
+        }
+
+        fn create_directory(&self, _: &Path, _: &Attributes) -> Result<()> {
+            unreachable!()
+        }
+
+        fn create_file(&self, _: &Path, _: &Attributes) -> Result<()> {
+            unreachable!()
+        }
+
+        fn remove(&self, _: &Path) -> Result<()> {
+            unreachable!()
+        }
+
+        fn rename(&self, _: &Path, _: &Path) -> Result<()> {
+            unreachable!()
+        }
+
+        fn get_attributes(&self, _: &Path, _: &mut Attributes) -> Result<()> {
+            unreachable!()
+        }
+
+        fn set_attributes(&self, _: &Path, _: &Attributes) -> Result<()> {
+            unreachable!()
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+async fn storage_shutdown_unmounts_the_deepest_mount_first_and_resumes_after_a_failure() {
+    let (task, vfs) = initialize().await;
+    let unmounted: &'static std::sync::Mutex<Vec<&'static str>> = Box::leak(Box::default());
+    let recording = |name, fail: bool| recording_file_system::FileSystem {
+        name,
+        unmounted,
+        fail_next_unmount: fail.into(),
+    };
+
+    // The mount order differs from the unmount order: `/outer/inner` is the
+    // third mount and the deepest one.
+    vfs.create_directory(task, &"/side").await.unwrap();
+    vfs.mount_file_system(recording("/side", true), &"/side", task)
+        .await
+        .unwrap();
+    vfs.create_directory(task, &"/outer").await.unwrap();
+    vfs.mount_file_system(memory_file_system::FileSystem::new(), &"/outer", task)
+        .await
+        .unwrap();
+    vfs.create_directory(task, &"/outer/inner").await.unwrap();
+    vfs.mount_file_system(recording("/outer/inner", false), &"/outer/inner", task)
+        .await
+        .unwrap();
+    vfs.create_directory(task, &"/tail").await.unwrap();
+    vfs.mount_file_system(recording("/tail", false), &"/tail", task)
+        .await
+        .unwrap();
+
+    // `/side` fails once. The mounts after it in the order stay mounted.
+    assert_eq!(vfs.shutdown_storage().await, Err(IoErrorKind::InputOutput));
+    assert_eq!(*unmounted.lock().unwrap(), ["/outer/inner"]);
+
+    // A second shutdown does not unmount `/outer/inner` again. Mount points of
+    // equal length keep their mount order.
+    vfs.shutdown_storage().await.unwrap();
+    assert_eq!(
+        *unmounted.lock().unwrap(),
+        ["/outer/inner", "/side", "/tail"]
+    );
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 async fn synchronous_handles_support_offset_io_timestamps_and_status_flags() {
