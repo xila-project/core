@@ -83,7 +83,7 @@ pub enum LinkedHome {
     /// No home capability.
     None,
     /// The home that the account of the task's user records, with read and write rights.
-    /// The program gets no home capability if the account has none.
+    /// The program gets no home capability if the account or directory is missing.
     User,
     /// This directory, with these rights.
     Path(Home),
@@ -181,13 +181,14 @@ pub unsafe fn run_linked(
 
         let home = match options.home {
             LinkedHome::None => None,
-            LinkedHome::Path(home) => Some(home),
-            LinkedHome::User => user_home(context).await,
-        }
-        .map(|home| HomeGrant::Path {
-            path: home.path,
-            rights: home.rights,
-        });
+            LinkedHome::Path(home) => Some(HomeGrant::Path {
+                path: home.path,
+                rights: home.rights,
+            }),
+            LinkedHome::User => Some(HomeGrant::User {
+                rights: READ_WRITE_RIGHTS,
+            }),
+        };
 
         let Some((stack, owner, launch)) = linked_setup(
             options.stack_size,
@@ -324,18 +325,6 @@ fn linked_setup(
         network: u32::from(network.bits()),
     };
     Some((stack, owner, launch))
-}
-
-/// The user's home as a grant, or `None` if the task, the user or the account has none.
-async fn user_home(context: &'static crate::ExecutableContext) -> Option<Home> {
-    let manager = context.task_manager;
-    let task = manager.try_get_current_task_identifier().await.ok()?;
-    let user = manager.get_user(task).await.ok()?;
-    let path = context.virtual_file_system.get_user_home(user).await.ok()?;
-    Some(Home {
-        path,
-        rights: READ_WRITE_RIGHTS,
-    })
 }
 
 /// Declare an executable that runs a linked entry, for `mount_executables!`. The `unsafe`

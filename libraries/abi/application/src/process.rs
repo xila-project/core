@@ -51,6 +51,8 @@ fn task_status(error: task::Error) -> Status {
 
 /// A directory capability granted to a child as its home.
 pub enum HomeGrant {
+    /// Grant the user's recorded home if it exists.
+    User { rights: u8 },
     /// The host grants a directory by absolute path.
     Path { path: PathOwned, rights: u8 },
     /// A parent passes on a directory it already holds.
@@ -128,8 +130,7 @@ impl ProcessLaunch {
     /// data in `state`. The coroutine runs inside the process's task, which is how
     /// the process learns its identity.
     ///
-    /// Returns the entry's exit status, or -1 if the process could not be set up:
-    /// the coroutine is not on a registered task or the task is gone.
+    /// Returns the entry's exit status, or -1 if process setup fails.
     ///
     /// Every resource the process owns is held by `state`, which belongs to the
     /// host side of the task, not to this coroutine's stack: the call keeps only
@@ -171,6 +172,21 @@ impl ProcessLaunch {
                     .map_err(task_status)?;
             }
             let home = match home {
+                Some(HomeGrant::User { rights }) => {
+                    let user = manager.get_user(task).await.map_err(task_status)?;
+                    let vfs = host.virtual_file_system();
+                    if let Ok(path) = vfs.get_user_home(user).await {
+                        match Directory::new_async(vfs, task, path.as_str(), u32::from(rights))
+                            .await
+                        {
+                            Ok(directory) => Some(directory),
+                            Err(Status::NotFound) => None,
+                            Err(error) => return Err(error),
+                        }
+                    } else {
+                        None
+                    }
+                }
                 Some(HomeGrant::Open(mut directory)) => {
                     directory.task = task;
                     Some(directory)
