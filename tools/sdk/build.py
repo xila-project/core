@@ -973,10 +973,14 @@ def link_packaged_example(target, sdk, name, archive):
     """Compile and localize an example from the SDK directory."""
     manifest = sdk / "sdk.json"
     try:
-        actual_target = json.loads(manifest.read_text())["target"]
-    except (OSError, ValueError, KeyError, TypeError) as error:
-        sys.exit(f"error: cannot read the SDK target from {manifest}: {error}. "
-                 "Set XILA_SDK_DIRECTORY to a built SDK directory.")
+        metadata = json.loads(manifest.read_text())
+    except (OSError, ValueError) as error:
+        sys.exit(f"error: cannot read the SDK manifest at {manifest}: {error}. "
+                 "Pass a built SDK directory to --sdk.")
+    actual_target = metadata.get("target") if isinstance(metadata, dict) else None
+    if not isinstance(actual_target, str) or not actual_target:
+        sys.exit(f"error: SDK manifest {manifest} must contain a non-empty 'target' string. "
+                 "Pass a built SDK directory to --sdk.")
     if actual_target != target:
         sys.exit(f"error: {sdk} targets {actual_target}, expected {target}")
     include = [
