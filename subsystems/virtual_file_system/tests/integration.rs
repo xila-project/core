@@ -3345,6 +3345,20 @@ mod symlink_confinement_regression_tests {
             entries.get(name).copied().ok_or(IoErrorKind::NotFound)
         }
 
+        /// Resolve a path from the volume root. Only mount registration walks
+        /// paths by name; confined lookups always use opened directory handles.
+        fn walk_path(state: &SimulatedState, path: &Path) -> file_system::Result<Inode> {
+            let mut inode = 1;
+            for component in path
+                .as_str()
+                .split('/')
+                .filter(|component| !component.is_empty())
+            {
+                inode = Self::lookup_child_inode(state, inode, component)?;
+            }
+            Ok(inode)
+        }
+
         fn read_node_attributes(node: &SimulatedNode, attributes: &mut Attributes) {
             let request = attributes.get_mask();
             let mut output = Attributes::new();
@@ -3733,9 +3747,15 @@ mod symlink_confinement_regression_tests {
 
         fn create_directory(
             &self,
-            _path: &Path,
+            path: &Path,
             _attributes: &Attributes,
         ) -> file_system::Result<()> {
+            // Mount registration creates the mount point through entry
+            // operations first and only asks here whether it already exists.
+            let state = self.state();
+            if Self::walk_path(&state, path).is_ok() {
+                return Err(IoErrorKind::AlreadyExists);
+            }
             panic!("directory-entry backend must not receive path-based create_directory");
         }
 
@@ -3915,10 +3935,15 @@ mod symlink_confinement_regression_tests {
 
         fn get_attributes(
             &self,
-            _path: &Path,
-            _attributes: &mut Attributes,
+            path: &Path,
+            attributes: &mut Attributes,
         ) -> file_system::Result<()> {
-            panic!("directory-entry backend must not receive path-based get_attributes");
+            // Mount registration reads the mount point attributes by path.
+            let state = self.state();
+            let inode = Self::walk_path(&state, path)?;
+            let node = state.nodes.get(&inode).ok_or(IoErrorKind::StaleHandle)?;
+            Self::read_node_attributes(node, attributes);
+            Ok(())
         }
 
         fn get_entry_attributes(
@@ -5299,6 +5324,170 @@ mod symlink_confinement_regression_tests {
             read_to_vec(&mut back_file).await,
             b"from-little-file-system"
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[task::test]
+    async fn pinned_directory_rejects_mount_below_its_renamed_path() {
+        let (task, virtual_file_system) = initialize().await;
+
+        let simulated = SimulatedDirectoryEntryFileSystem::new();
+        let granted = simulated.populate_directory(1, "granted").unwrap();
+        let child = simulated.populate_directory(granted, "child").unwrap();
+        simulated.populate_file(child, "first", b"first").unwrap();
+        virtual_file_system
+            .create_directory(task, &"/host")
+            .await
+            .unwrap();
+        virtual_file_system
+            .mount_file_system(simulated, &"/host", task)
+            .await
+            .unwrap();
+
+        let capability = virtual_file_system
+            .pin_directory(task, Path::new("/host/granted"))
+            .await
+            .unwrap();
+
+        // The capability keeps its handle to the moved directory, but its
+        // recorded path now names a different directory.
+        virtual_file_system
+            .rename(task, &"/host/granted", &"/host/renamed")
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_directory(task, &"/host/granted")
+            .await
+            .unwrap();
+        virtual_file_system
+            .create_directory(task, &"/host/granted/sub")
+            .await
+            .unwrap();
+        let mounted = SimulatedDirectoryEntryFileSystem::new();
+        mounted
+            .populate_file(1, "secret", b"mounted-secret")
+            .unwrap();
+        virtual_file_system
+            .mount_file_system(mounted, &"/host/granted/sub", task)
+            .await
+            .unwrap();
+
+        // Lookups that stay inside the moved directory still work.
+        let mut first = capability
+            .open_file(
+                task,
+                Path::new("child/first"),
+                AccessFlags::Read.into(),
+                true,
+            )
+            .await
+            .unwrap();
+        assert_eq!(read_to_vec(&mut first).await, b"first");
+
+        // The capability refers to /host/renamed, which has no such mount, so
+        // every crossing into the volume mounted below the old path fails
+        // closed, with or without a dot-dot detour.
+        assert_eq!(
+            capability
+                .open_file(
+                    task,
+                    Path::new("sub/secret"),
+                    AccessFlags::Read.into(),
+                    true
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::PathEscapesRoot
+        );
+        assert_eq!(
+            capability
+                .open_file(
+                    task,
+                    Path::new("child/../sub/secret"),
+                    AccessFlags::Read.into(),
+                    true
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::PathEscapesRoot
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[task::test]
+    async fn relative_link_to_dot_checks_parent_of_moved_pinned_directory() {
+        let (task, virtual_file_system) = initialize().await;
+
+        let simulated = SimulatedDirectoryEntryFileSystem::new();
+        let granted = simulated.populate_directory(1, "granted").unwrap();
+        let child = simulated.populate_directory(granted, "child").unwrap();
+        simulated.populate_symlink(child, "self_link", ".").unwrap();
+        virtual_file_system
+            .create_directory(task, &"/host")
+            .await
+            .unwrap();
+        virtual_file_system
+            .mount_file_system(simulated, &"/host", task)
+            .await
+            .unwrap();
+
+        let capability = virtual_file_system
+            .pin_directory(task, Path::new("/host/granted"))
+            .await
+            .unwrap();
+
+        virtual_file_system
+            .rename(task, &"/host/granted", &"/host/renamed")
+            .await
+            .unwrap();
+
+        // Recreate the old path as a decoy that denies traversal to a
+        // non-root user, so a parent permission check that re-resolves the
+        // recorded path by name is denied.
+        virtual_file_system
+            .create_directory_with_permissions(task, &"/host/granted", Permissions::USER_READ_WRITE)
+            .await
+            .unwrap();
+
+        let group = GroupIdentifier::new(1000);
+        let user = UserIdentifier::new(1000);
+        virtual_file_system
+            .users_manager()
+            .add_group(group, "test-group", &[])
+            .await
+            .unwrap();
+        virtual_file_system
+            .users_manager()
+            .add_user(user, "test-user", group, "/users/test-user")
+            .await
+            .unwrap();
+        virtual_file_system
+            .task_manager()
+            .set_user(task, user)
+            .await
+            .unwrap();
+
+        // Control: the decoy at the old path denies traversal to this user.
+        assert_eq!(
+            virtual_file_system
+                .open(
+                    &"/host/granted/inside.txt",
+                    Flags::from(AccessFlags::Read),
+                    task
+                )
+                .await
+                .unwrap_err(),
+            IoErrorKind::PermissionDenied
+        );
+
+        // `child/self_link` resolves to the moved `child` directory. Opening it
+        // checks execute permission on the moved `granted` directory through the
+        // retained parent handle, not on the decoy at the old path.
+        let directory = capability
+            .open_directory(task, Path::new("child/self_link"))
+            .await
+            .unwrap();
+        drop(directory);
     }
 }
 
