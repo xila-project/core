@@ -142,6 +142,7 @@ pub unsafe extern "C" fn xila_directory_open(
         if rights & !u32::from(parent.rights) != 0 {
             return Err(Status::PermissionDenied);
         }
+        // SAFETY: The caller supplies readable path bytes for path_length.
         let path = relative_path(unsafe { path_input(path, path_length)? }, false)?;
         crate::suspend_on_cancellable(async {
             let root = Arc::new(
@@ -177,6 +178,8 @@ pub unsafe extern "C" fn xila_directory_close(directory: *mut Directory) -> Stat
 }
 
 impl Directory {
+    /// # Safety
+    /// Keep non-null path bytes readable for `length` and for the returned borrow.
     pub(crate) unsafe fn relative_path<'a>(
         &self,
         path: *const c_char,
@@ -190,6 +193,7 @@ impl Directory {
         if u32::from(self.rights) & right == 0 {
             return Err(Status::PermissionDenied);
         }
+        // SAFETY: The caller keeps the path bytes readable for the returned borrow.
         relative_path(unsafe { path_input(path, length)? }, nonempty)
     }
 }
@@ -208,6 +212,7 @@ pub unsafe extern "C" fn xila_directory_create(
     // SAFETY: checked non-null above; the caller guarantees the object is live.
     let directory = unsafe { &*directory };
     let result = (|| {
+        // SAFETY: The caller supplies readable path bytes for length.
         let path = unsafe { directory.relative_path(path, length, XILA_RIGHT_WRITE, true)? };
         crate::suspend_on_cancellable(directory.root.create_directory(directory.task, path))
             .map_err(Status::from)
@@ -233,6 +238,7 @@ pub unsafe extern "C" fn xila_directory_remove(
     // SAFETY: checked non-null above; the caller guarantees the object is live.
     let directory = unsafe { &*directory };
     let result = (|| {
+        // SAFETY: The caller supplies readable path bytes for length.
         let path = unsafe { directory.relative_path(path, length, XILA_RIGHT_WRITE, true)? };
         crate::suspend_on_cancellable(directory.root.remove(
             directory.task,
@@ -262,8 +268,10 @@ pub unsafe extern "C" fn xila_directory_rename(
     // SAFETY: checked non-null above; the caller guarantees the objects are live.
     let (from, to) = unsafe { (&*from, &*to) };
     let result = (|| {
+        // SAFETY: The caller supplies readable source path bytes for from_length.
         let from_path =
             unsafe { from.relative_path(from_path, from_length, XILA_RIGHT_WRITE, true)? };
+        // SAFETY: The caller supplies readable destination path bytes for to_length.
         let to_path = unsafe { to.relative_path(to_path, to_length, XILA_RIGHT_WRITE, true)? };
         if !core::ptr::eq(from.vfs, to.vfs) || from.task != to.task {
             return Err(Status::InvalidArgument);

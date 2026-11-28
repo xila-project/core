@@ -35,6 +35,7 @@ pub unsafe extern "C" fn xila_directory_iterator_open(
     // SAFETY: checked non-null above; the caller guarantees the object is live.
     let directory = unsafe { &*directory };
     let result = (|| {
+        // SAFETY: The caller supplies readable path bytes for length.
         let path = unsafe { directory.relative_path(path, length, XILA_RIGHT_READ, false)? };
         let inner =
             crate::suspend_on_cancellable(directory.root.open_directory(directory.task, path))?;

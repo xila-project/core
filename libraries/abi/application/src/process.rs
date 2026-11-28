@@ -656,6 +656,7 @@ pub unsafe extern "C" fn xila_process_spawn(
         {
             return Err(Status::InvalidArgument);
         }
+        // SAFETY: The caller supplies readable path bytes for path_length.
         let path = unsafe { directory.relative_path(path, path_length, XILA_RIGHT_READ, true)? };
         // A parent can pass on only network rights it holds itself.
         let network = spawn.flags & SPAWN_NETWORK;
@@ -668,6 +669,7 @@ pub unsafe extern "C" fn xila_process_spawn(
         } else {
             Some(unsafe { environment(spawn.environment, spawn.environment_count)? })
         };
+        // SAFETY: A non-null home points to a live directory for this call, per the caller contract.
         let home = unsafe { spawn.home.as_ref() };
         if home.is_some_and(|home| {
             home.task != process.task || !core::ptr::eq(home.vfs, directory.vfs)

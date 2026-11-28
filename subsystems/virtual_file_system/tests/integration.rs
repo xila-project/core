@@ -3827,6 +3827,19 @@ mod symlink_confinement_regression_tests {
             let new_parent_inode = Self::context_inode(new_parent)?;
             let mut state = self.state();
             let moved_inode = Self::lookup_child_inode(&state, old_parent_inode, old_name)?;
+            let mut remaining = alloc::vec![moved_inode];
+            while let Some(inode) = remaining.pop() {
+                if inode == new_parent_inode {
+                    return Err(IoErrorKind::InvalidArgument);
+                }
+                if let Some(SimulatedNode {
+                    kind: SimulatedNodeKind::Directory { entries },
+                    ..
+                }) = state.nodes.get(&inode)
+                {
+                    remaining.extend(entries.values().copied());
+                }
+            }
             if let Some(SimulatedNode {
                 kind: SimulatedNodeKind::Directory { entries },
                 ..
@@ -4966,6 +4979,18 @@ mod symlink_confinement_regression_tests {
             .await
             .unwrap();
         assert_eq!(read_to_vec(&mut first).await, b"first");
+
+        assert_eq!(
+            capability
+                .rename(
+                    task,
+                    Path::new("child"),
+                    &capability,
+                    Path::new("child/nested")
+                )
+                .await,
+            Err(IoErrorKind::InvalidArgument)
+        );
 
         // A later lookup and a rewalk to the root both start from the same handle.
         let mut second = capability

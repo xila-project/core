@@ -116,6 +116,7 @@ pub unsafe extern "C" fn xila_file_open(
     let result = (|| {
         let follow_final = flags & XILA_OPEN_NO_FOLLOW == 0;
         let flags = open_flags(flags, directory.rights)?;
+        // SAFETY: The caller supplies readable path bytes for path_length.
         let path = relative_path(unsafe { path_input(path, path_length)? }, true)?;
         let inner = crate::suspend_on_cancellable(directory.root.open_file(
             directory.task,

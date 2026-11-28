@@ -144,6 +144,7 @@ pub unsafe extern "C" fn xila_directory_get_statistics(
         unsafe {
             validate_output(output)?;
         }
+        // SAFETY: The caller supplies readable path bytes for length.
         let path = unsafe { directory.relative_path(path, length, XILA_RIGHT_READ, false)? };
         let value = crate::suspend_on_cancellable(directory.root.get_statistics(
             directory.task,

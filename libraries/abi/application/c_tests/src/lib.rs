@@ -106,10 +106,12 @@ mod tests {
             Directory::new(vfs, task, "/grant", XILA_RIGHT_READ | XILA_RIGHT_WRITE).unwrap();
         let open = |path: &str, flags| {
             let mut file = ptr::null_mut();
+            // SAFETY: The grant and path stay live. The output is writable and disjoint.
             let status = unsafe {
                 xila_file_open(&grant, path.as_ptr().cast(), path.len(), flags, &mut file)
             };
             if status == Status::Ok {
+                // SAFETY: A successful open returned a live handle. This is its only close.
                 assert_eq!(unsafe { xila_file_close(file) }, Status::Ok);
             } else {
                 assert!(file.is_null());

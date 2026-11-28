@@ -1641,6 +1641,7 @@ impl VirtualFileSystem {
         let mut resolved = self
             .resolve_path_with_root(&file_systems, path, false, false, user, task, root)
             .await?;
+        // Protect the mount table conservatively if an open directory has moved.
         if root.is_some_and(|root| resolved.path.as_str() == root.path().as_str())
             || Self::protects_mount(&file_systems, &resolved.path, true)
         {
@@ -2326,6 +2327,7 @@ impl VirtualFileSystem {
         let mut new_resolved = self
             .resolve_path_with_root(&file_systems, new_path, false, true, user, task, new_root)
             .await?;
+        // Protect the mount table conservatively if an open directory has moved.
         if old_root.is_some_and(|root| old_resolved.path.as_str() == root.path().as_str())
             || new_root.is_some_and(|root| new_resolved.path.as_str() == root.path().as_str())
             || Self::protects_mount(&file_systems, &old_resolved.path, true)
@@ -2333,14 +2335,18 @@ impl VirtualFileSystem {
         {
             return Err(IoErrorKind::ResourceBusy);
         }
-        // A directory cannot move beneath itself. The backends do not check:
-        // LittleFS would detach the whole subtree from the hierarchy.
-        let source = old_resolved.path.as_str().trim_end_matches('/');
-        if new_resolved.path.as_str().len() > source.len()
-            && new_resolved.path.as_str().starts_with(source)
-            && new_resolved.path.as_str().as_bytes()[source.len()] == b'/'
+        // The backend checks actual ancestry for an open directory that can move.
+        // Path-based backends such as LittleFS need the VFS check.
+        if !old_root.is_some_and(LookupRoot::is_handle_relative)
+            && !new_root.is_some_and(LookupRoot::is_handle_relative)
         {
-            return Err(IoErrorKind::InvalidArgument);
+            let source = old_resolved.path.as_str().trim_end_matches('/');
+            if new_resolved.path.as_str().len() > source.len()
+                && new_resolved.path.as_str().starts_with(source)
+                && new_resolved.path.as_str().as_bytes()[source.len()] == b'/'
+            {
+                return Err(IoErrorKind::InvalidArgument);
+            }
         }
 
         if old_resolved.mount_index != new_resolved.mount_index {

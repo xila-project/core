@@ -32,7 +32,12 @@ that follows more than 40 links returns `SymlinkLoop`.
 
 The directory stays pinned until the last capability that shares it closes.
 On backends with directory entry operations, lookup starts from the open
-directory handle after a rename. In-process backends that use paths, such as
+directory handle after a rename. A lookup from that handle returns
+`PathEscapesRoot` if the mount table would send it to another file system.
+The mount table uses paths and cannot verify that the mount is beneath the
+open handle. The mount table can conservatively reject a rename or removal
+with `ResourceBusy` if the original path now names a mount or its ancestor.
+In-process backends that use paths, such as
 LittleFS, reject rename or removal of a pinned directory or its ancestors
 with `ResourceBusy`. Host file systems that cannot confine lookup, including
 HostFS on macOS and Windows, return `PathEscapesRoot`.
