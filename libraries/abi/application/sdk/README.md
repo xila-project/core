@@ -649,7 +649,8 @@ returned process identifier is the one the child reports with `getpid`
 
 - A task table that cannot take another task makes the spawn fail with
   `XILA_STATUS_OUT_OF_MEMORY`, and `posix_spawn` and `posix_spawnp` then return
-  `ENOMEM`. Other allocation failures report the same status.
+  `ENOMEM`. Other failures, such as a failed allocation or a native image that is
+  too large, report the same status.
 - `posix_spawnp` searches `PATH` and has no default search path: without `PATH`, only a
   name containing a slash runs. An empty entry is the current directory.
 - A child gets exactly three descriptors, its standard streams. File actions edit that

@@ -59,6 +59,7 @@ class SetupGuardTests(unittest.TestCase):
         self.source.mkdir()
         (self.source / "meson.build").write_text("# fake picolibc\n")
         # The cross file and the stamp name tools and a compiler without needing them.
+        self.real_compiler_identity = build.compiler_identity
         patches = [
             mock.patch.object(build, "find_target_tool", lambda target, role: f"fake-{role}"),
             mock.patch.object(build, "compiler_command",
@@ -139,6 +140,29 @@ class SetupGuardTests(unittest.TestCase):
         self.assertEqual(len(setups), 2)
         self.assertIn("--wipe", setups[1])
         self.assertEqual(self.configured_cross(), (self.work / "picolibc.cross").read_text())
+
+    def test_changed_compiler_flag_in_the_cross_file_redoes_the_setup(self):
+        # Same target, same mocked compiler identity: only the cross file changes, so this
+        # exercises the cross-file part of the hashed inputs.
+        self.build_picolibc(TARGET)
+        with mock.patch.object(build, "compiler_command",
+                               lambda target: ["fake-clang", f"--target={target}",
+                                               "-march=rv32imac"]):
+            self.build_picolibc(TARGET)
+        setups = self.meson.setup_commands()
+        self.assertEqual(len(setups), 2)
+        self.assertIn("--wipe", setups[1])
+        self.assertNotIn("--reconfigure", setups[1])
+        self.assertIn("-march=rv32imac", (self.work / "picolibc.cross").read_text())
+        self.assertEqual(self.configured_cross(), (self.work / "picolibc.cross").read_text())
+
+    def test_unusable_compiler_exits_with_an_error(self):
+        for failure in (FileNotFoundError("fake-clang"),
+                        subprocess.CalledProcessError(1, ["fake-clang"])):
+            with mock.patch.object(build.subprocess, "run", side_effect=failure):
+                with self.assertRaises(SystemExit) as raised:
+                    self.real_compiler_identity(TARGET)
+            self.assertIn("does not report a version", str(raised.exception))
 
     def test_different_recorded_inputs_redo_the_setup(self):
         self.build_picolibc()

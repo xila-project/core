@@ -234,8 +234,12 @@ def compiler_command(target):
 def compiler_identity(target):
     """The compiler's version output: the cross file names the compiler's path, but a
     compiler replaced at the same path must redo the setup."""
-    result = subprocess.run([compiler_command(target)[0], "--version"],
-                            capture_output=True, text=True, check=True)
+    compiler = compiler_command(target)[0]
+    try:
+        result = subprocess.run([compiler, "--version"], capture_output=True, text=True,
+                                check=True)
+    except (OSError, subprocess.CalledProcessError) as error:
+        sys.exit(f"error: {compiler} does not report a version: {error}")
     return result.stdout
 
 
@@ -345,9 +349,10 @@ MESON_ENVIRONMENT = ("CC", "CFLAGS", "LDFLAGS", "CPPFLAGS")
 
 
 def setup_inputs(source, target, cross, install, options):
-    """Hash of every input `meson setup` reads: the picolibc source directory, the compiler
-    identity, the cross file, the prefix, the picolibc options and the environment meson
-    reads on the first setup. build_picolibc records it only after a successful setup."""
+    """Hash of the setup inputs the build controls and meson reads on the first setup: the
+    picolibc source directory, the compiler identity, the cross file, the prefix, the
+    picolibc options and the environment meson reads only there. build_picolibc records it
+    only after a successful setup."""
     digest = hashlib.sha256()
     digest.update(str(source).encode())
     digest.update(b"\0")
@@ -363,9 +368,13 @@ def setup_inputs(source, target, cross, install, options):
 
 
 def write_stamp(stamp, inputs):
-    """Write the stamp atomically: a temporary file in the same directory, then replace."""
+    """Write the stamp atomically: a temporary file in the same directory, flushed to disk,
+    then replaced."""
     temporary = stamp.with_name(stamp.name + ".tmp")
-    temporary.write_text(inputs + "\n")
+    with open(temporary, "w") as handle:
+        handle.write(inputs + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
     os.replace(temporary, stamp)
 
 
@@ -871,8 +880,11 @@ def assemble(target, pin, install, crt0, crt0_linked, libraries, work):
     shutil.copy(pin_source(pin) / "COPYING.picolibc", root / "COPYING.picolibc")
     shutil.copy(ROOT / "license.md", root / "LICENSE-xila.md")
 
-    compiler_version = subprocess.run([find_tool(compiler_bin), "--version"],
-                                      capture_output=True, text=True, check=True)
+    try:
+        compiler_version = subprocess.run([find_tool(compiler_bin), "--version"],
+                                          capture_output=True, text=True, check=True)
+    except (OSError, subprocess.CalledProcessError) as error:
+        sys.exit(f"error: {compiler_bin} does not report a version: {error}")
     (root / "sdk.json").write_text(json.dumps({
         "name": name,
         "target": target,

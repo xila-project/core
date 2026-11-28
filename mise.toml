@@ -164,7 +164,7 @@ tools.rust = { version = "{{ vars.rust_version }}", profile = "minimal" }
 run = "uv run --no-project --with meson=={{ vars.meson_version }} --with ninja=={{ vars.ninja_version }} python tools/sdk/build.py verify --target \"${XILA_SDK_TARGET:-x86_64-unknown-linux-gnu}\""
 
 [tasks."sdk:test"]
-description = "Run the SDK tools' Python tests (ELF checker, link-archive, picolibc setup guard)"
+description = "Run the SDK tools' Python tests (unittest discover over tools/sdk)"
 tools.uv = "{{ vars.uv_version }}"
 run = "uv run --no-project python -m unittest discover -s tools/sdk -v"
 
