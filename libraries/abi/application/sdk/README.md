@@ -12,11 +12,13 @@ To get the SDK for a Xila release:
    your target. `<xila_version>` is the major and minor version of the release.
    For example, Xila `v0.1.0` uses `xila-sdk-0.1-thumbv7em-none-eabihf.tar.zst`
    for Cortex-M4F. The archive name does not show the patch version. Record
-   the release tag next to the archive.
+   the release tag next to the archive, so that you can tell which patch
+   release it came from.
 3. From the download directory, run
-   `sha256sum --check --ignore-missing SHA256SUMS` (GNU coreutils). Make sure
-   that the output has an `OK` line for your archive: `--ignore-missing` skips
-   an absent file, and the command still succeeds. The check finds a damaged
+   `LC_ALL=C sha256sum --check --ignore-missing SHA256SUMS` (GNU coreutils).
+   Make sure that the output has an `OK` line for your archive:
+   `--ignore-missing` skips an absent file, and the command succeeds when one
+   other listed file matches. The check finds a damaged
    download. It does not prove who made the release, because `SHA256SUMS`
    comes from the same release as the archive.
 4. Extract the archive. Each archive includes `COPYING.picolibc` and
@@ -32,9 +34,13 @@ assets for application builds.
 | `x86_64-unknown-linux-gnu` | the host Platforms runs on Linux, x86-64 | none | none needed |
 | `aarch64-unknown-linux-gnu` | the host Platforms runs on Linux, AArch64 | none | none needed |
 | `thumbv7em-none-eabihf` | Cortex-M4F | hard | Arm GNU toolchain's `libgcc.a` |
-| `riscv32imac-unknown-none-elf` | ESP32-C6 class RV32IMAC | soft (`ilp32`) | bare-metal RISC-V GCC's `libgcc.a`, or Espressif `riscv32-esp-elf-gcc`'s |
-| `riscv32imafc-unknown-none-elf` | ESP32-P4 class RV32IMAFC | single (`ilp32f`) | bare-metal RISC-V GCC's `libgcc.a`, or Espressif `riscv32-esp-elf-gcc`'s |
+| `riscv32imac-unknown-none-elf` | ESP32-C6 class RV32IMAC | soft (`ilp32`) | bare-metal RISC-V GCC's `libgcc.a` |
+| `riscv32imafc-unknown-none-elf` | ESP32-P4 class RV32IMAFC | single (`ilp32f`) | bare-metal RISC-V GCC's `libgcc.a` |
 | `xtensa-esp32s3-elf` | ESP32-S3 | toolchain default | Espressif `xtensa-esp32s3-elf-gcc`'s `libgcc.a` |
+
+The released RISC-V archives use the bare-metal RISC-V GCC runtime. A local
+build uses Espressif `riscv32-esp-elf-gcc`'s `libgcc.a` only when the
+bare-metal RISC-V GCC is not installed.
 
 The RISC-V images do no gp relaxation: the link defines no `__global_pointer$`
 (and never passes `--relax-gp`), and `check_elf.py` rejects an image that defines
