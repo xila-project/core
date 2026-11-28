@@ -913,7 +913,13 @@ impl VirtualFileSystem {
                     return Err(IoErrorKind::PathEscapesRoot);
                 }
 
-                let (resolved, mount_index, current_directory) = if target.starts_with('/') {
+                // A relative target continues from the link's containing directory,
+                // so keep its open handle and parent handle: a later permission
+                // check must not re-resolve the recorded path by name, which can
+                // name a different directory after a rename.
+                let (resolved, mount_index, current_directory, parent_directory) = if target
+                    .starts_with('/')
+                {
                     let (root_file_system, _, root_mount) =
                         Self::get_file_system_from_path(file_systems, Path::ROOT)?;
                     let root_directory = if root_file_system
@@ -924,12 +930,13 @@ impl VirtualFileSystem {
                     } else {
                         None
                     };
-                    (String::from("/"), root_mount, root_directory)
+                    (String::from("/"), root_mount, root_directory, None)
                 } else {
                     (
                         String::from(&text[..parent_end]),
                         mount_index,
                         current_directory,
+                        parent_directory,
                     )
                 };
 
@@ -959,7 +966,7 @@ impl VirtualFileSystem {
                             target_buffer,
                             mount_index,
                             current_directory,
-                            parent_directory: None,
+                            parent_directory,
                             root_mount_index,
                             root_directory,
                         },
