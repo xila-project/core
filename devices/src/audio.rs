@@ -3,6 +3,8 @@
 //! Configuration is fixed for an open stream. [`GET_WRITABLE`] returns free
 //! bytes. Volume is `0..=100` percent, applied when rendering. [`STOP`] pauses
 //! on the next callback and retains queued PCM.
+//! [`GET_UNDERRUNS`] returns the number of output underruns since boot.
+//! The count saturates at `u32::MAX`.
 
 use file_system::{ControlCommand, IoErrorKind, Result, define_command};
 
@@ -111,3 +113,4 @@ define_command!(SET_VOLUME, Write, kind::AUDIO, 0x04, u8, ());
 define_command!(GET_VOLUME, Read, kind::AUDIO, 0x05, (), u8);
 define_command!(START, Write, kind::AUDIO, 0x06, (), ());
 define_command!(STOP, Write, kind::AUDIO, 0x07, (), ());
+define_command!(GET_UNDERRUNS, Read, kind::AUDIO, 0x08, (), u32);
