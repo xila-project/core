@@ -1,6 +1,6 @@
-use core::{fmt, str};
+use core::{fmt, marker::PhantomData, ptr, str};
 
-use crate::{checksum, write_marker};
+use crate::{checksum, crc32_step, write_marker, write_marker_raw};
 
 pub const MAGIC: [u8; 4] = *b"XCR1";
 pub const VERSION: u16 = 1;
@@ -154,112 +154,188 @@ impl Limits {
     };
 }
 
-/// Writes the payload in place. Dropping this writer before `finish` leaves
-/// the record invalid.
-pub struct Writer<'a> {
-    output: &'a mut [u8],
+/// A raw cursor into the record slot. Every access is a volatile read or
+/// write through the raw pointer, so a cursor never creates a Rust reference
+/// to the slot and never assumes exclusive access to it.
+struct Cursor {
+    pointer: *mut u8,
+    length: usize,
+}
+
+impl Cursor {
+    fn put(&mut self, offset: usize, value: &[u8]) {
+        for (index, byte) in value.iter().enumerate() {
+            // SAFETY: The writer constructors guarantee that
+            // `pointer..pointer + length` is valid for reads and writes for
+            // the lifetime of the writer.
+            unsafe { ptr::write_volatile(self.pointer.add(offset + index), *byte) };
+        }
+    }
+
+    fn fill(&mut self, offset: usize, length: usize, value: u8) {
+        for index in 0..length {
+            // SAFETY: Same range invariant as `put`.
+            unsafe { ptr::write_volatile(self.pointer.add(offset + index), value) };
+        }
+    }
+
+    /// CRC-32 over `start..end`, read back with volatile reads through the raw
+    /// pointer. Reading the slot back (instead of trusting cached values)
+    /// also covers bytes a concurrent writer may have changed, so a record
+    /// torn by that writer fails the checksum on the next boot.
+    fn checksum(&self, start: usize, end: usize) -> u32 {
+        let mut checksum = u32::MAX;
+        for offset in start..end {
+            // SAFETY: Same range invariant as `put`.
+            let byte = unsafe { ptr::read_volatile(self.pointer.add(offset)) };
+            checksum = crc32_step(checksum, byte);
+        }
+        !checksum
+    }
+
+    /// Whether `offset..offset + length` is valid UTF-8, checked with volatile
+    /// reads in small chunks so that no reference to the slot is created.
+    fn is_utf8(&self, offset: usize, length: usize) -> bool {
+        const CHUNK: usize = 64;
+        let mut buffer = [0u8; CHUNK];
+        let mut carried = 0usize;
+        let mut position = 0usize;
+        while position < length {
+            let take = (length - position).min(CHUNK - carried);
+            for index in 0..take {
+                // SAFETY: Same range invariant as `put`.
+                buffer[carried + index] =
+                    unsafe { ptr::read_volatile(self.pointer.add(offset + position + index)) };
+            }
+            position += take;
+            let filled = carried + take;
+            match str::from_utf8(&buffer[..filled]) {
+                Ok(_) => carried = 0,
+                Err(error) if error.error_len().is_none() => {
+                    // Incomplete sequence at the chunk end: carry its bytes.
+                    let valid_up_to = error.valid_up_to();
+                    buffer.copy_within(valid_up_to..filled, 0);
+                    carried = filled - valid_up_to;
+                    if carried >= 4 {
+                        return false;
+                    }
+                }
+                Err(_) => return false,
+            }
+        }
+        carried == 0
+    }
+}
+
+/// Shared writer implementation. All slot accesses go through a raw cursor
+/// with volatile reads and writes, so the writer itself never creates a Rust
+/// reference to the slot.
+struct WriterCore {
+    cursor: Cursor,
     limits: Limits,
     frame_count: u8,
     flags: u16,
 }
 
-impl<'a> Writer<'a> {
+impl WriterCore {
     /// Returns `None` if the slot cannot hold the fixed header.
-    pub fn new(output: &'a mut [u8], header: &Header<'_>, limits: Limits) -> Option<Self> {
-        let bytes = output.get_mut(..HEADER_SIZE)?;
-        write_marker(bytes, [0; 4]);
-        bytes[4..].fill(0);
-        put(bytes, 8, VERSION.to_le_bytes());
-        put(bytes, 10, (HEADER_SIZE as u16).to_le_bytes());
-        bytes[16] = header.kind as u8;
-        bytes[17] = header.architecture as u8;
-        bytes[18] = header.reset_reason as u8;
-        let identifier = &mut bytes[104..136];
-        let identifier_kind = match &header.build_identifier {
-            BuildIdentifier::None => BuildIdentifierKind::None,
-            BuildIdentifier::ElfSha256(value) => {
-                identifier.copy_from_slice(value);
-                BuildIdentifierKind::ElfSha256
-            }
-            BuildIdentifier::GnuBuildIdentifier(value) => {
-                identifier[..value.len()].copy_from_slice(value);
-                BuildIdentifierKind::GnuBuildIdentifier
-            }
-            BuildIdentifier::WasmFingerprint(value) => {
-                identifier.copy_from_slice(value);
-                BuildIdentifierKind::WasmFingerprint
-            }
-        };
-        bytes[19] = identifier_kind as u8;
-        put(bytes, 20, header.raw_reset_reason.to_le_bytes());
-        put(bytes, 24, header.exception_code.to_le_bytes());
-        put(bytes, 28, header.consecutive_crashes.to_le_bytes());
-        put(bytes, 32, header.uptime_microseconds.to_le_bytes());
-        put(bytes, 40, header.build_epoch.to_le_bytes());
-        put(bytes, 48, header.program_counter.to_le_bytes());
-        put(bytes, 56, header.stack_pointer.to_le_bytes());
-        put(bytes, 64, header.link_register.to_le_bytes());
-        put(bytes, 72, header.fault_address.to_le_bytes());
-        put(bytes, 80, header.stack_base.to_le_bytes());
-        put(bytes, 88, header.code_load_offset.to_le_bytes());
-        put(bytes, 96, header.core_identifier.to_le_bytes());
-        put(bytes, 100, header.task_identifier.to_le_bytes());
-        bytes[216] = put_text(bytes, 136, 32, header.task_name);
-        bytes[217] = put_text(bytes, 168, 32, header.target_name);
-        bytes[218] = put_text(bytes, 200, 16, header.firmware_version);
-        Some(Self {
-            output,
+    ///
+    /// # Safety
+    /// `cursor.pointer..cursor.pointer + cursor.length` must be valid for
+    /// reads and writes for the lifetime of the returned writer.
+    unsafe fn new(cursor: Cursor, header: &Header<'_>, limits: Limits) -> Option<Self> {
+        if cursor.length < HEADER_SIZE {
+            return None;
+        }
+        let mut this = Self {
+            cursor,
             limits,
             frame_count: 0,
             flags: header.flags,
-        })
+        };
+        // SAFETY: The range invariant above holds for the header range.
+        unsafe { write_marker_raw(this.cursor.pointer, [0; 4]) };
+        this.cursor.fill(4, HEADER_SIZE - 4, 0);
+        this.cursor.put(8, &VERSION.to_le_bytes());
+        this.cursor.put(10, &(HEADER_SIZE as u16).to_le_bytes());
+        this.cursor.put(16, &[header.kind as u8]);
+        this.cursor.put(17, &[header.architecture as u8]);
+        this.cursor.put(18, &[header.reset_reason as u8]);
+        let (identifier_kind, identifier) = match &header.build_identifier {
+            BuildIdentifier::None => (BuildIdentifierKind::None, [0; 32]),
+            BuildIdentifier::ElfSha256(value) => (BuildIdentifierKind::ElfSha256, *value),
+            BuildIdentifier::GnuBuildIdentifier(value) => {
+                let mut identifier = [0; 32];
+                identifier[..value.len()].copy_from_slice(value);
+                (BuildIdentifierKind::GnuBuildIdentifier, identifier)
+            }
+            BuildIdentifier::WasmFingerprint(value) => {
+                (BuildIdentifierKind::WasmFingerprint, *value)
+            }
+        };
+        this.cursor.put(104, &identifier);
+        this.cursor.put(19, &[identifier_kind as u8]);
+        this.cursor.put(20, &header.raw_reset_reason.to_le_bytes());
+        this.cursor.put(24, &header.exception_code.to_le_bytes());
+        this.cursor
+            .put(28, &header.consecutive_crashes.to_le_bytes());
+        this.cursor
+            .put(32, &header.uptime_microseconds.to_le_bytes());
+        this.cursor.put(40, &header.build_epoch.to_le_bytes());
+        this.cursor.put(48, &header.program_counter.to_le_bytes());
+        this.cursor.put(56, &header.stack_pointer.to_le_bytes());
+        this.cursor.put(64, &header.link_register.to_le_bytes());
+        this.cursor.put(72, &header.fault_address.to_le_bytes());
+        this.cursor.put(80, &header.stack_base.to_le_bytes());
+        this.cursor.put(88, &header.code_load_offset.to_le_bytes());
+        this.cursor.put(96, &header.core_identifier.to_le_bytes());
+        this.cursor.put(100, &header.task_identifier.to_le_bytes());
+        let task_name_length = header.task_name.floor_char_boundary(32);
+        this.cursor
+            .put(136, &header.task_name.as_bytes()[..task_name_length]);
+        this.cursor.put(216, &[task_name_length as u8]);
+        let target_name_length = header.target_name.floor_char_boundary(32);
+        this.cursor
+            .put(168, &header.target_name.as_bytes()[..target_name_length]);
+        this.cursor.put(217, &[target_name_length as u8]);
+        let version_length = header.firmware_version.floor_char_boundary(16);
+        this.cursor
+            .put(200, &header.firmware_version.as_bytes()[..version_length]);
+        this.cursor.put(218, &[version_length as u8]);
+        Some(this)
     }
 
     /// Returns false and sets `FRAMES_TRUNCATED` when the frame does not fit.
-    pub fn push_frame(&mut self, address: u64) -> bool {
+    fn push_frame(&mut self, address: u64) -> bool {
         let end = HEADER_SIZE + usize::from(self.frame_count) * 8;
-        if self.frame_count == self.limits.frames || self.output.len() - end < 8 {
+        if self.frame_count == self.limits.frames || self.cursor.length - end < 8 {
             self.flags |= FRAMES_TRUNCATED;
             return false;
         }
-        put(self.output, end, address.to_le_bytes());
+        self.cursor.put(end, &address.to_le_bytes());
         self.frame_count += 1;
         true
     }
 
-    /// Commits the record and returns its valid bytes. The log callback copies
-    /// a UTF-8 tail into the supplied buffer, or returns `None` on contention.
-    pub fn finish(
-        self,
-        message: fmt::Arguments<'_>,
-        stack: &[u8],
-        snapshot_log: impl FnOnce(&mut [u8]) -> Option<usize>,
-    ) -> &'a [u8] {
-        self.finish_with_stack(
-            message,
-            stack.len(),
-            |output| output.copy_from_slice(&stack[..output.len()]),
-            snapshot_log,
-        )
-    }
-
-    /// Like `finish`, but copies the stack directly into the output slot.
-    /// The callback must fill the supplied window starting at `stack_base`.
-    pub fn finish_with_stack(
-        self,
+    /// Commits the record and returns its length in bytes. The callbacks
+    /// receive the raw window into the slot.
+    fn finish_with_stack(
+        &mut self,
         message: fmt::Arguments<'_>,
         stack_length: usize,
-        copy_stack: impl FnOnce(&mut [u8]),
-        snapshot_log: impl FnOnce(&mut [u8]) -> Option<usize>,
-    ) -> &'a [u8] {
+        copy_stack: impl FnOnce(*mut u8, usize),
+        snapshot_log: impl FnOnce(*mut u8, usize) -> Option<usize>,
+    ) -> usize {
         use fmt::Write as _;
 
         let mut flags = self.flags;
         let mut end = HEADER_SIZE + usize::from(self.frame_count) * 8;
-        let capacity = self.output.len() - end;
+        let capacity = self.cursor.length - end;
         let message_capacity = capacity.min(usize::from(self.limits.message));
         let mut writer = MessageWriter {
-            buffer: &mut self.output[end..end + message_capacity],
+            cursor: &mut self.cursor,
+            base: end,
+            capacity: message_capacity,
             length: 0,
             truncated: false,
         };
@@ -271,21 +347,21 @@ impl<'a> Writer<'a> {
 
         let captured = stack_length
             .min(usize::from(self.limits.stack))
-            .min(self.output.len() - end);
+            .min(self.cursor.length - end);
         if captured < stack_length {
             flags |= STACK_TRUNCATED;
         }
-        let stack_output = &mut self.output[end..end + captured];
-        stack_output.fill(0);
-        copy_stack(stack_output);
+        self.cursor.fill(end, captured, 0);
+        // SAFETY: `end..end + captured` is within the slot range.
+        copy_stack(unsafe { self.cursor.pointer.add(end) }, captured);
         end += captured;
 
-        let log_capacity = (self.output.len() - end).min(usize::from(self.limits.log_tail));
-        let log = &mut self.output[end..end + log_capacity];
+        let log_capacity = (self.cursor.length - end).min(usize::from(self.limits.log_tail));
         // Initialize the buffer in case the callback reports bytes it did not write.
-        log.fill(0);
-        let log_length = match snapshot_log(log) {
-            Some(length) if length <= log.len() && str::from_utf8(&log[..length]).is_ok() => length,
+        self.cursor.fill(end, log_capacity, 0);
+        // SAFETY: `end..end + log_capacity` is within the slot range.
+        let log_length = match snapshot_log(unsafe { self.cursor.pointer.add(end) }, log_capacity) {
+            Some(length) if length <= log_capacity && self.cursor.is_utf8(end, length) => length,
             Some(_) => 0,
             None => {
                 flags |= LOG_SKIPPED_CONTENTION;
@@ -294,27 +370,180 @@ impl<'a> Writer<'a> {
         };
         end += log_length;
 
-        self.output[219] = self.frame_count;
-        put(self.output, 220, (message_length as u16).to_le_bytes());
-        put(self.output, 222, (captured as u16).to_le_bytes());
-        put(self.output, 224, (log_length as u16).to_le_bytes());
-        put(self.output, 226, flags.to_le_bytes());
-        commit(&mut self.output[..end]);
-        &self.output[..end]
+        self.cursor.put(219, &[self.frame_count]);
+        self.cursor.put(220, &(message_length as u16).to_le_bytes());
+        self.cursor.put(222, &(captured as u16).to_le_bytes());
+        self.cursor.put(224, &(log_length as u16).to_le_bytes());
+        self.cursor.put(226, &flags.to_le_bytes());
+        self.commit(end);
+        end
+    }
+
+    fn commit(&mut self, end: usize) {
+        self.cursor.put(12, &(end as u32).to_le_bytes());
+        let checksum = self.cursor.checksum(8, end);
+        self.cursor.put(4, &checksum.to_le_bytes());
+        // SAFETY: The first 4 bytes are within the slot range; the magic goes
+        // last, between fences.
+        unsafe { write_marker_raw(self.cursor.pointer, MAGIC) };
+    }
+}
+
+/// Writes the payload in place through an exclusive slot. Dropping this
+/// writer before `finish` leaves the record invalid.
+pub struct Writer<'a> {
+    core: WriterCore,
+    _exclusive: PhantomData<&'a mut [u8]>,
+}
+
+impl<'a> Writer<'a> {
+    /// Returns `None` if the slot cannot hold the fixed header.
+    pub fn new(output: &'a mut [u8], header: &Header<'_>, limits: Limits) -> Option<Self> {
+        // SAFETY: `output` is an exclusive mutable borrow for `'a`, so the
+        // slot range is valid and no other reference to it exists.
+        unsafe {
+            WriterCore::new(
+                Cursor {
+                    pointer: output.as_mut_ptr(),
+                    length: output.len(),
+                },
+                header,
+                limits,
+            )
+        }
+        .map(|core| Self {
+            core,
+            _exclusive: PhantomData,
+        })
+    }
+
+    /// Returns false and sets `FRAMES_TRUNCATED` when the frame does not fit.
+    pub fn push_frame(&mut self, address: u64) -> bool {
+        self.core.push_frame(address)
+    }
+
+    /// Commits the record and returns its valid bytes. The log callback copies
+    /// a UTF-8 tail into the supplied buffer, or returns `None` on contention.
+    pub fn finish(
+        mut self,
+        message: fmt::Arguments<'_>,
+        stack: &[u8],
+        snapshot_log: impl FnOnce(&mut [u8]) -> Option<usize>,
+    ) -> &'a [u8] {
+        let pointer = self.core.cursor.pointer;
+        let length = self.core.finish_with_stack(
+            message,
+            stack.len(),
+            |window, length| {
+                // SAFETY: The window is derived from the exclusive `&'a mut`.
+                let output = unsafe { core::slice::from_raw_parts_mut(window, length) };
+                output.copy_from_slice(&stack[..length])
+            },
+            |window, length| {
+                // SAFETY: The window is derived from the exclusive `&'a mut`.
+                let output = unsafe { core::slice::from_raw_parts_mut(window, length) };
+                snapshot_log(output)
+            },
+        );
+        // SAFETY: The slice is derived from the exclusive `&'a mut [u8]` passed
+        // to `new` and is valid for `'a`.
+        unsafe { core::slice::from_raw_parts(pointer, length) }
+    }
+
+    /// Like `finish`, but copies the stack directly into the output slot.
+    /// The callback must fill the supplied window starting at `stack_base`.
+    pub fn finish_with_stack(
+        mut self,
+        message: fmt::Arguments<'_>,
+        stack_length: usize,
+        copy_stack: impl FnOnce(&mut [u8]),
+        snapshot_log: impl FnOnce(&mut [u8]) -> Option<usize>,
+    ) -> &'a [u8] {
+        let pointer = self.core.cursor.pointer;
+        let length = self.core.finish_with_stack(
+            message,
+            stack_length,
+            |window, length| {
+                // SAFETY: The window is derived from the exclusive `&'a mut`
+                // passed to `new`.
+                copy_stack(unsafe { core::slice::from_raw_parts_mut(window, length) })
+            },
+            |window, length| {
+                // SAFETY: The window is derived from the exclusive `&'a mut`
+                // passed to `new`.
+                let output = unsafe { core::slice::from_raw_parts_mut(window, length) };
+                snapshot_log(output)
+            },
+        );
+        // SAFETY: The slice is derived from the exclusive `&'a mut [u8]` passed
+        // to `new` and is valid for `'a`.
+        unsafe { core::slice::from_raw_parts(pointer, length) }
+    }
+}
+
+/// Raw writer for a slot the writer does not exclusively own, for example
+/// the retained slot of a core that panicked first and still holds the
+/// claim: creating a Rust reference to that slot here would be undefined
+/// behavior. Every access goes through the raw cursor with volatile reads
+/// and writes, and the magic is committed last between fences, so a record
+/// torn by the concurrent writer fails the checksum on the next boot.
+pub struct RawWriter {
+    core: WriterCore,
+}
+
+impl RawWriter {
+    /// Returns `None` if the slot cannot hold the fixed header.
+    ///
+    /// # Safety
+    /// `pointer..pointer.add(length)` must be valid for reads and writes for
+    /// the lifetime of the returned writer, and no Rust reference (in
+    /// particular no second `&mut`) to that range may exist on any core while
+    /// the writer is alive.
+    pub unsafe fn new(
+        pointer: *mut u8,
+        length: usize,
+        header: &Header<'_>,
+        limits: Limits,
+    ) -> Option<Self> {
+        // SAFETY: The caller guarantees the range is valid and unreferenced.
+        unsafe { WriterCore::new(Cursor { pointer, length }, header, limits) }
+            .map(|core| Self { core })
+    }
+
+    /// Returns false and sets `FRAMES_TRUNCATED` when the frame does not fit.
+    pub fn push_frame(&mut self, address: u64) -> bool {
+        self.core.push_frame(address)
+    }
+
+    /// Commits the record and returns its length in bytes. The callbacks
+    /// receive the raw window into the slot and must not create Rust
+    /// references to it.
+    pub fn finish_with_stack(
+        mut self,
+        message: fmt::Arguments<'_>,
+        stack_length: usize,
+        copy_stack: impl FnOnce(*mut u8, usize),
+        snapshot_log: impl FnOnce(*mut u8, usize) -> Option<usize>,
+    ) -> usize {
+        self.core
+            .finish_with_stack(message, stack_length, copy_stack, snapshot_log)
     }
 }
 
 struct MessageWriter<'a> {
-    buffer: &'a mut [u8],
+    cursor: &'a mut Cursor,
+    base: usize,
+    capacity: usize,
     length: usize,
     truncated: bool,
 }
 
 impl fmt::Write for MessageWriter<'_> {
     fn write_str(&mut self, value: &str) -> fmt::Result {
-        let remaining = self.buffer.len() - self.length;
+        let remaining = self.capacity - self.length;
         let length = value.floor_char_boundary(remaining);
-        self.buffer[self.length..self.length + length].copy_from_slice(&value.as_bytes()[..length]);
+        self.cursor
+            .put(self.base + self.length, &value.as_bytes()[..length]);
         self.length += length;
         if length < value.len() {
             self.truncated = true;
@@ -479,12 +708,6 @@ fn get<const SIZE: usize>(bytes: &[u8], offset: usize) -> [u8; SIZE] {
     bytes[offset..offset + SIZE].try_into().unwrap()
 }
 
-fn put_text(bytes: &mut [u8], offset: usize, capacity: usize, value: &str) -> u8 {
-    let length = value.floor_char_boundary(capacity);
-    bytes[offset..offset + length].copy_from_slice(&value.as_bytes()[..length]);
-    length as u8
-}
-
 fn get_text(bytes: &[u8], offset: usize, capacity: usize, length: u8) -> Result<&str, DecodeError> {
     let length = usize::from(length);
     if length > capacity {
@@ -590,6 +813,65 @@ mod tests {
             Record::read(&slot).unwrap_err(),
             DecodeError::UnsupportedVersion(2)
         );
+    }
+
+    #[test]
+    fn raw_writer_produces_the_same_record_as_the_owned_writer() {
+        let mut owned_slot = [0xFF; 512];
+        let mut raw_slot = [0xFF; 512];
+        let header = header();
+        let mut writer = Writer::new(&mut owned_slot, &header, Limits::ESPRESSIF).unwrap();
+        assert!(writer.push_frame(0x0102_0304_0506_0708));
+        let owned = writer
+            .finish(format_args!("Panic"), &[0xFF, 0xAA], |log| {
+                log[..2].copy_from_slice(b"x\n");
+                Some(2)
+            })
+            .len();
+
+        // SAFETY: `raw_slot` is a local array that this test owns exclusively;
+        // no reference to it is live while the raw writer runs.
+        let mut raw = unsafe {
+            RawWriter::new(
+                raw_slot.as_mut_ptr(),
+                raw_slot.len(),
+                &header,
+                Limits::ESPRESSIF,
+            )
+        }
+        .unwrap();
+        assert!(raw.push_frame(0x0102_0304_0506_0708));
+        let length = raw.finish_with_stack(
+            format_args!("Panic"),
+            2,
+            |pointer, length| {
+                // SAFETY: The window is into `raw_slot`, owned by this test.
+                let window = unsafe { core::slice::from_raw_parts_mut(pointer, length) };
+                window.copy_from_slice(&[0xFF, 0xAA][..length]);
+            },
+            |pointer, length| {
+                // SAFETY: The window is into `raw_slot`, owned by this test.
+                let window = unsafe { core::slice::from_raw_parts_mut(pointer, length) };
+                window[..2].copy_from_slice(b"x\n");
+                Some(2)
+            },
+        );
+        assert_eq!(length, owned);
+        assert_eq!(&raw_slot[..length], &owned_slot[..owned]);
+        let record = Record::read(&raw_slot).unwrap();
+        assert_eq!(record.header, header);
+        assert_eq!(record.message, "Panic");
+        assert_eq!(record.stack_window, [0xFF, 0xAA]);
+        assert_eq!(record.log_tail, "x\n");
+    }
+
+    #[test]
+    fn raw_writer_rejects_a_slot_smaller_than_the_header() {
+        let mut slot = [0; HEADER_SIZE - 1];
+        // SAFETY: `slot` is a local array that this test owns exclusively.
+        let raw =
+            unsafe { RawWriter::new(slot.as_mut_ptr(), slot.len(), &header(), Limits::ESPRESSIF) };
+        assert!(raw.is_none());
     }
 
     #[test]
