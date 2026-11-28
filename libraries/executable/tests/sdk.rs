@@ -274,6 +274,7 @@ async fn setup_with(
 async fn registers_sdk_image_symbols() {
     use core::{future::poll_fn, ptr, task::Poll};
     use native_loader::{LoadedImage, Startup};
+    use object::{Object, ObjectSection, ObjectSymbol, endian::LittleEndian, read::elf::ElfFile64};
 
     #[repr(C)]
     struct Entry {
@@ -309,17 +310,35 @@ async fn registers_sdk_image_symbols() {
             while let Some(entry) = current.as_ref() {
                 assert_eq!(entry.previous, previous);
                 assert!(!entries.contains(&current));
-                assert!(entry.symbol_file_size >= 64);
-                assert_eq!(
-                    core::slice::from_raw_parts(entry.symbol_file, 4),
-                    native_loader::ELF_MAGIC,
-                );
                 entries.push(current);
                 previous = current;
                 current = entry.next;
             }
             entries
         }
+    }
+
+    fn check_symbol(entry: *const Entry, image: &LoadedImage) {
+        // SAFETY: this test owns the image and keeps it mapped for the ELF read.
+        let bytes = unsafe {
+            let entry = &*entry;
+            core::slice::from_raw_parts(entry.symbol_file, entry.symbol_file_size as usize)
+        };
+        let elf = ElfFile64::<LittleEndian>::parse(bytes).unwrap();
+        let symbol = elf
+            .symbols()
+            .find(|symbol| symbol.name() == Ok("xila_jit_probe"))
+            .unwrap();
+        let section = elf
+            .section_by_index(symbol.section_index().unwrap())
+            .unwrap();
+        assert_eq!(section.name(), Ok(".text"));
+        assert!(symbol.size() > 0);
+        let base = image.execution_base().as_ptr().addr() as u64;
+        assert!(base <= section.address());
+        assert!(section.address() + section.size() <= base + image.image_size() as u64);
+        assert!(section.address() <= symbol.address());
+        assert!(symbol.address() + symbol.size() <= section.address() + section.size());
     }
 
     let bytes = build_posix_probe("jit-probe");
@@ -347,6 +366,7 @@ async fn registers_sdk_image_symbols() {
         let image = load();
         let registered = entries();
         assert_eq!(registered.len(), 1);
+        check_symbol(registered[0], &image);
         let program = unsafe { image.start(stackful::Stack::new(64 * 1024), startup) }.unwrap();
         let mut program = Box::pin(program);
         assert!(
@@ -370,14 +390,37 @@ async fn registers_sdk_image_symbols() {
     let first = load();
     let first_entry = entries();
     assert_eq!(first_entry.len(), 1);
+    check_symbol(first_entry[0], &first);
     let second = load();
     let two_entries = entries();
     assert_eq!(two_entries.len(), 2);
     assert_eq!(two_entries[1], first_entry[0]);
+    check_symbol(two_entries[0], &second);
     drop(first);
     assert_eq!(entries(), two_entries[..1]);
     drop(second);
     assert!(entries().is_empty());
+}
+
+#[cfg(feature = "gdb-jit")]
+#[test]
+#[ignore = "requires GDB and permission to debug a child process"]
+fn stops_in_sdk_image_with_gdb() {
+    let script =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../native_loader/fixtures/gdb-jit.gdb");
+    let result = Command::new("gdb")
+        .args(["-nx", "-batch", "-x"])
+        .arg(script)
+        .arg("--args")
+        .arg(std::env::current_exe().unwrap())
+        .args(["--exact", "registers_sdk_image_symbols"])
+        .status();
+    match result {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            println!("Skipping GDB check because gdb is not on PATH.");
+        }
+        result => assert!(result.unwrap().success()),
+    }
 }
 
 #[task::test]

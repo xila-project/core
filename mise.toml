@@ -195,6 +195,8 @@ tools."github:nextest-rs/nextest" = "cargo-nextest-{{ vars.nextest_version }}"
 env.XILA_REQUIRE_LINKED_HEXDUMP = "1"
 run = """
 set -eu
-cargo nextest run --locked -p xila-executable --features gdb-jit,native-linked,graphics,network
-cargo test --locked -p xila-executable --features gdb-jit,native-linked,graphics,network --doc
+cargo nextest run --locked -p xila-executable --features native-dev,native-linked,graphics,network
+cargo test --locked -p xila-executable --features native-dev,native-linked,graphics,network --doc
+cargo test --locked -p xila-executable --features gdb-jit,native-linked,graphics,network \
+  --test sdk -- registers_sdk_image_symbols --exact
 """

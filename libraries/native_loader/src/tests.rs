@@ -789,3 +789,120 @@ fn split_bus_relocates_xtensa_by_segment_and_rejects_other_arches() {
         Err(Error::InvalidRelocationAddend)
     );
 }
+
+#[cfg(feature = "gdb-jit")]
+fn compact_symbol_file_32_bit<A: Abi>() {
+    use crate::{
+        elf::{u16_at, u32_at},
+        gdb_jit::symbol_file::SymbolFile,
+    };
+    use alloc::vec;
+
+    const SECTION_HEADER: usize = 40;
+    const SYMBOL: usize = 16;
+    const SECTION_NAMES: &[u8] = b"\0.debug\0.text\0.data\0.symtab\0.strtab\0.shstrtab\0";
+    const SYMBOL_NAMES: &[u8] = b"\0entry\0data\0bad\0";
+    let mut input = vec![0; FILE + 7 * SECTION_HEADER + 6 * SYMBOL];
+    input[..FILE].copy_from_slice(&fixture::<A>(true));
+    let flags = match A::ARCH {
+        Arch::Arm => 0x0500_0400u32,
+        Arch::Riscv32 => 1,
+        _ => 0x100,
+    };
+    write(&mut input, 36, &flags.to_le_bytes());
+    put::<A>(&mut input, 32, FILE);
+    write(&mut input, 46, &(SECTION_HEADER as u16).to_le_bytes());
+    write(&mut input, 48, &7u16.to_le_bytes());
+    write(&mut input, 50, &6u16.to_le_bytes());
+    let symbols = FILE + 7 * SECTION_HEADER;
+    let names = input.len();
+    input.extend_from_slice(SYMBOL_NAMES);
+    let section_names = input.len();
+    input.extend_from_slice(SECTION_NAMES);
+    for (index, fields) in [
+        [1, 1, 0, 0, 0, 0, 0, 0, 1, 0],
+        [8, 1, 6, 0x100, 0x100, 0x10, 0, 0, 4, 0],
+        [14, 1, 3, 0x1b0, 0x1b0, 0x10, 0, 0, 4, 0],
+        [20, 2, 0, 0, symbols, 6 * SYMBOL, 5, 1, 4, SYMBOL],
+        [28, 3, 0, 0, names, SYMBOL_NAMES.len(), 0, 0, 1, 0],
+        [36, 3, 0, 0, section_names, SECTION_NAMES.len(), 0, 0, 1, 0],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let section = FILE + (index + 1) * SECTION_HEADER;
+        for (field, value) in fields.into_iter().enumerate() {
+            put::<A>(&mut input, section + field * 4, value);
+        }
+    }
+    let thumb = usize::from(A::ARCH == Arch::Arm);
+    for (index, (name, value, size, info, section)) in [
+        (1, 0x100 | thumb, 4, 0x12, 2u16),
+        (7, 0x1b0, 4, 0x01, 3),
+        (12, 0x0fc, 4, 0x12, 2), // Update must skip this invalid definition.
+        (12, 0x100, 4, 0x12, u16::MAX), // Extended index without a table.
+        (12, 0x100, 0, 0x10, 2), // A mapping symbol.
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let symbol = symbols + (index + 1) * SYMBOL;
+        put::<A>(&mut input, symbol, name);
+        put::<A>(&mut input, symbol + 4, value);
+        put::<A>(&mut input, symbol + 8, size);
+        input[symbol + 12] = info;
+        write(&mut input, symbol + 14, &section.to_le_bytes());
+    }
+
+    let elf = Elf::<A>::parse(&input).unwrap();
+    let symbols = SymbolFile::new(&elf).unwrap();
+    let mut output = vec![0; symbols.size().unwrap()];
+    let data_base = 0x3fc8_8000;
+    let exec_base = if A::ARCH == Arch::Xtensa {
+        0x4037_8000
+    } else {
+        data_base
+    };
+    symbols.write(&mut output, data_base, exec_base).unwrap();
+
+    assert_eq!(u16_at(&output, 16), 2); // ET_EXEC
+    assert_eq!(u16_at(&output, 18), A::MACHINE);
+    assert_eq!(u32_at(&output, 28), 0); // e_phoff
+    assert_eq!(u32_at(&output, 32) as usize, A::HEADER);
+    assert_eq!(u32_at(&output, 36), flags);
+    assert_eq!(u16_at(&output, 44), 0); // e_phnum
+    assert_eq!(u16_at(&output, 48), 6); // Null, two mapped sections and three tables.
+    assert_eq!(u16_at(&output, 50), 5); // e_shstrndx
+
+    let section = |index| &output[A::HEADER + index * SECTION_HEADER..][..SECTION_HEADER];
+    for (index, address) in [(1, exec_base + 0x100), (2, data_base + 0x1b0)] {
+        assert_eq!(u32_at(section(index), 4), 8); // SHT_NOBITS
+        assert_eq!(A::word_at(section(index), 12), address);
+        assert_eq!(u32_at(section(index), 28), 0); // The temporary input index was cleared.
+    }
+    let symtab = section(3);
+    assert_eq!(u32_at(symtab, 4), 2);
+    assert_eq!(u32_at(symtab, 24), 4); // The new string table index.
+    assert_eq!(u32_at(symtab, 28), 2); // Null plus one local symbol.
+    assert_eq!(A::word_at(symtab, 20), 3 * SYMBOL);
+    let names_offset = A::word_at(section(4), 16);
+    let symbols_offset = A::word_at(symtab, 16);
+    for (index, section, address, name) in [
+        (1, 2, data_base + 0x1b0, &b"data\0"[..]),
+        (2, 1, exec_base + 0x100 + thumb, &b"entry\0"[..]),
+    ] {
+        let symbol = symbols_offset + index * SYMBOL;
+        assert_eq!(u16_at(&output, symbol + 14), section);
+        assert_eq!(A::word_at(&output, symbol + 4), address);
+        let name_offset = names_offset + A::word_at(&output, symbol);
+        assert_eq!(&output[name_offset..][..name.len()], name);
+    }
+}
+
+#[cfg(feature = "gdb-jit")]
+#[test]
+fn writes_compact_symbol_files_for_32_bit_images() {
+    compact_symbol_file_32_bit::<Arm32>();
+    compact_symbol_file_32_bit::<Riscv32>();
+    compact_symbol_file_32_bit::<Xtensa32>();
+}

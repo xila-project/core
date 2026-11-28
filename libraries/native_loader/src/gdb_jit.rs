@@ -1,5 +1,5 @@
 //! GDB JIT ABI, version 1.
-mod symbol_file;
+pub(crate) mod symbol_file;
 
 use alloc::alloc::{alloc, dealloc};
 use core::{
@@ -47,6 +47,7 @@ extern "C" fn __jit_debug_register_code() {
     // GDB breaks here. The volatile read keeps the call and descriptor writes
     // observable with link-time optimization, on targets without inline assembly too.
     compiler_fence(Ordering::SeqCst);
+    // SAFETY: notify calls this hook with the descriptor locked.
     unsafe { ptr::read_volatile(&raw const __jit_debug_descriptor) };
 }
 
@@ -64,6 +65,7 @@ impl Registration {
         let symbol_file = SymbolFile::new(elf)?;
         let size = symbol_file.size()?;
         let (layout, offset) = entry_layout(size)?;
+        // SAFETY: the entry makes the allocation layout nonzero.
         let entry = NonNull::new(unsafe { alloc(layout) })?.cast::<JitCodeEntry>();
         // SAFETY: this exclusive allocation has room for the entry and ELF.
         let bytes = unsafe {
@@ -71,10 +73,8 @@ impl Registration {
             start.write_bytes(0, size);
             core::slice::from_raw_parts_mut(start, size)
         };
-        if symbol_file
-            .write(bytes, elf, data_base, exec_base)
-            .is_none()
-        {
+        if symbol_file.write(bytes, data_base, exec_base).is_none() {
+            // SAFETY: the allocation is still exclusive and has this layout.
             unsafe { dealloc(entry.as_ptr().cast(), layout) };
             return None;
         }
@@ -101,8 +101,13 @@ impl Registration {
     }
 }
 
-/// The caller holds the critical section and both pointers are valid.
+/// Notify GDB of a list change.
+///
+/// # Safety
+/// The caller holds the critical section. The descriptor and entry must be
+/// valid for the call, and the entry must point to a live symbol file.
 unsafe fn notify(descriptor: *mut JitDescriptor, entry: *mut JitCodeEntry, action: u32) {
+    // SAFETY: both pointers stay valid and the critical section excludes writers.
     unsafe {
         (*descriptor).relevant_entry = entry;
         (*descriptor).action_flag = action;
@@ -139,6 +144,7 @@ impl Drop for Registration {
         // The debugger has completed the unregister event. No links point at
         // the entry, and the image is still mapped.
         let (layout, _) = entry_layout(size).unwrap();
+        // SAFETY: entry was allocated with this layout and has been unlinked.
         unsafe { dealloc(entry.cast(), layout) };
     }
 }

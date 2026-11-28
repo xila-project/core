@@ -57,6 +57,10 @@ strict = true
 [target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dev-dependencies]
 libc = "0.2"
 little_fs.workspace = true
+object = { version = "0.40", default-features = false, features = [
+  "read_core",
+  "elf",
+] }
 portable-atomic.workspace = true
 xila-sys = { path = "../abi/application/sdk/rust/xila-sys", features = [
   "linked",
