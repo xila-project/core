@@ -1,3 +1,9 @@
+# RISC-V extensions that firmware supports when it has the listed requirements.
+# Read by libraries/native_loader/build.rs (loader check) and tools/sdk/build.py
+# (SDK image check). Format: one rule per line, the extension name followed by
+# the extensions it requires, separated by spaces. A rule with no requirement is
+# always supported. Rules apply in order, so a rule can use an extension that an
+# earlier rule adds. Blank lines and text after `#` are ignored.
 zicsr
 zifencei
 zmmul m

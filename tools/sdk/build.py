@@ -966,8 +966,12 @@ def verify_riscv_architecture(image, target):
     if TARGETS[target]["float_abi"] == "single":
         supported.add("f")
     policy = ROOT / "libraries/native_loader/riscv_extensions.txt"
-    for rule in policy.read_text().splitlines():
-        extension, *requirements = rule.split()
+    # See riscv_extensions.txt for the rule format, shared with the loader build script.
+    for line in policy.read_text().splitlines():
+        names = line.split("#", 1)[0].split()
+        if not names:
+            continue
+        extension, *requirements = names
         if supported.issuperset(requirements):
             supported.add(extension)
     if unsupported := extensions - supported:

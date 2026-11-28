@@ -87,9 +87,13 @@ fn target_extensions(abi: &str) -> String {
         }
     }
     // Apply the baseline extensions and component names shared with SDK verification.
-    for rule in include_str!("riscv_extensions.txt").lines() {
+    // See riscv_extensions.txt for the rule format, shared with tools/sdk/build.py.
+    for line in include_str!("riscv_extensions.txt").lines() {
+        let rule = line.split('#').next().unwrap_or_default();
         let mut names = rule.split_ascii_whitespace();
-        let extension = names.next().expect("an extension name");
+        let Some(extension) = names.next() else {
+            continue;
+        };
         if names.all(|required| features.contains(required)) {
             features.insert(extension);
         }
