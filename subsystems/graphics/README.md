@@ -91,16 +91,18 @@ The theme has no shadows or gradients, and the mode keeps its rounded corners an
 
 ## Window events
 
-Each window queues the events of its widgets in a fixed ring of `WINDOW_EVENT_QUEUE_CAPACITY` (16) events that lives inside the window object: no allocation, and it never grows. The window handles widget creation and deletion internally and never queues hover, drawing, hit test, invalidation or layout notifications. The rest falls in four tiers, from the least to the most important:
+Each window has a fixed event ring with `WINDOW_EVENT_QUEUE_CAPACITY` (16) regular slots and one slot reserved for `CloseRequested`. The ring lives inside the window object and requires no allocation. The window handles widget creation and deletion internally and never queues hover, drawing, hit test, invalidation or layout notifications. The rest falls in four tiers, from the least to the most important:
 
 | Tier | Events | Coalesced |
 |---|---|---|
-| Low | the scroll family (`Scroll`, `ScrollBegin`, `ScrollThrowBegin`, `ScrollEnd`), `Refresh`, `Create` and the filtered notifications | no |
+| Low | the scroll family (`Scroll`, `ScrollBegin`, `ScrollThrowBegin`, `ScrollEnd`), `Refresh`, `Create`, `Insert`, `Delete` and the filtered notifications | no |
 | Transient | `Pressing`, `LongPressedRepeat` | yes |
 | State | `ValueChanged`, `SizeChanged`, `StyleChanged` | yes |
-| Lifecycle | everything else: `Pressed`, `Released`, `PressLost`, the clicks, `LongPressed`, `Key`, `Focused`, `Defocused`, `CloseRequested`, `Delete`, `Ready`, `Cancel`, `Custom1`, `Custom2`... | no |
+| Lifecycle | everything else: `Pressed`, `Released`, `PressLost`, the clicks, `LongPressed`, `Key`, `Focused`, `Defocused`, `Ready`, `Cancel`, `Custom1`, `Custom2`... | no |
 
-Overflow policy, applied when an event is pushed:
+A close request uses its reserved slot and keeps its place in arrival order. Further close requests merge into the pending request until the consumer takes it. `Manager::send_window_close_request` reports an error if the window identifier is invalid or delivery fails.
+
+Overflow policy for regular events:
 
 1. A transient or state event replaces the queued event of the same kind and target, wherever it is, and moves to the back with the latest data ("latest wins"). It never moves across a lifecycle event of its own target, so the event order of a press is kept: a value change queued before a `Released` or a `Key` of its widget stays, and the newer one is queued after it. The match ignores the input device, so the moves and value changes two devices make on one widget merge into the latest one: consumers read the widget's current state, and events do not carry their device, which would cost a word per slot. A burst therefore never drops the last value, size or style change of a widget: a resize survives any number of scroll events.
 2. If the ring is full, the arrival evicts the oldest low event, or else the oldest transient event, or else the oldest state event, but never an event more important than itself. Lifecycle events are never evicted or reordered. An arrival that finds nothing to evict is rejected.
@@ -110,15 +112,8 @@ Overflow policy, applied when an event is pushed:
 
 `OwnedWindow::dropped_event_count` counts every evicted or rejected event. Losses are logged at most once per second (`LOSS_REPORT_INTERVAL`, in LVGL ticks) with the number lost since the previous report, both when events are pushed and when the consumer pops them, so a consumer that never empties the queue keeps getting periodic summaries.
 
-RAM budget (excluding allocator bookkeeping): on x86_64, `Event` is 32 bytes,
-so the old queue started at 32 bytes inline plus a 320-byte allocation, and
-could grow indefinitely. The new queue is 632 bytes inline (16 slots, indices,
-four 24-byte press records and the loss counters), with no separate
-allocation or growth. The whole host `Window` is 744 bytes. On 32-bit targets
-the corresponding layout is expected to be 16 + 280 bytes before and about
-516 bytes after; verify target layouts when budgeting board RAM. This trades a
-slightly larger initial reservation for a fixed upper bound and fewer heap
-blocks.
+The reserved slot adds one `Option<Event>` to each window. Check the layout on
+the target when budgeting RAM.
 
 ## Window ownership
 

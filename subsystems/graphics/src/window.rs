@@ -63,24 +63,16 @@ pub(crate) fn get_window_class() -> &'static lvgl::lv_obj_class_t {
 
 /// An LVGL object that queues the events of its widgets for one consumer.
 ///
-/// The queue is a fixed ring of [`crate::WINDOW_EVENT_QUEUE_CAPACITY`]
-/// events inside the window: it never allocates. A newer `Pressing`,
-/// `LongPressedRepeat`, `ValueChanged`, `SizeChanged` or `StyleChanged`
-/// replaces the queued one for the same target, whichever input device sent
-/// them. When the queue is full, an arrival evicts the oldest scroll or other
-/// notification, then the oldest `Pressing` or `LongPressedRepeat`, then the
-/// oldest value, size or style change, but never an event more important than
-/// itself. Other events (presses, releases, clicks, keys, focus changes,
-/// `Ready`, `Cancel`, `Delete`, `CloseRequested`...) are never evicted or
-/// reordered; one that finds no room is rejected. A newer event never
-/// replaces a queued one across such an event of the same target: a value
-/// change queued before a `Released` or a `Key` of its widget stays, and the
-/// newer one is queued after it. A press is only queued with room for the
-/// rest of it, reserved per input device, and the rest of a rejected press is
-/// dropped: the queue never drops a `Pressed` event while keeping the end of
-/// its press. LVGL itself may end a press on a widget that never got
-/// `Pressed`: after a drag onto another widget without press lock, or when a
-/// keypad is released on a newly focused widget.
+/// The fixed ring has [`crate::WINDOW_EVENT_QUEUE_CAPACITY`] regular slots.
+/// A separate slot holds a pending `CloseRequested` in arrival order.
+/// Further close requests merge into it until the consumer takes it.
+///
+/// Press repeats and state changes coalesce for the same target between
+/// lifecycle events. When the ring is full, higher-priority events can evict
+/// lower-priority events. `Insert` and `Delete` are low-priority notifications.
+/// Lifecycle events stay in arrival order. The queue reserves room for the
+/// end of each accepted press. If it rejects a press, it rejects its end.
+///
 /// Losses are counted ([`Window::dropped_event_count`]) and logged at most
 /// once per second. The crate README ("Window events") details the policy.
 #[repr(C)]
@@ -371,6 +363,16 @@ impl Window {
         queue.pop_front()
     }
 
+    /// Check whether this window has a pending close request.
+    ///
+    /// # Safety
+    ///
+    /// The caller holds the graphics lock and `window` points to a live Window.
+    pub(crate) unsafe fn has_close_request(window: NonNull<Self>) -> bool {
+        // SAFETY: the caller keeps this queue alive and excludes its writers.
+        unsafe { (*window.as_ptr()).event_queue.has_close_request() }
+    }
+
     /// Count events lost to queue overflow since the window was created.
     ///
     /// # Safety
@@ -382,7 +384,7 @@ impl Window {
     }
 
     /// Forget queued targets before LVGL can reuse their addresses.
-    /// Retain press events with a null target so the press stays paired.
+    /// Retain press boundaries and close requests with a null target.
     ///
     /// # Safety
     ///

@@ -827,16 +827,28 @@ impl Manager {
         Ok(())
     }
 
+    /// Request that a window close. A pending request satisfies later calls
+    /// until the window consumes it.
+    ///
+    /// Returns `InvalidWindowIdentifier` if the identifier does not identify
+    /// a window, or `NotAvailable` if dispatch fails or leaves no pending request.
     pub fn send_window_close_request(&self, lvgl: &mut Lvgl, identifier: usize) -> Result<()> {
-        let window = self.find_window(lvgl, identifier)?;
-        // SAFETY: find_window resolved a live child. The same session excludes
-        // deletion by another task through the entire event dispatch.
-        unsafe {
+        let object = self.find_window(lvgl, identifier)?;
+        // SAFETY: the session keeps the live child stable during lookup.
+        let window = unsafe { Window::from_raw(object) }.ok_or(Error::InvalidWindowIdentifier)?;
+        // SAFETY: the session excludes other tasks through dispatch. LVGL
+        // returns INVALID if a handler deletes the object during dispatch.
+        let result = unsafe {
             lvgl::lv_obj_send_event(
-                window,
+                object,
                 crate::EventKind::CloseRequested.into_lvgl_code(),
                 core::ptr::null_mut(),
-            );
+            )
+        };
+        // A preprocessing handler can stop dispatch without returning INVALID.
+        if result != lvgl::lv_result_t_LV_RESULT_OK || !unsafe { Window::has_close_request(window) }
+        {
+            return Err(Error::NotAvailable);
         }
         Ok(())
     }
