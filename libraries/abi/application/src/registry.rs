@@ -494,7 +494,9 @@ mod tests {
         register_probe::<DirectoryIterator>(3);
         // The middle handle's link is preceded by another link's `next` field, not by the head.
         let middle = EXPECTED.with_borrow_mut(|expected| {
-            let index = expected.iter().position(|probe| probe.marker == 4).unwrap();
+            let Some(index) = expected.iter().position(|probe| probe.marker == 4) else {
+                panic!("the middle probe is not registered");
+            };
             expected.remove(index)
         });
         // SAFETY: the probe registered a `MaybeUninit<Child>`, and this is its only reclaim.
