@@ -24,7 +24,7 @@ SECTIONS
      outside the ABI note segment. */
   .note.gnu.build-id : { *(.note.gnu.build-id) } :text
   .note.gnu.property : { *(.note.gnu.property) } :text
-  .note.xila.abi : ALIGN(4) { KEEP(*(.note.xila.abi)) } :text :abi
+  .note.xila.abi : ALIGN(4) { KEEP(*(.note.xila.abi .note.xila.abi.lifecycle)) } :text :abi
   /* Any other note (.note.package, custom notes) would otherwise follow the ABI
      note and inherit its segments; the explicit :text keeps it out of :abi. */
   .note.other : { *(.note .note.*) } :text
@@ -42,11 +42,19 @@ SECTIONS
   .dynamic : { *(.dynamic) } :data :dynamic
   .data : { *(.data .data.* .sdata .sdata.*) } :data
   .got : { *(.got .got.*) } :data
+  .preinit_array : {
+    KEEP(*(SORT_BY_INIT_PRIORITY(.preinit_array.*)))
+    KEEP(*(.preinit_array))
+  } :data
   .init_array : {
     PROVIDE_HIDDEN(__init_array_start = .);
     KEEP(*(SORT_BY_INIT_PRIORITY(.init_array.*)))
     KEEP(*(.init_array))
     PROVIDE_HIDDEN(__init_array_end = .);
+  } :data
+  .fini_array : {
+    KEEP(*(SORT_BY_INIT_PRIORITY(.fini_array.*)))
+    KEEP(*(.fini_array))
   } :data
   .bss (NOLOAD) : { *(.bss .bss.* .sbss .sbss.* COMMON) } :data
 

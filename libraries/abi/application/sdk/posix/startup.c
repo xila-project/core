@@ -29,6 +29,13 @@ __attribute__((weak, visibility("hidden"), noinline)) int xila_environ_initializ
 
 static jmp_buf *exit_target;
 static int exit_status;
+static bool finalization_started;
+
+static void run_lifecycle(bool finalize) {
+    const XilaStartup *startup = xila_process.startup;
+    if (startup != NULL && startup->size >= sizeof(*startup) && startup->lifecycle != NULL)
+        startup->lifecycle->run(startup->lifecycle, finalize);
+}
 
 /* Per-run reset hooks of the POSIX modules. Every module that keeps static state holding
    heap pointers, locks, buffers or per-run bookkeeping defines its hook strongly (hidden);
@@ -84,6 +91,7 @@ extern char *optarg __attribute__((weak));
 static void reset_previous_run(void) {
     exit_target = NULL;
     exit_status = 0;
+    finalization_started = false;
     xila_stdin_reset();
     xila_stdout_reset();
     xila_stderr_reset();
@@ -156,6 +164,11 @@ __attribute__((no_stack_protector)) void xila_posix_shutdown(void) {
     xila_process.cwd = NULL;
 }
 
+/* Run the arrays with initialized POSIX state and the exit jump target. */
+__attribute__((visibility("hidden"))) bool xila_posix_owns_lifecycle(void) {
+    return true;
+}
+
 int32_t xila_main(const XilaStartup *startup) {
     /* A relaunch of the same linked program starts from pristine runtime state, even when
        the previous run was cancelled mid-call and cleaned up nothing. */
@@ -167,6 +180,7 @@ int32_t xila_main(const XilaStartup *startup) {
     jmp_buf target;
     exit_target = &target;
     if (setjmp(target) == 0) {
+        run_lifecycle(false);
         int status = main(argc, argv);
         exit(status);
     }
@@ -184,6 +198,11 @@ void exit(int status) {
     if (!live) {
         xila_run_exit_handlers(status);
         (void)xila_thread_has_workers(&live);
+        if (!live && !finalization_started) {
+            finalization_started = true;
+            run_lifecycle(true);
+            (void)xila_thread_has_workers(&live);
+        }
     }
     if (live) {
         (void)xila_thread_stop_others(xila_process.process);

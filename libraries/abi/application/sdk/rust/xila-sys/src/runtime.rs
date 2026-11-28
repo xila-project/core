@@ -98,6 +98,25 @@ pub const ABI_NOTE: AbiNote = AbiNote {
     version: VERSION,
 };
 
+#[cfg(not(feature = "linked"))]
+#[doc(hidden)]
+#[repr(C, align(4))]
+pub struct LifecycleNote {
+    pub name_size: u32,
+    pub descriptor_size: u32,
+    pub kind: u32,
+    pub name: [u8; 8],
+}
+
+#[cfg(not(feature = "linked"))]
+#[doc(hidden)]
+pub const LIFECYCLE_NOTE: LifecycleNote = LifecycleNote {
+    name_size: 5,
+    descriptor_size: 0,
+    kind: 2,
+    name: *b"XILA\0\0\0\0",
+};
+
 /// Emit the image entry point and the required ELF ABI note. Invoke once with
 /// a function of type `unsafe fn(*const XilaStartup) -> i32`. It receives the
 /// host's borrowed startup data and returns the application's status.
@@ -108,6 +127,11 @@ macro_rules! entry {
         #[used]
         #[unsafe(link_section = ".note.xila.abi")]
         static XILA_ABI_NOTE: $crate::runtime::AbiNote = $crate::runtime::ABI_NOTE;
+
+        #[used]
+        #[unsafe(link_section = ".note.xila.abi.lifecycle")]
+        static XILA_LIFECYCLE_NOTE: $crate::runtime::LifecycleNote =
+            $crate::runtime::LIFECYCLE_NOTE;
 
         /// # Safety
         /// The host must supply the startup data described by Xila's native ABI
@@ -161,7 +185,7 @@ pub unsafe fn start(
     startup: *const XilaStartup,
     main: unsafe fn(*const XilaStartup) -> i32,
 ) -> i32 {
-    // Read only the prefixes until both structures are known to be large enough.
+    // The runtime exposes a reference to the full startup structure.
     if startup.is_null() || (unsafe { (*startup).size } as usize) < size_of::<XilaStartup>() {
         return -1;
     }
@@ -180,7 +204,21 @@ pub unsafe fn start(
     STARTUP.store(startup.cast_mut(), Ordering::Release);
     #[cfg(test)]
     TEST_STARTUP.store(startup.cast_mut(), Ordering::Release);
+    #[cfg(not(feature = "linked"))]
+    let lifecycle = unsafe { (*startup).lifecycle.as_ref() };
+    #[cfg(not(feature = "linked"))]
+    if let Some(lifecycle) = lifecycle {
+        unsafe { (lifecycle.run)(lifecycle, false) };
+    }
     let result = unsafe { main(startup) };
+    #[cfg(not(feature = "linked"))]
+    if let Some(lifecycle) = lifecycle {
+        let mut live = false;
+        unsafe { ((*api).thread_has_workers)(&mut live) };
+        if !live {
+            unsafe { (lifecycle.run)(lifecycle, true) };
+        }
+    }
     #[cfg(all(not(test), not(feature = "linked")))]
     STARTUP.store(ptr::null_mut(), Ordering::Release);
     #[cfg(test)]

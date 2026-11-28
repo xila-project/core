@@ -9,6 +9,11 @@ __attribute__((section(".note.xila.abi"), aligned(4), used)) static const struct
     char name[8];
     uint32_t version;
 } xila_abi_note = {5, 4, 1, "XILA", (XILA_VERSION_MAJOR << 16) | XILA_VERSION_MINOR};
+/* The entry drives validated lifecycle arrays. */
+__attribute__((section(".note.xila.abi.lifecycle"), aligned(4), used)) static const struct {
+    uint32_t name_size, descriptor_size, type;
+    char name[8];
+} xila_lifecycle_note = {5, 0, 2, "XILA"};
 #endif
 
 /* One instance per loaded image. The host calls _xila_start once per image; a linked
@@ -23,6 +28,14 @@ extern int32_t xila_main(const XilaStartup *startup);
 
 #ifndef XILA_SDK_LINKED
 
+/* C++ objects use this identifier when they register an exit handler. */
+__attribute__((weak, visibility("hidden"))) void *__dso_handle = &__dso_handle;
+
+/* The POSIX startup overrides this when it owns the lifecycle. */
+__attribute__((weak, visibility("hidden"), noinline)) bool xila_posix_owns_lifecycle(void) {
+    return false;
+}
+
 int32_t _xila_start(const XilaStartup *startup) {
     if (startup == NULL || startup->size < sizeof(*startup) || startup->api == NULL ||
         startup->api->size < sizeof(XilaApi) ||
@@ -34,7 +47,18 @@ int32_t _xila_start(const XilaStartup *startup) {
        the fallback table. */
     xila_sdk_api = startup->api;
     xila_sdk_process = startup->process;
+    const XilaLifecycle *lifecycle = startup->lifecycle;
+    if (lifecycle != NULL && xila_posix_owns_lifecycle())
+        lifecycle = NULL;
+    if (lifecycle != NULL)
+        lifecycle->run(lifecycle, false);
     int32_t result = xila_main(startup);
+    if (lifecycle != NULL) {
+        bool live = false;
+        (void)startup->api->thread_has_workers(&live);
+        if (!live)
+            lifecycle->run(lifecycle, true);
+    }
     xila_sdk_process = NULL;
     xila_sdk_api = &xila_sdk_fallback_api;
     return result;

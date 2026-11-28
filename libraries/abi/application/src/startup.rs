@@ -13,6 +13,12 @@ pub struct XilaString {
     pub length: usize,
 }
 
+/// Callback that runs the loaded image's initialization or finalization functions.
+#[repr(C)]
+pub struct XilaLifecycle {
+    pub run: unsafe extern "C" fn(lifecycle: *const XilaLifecycle, finalize: bool),
+}
+
 /// Host-owned startup data, valid only for the duration of the entry call.
 /// The API is always present. Capability pointers may be null when not granted;
 /// the process capability is null for an application that is not a process, such
@@ -42,6 +48,8 @@ pub struct XilaStartup {
     /// default. Appended after `program_name`, so images built before it existed still
     /// start.
     pub network: *const Network,
+    /// Lifecycle functions of a loaded image, or null if none are present.
+    pub lifecycle: *const XilaLifecycle,
 }
 
 /// The startup block of the program that the calling coroutine runs, or null.
@@ -170,10 +178,19 @@ impl HostState {
                     length: 0,
                 },
                 network: ptr::null(),
+                lifecycle: ptr::null(),
             },
             process: None,
             resources,
         }
+    }
+
+    /// Attach lifecycle functions before the entry runs.
+    ///
+    /// # Safety
+    /// The pointer must remain valid until the program can no longer run.
+    pub unsafe fn set_lifecycle(&mut self, lifecycle: *const XilaLifecycle) {
+        self.startup.lifecycle = lifecycle;
     }
 
     /// Run a linked entry that gets no process capability and cannot exit early,
@@ -395,6 +412,7 @@ pub(crate) unsafe fn enter(
                 length: resources.program_name.len(),
             },
             network: network_pointer(resources),
+            lifecycle: (*state).startup.lifecycle,
         };
         &raw const (*state).startup
     };

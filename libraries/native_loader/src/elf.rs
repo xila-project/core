@@ -1,11 +1,33 @@
 use crate::{ELF_MAGIC, Error, Region, Version};
-use core::{alloc::Layout, marker::PhantomData};
+use core::{alloc::Layout, marker::PhantomData, ops::Range};
+
+const SHT_INIT_ARRAY: u32 = 14;
+const SHT_FINI_ARRAY: u32 = 15;
+const SHT_PREINIT_ARRAY: u32 = 16;
+const SHF_ALLOC: usize = 2;
+
+const PREINITIALIZE: usize = 0;
+const INITIALIZE: usize = 1;
+const FINALIZE: usize = 2;
 
 const PT_LOAD: u32 = 1;
 const PT_DYNAMIC: u32 = 2;
 const PT_NOTE: u32 = 4;
 const PF_X: u32 = 1;
 const PF_W: u32 = 2;
+
+fn instruction<A: Abi>(address: usize) -> Option<(usize, usize)> {
+    let thumb = A::ARCH == Arch::Arm && address & 1 != 0;
+    let code = if thumb { address & !1 } else { address };
+    let alignment = match A::ARCH {
+        Arch::Arm if thumb => 2,
+        Arch::Aarch64 | Arch::Arm => 4,
+        Arch::Riscv32 if !A::RISCV_COMPRESSED => 4,
+        Arch::Riscv32 => 2,
+        _ => 1,
+    };
+    ((!A::THUMB_ONLY || thumb) && code.is_multiple_of(alignment)).then_some((code, alignment))
+}
 /// Largest accepted program header table. Real static PIEs carry fewer than ten.
 pub(crate) const MAX_PROGRAM_HEADERS: usize = 16;
 /// Largest accepted segment alignment, a power of two. It bounds the padding
@@ -34,6 +56,9 @@ pub(crate) trait Abi: 'static {
     const ARCH: Arch;
     /// Bare-metal Arm cores run Thumb only, so the entry must select Thumb.
     const THUMB_ONLY: bool;
+    const RISCV_COMPRESSED: bool = false;
+    #[cfg(any(target_arch = "riscv32", test))]
+    const RISCV_FEATURES: &'static str = "";
     const HEADER: usize = if Self::WORD == 8 { 64 } else { 52 };
     const PROGRAM_HEADER: usize = if Self::WORD == 8 { 56 } else { 32 };
 
@@ -212,6 +237,9 @@ impl Abi for Native {
     } else {
         Arch::Unsupported
     };
+    #[cfg(target_arch = "riscv32")]
+    const RISCV_FEATURES: &'static str = env!("NATIVE_LOADER_RISCV_FEATURES");
+    const RISCV_COMPRESSED: bool = cfg!(any(target_feature = "c", target_feature = "zca"));
     const THUMB_ONLY: bool = cfg!(all(target_arch = "arm", target_os = "none"));
 
     fn flags_supported(flags: u32) -> bool {
@@ -219,7 +247,7 @@ impl Abi for Native {
             Arch::Arm => arm_flags_supported(flags, cfg!(target_abi = "eabihf")),
             Arch::Riscv32 => riscv_flags_supported(
                 flags,
-                cfg!(target_feature = "c"),
+                Self::RISCV_COMPRESSED,
                 RISCV_FLOAT_ABI,
                 RISCV_EMBEDDED,
             ),
@@ -277,6 +305,7 @@ pub(crate) struct Elf<'a, A: Abi> {
     pub(crate) start: usize,
     pub(crate) layout: Layout,
     pub(crate) entry_offset: usize,
+    pub(crate) arrays: [Range<usize>; 3],
     abi: PhantomData<A>,
 }
 
@@ -320,23 +349,7 @@ impl<'a, A: Abi> Elf<'a, A> {
         }
         let headers = subrange(bytes, phoff, count * A::PROGRAM_HEADER).ok_or(Error::Truncated)?;
         let entry = A::word_at(header, 24);
-        // The ARM ELF entry carries the instruction-set selector in bit zero.
-        let code = if A::ARCH == Arch::Arm {
-            entry & !1
-        } else {
-            entry
-        };
-        if A::THUMB_ONLY && entry == code {
-            return Err(Error::InvalidEntry);
-        }
-        let instruction_alignment =
-            if A::ARCH == Arch::Aarch64 || A::ARCH == Arch::Arm && entry == code {
-                4
-            } else if A::ARCH == Arch::Arm || A::ARCH == Arch::Riscv32 {
-                2
-            } else {
-                1
-            };
+        let (code, instruction_alignment) = instruction::<A>(entry).ok_or(Error::InvalidEntry)?;
 
         let mut start = usize::MAX;
         let mut end = 0;
@@ -390,7 +403,7 @@ impl<'a, A: Abi> Elf<'a, A> {
                 _ => {}
             }
         }
-        if !entry_found || !code.is_multiple_of(instruction_alignment) {
+        if !entry_found {
             return Err(Error::InvalidEntry);
         }
         // Preserve the congruence of every segment and Thumb entry after rebasing.
@@ -405,6 +418,7 @@ impl<'a, A: Abi> Elf<'a, A> {
             start,
             layout,
             entry_offset: entry - start,
+            arrays: [0..0, 0..0, 0..0],
             abi: PhantomData,
         };
         // A static PIE always has a dynamic section, even without relocations.
@@ -420,15 +434,39 @@ impl<'a, A: Abi> Elf<'a, A> {
         {
             return Err(Error::InvalidDynamic);
         }
-        elf.read_dynamic(dynamic)?;
+        let sections = sections::<A>(bytes, header, sizes)?;
+        elf.check_attributes(sections)?;
+        elf.read_dynamic(dynamic, sections)?;
         Ok(elf)
+    }
+
+    fn check_attributes(&self, sections: &[u8]) -> Result<(), Error> {
+        #[cfg(any(target_arch = "riscv32", test))]
+        if A::ARCH == Arch::Riscv32 {
+            const SHT_RISCV_ATTRIBUTES: u32 = 0x7000_0003;
+            let mut sections = sections
+                .chunks_exact(40)
+                .filter(|section| u32_at(section, 4) == SHT_RISCV_ATTRIBUTES);
+            if let Some(section) = sections.next() {
+                if sections.next().is_some() {
+                    return Err(Error::InvalidRiscvAttributes);
+                }
+                let attributes =
+                    subrange(self.bytes, A::word_at(section, 16), A::word_at(section, 20))
+                        .ok_or(Error::InvalidRiscvAttributes)?;
+                crate::riscv::check(attributes, A::RISCV_FEATURES)?;
+            }
+        }
+        let _ = sections;
+        Ok(())
     }
 
     /// Locate the relocation tables and reject everything the loader would
     /// otherwise silently skip, before any memory is allocated.
-    fn read_dynamic(&mut self, dynamic: &'a [u8]) -> Result<(), Error> {
+    fn read_dynamic(&mut self, dynamic: &'a [u8], sections: &[u8]) -> Result<(), Error> {
         let mut rel = Table::default();
         let mut rela = Table::default();
+        let mut arrays: [Table; 3] = core::array::from_fn(|_| Table::default());
         let mut terminated = false;
         for entry in dynamic.chunks_exact(2 * A::WORD) {
             let tag = A::word_at(entry, 0);
@@ -445,22 +483,25 @@ impl<'a, A: Abi> Elf<'a, A> {
                 17 => &mut rel.address,
                 18 => &mut rel.size,
                 19 => &mut rel.entry_size,
-                // DT_INIT, DT_FINI and the init, fini and preinit arrays: the loader runs
-                // no constructors or destructors, so reject them instead of skipping them.
-                12 | 13 | 27 | 28 | 33 if value != 0 => return Err(Error::Constructors),
+                12 | 13 if value != 0 => return Err(Error::Constructors),
+                25 => &mut arrays[INITIALIZE].address,
+                26 => &mut arrays[FINALIZE].address,
+                27 => &mut arrays[INITIALIZE].size,
+                28 => &mut arrays[FINALIZE].size,
+                32 => &mut arrays[PREINITIALIZE].address,
+                33 => &mut arrays[PREINITIALIZE].size,
                 // Xtensa GNU ld emits DT_PLTGOT (pointing to .got even with no PLT) and the
                 // processor-specific GOT-location metadata tags (DT_XTENSA_GOT_LOC_OFF / _SZ)
                 // on `-pie --no-dynamic-linker` static PIEs.
                 3 | 0x7000_0000 | 0x7000_0001 if A::ARCH == Arch::Xtensa => continue,
                 // Hash/string/symbol metadata, version definitions, relative counts, flags,
-                // empty constructor metadata and the debugger rendezvous slot are not consumed.
+                // the debugger rendezvous slot are not consumed.
                 4..=6
                 | 10..=16
                 | 21
                 | 22
-                | 24..=30
-                | 32
-                | 33
+                | 24
+                | 29..=30
                 | 0x6fff_fef5
                 | 0x6fff_fff0
                 | 0x6fff_fff9..=0x6fff_fffd => continue,
@@ -475,11 +516,100 @@ impl<'a, A: Abi> Elf<'a, A> {
         }
         self.rel = rel.bytes(self, 2 * A::WORD)?;
         self.rela = rela.bytes(self, 3 * A::WORD)?;
+        self.read_arrays(arrays, sections)
+    }
+
+    fn read_arrays(&mut self, arrays: [Table; 3], sections: &[u8]) -> Result<(), Error> {
+        let mut locations = [None; 3];
+        for section in sections.chunks_exact(section_header_size::<A>()) {
+            let index = match u32_at(section, 4) {
+                SHT_PREINIT_ARRAY => PREINITIALIZE,
+                SHT_INIT_ARRAY => INITIALIZE,
+                SHT_FINI_ARRAY => FINALIZE,
+                _ => continue,
+            };
+            let offset = A::word_at(section, 8 + 2 * A::WORD);
+            let address = A::word_at(section, 8 + A::WORD);
+            let size = A::word_at(section, 8 + 3 * A::WORD);
+            if size == 0 {
+                continue;
+            }
+            let data = self
+                .file_range(address, size)
+                .ok_or(Error::InvalidLifecycleArray)?;
+            if A::word_at(section, 8) & SHF_ALLOC == 0
+                || locations[index].replace((address, size)).is_some()
+                || subrange(self.bytes, offset, size).map(<[u8]>::as_ptr) != Some(data.as_ptr())
+            {
+                return Err(Error::InvalidLifecycleArray);
+            }
+        }
+        for (index, (table, section)) in arrays.into_iter().zip(locations).enumerate() {
+            let dynamic = match (table.address, table.size) {
+                (None, None | Some(0)) => None,
+                (Some(address), Some(size)) => Some((address, size)),
+                _ => return Err(Error::InvalidLifecycleArray),
+            };
+            if let (Some(dynamic), Some(section)) = (dynamic, section)
+                && dynamic != section
+            {
+                return Err(Error::InvalidLifecycleArray);
+            }
+            if let Some((address, size)) = dynamic.or(section)
+                && size != 0
+            {
+                if !address.is_multiple_of(A::WORD)
+                    || !size.is_multiple_of(A::WORD)
+                    || self.file_range(address, size).is_none()
+                {
+                    return Err(Error::InvalidLifecycleArray);
+                }
+                let offset = address - self.start;
+                let range = offset..offset + size;
+                if self.arrays[..index]
+                    .iter()
+                    .any(|other| range.start < other.end && other.start < range.end)
+                {
+                    return Err(Error::InvalidLifecycleArray);
+                }
+                self.arrays[index] = range;
+            }
+        }
         Ok(())
+    }
+
+    /// The relocated entries must point into file-backed executable code.
+    pub(crate) fn check_array_entries(&self, image: &[u8], execution: usize) -> Result<(), Error> {
+        for range in &self.arrays {
+            let array = &image[range.clone()];
+            for entry in array.chunks_exact(A::WORD) {
+                let pointer = A::word_at(entry, 0);
+                let (code, size) = instruction::<A>(pointer)
+                    .filter(|_| pointer != 0)
+                    .ok_or(Error::InvalidLifecycleEntry)?;
+                let address = code
+                    .checked_sub(execution)
+                    .and_then(|offset| self.start.checked_add(offset))
+                    .ok_or(Error::InvalidLifecycleEntry)?;
+                if !self.executable_at(address, size) {
+                    return Err(Error::InvalidLifecycleEntry);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // Share the segment scan across the three arrays.
+    #[inline(never)]
+    fn executable_at(&self, address: usize, size: usize) -> bool {
+        self.loads().any(|program| {
+            program.flags & PF_X != 0 && program.contains(address, size, program.file_size)
+        })
     }
 
     pub(crate) fn check_abi(&self) -> Result<(), Error> {
         let mut version = None;
+        let mut lifecycle = false;
         for note in programs::<A>(self.headers).filter(|program| program.kind == PT_NOTE) {
             let mut bytes =
                 subrange(self.bytes, note.offset, note.file_size).ok_or(Error::InvalidAbiNote)?;
@@ -499,11 +629,16 @@ impl<'a, A: Abi> Elf<'a, A> {
                 let (desc, rest) = rest
                     .split_at_checked(desc_end)
                     .ok_or(Error::InvalidAbiNote)?;
-                if u32_at(header, 8) == 1
-                    && &name[..name_size] == b"XILA\0"
-                    && (desc_size != 4 || version.replace(u32_at(desc, 0)).is_some())
-                {
-                    return Err(Error::InvalidAbiNote);
+                if &name[..name_size] == b"XILA\0" {
+                    match u32_at(header, 8) {
+                        1 if desc_size != 4 || version.replace(u32_at(desc, 0)).is_some() => {
+                            return Err(Error::InvalidAbiNote);
+                        }
+                        2 if desc_size != 0 || core::mem::replace(&mut lifecycle, true) => {
+                            return Err(Error::InvalidAbiNote);
+                        }
+                        _ => {}
+                    }
                 }
                 bytes = rest;
             }
@@ -511,6 +646,9 @@ impl<'a, A: Abi> Elf<'a, A> {
         // The descriptor is the Xila version the image was built for, packed as
         // `(major << 16) | minor`.
         let declared = Version::from_packed(version.ok_or(Error::MissingAbiNote)?);
+        if !lifecycle && self.arrays.iter().any(|array| !array.is_empty()) {
+            return Err(Error::MissingLifecycleNote);
+        }
         let running = xila_version::RUNNING;
         if !xila_version::compatible(declared, running) {
             return Err(Error::IncompatibleXilaVersion { declared, running });
@@ -684,6 +822,32 @@ fn programs<A: Abi>(headers: &[u8]) -> impl Iterator<Item = Program> {
     headers
         .chunks_exact(A::PROGRAM_HEADER)
         .map(Program::read::<A>)
+}
+
+const fn section_header_size<A: Abi>() -> usize {
+    if A::WORD == 8 { 64 } else { 40 }
+}
+
+fn sections<'a, A: Abi>(bytes: &'a [u8], header: &[u8], sizes: usize) -> Result<&'a [u8], Error> {
+    let offset = A::word_at(header, 24 + 2 * A::WORD);
+    let count = usize::from(u16_at(header, sizes + 8));
+    if offset == 0 && count == 0 {
+        return Ok(&[]);
+    }
+    let stride = section_header_size::<A>();
+    if offset < A::HEADER || usize::from(u16_at(header, sizes + 6)) != stride {
+        return Err(Error::InvalidSectionHeaders);
+    }
+    let count = if count == 0 {
+        let first = subrange(bytes, offset, stride).ok_or(Error::InvalidSectionHeaders)?;
+        A::word_at(first, 8 + 3 * A::WORD)
+    } else {
+        count
+    };
+    let length = count
+        .checked_mul(stride)
+        .ok_or(Error::InvalidSectionHeaders)?;
+    subrange(bytes, offset, length).ok_or(Error::InvalidSectionHeaders)
 }
 
 fn subrange(bytes: &[u8], offset: usize, size: usize) -> Option<&[u8]> {

@@ -765,6 +765,13 @@ typedef struct XilaApi {
 } XilaApi;
 
 /**
+ * Callback that runs the loaded image's initialization or finalization functions.
+ */
+typedef struct XilaLifecycle {
+  void (*run)(const struct XilaLifecycle *lifecycle, bool finalize);
+} XilaLifecycle;
+
+/**
  * Host-owned startup data, valid only for the duration of the entry call.
  * The API is always present. Capability pointers may be null when not granted;
  * the process capability is null for an application that is not a process, such
@@ -798,6 +805,10 @@ typedef struct XilaStartup {
    * start.
    */
   const struct XilaNetwork *network;
+  /**
+   * Lifecycle functions of a loaded image, or null if none are present.
+   */
+  const struct XilaLifecycle *lifecycle;
 } XilaStartup;
 
 #endif  /* XILA_APPLICATION_H */

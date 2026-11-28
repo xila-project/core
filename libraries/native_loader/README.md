@@ -12,18 +12,53 @@ An image must be an `ET_DYN` file with a `PT_DYNAMIC` segment, at most 16
 program headers, and power-of-two segment alignments up to 64 KiB. Its
 `e_flags` must match the target: Arm needs EABI version 5 and the target's
 float ABI (hard on `eabihf`), and RISC-V needs the target's float ABI, with
-RVC only if the target has the C extension and no RVE or TSO. Other targets
+RVC only if the target has the C extension, RVE only for the embedded ABI,
+and no TSO. Other targets
 require zero flags, except Xtensa, whose flags are not checked.
+
+On RISC-V, the loader also reads `Tag_RISCV_arch` in `.riscv.attributes`.
+It rejects malformed attributes and extensions that the firmware target does
+not enable. It checks extension names independently of their version numbers.
+For example, an image that requires atomics cannot run on `rv32imc`. If the
+section is absent, the loader checks only the ELF header and its architecture
+flags as before. The Xila firmware baseline includes `zicsr` and `zifencei`.
 
 ### Constructors and destructors
 
-The loader runs no constructors or destructors, and rejects an image that has
-`DT_INIT`, `DT_FINI`, or a non-empty `DT_INIT_ARRAY`, `DT_FINI_ARRAY` or
-`DT_PREINIT_ARRAY` with `Error::Constructors`, before it allocates anything.
-Initialize state in `_xila_start` instead (for example, avoid
-`__attribute__((constructor))` and C++ static initializers). Running
-`__init_array` once before the entry point would need the loader to call
-through a relocated array, so this is a deliberate omission, not an oversight.
+The loader accepts preinitialization, initialization and finalization arrays
+from the dynamic table or the corresponding ELF sections. When both are
+present, they must describe the same array. Each relocated function pointer
+must be nonzero and point into an executable segment. A zero entry gives
+`Error::InvalidLifecycleEntry`. The loader rejects legacy `DT_INIT` and
+`DT_FINI` functions. When removing the section header table, set both
+`e_shoff` and `e_shnum` to zero. Inconsistent table metadata gives
+`Error::InvalidSectionHeaders`.
+
+The SDK entries install the ABI on the process coroutine, then run
+preinitialization and initialization in ascending order. The POSIX entry
+also initializes the POSIX state first. A normal return from `main` or a call
+to `exit` runs registered exit handlers, then finalization in reverse order,
+then flushes standard I/O. A call to `exit` from a constructor runs the whole
+finalization array, even if some constructors have not run. With live worker
+threads the POSIX entry skips exit handlers and finalization. `_exit`,
+abort and cancellation skip finalization.
+
+The direct C shim and Rust entry run finalizers after the application function
+returns if no worker threads are live. A direct call to `xila_process_exit`
+or a Rust panic in `panic_abort` skips finalization. The SDK entries require
+the full `XilaStartup` layout.
+
+A custom `_xila_start` that supports these arrays must emit an empty `PT_NOTE`
+record named `XILA\0` of type 2. Without this record, non-empty arrays give
+`Error::MissingLifecycleNote`. Check `XilaStartup.size` before reading
+`lifecycle`. When present, call its `run` callback with the lifecycle pointer
+and `false` after runtime initialization and with `true` on normal exit.
+Call each phase at most once.
+
+`link-archive` rejects lifecycle sections in applications linked into the
+firmware with `native-linked`. Those sections could run at firmware startup
+outside the application's coroutine. Initialize and finalize linked
+applications in their own entry point.
 
 ## Building an image
 
@@ -86,10 +121,11 @@ capability and the launch name, arguments and startup streams they point into, a
 registry of the files, directories, listings, children and sockets the program opened.
 The image bytes stay in the platform's `ExecutableMemory`, which the handle releases, and
 the C heap's blocks are separate allocations the `XilaHeap` tracks: neither is
-part of it. The state takes 392 B per process on 32-bit targets (424 B for the
-allocation, with the heap and the handle: the registry's 8 B replace the `started`
-flag the loader needed before). The launch-name bytes are allocated
-separately, like the argument strings. The coroutine entry receives only a
+part of it. On `thumbv7em-none-eabihf`, the default loader features use
+512 bytes for the process record. The lifecycle record adds 28 bytes to the
+image handle and a 4-byte pointer to the host state. The measured process
+allocation grows by 24 bytes after padding. The launch name and argument
+strings are allocated separately. The coroutine entry receives only a
 pointer to it, so a program that overruns its own frames cannot damage the state
 `xila_process_exit` and the SDK's heap and standard error access depend on, and
 the host can reach everything the program holds whatever the coroutine was doing.

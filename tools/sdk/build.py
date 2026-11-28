@@ -152,8 +152,8 @@ TARGETS = {
     },
 }
 
-# Flags every SDK object is built with. The loader rejects constructors and TLS, so the
-# build must never emit them; check_elf.py verifies the result.
+# Build the SDK archives without native TLS or lifecycle sections. The same
+# archives serve loaded and linked applications.
 COMMON_FLAGS = [
     "-std=gnu11", "-Os", "-fPIE", "-ffunction-sections", "-fdata-sections",
     "-fno-stack-protector", "-fno-unwind-tables", "-fno-asynchronous-unwind-tables",
@@ -312,7 +312,7 @@ needs_exe_wrapper = true
 
 # picolibc configuration. TLS is off and errno is a function so the loader never sees PT_TLS
 # and no thread pointer is switched; the allocator and POSIX console are ours (the
-# console's destructor would make the loader reject the image); integer printf is the
+# console has a destructor, which a linked application cannot contain); integer printf is the
 # default, with the float variants selectable by linking the other vfprintf.
 PICOLIBC_OPTIONS = {
     "multilib": "false",
@@ -416,9 +416,7 @@ def drop_members(install, target):
                      "update DROPPED_MEMBERS")
 
 
-# Sections the loader never runs. A constructor, destructor or init/fini hook in any
-# member of any SDK archive would be linked into an image as soon as a symbol of that
-# member is used, and the loader would reject the image (or, worse, silently skip it).
+# The firmware link could run these sections outside the linked program's launch.
 CONSTRUCTOR_SECTIONS = re.compile(
     r"^(\.rela?)?(\.(init|fini|preinit)_array\w*|\.ctors|\.dtors|\.init|\.fini)(\..*)?$")
 
@@ -427,7 +425,7 @@ CONSTRUCTOR_SECTIONS = re.compile(
 CONSTRUCTOR_ALLOWLIST = {}
 
 
-def scan_constructors(libraries, target=HOST_TARGET):
+def scan_constructors(libraries, target=HOST_TARGET, *, linked=False):
     """Fail if any member of any archive (or crt0.o) holds a constructor section."""
     readelf = find_target_tool(target, "readelf")
     offenders = []
@@ -440,14 +438,17 @@ def scan_constructors(libraries, target=HOST_TARGET):
             if header:
                 member = header.group(1)
                 continue
-            section = re.match(r"\s*\[\s*\d+\]\s+(\S+)\s+\S+", line)
-            if section and CONSTRUCTOR_SECTIONS.match(section.group(1)):
+            section = re.match(r"\s*\[\s*\d+\]\s+(\S+)\s+(\S+)", line)
+            if section and (CONSTRUCTOR_SECTIONS.match(section[1])
+                            or section[2] in ("INIT_ARRAY", "FINI_ARRAY", "PREINIT_ARRAY")):
                 key = (path.name, member, section.group(1))
                 if key not in CONSTRUCTOR_ALLOWLIST:
                     offenders.append(key)
     if offenders:
+        reason = ("linked programs cannot use lifecycle sections" if linked
+                  else "SDK archives must support linked programs")
         for archive, member, section in offenders:
-            print(f"error: {archive}({member}) has {section}: the loader runs no constructors",
+            print(f"error: {archive}({member}) has {section}: {reason}",
                   file=sys.stderr)
         sys.exit(1)
     print(f"constructor scan: {len(libraries)} files, no constructor, destructor or init section")
@@ -691,6 +692,7 @@ def link_archive(args):
         work = Path(work)
         archive = work / "program.a"
         run(link_archive_plan(archives, entry, archive, inputs, builtins, work, tools)[0])
+        scan_constructors([work / "combined.o"], sdk_target, linked=True)
         weak, strong = undefined_symbols(work / "combined.o", tools["nm"])
         unexpected = sorted(name for name in strong if name not in allow_undefined)
         if unexpected:
@@ -947,12 +949,43 @@ def check_target(data, target):
     return check(data, config["machine"], float_abi=config["float_abi"])
 
 
+def verify_riscv_architecture(image, target):
+    """Compare the linker-merged architecture with the firmware's extension set."""
+    readelf = find_target_tool(target, "readelf")
+    output = subprocess.check_output([readelf, "--arch-specific", image], text=True)
+    architecture = re.search(r"Value:\s+(rv32\S+)", output)
+    if not architecture:
+        sys.exit(f"{image}: missing RISC-V architecture attribute")
+    extensions = set()
+    for extension in architecture[1].removeprefix("rv32").split("_"):
+        match = re.fullmatch(r"([a-z][a-z0-9]*?)[0-9]+p[0-9]+", extension)
+        if not match:
+            sys.exit(f"{image}: invalid RISC-V extension {extension}")
+        extensions.add(match[1])
+    supported = set("imac")
+    if TARGETS[target]["float_abi"] == "single":
+        supported.add("f")
+    policy = ROOT / "libraries/native_loader/riscv_extensions.txt"
+    # See riscv_extensions.txt for the rule format, shared with the loader build script.
+    for line in policy.read_text().splitlines():
+        names = line.split("#", 1)[0].split()
+        if not names:
+            continue
+        extension, *requirements = names
+        if supported.issuperset(requirements):
+            supported.add(extension)
+    if unsupported := extensions - supported:
+        sys.exit(f"{image}: RISC-V firmware lacks {', '.join(sorted(unsupported))}")
+
+
 def verify_image(image, target):
     problems = check_target(image.read_bytes(), target)
     for problem in problems:
         print(f"{image}: {problem}", file=sys.stderr)
     if problems:
         sys.exit(1)
+    if TARGETS[target]["machine"] == "riscv32":
+        verify_riscv_architecture(image, target)
     print(f"{image}: ELF checks passed")
 
 
@@ -1108,8 +1141,11 @@ def verify(args):
         if links_builder != needs_environ:
             sys.exit(f"error: unexpected environ builder linkage in {name}.elf")
         print(f"{name}.elf: environ builder {'present' if links_builder else 'absent'}")
-    for name in ("threads", "ssp", "graphics"):
+    for name in ("threads", "ssp", "graphics", "lifecycle"):
         verify_c_program(target, sdk, name, SDK_SOURCE / "sdk/test" / name)
+    verify_c_program(target, sdk, "lifecycle-direct", SDK_SOURCE / "sdk/test/lifecycle")
+    if target == HOST_TARGET:
+        verify_c_program(target, sdk, "lifecycle-cxx", SDK_SOURCE / "sdk/test/lifecycle")
     # The hexdump example, in both of its forms: the ELF the loader runs, and the
     # localized archive link-archive produces for a firmware that links it in.
     size_tool = find_target_tool(target, "size")
@@ -1176,6 +1212,15 @@ def rust_example(args):
         check_data_alignment(image, elf, TARGETS[target]["data_alignment"])
         run([find_tool("llvm-size"), image])
         print(f"ELF file: {image.stat().st_size} bytes")
+
+    if HOST_TARGET in selected:
+        lifecycle_output = OUTPUT / "rust-lifecycle"
+        run(["rustup", "run", nightly, "cargo", "build", "--locked", "--release",
+             "--target", HOST_TARGET, "--target-dir", lifecycle_output,
+             "--features", "lifecycle-test"], cwd=example, env=env)
+        image = lifecycle_output / HOST_TARGET / "release/xila-rust-hello"
+        verify_image(image, HOST_TARGET)
+        check_data_alignment(image, Elf(image.read_bytes()), TARGETS[HOST_TARGET]["data_alignment"])
 
 
 def main():

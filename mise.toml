@@ -182,6 +182,7 @@ case "${XILA_SDK_TARGET:-x86_64-unknown-linux-gnu}" in
       --manifest-path libraries/abi/application/sdk/rust/xila-sys/Cargo.toml --features runtime \
       --target-dir target/sdk/xila-sys-test
     XILA_RUST_HELLO="$PWD/target/sdk/rust-hello/x86_64-unknown-linux-gnu/release/xila-rust-hello" \
+      XILA_RUST_LIFECYCLE="$PWD/target/sdk/rust-lifecycle/x86_64-unknown-linux-gnu/release/xila-rust-hello" \
       cargo test --locked -p xila-executable --features native-dev --test sdk -- runs_sdk_rust_hello --ignored --exact
     ;;
 esac
